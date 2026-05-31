@@ -1,13 +1,14 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+export const runtime = 'nodejs'
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-  // ถ้า env ไม่ครบ ให้ผ่านไปก่อน ไม่ crash
   if (!supabaseUrl || !supabaseKey) {
     return supabaseResponse
   }
@@ -48,7 +49,6 @@ export async function middleware(request: NextRequest) {
     }
   } catch (e) {
     console.error('Middleware error:', e)
-    // ถ้า error ให้ผ่านไปก่อน ไม่ redirect วนลูป
   }
 
   return supabaseResponse
