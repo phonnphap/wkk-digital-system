@@ -1,7 +1,6 @@
 // lib/supabase/client.ts
-// ─── Browser client (ใช้ใน Client Components) ────────────────────────────────
 import { createBrowserClient } from '@supabase/ssr'
-import type { Database } from '@/types/database'
+import type { Database } from '@/types/database' // ตรวจสอบว่ามีไฟล์ types นี้จริงหรือไม่
 
 export function createClient() {
   return createBrowserClient<Database>(
