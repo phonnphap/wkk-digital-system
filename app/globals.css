@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: 'TH Saraban New';
+  src: url('/fonts/THSarabunNew.ttf') format('truetype');
+  font-weight: 400; /* ปกติ */
+  font-style: normal;
+  font-display: swap; /* ช่วยให้โหลดฟอนต์เร็วขึ้นและไม่ทำให้ข้อความหายขณะรอโหลด */
+}
+
+body {
+  font-family: 'TH Saraban New', sans-serif;
+  font-size: 18px; /* ปรับขนาดฟอนต์ให้เหมาะสมกับ Saraban */
+}
