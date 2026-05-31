@@ -12,22 +12,15 @@ export async function GET() {
   }
 
   // ดึง face_vector ของครูทุกคนที่ลงทะเบียนแล้ว
-  // ส่งเฉพาะ user_id + face_vector เท่านั้น (ไม่ส่งข้อมูลส่วนตัวอื่น)
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from('users')
     .select('id, face_vector')
-    .eq('is_active', true)
-    .not('face_vector', 'is', null)
+    .returns<{ id: string; face_vector: number[] }[]>(); // แนะนำระบุ Type ให้ชัดกว่า any
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  // Map เป็น { user_id, face_vector } เพื่อใช้กับ findBestMatch()
   const vectors = (data ?? []).map(u => ({
     user_id: u.id,
-    face_vector: u.face_vector as number[],
-  }))
+    face_vector: u.face_vector as number[], // Map กลับมาให้ชื่อตรงกับที่ฟังก์ชัน findBestMatch ต้องการ
+  }));
 
-  return NextResponse.json({ vectors })
+  return NextResponse.json({ vectors });
 }

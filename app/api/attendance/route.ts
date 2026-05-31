@@ -3,8 +3,26 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase/server'
 import { todayISO, lateMinutesFrom8 } from '@/lib/utils'
 
+// ─── local types (แทน Database generated types) ──────────────────────────────
+type AttendanceRow = {
+  id: string
+  user_id: string
+  attendance_date: string
+  check_in_time: string | null
+  check_in_lat: number | null
+  check_in_lng: number | null
+  check_in_face_score: number | null
+  check_out_time: string | null
+  check_out_lat: number | null
+  check_out_lng: number | null
+  check_out_face_score: number | null
+  is_late: boolean | null
+  late_minutes: number | null
+}
+
+type DbUser = { id: string; first_name: string; last_name: string }
+
 // ─── GET /api/attendance?userId=xxx ─────────────────────────────────────────
-// ดึงสถานะการเข้างานวันนี้ของ user คนนั้น
 export async function GET(req: NextRequest) {
   const supabase = createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -16,12 +34,11 @@ export async function GET(req: NextRequest) {
   const userId = req.nextUrl.searchParams.get('userId') ?? user.id
   const date   = req.nextUrl.searchParams.get('date') ?? todayISO()
 
-  // หา DB user id จาก auth_id
   const { data: dbUser } = await supabase
     .from('users')
     .select('id')
     .eq('auth_id', userId)
-    .single()
+    .single<{ id: string }>()   // ← เพิ่ม generic type
 
   if (!dbUser) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 })
@@ -32,7 +49,7 @@ export async function GET(req: NextRequest) {
     .select('*')
     .eq('user_id', dbUser.id)
     .eq('attendance_date', date)
-    .maybeSingle()
+    .maybeSingle<AttendanceRow>()  // ← เพิ่ม generic type
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
@@ -42,7 +59,6 @@ export async function GET(req: NextRequest) {
 }
 
 // ─── POST /api/attendance ────────────────────────────────────────────────────
-// Body: { type: 'check_in' | 'check_out', lat, lng, faceScore, faceDescriptor? }
 export async function POST(req: NextRequest) {
   const supabase = createServerSupabaseClient()
   const service  = createServiceClient()
@@ -66,31 +82,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
   }
 
-  // ดึง DB user id
   const { data: dbUser } = await service
     .from('users')
     .select('id, first_name, last_name')
     .eq('auth_id', user.id)
-    .single<{ id: string; first_name: string; last_name: string }>()
+    .single<DbUser>()   // ← มีอยู่แล้ว ถูกต้อง
 
   if (!dbUser) {
     return NextResponse.json({ error: 'User profile not found' }, { status: 404 })
   }
 
-  const userId = (dbUser as any).id;
+  const today  = todayISO()
+  const nowISO = new Date().toISOString()
+  const nowDate = new Date()
 
-  const today     = todayISO()
-  const nowISO    = new Date().toISOString()
-  const nowDate   = new Date()
-
+  // ── check_in ──────────────────────────────────────────────────────────────
   if (type === 'check_in') {
-    // ตรวจสอบว่า check-in แล้วหรือยัง
     const { data: existing } = await service
       .from('teacher_attendance')
       .select('id, check_in_time')
       .eq('user_id', dbUser.id)
       .eq('attendance_date', today)
-      .maybeSingle()
+      .maybeSingle<Pick<AttendanceRow, 'id' | 'check_in_time'>>()  // ← เพิ่ม generic type
 
     if (existing?.check_in_time) {
       return NextResponse.json({
@@ -102,8 +115,8 @@ export async function POST(req: NextRequest) {
     const isLate      = nowDate.getHours() >= 8 && lateMinutesFrom8(nowDate) > 0
     const lateMinutes = lateMinutesFrom8(nowDate)
 
-    const { data, error } = await service
-      .from('teacher_attendance')
+    const { data, error } = await (service
+      .from('teacher_attendance') as any)
       .upsert({
         user_id: dbUser.id,
         attendance_date: today,
@@ -121,10 +134,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    // อัปเดต face_vector ใน users table ถ้ามีข้อมูลใหม่
     if (faceDescriptor && faceDescriptor.length === 128) {
-      await service
-        .from('users')
+      await (service.from('users') as any)
         .update({
           face_vector: faceDescriptor,
           face_registered_at: nowISO,
@@ -142,13 +153,14 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // ── check_out ─────────────────────────────────────────────────────────────
   if (type === 'check_out') {
     const { data: existing } = await service
       .from('teacher_attendance')
       .select('id, check_in_time, check_out_time')
       .eq('user_id', dbUser.id)
       .eq('attendance_date', today)
-      .maybeSingle()
+      .maybeSingle<Pick<AttendanceRow, 'id' | 'check_in_time' | 'check_out_time'>>()  // ← เพิ่ม generic type
 
     if (!existing?.check_in_time) {
       return NextResponse.json({ error: 'No check-in record found for today' }, { status: 404 })
@@ -161,8 +173,8 @@ export async function POST(req: NextRequest) {
       }, { status: 409 })
     }
 
-    const { data, error } = await service
-      .from('teacher_attendance')
+    const { data, error } = await (service
+      .from('teacher_attendance') as any)
       .update({
         check_out_time: nowISO,
         check_out_lat: lat,

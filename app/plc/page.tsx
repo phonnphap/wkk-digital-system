@@ -1058,7 +1058,7 @@ export default function PLCHoursPage() {
 
   // สถิติของครูที่ล็อกอิน (กรองเฉพาะรายการที่ครูมีชื่อเป็นผู้เข้าร่วม หรือเป็นคนบันทึก)
   const myMeetings = meetings.filter(m => 
-    m.created_at === user?.id || m.participants?.includes(user?.id)
+    m.created_at === user?.id || m.participants?.includes(user?.id ?? '')
   );
   const totalMyHours = myMeetings.reduce((sum, m) => sum + (m.duration_hours || 0), 0);
 
