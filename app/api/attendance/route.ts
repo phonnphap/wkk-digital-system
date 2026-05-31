@@ -71,11 +71,13 @@ export async function POST(req: NextRequest) {
     .from('users')
     .select('id, first_name, last_name')
     .eq('auth_id', user.id)
-    .single()
+    .single<{ id: string; first_name: string; last_name: string }>()
 
   if (!dbUser) {
     return NextResponse.json({ error: 'User profile not found' }, { status: 404 })
   }
+
+  const userId = (dbUser as any).id;
 
   const today     = todayISO()
   const nowISO    = new Date().toISOString()
