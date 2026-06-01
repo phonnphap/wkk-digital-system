@@ -1,13 +1,12 @@
-import { NextResponse, type NextRequest } from 'next/server'
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
-export async function middleware(request: NextRequest) {
-  // ไม่ต้องสร้าง Supabase Client ในนี้ 
-  // การเช็ค user/auth ให้ไปทำที่ Server Components หรือ Page แทน
-  return NextResponse.next()
+export function middleware(request: NextRequest) {
+  // กล่องเปล่า: ไม่มีการ import Supabase หรือเรียกใช้งาน API ใดๆ
+  return NextResponse.next();
 }
 
+// ลบ matcher ออกชั่วคราวเพื่อให้แน่ใจว่ามันจะไม่ไปขวางอะไร
 export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|models|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
-  ],
-}
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
+};
