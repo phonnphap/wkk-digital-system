@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import * as faceapi from "face-api.js";
+
 import { useRouter } from 'next/navigation';
 import { createClient } from "@/lib/supabase/client";
 
@@ -9,6 +9,17 @@ interface UserRow {
   id: string;
   face_features: any;
 }
+
+const [faceapi, setFaceapi] = useState<any>(null);
+
+useEffect(() => {
+  const loadFaceApi = async () => {
+    const fa = await import('face-api.js');
+    setFaceapi(fa);
+    // ... โหลด models ต่อได้เลย
+  };
+  loadFaceApi();
+}, []);
 
 const supabase = createClient();
 
@@ -68,7 +79,7 @@ export default function FaceScanPage() {
     monthly: { normal: 0, late: 0, mission: 0 },
     term:    { normal: 0, late: 0, mission: 0 }
   });
-  const [faceMatcher, setFaceMatcher] = useState<faceapi.FaceMatcher | null>(null);
+  const [faceMatcher, setFaceMatcher] = useState<any>(null);
 
   // ── 1. นาฬิกา + GPS ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -124,10 +135,12 @@ export default function FaceScanPage() {
     const init = async () => {
       try {
         setStatus("กำลังโหลดโมเดล AI...");
+        const fa = await import('face-api.js');
+        setFaceapi(fa);
         await Promise.all([
-          faceapi.nets.ssdMobilenetv1.loadFromUri('/models'),
-          faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
-          faceapi.nets.faceRecognitionNet.loadFromUri('/models')
+          fa.nets.ssdMobilenetv1.loadFromUri('/models'),
+          fa.nets.faceLandmark68Net.loadFromUri('/models'),
+          fa.nets.faceRecognitionNet.loadFromUri('/models')
         ]);
 
         const { data, error } = await supabase
@@ -154,12 +167,12 @@ export default function FaceScanPage() {
                 arr = parsed;
               }
               if (arr && arr.length === 128) {
-                return new faceapi.LabeledFaceDescriptors(u.id, [new Float32Array(arr)]);
+                return new fa.LabeledFaceDescriptors(u.id, [new Float32Array(arr)]);
               }
               return null;
             } catch { return null; }
           })
-          .filter((d): d is faceapi.LabeledFaceDescriptors => d !== null);
+          .filter((d): d is any => d !== null);
 
         if (descriptors.length === 0) {
           setFaceMatcher(null);
@@ -247,7 +260,7 @@ export default function FaceScanPage() {
   // ── 6. Loop ตรวจจับใบหน้า ─────────────────────────────────────────────────────
   const detectFaceLoop = () => {
     intervalRef.current = setInterval(async () => {
-      if (!videoRef.current || !streamRef.current || !faceMatcher) return;
+      if (!videoRef.current || !streamRef.current || !faceMatcher || !faceapi) return;
 
       const detection = await faceapi
         .detectSingleFace(videoRef.current, new faceapi.SsdMobilenetv1Options())

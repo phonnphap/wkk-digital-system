@@ -1,9 +1,20 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import * as faceapi from "face-api.js";
+
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
+
+const [faceapi, setFaceapi] = useState<any>(null);
+
+useEffect(() => {
+  const loadFaceApi = async () => {
+    const fa = await import('face-api.js');
+    setFaceapi(fa);
+    // ... โหลด models ต่อได้เลย
+  };
+  loadFaceApi();
+}, []);
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
