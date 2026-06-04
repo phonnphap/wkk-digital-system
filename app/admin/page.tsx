@@ -1,20 +1,11 @@
 "use client";
 
+export const dynamic = 'force-dynamic';
+
 import { useEffect, useState, useRef } from "react";
 
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
-
-const [faceapi, setFaceapi] = useState<any>(null);
-
-useEffect(() => {
-  const loadFaceApi = async () => {
-    const fa = await import('face-api.js');
-    setFaceapi(fa);
-    // ... โหลด models ต่อได้เลย
-  };
-  loadFaceApi();
-}, []);
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -37,6 +28,7 @@ interface TeachingAssignment {
 }
 
 export default function AdminFaceRegisterPage() {
+  const [faceapi, setFaceapi] = useState<any>(null);
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -120,11 +112,14 @@ export default function AdminFaceRegisterPage() {
             setAllSubjects(subjectData);
           }
         }
+        
+        const fa = await import('face-api.js');
+        setFaceapi(fa);  // เก็บไว้ใช้ในฟังก์ชันอื่น
 
-        if (!faceapi.nets.ssdMobilenetv1.isLoaded) {
-          await faceapi.nets.ssdMobilenetv1.loadFromUri('/models');
-          await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
-          await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+        if (!fa.nets.ssdMobilenetv1.isLoaded) {  // ✅ ใช้ fa โดยตรง
+          await fa.nets.ssdMobilenetv1.loadFromUri('/models');
+          await fa.nets.faceLandmark68Net.loadFromUri('/models');
+          await fa.nets.faceRecognitionNet.loadFromUri('/models');
         }
 
         setModelsLoaded(true);
@@ -222,6 +217,7 @@ export default function AdminFaceRegisterPage() {
     if (!videoRef.current || !isCameraActive || !activeScanAngle) return;
     setStatus("⏳ AI กำลังสกัดจุดพิกัดใบหน้า...");
     try {
+      if (!faceapi) return;  // เพิ่ม guard
       const detection = await faceapi.detectSingleFace(
         videoRef.current,
         new faceapi.SsdMobilenetv1Options()

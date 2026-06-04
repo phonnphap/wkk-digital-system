@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = 'force-dynamic';
+
 import { useEffect, useState, useRef } from "react";
 
 import { useRouter } from 'next/navigation';
@@ -10,16 +12,7 @@ interface UserRow {
   face_features: any;
 }
 
-const [faceapi, setFaceapi] = useState<any>(null);
-
-useEffect(() => {
-  const loadFaceApi = async () => {
-    const fa = await import('face-api.js');
-    setFaceapi(fa);
-    // ... โหลด models ต่อได้เลย
-  };
-  loadFaceApi();
-}, []);
+export default function FaceScanPage() {
 
 const supabase = createClient();
 
@@ -60,8 +53,8 @@ function toThaiDateTime(isoString: string): string {
     hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok'
   });
 }
-
-export default function FaceScanPage() {
+  const faceApiRef = useRef<any>(null);
+  const [faceapi, setFaceapi] = useState<any>(null);
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -137,6 +130,7 @@ export default function FaceScanPage() {
         setStatus("กำลังโหลดโมเดล AI...");
         const fa = await import('face-api.js');
         setFaceapi(fa);
+        faceApiRef.current = fa;
         await Promise.all([
           fa.nets.ssdMobilenetv1.loadFromUri('/models'),
           fa.nets.faceLandmark68Net.loadFromUri('/models'),
@@ -178,7 +172,7 @@ export default function FaceScanPage() {
           setFaceMatcher(null);
           setStatus("⚠️ ระบบพร้อม (ไม่พบข้อมูลใบหน้าในระบบ)");
         } else {
-          setFaceMatcher(new faceapi.FaceMatcher(descriptors, 0.55));
+          setFaceMatcher(new fa.FaceMatcher(descriptors, 0.55));
           setStatus("🔘 ระบบพร้อมสแกนใบหน้า");
         }
       } catch (err) {
@@ -260,10 +254,11 @@ export default function FaceScanPage() {
   // ── 6. Loop ตรวจจับใบหน้า ─────────────────────────────────────────────────────
   const detectFaceLoop = () => {
     intervalRef.current = setInterval(async () => {
-      if (!videoRef.current || !streamRef.current || !faceMatcher || !faceapi) return;
+      if (!videoRef.current || !streamRef.current || !faceMatcher || !faceApiRef.current) return;
+      const fa = faceApiRef.current;
 
-      const detection = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.SsdMobilenetv1Options())
+      const detection = await fa
+        .detectSingleFace(videoRef.current, new fa.SsdMobilenetv1Options())
         .withFaceLandmarks()
         .withFaceDescriptor();
 

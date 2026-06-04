@@ -1,7 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // บอก Next.js ไม่ต้อง bundle face-api.js ฝั่ง server
-  serverExternalPackages: ['face-api.js'],
+  experimental: {
+    // Next.js 14 ใช้ชื่อนี้ (ไม่ใช่ serverExternalPackages)
+    serverComponentsExternalPackages: ['face-api.js'],
+  },
 
   webpack: (config, { isServer }) => {
     if (!isServer) {
@@ -13,12 +15,6 @@ const nextConfig = {
         os: false,
         stream: false,
         buffer: false,
-      };
-
-      // ป้องกัน face-api.js ถูก bundle ในฝั่ง client ตรงๆ
-      config.resolve.alias = {
-        ...config.resolve.alias,
-        'face-api.js': require.resolve('face-api.js'),
       };
     }
     return config;

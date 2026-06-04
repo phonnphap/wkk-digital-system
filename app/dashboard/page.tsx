@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = 'force-dynamic';
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 // 1. เปลี่ยนชื่อ import ให้ตรงกับชื่อฟังก์ชันที่ส่งออกมาจาก client.ts
