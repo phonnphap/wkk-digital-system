@@ -1,9 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    // Next.js 14 ใช้ชื่อนี้ (ไม่ใช่ serverExternalPackages)
-    serverComponentsExternalPackages: ['face-api.js'],
-  },
+  serverExternalPackages: ['face-api.js'], // ✅ ถูกต้องสำหรับ Next.js 14
 
   webpack: (config, { isServer }) => {
     if (!isServer) {
