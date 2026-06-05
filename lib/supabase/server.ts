@@ -1,12 +1,10 @@
-// lib/supabase/server.ts
-// ─── Server client (ใช้ใน Server Components, API Routes, Middleware) ──────────
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import type { Database } from '@/types/database'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
-export function createServerSupabaseClient() {
-  const cookieStore = cookies()
-  return createServerClient<Database>(
+export async function createClient() {
+  const cookieStore = await cookies()
+  return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -17,20 +15,19 @@ export function createServerSupabaseClient() {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options)
             )
-          } catch {
-            // Server Component — อ่านได้อย่างเดียว ไม่ต้อง throw
-          }
+          } catch {}
         },
       },
     }
   )
 }
 
-// Service Role client — ใช้สำหรับ admin operations เท่านั้น
-import { createClient } from '@supabase/supabase-js'
+export async function createServerSupabaseClient() {
+  return createClient()
+}
 
 export function createServiceClient() {
-  return createClient<Database>(
+  return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false } }

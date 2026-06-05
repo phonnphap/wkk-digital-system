@@ -24,7 +24,7 @@ type DbUser = { id: string; first_name: string; last_name: string }
 
 // ─── GET /api/attendance?userId=xxx ─────────────────────────────────────────
 export async function GET(req: NextRequest) {
-  const supabase = createServerSupabaseClient()
+  const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) {
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
 
 // ─── POST /api/attendance ────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const supabase = createServerSupabaseClient()
+  const supabase = await createServerSupabaseClient()
   const service  = createServiceClient()
 
   const { data: { user } } = await supabase.auth.getUser()
