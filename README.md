@@ -98,7 +98,7 @@ school-app/
 │   └── utils.ts                # GPS, date, helpers
 ├── types/
 │   └── database.ts             # TypeScript types for all DB tables
-├── middleware.ts               # Auth session middleware
+├── proxy.ts              # Auth session middleware
 ├── .env.example                # Environment template
 └── public/
     └── models/                 # face-api.js model files (ดาวน์โหลดเอง)
