@@ -384,7 +384,6 @@ export default function DashboardPage() {
                         <span className="block text-sm font-extrabold text-slate-700 group-hover:text-blue-600 transition-colors">
                           {item.name}
                         </span>
-                        <span className="text-xs text-slate-400 font-medium mt-0.5 block">เข้าสู่ระบบงานภายใน</span>
                       </div>
                     </button>
                   ))}

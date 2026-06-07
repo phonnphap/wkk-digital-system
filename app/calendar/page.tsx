@@ -717,23 +717,42 @@ export default function CalendarPage() {
 
   // ── Auth + load ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    const init = async () => {
-      const { data: { user: au } } = await supabase.auth.getUser();
-      if (!au) { setLoading(false); return; }
+  const init = async () => {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) { setLoading(false); return; }
 
-      let { data: p } = await supabase.from("users")
-        .select("id,first_name,last_name,email,role,position").eq("auth_id", au.id).maybeSingle();
-      if (!p && au.email) {
-        const r = await supabase.from("users")
-          .select("id,first_name,last_name,email,role,position").eq("email", au.email).maybeSingle();
-        p = r.data;
-        if (p) await (supabase.from("users") as any).update({ auth_id: au.id }).eq("id", (p as any).id);
+    const meta = authUser.user_metadata ?? {};
+    const claims = meta.custom_claims ?? {};
+    const email =
+      authUser.email || meta.email || meta.preferred_username || meta.upn ||
+      claims.email || claims.preferred_username || claims.upn ||
+      claims["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"] || "";
+
+    let { data } = await supabase
+      .from("users")
+      .select("id, first_name, last_name, email, role, position")
+      .eq("auth_id", authUser.id)
+      .maybeSingle();
+
+    if (!data && email) {
+      const res = await supabase
+        .from("users")
+        .select("id, first_name, last_name, email, role, position")
+        .eq("email", email)
+        .maybeSingle();
+      data = res.data;
+      if (data) {
+        await (supabase.from("users") as any)
+          .update({ auth_id: authUser.id })
+          .eq("id", (data as any).id);
       }
-      if (p) setUser(p as UserProfile);
-      setLoading(false);
-    };
-    init();
-  }, []);
+    }
+
+    if (data) setUser(data as UserProfile);
+    setLoading(false);
+  };
+  init();
+}, []);
 
   const loadEvents = useCallback(async () => {
     // Load 3 months window around current month
@@ -833,14 +852,14 @@ export default function CalendarPage() {
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center">
-      <p className="text-slate-400 animate-pulse">กำลังโหลด...</p>
+        <p className="text-slate-400 animate-pulse">กำลังโหลด...</p>
     </div>
-  );
-  if (!user) return (
+    );
+    if (!user) return (
     <div className="min-h-screen flex items-center justify-center">
-      <p className="text-red-500 font-bold">❌ กรุณาเข้าสู่ระบบก่อน</p>
+        <p className="text-slate-400 animate-pulse">กำลังโหลดข้อมูลผู้ใช้...</p>
     </div>
-  );
+    );
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
