@@ -4,7 +4,6 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-// 1. เปลี่ยนชื่อ import ให้ตรงกับชื่อฟังก์ชันที่ส่งออกมาจาก client.ts
 import { createClient } from "@/lib/supabase/client"; 
 import { 
   LayoutDashboard, UserCheck, CalendarDays, FileText,
@@ -15,29 +14,65 @@ export default function DashboardPage() {
   const router = useRouter();
   const supabase = createClient(); 
 
-  // กำหนดค่าเริ่มต้นของสิทธิ์
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
-  const [userName, setUserName] = useState<string>("คุณครู");
+  const [userName, setUserName] = useState<string>("");
+  const [userPrefix, setUserPrefix] = useState<string>("คุณครู");
 
   useEffect(() => {
     async function checkUserRole() {
       try {
-        // 1. ดึงข้อมูลผู้ใช้ปัจจุบันที่ล็อกอินอยู่จากระบบ Auth โดยตรง
         const { data: { user } } = await supabase.auth.getUser();
-        // ตัวอย่างการดึงข้อมูลเช็คสิทธิ์ (ปรับให้เข้ากับระบบของโรงเรียน)
         
         if (!user) {
           router.push("/login");
           return;
         }
 
-        const name = user.user_metadata?.full_name 
-          || user.user_metadata?.name
-          || user.email?.split('@')[0] 
-          || "คุณครู";
+        const { data: profile } = await supabase
+          .from("users")
+          .select("full_name, role")
+          .eq("id", user.id)
+          .single();
 
-        const adminEmails = ["admin@khienkhet.ac.th"];
-        setIsAdmin(user.email ? adminEmails.includes(user.email) : false);
+        if (profile) {
+          const fullName = profile.full_name 
+            || user.user_metadata?.full_name 
+            || user.user_metadata?.name
+            || "";
+
+          // กำหนด prefix ตาม role ที่มีใน DB
+          let prefix = "คุณครู";
+          switch (profile.role) {
+            case "director":
+              prefix = "ผอ.";
+              break;
+            case "deputy_director":
+              prefix = "รอง ผอ.";
+              break;
+            case "dept_head":
+              prefix = "หัวหน้ากลุ่มสาระ";
+              break;
+            case "grade_head":
+              prefix = "หัวหน้าระดับ";
+              break;
+            case "homeroom_teacher":
+            case "subject_teacher":
+              prefix = "คุณครู";
+              break;
+            case "admin":
+              prefix = "ผู้ดูแลระบบ";
+              break;
+            case "staff":
+              prefix = "เจ้าหน้าที่";
+              break;
+            default:
+              prefix = "คุณครู";
+          }
+
+          setUserPrefix(prefix);
+          setUserName(fullName);
+          setIsAdmin(profile.role === "admin");
+        }
 
       } catch (err) {
         console.error("ตรวจสอบสิทธิ์ผิดพลาด:", err);
@@ -46,16 +81,15 @@ export default function DashboardPage() {
     checkUserRole();
   }, [supabase, router]);
 
-  // ฟังก์ชันสำหรับจัดการเมื่อมีคนคลิกเข้าเมนูของผู้ดูแลระบบ (Admin)
+  // ✅ ฟังก์ชันเหล่านี้ต้องอยู่นอก useEffect
   const handleAdminMenuClick = (targetPath: string) => {
     if (isAdmin) {
-      router.push(targetPath); // ถ้าเป็น Admin จริง ให้ผ่านเข้าไปได้เลย
+      router.push(targetPath);
     } else {
       alert("🔒 ขออภัย ระบบนี้จำกัดสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้น");
     }
   };
 
-  // ฟังก์ชันออกจากระบบ
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
@@ -222,7 +256,7 @@ export default function DashboardPage() {
             })}
           </span>
           <h1 className="text-3xl md:text-4xl font-black mt-4 tracking-tight">
-            สวัสดี {userName} 👋
+            สวัสดี {userPrefix}{userName} 👋
           </h1>
           <p className="text-sm md:text-base text-blue-100 mt-2 font-semibold opacity-90">
             ยินดีต้อนรับสู่ระบบสารสนเทศอัจฉริยะ โรงเรียนวัดเขียนเขต
