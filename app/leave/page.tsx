@@ -14,6 +14,7 @@ import {
 const supabase = createClient();
 const HR_EMAIL = "hr@khienkhet.ac.th";
 
+
 // ─── helpers ───────────────────────────────────────────────────────────────────
 function toThaiDate(iso: string) {
   return new Date(iso).toLocaleDateString("th-TH", {
@@ -1218,6 +1219,8 @@ export default function LeavePage() {
   useEffect(() => {
     const init = async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser();
+      console.log('authUser:', authUser); // เพิ่มบรรทัดนี้
+      
       if (!authUser) { setLoading(false); return; }
 
       let { data } = await supabase
