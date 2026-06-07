@@ -439,20 +439,38 @@ export default function RepairPage() {
     const init = async () => {
       const { data: { user: au } } = await supabase.auth.getUser();
       if (!au) { setLoading(false); return; }
-      let { data } = await supabase.from("users")
+
+      const meta = au.user_metadata ?? {};
+      const claims = meta.custom_claims ?? {};
+      const email = au.email || meta.email || meta.preferred_username || meta.upn || claims.email || claims.preferred_username || "";
+
+      let data: any = null;
+
+      const byAuthId = await supabase.from("users")
         .select("id, first_name, last_name, email, role, position")
         .eq("auth_id", au.id).maybeSingle();
-      if (!data && au.email) {
-        const res = await supabase.from("users").select("id, first_name, last_name, email, role, position").eq("email", au.email).maybeSingle();
-        data = res.data;
-        if (data) await (supabase.from("users") as any).update({ auth_id: au.id }).eq("id", (data as any).id);
+
+      if (byAuthId.data) {
+        data = byAuthId.data;
+      } else if (email) {
+        const byEmail = await supabase.from("users")
+          .select("id, first_name, last_name, email, role, position")
+          .eq("email", email).maybeSingle();
+        data = byEmail.data;
+        if (data) {
+          await (supabase.from("users") as any)
+            .update({ auth_id: au.id }).eq("id", data.id);
+        }
       }
+
       if (data) {
         setUser(data as UserProfile);
-        const { data: staffData } = await supabase.from("users").select("id, first_name, last_name, role, position").in("role", ADMIN_ROLES);
+        const { data: staffData } = await supabase.from("users")
+          .select("id, first_name, last_name, role, position")
+          .in("role", ADMIN_ROLES);
         setStaff((staffData as UserProfile[]) || []);
       }
-      setLoading(false);
+      setLoading(false);  // ← ย้ายมาอยู่ใน init
     };
     init();
   }, []);

@@ -932,20 +932,22 @@ export default function PLCHoursPage() {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) { setLoading(false); return; }
 
+      const meta = authUser.user_metadata ?? {};
+      const claims = meta.custom_claims ?? {};
+      const email = authUser.email || meta.email || meta.preferred_username || meta.upn || claims.email || claims.preferred_username || "";
+
       let profileData: any = null;
-      const byAuthId = await supabase
-        .from("users")
+      const byAuthId = await supabase.from("users")
         .select("id, first_name, last_name, email, role, position")
         .eq("auth_id", authUser.id)
         .maybeSingle();
 
       if (byAuthId.data) {
         profileData = byAuthId.data;
-      } else if (authUser.email) {
-        const byEmail = await supabase
-          .from("users")
+      } else if (email) {
+        const byEmail = await supabase.from("users")
           .select("id, first_name, last_name, email, role, position")
-          .eq("email", authUser.email)
+          .eq("email", email)
           .maybeSingle();
         profileData = byEmail.data;
         if (profileData) {
@@ -956,11 +958,7 @@ export default function PLCHoursPage() {
       }
 
       if (profileData) {
-        setUser({
-          ...profileData,
-          full_name: profileData.full_name ||
-            `${profileData.first_name ?? ""} ${profileData.last_name ?? ""}`.trim(),
-        });
+        setUser({ ...profileData, full_name: profileData.full_name || `${profileData.first_name ?? ""} ${profileData.last_name ?? ""}`.trim() });
       }
 
       const { data: years } = await supabase
