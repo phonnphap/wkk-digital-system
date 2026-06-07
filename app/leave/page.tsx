@@ -1221,16 +1221,24 @@ export default function LeavePage() {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) { setLoading(false); return; }
 
+      const meta = authUser.user_metadata ?? {};
+      const claims = meta.custom_claims ?? {};
+
       // ── Microsoft OAuth เก็บ email ใน user_metadata ──
       const email =
         authUser.email ||
-        authUser.user_metadata?.email ||
-        authUser.user_metadata?.preferred_username ||
-        authUser.user_metadata?.upn ||
+        meta.email ||
+        meta.preferred_username ||
+        meta.upn ||
+        claims.email ||
+        claims.preferred_username ||
+        claims.upn ||
+        // Microsoft บางครั้งเก็บ email ใน claims ชื่อนี้
+        claims["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"] ||
         "";
 
-      console.log("email ที่ใช้:", email);
-      console.log("user_metadata:", authUser.user_metadata);
+      console.log("email ที่ได้:", email);
+      console.log("custom_claims:", claims);
 
       let { data } = await supabase
         .from("users")
