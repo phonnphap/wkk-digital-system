@@ -1219,9 +1219,18 @@ export default function LeavePage() {
   useEffect(() => {
     const init = async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser();
-      console.log('authUser:', authUser); // เพิ่มบรรทัดนี้
-      
       if (!authUser) { setLoading(false); return; }
+
+      // ── Microsoft OAuth เก็บ email ใน user_metadata ──
+      const email =
+        authUser.email ||
+        authUser.user_metadata?.email ||
+        authUser.user_metadata?.preferred_username ||
+        authUser.user_metadata?.upn ||
+        "";
+
+      console.log("email ที่ใช้:", email);
+      console.log("user_metadata:", authUser.user_metadata);
 
       let { data } = await supabase
         .from("users")
@@ -1229,16 +1238,20 @@ export default function LeavePage() {
         .eq("auth_id", authUser.id)
         .maybeSingle();
 
-      if (!data && authUser.email) {
+      if (!data && email) {
         const res = await supabase
           .from("users")
           .select("id, first_name, last_name, email, role, position")
-          .eq("email", authUser.email)
+          .eq("email", email)
           .maybeSingle();
         data = res.data;
         if (data) {
           await (supabase.from("users") as any).update({ auth_id: authUser.id }).eq("id", (data as any).id);
         }
+      }
+
+      if (!data && authUser.user_metadata?.name) {
+        console.log("ลอง debug: ไม่พบ user ใน DB สำหรับ email:", email);
       }
 
       if (data) {
