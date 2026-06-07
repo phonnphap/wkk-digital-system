@@ -21,8 +21,8 @@ import { th } from "date-fns/locale";
 // ─── Supabase client ───────────────────────────────────────
 // วาง URL และ anon key จาก Project Settings > API
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
 // ─── Roles ที่มีสิทธิ์ดูข้อมูลทั้งโรงเรียน ────────────────
