@@ -31,8 +31,10 @@ export default function DashboardPage() {
           return;
         }
 
-        const name = user.user_metadata?.full_name || user.email?.split('@')[0] || "คุณครู";
-        setUserName(name);
+        const name = user.user_metadata?.full_name 
+          || user.user_metadata?.name
+          || user.email?.split('@')[0] 
+          || "คุณครู";
 
         const adminEmails = ["admin@khienkhet.ac.th"];
         setIsAdmin(user.email ? adminEmails.includes(user.email) : false);
