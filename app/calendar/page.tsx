@@ -133,7 +133,18 @@ function EventPill({ ev, onClick }: { ev: CalEvent; onClick: () => void }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── EventModal (Add / Edit) ───────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-function EventModal({ event, user, isApprover, onSave, onDelete, onApprove, onReject, onClose }) {
+function EventModal({
+  event, user, isApprover, onSave, onDelete, onApprove, onReject, onClose,
+}: {
+  event: Partial<CalEvent> | null;
+  user: UserProfile;
+  isApprover: boolean;
+  onSave: (data: any) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  onApprove: (id: string) => Promise<void>;
+  onReject: (id: string, reason: string) => Promise<void>;
+  onClose: () => void;
+}) {
   const isEdit = !!event?.id;
   const isOwner = !event?.id || event.created_by === user.id;
 
