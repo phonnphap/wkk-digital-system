@@ -7,7 +7,7 @@
 // ============================================================
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -18,12 +18,7 @@ import {
 } from "date-fns";
 import { th } from "date-fns/locale";
 
-// ─── Supabase client ───────────────────────────────────────
-// วาง URL และ anon key จาก Project Settings > API
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-);
+const supabase = createClient();
 
 // ─── Roles ที่มีสิทธิ์ดูข้อมูลทั้งโรงเรียน ────────────────
 const ADMIN_ROLES = [
@@ -135,33 +130,43 @@ function Badge({ status }) {
 
 // ─── Main App ──────────────────────────────────────────────
 export default function NutritionApp() {
-  const [session, setSession] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("assess");
 
-  // Auth
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, s) => setSession(s)
-    );
-    return () => subscription.unsubscribe();
-  }, []);
+    const init = async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) { setLoading(false); return; }
 
-  // ดึงข้อมูล user + role จาก users table
-  useEffect(() => {
-    if (!session?.user) { setLoading(false); return; }
-    supabase
-      .from("users")
-      .select("id, first_name, last_name, role, department_id")
-      .eq("auth_id", session.user.id)
-      .single()
-      .then(({ data }) => {
-        setCurrentUser(data);
-        setLoading(false);
-      });
-  }, [session]);
+      let { data } = await supabase
+        .from("users")
+        .select("id, first_name, last_name, role, department_id")
+        .eq("auth_id", authUser.id)
+        .maybeSingle();
+
+      if (!data) {
+        const email = authUser.email || authUser.user_metadata?.email || "";
+        if (email) {
+          const res = await supabase
+            .from("users")
+            .select("id, first_name, last_name, role, department_id")
+            .eq("email", email)
+            .maybeSingle();
+          data = res.data;
+          if (data) {
+            await supabase.from("users")
+              .update({ auth_id: authUser.id })
+              .eq("id", data.id);
+          }
+        }
+      }
+
+      if (data) setCurrentUser(data);
+      setLoading(false);
+    };
+    init();
+  }, []);
 
   const isAdmin = useMemo(
     () => ADMIN_ROLES.includes(currentUser?.role),
@@ -169,11 +174,10 @@ export default function NutritionApp() {
   );
 
   if (loading) return <div style={{ padding: 32, textAlign: "center" }}>กำลังโหลด...</div>;
-  if (!session) return <LoginPage />;
+  if (!currentUser) return <div style={{ padding: 32, textAlign: "center", color: "#E24B4A" }}>❌ กรุณาเข้าสู่ระบบก่อน</div>;
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 1100, margin: "0 auto", padding: "1rem" }}>
-      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
         <div>
           <h1 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>ระบบประเมินภาวะโภชนาการนักเรียน</h1>
@@ -181,17 +185,12 @@ export default function NutritionApp() {
             {currentUser?.first_name} {currentUser?.last_name} · {currentUser?.role}
           </p>
         </div>
-        <button onClick={() => supabase.auth.signOut()}
-          style={{ fontSize: 13, padding: "6px 14px", border: "0.5px solid #ccc", borderRadius: 8, cursor: "pointer", background: "transparent" }}>
-          ออกจากระบบ
-        </button>
       </div>
 
-      {/* Tabs */}
       <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #e5e5e5", marginBottom: 20 }}>
         {[
-          { key: "assess", label: "ประเมินรายบุคคล" },
-          { key: "class",  label: "รายห้องเรียน" },
+          { key: "assess",  label: "ประเมินรายบุคคล" },
+          { key: "class",   label: "รายห้องเรียน" },
           { key: "compare", label: "เปรียบเทียบเทอม" },
           ...(isAdmin ? [{ key: "admin", label: "ผู้บริหาร" }] : []),
         ].map(t => (
@@ -212,39 +211,6 @@ export default function NutritionApp() {
       {tab === "class"   && <ClassPage   currentUser={currentUser} isAdmin={isAdmin} />}
       {tab === "compare" && <ComparePage currentUser={currentUser} isAdmin={isAdmin} />}
       {tab === "admin"   && isAdmin && <AdminPage currentUser={currentUser} />}
-    </div>
-  );
-}
-
-// ─── LoginPage ─────────────────────────────────────────────
-function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const handleLogin = async () => {
-    setLoading(true); setError("");
-    const { error: e } = await supabase.auth.signInWithPassword({ email, password });
-    if (e) setError(e.message);
-    setLoading(false);
-  };
-
-  return (
-    <div style={{ maxWidth: 380, margin: "80px auto", padding: 24, border: "0.5px solid #e5e5e5", borderRadius: 12 }}>
-      <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20 }}>เข้าสู่ระบบโภชนาการ</h2>
-      <input type="email" placeholder="อีเมล" value={email}
-        onChange={e => setEmail(e.target.value)}
-        style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "0.5px solid #ccc", marginBottom: 10, fontSize: 14 }} />
-      <input type="password" placeholder="รหัสผ่าน" value={password}
-        onChange={e => setPassword(e.target.value)}
-        onKeyDown={e => e.key === "Enter" && handleLogin()}
-        style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "0.5px solid #ccc", marginBottom: 12, fontSize: 14 }} />
-      {error && <p style={{ color: "#E24B4A", fontSize: 13, marginBottom: 8 }}>{error}</p>}
-      <button onClick={handleLogin} disabled={loading}
-        style={{ width: "100%", padding: "9px", background: "#185FA5", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
-        {loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
-      </button>
     </div>
   );
 }
