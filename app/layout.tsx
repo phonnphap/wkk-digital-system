@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ระบบสแกนใบหน้า โรงเรียนวัดเขียนเขต",
+  title: "ระบบปฏิบัติงาน โรงเรียนวัดเขียนเขต",
   description: "ระบบลงเวลาทำงานและจัดการข้อมูลโรงเรียนวัดเขียนเขต",
 };
 
