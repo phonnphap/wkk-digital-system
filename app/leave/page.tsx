@@ -1321,7 +1321,7 @@ export default function LeavePage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             {/* ปุ่มกลับหน้าหลัก */}
-            <button onClick={() => router.push("/")}
+            <button onClick={() => router.push("/dashboard")}
               className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors font-bold text-lg"
               title="กลับหน้าหลัก">
               🏠

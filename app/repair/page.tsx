@@ -547,7 +547,7 @@ export default function RepairPage() {
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {/* ปุ่มกลับหน้าหลัก */}
-          <button onClick={() => router.push("/")} style={{
+          <button onClick={() => router.push("/dashboard")} style={{
             width: 40, height: 40, borderRadius: 12, border: "2px solid #e5e7eb",
             background: "white", cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center",
             boxShadow: "0 1px 4px rgba(0,0,0,0.06)",

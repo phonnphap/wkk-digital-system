@@ -698,15 +698,15 @@ function MiniCalendar({ year, month, today, hasEvent, onSelect, selected }: {
 // ══════════════════════════════════════════════════════════════════════════════
 export default function CalendarPage() {
   const router = useRouter();
-  const todayStr = ymd(new Date());
-  const todayDate = new Date();
 
   // ── State ───────────────────────────────────────────────────────────────────
   const [user,       setUser]       = useState<UserProfile | null>(null);
   const [events,     setEvents]     = useState<CalEvent[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [view,       setView]       = useState<CalView>("month");
-  const [curDate,    setCurDate]    = useState(todayDate);
+  const [curDate,    setCurDate]    = useState(() => new Date());
+  const todayDate = useMemo(() => new Date(), []);
+  const todayStr  = useMemo(() => ymd(todayDate), [todayDate]);
   const [selected,   setSelected]   = useState(todayStr);
   const [modalEv,    setModalEv]    = useState<Partial<CalEvent> | null | false>(false);
   const [catFilter,  setCatFilter]  = useState<Set<EventCategory>>(new Set(Object.keys(CAT_CONFIG) as EventCategory[]));
@@ -755,16 +755,27 @@ export default function CalendarPage() {
 }, []);
 
   const loadEvents = useCallback(async () => {
-    // Load 3 months window around current month
     const from = ymd(new Date(curDate.getFullYear(), curDate.getMonth() - 1, 1));
     const to   = ymd(new Date(curDate.getFullYear(), curDate.getMonth() + 2, 0));
-    const { data } = await (supabase.from("calendar_events") as any)
-      .select("*, creator:users!created_by(first_name,last_name)")
-      .gte("end_date", from)
-      .lte("start_date", to)
-      .order("start_date", { ascending: true });
-    setEvents((data || []) as CalEvent[]);
-  }, [curDate]);
+
+    let query = (supabase.from("calendar_events") as any)
+        .select("*, creator:users!created_by(first_name,last_name)")
+        .order("start_date", { ascending: true });
+
+  // Admin/approver โหลดทุก pending ด้วย ไม่จำกัด date
+    if (isApprover) {
+        const { data } = await (supabase.from("calendar_events") as any)
+        .select("*, creator:users!created_by(first_name,last_name)")
+        .or(`status.eq.pending,and(end_date.gte.${from},start_date.lte.${to})`)
+        .order("start_date", { ascending: true });
+        setEvents((data || []) as CalEvent[]);
+    } else {
+        const { data } = await query
+        .gte("end_date", from)
+        .lte("start_date", to);
+        setEvents((data || []) as CalEvent[]);
+    }
+    }, [curDate, isApprover]);
 
   useEffect(() => { if (!loading && user) loadEvents(); }, [loading, user, loadEvents]);
 
@@ -867,7 +878,7 @@ export default function CalendarPage() {
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm">
         <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
           {/* Back */}
-          <button onClick={() => router.push("/")}
+          <button onClick={() => router.push("/dashboard")}
             className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 text-lg shrink-0">
             🏠
           </button>
