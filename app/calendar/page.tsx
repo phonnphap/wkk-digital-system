@@ -73,7 +73,12 @@ const TH_DAYS_SHORT = ["อา","จ","อ","พ","พฤ","ศ","ส"];
 const TH_DAYS_FULL  = ["อาทิตย์","จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์"];
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
-const ymd    = (d: Date) => d.toISOString().slice(0,10);
+const ymd = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
 const toDate = (s: string) => new Date(s + "T00:00:00");
 
 function thaiDateShort(iso: string) {
