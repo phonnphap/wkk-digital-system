@@ -1,4 +1,3 @@
-'use client'
 // app/login/page.tsx
 import { Suspense } from 'react'
 import LoginContent from './LoginContent'
