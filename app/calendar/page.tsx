@@ -101,27 +101,31 @@ function startOfWeek(d: Date) {
 // ══════════════════════════════════════════════════════════════════════════════
 function EventPill({ ev, onClick }: { ev: CalEvent; onClick: () => void }) {
   const cfg = CAT_CONFIG[ev.category];
+  const statusLabel = ev.status === "pending" ? " ⏳"
+    : ev.status === "rejected" ? " ❌"
+    : ev.status === "draft" ? " 📝"
+    : "";
+
   const style: React.CSSProperties = {
+    display: "block",
+    fontSize: 11,
+    fontWeight: 600,
+    padding: "1px 4px",
+    marginBottom: 1,
+    borderRadius: 4,
+    cursor: "pointer",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
     background: ev.color_override ? ev.color_override + "22" : cfg.light,
     color: ev.color_override ?? cfg.text,
     borderLeft: `3px solid ${ev.color_override ?? cfg.color}`,
-    padding: "1px 6px 1px 4px",
-    borderRadius: "0 4px 4px 0",
-    fontSize: 11,
-    fontWeight: 500,
-    marginBottom: 2,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    cursor: "pointer",
-    opacity: ev.status === "pending" ? 0.65 : 1,
-    display: "block",
   };
+
   return (
-    <span style={style} onClick={e => { e.stopPropagation(); onClick(); }}
-      title={`${ev.title}${ev.status !== "approved" ? ` (${STATUS_CONFIG[ev.status].label})` : ""}`}>
-      {ev.is_all_day ? "" : ev.start_time?.slice(0,5) + " "}
-      {ev.title}
+    <span style={style} onClick={onClick}>
+      {ev.is_all_day ? "" : (ev.start_time?.slice(0, 5) + " ")}
+      {ev.title}{statusLabel}
     </span>
   );
 }
@@ -129,38 +133,33 @@ function EventPill({ ev, onClick }: { ev: CalEvent; onClick: () => void }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── EventModal (Add / Edit) ───────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-function EventModal({
-  event, user, isApprover, onSave, onDelete, onApprove, onReject, onClose,
-}: {
-  event: Partial<CalEvent> | null;
-  user: UserProfile;
-  isApprover: boolean;
-  onSave: (data: any) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-  onApprove: (id: string) => Promise<void>;
-  onReject: (id: string, reason: string) => Promise<void>;
-  onClose: () => void;
-}) {
+function EventModal({ event, user, isApprover, onSave, onDelete, onApprove, onReject, onClose }) {
   const isEdit = !!event?.id;
   const isOwner = !event?.id || event.created_by === user.id;
 
-  const [title,       setTitle]       = useState(event?.title ?? "");
-  const [desc,        setDesc]        = useState(event?.description ?? "");
-  const [category,    setCategory]    = useState<EventCategory>(event?.category ?? "academic");
-  const [location,    setLocation]    = useState(event?.location ?? "");
-  const [startDate,   setStartDate]   = useState(event?.start_date ?? ymd(new Date()));
-  const [endDate,     setEndDate]     = useState(event?.end_date ?? ymd(new Date()));
-  const [startTime,   setStartTime]   = useState(event?.start_time?.slice(0,5) ?? "08:30");
-  const [endTime,     setEndTime]     = useState(event?.end_time?.slice(0,5) ?? "16:30");
-  const [isAllDay,    setIsAllDay]    = useState(event?.is_all_day ?? true);
-  const [colorOvr,    setColorOvr]    = useState(event?.color_override ?? "");
-  const [rejectReason, setRejectReason] = useState("");
-  const [showReject,  setShowReject]  = useState(false);
-  const [loading,     setLoading]     = useState(false);
+  // ── 1. useState ทั้งหมดอยู่บนสุด ──
+  const [title,        setTitle]       = useState(event?.title ?? "");
+  const [desc,         setDesc]        = useState(event?.description ?? "");
+  const [category,     setCategory]    = useState<EventCategory>(event?.category ?? "academic");
+  const [location,     setLocation]    = useState(event?.location ?? "");
+  const [startDate,    setStartDate]   = useState(event?.start_date ?? ymd(new Date()));
+  const [endDate,      setEndDate]     = useState(event?.end_date ?? ymd(new Date()));
+  const [startTime,    setStartTime]   = useState(event?.start_time?.slice(0,5) ?? "08:30");
+  const [endTime,      setEndTime]     = useState(event?.end_time?.slice(0,5) ?? "16:30");
+  const [isAllDay,     setIsAllDay]    = useState(event?.is_all_day ?? true);
+  const [colorOvr,     setColorOvr]    = useState(event?.color_override ?? "");
+  const [audience,     setAudience]    = useState(event?.target_roles?.[0] ?? "all");
+  const [rejectReason, setRejectReason]= useState("");
+  const [showReject,   setShowReject]  = useState(false);
+  const [loading,      setLoading]     = useState(false);
 
+  // ── 2. ตัวแปรที่คำนวณจาก state ──
   const canEdit = isOwner || isApprover;
   const cfg = CAT_CONFIG[category];
+  const inputCls = "w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium focus:border-blue-400 focus:outline-none focus:bg-white transition-colors text-slate-800";
+  const labelCls = "block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5";
 
+  // ── 3. ฟังก์ชันทั้งหมด ──
   async function handleSave(asDraft: boolean) {
     if (!title || !startDate || !endDate) { alert("กรุณากรอกข้อมูลให้ครบ"); return; }
     if (endDate < startDate) { alert("วันที่สิ้นสุดต้องไม่น้อยกว่าวันเริ่มต้น"); return; }
@@ -175,6 +174,7 @@ function EventModal({
       status: asDraft ? "draft" : "pending",
       created_by: user.id,
       is_public: true,
+      target_roles: [audience],
     });
     setLoading(false);
   }
@@ -193,9 +193,7 @@ function EventModal({
     setLoading(false);
   }
 
-  const inputCls = "w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium focus:border-blue-400 focus:outline-none focus:bg-white transition-colors text-slate-800";
-  const labelCls = "block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5";
-
+  // ── 4. return เดียว ที่ครอบ UI ทั้งหมด ──
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
       onClick={onClose}>
@@ -331,6 +329,28 @@ function EventModal({
                   <p className="text-sm text-red-700">{event.reject_reason}</p>
                 </div>
               )}
+
+              {/* ✅ Audience selector อยู่ใน return นี้ */}
+              <div>
+                <label className={labelCls}>ผู้ร่วมกิจกรรม</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { value: "all",     label: "👥 ทุกคน" },
+                    { value: "teacher", label: "👩‍🏫 ครู" },
+                    { value: "student", label: "🎒 นักเรียน" },
+                    { value: "staff",   label: "🏢 บุคลากร" },
+                  ].map(({ value, label }) => (
+                    <button key={value} type="button" onClick={() => setAudience(value)}
+                      className={`p-2.5 rounded-xl border-2 text-sm font-bold transition-all ${
+                        audience === value
+                          ? "bg-blue-50 border-blue-500 text-blue-700"
+                          : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
+                      }`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </>
           )}
 
