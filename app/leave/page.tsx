@@ -1370,68 +1370,60 @@ useEffect(() => {
       meta.upn ||
       claims.email ||
       claims.preferred_username ||
+      claims.upn ||
+      claims["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"] ||
       "";
 
-    let profileData: any = null;
-
-    // ── ลอง auth_id ก่อน — ถ้า error (column ไม่มี) หรือไม่เจอ → fallback email
-    const byAuthId = await supabase
+    // ── เพิ่ม signature_url ใน select ──
+    let { data } = await supabase
       .from("users")
       .select("id, first_name, last_name, full_name, email, role, position, signature_url")
       .eq("auth_id", authUser.id)
       .maybeSingle();
 
-    if (!byAuthId.error && byAuthId.data) {
-      profileData = byAuthId.data;
-    }
-
-    // ── Fallback ด้วย email เสมอถ้ายังไม่ได้ข้อมูล ──────────────────────
-    if (!profileData && email) {
-      const byEmail = await supabase
+    if (!data && email) {
+      const res = await supabase
         .from("users")
         .select("id, first_name, last_name, full_name, email, role, position, signature_url")
         .eq("email", email)
         .maybeSingle();
-
-      if (byEmail.data) {
-        profileData = byEmail.data;
-        // ผูก auth_id ไว้ครั้งถัดไป (ignore error ถ้า column ยังไม่มี)
-        await supabase
-          .from("users")
-          .update({ auth_id: authUser.id } as any)
-          .eq("id", profileData.id);
+      data = res.data;
+      if (data) {
+        await (supabase.from("users") as any)
+          .update({ auth_id: authUser.id })
+          .eq("id", (data as any).id);
       }
     }
 
-    if (!profileData) { setLoading(false); return; }
+    if (data) {
+      const profile: UserProfile = {
+        ...(data as any),
+        full_name: (data as any).full_name ||
+          `${(data as any).first_name ?? ""} ${(data as any).last_name ?? ""}`.trim(),
+      };
+      setUser(profile);
 
-    const profile: UserProfile = {
-      ...profileData,
-      full_name: profileData.full_name ||
-        `${profileData.first_name ?? ""} ${profileData.last_name ?? ""}`.trim(),
-    };
-    setUser(profile);
-    if (profileData.signature_url) setSavedSignature(profileData.signature_url);
+      // ── เพิ่ม setSavedSignature ──
+      if ((data as any).signature_url) {
+        setSavedSignature((data as any).signature_url);
+      }
 
-    const teacherRoles = ["homeroom_teacher", "subject_teacher", "staff", "teacher"];
-    if (teacherRoles.includes(profileData.role)) {
-      const [appRes, teachRes] = await Promise.all([
-        supabase
-          .from("users")
-          .select("id, first_name, last_name, full_name, position, email")
-          .in("role", ["admin", "director", "deputy_director", "dept_head"]),
-        supabase
-          .from("users")
-          .select("id, first_name, last_name, full_name, position, role, email")
-          .in("role", teacherRoles),
-      ]);
-      setApprovers(
-        ((appRes.data || []) as any[]).map(a => ({
+      const teacherRoles = ["homeroom_teacher", "subject_teacher", "staff", "teacher"];
+      if (teacherRoles.includes((data as any).role)) {
+        const [appRes, teachRes] = await Promise.all([
+          supabase.from("users")
+            .select("id, first_name, last_name, full_name, position, email")
+            .in("role", ["admin", "director", "deputy_director", "dept_head"]),
+          supabase.from("users")
+            .select("id, first_name, last_name, full_name, position, role, email")
+            .in("role", teacherRoles),
+        ]);
+        setApprovers(((appRes.data || []) as any[]).map(a => ({
           ...a,
           full_name: a.full_name || `${a.first_name ?? ""} ${a.last_name ?? ""}`.trim(),
-        }))
-      );
-      setAllTeachers((teachRes.data as UserProfile[]) || []);
+        })));
+        setAllTeachers((teachRes.data as UserProfile[]) || []);
+      }
     }
 
     setLoading(false);
