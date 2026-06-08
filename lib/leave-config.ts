@@ -59,9 +59,9 @@ export const LEAVE_TYPE_CONFIG: Record<LeaveType, {
   icon: string;
   quota: number | null;
 }> = {
-  sick:       { label: 'ลาป่วย',                             icon: '🤒', quota: 60   },
+  sick:       { label: 'ลาป่วย',                             icon: '🤒', quota: 120   },
   personal:   { label: 'ลากิจส่วนตัว',                       icon: '📋', quota: 45   },
-  maternity:  { label: 'ลาคลอดบุตร / ช่วยเหลือภริยาคลอด',   icon: '👶', quota: 98   },
+  maternity:  { label: 'ลาคลอดบุตร / ช่วยเหลือภริยาคลอด',   icon: '👶', quota: 90   },
   ordination: { label: 'ลาอุปสมบท / ประกอบพิธีฮัจย์',         icon: '🙏', quota: 120  },
   official:   { label: 'ไปราชการ',                            icon: '🏛️', quota: null },
   other:      { label: 'ลาประเภทอื่นๆ',                       icon: '📌', quota: null },
