@@ -143,12 +143,43 @@ export default function DashboardPage() {
     { name: "จองรถ / ห้องประชุม", icon: "🚌", bg: "bg-cyan-50 border-cyan-100 text-cyan-700", path: "/booking" },
   ];
 
-  const schoolEvents = [
-    { date: "26 พ.ค.", title: "ประชุมวิชาการ", color: "bg-blue-500" },
-    { date: "28 พ.ค.", title: "นิเทศการสอน", color: "bg-rose-500" },
-    { date: "02 มิ.ย.", title: "วันเฉลิมพระชนมพรรษา", color: "bg-amber-500" },
-    { date: "10 มิ.ย.", title: "กิจกรรม PLC", color: "bg-emerald-500" },
-  ];
+  const [schoolEvents, setSchoolEvents] = useState<{date: string; title: string; color: string}[]>([]);
+
+useEffect(() => {
+  async function loadEvents() {
+    const today = new Date().toISOString().split("T")[0];
+    const { data } = await supabase
+      .from("calendar_events")
+      .select("title, start_date, category")
+      .eq("status", "approved")
+      .gte("end_date", today)
+      .order("start_date", { ascending: true })
+      .limit(5);
+
+    if (data) {
+      const colorMap: Record<string, string> = {
+        academic: "bg-blue-500",
+        student:  "bg-emerald-500",
+        meeting:  "bg-amber-500",
+        holiday:  "bg-rose-500",
+        training: "bg-violet-500",
+        document: "bg-teal-500",
+        other:    "bg-slate-500",
+      };
+      setSchoolEvents(data.map(ev => {
+        const d = new Date(ev.start_date + "T00:00:00");
+        const day = d.getDate();
+        const month = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."][d.getMonth()];
+        return {
+          date: `${day} ${month}`,
+          title: ev.title,
+          color: colorMap[ev.category] ?? "bg-slate-500",
+        };
+      }));
+    }
+  }
+  loadEvents();
+}, [supabase]);
 
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
