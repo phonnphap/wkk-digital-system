@@ -372,20 +372,29 @@ useEffect(() => {
             📅 ปฏิทินปฏิบัติงาน ภาคเรียนที่ 1/2569
           </h3>
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center gap-4 overflow-x-auto">
-            {schoolEvents.map((event, idx) => (
-              <div key={idx} className="flex-shrink-0 flex items-center gap-3 pr-6 border-r border-slate-100 last:border-0">
-                <div className={`${event.color} w-12 h-12 rounded-xl text-white flex flex-col items-center justify-center text-[10px] font-bold leading-none`}>
-                  <span>{event.date.split(" ")[0]}</span>
-                  <span>{event.date.split(" ")[1]}</span>
+            {schoolEvents.length === 0 ? (
+              <p className="text-sm text-slate-400">ไม่มีกิจกรรมที่กำลังจะมาถึง</p>
+            ) : (
+              schoolEvents.map((event, idx) => (
+                <div key={idx} className="flex-shrink-0 flex items-center gap-3 pr-6 border-r border-slate-100 last:border-0">
+                  <div className={`${event.color} w-12 h-12 rounded-xl text-white flex flex-col items-center justify-center text-[10px] font-bold leading-none`}>
+                    <span>{event.date.split(" ")[0]}</span>
+                    <span>{event.date.split(" ")[1]}</span>
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-slate-800">{event.title}</p>
+                    <p className="text-[10px] text-slate-400 font-medium">โรงเรียนวัดเขียนเขต</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-bold text-slate-800">{event.title}</p>
-                  <p className="text-[10px] text-slate-400 font-medium">โรงเรียนวัดเขียนเขต</p>
-                </div>
-              </div>
-            ))}
-            <button className="flex-shrink-0 w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500">
-              <span className="text-lg font-bold">+</span>
+              ))
+            )}
+
+            {/* ✅ เปลี่ยนจากปุ่ม + เป็น ดูเพิ่มเติม */}
+            <button
+              onClick={() => router.push("/calendar")}
+              className="flex-shrink-0 px-4 py-2 rounded-xl bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-500 text-xs font-bold transition-all border border-slate-200 hover:border-blue-200 whitespace-nowrap"
+            >
+              ดูเพิ่มเติม →
             </button>
           </div>
         </div>
