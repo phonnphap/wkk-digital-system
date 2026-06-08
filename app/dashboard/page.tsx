@@ -154,7 +154,7 @@ export default function DashboardPage() {
     <div className="flex min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
       
       {/* Sidebar เมนูฝั่งซ้าย */}
-      <aside className="w-72 bg-white border-r border-slate-200 flex flex-col justify-between shrink-0 shadow-sm z-10">
+      <aside className="hidden lg:flex lg:w-72 bg-white border-r border-slate-200 flex-col justify-between shrink-0 shadow-sm z-10">
         <div>
           <div className="p-6 border-b border-slate-100 flex items-center gap-4">
             <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-extrabold text-lg shadow-sm">
@@ -229,7 +229,7 @@ export default function DashboardPage() {
       </aside>
 
       {/* พื้นที่เนื้อหาหลักฝั่งขวา */}
-      <main className="flex-1 p-8 md:p-10 space-y-8 overflow-y-auto">
+      <main className="flex-1 w-full p-4 md:p-8 lg:p-10 space-y-8 overflow-y-auto">
         <div className="flex justify-between items-center">
           <div className="text-sm text-slate-500 font-bold flex items-center gap-2">
             <span>โรงเรียนวัดเขียนเขต</span>
