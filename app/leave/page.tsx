@@ -802,7 +802,8 @@ function TeacherDashboard({
 }) {
   const [requests,   setRequests]   = useState<LeaveRequest[]>([]);
   const [showForm,   setShowForm]   = useState(false);
-  const [filterFY,   setFilterFY]   = useState(getCurrentFiscalYear());
+  const [filterFY, setFilterFY] = useState(0);
+  useEffect(() => { setFilterFY(getCurrentFiscalYear()); }, []);
   const [filterEval, setFilterEval] = useState<"all" | "1" | "2">("all");
   const [filterType, setFilterType] = useState<LeaveType | "all">("all");
   const [loading,    setLoading]    = useState(true);
@@ -1000,7 +1001,8 @@ function TeacherDashboard({
 // ─── Admin Dashboard ──────────────────────────────────────────────────────────
 function AdminDashboard({ user }: { user: UserProfile }) {
   const [requests,     setRequests]     = useState<LeaveRequest[]>([]);
-  const [filterFY,     setFilterFY]     = useState(getCurrentFiscalYear());
+  const [filterFY, setFilterFY] = useState(0);
+  useEffect(() => { setFilterFY(getCurrentFiscalYear()); }, []);
   const [filterEval,   setFilterEval]   = useState<"all" | "1" | "2">("all");
   const [filterType,   setFilterType]   = useState<LeaveType | "all">("all");
   const [filterStatus, setFilterStatus] = useState<LeaveStatus | "all">("pending");
