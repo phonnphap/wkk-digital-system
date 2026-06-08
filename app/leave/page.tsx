@@ -1372,30 +1372,36 @@ useEffect(() => {
       claims.preferred_username ||
       "";
 
-    // ── หา profile ───────────────────────────────────────────────────────
     let profileData: any = null;
 
-    const byAuthId = await supabase
-      .from("users")
-      .select("id, first_name, last_name, full_name, email, role, position, signature_url")
-      .eq("auth_id", authUser.id)
-      .maybeSingle();
-
-    if (byAuthId.data) {
-      profileData = byAuthId.data;
-    } else if (email) {
-      const byEmail = await supabase
+    // ── ลอง auth_id ก่อน ถ้า error/ไม่เจอ → ใช้ email ──────────────────
+    try {
+      const { data, error } = await supabase
         .from("users")
         .select("id, first_name, last_name, full_name, email, role, position, signature_url")
-        .eq("email", email)
+        .eq("auth_id", authUser.id)
         .maybeSingle();
-      profileData = byEmail.data;
-      if (profileData) {
-        // ผูก auth_id ไว้สำหรับครั้งถัดไป
-        await (supabase.from("users") as any)
-          .update({ auth_id: authUser.id })
-          .eq("id", profileData.id);
-      }
+      if (!error && data) profileData = data;
+    } catch (_) {}
+
+    // ── Fallback: หา profile ด้วย email ─────────────────────────────────
+    if (!profileData && email) {
+      try {
+        const { data } = await supabase
+          .from("users")
+          .select("id, first_name, last_name, full_name, email, role, position, signature_url")
+          .eq("email", email)
+          .maybeSingle();
+        profileData = data;
+        // ผูก auth_id ไว้สำหรับครั้งถัดไป (ถ้า column มีอยู่)
+        if (profileData) {
+          try {
+            await (supabase.from("users") as any)
+              .update({ auth_id: authUser.id })
+              .eq("id", profileData.id);
+          } catch (_) {}
+        }
+      } catch (_) {}
     }
 
     if (!profileData) { setLoading(false); return; }
@@ -1411,7 +1417,6 @@ useEffect(() => {
       setSavedSignature(profileData.signature_url);
     }
 
-    // ── โหลด approvers + teachers เฉพาะ teacher roles ──────────────────
     const teacherRoles = ["homeroom_teacher", "subject_teacher", "staff", "teacher"];
     if (teacherRoles.includes(profileData.role)) {
       const [appRes, teachRes] = await Promise.all([
