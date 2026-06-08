@@ -1385,7 +1385,7 @@ useEffect(() => {
 
     const { data: dataById, error: q1Error } = await supabase
       .from("users")
-      .select("id, first_name, last_name, full_name, email, role, position, signature_url")
+      .select("id, first_name, last_name, email, role, position, signature_url")
       .eq("auth_id", authUser.id)
       .maybeSingle();
 
@@ -1396,7 +1396,7 @@ useEffect(() => {
     if (!data && email) {
       const { data: dataByEmail, error: q2Error } = await supabase
         .from("users")
-        .select("id, first_name, last_name, full_name, email, role, position, signature_url")
+        .select("id, first_name, last_name, email, role, position, signature_url")
         .eq("email", email)
         .maybeSingle();
 
@@ -1427,13 +1427,13 @@ useEffect(() => {
       const teacherRoles = ["homeroom_teacher", "subject_teacher", "staff", "teacher"];
       if (teacherRoles.includes((data as any).role)) {
         const [appRes, teachRes] = await Promise.all([
-          supabase.from("users")
-            .select("id, first_name, last_name, full_name, position, email")
-            .in("role", ["admin", "director", "deputy_director", "dept_head"]),
-          supabase.from("users")
-            .select("id, first_name, last_name, full_name, position, role, email")
-            .in("role", teacherRoles),
-        ]);
+        supabase.from("users")
+          .select("id, first_name, last_name, position, email")
+          .in("role", ["admin", "director", "deputy_director", "dept_head"]),
+        supabase.from("users")
+          .select("id, first_name, last_name, position, role, email")
+          .in("role", teacherRoles),
+      ]);
         setApprovers(((appRes.data || []) as any[]).map(a => ({
           ...a,
           full_name: a.full_name || `${a.first_name ?? ""} ${a.last_name ?? ""}`.trim(),
