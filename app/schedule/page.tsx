@@ -589,7 +589,7 @@ export default function SchedulePage() {
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3 print:hidden">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
-            <button onClick={() => router.push("/")}
+            <button onClick={() => router.push("/dashboard")}
               className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors text-lg">🏠</button>
             <div>
               <h1 className="text-base font-black text-slate-800 leading-none">ตารางสอน</h1>
