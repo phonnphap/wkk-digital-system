@@ -1360,7 +1360,12 @@ export default function LeavePage() {
   // ใน LeavePage — แทนที่ useEffect init ทั้งหมด
 useEffect(() => {
   const init = async () => {
-    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+    
+    console.log("=== LEAVE DEBUG ===");
+    console.log("authUser:", authUser?.id, authUser?.email);
+    console.log("authError:", authError);
+    
     if (!authUser) { setLoading(false); return; }
 
     const meta   = authUser.user_metadata ?? {};
@@ -1376,26 +1381,36 @@ useEffect(() => {
       claims["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"] ||
       "";
 
-    // ── เพิ่ม signature_url ใน select ──
-    let { data } = await supabase
+    console.log("email resolved:", email);
+
+    const { data: dataById, error: q1Error } = await supabase
       .from("users")
       .select("id, first_name, last_name, full_name, email, role, position, signature_url")
       .eq("auth_id", authUser.id)
       .maybeSingle();
 
+    console.log("query auth_id result:", dataById, "error:", q1Error);
+
+    let data: any = dataById;
+
     if (!data && email) {
-      const res = await supabase
+      const { data: dataByEmail, error: q2Error } = await supabase
         .from("users")
         .select("id, first_name, last_name, full_name, email, role, position, signature_url")
         .eq("email", email)
         .maybeSingle();
-      data = res.data;
+
+      console.log("query email result:", dataByEmail, "error:", q2Error);
+
+      data = dataByEmail;
       if (data) {
         await (supabase.from("users") as any)
           .update({ auth_id: authUser.id })
           .eq("id", (data as any).id);
       }
     }
+
+    console.log("final data:", data);
 
     if (data) {
       const profile: UserProfile = {
@@ -1405,7 +1420,6 @@ useEffect(() => {
       };
       setUser(profile);
 
-      // ── เพิ่ม setSavedSignature ──
       if ((data as any).signature_url) {
         setSavedSignature((data as any).signature_url);
       }
