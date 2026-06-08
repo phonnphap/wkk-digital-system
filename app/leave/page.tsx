@@ -1372,27 +1372,33 @@ useEffect(() => {
       claims.preferred_username ||
       "";
 
-    // ── หา profile (ไม่มี try/catch ซ้อน — ใช้ pattern เดียวกับระบบซ่อม) ──
     let profileData: any = null;
 
+    // ── ลอง auth_id ก่อน — ถ้า error (column ไม่มี) หรือไม่เจอ → fallback email
     const byAuthId = await supabase
       .from("users")
       .select("id, first_name, last_name, full_name, email, role, position, signature_url")
       .eq("auth_id", authUser.id)
       .maybeSingle();
 
-    if (byAuthId.data) {
+    if (!byAuthId.error && byAuthId.data) {
       profileData = byAuthId.data;
-    } else if (email) {
+    }
+
+    // ── Fallback ด้วย email เสมอถ้ายังไม่ได้ข้อมูล ──────────────────────
+    if (!profileData && email) {
       const byEmail = await supabase
         .from("users")
         .select("id, first_name, last_name, full_name, email, role, position, signature_url")
         .eq("email", email)
         .maybeSingle();
-      profileData = byEmail.data;
-      if (profileData) {
-        await (supabase.from("users") as any)
-          .update({ auth_id: authUser.id })
+
+      if (byEmail.data) {
+        profileData = byEmail.data;
+        // ผูก auth_id ไว้ครั้งถัดไป (ignore error ถ้า column ยังไม่มี)
+        await supabase
+          .from("users")
+          .update({ auth_id: authUser.id } as any)
           .eq("id", profileData.id);
       }
     }
@@ -1405,10 +1411,7 @@ useEffect(() => {
         `${profileData.first_name ?? ""} ${profileData.last_name ?? ""}`.trim(),
     };
     setUser(profile);
-
-    if (profileData.signature_url) {
-      setSavedSignature(profileData.signature_url);
-    }
+    if (profileData.signature_url) setSavedSignature(profileData.signature_url);
 
     const teacherRoles = ["homeroom_teacher", "subject_teacher", "staff", "teacher"];
     if (teacherRoles.includes(profileData.role)) {
