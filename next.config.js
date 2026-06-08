@@ -1,7 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ['face-api.js', '@tensorflow/tfjs-node'],
-  turbopack: {},
+  // ✅ Next.js 14: ต้องอยู่ใน experimental
+  experimental: {
+    serverComponentsExternalPackages: ['face-api.js', '@tensorflow/tfjs-node'],
+  },
+
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {
@@ -13,4 +16,5 @@ const nextConfig = {
     return config;
   },
 };
+
 module.exports = nextConfig;
