@@ -368,7 +368,7 @@ function EventModal({
           {/* Approver section */}
           {isEdit && isApprover && event?.status === "pending" && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <p className="text-sm font-bold text-amber-700 mb-3">⏳ รออนุมัติจากท่าน</p>
+              <p className="text-sm font-bold text-amber-700 mb-3">⏳ รออนุมัติ</p>
               {!showReject ? (
                 <div className="flex gap-2">
                   <button onClick={handleApprove} disabled={loading}

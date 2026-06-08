@@ -73,6 +73,7 @@ type Classroom = {
   room_number: number;
   room_name?: string;
   grade_group?: string;
+  academic_year_id?: string; // เพิ่มบรรทัดนี้
 };
 
 type TimetableEntry = {
@@ -363,7 +364,17 @@ function TimetableGrid({
 }
 
 // ── Mobile timetable ──────────────────────────────────────────────────────────
-function MobileTimetable({ classroom, entries, timeSlots, subjects, teachers, isAdmin, currentUser, subjectColorMap, onCellClick }: any) {
+function MobileTimetable({ classroom, entries, timeSlots, subjects, teachers, isAdmin, currentUser, subjectColorMap, onCellClick }: {
+  classroom: Classroom;
+  entries: TimetableEntry[];
+  timeSlots: TimeSlot[];
+  subjects: Subject[];
+  teachers: Teacher[];
+  isAdmin: boolean;
+  currentUser: UserProfile;
+  subjectColorMap: Record<string, string>;
+  onCellClick: (slot: TimeSlot, day: number, entry?: TimetableEntry) => void; // เพิ่มบรรทัดนี้
+}) {
   const [activeDay, setActiveDay] = useState(1);
 
   return (
