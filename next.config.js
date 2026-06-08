@@ -1,20 +1,17 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // ✅ Next.js 14: ต้องอยู่ใน experimental
+  // ✅ บอก Next.js ให้ใช้ webpack แทน Turbopack ชัดเจน
   experimental: {
-    serverComponentsExternalPackages: ['face-api.js', '@tensorflow/tfjs-node'],
+    turbo: {},
   },
-
-  webpack: (config, { isServer }) => {
-    if (!isServer) {
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        fs: false,
-        path: false,
-      };
-    }
-    return config;
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co',
+      },
+    ],
   },
-};
+}
 
-module.exports = nextConfig;
+module.exports = nextConfig
