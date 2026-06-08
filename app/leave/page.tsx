@@ -1355,76 +1355,88 @@ export default function LeavePage() {
   const [savedSignature, setSavedSignature] = useState("");
   const [loading,        setLoading]        = useState(true);
 
-  useEffect(() => {
-    const init = async () => {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) { setLoading(false); return; }
+  // ใน LeavePage — แทนที่ useEffect init ทั้งหมด
+useEffect(() => {
+  const init = async () => {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) { setLoading(false); return; }
 
-      const meta   = authUser.user_metadata ?? {};
-      const claims = meta.custom_claims ?? {};
+    const meta   = authUser.user_metadata ?? {};
+    const claims = meta.custom_claims ?? {};
+    const email  =
+      authUser.email ||
+      meta.email ||
+      meta.preferred_username ||
+      meta.upn ||
+      claims.email ||
+      claims.preferred_username ||
+      "";
 
-      const email =
-        authUser.email ||
-        meta.email ||
-        meta.preferred_username ||
-        meta.upn ||
-        claims.email ||
-        claims.preferred_username ||
-        claims.upn ||
-        claims["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"] ||
-        "";
+    // ── หา profile ───────────────────────────────────────────────────────
+    let profileData: any = null;
 
-      let { data } = await supabase
+    const byAuthId = await supabase
+      .from("users")
+      .select("id, first_name, last_name, full_name, email, role, position, signature_url")
+      .eq("auth_id", authUser.id)
+      .maybeSingle();
+
+    if (byAuthId.data) {
+      profileData = byAuthId.data;
+    } else if (email) {
+      const byEmail = await supabase
         .from("users")
         .select("id, first_name, last_name, full_name, email, role, position, signature_url")
-        .eq("auth_id", authUser.id)
+        .eq("email", email)
         .maybeSingle();
-
-      if (!data && email) {
-        const res = await supabase
-          .from("users")
-          .select("id, first_name, last_name, full_name, email, role, position, signature_url")
-          .eq("email", email)
-          .maybeSingle();
-        data = res.data;
-        if (data) {
-          await (supabase.from("users") as any).update({ auth_id: authUser.id }).eq("id", (data as any).id);
-        }
+      profileData = byEmail.data;
+      if (profileData) {
+        // ผูก auth_id ไว้สำหรับครั้งถัดไป
+        await (supabase.from("users") as any)
+          .update({ auth_id: authUser.id })
+          .eq("id", profileData.id);
       }
+    }
 
-      if (data) {
-        const profile: UserProfile = {
-          ...(data as any),
-          full_name: (data as any).full_name ||
-            `${(data as any).first_name ?? ""} ${(data as any).last_name ?? ""}`.trim(),
-        };
-        setUser(profile);
+    if (!profileData) { setLoading(false); return; }
 
-        if ((data as any).signature_url) {
-          setSavedSignature((data as any).signature_url);
-        }
-
-        const teacherRoles = ["homeroom_teacher", "subject_teacher", "staff", "teacher"];
-        if (teacherRoles.includes((data as any).role)) {
-          const [appRes, teachRes] = await Promise.all([
-            supabase.from("users")
-              .select("id, first_name, last_name, full_name, position, email")
-              .in("role", ["admin", "director", "deputy_director", "dept_head"]),
-            supabase.from("users")
-              .select("id, first_name, last_name, full_name, position, role, email")
-              .in("role", teacherRoles),
-          ]);
-          setApprovers(((appRes.data || []) as any[]).map(a => ({
-            ...a,
-            full_name: a.full_name || `${a.first_name ?? ""} ${a.last_name ?? ""}`.trim(),
-          })));
-          setAllTeachers((teachRes.data as UserProfile[]) || []);
-        }
-      }
-      setLoading(false);
+    const profile: UserProfile = {
+      ...profileData,
+      full_name: profileData.full_name ||
+        `${profileData.first_name ?? ""} ${profileData.last_name ?? ""}`.trim(),
     };
-    init();
-  }, []);
+    setUser(profile);
+
+    if (profileData.signature_url) {
+      setSavedSignature(profileData.signature_url);
+    }
+
+    // ── โหลด approvers + teachers เฉพาะ teacher roles ──────────────────
+    const teacherRoles = ["homeroom_teacher", "subject_teacher", "staff", "teacher"];
+    if (teacherRoles.includes(profileData.role)) {
+      const [appRes, teachRes] = await Promise.all([
+        supabase
+          .from("users")
+          .select("id, first_name, last_name, full_name, position, email")
+          .in("role", ["admin", "director", "deputy_director", "dept_head"]),
+        supabase
+          .from("users")
+          .select("id, first_name, last_name, full_name, position, role, email")
+          .in("role", teacherRoles),
+      ]);
+      setApprovers(
+        ((appRes.data || []) as any[]).map(a => ({
+          ...a,
+          full_name: a.full_name || `${a.first_name ?? ""} ${a.last_name ?? ""}`.trim(),
+        }))
+      );
+      setAllTeachers((teachRes.data as UserProfile[]) || []);
+    }
+
+    setLoading(false);
+  };
+  init();
+}, []);
 
   if (loading) {
     return (
