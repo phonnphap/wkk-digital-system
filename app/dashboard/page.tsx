@@ -32,11 +32,27 @@ export default function DashboardPage() {
       }
 
       // 1. ดึง first_name และ last_name เพิ่มเติมจากตาราง users
-      const { data: profile } = await supabase
+      let profile: any = null;
+
+      const { data: byAuthId } = await supabase
         .from("users")
         .select("first_name, last_name, role")
-        .eq("id", user.id)
-        .single();
+        .eq("auth_id", user.id)
+        .maybeSingle();
+
+      if (byAuthId) {
+        profile = byAuthId;
+      } else {
+        const email = user.email || user.user_metadata?.email || "";
+        if (email) {
+          const { data: byEmail } = await supabase
+            .from("users")
+            .select("first_name, last_name, role")
+            .eq("email", email)
+            .maybeSingle();
+          profile = byEmail;
+        }
+      }
 
       if (profile) {
         // ดึงค่าชื่อและนามสกุลมาเก็บไว้ (ถ้าใน DB ไม่มี ให้ fallback ไปดึงค่าจาก metadata)
