@@ -38,7 +38,7 @@ function daysBetween(start: string, end: string) {
 function fullName(u: any) {
   if (!u) return "";
   if (u.full_name) return u.full_name;
-  return `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim();
+  return `${u.title ?? ""} ${u.first_name ?? ""} ${u.last_name ?? ""}`.trim();
 }
 function getEvalRound(dateStr: string): "1" | "2" {
   const m = new Date(dateStr).getMonth() + 1;
@@ -65,7 +65,7 @@ async function createNotification(userId: string, message: string, leaveId: stri
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type UserProfile = {
-  id: string; first_name?: string; last_name?: string;
+  id: string; title?: string; first_name?: string; last_name?: string;
   full_name?: string; email: string; role: string;
   position?: string; signature_url?: string; grade_level?: string;
 };
@@ -444,7 +444,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
           setIsOwnDuty(all.includes(user.id));
           if(all[0]){
             const {data:od}=await supabase.from("users")
-              .select("id,first_name,last_name,full_name,position,email").eq("id",all[0]).maybeSingle();
+              .select("id,title,first_name,last_name,full_name,position,email").eq("id",all[0]).maybeSingle();
             if(od) setDutyOfficer({...(od as any),full_name:(od as any).full_name||`${(od as any).first_name??""} ${(od as any).last_name??""}`.trim()});
             else setDutyOfficer(null);
           } else setDutyOfficer(null);
@@ -997,7 +997,7 @@ function AdminDashboard({user}:{user:UserProfile}){
   const loadAll=useCallback(async()=>{
     setLoading(true);
     const {data}=await supabase.from("leave_requests")
-      .select("*, user:users(first_name,last_name,full_name,position,email,grade_level)")
+      .select("*, user:users(title,first_name,last_name,full_name,position,email,grade_level)")
       .order("created_at",{ascending:false});
     setRequests((data as LeaveRequest[])||[]);
     setLoading(false);
@@ -1296,14 +1296,14 @@ export default function LeavePage(){
       const claims=meta.custom_claims??{};
       const email=authUser.email||meta.email||meta.preferred_username||meta.upn||claims.email||claims.preferred_username||claims.upn||claims["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"]||"";
       let data:any=null;
-      const {data:d1}=await supabase.from("users").select("id,first_name,last_name,email,role,position,signature_url,grade_level").eq("auth_id",authUser.id).maybeSingle();
+      const {data:d1}=await supabase.from("users").select("id,title,first_name,last_name,email,role,position,signature_url,grade_level").eq("auth_id",authUser.id).maybeSingle();
       if(d1){data=d1;}else if(email){
-        const {data:d2}=await supabase.from("users").select("id,first_name,last_name,email,role,position,signature_url,grade_level").eq("email",email).maybeSingle();
+        const {data:d2}=await supabase.from("users").select("id,title,first_name,last_name,email,role,position,signature_url,grade_level").eq("email",email).maybeSingle();
         data=d2;
         if(data)await (supabase.from("users") as any).update({auth_id:authUser.id}).eq("id",(data as any).id);
       }
       if(data){
-        const profile:UserProfile={...(data as any),full_name:(data as any).full_name||`${(data as any).first_name??""} ${(data as any).last_name??""}`.trim()};
+        const profile:UserProfile={...(data as any),full_name:(data as any).full_name||`${(data as any).title??""} ${(data as any).first_name??""} ${(data as any).last_name??""}`.trim()};
         setUser(profile);
         if((data as any).signature_url)setSavedSignature((data as any).signature_url);
 
@@ -1312,18 +1312,18 @@ export default function LeavePage(){
         // ── โหลด approvers ตาม email ที่กำหนด ─────────────────────────────
         const apvEmails=["phansa@khienkhet.ac.th","titima@khienkhet.ac.th"];
         const {data:apvByEmail}=await supabase.from("users")
-          .select("id,first_name,last_name,full_name,position,email").in("email",apvEmails);
+          .select("id,title,first_name,last_name,full_name,position,email").in("email",apvEmails);
         const {data:director}=await supabase.from("users")
-          .select("id,first_name,last_name,full_name,position,email").eq("role","director").maybeSingle();
+          .select("id,title,first_name,last_name,full_name,position,email").eq("role","director").maybeSingle();
 
         const apvList:ApproverInfo[]=[
           ...(apvByEmail||[]).map((a:any)=>({...a,full_name:a.full_name||`${a.first_name??""} ${a.last_name??""}`.trim()})),
-          ...(director?[{...director as any,full_name:(director as any).full_name||`${(director as any).first_name??""} ${(director as any).last_name??""}`.trim()}]:[]),
+          ...(director?[{...director as any,full_name:(director as any).full_name||`${(director as any).title??""} ${(director as any).first_name??""} ${(director as any).last_name??""}`.trim()}]:[]),
         ];
-        setApprovers(apvList.slice(0,3));
+        setApprovers(apvList.slice(0,3)); 
 
         if(teacherRoles.includes((data as any).role)){
-          const {data:teachRes}=await supabase.from("users").select("id,first_name,last_name,full_name,position,role,email").in("role",teacherRoles);
+          const {data:teachRes}=await supabase.from("users").select("id,title,first_name,last_name,full_name,position,role,email").in("role",teacherRoles);
           setAllTeachers((teachRes as UserProfile[])||[]);
         }
       }
