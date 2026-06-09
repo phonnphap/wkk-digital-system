@@ -15,10 +15,11 @@ export default function DashboardPage() {
   const supabase = createClient(); 
 
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
-  const [fullName, setFullName] = useState<string>("");
 
   const [userPrefix, setUserPrefix] = useState<string>("");
   const [userName, setUserName] = useState<string>("");
+
+  const [isMounted, setIsMounted] = useState<boolean>(false);
 
   useEffect(() => {
   async function checkUserRole() {
@@ -83,6 +84,7 @@ export default function DashboardPage() {
     }
   }
   checkUserRole();
+  setIsMounted(true);
 }, [supabase, router]);
 
   // ✅ ฟังก์ชันเหล่านี้ต้องอยู่นอก useEffect
@@ -291,7 +293,7 @@ useEffect(() => {
             })}
           </span>
           <h1 className="text-3xl md:text-4xl font-black mt-4 tracking-tight">
-            สวัสดี {userPrefix}{userName} 👋
+            {isMounted ? `สวัสดี ${userPrefix} ${userName} 👋` : "สวัสดี 👋"}
           </h1>
           <p className="text-sm md:text-base text-blue-100 mt-2 font-semibold opacity-90">
             ยินดีต้อนรับสู่ระบบสารสนเทศอัจฉริยะ โรงเรียนวัดเขียนเขต
