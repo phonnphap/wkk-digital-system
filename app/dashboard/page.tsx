@@ -17,6 +17,9 @@ export default function DashboardPage() {
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [fullName, setFullName] = useState<string>("");
 
+  const [userPrefix, setUserPrefix] = useState<string>("");
+  const [userName, setUserName] = useState<string>("");
+
   useEffect(() => {
   async function checkUserRole() {
     try {
