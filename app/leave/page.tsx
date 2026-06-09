@@ -224,7 +224,7 @@ table.stat th{background:#f0f0f0;font-weight:bold}
 .sigimg{width:120px;height:55px;object-fit:contain;display:block;margin:0 auto 3px}
 .sigline{border-bottom:1px solid #000;width:180px;margin:0 auto 3px}
 </style></head><body>
-<div class="center" style="margin-bottom:6px">
+<div style="text-align: center;" style="margin-bottom:6px">
   <img src="https://system.khienkhet.ac.th/logo.png" style="width:65px;height:65px" onerror="this.style.display='none'"/>
 </div>
 <div class="title">แบบใบลาป่วย ลากิจส่วนตัว ลาคลอดบุตร</div>

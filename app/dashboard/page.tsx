@@ -15,71 +15,72 @@ export default function DashboardPage() {
   const supabase = createClient(); 
 
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
-  const [userName, setUserName] = useState<string>("");
-  const [userPrefix, setUserPrefix] = useState<string>("คุณครู");
+  const [fullName, setFullName] = useState<string>("");
 
   useEffect(() => {
-    async function checkUserRole() {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (!user) {
-          router.push("/login");
-          return;
-        }
-
-        const { data: profile } = await supabase
-          .from("users")
-          .select("full_name, role")
-          .eq("id", user.id)
-          .single();
-
-        if (profile) {
-          const fullName = profile.full_name 
-            || user.user_metadata?.full_name 
-            || user.user_metadata?.name
-            || "";
-
-          // กำหนด prefix ตาม role ที่มีใน DB
-          let prefix = "คุณครู";
-          switch (profile.role) {
-            case "director":
-              prefix = "ผอ.";
-              break;
-            case "deputy_director":
-              prefix = "รอง ผอ.";
-              break;
-            case "dept_head":
-              prefix = "หัวหน้ากลุ่มสาระ";
-              break;
-            case "grade_head":
-              prefix = "หัวหน้าระดับ";
-              break;
-            case "homeroom_teacher":
-            case "subject_teacher":
-              prefix = "คุณครู";
-              break;
-            case "admin":
-              prefix = "ผู้ดูแลระบบ";
-              break;
-            case "staff":
-              prefix = "เจ้าหน้าที่";
-              break;
-            default:
-              prefix = "คุณครู";
-          }
-
-          setUserPrefix(prefix);
-          setUserName(fullName);
-          setIsAdmin(profile.role === "admin");
-        }
-
-      } catch (err) {
-        console.error("ตรวจสอบสิทธิ์ผิดพลาด:", err);
+  async function checkUserRole() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        router.push("/login");
+        return;
       }
+
+      // 1. ดึง first_name และ last_name เพิ่มเติมจากตาราง users
+      const { data: profile } = await supabase
+        .from("users")
+        .select("first_name, last_name, role")
+        .eq("id", user.id)
+        .single();
+
+      if (profile) {
+        // ดึงค่าชื่อและนามสกุลมาเก็บไว้ (ถ้าใน DB ไม่มี ให้ fallback ไปดึงค่าจาก metadata)
+        const firstName = profile.first_name || user.user_metadata?.first_name || "";
+        const lastName = profile.last_name || user.user_metadata?.last_name || "";
+        
+        // รวมร่างชื่อและนามสกุลแบบมีเว้นวรรคตรงกลาง
+        const combinedName = `${firstName} ${lastName}`.trim();
+
+        // 2. กำหนดเงื่อนไขคำนำหน้า และ การจัดฟอร์แมตชื่อตามสิทธิ์ (Role)
+        let prefix = "คุณครู";
+        let finalName = combinedName;
+
+        switch (profile.role) {
+          case "director":
+            prefix = "ผอ.";
+            break;
+          case "deputy_director":
+            prefix = "รอง";
+            break;
+          case "admin":
+            prefix = "Admin";
+            break;
+          case "staff":
+            prefix = "คุณ";
+            break;
+          case "homeroom_teacher":
+            prefix = "คุณครู";
+            break;
+          
+          // สำหรับ Role อื่นๆ ที่เหลือ (เช่น dept_head, grade_head, subject_teacher) 
+          // หากไม่มีระบุในเงื่อนไข จะตั้ง Default ไว้ที่ "คุณครู"
+          default:
+            prefix = "คุณครู";
+        }
+
+        // นำ prefix มาต่อกับชื่อที่ดึงมาได้
+        setUserPrefix(prefix);
+        setUserName(finalName);
+        setIsAdmin(profile.role === "admin");
+      }
+
+    } catch (err) {
+      console.error("ตรวจสอบสิทธิ์ผิดพลาด:", err);
     }
-    checkUserRole();
-  }, [supabase, router]);
+  }
+  checkUserRole();
+}, [supabase, router]);
 
   // ✅ ฟังก์ชันเหล่านี้ต้องอยู่นอก useEffect
   const handleAdminMenuClick = (targetPath: string) => {
