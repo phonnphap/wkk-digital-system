@@ -279,7 +279,7 @@ table.stat th{background:#f0f0f0;font-weight:bold}
     <div style="font-weight:bold;margin-bottom:8px">ความเห็นของรอง.ผอ.กลุ่มบริหารงานบุคคล</div>
     <div class="dotline"></div><div class="dotline"></div>
     <div style="text-align:center;margin-top:8px;font-size:12pt">
-      ลงชื่อ................................<br>(นางลัดดา จำปาแดง)<br>ตำแหน่ง รองผู้อำนวยการกลุ่มบริหารงานบุคคล
+      ลงชื่อ................................<br>(นางสาวฐิติมา  กาบแก้ว)<br>ตำแหน่ง รองผู้อำนวยการกลุ่มบริหารงานบุคคล
     </div>
   </div>
   <div class="apv" style="flex:1">
