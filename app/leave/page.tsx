@@ -85,8 +85,8 @@ const COLORS = {
 const LEAVE_TYPE_LIST: { key: LeaveType; label: string; icon: string }[] = [
   { key:"sick",       label:"ลาป่วย",                           icon:"🤒" },
   { key:"personal",   label:"ลากิจส่วนตัว",                     icon:"📋" },
-  { key:"maternity",  label:"ลาคลอดบุตร / ช่วยเหลือภริยาคลอด", icon:"👶" },
-  { key:"ordination", label:"ลาอุปสมบท / ประกอบพิธีฮัจย์",      icon:"🙏" },
+  { key:"maternity",  label:"ลาคลอดบุตร/ ช่วยเหลือภริยาคลอด", icon:"👶" },
+  { key:"ordination", label:"ลาอุปสมบท/ ประกอบพิธีฮัจย์",      icon:"🙏" },
   { key:"official",   label:"ไปราชการ",                          icon:"🏛️" },
   { key:"other" as LeaveType, label:"ลาประเภทอื่นๆ",            icon:"📌" },
 ];
@@ -285,10 +285,10 @@ table.stat th{background:#f0f0f0;font-weight:bold}
   <div class="apv" style="flex:1">
     <div style="font-weight:bold;margin-bottom:6px">ความเห็นของผู้บังคับบัญชา</div>
     <div style="font-size:12pt">
-      ลงชื่อ........................ผู้ตรวจสอบ<br>(นางสาวพรรษา แก้วใหญ่)<br>ตำแหน่ง ครู&nbsp;&nbsp;วันที่..............................<br><br>
+      ลงชื่อ........................ผู้ตรวจสอบ<br>(นางสาวพรรษา  แก้วใหญ่)<br>ตำแหน่ง ครู&nbsp;&nbsp;วันที่..............................<br><br>
       <strong>คำสั่ง</strong> &nbsp;<span class="chk"></span> อนุญาต &nbsp;&nbsp;<span class="chk"></span> ไม่อนุญาต<br>
       <div class="dotline"></div>
-      ลงชื่อ<br>(นายธนณัฐ ศิระวงษ์)<br>ตำแหน่ง ผู้อำนวยการโรงเรียนวัดเขียนเขต<br>วันที่..............................
+      ลงชื่อ<br>(นายธนณัฐ  ศิระวงษ์)<br>ตำแหน่ง ผู้อำนวยการโรงเรียนวัดเขียนเขต<br>วันที่..............................
     </div>
   </div>
 </div>
