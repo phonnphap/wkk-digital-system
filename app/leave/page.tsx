@@ -342,7 +342,7 @@ table.stat th{background:#f0f0f0;font-weight:700}
     </div>
 
     <div style="white-space: nowrap; line-height: 1; width: 100%;">
-      <span>ลงชื่อ...........................................................................</span>
+      <span>ลงชื่อ............................................................</span>
     </div>
     
     <div style="font-size: 13pt; margin-top: 10px; width: 100%;">
@@ -368,7 +368,7 @@ table.stat th{background:#f0f0f0;font-weight:700}
 
     <div style="text-align: center; margin-top: 15px; line-height: 2; font-size: 11.5pt;">
       <div style="text-align: left; padding-left: 10px; margin-bottom: 5px;">
-        ลงชื่อ......................................................ผู้ตรวจสอบ
+        ลงชื่อ...............................................ผู้ตรวจสอบ
       </div>
       (นางสาวพรรษา &nbsp;แก้วใหญ่)<br>
       ตำแหน่ง ครู<br>
@@ -385,7 +385,7 @@ table.stat th{background:#f0f0f0;font-weight:700}
       <div style="border-bottom: 1px dotted #aaa; height: 22px; margin: 4px 0;"></div>
       <div style="text-align: center; margin-top: 8px;">
         ลงชื่อ......................................................................<br>
-        (นางลัดดา &nbsp;จำปาแดง)<br>
+        (นางสาวฐิติมา &nbsp;กาบแก้ว)<br>
         ตำแหน่ง รองผู้อำนวยการกลุ่มบริหารงานบุคคล
       </div>
     </div>
