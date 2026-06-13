@@ -702,7 +702,7 @@ function AdminPage({ currentUser }) {
   const GRADE_GROUPS = ["อนุบาล", "ประถมศึกษา", "มัธยมศึกษาตอนต้น", "มัธยมศึกษาตอนปลาย"];
 
   useEffect(() => {
-    supabase.from("classrooms").select("id, room_name, room_number, grade_group, student_count, academic_year_id").order("room_number")
+    supabase.from("classrooms").select("id, room_name, room_number, student_count, academic_year_id, grade_levels(name)").order("room_number")
       .then(({ data }) => { setClassrooms(data || []); if (data?.[0]) setSelectedYear(data[0].academic_year_id); });
   }, []);
 
