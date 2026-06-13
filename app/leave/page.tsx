@@ -36,7 +36,9 @@ function daysBetween(start: string, end: string) {
 function fullName(u: any) {
   if (!u) return "";
   if (u.full_name) return u.full_name;
-  return `${u.title ?? ""} ${u.first_name ?? ""} ${u.last_name ?? ""}`.trim();
+  
+  // ใช้สเปซบาร์ปกติเคาะ 2 ครั้ง คั่นระหว่าง (คำนำหน้า+ชื่อ) กับ (นามสกุล)
+  return `${u.title ?? ""}${u.first_name ?? ""}  ${u.last_name ?? ""}`.trim();
 }
 function getEvalRound(dateStr: string): "1" | "2" {
   const m = new Date(dateStr).getMonth() + 1;
@@ -240,75 +242,176 @@ table.stat th{background:#f0f0f0;font-weight:700}
 .sigimg{max-width:140px;max-height:55px;object-fit:contain;display:block;margin:0 auto 4px}
 </style></head><body><div class="page">
 <div class="center" style="margin-bottom:8px">
-  <img src="https://system.khienkhet.ac.th/logo.png"
+  <img src="/school-logo.png"
     style="width:72px;height:72px;object-fit:contain"
-    onerror="this.onerror=null;this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 72 72%22><circle cx=%2236%22 cy=%2236%22 r=%2235%22 fill=%22%231e3a8a%22/><text x=%2236%22 y=%2244%22 text-anchor=%22middle%22 fill=%22white%22 font-size=%2224%22>ว</text></svg>'"/>
+    onerror="this.onerror=null;this.src='/school-logo.png'"/>
 </div>
 <div class="title">แบบใบลาป่วย ลากิจส่วนตัว ลาคลอดบุตร</div>
 <div class="sub">โรงเรียนวัดเขียนเขต ตำบลบึงยี่โถ<br>อำเภอธัญบุรี จังหวัดปทุมธานี</div>
-<div class="right" style="margin-bottom:14px">
-  วันที่ <span class="ul">&nbsp;${thDay}&nbsp;</span>
-  เดือน <span class="ul">&nbsp;${thMonth}&nbsp;</span>
-  พ.ศ. <span class="ul">&nbsp;${thYear}&nbsp;</span>
+
+<div style="display: flex; justify-content: flex-end; gap: 4px; margin-bottom: 14px; width: 100%;">
+  วันที่ <span style="border-bottom: 1px dotted #000; min-width: 40px; text-align: center; font-weight: bold;">${thDay}</span>
+  เดือน <span style="border-bottom: 1px dotted #000; min-width: 100px; text-align: center; font-weight: bold;">${thMonth}</span>
+  พ.ศ. <span style="border-bottom: 1px dotted #000; min-width: 60px; text-align: center; font-weight: bold;">${thYear}</span>
 </div>
-<div style="margin-bottom:6px">เรื่อง <span class="ul">&nbsp;&nbsp;ขอ${leaveLabel}${halfText}&nbsp;&nbsp;</span></div>
-<div style="margin-bottom:14px">เรียน ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
-<div style="margin-bottom:8px">ข้าพเจ้า <span class="ul">&nbsp;&nbsp;${data.fullName}&nbsp;&nbsp;</span> ตำแหน่ง <span class="ul">&nbsp;&nbsp;${data.position}&nbsp;&nbsp;</span></div>
-<div style="margin-bottom:10px">สังกัดโรงเรียนวัดเขียนเขต สำนักงานเขตพื้นที่การศึกษาประถมศึกษาปทุมธานี เขต 2</div>
-<div style="margin-bottom:8px;line-height:2.4">
+
+<div style="display: flex; margin-bottom: 6px;">
+  <span style="white-space: nowrap;">เรื่อง &nbsp;</span>
+  <span style="border-bottom: 1px dotted #000; flex-grow: 1; padding-left: 8px; font-weight: bold;">ขออนุญาต${leaveLabel}${halfText}</span>
+</div>
+
+<div style="margin-bottom: 14px;">เรียน ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
+
+<div style="display: flex; gap: 8px; margin-bottom: 8px; width: 100%; padding-left: 55px;">
+  <span style="white-space: nowrap;">ข้าพเจ้า</span>
+  <span style="border-bottom: 1px dotted #000; flex-grow: 1; padding-left: 8px; font-weight: bold;">${data.fullName}</span>
+  <span style="white-space: nowrap;">ตำแหน่ง</span>
+  <span style="border-bottom: 1px dotted #000; flex-grow: 1; padding-left: 8px; font-weight: bold;">${data.position}</span>
+</div>
+
+<div style="margin-bottom: 10px;">สังกัดโรงเรียนวัดเขียนเขต สำนักงานเขตพื้นที่การศึกษาประถมศึกษาปทุมธานี เขต 2</div>
+
+<div style="margin-bottom: 8px; line-height: 2.4; width: 100%; padding-left: 55px;">
+  <div style="margin-left: -55px; margin-bottom: 4px;">ขอลา :</div>
   <span class="chk">${isSick?"✓":""}</span> ลาป่วย<br>
-  <span class="chk">${isPersonal||isOther?"✓":""}</span> ลากิจส่วนตัว
-  เนื่องจาก <span class="ul">&nbsp;&nbsp;${isPersonal||isOther?data.reason.replace(/\[.+?\]/g,"").trim():""}&nbsp;&nbsp;</span><br>
+  
+  <div style="display: flex; align-items: center; width: 100%;">
+    <span class="chk" style="margin-right: 6px;">${isPersonal||isOther?"✓":""}</span> ลากิจส่วนตัว เนื่องจาก &nbsp;
+    <span style="border-bottom: 1px dotted #000; flex-grow: 1; font-weight: bold;">
+      ${isPersonal||isOther?data.reason.replace(/\[.+?\]/g,"").trim():""}&nbsp;
+    </span>
+  </div>
   ${isOther&&data.otherLeaveName?`<span style="margin-left:20px;font-size:12pt">(ประเภท: <strong>${data.otherLeaveName}</strong>)</span><br>`:""}
   <span class="chk">${isMat?"✓":""}</span> ลาคลอดบุตร
 </div>
-<div style="line-height:2.2;margin-bottom:8px">
-  ตั้งแต่วันที่ <span class="ul">&nbsp;&nbsp;${toThaiDateLong(data.startDate)}&nbsp;&nbsp;</span>
-  ถึงวันที่ <span class="ul">&nbsp;&nbsp;${toThaiDateLong(data.endDate)}&nbsp;&nbsp;</span>
-  มีกำหนด <span class="ul">&nbsp;&nbsp;${daysDisplay}&nbsp;&nbsp;</span> วัน${halfText}
+
+<div style="display: flex; gap: 4px; line-height: 2.2; margin-bottom: 8px; width: 100%;">
+  <span style="white-space: nowrap;">ตั้งแต่วันที่</span>
+  <span style="border-bottom: 1px dotted #000; flex-grow: 1; text-align: center; font-weight: bold;">${toThaiDateLong(data.startDate)}</span>
+  <span style="white-space: nowrap;">ถึงวันที่</span>
+  <span style="border-bottom: 1px dotted #000; flex-grow: 1; text-align: center; font-weight: bold;">${toThaiDateLong(data.endDate)}</span>
+  <span style="white-space: nowrap;">มีกำหนด</span>
+  <span style="border-bottom: 1px dotted #000; min-width: 60px; text-align: center; font-weight: bold;">${daysDisplay}</span>
+  <span style="white-space: nowrap;">วัน${halfText}</span>
 </div>
-<div style="line-height:2.2;margin-bottom:8px">
-  ข้าพเจ้า ได้ <span class="chk"></span> ลาป่วย <span class="chk"></span> ลากิจส่วนตัว <span class="chk"></span> ลาคลอดบุตร ครั้งสุดท้าย<br>
-  ตั้งแต่วันที่ <span class="ul" style="min-width:140px">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-  ถึงวันที่ <span class="ul" style="min-width:140px">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-  มีกำหนด <span class="ul">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> วัน
-</div>
-<div style="margin-bottom:20px;line-height:2">
-  ในระหว่างลาจะติดต่อข้าพเจ้าได้ที่ <span class="ul" style="min-width:280px">&nbsp;&nbsp;${data.phone||"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"}&nbsp;&nbsp;</span>
-</div>
-<div class="right" style="margin-bottom:6px">ขอแสดงความนับถือ</div>
-<div style="text-align:right;margin-right:8%">
-  ${signatureUrl?`<img src="${signatureUrl}" class="sigimg" alt="ลายเซ็น"/>`:`<div style="height:55px"></div>`}
-  <div class="sigline"></div>
-  <div style="text-align:center;font-size:13pt;margin-top:3px">(${data.fullName})</div>
-</div>
-<div style="margin-top:18px">
-  <div style="font-weight:700;text-decoration:underline;margin-bottom:6px">สถิติการลาในปีงบประมาณนี้</div>
-  <table class="stat">
-    <tr><th>ประเภทการลา</th><th>ลามาแล้ว</th><th>ลาครั้งนี้</th><th>รวมเป็น</th></tr>
-    <tr><td>ลาป่วย</td><td></td><td>${isSick?daysDisplay:""}</td><td></td></tr>
-    <tr><td>ลากิจส่วนตัว</td><td></td><td>${isPersonal||isOther?daysDisplay:""}</td><td></td></tr>
-    <tr><td>ลาคลอดบุตร</td><td></td><td>${isMat?daysDisplay:""}</td><td></td></tr>
-  </table>
-</div>
-<div style="display:flex;gap:16px;margin-top:16px">
-  <div class="apv" style="flex:1">
-    <div style="font-weight:700;margin-bottom:8px">ความเห็นของรอง.ผอ.กลุ่มบริหารงานบุคคล</div>
-    <div style="border-bottom:1px dotted #aaa;height:22px;margin:4px 0"></div>
-    <div style="border-bottom:1px dotted #aaa;height:22px;margin:4px 0"></div>
-    <div style="text-align:center;margin-top:10px;font-size:11.5pt">
-      ลงชื่อ................................<br>(นางสาวฐิติมา  กาบแก้ว)<br>รองผู้อำนวยการกลุ่มบริหารงานบุคคล
-    </div>
+
+<div style="margin-bottom: 12px; line-height: 2.2; width: 100%;">
+  <div style="display: flex; flex-wrap: wrap; items-center; column-gap: 12px; row-gap: 4px;">
+    <span>ข้าพเจ้า ได้</span>
+    <span style="display: inline-flex; align-items: center; gap: 4px;">
+      <span class="chk"></span> <span>ลาป่วย</span>
+    </span>
+    <span style="display: inline-flex; align-items: center; gap: 4px;">
+      <span class="chk"></span> <span>ลากิจส่วนตัว</span>
+    </span>
+    <span style="display: inline-flex; align-items: center; gap: 4px;">
+      <span class="chk"></span> <span>ลาคลอดบุตร ครั้งสุดท้าย</span>
+    </span>
   </div>
-  <div class="apv" style="flex:1">
-    <div style="font-weight:700;margin-bottom:6px">ความเห็นของผู้บังคับบัญชา</div>
-    <div style="font-size:11.5pt;line-height:1.9">
-      ลงชื่อ..................ผู้ตรวจสอบ<br>(นางสาวพรรษา  แก้วใหญ่)<br>ครู&nbsp;&nbsp;วันที่..............................<br><br>
-      <strong>คำสั่ง</strong>&nbsp;<span class="chk"></span>อนุญาต&nbsp;&nbsp;<span class="chk"></span>ไม่อนุญาต<br>
-      <div style="border-bottom:1px dotted #aaa;height:22px;margin:4px 0"></div>
-      ลงชื่อ<br>(นายธนณัฐ  ศิระวงษ์)<br>ผู้อำนวยการโรงเรียนวัดเขียนเขต<br>วันที่..............................
-    </div>
+  
+  <div style="display: flex; gap: 4px; margin-top: 6px; width: 100%;">
+    <span style="white-space: nowrap;">ตั้งแต่วันที่</span>
+    <span style="border-bottom: 1px dotted #000; flex-grow: 1;"></span>
+    <span style="white-space: nowrap;">ถึงวันที่</span>
+    <span style="border-bottom: 1px dotted #000; flex-grow: 1;"></span>
+    <span style="white-space: nowrap;">มีกำหนด</span>
+    <span style="border-bottom: 1px dotted #000; min-width: 60px; text-align: center;"></span>
+    <span style="white-space: nowrap;">วัน</span>
   </div>
+</div>
+
+<div style="display: flex; margin-bottom: 4px; line-height: 2; width: 100%;">
+  <span style="white-space: nowrap;">ในระหว่างลาจะติดต่อข้าพเจ้าได้ที่ &nbsp;</span>
+  <span style="border-bottom: 1px dotted #000; flex-grow: 1; font-weight: bold; padding-left: 8px;">${data.phone || ""}</span>
+</div>
+<div style="border-bottom: 1px dotted #000; width: 100%; height: 20px; margin-bottom: 20px;"></div>
+
+
+<div style="display: flex; flex-direction: column; align-items: flex-end; padding-right: 10%; margin-top: 15px; width: 100%;">
+  
+  <div style="display: inline-flex; flex-direction: column; align-items: center; width: 280px; position: relative; text-align: center;">
+    
+    <div style="margin-bottom: 10px; font-size: 13pt;">ขอแสดงความนับถือ</div>
+    
+    <div style="position: relative; width: 100%; height: 60px; display: flex; justify-content: center; align-items: center;">
+      ${signatureUrl ? `
+        <img src="${signatureUrl}" class="sigimg" 
+             style="position: absolute; bottom: -5px; max-height: 85px; width: auto; object-fit: contain; z-index: 10;" 
+             alt="ลายเซ็น"/>
+      ` : '' }
+    </div>
+
+    <div style="white-space: nowrap; line-height: 1; width: 100%;">
+      <span>ลงชื่อ...........................................................................</span>
+    </div>
+    
+    <div style="font-size: 13pt; margin-top: 10px; width: 100%;">
+      (${data.fullName})
+    </div>
+    
+  </div>
+</div>
+
+<div style="display: flex; gap: 24px; margin-top: 25px; width: 100%;">
+  
+  <div style="flex: 1; display: flex; flex-direction: column; gap: 20px;">
+    
+    <div>
+      <div style="font-weight: 700; text-decoration: underline; margin-bottom: 8px; font-size: 11.5pt;">สถิติการลาในปีงบประมาณนี้</div>
+      <table class="stat" style="width: 100%; border-collapse: collapse;">
+        <tr><th>ประเภทการลา</th><th>ลามาแล้ว</th><th>ลาครั้งนี้</th><th>รวมเป็น</th></tr>
+        <tr><td>ลาป่วย</td><td></td><td style="text-align: center; font-weight: bold;">${isSick?daysDisplay:""}</td><td></td></tr>
+        <tr><td>ลากิจส่วนตัว</td><td></td><td style="text-align: center; font-weight: bold;">${isPersonal||isOther?daysDisplay:""}</td><td></td></tr>
+        <tr><td>ลาคลอดบุตร</td><td></td><td style="text-align: center; font-weight: bold;">${isMat?daysDisplay:""}</td><td></td></tr>
+      </table>
+    </div>
+
+    <div style="text-align: center; margin-top: 15px; line-height: 2; font-size: 11.5pt;">
+      <div style="text-align: left; padding-left: 10px; margin-bottom: 5px;">
+        ลงชื่อ......................................................ผู้ตรวจสอบ
+      </div>
+      (นางสาวพรรษา &nbsp;แก้วใหญ่)<br>
+      ตำแหน่ง ครู<br>
+      วันที่......................................................
+    </div>
+
+  </div>
+
+  <div style="flex: 1; display: flex; flex-direction: column; gap: 16px; border-left: 1px dashed #ddd; padding-left: 16px;">
+    
+    <div class="apv" style="width: 100%; line-height: 1.8; font-size: 11.5pt;">
+      <div style="font-weight: 700; margin-bottom: 4px;">ความเห็นของรอง.ผอ.กลุ่มบริหารงานบุคคล</div>
+      <div style="border-bottom: 1px dotted #aaa; height: 22px; margin: 4px 0;"></div>
+      <div style="border-bottom: 1px dotted #aaa; height: 22px; margin: 4px 0;"></div>
+      <div style="text-align: center; margin-top: 8px;">
+        ลงชื่อ......................................................................<br>
+        (นางลัดดา &nbsp;จำปาแดง)<br>
+        ตำแหน่ง รองผู้อำนวยการกลุ่มบริหารงานบุคคล
+      </div>
+    </div>
+
+    <div class="apv" style="width: 100%; line-height: 1.8; font-size: 11.5pt; margin-top: 5px;">
+      <div style="font-weight: 700; margin-bottom: 6px;">ความเห็นของผู้บังคับบัญชา</div>
+      <div style="font-weight: 700; margin-bottom: 4px;">คำสั่ง</div>
+      
+      <div style="display: flex; gap: 16px; margin-bottom: 8px;">
+        <span style="display: inline-flex; align-items: center; gap: 6px;"><span class="chk"></span> อนุญาต</span>
+        <span style="display: inline-flex; align-items: center; gap: 6px;"><span class="chk"></span> ไม่อนุญาต</span>
+      </div>
+      
+      <div style="border-bottom: 1px dotted #aaa; height: 22px; margin: 4px 0;"></div>
+      <div style="border-bottom: 1px dotted #aaa; height: 22px; margin: 4px 0;"></div>
+      
+      <div style="text-align: center; margin-top: 10px;">
+        ลงชื่อ......................................................................<br>
+        (นายธนณัฐ &nbsp;ศิระวงษ์)<br>
+        ตำแหน่ง ผู้อำนวยการโรงเรียนวัดเขียนเขต<br>
+        วันที่......................................................
+      </div>
+    </div>
+
+  </div>
+
 </div>
 </div></body></html>`;
 
@@ -326,7 +429,7 @@ table.stat th{background:#f0f0f0;font-weight:700}
           {/* Header */}
           <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
             <div>
-              <h3 className="font-black text-slate-800 text-lg">📄 ตรวจสอบใบลาก่อนส่ง</h3>
+              <h3 className="font-black text-slate-800 text-lg">📄 กรุณาตรวจสอบใบลาก่อนส่ง</h3>
               <p className="text-xs text-slate-400">กรุณาตรวจสอบข้อมูลให้ถูกต้องก่อนยืนยัน</p>
             </div>
             <button onClick={onCancel} className="w-9 h-9 rounded-xl bg-slate-200 flex items-center justify-center text-slate-600 text-lg font-bold">✕</button>
@@ -351,7 +454,10 @@ table.stat th{background:#f0f0f0;font-weight:700}
             <div className="flex items-center justify-between mb-3">
               <div>
                 <p className="font-bold text-slate-700 text-sm">✍️ ลายเซ็น</p>
-                <p className="text-xs text-slate-400">{signatureUrl?"ลายเซ็นพร้อมแล้ว":"ยังไม่มีลายเซ็น — กรุณาเพิ่ม"}</p>
+                {/* ปรับสีข้อความแจ้งเตือนสีแดงเตะตาขึ้นถ้ายังไม่ได้เซ็น */}
+                <p className={`text-xs font-semibold ${signatureUrl ? "text-slate-400" : "text-amber-500 animate-pulse"}`}>
+                  {signatureUrl ? "ลายเซ็นพร้อมแล้ว" : "⚠️ ยังไม่มีลายเซ็น — กรุณาเพิ่มก่อนส่งใบลา"}
+                </p>
               </div>
               <div className="flex items-center gap-3">
                 {signatureUrl && <img src={signatureUrl} alt="sig" className="h-10 max-w-[120px] object-contain border border-slate-200 rounded-lg" />}
@@ -366,8 +472,23 @@ table.stat th{background:#f0f0f0;font-weight:700}
                 className="flex-1 py-3.5 rounded-2xl border-2 border-slate-200 bg-white text-slate-600 font-black text-base hover:bg-slate-50">
                 ← แก้ไข
               </button>
-              <button onClick={() => onConfirm(signatureUrl)}
-                className="flex-[2] py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-base shadow-lg flex items-center justify-center gap-2">
+    
+              {/* ปุ่มยืนยันส่งใบลา: เพิ่มการตรวจสอบลายเซ็น */}
+              <button 
+                onClick={() => {
+                  if (!signatureUrl) {
+                    alert("กรุณาเพิ่มลายเซ็นก่อนส่งใบลา");
+                    return;
+                  }
+                  onConfirm(signatureUrl);
+                }}
+                disabled={!signatureUrl}
+                className={`flex-[2] py-3.5 rounded-2xl font-black text-base flex items-center justify-center gap-2 transition-all
+                  ${signatureUrl 
+                    ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg cursor-pointer" 
+                    : "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
+                  }`}
+              >
                 📤 ยืนยันส่งใบลา
               </button>
             </div>
