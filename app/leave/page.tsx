@@ -821,11 +821,11 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature }: {
   return(
     <div className="w-full min-h-screen">
       {/* Greeting — full width */}
-      <div className="bg-gradient-to-br from-blue-500 to-indigo-600 px-6 py-8 text-white flex items-center justify-between gap-4">
+      <div className="bg-gradient-to-br from-blue-500 to-indigo-600 px-6 py-4 text-white flex items-center justify-between gap-4">
         <div>
-          <p className="text-blue-100 text-sm font-bold mb-1">ยินดีต้อนรับ</p>
+          <p className="text-blue-100 text-lg font-extrabold mb-0.5">ยินดีต้อนรับ</p>
           <h2 className="text-3xl font-black">{fullName(user)}</h2>
-          <p className="text-blue-200 mt-0.5">{user.position}</p>
+          <p className="text-blue-200 text-lg font-medium mt-0.5">{user.position}</p>
         </div>
         {/* ✅ ปุ่มใหญ่ชัดเจน */}
         <button onClick={()=>setShowForm(true)}
