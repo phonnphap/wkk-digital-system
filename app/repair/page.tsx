@@ -34,7 +34,20 @@ interface UserProfile {
   id:string; first_name:string; last_name:string; email:string; role:string; position?:string;
 }
 
-function fullName(u:any){if(!u)return"-";return`${u.first_name??""}${u.last_name??""}`.trim()||"-";}
+function fullName(u: any) {
+  if (!u) return "-";
+  
+  // 1. ดึงค่าแต่ละส่วนมาร้อยเรียงกัน (ต่อสตริง)
+  const title = u.title ?? "";
+  const firstName = u.first_name ?? "";
+  const lastName = u.last_name ?? "";
+
+  // 2. ถ้าไม่มีทั้งชื่อและนามสกุล ให้ส่งกลับเป็นเครื่องหมาย "-"
+  if (!firstName && !lastName) return "-";
+
+  // 3. ส่งค่ากลับ: คำนำหน้าชื่อ+ชื่อจริง แล้วตามด้วยเว้นวรรค 2 ช่อง ก่อนถึงนามสกุล
+  return `${title}${firstName}  ${lastName}`.trim();
+}
 function toThaiDateTime(iso:string){return new Date(iso).toLocaleString("th-TH",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Bangkok"});}
 function toThaiDate(iso:string){return new Date(iso).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Bangkok"});}
 function genTicketNo(){const y=new Date().getFullYear()+543;const r=Math.floor(Math.random()*9000)+1000;return`REP-${y}-${r}`;}
