@@ -124,7 +124,7 @@ table.stat th{background:#f0f0f0;font-weight:700}
 <div style="margin-bottom:10px;font-size:12.5pt">สังกัดโรงเรียนวัดเขียนเขต สำนักงานเขตพื้นที่การศึกษาประถมศึกษาปทุมธานี เขต 2</div>
 
 <div style="line-height:2.3;margin-bottom:8px;font-size:12.5pt">
-  ขออนุญาต{leaveLabel} เนื่องจาก{reasonClean}
+  ขออนุญาต${leaveLabel} เนื่องจาก${reasonClean}
 </div>
 
 <div style="display:flex;gap:4px;align-items:baseline;margin-bottom:8px;font-size:12.5pt;flex-wrap:wrap">
