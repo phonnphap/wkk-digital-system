@@ -9,6 +9,9 @@ import {
 } from "recharts";
 import { differenceInMonths, differenceInYears, format, parseISO } from "date-fns";
 import { th } from "date-fns/locale";
+registerLocale("th", th);
+import "react-datepicker/dist/react-datepicker.css";
+import DatePicker, { registerLocale } from "react-datepicker";
 
 const supabase = createClient();
 const ADMIN_ROLES = ["admin", "director", "deputy_director"];
@@ -392,9 +395,24 @@ function ClassAssessPage({currentUser}) {
               <option value="term2">🍂 ครั้งที่ 2 (เทอม 2)</option>
             </select>
           </div>
-          <div style={{minWidth:150}}>
+          <div style={{ minWidth: 150, position: "relative" }}>
             <label style={S.label}>วันที่วัด</label>
-            <input type="date" style={S.input} value={measuredDate} onChange={e=>setMeasuredDate(e.target.value)}/>
+            <input 
+              type="date" 
+              style={{ ...S.input, color: "transparent", userSelect: "none" }} 
+              value={measuredDate} 
+              onChange={e => setMeasuredDate(e.target.value)}
+            />
+            <div style={{
+              position: "absolute",
+              bottom: "8px",
+              left: "12px",
+              pointerEvents: "none",
+              fontSize: "14px",
+              color: "#333"
+            }}>
+              {measuredDate ? format(parseISO(measuredDate), "dd/MM/yyyy", { locale: th }) : "วัน/เดือน/พ.ศ."}
+            </div>
           </div>
         </div>
       </div>

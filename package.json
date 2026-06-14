@@ -22,6 +22,7 @@
     "next": "^16.2.7",
     "postcss": "^8.4.49",
     "react": "latest",
+    "react-datepicker": "^9.1.0",
     "react-dom": "latest",
     "recharts": "^3.8.1",
     "sonner": "^2.0.7",
