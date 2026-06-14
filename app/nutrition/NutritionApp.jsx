@@ -187,29 +187,29 @@ export default function NutritionApp() {
   const [tab, setTab] = useState("assess");
   const [isProjectManager, setIsProjectManager] = useState(false);
 
-  useEffect(()=>{
-    const init=async()=>{
-      const {data:{user:au}}=await supabase.auth.getUser();
-      if(!au){setLoading(false);return;}
-      let {data}=await supabase.from("users")
-        .select("id,first_name,last_name,title,role").eq("auth_id",au.id).maybeSingle();
-      if(!data&&au.email){
-        const res=await supabase.from("users")
-          .select("id,first_name,last_name,title,role").eq("email",au.email).maybeSingle();
-        data=res.data;
-        if(data) await supabase.from("users").update({auth_id:au.id}).eq("id",data.id);
+  useEffect(() => {
+    const init = async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) { setLoading(false); return; }
+      let { data } = await supabase.from("users")
+        .select("id, first_name, last_name, role, department_id")
+        .eq("auth_id", authUser.id).maybeSingle();
+      if (!data) {
+        const email = authUser.email || authUser.user_metadata?.email || "";
+        if (email) {
+          const res = await supabase.from("users")
+            .select("id, first_name, last_name, role, department_id")
+            .eq("email", email).maybeSingle();
+          data = res.data;
+          if (data) await supabase.from("users").update({ auth_id: authUser.id }).eq("id", data.id);
+        }
       }
-      if(data){
-        setCurrentUser(data);
-        // ตรวจสอบว่าเป็น project manager หรือไม่
-        const {data:pm}=await supabase.from("nutrition_project_managers")
-          .select("id").eq("user_id",data.id).maybeSingle();
-        setIsProjectManager(!!pm);
-      }
+      if (data) setCurrentUser(data);
       setLoading(false);
     };
     init();
-  },[]);
+  }, []);
+
 
   const isAdmin = useMemo(()=>
     ADMIN_ROLES.includes(currentUser?.role)||isProjectManager
