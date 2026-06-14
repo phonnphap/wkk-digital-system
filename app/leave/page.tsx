@@ -397,6 +397,8 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
   const [sigUrl,       setSigUrl]       = useState(savedSignature??"");
   const [pendingPayload,setPendingPayload] = useState<any>(null);
   const [touched,      setTouched]      = useState<Record<string,boolean>>({});
+  const [docPreview, setDocPreview] = useState<string|null>(null);
+  const [docMime,    setDocMime]    = useState<string>("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const rawDays = startDate&&endDate ? daysBetween(startDate,endDate) : 0;
@@ -404,7 +406,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
   const tooSoon = leaveType==="personal" && startDate && isPersonalTooSoon(startDate);
   const typeColor = COLORS[leaveType]??COLORS.other;
   const isEdit = !!editData?.id;
-
+  
   useEffect(()=>{
     if(!startDate){setDutyOfficer(null);setIsOwnDuty(false);return;}
     (async()=>{
@@ -442,12 +444,18 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
     if(!isDraft&&!canSubmit){alert("กรุณากรอกข้อมูลให้ครบ");return;}
     if(!isDraft&&tooSoon){alert("ลากิจต้องยื่นล่วงหน้าอย่างน้อย 3 วัน");return;}
 
-    let docUrl:string|null=null;
-    if(docFile){
-      const path=`leaves/${Date.now()}_${docFile.name}`;
-      const {data:up}=await supabase.storage.from("school-files").upload(path,docFile,{upsert:true});
-      if(up){const {data:u}=supabase.storage.from("school-files").getPublicUrl(up.path);docUrl=u.publicUrl;}
-    }
+  // แทนที่ส่วน upload เดิม
+  let docUrl: string | null = null;
+  if (docFile) {
+    const formData = new FormData();
+    formData.append("file", docFile);
+    const year = new Date().getFullYear() + 543;
+    formData.append("path", `WKK_Leave_System/${year}/${Date.now()}_${docFile.name}`);
+  
+    const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+    const { webUrl, downloadUrl } = await res.json();
+    docUrl = downloadUrl || webUrl || null;
+  }
 
     const reasonFull = leaveType==="official"
       ?`[ปลายทาง: ${tripDest}] [พาหนะ: ${vehicle==="school"?"รถโรงเรียน":"รถส่วนตัว"}] [ผู้ร่วมเดินทาง: ${companions||"-"}] ${reason}`
@@ -459,7 +467,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
       contact_info:contactInfo,
       other_leave_name:leaveType==="other"?otherName:null,
       half_day:rawDays===1&&leaveType!=="ordination"?halfDay:null,
-      document_url:docUrl,
+      document_url: docUrl,
       status:isDraft?"draft":"pending",
       missed_periods:missedPeriods.join(","), substitute_id:substitute||null,
       duty_officer_id:dutyOfficer?.id??null,
@@ -610,9 +618,36 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
               </div>
               {docFile&&<button type="button" onClick={e=>{e.stopPropagation();setDocFile(null);}} className="w-6 h-6 rounded-full bg-red-100 text-red-500 text-xs flex items-center justify-center font-black">✕</button>}
             </div>
-            <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e=>setDocFile(e.target.files?.[0]??null)}/>
+            <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" 
+              onChange={e => {
+                const f = e.target.files?.[0] ?? null;
+                setDocFile(f);
+                if (f) {
+                  setDocMime(f.type);
+                  const reader = new FileReader();
+                  reader.onload = ev => setDocPreview(ev.target?.result as string);
+                  reader.readAsDataURL(f);
+                } else {
+                  setDocPreview(null);
+                }
+              }}
+            />
           </div>
         </div>
+        {docPreview && (
+          <div className="mt-3 border-2 border-blue-100 rounded-xl overflow-hidden">
+            {docMime.startsWith("image/") ? (
+              <img src={docPreview} alt="preview" className="w-full max-h-64 object-contain bg-slate-50"/>
+            ) : (
+              <iframe src={docPreview} title="preview" className="w-full h-64"/>
+            )}
+            <div className="px-3 py-2 bg-blue-50 flex items-center justify-between">
+              <span className="text-xs text-blue-600 font-bold">📎 {docFile?.name}</span>
+              <button type="button" onClick={() => { setDocFile(null); setDocPreview(null); }}
+                className="text-xs text-red-500 font-bold hover:text-red-700">✕ ลบออก</button>
+            </div>
+          </div>
+        )}
 
         {/* ไปราชการ */}
         {leaveType==="official"&&(
@@ -975,8 +1010,47 @@ function AdminDashboard({user}:{user:UserProfile}){
     const updates:any={[`approver_${slot}_status`]:action};
     const newSlots=[slot===1?action:req.approver_1_status,slot===2?action:req.approver_2_status,slot===3?action:req.approver_3_status];
     const filled=newSlots.filter((s,i)=>[req.approver_1_id,req.approver_2_id,req.approver_3_id][i]);
-    if(action==="rejected")updates.status="rejected";
-    else if(filled.every(s=>s==="approved")){updates.status="approved";}
+    if (action === "rejected") {
+      updates.status = "rejected";
+    } else if (filled.every(s => s === "approved")) {
+      updates.status = "approved"; 
+      
+      // ส่งอีเมลแจ้ง HR เมื่ออนุมัติครบ
+      const r = requests.find(x => x.id === id)!;
+      const typeCfg = LEAVE_TYPE_CONFIG[r.leave_type];
+      const teacherName = fullName((r as any).user);
+      const html = `
+        <div style="font-family:Sarabun,Arial,sans-serif;max-width:600px;margin:0 auto">
+          <div style="background:linear-gradient(135deg,#10b981,#059669);padding:24px;border-radius:12px 12px 0 0;color:white">
+            <h2 style="margin:0">✅ ใบลาได้รับการอนุมัติครบแล้ว</h2>
+            <p style="margin:4px 0 0;opacity:0.85;font-size:13px">ระบบลา โรงเรียนวัดเขียนเขต</p>
+          </div>
+          <div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px">
+            <table style="width:100%;border-collapse:collapse;font-size:14px">
+              <tr><td style="padding:8px 0;color:#64748b;width:120px">ผู้ลา</td><td style="font-weight:700">${teacherName}</td></tr>
+              <tr><td style="padding:8px 0;color:#64748b">ประเภท</td><td>${typeCfg?.icon} ${typeCfg?.label}</td></tr>
+              <tr><td style="padding:8px 0;color:#64748b">วันที่</td><td>${toThaiDate(r.start_date)} – ${toThaiDate(r.end_date)}</td></tr>
+              <tr><td style="padding:8px 0;color:#64748b">จำนวน</td><td><strong>${r.days_count} วัน</strong></td></tr>
+              <tr><td style="padding:8px 0;color:#64748b">เหตุผล</td><td>${r.reason}</td></tr>
+            </table>
+            <p style="margin-top:16px;font-size:12px;color:#94a3b8">
+              อีเมลนี้ส่งโดยอัตโนมัติ · ${new Date().toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})}
+            </p>
+          </div>
+        </div>`;
+
+      // ส่งไป HR
+      fetch("/api/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: [HR_EMAIL, "admin@khienkhet.ac.th"],
+          subject: `[อนุมัติแล้ว] ใบลา ${teacherName} · ${typeCfg?.label} · ${r.days_count} วัน`,
+          html,
+        }),
+      }).catch(console.warn);
+    } // 🌟 ปิดปีกกาของ else if ตรงนี้แทน โดยไม่มี }).catch ซ้อนท้ายตัวโดด ๆ
+
     await (supabase.from("leave_requests") as any).update(updates).eq("id",id);
     await loadAll();
   }
@@ -1235,7 +1309,9 @@ export default function LeavePage(){
   if(loading)return<div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-blue-500 font-black text-lg animate-pulse">กำลังโหลดระบบ...</div></div>;
   if(!user)return<div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-red-500 font-black">❌ กรุณาเข้าสู่ระบบก่อน</div></div>;
 
-  const isTeacher=["homeroom_teacher","subject_teacher","staff","teacher"].includes(user.role);
+  const ADMIN_EMAILS = ["admin@khienkhet.ac.th", "hr@khienkhet.ac.th"];
+  const isTeacher = ["homeroom_teacher","subject_teacher","staff","teacher"].includes(user.role)
+    && !ADMIN_EMAILS.includes(user.email);
   const isAdmin=ADMIN_ROLES.includes(user.role);
   const canPrint=PRINT_ROLES.includes(user.role)||user.email===HR_EMAIL;
   const roleLabel=user.role==="director"?"👔 ผู้อำนวยการ":user.role==="deputy_director"?"👔 รองผู้อำนวยการ":user.role==="admin"?"🔧 ผู้ดูแลระบบ":user.role==="dept_head"?"👔 หัวหน้าฝ่าย":"👩‍🏫 ครู";

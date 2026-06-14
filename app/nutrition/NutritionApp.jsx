@@ -256,7 +256,7 @@ export default function NutritionApp() {
   return (
     <div style={S.page}>
       <div style={S.header}>
-        <button onClick={()=>router.push("/dashboard")} style={S.backBtn}>← แดชบอร์ด</button>
+        <button onClick={()=>router.push("/dashboard")} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg">🏠</button>
         <div style={{flex:1,minWidth:0}}>
           <h1 style={S.headerTitle}>🌱 ระบบประเมินภาวะโภชนาการนักเรียน</h1>
           <p style={S.headerSub}>{currentUser.title}{currentUser.first_name} {currentUser.last_name} · {roleLabel}{isProjectManager&&!isRealAdmin?" · ผู้ดูแลโครงการ":""}</p>
