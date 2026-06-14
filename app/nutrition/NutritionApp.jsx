@@ -71,6 +71,18 @@ function formatAge(birthDate) {
   const m = differenceInMonths(today, new Date(birthDate)) % 12;
   return `${y} ปี ${m} เดือน`;
 }
+function genderLabel(gender) {
+  if (!gender) return "—";
+  const g = gender.toLowerCase();
+  if (g === "male" || g === "ชาย" || g === "m") return "ชาย";
+  if (g === "female" || g === "หญิง" || g === "f") return "หญิง";
+  return gender;
+}
+
+function genderPrefix(gender) {
+  const g = genderLabel(gender);
+  return g === "ชาย" ? "ด.ช." : "ด.ญ.";
+}
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 const S = {
@@ -245,17 +257,10 @@ export default function NutritionApp() {
   return (
     <div style={S.page}>
       <div style={S.header}>
-        <button
-          onClick={() => router.push("/dashboard")}
-          style={S.backBtn}
-          onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.3)"}
-          onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.18)"}
-        >
-          ← แดชบอร์ด
-        </button>
+        <button onClick={()=>router.push("/dashboard")} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg">🏠</button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 style={S.headerTitle}>🌱 ระบบประเมินภาวะโภชนาการนักเรียน</h1>
-          <p style={S.headerSub}>{currentUser.first_name} {currentUser.last_name} · {roleLabel}</p>
+          <p style={S.headerSub}>{currentUser.title}{currentUser.first_name} {currentUser.last_name} · {roleLabel}</p>
         </div>
         <div style={{
           background: "rgba(255,255,255,0.2)", borderRadius: 10,
@@ -309,8 +314,8 @@ function ClassAssessPage({ currentUser }) {
         rooms = rpcRes.data;
       } else {
         const fb = await supabase.from("classrooms")
-          .select("id, room_name, room_number, academic_year_id")
-          .eq("homeroom_teacher_id", currentUser.id)
+          .select("id, room_name, room_number, academic_year_id, homeroom_teacher_id, homeroom_teacher_2_id")
+          .or(`homeroom_teacher_id.eq.${currentUser.id},homeroom_teacher_2_id.eq.${currentUser.id}`)
           .order("room_number");
         rooms = (fb.data || []).map(c => ({ ...c, classroom_id: c.id }));
       }
@@ -359,20 +364,21 @@ function ClassAssessPage({ currentUser }) {
       });
   }, [selectedClass, students, term]);
 
-  function setVal(studentId, field, val) {
-    setValues(prev => ({ ...prev, [studentId]: { ...(prev[studentId] || {}), [field]: val } }));
+  function setVal(key, field, val) {
+    setValues(prev => ({ ...prev, [key]: { ...(prev[key] || {}), [field]: val } }));
   }
 
   // คำนวณผลแบบ live ต่อแถว
   const rows = useMemo(() => {
     return students.map(s => {
-      const v = values[s.id] || {};
+      const key = s.student_id || s.id;  // รองรับทั้งสองกรณี
+      const v = values[key] || {};
       const w = parseFloat(v.weight), h = parseFloat(v.height);
       let result = null;
       if (w >= 5 && h >= 50) {
         result = { ...calcNutrition(s, w, h, measuredDate), weight_kg: w, height_cm: h };
       }
-      return { student: s, v, result };
+      return { student: s, key, v, result };
     });
   }, [students, values, measuredDate]);
 
@@ -383,7 +389,7 @@ function ClassAssessPage({ currentUser }) {
     const cid = selectedClass.classroom_id || selectedClass.id;
     const ay = selectedClass.academic_year_id;
     const toSave = rows.filter(r => r.result).map(r => ({
-      student_id: r.student.student_id,
+      student_id: r.student.student_id || r.student.id,  // ← แก้จุดนี้
       classroom_id: cid,
       academic_year_id: ay,
       recorded_by: currentUser.id,
@@ -493,13 +499,11 @@ function ClassAssessPage({ currentUser }) {
               <tbody>
                 {rows.map((r, i) => {
                   const s = r.student;
-                  const v = values[s.student_id] || {};
                   return (
-                    <tr key={s.student_id} style={{ background: i % 2 === 0 ? "#f8faff" : "#fff" }}>
-                      <td style={{ padding: "6px 8px", width: 60 }}>
-                        <input type="number" min="1" placeholder="-" value={v.seat ?? ""}
-                          onChange={e => setVal(s.student_id, "seat", e.target.value)}
-                          style={{ ...S.input, padding: "6px 8px", textAlign: "center", width: 56 }} />
+                    <tr key={r.key} style={{ background: i % 2 === 0 ? "#f8faff" : "#fff" }}>
+                      {/* เลขที่ — แสดงแค่ตัวเลข ไม่มีปุ่ม spinner */}
+                      <td style={{ padding: "8px", textAlign: "center", color: "#6b7280", fontWeight: 700, fontSize: 13 }}>
+                        {r.v.seat || s.seat_number || (i + 1)}
                       </td>
                       <td style={{ padding: "8px", fontWeight: 600, color: "#1e3a8a", whiteSpace: "nowrap" }}>
                         {s.gender === "male" || s.gender === "ชาย" ? "ด.ช. " : "ด.ญ. "}{s.first_name} {s.last_name}
@@ -507,13 +511,13 @@ function ClassAssessPage({ currentUser }) {
                       </td>
                       <td style={{ padding: "8px", color: "#6b7280", whiteSpace: "nowrap" }}>{formatAge(s.birth_date)}</td>
                       <td style={{ padding: "6px 8px", width: 100 }}>
-                        <input type="number" step="0.1" placeholder="0.0" value={v.weight ?? ""}
-                          onChange={e => setVal(s.student_id, "weight", e.target.value)}
+                        <input type="number" step="0.1" placeholder="0.0" value={r.v.weight ?? ""}
+                          onChange={e => setVal(r.key, "weight", e.target.value)}
                           style={{ ...S.input, padding: "6px 8px", width: 90 }} />
                       </td>
                       <td style={{ padding: "6px 8px", width: 100 }}>
-                        <input type="number" step="0.1" placeholder="0.0" value={v.height ?? ""}
-                          onChange={e => setVal(s.student_id, "height", e.target.value)}
+                        <input type="number" step="0.1" placeholder="0.0" value={r.v.height ?? ""}
+                          onChange={e => setVal(r.key, "height", e.target.value)}
                           style={{ ...S.input, padding: "6px 8px", width: 90 }} />
                       </td>
                       <td style={{ padding: "8px" }}>
@@ -752,10 +756,10 @@ function ClassPage({ currentUser, isAdmin }) {
                   <tr key={r.student_id + r.term} style={{ background: i % 2 === 0 ? "#f8faff" : "#fff", transition: "background 0.1s" }}>
                     <td style={{ padding: "8px 10px", color: "#6b7280" }}>{r.seat_number ?? "—"}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 600, color: "#1e3a8a" }}>
-                      {r.gender === "male" || r.gender === "ชาย" ? "ด.ช. " : "ด.ญ. "}{r.first_name} {r.last_name}
+                      {genderPrefix(r.gender)} {r.first_name} {r.last_name}
                     </td>
                     <td style={{ padding: "8px 10px", color: "#6b7280" }}>{r.birth_date ? formatAge(r.birth_date) : "—"}</td>
-                    <td style={{ padding: "8px 10px" }}>{r.gender}</td>
+                    <td style={{ padding: "8px 10px" }}>{genderLabel(r.gender)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700 }}>{r.weight_kg ?? "—"}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700 }}>{r.height_cm ?? "—"}</td>
                     <td style={{ padding: "8px 10px" }}>{r.ibw_kg ?? "—"}</td>
