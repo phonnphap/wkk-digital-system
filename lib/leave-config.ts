@@ -13,7 +13,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   CREATE TYPE leave_status AS ENUM (
-    'pending', 'approved', 'rejected', 'cancelled'
+    'draft','pending', 'approved', 'rejected', 'cancelled'
   );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 `;
