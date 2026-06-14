@@ -118,7 +118,11 @@ function getSubjectGroupForTeacher(teacher: any): string {
 // ─── Types ────────────────────────────────────────────────────────────────────
 type UserProfile = { id: string; first_name?: string; last_name?: string; full_name?: string; email: string; role: string; position?: string; };
 type Teacher = UserProfile & { subGroupKey: string; subjectGroupKey: string };
-type AcademicYear = { id: string; name: string; year: number };
+type AcademicYear = { 
+  id: string; 
+  year_name: string; // แก้เป็น year_name ให้ตรงกับตารางใน Supabase
+  semester: number;  // แถม: ใส่ semester เพิ่มไว้ด้วยเลยตามในตาราง
+};
 type PLCMeeting = {
   id: string;
   meeting_number?: number;
@@ -485,7 +489,7 @@ function MeetingModal({
               <div>
                 <label className={labelCls}>ปีการศึกษา *</label>
                 <select value={yearId} onChange={e => setYearId(e.target.value)} className={inputCls}>
-                  {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+                  {academicYears.map(y => <option key={y.id} value={y.id}>{y.year_name}</option>)}
                 </select>
               </div>
 
@@ -822,7 +826,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "submitted">("all");
   const [viewMeeting, setViewMeeting]   = useState<PLCMeeting | null>(null);
 
-  const yearName = academicYears.find(y => y.id === selectedYearId)?.name ?? "";
+  const yearName = academicYears.find(y => y.id === selectedYearId)?.year_name ?? "";
   const filtered = meetings.filter(m => {
     const matchSearch = m.title.toLowerCase().includes(search.toLowerCase()) ||
       (m.topic ?? "").toLowerCase().includes(search.toLowerCase());
@@ -1160,7 +1164,7 @@ export default function PLCHoursPage() {
       }
 
       const { data: years } = await supabase.from("academic_years").select("id, name, year").order("year", { ascending: false });
-      const ys = (years as AcademicYear[]) || [];
+      const ys = (years as unknown as AcademicYear[]) || [];
       setAcademicYears(ys);
       if (ys.length > 0) setSelectedYearId(ys[0].id);
 
@@ -1311,14 +1315,14 @@ export default function PLCHoursPage() {
             <p className="text-slate-400 text-xs truncate">
               โรงเรียนวัดเขียนเขต
               {isTeacher ? ` · ${fullName(user)}` : " · ผู้บริหาร"}
-              {academicYears.find(y => y.id === selectedYearId) ? ` · ปีการศึกษา ${academicYears.find(y => y.id === selectedYearId)!.name}` : ""}
+              {academicYears.find(y => y.id === selectedYearId) ? ` · ปีการศึกษา ${academicYears.find(y => y.id === selectedYearId)!.year_name}` : ""}
             </p>
           </div>
           {/* ย้าย year select มาไว้ใน top bar แต่ใช้ style เล็กลง — มองเห็นชัดกว่าปุ่มแปลกๆ */}
           {academicYears.length > 1 && (
             <select value={selectedYearId} onChange={e => setSelectedYearId(e.target.value)}
               className="shrink-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-600 text-xs font-bold focus:outline-none focus:border-blue-400">
-              {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+              {academicYears.map(y => <option key={y.id} value={y.id}>{y.year_name}</option>)}
             </select>
           )}
         </div>
