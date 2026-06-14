@@ -209,8 +209,8 @@ export default function NutritionApp() {
     : [{key:"assess",label:"✏️ ประเมินรายห้อง"},{key:"class",label:"📋 รายห้องเรียน"},{key:"compare",label:"📊 เปรียบเทียบเทอม"}];
 
   const roleLabel = {homeroom_teacher:"ครูประจำชั้น",subject_teacher:"ครูผู้สอน",
-    admin:"ผู้ดูแลระบบ",director:"ผู้อำนวยการ",deputy_director:"รองผู้อำนวยการ",
-    dept_head:"หัวหน้าฝ่าย",grade_head:"หัวหน้าระดับ"}[currentUser.role]||currentUser.role;
+    admin:"ผู้ดูแลระบบ",director:"ผู้อำนวยการโรงเรียน",deputy_director:"รองผู้อำนวยการโรงเรียน",
+    dept_head:"หัวหน้าสายชั้น",grade_head:"หัวหน้ากลุ่มสาระฯ"}[currentUser.role]||currentUser.role;
 
   return (
     <div style={S.page}>
@@ -369,7 +369,7 @@ function ClassAssessPage({currentUser}) {
   );
 
   return (
-    <div>
+    <>
       {/* ตัวเลือก */}
       <div style={S.card}>
         <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
@@ -424,162 +424,100 @@ function ClassAssessPage({currentUser}) {
         <StatCard label="ยังไม่กรอก"       value={students.length-filledCount} color="#f59e0b" icon="⏳" sub="คน"/>
       </div>
 
-      {/* ตาราง */}
-      <div style={S.card}>
-        <div style={S.cardTitle}>📝 บันทึกน้ำหนัก-ส่วนสูง — {selectedClass?.room_name}</div>
-        {loadingStudents?(
-          <div style={{textAlign:"center",padding:40,color:"#6b7280"}}>⏳ กำลังโหลดรายชื่อนักเรียน...</div>
-        ):students.length===0?(
-          <div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>📭 ไม่พบนักเรียนในห้องนี้</div>
-        ):(
-          <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:700}}>
-              <thead>
-                <tr style={{background:"linear-gradient(135deg,#1e40af,#3b82f6)"}}>
-                  {["เลขที่","ชื่อ-นามสกุล","อายุ","น้ำหนัก (กก.)","ส่วนสูง (ซม.)","ภาวะ WH","ภาวะ HA",""].map(h=>(
-                    <th key={h} style={{padding:"10px 8px",textAlign:"left",color:"#fff",fontWeight:700,fontSize:12,whiteSpace:"nowrap"}}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r,i)=>{
-                  const s=r.student;
-                  const seatNum = r.v.seat||s.seat_number||(i+1);
-                  return (
-                    <tr key={r.key} style={{background:i%2===0?"#f8faff":"#fff"}}>
-                      <td style={{padding:"8px",textAlign:"center",color:"#6b7280",fontWeight:700,fontSize:13,width:50}}>
-                        {seatNum}
-                      </td>
-                      <td style={{padding:"8px",fontWeight:600,color:"#1e3a8a",whiteSpace:"nowrap"}}>
-                        {genderPrefix(s.gender)} {s.first_name} {s.last_name}
-                        {s.nick_name&&<span style={{color:"#9ca3af",fontWeight:400}}> ({s.nick_name})</span>}
-                      </td>
-                      <td style={{padding:"8px",color:"#6b7280",whiteSpace:"nowrap"}}>{formatAge(s.birth_date)}</td>
-                      <td style={{padding:"6px 8px",width:110}}>
-                        <input type="number" step="0.1" placeholder="0.0" value={r.v.weight??""} 
-                          onChange={e=>setVal(r.key,"weight",e.target.value)}
-                          style={{...S.input,padding:"6px 8px",width:95}}/>
-                      </td>
-                      <td style={{padding:"6px 8px",width:110}}>
-                        <input type="number" step="0.1" placeholder="0.0" value={r.v.height??""}
-                          onChange={e=>setVal(r.key,"height",e.target.value)}
-                          style={{...S.input,padding:"6px 8px",width:95}}/>
-                      </td>
-                      <td style={{padding:"8px"}}>
-                        {r.result?<Badge status={getWHStatus(r.result.pct_weight_for_height)}/>:<span style={{color:"#d1d5db"}}>—</span>}
-                      </td>
-                      <td style={{padding:"8px"}}>
-                        {r.result?<Badge status={getHAStatus(r.result.pct_height_for_age)}/>:<span style={{color:"#d1d5db"}}>—</span>}
-                      </td>
-                      <td style={{padding:"8px"}}>
-                        <button onClick={()=>setDetailStudent(s)}
-                          style={{...S.btn,padding:"6px 12px",fontSize:12,whiteSpace:"nowrap"}}>
-                          📈 ดูกราฟ
-                        </button>
-                      </td>
+      {/* ตารางข้อมูล */}
+      <div style={{ display: "flex", gap: 20, alignItems: "flex-start", width: "100%" }}>
+      
+        {/* ⬅️ ฝั่งซ้าย: ตารางบันทึกข้อมูลน้ำหนัก-ส่วนสูง */}
+        <div style={{ flex: 3, minWidth: 0 }}>
+          <div style={S.card}>
+            <div style={S.cardTitle}>📝 บันทึกน้ำหนัก-ส่วนสูง — {selectedClass?.room_name}</div>
+            {loadingStudents ? (
+              <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>⏳ กำลังโหลดรายชื่อนักเรียน...</div>
+            ) : students.length === 0 ? (
+              <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>📭 ไม่พบนักเรียนในห้องนี้</div>
+            ) : (
+              <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 600 }}>
+                  <thead>
+                    <tr style={{ background: "linear-gradient(135deg,#1e40af,#3b82f6)" }}>
+                      {["เลขที่", "ชื่อ-นามสกุล", "อายุ", "น้ำหนัก (กก.)", "ส่วนสูง (ซม.)", "ภาวะ WH", "ภาวะ HA", ""].map(h => (
+                        <th key={h} style={{ padding: "10px 8px", textAlign: "left", color: "#fff", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => {
+                      const s = r.student;
+                      const seatNum = r.v.seat || s.seat_number || (i + 1);
+                      return (
+                        <tr key={r.key} style={{ background: i % 2 === 0 ? "#f8faff" : "#fff" }}>
+                          <td style={{ padding: "8px", textAlign: "center", color: "#6b7280", fontWeight: 700, fontSize: 13, width: 40 }}>
+                            {seatNum}
+                          </td>
+                          <td style={{ padding: "8px", fontWeight: 600, color: "#1e3a8a", whiteSpace: "nowrap" }}>
+                            {genderPrefix(s.gender)} {s.first_name} {s.last_name}
+                            {s.nick_name && <span style={{ color: "#9ca3af", fontWeight: 400 }}> ({s.nick_name})</span>}
+                          </td>
+                          <td style={{ padding: "8px", color: "#6b7280", whiteSpace: "nowrap" }}>{formatAge(s.birth_date)}</td>
+                          <td style={{ padding: "6px 8px", width: 100 }}>
+                            <input type="number" step="0.1" placeholder="0.0" value={r.v.weight ?? ""}
+                              onChange={e => setVal(r.key, "weight", e.target.value)}
+                              style={{ ...S.input, padding: "6px 8px", width: 80 }} />
+                          </td>
+                          <td style={{ padding: "6px 8px", width: 100 }}>
+                            <input type="number" step="0.1" placeholder="0.0" value={r.v.height ?? ""}
+                              onChange={e => setVal(r.key, "height", e.target.value)}
+                              style={{ ...S.input, padding: "6px 8px", width: 80 }} />
+                          </td>
+                          <td style={{ padding: "8px" }}>
+                            {r.result ? <Badge status={getWHStatus(r.result.pct_weight_for_height)} /> : <span style={{ color: "#d1d5db" }}>—</span>}
+                          </td>
+                          <td style={{ padding: "8px" }}>
+                            {r.result ? <Badge status={getHAStatus(r.result.pct_height_for_age)} /> : <span style={{ color: "#d1d5db" }}>—</span>}
+                          </td>
+                          <td style={{ padding: "8px" }}>
+                            <button onClick={() => setDetailStudent(s)}
+                              style={{ ...S.btn, padding: "6px 12px", fontSize: 12, whiteSpace: "nowrap" }}>
+                              📈 ดูกราฟ
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-        {students.length>0&&(
-          <div style={{marginTop:16,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-            <button onClick={handleSaveAll} disabled={saving}
-              style={{...S.btn,opacity:saving?0.6:1}}>
-              {saving?"⏳ กำลังบันทึก...":`💾 บันทึกข้อมูลทั้งห้อง (${filledCount} คน)`}
-            </button>
-            {saveMsg&&(
-              <div style={{padding:"8px 16px",borderRadius:10,fontWeight:700,fontSize:13,
-                background:saveMsg.includes("✅")?"#f0fdf4":saveMsg.includes("⚠️")?"#fffbeb":"#fef2f2",
-                color:saveMsg.includes("✅")?"#16a34a":saveMsg.includes("⚠️")?"#b45309":"#dc2626"}}>
-                {saveMsg}
+            {students.length > 0 && (
+              <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <button onClick={handleSaveAll} disabled={saving}
+                  style={{ ...S.btn, opacity: saving ? 0.6 : 1 }}>
+                  {saving ? "⏳ กำลังบันทึก..." : `💾 บันทึกข้อมูลทั้งห้อง (${filledCount} คน)`}
+                </button>
+                {saveMsg && (
+                  <div style={{
+                    padding: "8px 16px", borderRadius: 10, fontWeight: 700, fontSize: 13,
+                    background: saveMsg.includes("✅") ? "#f0fdf4" : saveMsg.includes("⚠️") ? "#fffbeb" : "#fef2f2",
+                    color: saveMsg.includes("✅") ? "#16a34a" : saveMsg.includes("⚠️") ? "#b45309" : "#dc2626"
+                  }}>
+                    {saveMsg}
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
 
-      {detailStudent&&(
-        <StudentDetailPanel student={detailStudent} onClose={()=>setDetailStudent(null)}/>
-      )}
-    </div>
-  );
-}
-
-// ── StudentDetailPanel ────────────────────────────────────────────────────────
-function StudentDetailPanel({student,onClose}) {
-  const [records, setRecords] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(()=>{
-    setLoading(true);
-    const sid = student.student_id||student.id;
-    supabase.from("v_nutrition_student_detail").select("*")
-      .eq("student_id",sid).order("term")
-      .then(({data})=>{setRecords(data||[]);setLoading(false);});
-  },[student]);
-
-  const latest = records[records.length-1];
-  const g = gKey(student.gender);
-
-  return (
-    <div style={{...S.card,border:"2px solid #c7d2fe",position:"relative"}}>
-      <button onClick={onClose} style={{position:"absolute",top:14,right:14,
-        background:"#f1f5f9",border:"none",borderRadius:8,width:32,height:32,
-        cursor:"pointer",fontSize:16,color:"#6b7280"}}>✕</button>
-
-      <div style={S.cardTitle}>
-        📈 {genderPrefix(student.gender)==="ด.ช."?"เด็กชาย":"เด็กหญิง"} {student.first_name} {student.last_name}
-        {student.nick_name&&` (${student.nick_name})`}
-      </div>
-      <div style={{color:"#6b7280",fontSize:13,marginBottom:12}}>
-        {formatAge(student.birth_date)} · รหัส {student.student_code}
-        {student.seat_number?` · เลขที่ ${student.seat_number}`:""}
-      </div>
-
-      {loading?(
-        <div style={{textAlign:"center",padding:30,color:"#6b7280"}}>⏳ กำลังโหลด...</div>
-      ):records.length===0?(
-        <div style={{textAlign:"center",padding:30,color:"#9ca3af"}}>📭 ยังไม่มีข้อมูลการวัด</div>
-      ):(
-        <>
-          <div style={{display:"grid",gridTemplateColumns:`repeat(${records.length},1fr)`,gap:10,marginBottom:16}}>
-            {records.map(r=>(
-              <div key={r.term} style={{background:"#f8faff",borderRadius:12,padding:12,border:"1px solid #e0e7ff"}}>
-                <div style={{fontWeight:700,color:"#1e40af",fontSize:13,marginBottom:6}}>
-                  {r.term==="term1"?"🌸 ครั้งที่ 1":"🍂 ครั้งที่ 2"}
-                </div>
-                <InfoRow label="วันที่วัด" value={r.measured_date?format(parseISO(r.measured_date),"d MMM yyyy",{locale:th}):"—"}/>
-                <InfoRow label="น้ำหนัก" value={`${r.weight_kg} กก.`}/>
-                <InfoRow label="ส่วนสูง" value={`${r.height_cm} ซม.`}/>
-                <InfoRow label="IBW" value={`${r.ibw_kg} กก.`}/>
-                <InfoRow label="%HA" value={`${r.pct_height_for_age}%`}/>
-                <InfoRow label="%WH" value={`${r.pct_weight_for_height}%`}/>
-                <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:6}}>
-                  <Badge status={getWHStatus(r.pct_weight_for_height)}/>
-                  <Badge status={getHAStatus(r.pct_height_for_age)}/>
-                </div>
-              </div>
-            ))}
+        {/* ➡️ ฝั่งขวา: ลอยค้างแสดงหน้าต่างข้อมูลกราฟเมื่อกดเลือกนักเรียน */}
+        {detailStudent && (
+          <div style={{ flex: 2, minWidth: 350, position: "sticky", top: 20 }}>
+            <StudentDetailPanel student={detailStudent} onClose={() => setDetailStudent(null)} />
           </div>
-          {latest&&(
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-              <div>
-                <div style={{fontWeight:700,color:"#1e3a8a",fontSize:13,marginBottom:8}}>📐 ส่วนสูงตามเกณฑ์อายุ</div>
-                <HAChart student={student} actualHeight={latest.height_cm} ageMonths={latest.age_months}/>
-              </div>
-              <div>
-                <div style={{fontWeight:700,color:"#1e3a8a",fontSize:13,marginBottom:8}}>⚖️ น้ำหนักตามเกณฑ์ส่วนสูง</div>
-                <WHChart actualWeight={latest.weight_kg} actualHeight={latest.height_cm} gender={g}/>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
+        )}
+
+      </div>
+    </>
   );
 }
 
