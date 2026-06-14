@@ -1433,7 +1433,7 @@ export default function LeavePage(){
           <div className="flex items-center gap-3">
             <button onClick={()=>router.push("/dashboard")} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg">🏠</button>
             <div>
-              <h1 className="text-base font-black text-slate-800 leading-none">ระบบลา / ไปราชการ</h1>
+              <h1 className="text-base font-black text-slate-800 leading-none">ระบบลา/ ไปราชการ</h1>
               <p className="text-slate-400 text-xs">โรงเรียนวัดเขียนเขต</p>
             </div>
           </div>
