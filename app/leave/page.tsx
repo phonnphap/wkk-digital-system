@@ -717,7 +717,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
                 <div>
                   <label className="block text-sm font-bold text-slate-600 mb-2">ลาครึ่งวัน</label>
                   <div className="flex gap-2">
-                    {[{val:null,label:"🗓️ เต็มวัน"},{val:"morning",label:"🌅 เช้า (0.5)"},{val:"afternoon",label:"🌇 บ่าย (0.5)"}].map(opt=>(
+                    {[{val:null,label:"🗓️ เต็มวัน"},{val:"morning",label:"🌅 เช้า"},{val:"afternoon",label:"🌇 บ่าย"}].map(opt=>(
                       <button key={String(opt.val)} type="button" onClick={()=>setHalfDay(opt.val as any)}
                         className={`flex-1 py-2.5 rounded-xl border-2 text-xs font-bold ${halfDay===opt.val?"bg-blue-50 border-blue-400 text-blue-700":"bg-white border-slate-200 text-slate-600"}`}>
                         {opt.label}
@@ -763,7 +763,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
             {activeSection===2&&(
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-bold text-slate-600 mb-1">สถานที่ / หน่วยงานที่ไป <span className="text-red-500">*</span></label>
+                  <label className="block text-sm font-bold text-slate-600 mb-1">สถานที่/ หน่วยงานที่ไป <span className="text-red-500">*</span></label>
                   <input type="text" value={tripDest} onChange={e=>setTripDest(e.target.value)} placeholder="เช่น กระทรวงศึกษาธิการ กรุงเทพฯ"
                     className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-sky-400 focus:outline-none"/>
                 </div>
@@ -942,20 +942,26 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature }: {
   return(
     <div className="w-full min-h-screen">
       {/* Greeting — full width */}
-      <div className="bg-gradient-to-br from-blue-500 to-indigo-600 px-6 py-4 text-white flex items-center justify-between gap-4">
-        <div>
-          <p className="text-blue-100 text-lg font-extrabold mb-0.5">ยินดีต้อนรับ</p>
-          <h2 className="text-3xl font-black">{fullName(user)}</h2>
-          <p className="text-blue-200 text-lg font-medium mt-0.5">{user.position}</p>
+      <div className="bg-gradient-to-br from-blue-500 to-indigo-600 px-6 py-5 text-white flex items-center justify-between gap-6">
+        <div className="flex flex-col gap-2">
+          {/* ส่วนชื่อ: คำนำหน้า+ชื่อติดกัน ตัวเท่ากัน อยู่บรรทัดเดียวกับคำว่ายินดีต้อนรับ */}
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-extrabold text-blue-100">ยินดีต้อนรับ</span>
+            <h2 className="text-2xl font-black">{fullName(user)?.replace(/\s+/g, ' ')}</h2>
+          </div>
+          {/* ส่วนตำแหน่ง/คศ: ปรับขนาดตัวใหญ่ขึ้นเด่นชัด */}
+          <p className="text-xl font-bold text-blue-200">{user.position}</p>
         </div>
-        {/* ✅ ปุ่มใหญ่ชัดเจน */}
+        
+        {/* ✅ ปุ่มยื่นใบลา: ขยายความกว้าง (min-w-[240px]) เพื่อให้ตัวหนังสืออยู่บรรทัดเดียวกันทั้งหมด */}
         <button onClick={()=>setShowForm(true)}
-          className="shrink-0 px-8 py-5 bg-white text-blue-700 rounded-2xl font-black text-lg shadow-xl hover:bg-blue-50 transition-all active:scale-95 flex flex-col items-center gap-1.5 min-w-[160px]">
-          <span className="text-4xl">✍️</span>
-          <span>ยื่นใบลา</span>
-          <span className="text-sm font-bold opacity-70">/ ไปราชการ</span>
+          className="shrink-0 px-6 py-4 bg-white text-blue-700 rounded-2xl font-black shadow-xl hover:bg-blue-50 transition-all active:scale-95 flex items-center justify-center gap-3 min-w-[240px]">
+          <span className="text-3xl">✍️</span>
+          <div className="flex flex-col items-start leading-tight">
+            <span className="text-lg">ยื่นใบลา/ ไปราชการ</span>
+          </div>
         </button>
-      </div>
+        </div>
 
       <div className="px-4 py-5 space-y-5 max-w-5xl mx-auto">
         {/* ตัวกรอง */}

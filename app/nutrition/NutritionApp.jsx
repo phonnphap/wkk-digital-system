@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis,
@@ -77,21 +78,27 @@ const S = {
   header: {
     background: "linear-gradient(135deg, #1e40af 0%, #3b82f6 50%, #06b6d4 100%)",
     padding: "1rem 1.5rem", display: "flex", justifyContent: "space-between",
-    alignItems: "center", boxShadow: "0 4px 20px rgba(30,64,175,0.3)"
+    alignItems: "center", boxShadow: "0 4px 20px rgba(30,64,175,0.3)", gap: 12
   },
   headerTitle: { color: "#fff", fontSize: 18, fontWeight: 700, margin: 0 },
   headerSub: { color: "rgba(255,255,255,0.8)", fontSize: 13, margin: "2px 0 0" },
+  backBtn: {
+    background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.35)",
+    color: "#fff", borderRadius: 10, padding: "8px 14px", cursor: "pointer",
+    fontSize: 13, fontWeight: 700, fontFamily: "inherit", display: "flex",
+    alignItems: "center", gap: 6, transition: "background 0.15s", flexShrink: 0
+  },
   tabBar: {
     background: "#fff", padding: "0 1.5rem",
     borderBottom: "2px solid #e0e7ff", display: "flex", gap: 0,
-    boxShadow: "0 2px 8px rgba(0,0,0,0.05)"
+    boxShadow: "0 2px 8px rgba(0,0,0,0.05)", overflowX: "auto"
   },
   tab: (active) => ({
     padding: "14px 20px", border: "none", background: "transparent",
     cursor: "pointer", fontSize: 14, fontWeight: active ? 700 : 400,
     color: active ? "#1e40af" : "#6b7280",
     borderBottom: active ? "3px solid #1e40af" : "3px solid transparent",
-    transition: "all 0.2s", marginBottom: -2
+    transition: "all 0.2s", marginBottom: -2, whiteSpace: "nowrap"
   }),
   content: { maxWidth: 1200, margin: "0 auto", padding: "1.5rem" },
   card: {
@@ -164,6 +171,7 @@ function InfoRow({ label, value }) {
 
 // ── Main App ─────────────────────────────────────────────────────────────────
 export default function NutritionApp() {
+  const router = useRouter();
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("assess");
@@ -193,6 +201,12 @@ export default function NutritionApp() {
 
   const isAdmin = useMemo(() => ADMIN_ROLES.includes(currentUser?.role), [currentUser]);
 
+  // ตั้งค่า tab เริ่มต้นให้เหมาะกับ role
+  useEffect(() => {
+    if (!currentUser) return;
+    setTab(isAdmin ? "class" : "assess");
+  }, [currentUser, isAdmin]);
+
   if (loading) return (
     <div style={{ ...S.page, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ textAlign: "center" }}>
@@ -207,12 +221,20 @@ export default function NutritionApp() {
     </div>
   );
 
-  const tabs = [
-    { key: "assess", label: "🔍 ประเมินรายบุคคล" },
-    { key: "class", label: "📋 รายห้องเรียน" },
-    { key: "compare", label: "📊 เปรียบเทียบเทอม" },
-    ...(isAdmin ? [{ key: "admin", label: "🏫 ผู้บริหาร" }] : []),
-  ];
+  // ── Tabs ตาม role ──────────────────────────────────────────────
+  // ครูประจำชั้น: ประเมินรายห้อง (กรอกข้อมูล) + รายห้องเรียน + เปรียบเทียบเทอม
+  // ผู้บริหาร/ผู้ดูแล: รายห้องเรียน + เปรียบเทียบเทอม + ผู้บริหาร (ไม่มีฟอร์มกรอกข้อมูล)
+  const tabs = isAdmin
+    ? [
+        { key: "class", label: "📋 รายห้องเรียน" },
+        { key: "compare", label: "📊 เปรียบเทียบเทอม" },
+        { key: "admin", label: "🏫 ผู้บริหาร" },
+      ]
+    : [
+        { key: "assess", label: "✏️ ประเมินรายห้อง" },
+        { key: "class", label: "📋 รายห้องเรียน" },
+        { key: "compare", label: "📊 เปรียบเทียบเทอม" },
+      ];
 
   const roleLabel = {
     homeroom_teacher: "ครูประจำชั้น", subject_teacher: "ครูผู้สอน",
@@ -223,13 +245,21 @@ export default function NutritionApp() {
   return (
     <div style={S.page}>
       <div style={S.header}>
-        <div>
+        <button
+          onClick={() => router.push("/dashboard")}
+          style={S.backBtn}
+          onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.3)"}
+          onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.18)"}
+        >
+          ← แดชบอร์ด
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h1 style={S.headerTitle}>🌱 ระบบประเมินภาวะโภชนาการนักเรียน</h1>
           <p style={S.headerSub}>{currentUser.first_name} {currentUser.last_name} · {roleLabel}</p>
         </div>
         <div style={{
           background: "rgba(255,255,255,0.2)", borderRadius: 10,
-          padding: "6px 14px", color: "#fff", fontSize: 13, fontWeight: 600
+          padding: "6px 14px", color: "#fff", fontSize: 13, fontWeight: 600, flexShrink: 0
         }}>
           โรงเรียนวัดเขียนเขต
         </div>
@@ -244,7 +274,7 @@ export default function NutritionApp() {
       </div>
 
       <div style={S.content}>
-        {tab === "assess"  && <AssessPage  currentUser={currentUser} isAdmin={isAdmin} />}
+        {tab === "assess"  && !isAdmin && <ClassAssessPage currentUser={currentUser} />}
         {tab === "class"   && <ClassPage   currentUser={currentUser} isAdmin={isAdmin} />}
         {tab === "compare" && <ComparePage currentUser={currentUser} isAdmin={isAdmin} />}
         {tab === "admin"   && isAdmin && <AdminPage currentUser={currentUser} />}
@@ -253,219 +283,363 @@ export default function NutritionApp() {
   );
 }
 
-// ── AssessPage ────────────────────────────────────────────────────────────────
-function AssessPage({ currentUser, isAdmin }) {
+// ── ClassAssessPage (ใหม่) ──────────────────────────────────────────────────
+// ครูประจำชั้นเห็นรายชื่อนักเรียนทั้งห้องพร้อมเลขที่ กรอก น้ำหนัก/ส่วนสูง ได้ทีเดียว
+// แต่ละแถวมีปุ่ม "ดูกราฟ" เพื่อเปิดดูรายละเอียด/กราฟรายบุคคล
+function ClassAssessPage({ currentUser }) {
   const [classrooms, setClassrooms] = useState([]);
   const [selectedClass, setSelectedClass] = useState(null);
   const [students, setStudents] = useState([]);
-  const [selectedStudent, setSelectedStudent] = useState(null);
   const [term, setTerm] = useState("term1");
   const [measuredDate, setMeasuredDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [weightKg, setWeightKg] = useState("");
-  const [heightCm, setHeightCm] = useState("");
-  const [result, setResult] = useState(null);
+  const [values, setValues] = useState({}); // { [student_id]: { weight, height, seat } }
+  const [existing, setExisting] = useState({}); // { [student_id]: record for this term }
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
+  const [detailStudent, setDetailStudent] = useState(null);
+  const [loadingStudents, setLoadingStudents] = useState(false);
 
+  // โหลดห้องเรียนของครู (รองรับทั้ง RPC และ fallback query ตรง)
   useEffect(() => {
     if (!currentUser) return;
-    if (isAdmin) {
-      supabase.from("classrooms").select("id, room_name, room_number, grade_group, academic_year_id")
-        .order("room_number").then(({ data }) => setClassrooms(data || []));
-    } else {
-      supabase.rpc("get_my_classrooms").then(({ data }) => {
-        setClassrooms(data || []);
-        if (data?.length === 1) setSelectedClass(data[0]);
-      });
-    }
-  }, [currentUser, isAdmin]);
+    const loadClassrooms = async () => {
+      let rooms = [];
+      const rpcRes = await supabase.rpc("get_my_classrooms");
+      if (rpcRes.data && rpcRes.data.length > 0) {
+        rooms = rpcRes.data;
+      } else {
+        const fb = await supabase.from("classrooms")
+          .select("id, room_name, room_number, academic_year_id")
+          .eq("homeroom_teacher_id", currentUser.id)
+          .order("room_number");
+        rooms = (fb.data || []).map(c => ({ ...c, classroom_id: c.id }));
+      }
+      setClassrooms(rooms);
+      if (rooms.length >= 1) setSelectedClass(rooms[0]);
+    };
+    loadClassrooms();
+  }, [currentUser]);
 
+  // โหลดรายชื่อนักเรียน
   useEffect(() => {
     if (!selectedClass) return;
-    supabase.rpc("get_my_students", { p_classroom_id: selectedClass.classroom_id || selectedClass.id })
-      .then(({ data }) => setStudents(data || []));
+    const cid = selectedClass.classroom_id || selectedClass.id;
+    setLoadingStudents(true);
+    supabase.rpc("get_my_students", { p_classroom_id: cid }).then(({ data }) => {
+      const list = data || [];
+      setStudents(list);
+      setLoadingStudents(false);
+    });
   }, [selectedClass]);
 
+  // โหลดข้อมูลที่บันทึกไว้แล้วสำหรับเทอมนี้ (เพื่อ pre-fill)
   useEffect(() => {
-    if (!selectedStudent || !weightKg || !heightCm) { setResult(null); return; }
-    const w = parseFloat(weightKg), h = parseFloat(heightCm);
-    if (w < 5 || h < 50) return;
-    setResult({ ...calcNutrition(selectedStudent, w, h, measuredDate), weight_kg: w, height_cm: h });
-  }, [selectedStudent, weightKg, heightCm, measuredDate]);
+    if (!selectedClass || students.length === 0) return;
+    const cid = selectedClass.classroom_id || selectedClass.id;
+    const ay = selectedClass.academic_year_id;
+    supabase.from("v_nutrition_student_detail").select("*")
+      .eq("classroom_id", cid).eq("term", term)
+      .then(({ data }) => {
+        const map = {};
+        (data || []).forEach(r => { map[r.student_id] = r; });
+        setExisting(map);
+        // pre-fill ค่าน้ำหนัก/ส่วนสูง/เลขที่
+        setValues(prev => {
+          const next = { ...prev };
+          students.forEach(s => {
+            const ex = map[s.student_id];
+            next[s.student_id] = {
+              weight: ex?.weight_kg ?? next[s.student_id]?.weight ?? "",
+              height: ex?.height_cm ?? next[s.student_id]?.height ?? "",
+              seat: s.seat_number ?? next[s.student_id]?.seat ?? "",
+            };
+          });
+          return next;
+        });
+      });
+  }, [selectedClass, students, term]);
 
-  const handleSave = async () => {
-    if (!selectedStudent || !result) return;
+  function setVal(studentId, field, val) {
+    setValues(prev => ({ ...prev, [studentId]: { ...(prev[studentId] || {}), [field]: val } }));
+  }
+
+  // คำนวณผลแบบ live ต่อแถว
+  const rows = useMemo(() => {
+    return students.map(s => {
+      const v = values[s.id] || {};
+      const w = parseFloat(v.weight), h = parseFloat(v.height);
+      let result = null;
+      if (w >= 5 && h >= 50) {
+        result = { ...calcNutrition(s, w, h, measuredDate), weight_kg: w, height_cm: h };
+      }
+      return { student: s, v, result };
+    });
+  }, [students, values, measuredDate]);
+
+  const filledCount = rows.filter(r => r.result).length;
+
+  const handleSaveAll = async () => {
+    if (!selectedClass) return;
+    const cid = selectedClass.classroom_id || selectedClass.id;
+    const ay = selectedClass.academic_year_id;
+    const toSave = rows.filter(r => r.result).map(r => ({
+      student_id: r.student.student_id,
+      classroom_id: cid,
+      academic_year_id: ay,
+      recorded_by: currentUser.id,
+      term, measured_date: measuredDate,
+      weight_kg: r.result.weight_kg, height_cm: r.result.height_cm,
+      age_months: r.result.age_months,
+      median_height: r.result.median_height,
+      median_weight_for_height: r.result.median_weight_for_height,
+      ibw_kg: r.result.ibw_kg,
+      pct_height_for_age: r.result.pct_height_for_age,
+      pct_weight_for_height: r.result.pct_weight_for_height,
+      ha_status: r.result.ha_status,
+      wh_status: r.result.wh_status,
+    }));
+
+    if (toSave.length === 0) { setSaveMsg("⚠️ กรุณากรอกน้ำหนัก/ส่วนสูงอย่างน้อย 1 คน"); return; }
+
     setSaving(true); setSaveMsg("");
-    const { error } = await supabase.from("nutrition_records").upsert({
-      student_id: selectedStudent.student_id,
-      classroom_id: selectedStudent.classroom_id,
-      academic_year_id: selectedClass.academic_year_id || selectedClass.classroom_id,
-      recorded_by: currentUser.id, term, measured_date: measuredDate,
-      weight_kg: result.weight_kg, height_cm: result.height_cm, ...result
-    }, { onConflict: "student_id,academic_year_id,term" });
+
+    // บันทึกเลขที่ (seat_number) ที่เปลี่ยนแปลง
+    const seatUpdates = students.filter(s => {
+      const v = values[s.student_id];
+      return v?.seat !== "" && v?.seat != null && Number(v.seat) !== s.seat_number;
+    });
+    for (const s of seatUpdates) {
+      await supabase.from("students").update({ seat_number: Number(values[s.student_id].seat) }).eq("id", s.student_id);
+    }
+
+    const { error } = await supabase.from("nutrition_records")
+      .upsert(toSave, { onConflict: "student_id,academic_year_id,term" });
+
     setSaving(false);
-    setSaveMsg(error ? `❌ ${error.message}` : "✅ บันทึกสำเร็จ");
+    setSaveMsg(error ? `❌ ${error.message}` : `✅ บันทึกสำเร็จ ${toSave.length} คน`);
   };
 
-  const haStatus = result ? getHAStatus(result.pct_height_for_age) : null;
-  const whStatus = result ? getWHStatus(result.pct_weight_for_height) : null;
+  if (classrooms.length === 0) {
+    return (
+      <div style={{ ...S.card, textAlign: "center", padding: 48 }}>
+        <div style={{ fontSize: 64, marginBottom: 16 }}>🏫</div>
+        <div style={{ color: "#6b7280", fontSize: 15, fontWeight: 600 }}>
+          ไม่พบห้องเรียนที่คุณเป็นครูประจำชั้น<br />
+          <span style={{ fontSize: 13, color: "#9ca3af" }}>กรุณาติดต่อผู้ดูแลระบบเพื่อตรวจสอบข้อมูลครูประจำชั้น</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-      <div>
-        {/* เลือกห้องและนักเรียน */}
-        <div style={S.card}>
-          <div style={S.cardTitle}>🏫 เลือกห้องเรียนและนักเรียน</div>
-          {!isAdmin && classrooms.length === 1 ? (
-            <div style={{ background: "#eff6ff", borderRadius: 10, padding: "10px 14px", marginBottom: 12, color: "#1e40af", fontWeight: 700, fontSize: 14 }}>
-              📚 {classrooms[0].room_name} <span style={{ fontWeight: 400, color: "#6b7280", fontSize: 12 }}>(ห้องประจำชั้นของคุณ)</span>
-            </div>
-          ) : (
-            <div style={{ marginBottom: 12 }}>
+    <div>
+      {/* ตัวเลือกห้อง/เทอม/วันที่ */}
+      <div style={S.card}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+          {classrooms.length > 1 ? (
+            <div style={{ flex: 1, minWidth: 160 }}>
               <label style={S.label}>ห้องเรียน</label>
-              <select style={S.select} onChange={e => setSelectedClass(classrooms.find(c => (c.classroom_id || c.id) === e.target.value))}>
-                <option value="">— เลือกห้องเรียน —</option>
-                {classrooms.map(c => <option key={c.classroom_id || c.id} value={c.classroom_id || c.id}>{c.room_name}</option>)}
+              <select style={S.select}
+                value={selectedClass?.classroom_id || selectedClass?.id || ""}
+                onChange={e => setSelectedClass(classrooms.find(c => (c.classroom_id || c.id) === e.target.value))}>
+                {classrooms.map(c => (
+                  <option key={c.classroom_id || c.id} value={c.classroom_id || c.id}>{c.room_name}</option>
+                ))}
               </select>
             </div>
+          ) : (
+            <div style={{ flex: 1, minWidth: 160, background: "#eff6ff", borderRadius: 10, padding: "10px 14px", color: "#1e40af", fontWeight: 700, fontSize: 14 }}>
+              📚 {classrooms[0].room_name} <span style={{ fontWeight: 400, color: "#6b7280", fontSize: 12 }}>(ห้องประจำชั้นของคุณ)</span>
+            </div>
           )}
-          <div>
-            <label style={S.label}>นักเรียน</label>
-            <select style={S.select} onChange={e => setSelectedStudent(students.find(s => s.student_id === e.target.value))}>
-              <option value="">— เลือกนักเรียน —</option>
-              {students.map(s => (
-                <option key={s.student_id} value={s.student_id}>
-                  {s.gender === "ชาย" || s.gender === "male" ? "ด.ช. " : "ด.ญ. "}
-                  {s.first_name} {s.last_name} {s.nick_name ? `(${s.nick_name})` : ""}
-                </option>
-              ))}
+          <div style={{ minWidth: 150 }}>
+            <label style={S.label}>ครั้งที่วัด</label>
+            <select style={S.select} value={term} onChange={e => setTerm(e.target.value)}>
+              <option value="term1">🌸 ครั้งที่ 1 (เทอม 1)</option>
+              <option value="term2">🍂 ครั้งที่ 2 (เทอม 2)</option>
             </select>
           </div>
+          <div style={{ minWidth: 150 }}>
+            <label style={S.label}>วันที่วัด</label>
+            <input type="date" style={S.input} value={measuredDate} onChange={e => setMeasuredDate(e.target.value)} />
+          </div>
         </div>
+      </div>
 
-        {/* ข้อมูลนักเรียน */}
-        {selectedStudent && (
-          <div style={S.card}>
-            <div style={S.cardTitle}>👤 ข้อมูลนักเรียน</div>
-            <div style={{ background: "linear-gradient(135deg,#eff6ff,#f0fdf4)", borderRadius: 12, padding: "14px", marginBottom: 12, textAlign: "center" }}>
-              <div style={{ fontSize: 48 }}>{selectedStudent.gender === "ชาย" || selectedStudent.gender === "male" ? "👦" : "👧"}</div>
-              <div style={{ fontWeight: 800, fontSize: 16, color: "#1e3a8a" }}>
-                {selectedStudent.gender === "ชาย" || selectedStudent.gender === "male" ? "เด็กชาย " : "เด็กหญิง "}
-                {selectedStudent.first_name} {selectedStudent.last_name}
-              </div>
-              <div style={{ color: "#6b7280", fontSize: 13 }}>{formatAge(selectedStudent.birth_date)}</div>
-            </div>
-            <InfoRow label="รหัสนักเรียน" value={selectedStudent.student_code} />
-            <InfoRow label="วันเกิด" value={format(parseISO(selectedStudent.birth_date), "d MMMM yyyy", { locale: th })} />
-            <InfoRow label="เพศ" value={selectedStudent.gender} />
+      {/* สถิติย่อ */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 16 }}>
+        <StatCard label="นักเรียนทั้งหมด" value={students.length} color="#3b82f6" icon="👨‍👩‍👧‍👦" sub="คน" />
+        <StatCard label="กรอกข้อมูลแล้ว" value={filledCount} color="#16a34a" icon="✅" sub="คน" />
+        <StatCard label="ยังไม่กรอก" value={students.length - filledCount} color="#f59e0b" icon="⏳" sub="คน" />
+      </div>
+
+      {/* ตารางกรอกข้อมูลทั้งห้อง */}
+      <div style={S.card}>
+        <div style={S.cardTitle}>📝 บันทึกน้ำหนัก-ส่วนสูง ทั้งห้อง — {selectedClass?.room_name}</div>
+        {loadingStudents ? (
+          <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>⏳ กำลังโหลดรายชื่อนักเรียน...</div>
+        ) : students.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>📭 ไม่พบนักเรียนในห้องนี้</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "linear-gradient(135deg,#1e40af,#3b82f6)" }}>
+                  {["เลขที่","ชื่อ-นามสกุล","อายุ","น้ำหนัก (กก.)","ส่วนสูง (ซม.)","ภาวะ WH","ภาวะ HA",""].map(h => (
+                    <th key={h} style={{ padding: "10px 8px", textAlign: "left", color: "#fff", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => {
+                  const s = r.student;
+                  const v = values[s.student_id] || {};
+                  return (
+                    <tr key={s.student_id} style={{ background: i % 2 === 0 ? "#f8faff" : "#fff" }}>
+                      <td style={{ padding: "6px 8px", width: 60 }}>
+                        <input type="number" min="1" placeholder="-" value={v.seat ?? ""}
+                          onChange={e => setVal(s.student_id, "seat", e.target.value)}
+                          style={{ ...S.input, padding: "6px 8px", textAlign: "center", width: 56 }} />
+                      </td>
+                      <td style={{ padding: "8px", fontWeight: 600, color: "#1e3a8a", whiteSpace: "nowrap" }}>
+                        {s.gender === "male" || s.gender === "ชาย" ? "ด.ช. " : "ด.ญ. "}{s.first_name} {s.last_name}
+                        {s.nick_name && <span style={{ color: "#9ca3af", fontWeight: 400 }}> ({s.nick_name})</span>}
+                      </td>
+                      <td style={{ padding: "8px", color: "#6b7280", whiteSpace: "nowrap" }}>{formatAge(s.birth_date)}</td>
+                      <td style={{ padding: "6px 8px", width: 100 }}>
+                        <input type="number" step="0.1" placeholder="0.0" value={v.weight ?? ""}
+                          onChange={e => setVal(s.student_id, "weight", e.target.value)}
+                          style={{ ...S.input, padding: "6px 8px", width: 90 }} />
+                      </td>
+                      <td style={{ padding: "6px 8px", width: 100 }}>
+                        <input type="number" step="0.1" placeholder="0.0" value={v.height ?? ""}
+                          onChange={e => setVal(s.student_id, "height", e.target.value)}
+                          style={{ ...S.input, padding: "6px 8px", width: 90 }} />
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        {r.result ? <Badge status={getWHStatus(r.result.pct_weight_for_height)} /> : <span style={{ color: "#d1d5db" }}>—</span>}
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        {r.result ? <Badge status={getHAStatus(r.result.pct_height_for_age)} /> : <span style={{ color: "#d1d5db" }}>—</span>}
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        <button onClick={() => setDetailStudent(s)}
+                          style={{ ...S.btn, padding: "6px 12px", fontSize: 12, whiteSpace: "nowrap" }}>
+                          📈 ดูกราฟ
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
 
-        {/* บันทึกการวัด */}
-        {selectedStudent && (
-          <div style={S.card}>
-            <div style={S.cardTitle}>📏 บันทึกการวัด</div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={S.label}>ครั้งที่วัด</label>
-              <select style={S.select} value={term} onChange={e => setTerm(e.target.value)}>
-                <option value="term1">🌸 ครั้งที่ 1 (เทอม 1)</option>
-                <option value="term2">🍂 ครั้งที่ 2 (เทอม 2)</option>
-              </select>
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={S.label}>วันที่วัด</label>
-              <input type="date" style={S.input} value={measuredDate} onChange={e => setMeasuredDate(e.target.value)} />
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-              <div>
-                <label style={S.label}>⚖️ น้ำหนัก (กก.)</label>
-                <input type="number" step="0.1" placeholder="0.0" style={S.input} value={weightKg} onChange={e => setWeightKg(e.target.value)} />
-              </div>
-              <div>
-                <label style={S.label}>📐 ส่วนสูง (ซม.)</label>
-                <input type="number" step="0.1" placeholder="0.0" style={S.input} value={heightCm} onChange={e => setHeightCm(e.target.value)} />
-              </div>
-            </div>
-            <button onClick={handleSave} disabled={!result || saving} style={{ ...S.btn, width: "100%", opacity: (!result || saving) ? 0.5 : 1 }}>
-              {saving ? "⏳ กำลังบันทึก..." : "💾 บันทึกข้อมูล"}
+        {students.length > 0 && (
+          <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <button onClick={handleSaveAll} disabled={saving} style={{ ...S.btn, opacity: saving ? 0.6 : 1 }}>
+              {saving ? "⏳ กำลังบันทึก..." : `💾 บันทึกข้อมูลทั้งห้อง (${filledCount} คน)`}
             </button>
             {saveMsg && (
               <div style={{
-                marginTop: 10, padding: "10px 14px", borderRadius: 10, textAlign: "center",
-                background: saveMsg.includes("✅") ? "#f0fdf4" : "#fef2f2",
-                color: saveMsg.includes("✅") ? "#16a34a" : "#dc2626", fontWeight: 700, fontSize: 14
+                padding: "8px 16px", borderRadius: 10,
+                background: saveMsg.includes("✅") ? "#f0fdf4" : saveMsg.includes("⚠️") ? "#fffbeb" : "#fef2f2",
+                color: saveMsg.includes("✅") ? "#16a34a" : saveMsg.includes("⚠️") ? "#b45309" : "#dc2626",
+                fontWeight: 700, fontSize: 13
               }}>{saveMsg}</div>
             )}
           </div>
         )}
       </div>
 
-      <div>
-        {result && (
-          <>
-            {/* ผลประเมิน */}
-            <div style={{ ...S.card, background: "linear-gradient(135deg,#1e40af,#3b82f6)", border: "none" }}>
-              <div style={{ ...S.cardTitle, color: "#fff" }}>📊 ผลการประเมินโภชนาการ</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-                {[
-                  { label: "น้ำหนัก", value: `${result.weight_kg} กก.`, icon: "⚖️" },
-                  { label: "ส่วนสูง", value: `${result.height_cm} ซม.`, icon: "📐" },
-                  { label: "IBW", value: `${result.ibw_kg} กก.`, icon: "🎯" },
-                  { label: "%Median HA", value: `${result.pct_height_for_age}%`, icon: "📏" },
-                ].map(m => (
-                  <div key={m.label} style={{ background: "rgba(255,255,255,0.15)", borderRadius: 12, padding: "12px", textAlign: "center", backdropFilter: "blur(4px)" }}>
-                    <div style={{ fontSize: 22 }}>{m.icon}</div>
-                    <div style={{ color: "rgba(255,255,255,0.8)", fontSize: 11, fontWeight: 600 }}>{m.label}</div>
-                    <div style={{ color: "#fff", fontSize: 20, fontWeight: 800 }}>{m.value}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ background: "rgba(255,255,255,0.1)", borderRadius: 12, padding: "12px 14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <span style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, fontWeight: 600 }}>ภาวะส่วนสูงตามเกณฑ์อายุ</span>
-                  <Badge status={haStatus} />
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, fontWeight: 600 }}>ภาวะน้ำหนักตามเกณฑ์ส่วนสูง</span>
-                  <Badge status={whStatus} />
-                </div>
-              </div>
-            </div>
+      {/* รายละเอียด/กราฟรายบุคคล */}
+      {detailStudent && (
+        <StudentDetailPanel
+          student={detailStudent}
+          classroomId={selectedClass?.classroom_id || selectedClass?.id}
+          onClose={() => setDetailStudent(null)}
+        />
+      )}
+    </div>
+  );
+}
 
-            {/* รายละเอียด */}
-            <div style={S.card}>
-              <div style={S.cardTitle}>🔬 รายละเอียดการคำนวณ</div>
-              <InfoRow label="อายุ ณ วันที่วัด" value={`${result.age_months} เดือน`} />
-              <InfoRow label="Median Height อ้างอิง" value={`${result.median_height} ซม.`} />
-              <InfoRow label="Median Weight อ้างอิง" value={`${result.median_weight_for_height} กก.`} />
-              <InfoRow label="%Median WH" value={`${result.pct_weight_for_height}%`} />
-            </div>
+// ── StudentDetailPanel — กราฟ + รายละเอียดรายบุคคล ─────────────────────────────
+function StudentDetailPanel({ student, classroomId, onClose }) {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-            {/* กราฟ */}
-            <div style={S.card}>
-              <div style={S.cardTitle}>📈 กราฟส่วนสูงตามเกณฑ์อายุ</div>
-              <HAChart student={selectedStudent} actualHeight={result.height_cm} ageMonths={result.age_months} />
-            </div>
-            <div style={S.card}>
-              <div style={S.cardTitle}>📈 กราฟน้ำหนักตามเกณฑ์ส่วนสูง</div>
-              <WHChart actualWeight={result.weight_kg} actualHeight={result.height_cm}
-                gender={selectedStudent.gender === "ชาย" || selectedStudent.gender === "male" ? "male" : "female"} />
-            </div>
-          </>
-        )}
-        {!result && selectedStudent && (
-          <div style={{ ...S.card, textAlign: "center", padding: 40 }}>
-            <div style={{ fontSize: 64, marginBottom: 16 }}>📝</div>
-            <div style={{ color: "#6b7280", fontSize: 15, fontWeight: 600 }}>กรอกน้ำหนักและส่วนสูงเพื่อดูผลการประเมิน</div>
-          </div>
-        )}
-        {!selectedStudent && (
-          <div style={{ ...S.card, textAlign: "center", padding: 48 }}>
-            <div style={{ fontSize: 72, marginBottom: 16 }}>👨‍👩‍👧‍👦</div>
-            <div style={{ color: "#6b7280", fontSize: 15, fontWeight: 600 }}>เลือกห้องเรียนและนักเรียนเพื่อเริ่มประเมิน</div>
-          </div>
-        )}
+  useEffect(() => {
+    setLoading(true);
+    supabase.from("v_nutrition_student_detail").select("*")
+      .eq("student_id", student.student_id)
+      .order("term")
+      .then(({ data }) => { setRecords(data || []); setLoading(false); });
+  }, [student]);
+
+  const latest = records[records.length - 1];
+  const gender = student.gender === "ชาย" || student.gender === "male" ? "male" : "female";
+
+  return (
+    <div style={{ ...S.card, border: "2px solid #c7d2fe", position: "relative" }}>
+      <button onClick={onClose}
+        style={{
+          position: "absolute", top: 14, right: 14, background: "#f1f5f9", border: "none",
+          borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 16, color: "#6b7280"
+        }}>✕</button>
+
+      <div style={S.cardTitle}>
+        📈 รายละเอียด — {student.gender === "ชาย" || student.gender === "male" ? "เด็กชาย" : "เด็กหญิง"} {student.first_name} {student.last_name}
+        {student.nick_name && ` (${student.nick_name})`}
       </div>
+      <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 12 }}>
+        {formatAge(student.birth_date)} · รหัส {student.student_code}
+        {student.seat_number ? ` · เลขที่ ${student.seat_number}` : ""}
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: 30, color: "#6b7280" }}>⏳ กำลังโหลด...</div>
+      ) : records.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>📭 ยังไม่มีข้อมูลการวัดของนักเรียนคนนี้</div>
+      ) : (
+        <>
+          {/* ตารางเปรียบเทียบ 2 เทอม */}
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${records.length},1fr)`, gap: 10, marginBottom: 16 }}>
+            {records.map(r => (
+              <div key={r.term} style={{ background: "#f8faff", borderRadius: 12, padding: 12, border: "1px solid #e0e7ff" }}>
+                <div style={{ fontWeight: 700, color: "#1e40af", fontSize: 13, marginBottom: 6 }}>
+                  {r.term === "term1" ? "🌸 ครั้งที่ 1" : "🍂 ครั้งที่ 2"}
+                </div>
+                <InfoRow label="วันที่วัด" value={r.measured_date ? format(parseISO(r.measured_date), "d MMM yyyy", { locale: th }) : "—"} />
+                <InfoRow label="น้ำหนัก" value={`${r.weight_kg} กก.`} />
+                <InfoRow label="ส่วนสูง" value={`${r.height_cm} ซม.`} />
+                <InfoRow label="IBW" value={`${r.ibw_kg} กก.`} />
+                <InfoRow label="%HA" value={`${r.pct_height_for_age}%`} />
+                <InfoRow label="%WH" value={`${r.pct_weight_for_height}%`} />
+                <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                  <Badge status={getWHStatus(r.pct_weight_for_height)} />
+                  <Badge status={getHAStatus(r.pct_height_for_age)} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* กราฟ */}
+          {latest && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <div>
+                <div style={{ fontWeight: 700, color: "#1e3a8a", fontSize: 13, marginBottom: 8 }}>📐 ส่วนสูงตามเกณฑ์อายุ</div>
+                <HAChart student={student} actualHeight={latest.height_cm} ageMonths={latest.age_months} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, color: "#1e3a8a", fontSize: 13, marginBottom: 8 }}>⚖️ น้ำหนักตามเกณฑ์ส่วนสูง</div>
+                <WHChart actualWeight={latest.weight_kg} actualHeight={latest.height_cm} gender={gender} />
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -480,13 +654,24 @@ function ClassPage({ currentUser, isAdmin }) {
 
   useEffect(() => {
     if (!currentUser) return;
-    const fn = isAdmin
-      ? supabase.from("classrooms").select("id, room_name, room_number").order("room_number")
-      : supabase.rpc("get_my_classrooms");
-    fn.then(({ data }) => {
-      setClassrooms(data || []);
-      if (!isAdmin && data?.length === 1) setSelectedClass(data[0]);
-    });
+    const loadClassrooms = async () => {
+      if (isAdmin) {
+        const { data } = await supabase.from("classrooms").select("id, room_name, room_number, academic_year_id").order("room_number");
+        setClassrooms(data || []);
+      } else {
+        const rpcRes = await supabase.rpc("get_my_classrooms");
+        let rooms = rpcRes.data || [];
+        if (rooms.length === 0) {
+          const fb = await supabase.from("classrooms")
+            .select("id, room_name, room_number, academic_year_id")
+            .eq("homeroom_teacher_id", currentUser.id).order("room_number");
+          rooms = (fb.data || []).map(c => ({ ...c, classroom_id: c.id }));
+        }
+        setClassrooms(rooms);
+        if (rooms.length === 1) setSelectedClass(rooms[0]);
+      }
+    };
+    loadClassrooms();
   }, [currentUser, isAdmin]);
 
   const load = useCallback(async () => {
@@ -515,10 +700,11 @@ function ClassPage({ currentUser, isAdmin }) {
     <div>
       <div style={S.card}>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-          {isAdmin && (
+          {(isAdmin || classrooms.length > 1) && (
             <div style={{ flex: 1, minWidth: 160 }}>
               <label style={S.label}>ห้องเรียน</label>
-              <select style={S.select} onChange={e => setSelectedClass(classrooms.find(c => (c.id || c.classroom_id) === e.target.value))}>
+              <select style={S.select} value={selectedClass?.id || selectedClass?.classroom_id || ""}
+                onChange={e => setSelectedClass(classrooms.find(c => (c.id || c.classroom_id) === e.target.value))}>
                 <option value="">— เลือกห้องเรียน —</option>
                 {classrooms.map(c => <option key={c.id || c.classroom_id} value={c.id || c.classroom_id}>{c.room_name}</option>)}
               </select>
@@ -556,7 +742,7 @@ function ClassPage({ currentUser, isAdmin }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "linear-gradient(135deg,#1e40af,#3b82f6)" }}>
-                  {["ชื่อ-นามสกุล","อายุ","เพศ","น้ำหนัก","ส่วนสูง","IBW","% HA","% WH","ภาวะ WH","ภาวะ HA"].map(h => (
+                  {["เลขที่","ชื่อ-นามสกุล","อายุ","เพศ","น้ำหนัก","ส่วนสูง","IBW","% HA","% WH","ภาวะ WH","ภาวะ HA"].map(h => (
                     <th key={h} style={{ padding: "10px 10px", textAlign: "left", color: "#fff", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -564,6 +750,7 @@ function ClassPage({ currentUser, isAdmin }) {
               <tbody>
                 {records.map((r, i) => (
                   <tr key={r.student_id + r.term} style={{ background: i % 2 === 0 ? "#f8faff" : "#fff", transition: "background 0.1s" }}>
+                    <td style={{ padding: "8px 10px", color: "#6b7280" }}>{r.seat_number ?? "—"}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 600, color: "#1e3a8a" }}>
                       {r.gender === "male" || r.gender === "ชาย" ? "ด.ช. " : "ด.ญ. "}{r.first_name} {r.last_name}
                     </td>
@@ -579,7 +766,7 @@ function ClassPage({ currentUser, isAdmin }) {
                   </tr>
                 ))}
                 {records.length === 0 && (
-                  <tr><td colSpan={10} style={{ textAlign: "center", padding: 32, color: "#9ca3af" }}>📭 ยังไม่มีข้อมูล กด "แสดงผล" เพื่อโหลดข้อมูล</td></tr>
+                  <tr><td colSpan={11} style={{ textAlign: "center", padding: 32, color: "#9ca3af" }}>📭 ยังไม่มีข้อมูล กด "แสดงผล" เพื่อโหลดข้อมูล</td></tr>
                 )}
               </tbody>
             </table>
@@ -600,8 +787,23 @@ function ComparePage({ currentUser, isAdmin }) {
 
   useEffect(() => {
     if (!currentUser) return;
-    const fn = isAdmin ? supabase.from("classrooms").select("id, room_name").order("room_number") : supabase.rpc("get_my_classrooms");
-    fn.then(({ data }) => { setClassrooms(data || []); if (!isAdmin && data?.length === 1) setSelectedClass(data[0]); });
+    const loadClassrooms = async () => {
+      if (isAdmin) {
+        const { data } = await supabase.from("classrooms").select("id, room_name").order("room_number");
+        setClassrooms(data || []);
+      } else {
+        const rpcRes = await supabase.rpc("get_my_classrooms");
+        let rooms = rpcRes.data || [];
+        if (rooms.length === 0) {
+          const fb = await supabase.from("classrooms")
+            .select("id, room_name").eq("homeroom_teacher_id", currentUser.id).order("room_number");
+          rooms = (fb.data || []).map(c => ({ ...c, classroom_id: c.id }));
+        }
+        setClassrooms(rooms);
+        if (rooms.length === 1) setSelectedClass(rooms[0]);
+      }
+    };
+    loadClassrooms();
   }, [currentUser, isAdmin]);
 
   const load = useCallback(async () => {
@@ -633,7 +835,8 @@ function ComparePage({ currentUser, isAdmin }) {
           {(isAdmin || classrooms.length > 1) && (
             <div style={{ flex: 1 }}>
               <label style={S.label}>ห้องเรียน</label>
-              <select style={S.select} onChange={e => setSelectedClass(classrooms.find(c => (c.classroom_id || c.id) === e.target.value))}>
+              <select style={S.select} value={selectedClass?.classroom_id || selectedClass?.id || ""}
+                onChange={e => setSelectedClass(classrooms.find(c => (c.classroom_id || c.id) === e.target.value))}>
                 <option value="">— เลือกห้องเรียน —</option>
                 {classrooms.map(c => <option key={c.classroom_id || c.id} value={c.classroom_id || c.id}>{c.room_name}</option>)}
               </select>
@@ -702,7 +905,7 @@ function AdminPage({ currentUser }) {
   const GRADE_GROUPS = ["อนุบาล", "ประถมศึกษา", "มัธยมศึกษาตอนต้น", "มัธยมศึกษาตอนปลาย"];
 
   useEffect(() => {
-    supabase.from("classrooms").select("id, room_name, room_number, student_count, academic_year_id, grade_levels(name)").order("room_number")
+    supabase.from("classrooms").select("id, room_name, room_number, student_count, academic_year_id").order("room_number")
       .then(({ data }) => { setClassrooms(data || []); if (data?.[0]) setSelectedYear(data[0].academic_year_id); });
   }, []);
 
