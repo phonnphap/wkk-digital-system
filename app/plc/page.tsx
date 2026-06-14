@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -132,7 +132,6 @@ type PLCMeeting = {
   participants: string[];
   academic_year_id: string;
   location?: string;
-  // Report fields
   problem_description?: string;
   objectives?: string;
   methods?: string;
@@ -198,14 +197,9 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
     { label: "แนวทางการพัฒนาต่อ", value: meeting.future_development, icon: "🚀" },
   ];
 
-  function handlePrint() {
-    window.print();
-  }
-
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        {/* Header */}
         <div className="px-6 py-5 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -233,9 +227,7 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
           <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-lg shrink-0">✕</button>
         </div>
 
-        {/* Body */}
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
-          {/* Facilitator + Participants */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3">
               <p className="text-xs font-black text-blue-500 mb-1">วิทยากร / ผู้นำ</p>
@@ -252,7 +244,6 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
             </div>
           </div>
 
-          {/* Report sections */}
           {sections.map(s => s.value ? (
             <div key={s.label} className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
               <p className="text-xs font-black text-slate-500 mb-1.5 flex items-center gap-1.5">
@@ -262,25 +253,29 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
             </div>
           ) : null)}
 
-          {/* Images */}
+          {/* Images — แสดงรูปที่แนบ */}
           {meeting.image_urls && meeting.image_urls.length > 0 && (
             <div>
-              <p className="text-xs font-black text-slate-500 mb-2 flex items-center gap-1.5">📷 รูปภาพการประชุม</p>
+              <p className="text-xs font-black text-slate-500 mb-2 flex items-center gap-1.5">📷 รูปภาพการประชุม ({meeting.image_urls.length} รูป)</p>
               <div className="grid grid-cols-3 gap-2">
                 {meeting.image_urls.map((url, i) => (
-                  <img key={i} src={url} alt={`meeting-${i+1}`}
-                    className="w-full h-24 object-cover rounded-xl border border-slate-200 cursor-pointer hover:opacity-90 transition-opacity"
-                    onClick={() => window.open(url, "_blank")} />
+                  <img
+                    key={i}
+                    src={url}
+                    alt={`meeting-${i+1}`}
+                    className="w-full h-28 object-cover rounded-xl border border-slate-200 cursor-pointer hover:opacity-90 transition-opacity"
+                    onClick={() => window.open(url, "_blank")}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
                 ))}
               </div>
             </div>
           )}
         </div>
 
-        {/* Footer */}
         {canEdit && (
           <div className="border-t border-slate-100 px-6 py-4 flex gap-2 shrink-0 bg-slate-50 rounded-b-3xl">
-            <button onClick={handlePrint}
+            <button onClick={() => window.print()}
               className="px-4 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm hover:bg-slate-100 flex items-center gap-1.5">
               🖨️ พิมพ์
             </button>
@@ -301,10 +296,11 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
 
 // ─── Meeting Modal (Add/Edit) ─────────────────────────────────────────────────
 function MeetingModal({
-  meeting, allTeachers, academicYears, currentUserId, onSave, onClose,
+  meeting, allTeachers, sameGroupTeachers, academicYears, currentUserId, onSave, onClose,
 }: {
   meeting: Partial<PLCMeeting> | null;
   allTeachers: Teacher[];
+  sameGroupTeachers: Teacher[]; // เฉพาะกลุ่มสาระเดียวกัน
   academicYears: AcademicYear[];
   currentUserId: string;
   onSave: (data: any, isDraft: boolean) => Promise<void>;
@@ -317,12 +313,16 @@ function MeetingModal({
   const [meetingNo,   setMeetingNo]   = useState<number | "">(meeting?.meeting_number ?? "");
   const [title,       setTitle]       = useState(meeting?.title ?? "");
   const [topic,       setTopic]       = useState(meeting?.topic ?? "");
-  const [hours,       setHours]       = useState<number>(meeting?.duration_hours ?? 1);
+  // hours คำนวณอัตโนมัติจากเวลา ไม่มี stepper
+  const [hours,       setHours]       = useState<number>(meeting?.duration_hours ?? 4);
   const [location,    setLocation]    = useState(meeting?.location ?? "");
+  // facilId default = ตัวเอง
   const [facilId,     setFacilId]     = useState(meeting?.facilitator_id ?? currentUserId);
   const [yearId,      setYearId]      = useState(meeting?.academic_year_id ?? academicYears[0]?.id ?? "");
-  const [selected,    setSelected]    = useState<string[]>(meeting?.participants ?? [currentUserId]);
-  // Report fields
+  // participants default = ทุกคนในกลุ่มสาระเดียวกัน
+  const [selected,    setSelected]    = useState<string[]>(
+    meeting?.participants ?? sameGroupTeachers.map(t => t.id)
+  );
   const [problem,     setProblem]     = useState(meeting?.problem_description ?? "");
   const [objectives,  setObjectives]  = useState(meeting?.objectives ?? "");
   const [methods,     setMethods]     = useState(meeting?.methods ?? "");
@@ -331,21 +331,24 @@ function MeetingModal({
   const [reflections, setReflections] = useState(meeting?.reflections ?? "");
   const [futuredev,   setFuturedev]   = useState(meeting?.future_development ?? "");
   const [images,      setImages]      = useState<string[]>(meeting?.image_urls ?? []);
+  const [uploading,   setUploading]   = useState(false);
   const [loading,     setLoading]     = useState(false);
   const [search,      setSearch]      = useState("");
   const [tab,         setTab]         = useState<"basic" | "report">("basic");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-calc hours from time
+  // คำนวณชั่วโมงอัตโนมัติจากเวลาเริ่ม-สิ้นสุด (ไม่มี stepper)
   useEffect(() => {
     if (startTime && endTime) {
       const [sh, sm] = startTime.split(":").map(Number);
       const [eh, em] = endTime.split(":").map(Number);
       const diff = (eh * 60 + em - sh * 60 - sm) / 60;
-      if (diff > 0) setHours(Math.round(diff * 2) / 2);
+      if (diff > 0) setHours(Math.round(diff * 10) / 10);
     }
   }, [startTime, endTime]);
 
-  const filtered = allTeachers.filter(t =>
+  // กรองผู้เข้าร่วมเฉพาะกลุ่มสาระเดียวกัน + ค้นหา
+  const filtered = sameGroupTeachers.filter(t =>
     fullName(t).toLowerCase().includes(search.toLowerCase()) ||
     (t.position ?? "").toLowerCase().includes(search.toLowerCase())
   );
@@ -354,20 +357,38 @@ function MeetingModal({
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
 
+  // อัพโหลดรูปไปยัง Supabase Storage
   async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    setUploading(true);
     for (const file of files) {
-      const path = `plc-images/${Date.now()}-${file.name}`;
-      const { error } = await supabase.storage.from("plc").upload(path, file);
-      if (!error) {
-        const { data } = supabase.storage.from("plc").getPublicUrl(path);
-        setImages(prev => [...prev, data.publicUrl]);
+      // ตรวจขนาดไฟล์ 5MB
+      if (file.size > 5 * 1024 * 1024) {
+        alert(`ไฟล์ "${file.name}" ขนาดใหญ่เกิน 5MB`);
+        continue;
+      }
+      const ext = file.name.split(".").pop();
+      const path = `plc-images/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { data: uploadData, error } = await supabase.storage
+        .from("plc")
+        .upload(path, file, { cacheControl: "3600", upsert: false });
+      if (error) {
+        alert(`อัพโหลดไม่สำเร็จ: ${error.message}`);
+        continue;
+      }
+      const { data: urlData } = supabase.storage.from("plc").getPublicUrl(path);
+      if (urlData?.publicUrl) {
+        setImages(prev => [...prev, urlData.publicUrl]);
       }
     }
+    setUploading(false);
+    // reset input
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function handleSave(isDraft: boolean) {
-    if (!date || !title || !hours || !yearId) { alert("กรุณากรอกข้อมูลให้ครบ"); return; }
+    if (!date || !title || !yearId) { alert("กรุณากรอกข้อมูลให้ครบ"); return; }
     setLoading(true);
     await onSave({
       meeting_date: date,
@@ -442,7 +463,7 @@ function MeetingModal({
                 </div>
               </div>
 
-              {/* Start-End Time + Hours */}
+              {/* Start-End Time → ชั่วโมงคำนวณอัตโนมัติ (ไม่มี stepper) */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className={labelCls}>เวลาเริ่ม</label>
@@ -453,14 +474,9 @@ function MeetingModal({
                   <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className={inputCls} />
                 </div>
                 <div>
-                  <label className={labelCls}>ชั่วโมง *</label>
-                  <div className="flex items-center gap-1.5">
-                    <button type="button" onClick={() => setHours(h => Math.max(0.5, +(h - 0.5).toFixed(1)))}
-                      className="w-9 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 font-black text-slate-600 transition-colors shrink-0">−</button>
-                    <input type="number" min="0.5" max="8" step="0.5" value={hours} onChange={e => setHours(+e.target.value)}
-                      className="flex-1 bg-slate-50 border-2 border-slate-200 rounded-xl px-2 py-2.5 text-slate-800 text-sm font-black text-center focus:border-blue-400 focus:outline-none transition-colors" />
-                    <button type="button" onClick={() => setHours(h => Math.min(8, +(h + 0.5).toFixed(1)))}
-                      className="w-9 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 font-black text-slate-600 transition-colors shrink-0">+</button>
+                  <label className={labelCls}>ชั่วโมง (อัตโนมัติ)</label>
+                  <div className={`${inputCls} text-center text-blue-600 font-black bg-blue-50 border-blue-200`}>
+                    {hours} ชม.
                   </div>
                 </div>
               </div>
@@ -497,17 +513,20 @@ function MeetingModal({
                 <div>
                   <label className={labelCls}>วิทยากร / ผู้นำ</label>
                   <select value={facilId} onChange={e => setFacilId(e.target.value)} className={inputCls}>
-                    {allTeachers.map(t => <option key={t.id} value={t.id}>{fullName(t)}</option>)}
+                    {sameGroupTeachers.map(t => <option key={t.id} value={t.id}>{fullName(t)}</option>)}
                   </select>
                 </div>
               </div>
 
-              {/* Participants */}
+              {/* Participants — เฉพาะกลุ่มสาระเดียวกัน */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className={labelCls}>ผู้เข้าร่วม ({selected.length} คน)</label>
+                  <label className={labelCls}>
+                    ผู้เข้าร่วม ({selected.length} คน)
+                    <span className="ml-1 text-blue-500 normal-case font-bold">· เฉพาะกลุ่มสาระเดียวกัน</span>
+                  </label>
                   <div className="flex gap-1.5">
-                    <button type="button" onClick={() => setSelected(allTeachers.map(t => t.id))}
+                    <button type="button" onClick={() => setSelected(sameGroupTeachers.map(t => t.id))}
                       className="text-xs font-black text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50">เลือกทั้งหมด</button>
                     <button type="button" onClick={() => setSelected([])}
                       className="text-xs font-black text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg hover:bg-slate-100">ล้าง</button>
@@ -529,7 +548,7 @@ function MeetingModal({
                       </button>
                     );
                   })}
-                  {filtered.length === 0 && <div className="text-center py-6 text-slate-400 text-sm">ไม่พบ</div>}
+                  {filtered.length === 0 && <div className="text-center py-6 text-slate-400 text-sm">ไม่พบสมาชิกในกลุ่มสาระ</div>}
                 </div>
               </div>
             </>
@@ -553,27 +572,55 @@ function MeetingModal({
                 </div>
               ))}
 
-              {/* Image upload */}
+              {/* Image upload — แก้ให้ทำงานได้จริง */}
               <div>
                 <label className={labelCls}>📷 แนบรูปการประชุม</label>
-                <label className="flex items-center gap-3 cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-xl px-4 py-3 transition-colors">
-                  <span className="text-2xl">📁</span>
+                <label className={`flex items-center gap-3 cursor-pointer bg-slate-50 border-2 border-dashed rounded-xl px-4 py-3 transition-colors ${uploading ? "border-blue-300 opacity-60" : "border-slate-300 hover:border-blue-400"}`}>
+                  <span className="text-2xl">{uploading ? "⏳" : "📁"}</span>
                   <div>
-                    <p className="font-bold text-slate-600 text-sm">คลิกเพื่อเลือกรูปภาพ</p>
-                    <p className="text-slate-400 text-xs">JPG, PNG ขนาดไม่เกิน 5MB</p>
+                    <p className="font-bold text-slate-600 text-sm">{uploading ? "กำลังอัพโหลด..." : "คลิกเพื่อเลือกรูปภาพ"}</p>
+                    <p className="text-slate-400 text-xs">JPG, PNG ขนาดไม่เกิน 5MB ต่อรูป</p>
                   </div>
-                  <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    disabled={uploading}
+                    onChange={handleImageUpload}
+                    className="hidden"
+                  />
                 </label>
+
+                {/* แสดงรูปที่อัพโหลดแล้ว */}
                 {images.length > 0 && (
-                  <div className="mt-2 grid grid-cols-4 gap-2">
+                  <div className="mt-3 grid grid-cols-4 gap-2">
                     {images.map((url, i) => (
-                      <div key={i} className="relative group">
-                        <img src={url} alt="" className="w-full h-16 object-cover rounded-lg border border-slate-200" />
-                        <button onClick={() => setImages(prev => prev.filter((_, j) => j !== i))}
-                          className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs hidden group-hover:flex items-center justify-center font-black">×</button>
+                      <div key={i} className="relative group aspect-square">
+                        <img
+                          src={url}
+                          alt={`รูปที่ ${i + 1}`}
+                          className="w-full h-full object-cover rounded-xl border-2 border-slate-200"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect fill='%23f1f5f9' width='80' height='80' rx='8'/%3E%3Ctext x='50%25' y='55%25' text-anchor='middle' fill='%2394a3b8' font-size='24'%3E🖼%3C/text%3E%3C/svg%3E";
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setImages(prev => prev.filter((_, j) => j !== i))}
+                          className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full text-xs hidden group-hover:flex items-center justify-center font-black shadow-md"
+                        >
+                          ×
+                        </button>
+                        <div className="absolute bottom-1 left-1 bg-black/40 text-white text-[9px] px-1 rounded hidden group-hover:block">
+                          {i + 1}
+                        </div>
                       </div>
                     ))}
                   </div>
+                )}
+                {images.length > 0 && (
+                  <p className="text-xs text-slate-400 mt-1.5">รูปภาพ {images.length} รูป · hover เพื่อลบ</p>
                 )}
               </div>
             </>
@@ -602,7 +649,7 @@ function MeetingModal({
 
 // ─── SubGroup Panel ────────────────────────────────────────────────────────────
 function SubGroupPanel({
-  subGroup, teachers, meetings, onAddMeeting, onEdit, onDelete, canEdit, targetHours, isAdmin,
+  subGroup, teachers, meetings, onAddMeeting, onEdit, onDelete, canEdit, isAdmin,
 }: {
   subGroup: SubGroup;
   teachers: Teacher[];
@@ -611,7 +658,6 @@ function SubGroupPanel({
   onEdit: (m: PLCMeeting) => void;
   onDelete: (id: string) => void;
   canEdit: boolean;
-  targetHours: number;
   isAdmin: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -622,7 +668,7 @@ function SubGroupPanel({
     return hasTeacher ? s + Number(m.duration_hours) : s;
   }, 0);
 
-  const pct = (totalHours / targetHours) * 100;
+  const pct = (totalHours / TARGET_HOURS) * 100;
   const ringColor = pct >= 100 ? "#10b981" : pct >= 60 ? "#f59e0b" : "#3b82f6";
 
   return (
@@ -649,7 +695,7 @@ function SubGroupPanel({
             <p className={`font-black text-sm ${subGroup.textColor}`}>{subGroup.label}</p>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <span className="text-slate-500 text-xs font-bold">{teachers.length} คน · {meetings.length} ครั้ง</span>
-              <HourBadge hours={totalHours} target={targetHours} />
+              <HourBadge hours={totalHours} target={TARGET_HOURS} />
             </div>
           </div>
           <div className="hidden sm:block w-24">
@@ -663,7 +709,6 @@ function SubGroupPanel({
 
         {expanded && (
           <div className="border-t border-white/60">
-            {/* Teachers */}
             {isAdmin && teachers.length > 0 && (
               <div className="px-5 py-3 border-b border-white/50">
                 <p className="text-xs font-black text-slate-500 mb-2">สมาชิกในกลุ่ม</p>
@@ -673,7 +718,7 @@ function SubGroupPanel({
                     return (
                       <div key={t.id} className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-sm">
                         <span className="text-slate-700 font-bold text-xs">{fullName(t)}</span>
-                        <HourBadge hours={tHours} target={targetHours} />
+                        <HourBadge hours={tHours} target={TARGET_HOURS} />
                       </div>
                     );
                   })}
@@ -681,7 +726,6 @@ function SubGroupPanel({
               </div>
             )}
 
-            {/* Report table */}
             <div className="px-5 py-4">
               {meetings.length === 0 ? (
                 <div className="text-center py-6 text-slate-400 text-sm">ยังไม่มีการประชุม</div>
@@ -735,7 +779,7 @@ function SubGroupPanel({
                                     className="text-[10px] font-black text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors">
                                     ✏️
                                   </button>
-                                  <button onClick={() => onDelete(m.id)}
+                                  <button onClick={() => { if (confirm("ยืนยันลบ?")) onDelete(m.id); }}
                                     className="text-[10px] font-black text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors">
                                     🗑️
                                   </button>
@@ -774,12 +818,11 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
   onDelete: (id: string) => void;
   canEdit: boolean;
 }) {
-  const [search, setSearch]           = useState("");
+  const [search, setSearch]             = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "submitted">("all");
-  const [viewMeeting, setViewMeeting] = useState<PLCMeeting | null>(null);
+  const [viewMeeting, setViewMeeting]   = useState<PLCMeeting | null>(null);
 
   const yearName = academicYears.find(y => y.id === selectedYearId)?.name ?? "";
-
   const filtered = meetings.filter(m => {
     const matchSearch = m.title.toLowerCase().includes(search.toLowerCase()) ||
       (m.topic ?? "").toLowerCase().includes(search.toLowerCase());
@@ -787,8 +830,8 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
     return matchSearch && matchStatus;
   });
 
-  const submitted = meetings.filter(m => m.status === "submitted").length;
-  const draft = meetings.filter(m => m.status === "draft").length;
+  const submitted  = meetings.filter(m => m.status === "submitted").length;
+  const draft      = meetings.filter(m => m.status === "draft").length;
   const totalHours = meetings.reduce((s, m) => s + Number(m.duration_hours), 0);
 
   return (
@@ -805,7 +848,6 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
       )}
       <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
         <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-          {/* Header */}
           <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between shrink-0">
             <div>
               <h3 className="font-black text-slate-800 text-lg">📊 รายงานทั้งหมด</h3>
@@ -814,7 +856,6 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
             <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-lg">✕</button>
           </div>
 
-          {/* Summary */}
           <div className="px-6 py-4 border-b border-slate-100 grid grid-cols-3 gap-3 shrink-0">
             {[
               { label: "ชั่วโมงรวม", value: totalHours, unit: "ชม.", color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200" },
@@ -828,7 +869,6 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
             ))}
           </div>
 
-          {/* Filters */}
           <div className="px-6 py-3 border-b border-slate-100 flex gap-3 shrink-0 flex-wrap">
             <input type="text" value={search} onChange={e => setSearch(e.target.value)}
               placeholder="🔍 ค้นหา..."
@@ -845,7 +885,6 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
             </div>
           </div>
 
-          {/* Table */}
           <div className="overflow-y-auto flex-1 px-6 py-4">
             {filtered.length === 0 ? (
               <div className="text-center py-16 text-slate-400">ไม่พบรายการ</div>
@@ -912,6 +951,105 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
   );
 }
 
+// ─── Teacher History Card ──────────────────────────────────────────────────────
+// แสดงประวัติการบันทึก PLC ของครูที่ login อยู่
+function TeacherHistorySection({ meetings, userId, onEdit, onDelete, onView }: {
+  meetings: PLCMeeting[];
+  userId: string;
+  onEdit: (m: PLCMeeting) => void;
+  onDelete: (id: string) => void;
+  onView: (m: PLCMeeting) => void;
+}) {
+  const myMeetings = meetings
+    .filter(m => m.participants?.includes(userId))
+    .sort((a, b) => new Date(b.meeting_date).getTime() - new Date(a.meeting_date).getTime());
+
+  const totalHours = myMeetings.reduce((s, m) => s + Number(m.duration_hours), 0);
+  const pct = Math.min((totalHours / TARGET_HOURS) * 100, 100);
+  const ringColor = pct >= 100 ? "#10b981" : pct >= 60 ? "#f59e0b" : "#3b82f6";
+
+  return (
+    <div className="space-y-4">
+      {/* Summary ring */}
+      <div className="bg-white rounded-2xl border border-slate-200 px-6 py-5 flex items-center gap-5">
+        <div className="relative shrink-0">
+          <RingProgress pct={pct} size={72} stroke={7} color={ringColor} />
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-sm font-black text-slate-700 leading-none">{totalHours}</span>
+            <span className="text-[9px] text-slate-400 font-bold">ชม.</span>
+          </div>
+        </div>
+        <div>
+          <p className="font-black text-slate-700 text-base">ชั่วโมง PLC ของฉัน</p>
+          <p className="text-slate-400 text-sm">{totalHours} / {TARGET_HOURS} ชั่วโมง · {myMeetings.length} ครั้ง</p>
+          <div className="mt-2 w-48 h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: ringColor }} />
+          </div>
+        </div>
+        <div className="ml-auto">
+          {pct >= 100
+            ? <span className="text-xs font-black px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">✅ ครบแล้ว!</span>
+            : <span className="text-xs font-black px-3 py-1.5 rounded-xl bg-amber-50 text-amber-700 border border-amber-200">เหลือ {TARGET_HOURS - totalHours} ชม.</span>
+          }
+        </div>
+      </div>
+
+      {/* History list */}
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="font-black text-slate-700 text-sm">📋 ประวัติการบันทึก PLC</h3>
+          <span className="text-xs text-slate-400 font-bold">{myMeetings.length} รายการ</span>
+        </div>
+        {myMeetings.length === 0 ? (
+          <div className="text-center py-12 text-slate-400">
+            <div className="text-4xl mb-2">📭</div>
+            <p className="text-sm font-bold">ยังไม่มีรายการบันทึก</p>
+            <p className="text-xs mt-1">กดปุ่มด้านบนเพื่อเริ่มบันทึกชั่วโมง PLC</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-50">
+            {myMeetings.map(m => (
+              <div key={m.id} className="px-5 py-4 hover:bg-slate-50 transition-colors">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      {m.meeting_number && (
+                        <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">ครั้งที่ {m.meeting_number}</span>
+                      )}
+                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${
+                        m.status === "submitted"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : "bg-amber-50 text-amber-700 border-amber-200"
+                      }`}>
+                        {m.status === "submitted" ? "✅ ส่งแล้ว" : "📝 ร่าง"}
+                      </span>
+                    </div>
+                    <p className="font-bold text-slate-800 text-sm line-clamp-1">{m.title}</p>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
+                      <span>📅 {toThaiDate(m.meeting_date)}</span>
+                      {m.start_time && m.end_time && <span>🕐 {m.start_time}–{m.end_time}</span>}
+                      <span className="font-black text-blue-600">⏱️ {m.duration_hours} ชม.</span>
+                      {m.location && <span>📍 {m.location}</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => onView(m)}
+                      className="text-xs font-black text-blue-500 hover:text-blue-700 px-2 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">👁️</button>
+                    <button onClick={() => onEdit(m)}
+                      className="text-xs font-black text-slate-400 hover:text-slate-700 px-2 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">✏️</button>
+                    <button onClick={() => { if (confirm("ยืนยันลบ?")) onDelete(m.id); }}
+                      className="text-xs font-black text-red-400 hover:text-red-600 px-2 py-1.5 rounded-lg hover:bg-red-50 transition-colors">🗑️</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function PLCHoursPage() {
   const router = useRouter();
@@ -924,8 +1062,8 @@ export default function PLCHoursPage() {
   const [modalOpen,      setModalOpen]      = useState(false);
   const [editMeeting,    setEditMeeting]    = useState<Partial<PLCMeeting> | null>(null);
   const [activeGroup,    setActiveGroup]    = useState<string>("all");
-  const [targetHours,    setTargetHours]    = useState(TARGET_HOURS);
   const [showReports,    setShowReports]    = useState(false);
+  const [viewMeeting,    setViewMeeting]    = useState<PLCMeeting | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -951,9 +1089,7 @@ export default function PLCHoursPage() {
           .maybeSingle();
         profileData = byEmail.data;
         if (profileData) {
-          await (supabase.from("users") as any)
-            .update({ auth_id: authUser.id })
-            .eq("id", profileData.id);
+          await (supabase.from("users") as any).update({ auth_id: authUser.id }).eq("id", profileData.id);
         }
       }
 
@@ -961,10 +1097,7 @@ export default function PLCHoursPage() {
         setUser({ ...profileData, full_name: profileData.full_name || `${profileData.first_name ?? ""} ${profileData.last_name ?? ""}`.trim() });
       }
 
-      const { data: years } = await supabase
-        .from("academic_years")
-        .select("id, name, year")
-        .order("year", { ascending: false });
+      const { data: years } = await supabase.from("academic_years").select("id, name, year").order("year", { ascending: false });
       const ys = (years as AcademicYear[]) || [];
       setAcademicYears(ys);
       if (ys.length > 0) setSelectedYearId(ys[0].id);
@@ -987,10 +1120,10 @@ export default function PLCHoursPage() {
     };
     init();
   }, []);
-  
+
   const isAdmin = !!(user?.role && ADMIN_ROLES.includes(user.role));
   const isTeacher = !isAdmin;
-  
+
   const mySubjectGroupKey = useMemo(() => {
     if (!user || isAdmin) return null;
     const me = allTeachers.find(t => t.id === user.id);
@@ -1003,16 +1136,21 @@ export default function PLCHoursPage() {
     return me?.subGroupKey ?? null;
   }, [user, allTeachers, isAdmin]);
 
+  // ครูในกลุ่มสาระเดียวกันกับคน login — ใช้ใน modal
+  const sameGroupTeachers = useMemo(() => {
+    if (isAdmin) return allTeachers;
+    if (!mySubjectGroupKey) return allTeachers;
+    return allTeachers.filter(t => t.subjectGroupKey === mySubjectGroupKey);
+  }, [allTeachers, isAdmin, mySubjectGroupKey]);
+
   const loadMeetings = useCallback(async () => {
     if (!selectedYearId) return;
-
     let query = supabase
       .from("plc_meetings")
       .select("*")
       .eq("academic_year_id", selectedYearId)
       .order("meeting_date", { ascending: false });
 
-    // ถ้าไม่ใช่ Admin ให้ดึงเฉพาะข้อมูลที่เกี่ยวข้องกับกลุ่มสาระตัวเอง
     if (!isAdmin && mySubjectGroupKey) {
       query = query.eq("subject_group_key", mySubjectGroupKey);
     }
@@ -1024,7 +1162,6 @@ export default function PLCHoursPage() {
 
   useEffect(() => { loadMeetings(); }, [loadMeetings]);
 
-  // Filter subject groups visible to this user
   const visibleGroups = useMemo(() => {
     if (isAdmin) return SUBJECT_GROUPS;
     if (!mySubjectGroupKey) return [];
@@ -1051,40 +1188,22 @@ export default function PLCHoursPage() {
     return map;
   }, [allTeachers]);
 
-  const { schoolStats, myStats } = useMemo(() => {
-  // สถิติทั้งโรงเรียน (รวมทั้งหมด)
-  const totalSchoolHours = meetings.reduce((sum, m) => sum + (m.duration_hours || 0), 0);
-  const totalSchoolMeetings = meetings.length;
-
-  // สถิติของครูที่ล็อกอิน (กรองเฉพาะรายการที่ครูมีชื่อเป็นผู้เข้าร่วม หรือเป็นคนบันทึก)
-  const myMeetings = meetings.filter(m => 
-    m.created_at === user?.id || m.participants?.includes(user?.id ?? '')
-  );
-  const totalMyHours = myMeetings.reduce((sum, m) => sum + (m.duration_hours || 0), 0);
-
-  return {
-    schoolStats: { total: totalSchoolHours, count: totalSchoolMeetings },
-    myStats: { total: totalMyHours, count: myMeetings.length }
-  };
-}, [meetings, user?.id]);
-
-  const totalHoursAll = meetings.reduce((s, m) => s + Number(m.duration_hours), 0);
-  const totalMeetings = meetings.length;
-  const totalTeachers = allTeachers.length;
+  // สถิติ admin
+  const totalHoursAll  = meetings.reduce((s, m) => s + Number(m.duration_hours), 0);
+  const totalMeetings  = meetings.length;
+  const totalTeachers  = allTeachers.length;
   const teachersOnTarget = allTeachers.filter(t => {
     const h = meetings.reduce((s, m) => m.participants?.includes(t.id) ? s + Number(m.duration_hours) : s, 0);
-    return h >= targetHours;
+    return h >= TARGET_HOURS;
   }).length;
 
   async function handleSave(data: any, isDraft: boolean) {
     const payload = { ...data, status: isDraft ? "draft" : "submitted" };
     if (editMeeting?.id) {
-      const { error } = await (supabase.from("plc_meetings") as any)
-        .update(payload).eq("id", editMeeting.id);
+      const { error } = await (supabase.from("plc_meetings") as any).update(payload).eq("id", editMeeting.id);
       if (error) { alert("❌ " + error.message); return; }
     } else {
-      const { error } = await (supabase.from("plc_meetings") as any)
-        .insert([{ ...payload, academic_year_id: selectedYearId }]);
+      const { error } = await (supabase.from("plc_meetings") as any).insert([{ ...payload, academic_year_id: selectedYearId }]);
       if (error) { alert("❌ " + error.message); return; }
     }
     setModalOpen(false);
@@ -1099,10 +1218,7 @@ export default function PLCHoursPage() {
   }
 
   function openAdd(subGroupKey?: string) {
-    const defaultParticipants = subGroupKey
-      ? subGroupTeachers[subGroupKey]?.map(t => t.id) ?? []
-      : [];
-    setEditMeeting({ participants: defaultParticipants, academic_year_id: selectedYearId });
+    setEditMeeting({ academic_year_id: selectedYearId });
     setModalOpen(true);
   }
 
@@ -1123,7 +1239,7 @@ export default function PLCHoursPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Top bar */}
+      {/* Top bar — ลบ select dropdown และปุ่มบันทึกออกจาก header ของหน้าครู */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3">
         <div className="px-6 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -1134,218 +1250,218 @@ export default function PLCHoursPage() {
               <p className="text-slate-400 text-xs">โรงเรียนวัดเขียนเขต{isTeacher ? ` · ${fullName(user)}` : ""}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <select value={selectedYearId} onChange={e => setSelectedYearId(e.target.value)}
-              className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none focus:border-blue-400">
-              {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
-            </select>
-            {/* FIXED: Both admin and teacher can add */}
-            {!isAdmin && (
-              <button 
-                onClick={() => openAdd(mySubGroupKey || "")}
-                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm transition-all shadow-sm whitespace-nowrap"
-              >
-                ➕ บันทึก
-              </button>
-            )}
-          </div>
+          {/* ปีการศึกษา — แสดงทั้ง admin และ teacher แต่ไม่มีปุ่มอื่น */}
+          <select value={selectedYearId} onChange={e => setSelectedYearId(e.target.value)}
+            className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none focus:border-blue-400">
+            {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+          </select>
         </div>
       </div>
 
-      <div className="w-full px-6 px-4 py-6 space-y-6">
+      <div className="w-full px-6 py-6 space-y-6">
 
-        {/* Overview cards — admin only */}
-        {isAdmin && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: "ชั่วโมงรวม", value: totalHoursAll, unit: "ชม.", color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200", icon: "⏱️" },
-              { label: "จำนวนครั้ง", value: totalMeetings, unit: "ครั้ง", color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-200", icon: "📅" },
-              { label: "ครูทั้งหมด", value: totalTeachers, unit: "คน", color: "text-amber-600", bg: "bg-amber-50", border: "border-amber-200", icon: "👩‍🏫" },
-              { label: `ครบ ${targetHours} ชม.`, value: teachersOnTarget, unit: "คน", color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-200", icon: "✅" },
-            ].map(card => (
-              <div key={card.label} className={`${card.bg} border-2 ${card.border} rounded-2xl p-4 text-center`}>
-                <div className="text-2xl mb-1">{card.icon}</div>
-                <div className={`text-3xl font-black ${card.color} leading-none`}>{card.value}</div>
-                <div className="text-slate-500 text-xs font-bold mt-1">{card.unit}</div>
-                <div className="text-slate-400 text-[10px] font-bold mt-0.5">{card.label}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* All Reports card — admin only */}
-        {isAdmin && (
-          <button onClick={() => setShowReports(true)}
-            className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-2xl px-6 py-4 flex items-center justify-between transition-all shadow-sm group">
-            <div className="flex items-center gap-3">
-              <span className="text-3xl">📊</span>
-              <div className="text-left">
-                <p className="font-black text-base">รายงานทั้งหมด</p>
-                <p className="text-indigo-200 text-xs">{totalMeetings} รายการ · {totalHoursAll} ชั่วโมง</p>
-              </div>
-            </div>
-            <span className="text-white/60 group-hover:text-white transition-colors text-xl">→</span>
-          </button>
-        )}
-
-        {/* Target hours — admin only */}
-        {isAdmin && (
-          <div className="bg-white border border-slate-200 rounded-2xl px-5 py-4 flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-2">
-              <span className="text-slate-500 text-sm font-bold">🎯 เป้าหมายชั่วโมง/คน/ปี:</span>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setTargetHours(h => Math.max(10, h - 5))}
-                  className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 font-black text-slate-600 text-sm">−</button>
-                <span className="font-black text-blue-600 text-xl w-12 text-center">{targetHours}</span>
-                <button onClick={() => setTargetHours(h => Math.min(200, h + 5))}
-                  className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 font-black text-slate-600 text-sm">+</button>
-              </div>
-              <span className="text-slate-400 text-sm">ชั่วโมง</span>
-            </div>
-          </div>
-        )}
-
-        {/* Tab bar — subject groups */}
-        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-          {isAdmin && (
-            <button onClick={() => setActiveGroup("all")}
-              className={`px-4 py-2 rounded-xl text-sm font-black border-2 whitespace-nowrap transition-all ${activeGroup === "all" ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-              🏫 ทุกกลุ่มสาระ
-            </button>
-          )}
-          {visibleGroups.map(g => {
-            const gMeetings = g.subGroups.flatMap(sg => subGroupMeetings[sg.key] ?? []);
-            const uniqueMeetings = Array.from(new Map(gMeetings.map(m => [m.id, m])).values());
-            const gHours = uniqueMeetings.reduce((s, m) => s + Number(m.duration_hours), 0);
-            const isActive = activeGroup === g.key || (!isAdmin && visibleGroups.length === 1);
-            return (
-              <button key={g.key} onClick={() => setActiveGroup(g.key)}
-                className={`px-4 py-2 rounded-xl text-sm font-black border-2 whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                  isActive ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                }`}>
-                {g.icon} {g.label}
-                {gHours > 0 && (
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
-                    {gHours}ชม.
-                  </span>
-                )}
+        {/* ══════════════════════════════════════════════════════
+            หน้าครู — ปุ่มบันทึกตรงกลาง + ประวัติการบันทึก
+        ══════════════════════════════════════════════════════ */}
+        {isTeacher && (
+          <>
+            {/* Big CTA button กลางหน้า */}
+            <div className="flex flex-col items-center gap-3 py-4">
+              <button
+                onClick={() => openAdd(mySubGroupKey || "")}
+                className="flex items-center gap-3 px-10 py-5 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-black text-lg shadow-lg transition-all"
+              >
+                <span className="text-3xl">➕</span>
+                <div className="text-left">
+                  <div>บันทึกชั่วโมง PLC</div>
+                  <div className="text-blue-200 text-xs font-bold mt-0.5">คลิกเพื่อเพิ่มรายการประชุมใหม่</div>
+                </div>
               </button>
-            );
-          })}
-        </div>
+            </div>
 
-        {/* Subject group panels */}
-        <div className="space-y-4">
-          {visibleGroups
-            .filter(g => activeGroup === "all" || activeGroup === g.key || (!isAdmin && visibleGroups.length === 1))
-            .map(g => (
-              <div key={g.key}>
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-xl">{g.icon}</span>
-                  <h2 className="font-black text-slate-700 text-base">{g.label}</h2>
-                  <div className="flex-1 h-px bg-slate-200" />
-                  {(() => {
-                    const gMs = g.subGroups.flatMap(sg => subGroupMeetings[sg.key] ?? []);
-                    const unique = Array.from(new Map(gMs.map(m => [m.id, m])).values());
-                    const h = unique.reduce((s, m) => s + Number(m.duration_hours), 0);
-                    return h > 0 ? (
-                      <span className="text-xs font-black text-slate-500 bg-white border border-slate-200 rounded-lg px-2.5 py-1">
-                        {h} ชม. · {unique.length} ครั้ง
-                      </span>
-                    ) : null;
-                  })()}
+            {/* ประวัติการบันทึก */}
+            <TeacherHistorySection
+              meetings={meetings}
+              userId={user.id}
+              onEdit={(m) => { setEditMeeting(m); setModalOpen(true); }}
+              onDelete={handleDelete}
+              onView={(m) => setViewMeeting(m)}
+            />
+          </>
+        )}
+
+        {/* ══════════════════════════════════════════════════════
+            หน้า Admin — ไม่มีปุ่มบันทึก, ไม่มีการ์ดชั่วโมงรวม
+            ไม่มีเป้าหมายชั่วโมง, ไม่มีปุ่ม select มุมขวา
+        ══════════════════════════════════════════════════════ */}
+        {isAdmin && (
+          <>
+            {/* Overview: จำนวนครั้ง / ครูทั้งหมด / ครบเป้า — ลบ "ชั่วโมงรวม" ออก */}
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: "จำนวนครั้ง",    value: totalMeetings,      unit: "ครั้ง", color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-200", icon: "📅" },
+                { label: "ครูทั้งหมด",    value: totalTeachers,      unit: "คน",   color: "text-amber-600",   bg: "bg-amber-50",   border: "border-amber-200",   icon: "👩‍🏫" },
+                { label: `ครบ ${TARGET_HOURS} ชม.`, value: teachersOnTarget, unit: "คน", color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-200", icon: "✅" },
+              ].map(card => (
+                <div key={card.label} className={`${card.bg} border-2 ${card.border} rounded-2xl p-4 text-center`}>
+                  <div className="text-2xl mb-1">{card.icon}</div>
+                  <div className={`text-3xl font-black ${card.color} leading-none`}>{card.value}</div>
+                  <div className="text-slate-500 text-xs font-bold mt-1">{card.unit}</div>
+                  <div className="text-slate-400 text-[10px] font-bold mt-0.5">{card.label}</div>
                 </div>
-                <div className="space-y-2">
-                  {g.subGroups
-                    .filter(sg => !mySubGroupKey || isAdmin || sg.key === mySubGroupKey)
-                    .map(sg => (
-                      <SubGroupPanel
-                        key={sg.key}
-                        subGroup={sg}
-                        teachers={subGroupTeachers[sg.key] ?? []}
-                        meetings={subGroupMeetings[sg.key] ?? []}
-                        onAddMeeting={(key) => openAdd(key)}
-                        onEdit={(m) => { setEditMeeting(m); setModalOpen(true); }}
-                        onDelete={handleDelete}
-                        canEdit={true}
-                        targetHours={targetHours}
-                        isAdmin={isAdmin}
-                      />
-                    ))}
+              ))}
+            </div>
+
+            {/* All Reports button */}
+            <button onClick={() => setShowReports(true)}
+              className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-2xl px-6 py-4 flex items-center justify-between transition-all shadow-sm group">
+              <div className="flex items-center gap-3">
+                <span className="text-3xl">📊</span>
+                <div className="text-left">
+                  <p className="font-black text-base">รายงานทั้งหมด</p>
+                  <p className="text-indigo-200 text-xs">{totalMeetings} รายการ · {totalHoursAll} ชั่วโมง</p>
                 </div>
               </div>
-            ))}
-        </div>
+              <span className="text-white/60 group-hover:text-white transition-colors text-xl">→</span>
+            </button>
 
-        {/* Teacher summary table — admin only */}
-        {isAdmin && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="bg-slate-50 border-b border-slate-200 px-5 py-3.5 flex items-center justify-between">
-              <h3 className="font-black text-slate-700 text-sm">👩‍🏫 สรุปชั่วโมงรายบุคคล</h3>
-              <span className="text-xs text-slate-400 font-bold">เป้าหมาย {targetHours} ชม./คน</span>
+            {/* Tab bar */}
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              <button onClick={() => setActiveGroup("all")}
+                className={`px-4 py-2 rounded-xl text-sm font-black border-2 whitespace-nowrap transition-all ${activeGroup === "all" ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                🏫 ทุกกลุ่มสาระ
+              </button>
+              {SUBJECT_GROUPS.map(g => {
+                const gMeetings = g.subGroups.flatMap(sg => subGroupMeetings[sg.key] ?? []);
+                const unique = Array.from(new Map(gMeetings.map(m => [m.id, m])).values());
+                const gHours = unique.reduce((s, m) => s + Number(m.duration_hours), 0);
+                const isActive = activeGroup === g.key;
+                return (
+                  <button key={g.key} onClick={() => setActiveGroup(g.key)}
+                    className={`px-4 py-2 rounded-xl text-sm font-black border-2 whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                      isActive ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}>
+                    {g.icon} {g.label}
+                    {gHours > 0 && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+                        {gHours}ชม.
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="text-left px-5 py-3 text-xs font-black text-slate-400 uppercase tracking-wider">ชื่อ–สกุล</th>
-                    <th className="text-left px-3 py-3 text-xs font-black text-slate-400 uppercase tracking-wider hidden sm:table-cell">กลุ่ม</th>
-                    <th className="text-center px-3 py-3 text-xs font-black text-slate-400 uppercase tracking-wider">ชั่วโมง</th>
-                    <th className="text-left px-3 py-3 text-xs font-black text-slate-400 uppercase tracking-wider hidden md:table-cell">ความคืบหน้า</th>
-                    <th className="text-center px-5 py-3 text-xs font-black text-slate-400 uppercase tracking-wider">สถานะ</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {allTeachers
-                    .map(t => ({
-                      ...t,
-                      hours: meetings.reduce((s, m) => m.participants?.includes(t.id) ? s + Number(m.duration_hours) : s, 0),
-                    }))
-                    .sort((a, b) => b.hours - a.hours)
-                    .map(t => {
-                      const pct = Math.min((t.hours / targetHours) * 100, 100);
-                      const status = pct >= 100
-                        ? { label: "✅ ครบ", cls: "bg-emerald-100 text-emerald-700 border-emerald-300" }
-                        : pct >= 60
-                        ? { label: "🔶 กำลังดำเนินการ", cls: "bg-amber-100 text-amber-700 border-amber-300" }
-                        : { label: "🔴 ยังไม่ครบ", cls: "bg-red-100 text-red-700 border-red-300" };
-                      return (
-                        <tr key={t.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-5 py-3 font-bold text-slate-800">{fullName(t)}</td>
-                          <td className="px-3 py-3 text-slate-400 text-xs hidden sm:table-cell">{t.position ?? "—"}</td>
-                          <td className="px-3 py-3 text-center">
-                            <span className="font-black text-slate-800">{t.hours}</span>
-                            <span className="text-slate-400 text-xs"> /{targetHours}</span>
-                          </td>
-                          <td className="px-3 py-3 hidden md:table-cell">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                                <div className={`h-full rounded-full transition-all ${pct >= 100 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-400" : "bg-blue-400"}`} style={{ width: `${pct}%` }} />
+
+            {/* SubGroup panels */}
+            <div className="space-y-4">
+              {SUBJECT_GROUPS
+                .filter(g => activeGroup === "all" || activeGroup === g.key)
+                .map(g => (
+                  <div key={g.key}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-xl">{g.icon}</span>
+                      <h2 className="font-black text-slate-700 text-base">{g.label}</h2>
+                      <div className="flex-1 h-px bg-slate-200" />
+                      {(() => {
+                        const gMs = g.subGroups.flatMap(sg => subGroupMeetings[sg.key] ?? []);
+                        const unique = Array.from(new Map(gMs.map(m => [m.id, m])).values());
+                        const h = unique.reduce((s, m) => s + Number(m.duration_hours), 0);
+                        return h > 0 ? (
+                          <span className="text-xs font-black text-slate-500 bg-white border border-slate-200 rounded-lg px-2.5 py-1">
+                            {h} ชม. · {unique.length} ครั้ง
+                          </span>
+                        ) : null;
+                      })()}
+                    </div>
+                    <div className="space-y-2">
+                      {g.subGroups.map(sg => (
+                        <SubGroupPanel
+                          key={sg.key}
+                          subGroup={sg}
+                          teachers={subGroupTeachers[sg.key] ?? []}
+                          meetings={subGroupMeetings[sg.key] ?? []}
+                          onAddMeeting={(key) => openAdd(key)}
+                          onEdit={(m) => { setEditMeeting(m); setModalOpen(true); }}
+                          onDelete={handleDelete}
+                          canEdit={true}
+                          isAdmin={true}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+            </div>
+
+            {/* Teacher summary table */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="bg-slate-50 border-b border-slate-200 px-5 py-3.5 flex items-center justify-between">
+                <h3 className="font-black text-slate-700 text-sm">👩‍🏫 สรุปชั่วโมงรายบุคคล</h3>
+                <span className="text-xs text-slate-400 font-bold">เป้าหมาย {TARGET_HOURS} ชม./คน</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      <th className="text-left px-5 py-3 text-xs font-black text-slate-400 uppercase tracking-wider">ชื่อ–สกุล</th>
+                      <th className="text-left px-3 py-3 text-xs font-black text-slate-400 uppercase tracking-wider hidden sm:table-cell">กลุ่ม</th>
+                      <th className="text-center px-3 py-3 text-xs font-black text-slate-400 uppercase tracking-wider">ชั่วโมง</th>
+                      <th className="text-left px-3 py-3 text-xs font-black text-slate-400 uppercase tracking-wider hidden md:table-cell">ความคืบหน้า</th>
+                      <th className="text-center px-5 py-3 text-xs font-black text-slate-400 uppercase tracking-wider">สถานะ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {allTeachers
+                      .map(t => ({
+                        ...t,
+                        hours: meetings.reduce((s, m) => m.participants?.includes(t.id) ? s + Number(m.duration_hours) : s, 0),
+                      }))
+                      .sort((a, b) => b.hours - a.hours)
+                      .map(t => {
+                        const pct = Math.min((t.hours / TARGET_HOURS) * 100, 100);
+                        const status = pct >= 100
+                          ? { label: "✅ ครบ", cls: "bg-emerald-100 text-emerald-700 border-emerald-300" }
+                          : pct >= 60
+                          ? { label: "🔶 กำลังดำเนินการ", cls: "bg-amber-100 text-amber-700 border-amber-300" }
+                          : { label: "🔴 ยังไม่ครบ", cls: "bg-red-100 text-red-700 border-red-300" };
+                        return (
+                          <tr key={t.id} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-5 py-3 font-bold text-slate-800">{fullName(t)}</td>
+                            <td className="px-3 py-3 text-slate-400 text-xs hidden sm:table-cell">{t.position ?? "—"}</td>
+                            <td className="px-3 py-3 text-center">
+                              <span className="font-black text-slate-800">{t.hours}</span>
+                              <span className="text-slate-400 text-xs"> /{TARGET_HOURS}</span>
+                            </td>
+                            <td className="px-3 py-3 hidden md:table-cell">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                  <div className={`h-full rounded-full transition-all ${pct >= 100 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-400" : "bg-blue-400"}`} style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="text-xs font-black text-slate-400 w-9 text-right">{Math.round(pct)}%</span>
                               </div>
-                              <span className="text-xs font-black text-slate-400 w-9 text-right">{Math.round(pct)}%</span>
-                            </div>
-                          </td>
-                          <td className="px-5 py-3 text-center">
-                            <span className={`inline-flex items-center px-2 py-1 rounded-lg text-xs font-black border ${status.cls}`}>{status.label}</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-              {allTeachers.length === 0 && (
-                <div className="text-center py-10 text-slate-400 text-sm">ไม่พบข้อมูลครู</div>
-              )}
+                            </td>
+                            <td className="px-5 py-3 text-center">
+                              <span className={`inline-flex items-center px-2 py-1 rounded-lg text-xs font-black border ${status.cls}`}>{status.label}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+                {allTeachers.length === 0 && (
+                  <div className="text-center py-10 text-slate-400 text-sm">ไม่พบข้อมูลครู</div>
+                )}
+              </div>
             </div>
-          </div>
+          </>
         )}
       </div>
 
       {/* Modals */}
-      {modalOpen && (
+      {modalOpen && user && (
         <MeetingModal
           meeting={editMeeting}
           allTeachers={allTeachers}
+          sameGroupTeachers={sameGroupTeachers}
           academicYears={academicYears}
           currentUserId={user.id}
           onSave={handleSave}
@@ -1363,6 +1479,17 @@ export default function PLCHoursPage() {
           onEdit={(m) => { setShowReports(false); setEditMeeting(m); setModalOpen(true); }}
           onDelete={handleDelete}
           canEdit={isAdmin}
+        />
+      )}
+
+      {viewMeeting && user && (
+        <ReportDetailModal
+          meeting={viewMeeting}
+          allTeachers={allTeachers}
+          onClose={() => setViewMeeting(null)}
+          onEdit={(m) => { setViewMeeting(null); setEditMeeting(m); setModalOpen(true); }}
+          onDelete={(id) => { handleDelete(id); setViewMeeting(null); }}
+          canEdit={true}
         />
       )}
     </div>
