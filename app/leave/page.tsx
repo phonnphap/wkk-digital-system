@@ -96,7 +96,7 @@ table.stat th{background:#f0f0f0;font-weight:700}
 </style></head><body><div class="page">
 
 <div style="text-align:center;margin-bottom:7px">
-  <img src="/logo.png" style="width:70px;height:70px;object-fit:contain" onerror="this.style.display='none'"/>
+  <img src="/school_logo.png" style="width:70px;height:70px;object-fit:contain" onerror="this.style.display='none'"/>
 </div>
 <div style="font-size:16pt;font-weight:900;text-align:center;margin:5px 0">แบบใบลาป่วย ลากิจส่วนตัว ลาคลอดบุตร</div>
 <div style="text-align:right;line-height:1.9;font-size:12.5pt;margin-bottom:10px">
@@ -124,7 +124,7 @@ table.stat th{background:#f0f0f0;font-weight:700}
 <div style="margin-bottom:10px;font-size:12.5pt">สังกัดโรงเรียนวัดเขียนเขต สำนักงานเขตพื้นที่การศึกษาประถมศึกษาปทุมธานี เขต 2</div>
 
 <div style="line-height:2.3;margin-bottom:8px;font-size:12.5pt">
-  ขออนุญาต${leaveLabel}: ${reasonClean}
+  ขออนุญาต{leaveLabel} เนื่องจาก{reasonClean}
 </div>
 
 <div style="display:flex;gap:4px;align-items:baseline;margin-bottom:8px;font-size:12.5pt;flex-wrap:wrap">
@@ -1214,7 +1214,7 @@ export default function LeavePage(){
         setUser(profile);
         if((data as any).signature_url)setSavedSignature((data as any).signature_url);
         const teacherRoles=["homeroom_teacher","subject_teacher","staff","teacher"];
-        const apvEmails=["phansa@khienkhet.ac.th","titima@khienkhet.ac.th"];
+        const apvEmails=["admin@khienkhet.ac.th","phansa@khienkhet.ac.th","titima@khienkhet.ac.th"];
         const [{data:apvByEmail},{data:director},{data:teachRes}]=await Promise.all([
           supabase.from("users").select("id,title,first_name,last_name,full_name,position,email").in("email",apvEmails),
           supabase.from("users").select("id,title,first_name,last_name,full_name,position,email").eq("role","director").maybeSingle(),
