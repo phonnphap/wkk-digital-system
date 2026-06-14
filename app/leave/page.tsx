@@ -96,7 +96,7 @@ table.stat th{background:#f0f0f0;font-weight:700}
 </style></head><body><div class="page">
 
 <div style="text-align:center;margin-bottom:7px">
-  <img src="/school_logo.png" style="width:70px;height:70px;object-fit:contain" onerror="this.style.display='none'"/>
+  <img src="/school-logo.png" style="width:70px;height:70px;object-fit:contain" onerror="this.style.display='none'"/>
 </div>
 <div style="font-size:16pt;font-weight:900;text-align:center;margin:5px 0">แบบใบลาป่วย ลากิจส่วนตัว ลาคลอดบุตร</div>
 <div style="text-align:right;line-height:1.9;font-size:12.5pt;margin-bottom:10px">
