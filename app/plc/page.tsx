@@ -351,7 +351,8 @@ function MeetingModal({
     }
   }, [startTime, endTime]);
 
-  // กรองผู้เข้าร่วมเฉพาะกลุ่มสาระเดียวกัน + ค้นหา
+  // 1. คำนวณรายชื่อครูในกลุ่มเดียวกันออกมาก่อน (เอาบล็อกนี้ไว้ด้านบน)
+  // 2. นำรายชื่อที่ได้จากด้านบน มาทำระบบค้นหาต่อ (เอาบล็อกนี้ไว้ด้านล่าง)
   const filtered = sameGroupTeachers.filter(t =>
     fullName(t).toLowerCase().includes(search.toLowerCase()) ||
     (t.position ?? "").toLowerCase().includes(search.toLowerCase())
