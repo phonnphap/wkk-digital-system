@@ -853,7 +853,69 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
               <h3 className="font-black text-slate-800 text-lg">📊 รายงานทั้งหมด</h3>
               <p className="text-slate-400 text-xs mt-0.5">ปีการศึกษา {yearName}</p>
             </div>
-            <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-lg">✕</button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  // เปิด print dialog พร้อม print-only style
+                  const printWindow = window.open("", "_blank", "width=900,height=700");
+                  if (!printWindow) return;
+                  const rows = filtered.map(m => {
+                    const pts = allTeachers.filter(t => m.participants?.includes(t.id));
+                    return `<tr>
+                      <td style="padding:6px 10px;border-bottom:1px solid #f0f0f0;text-align:center">${m.meeting_number ?? "—"}</td>
+                      <td style="padding:6px 10px;border-bottom:1px solid #f0f0f0;white-space:nowrap">${toThaiDate(m.meeting_date)}</td>
+                      <td style="padding:6px 10px;border-bottom:1px solid #f0f0f0"><b>${m.title}</b>${m.topic ? `<br><span style="color:#94a3b8;font-size:11px">${m.topic}</span>` : ""}</td>
+                      <td style="padding:6px 10px;border-bottom:1px solid #f0f0f0;text-align:center">${m.duration_hours}</td>
+                      <td style="padding:6px 10px;border-bottom:1px solid #f0f0f0;text-align:center">${m.status === "submitted" ? "✅ ส่งแล้ว" : "📝 ร่าง"}</td>
+                      <td style="padding:6px 10px;border-bottom:1px solid #f0f0f0;font-size:11px">${pts.map(t => fullName(t)).join(", ") || "—"}</td>
+                    </tr>`;
+                  }).join("");
+                  printWindow.document.write(`<!DOCTYPE html><html><head>
+                    <meta charset="utf-8">
+                    <title>รายงาน PLC ปีการศึกษา ${yearName}</title>
+                    <style>
+                      body{font-family:'Sarabun',sans-serif;padding:24px;color:#1e293b;font-size:13px}
+                      h1{font-size:18px;font-weight:700;margin:0 0 4px}
+                      p{color:#64748b;margin:0 0 16px;font-size:12px}
+                      .summary{display:flex;gap:16px;margin-bottom:20px}
+                      .chip{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 16px;text-align:center}
+                      .chip .val{font-size:22px;font-weight:700;color:#185fa5}
+                      .chip .lbl{font-size:11px;color:#94a3b8}
+                      table{width:100%;border-collapse:collapse}
+                      th{background:#f8fafc;padding:8px 10px;text-align:left;font-size:11px;color:#64748b;font-weight:700;border-bottom:2px solid #e2e8f0}
+                      tr:hover{background:#f8fafc}
+                      @media print{body{padding:12px}button{display:none}}
+                    </style>
+                  </head><body>
+                    <h1>📊 รายงานชั่วโมง PLC</h1>
+                    <p>ปีการศึกษา ${yearName} · พิมพ์เมื่อ ${new Date().toLocaleDateString("th-TH",{year:"numeric",month:"long",day:"numeric"})}</p>
+                    <div class="summary">
+                      <div class="chip"><div class="val">${totalHours}</div><div class="lbl">ชั่วโมงรวม</div></div>
+                      <div class="chip"><div class="val">${submitted}</div><div class="lbl">ส่งแล้ว</div></div>
+                      <div class="chip"><div class="val">${draft}</div><div class="lbl">ร่าง</div></div>
+                      <div class="chip"><div class="val">${filtered.length}</div><div class="lbl">รายการที่แสดง</div></div>
+                    </div>
+                    <table>
+                      <thead><tr>
+                        <th style="width:50px">ครั้งที่</th>
+                        <th style="width:100px">วันที่</th>
+                        <th>ชื่อ / หัวข้อ</th>
+                        <th style="width:50px;text-align:center">ชม.</th>
+                        <th style="width:80px;text-align:center">สถานะ</th>
+                        <th>ผู้เข้าร่วม</th>
+                      </tr></thead>
+                      <tbody>${rows}</tbody>
+                    </table>
+                    <script>window.onload=()=>{window.print()}<\/script>
+                  </body></html>`);
+                  printWindow.document.close();
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 border-indigo-200 bg-indigo-50 text-indigo-700 font-black text-xs hover:bg-indigo-100 transition-colors"
+              >
+                🖨️ พิมพ์ PDF
+              </button>
+              <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-lg">✕</button>
+            </div>
           </div>
 
           <div className="px-6 py-4 border-b border-slate-100 grid grid-cols-3 gap-3 shrink-0">
@@ -1241,20 +1303,24 @@ export default function PLCHoursPage() {
     <div className="min-h-screen bg-slate-50">
       {/* Top bar — ลบ select dropdown และปุ่มบันทึกออกจาก header ของหน้าครู */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3">
-        <div className="px-6 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <button onClick={() => router.push("/dashboard")}
-              className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors text-lg">🏠</button>
-            <div>
-              <h1 className="text-base font-black text-slate-800 leading-none">บันทึกชั่วโมง PLC</h1>
-              <p className="text-slate-400 text-xs">โรงเรียนวัดเขียนเขต{isTeacher ? ` · ${fullName(user)}` : ""}</p>
-            </div>
+        <div className="px-6 flex items-center gap-3">
+          <button onClick={() => router.push("/dashboard")}
+            className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors text-lg shrink-0">🏠</button>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-base font-black text-slate-800 leading-none">บันทึกชั่วโมง PLC</h1>
+            <p className="text-slate-400 text-xs truncate">
+              โรงเรียนวัดเขียนเขต
+              {isTeacher ? ` · ${fullName(user)}` : " · ผู้บริหาร"}
+              {academicYears.find(y => y.id === selectedYearId) ? ` · ปีการศึกษา ${academicYears.find(y => y.id === selectedYearId)!.name}` : ""}
+            </p>
           </div>
-          {/* ปีการศึกษา — แสดงทั้ง admin และ teacher แต่ไม่มีปุ่มอื่น */}
-          <select value={selectedYearId} onChange={e => setSelectedYearId(e.target.value)}
-            className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none focus:border-blue-400">
-            {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
-          </select>
+          {/* ย้าย year select มาไว้ใน top bar แต่ใช้ style เล็กลง — มองเห็นชัดกว่าปุ่มแปลกๆ */}
+          {academicYears.length > 1 && (
+            <select value={selectedYearId} onChange={e => setSelectedYearId(e.target.value)}
+              className="shrink-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-600 text-xs font-bold focus:outline-none focus:border-blue-400">
+              {academicYears.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}
+            </select>
+          )}
         </div>
       </div>
 
@@ -1383,7 +1449,7 @@ export default function PLCHoursPage() {
                           onAddMeeting={(key) => openAdd(key)}
                           onEdit={(m) => { setEditMeeting(m); setModalOpen(true); }}
                           onDelete={handleDelete}
-                          canEdit={true}
+                          canEdit={false}
                           isAdmin={true}
                         />
                       ))}
