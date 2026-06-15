@@ -1056,7 +1056,11 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
                  : slot === 2 ? r.approver_2_status
                  : slot === 3 ? r.approver_3_status
                  : null;
-  const canAct = canApprove && slot !== null && myStatus === "pending" && r.status === "pending";
+  const canAct = canApprove
+    && slot !== null          // email ตรงกับ approver slot
+    && r.status === "pending" // ใบลายัง pending
+    && myStatus !== "approved"
+    && myStatus !== "rejected";
 
   return (
     <div className="fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center p-4 overflow-auto">
@@ -1317,23 +1321,31 @@ const loadAll = useCallback(async () => {
   }
 
   async function handleApprove(id: string, slot: 1|2|3, action: "approved"|"rejected", reason?: string) {
-    const req = requests.find(r=>r.id===id)!;
-    const updates: any = {
-      [`approver_${slot}_status`]: action,
+  const req = requests.find(r => r.id === id)!;
+  const updates: any = {
+    [`approver_${slot}_status`]: action,
+    [`approver_${slot}_id`]: user.id,
     ...(reason ? { reject_reason: reason } : {})
   };
 
-    const newSlots = [
-      slot===1 ? action : req.approver_1_status,
-      slot===2 ? action : req.approver_2_status,
-      slot===3 ? action : req.approver_3_status,
-    ];
-    const filled = newSlots.filter((s,i) => [req.approver_1_id,req.approver_2_id,req.approver_3_id][i]);
-    if (action === "rejected") {
-      updates.status = "rejected";
-    } else if (filled.every(s => s === "approved")) {
+  const s1 = slot === 1 ? action : req.approver_1_status;
+  const s2 = slot === 2 ? action : req.approver_2_status;
+  const s3 = slot === 3 ? action : req.approver_3_status;
+
+  if (action === "rejected") {
+    updates.status = "rejected";
+  } else {
+    const hasSlot2 = req.approver_2_id || slot === 2;
+    const hasSlot3 = req.approver_3_id || slot === 3;
+    const allApproved =
+      s1 === "approved" &&
+      (!hasSlot2 || s2 === "approved") &&
+      (!hasSlot3 || s3 === "approved");
+
+    if (allApproved) {
       updates.status = "approved";
 
+      // ส่ง email แจ้งเตือน
       const r = requests.find(x => x.id === id)!;
       const typeCfg = LEAVE_TYPE_CONFIG[r.leave_type];
       const teacherName = fullName((r as any).user);
@@ -1367,21 +1379,16 @@ const loadAll = useCallback(async () => {
         }),
       }).catch(console.warn);
     }
-
-    await (supabase.from("leave_requests") as any).update(updates).eq("id",id);
-    setPendingApproveId(null);
-    await loadAll();
   }
 
-  /** หา slot ที่ user นี้ต้องอนุมัติ โดยใช้ email เป็นหลัก */
-  function mySlot(r: LeaveRequest): 1|2|3|null {
-    console.log("user.email:", user.email);
-    console.log("APPROVER_1_EMAIL:", APPROVER_1_EMAIL);
-    console.log("r.approver_1_id:", r.approver_1_id);
-    console.log("r.approver_2_id:", r.approver_2_id);
-    console.log("r.approver_3_id:", r.approver_3_id);
-    return approverSlotByEmail(user.email);
-  }
+  await (supabase.from("leave_requests") as any).update(updates).eq("id", id);
+  setPendingApproveId(null);
+  await loadAll();
+}
+
+function mySlot(r: LeaveRequest): 1|2|3|null {
+  return approverSlotByEmail(user.email);
+}
 
   const fyAll = requests.filter(r=>isInFiscalYear(r.start_date,filterFY)&&r.status!=="cancelled");
   const summaryByType = Object.fromEntries((Object.keys(LEAVE_TYPE_CONFIG) as LeaveType[]).map(t=>[t,{approved:fyAll.filter(r=>r.leave_type===t&&r.status==="approved").reduce((s,r)=>s+Number(r.days_count),0),pending:fyAll.filter(r=>r.leave_type===t&&r.status==="pending").length}])) as Record<LeaveType,{approved:number;pending:number}>;
