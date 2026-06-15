@@ -1056,13 +1056,13 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
 
   const canPrint = true; // admin dashboard เห็นทุกอย่าง พิมพ์ได้ทุกใบ
 
-  const loadAll = useCallback(async () => {
+const loadAll = useCallback(async () => {
   setLoading(true);
   const { data, error } = await supabase
     .from("leave_requests")
     .select(`
       *,
-      user:users(
+      user:users (
         title,
         first_name,
         last_name,
@@ -1072,7 +1072,7 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
         phone,
         signature_url
       )
-    `)
+    `) // 🟢 ปรับตรงนี้ให้เหลือแค่ user:users เพื่อให้ระเบียบการดึง Relationship ทำงานอัตโนมัติ
     .order("created_at", { ascending: false });
 
   if (error) {
