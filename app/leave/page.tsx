@@ -1375,6 +1375,11 @@ const loadAll = useCallback(async () => {
 
   /** หา slot ที่ user นี้ต้องอนุมัติ โดยใช้ email เป็นหลัก */
   function mySlot(r: LeaveRequest): 1|2|3|null {
+    console.log("user.email:", user.email);
+    console.log("APPROVER_1_EMAIL:", APPROVER_1_EMAIL);
+    console.log("r.approver_1_id:", r.approver_1_id);
+    console.log("r.approver_2_id:", r.approver_2_id);
+    console.log("r.approver_3_id:", r.approver_3_id);
     return approverSlotByEmail(user.email);
   }
 
