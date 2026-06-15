@@ -1271,40 +1271,41 @@ export default function LeavePage(){
   const [savedSignature, setSavedSignature] = useState("");
   const [loading,        setLoading]        = useState(true);
 
-  useEffect(()=>{
-    const init=async()=>{
-      const {data:{user:authUser}}=await supabase.auth.getUser();
-      if(!authUser){setLoading(false);return;}
-      const email=authUser.email||authUser.user_metadata?.email||"";
-      let data:any=null;
-      const {data:d1}=await supabase.from("users").select("id,title,first_name,last_name,email,role,position,signature_url,grade_level,phone").eq("auth_id",authUser.id).maybeSingle();
-      if(d1){data=d1;}else if(email){
-        const {data:d2}=await supabase.from("users").select("id,title,first_name,last_name,email,role,position,signature_url,grade_level,phone").eq("email",email).maybeSingle();
-        data=d2;
-        if(data)await (supabase.from("users") as any).update({auth_id:authUser.id}).eq("id",(data as any).id);
+  useEffect(() => {
+  const init = async () => {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) { setLoading(false); return; }
+
+    let { data } = await supabase.from("users")
+      .select("id, title, first_name, last_name, email, role, position, signature_url, grade_level, phone")
+      .eq("auth_id", authUser.id)
+      .maybeSingle();
+
+    if (!data) {
+      const email = authUser.email || authUser.user_metadata?.email || "";
+      if (email) {
+        const res = await supabase.from("users")
+          .select("id, title, first_name, last_name, email, role, position, signature_url, grade_level, phone")
+          .eq("email", email)
+          .maybeSingle();
+        data = res.data;
+        if (data) await supabase.from("users").update({ auth_id: authUser.id }).eq("id", data.id);
       }
-      if(data){
-        const profile:UserProfile={...(data as any),full_name:(data as any).full_name||`${(data as any).title??""} ${(data as any).first_name??""} ${(data as any).last_name??""}`.replace(/\s+/g," ").trim()};
-        setUser(profile);
-        if((data as any).signature_url)setSavedSignature((data as any).signature_url);
-        const teacherRoles=["homeroom_teacher","subject_teacher","staff","teacher"];
-        const apvEmails=["admin@khienkhet.ac.th","phansa@khienkhet.ac.th","titima@khienkhet.ac.th"];
-        const [{data:apvByEmail},{data:director},{data:teachRes}]=await Promise.all([
-          supabase.from("users").select("id,title,first_name,last_name,full_name,position,email").in("email",apvEmails),
-          supabase.from("users").select("id,title,first_name,last_name,full_name,position,email").eq("role","director").maybeSingle(),
-          teacherRoles.includes((data as any).role)?supabase.from("users").select("id,title,first_name,last_name,full_name,position,role,email,phone").in("role",teacherRoles):{data:[]},
-        ]);
-        const apvList:ApproverInfo[]=[
-          ...((apvByEmail||[]) as any[]).map((a:any)=>({...a,full_name:a.full_name||`${a.title??""} ${a.first_name??""} ${a.last_name??""}`.trim()})),
-          ...(director?[{...(director as any),full_name:(director as any).full_name||`${(director as any).title??""} ${(director as any).first_name??""} ${(director as any).last_name??""}`.trim()}]:[]),
-        ];
-        setApprovers(apvList.slice(0,3));
-        setAllTeachers(((teachRes||[]) as UserProfile[]));
-      }
-      setLoading(false);
-    };
-    init();
-  },[]);
+    }
+
+    if (data) {
+      const profile: UserProfile = {
+        ...data,
+        full_name: (data as any).full_name || `${data.title ?? ""} ${data.first_name ?? ""} ${data.last_name ?? ""}`.replace(/\s+/g, " ").trim(),
+      };
+      setUser(profile);
+      if (data.signature_url) setSavedSignature(data.signature_url);
+    }
+
+    setLoading(false);
+  };
+  init();
+}, []);
 
   if(loading)return<div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-blue-500 font-black text-lg animate-pulse">กำลังโหลดระบบ...</div></div>;
   if(!user)return<div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-red-500 font-black">❌ กรุณาเข้าสู่ระบบก่อน</div></div>;
