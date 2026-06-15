@@ -1036,6 +1036,135 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
   );
 }
 
+function LeaveViewModal({ r, user, onClose, onPrint }: {
+  r: any; user: UserProfile; onClose: () => void; onPrint: () => void;
+}) {
+  const typeCfg = LEAVE_TYPE_CONFIG[r.leave_type as LeaveType];
+  const c = COLORS[r.leave_type] ?? COLORS.other;
+
+  return (
+    <div className="fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center p-4 overflow-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+        {/* Header */}
+        <div className={`${c.bg} border-b ${c.border} px-6 py-4 flex items-center justify-between`}>
+          <div>
+            <p className={`font-black text-lg ${c.text}`}>{typeCfg?.icon} {typeCfg?.label}</p>
+            <p className="text-slate-500 text-sm">{fullName(r.user)}</p>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-xl bg-white/60 flex items-center justify-center text-slate-600 font-bold text-lg">✕</button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-3 text-sm">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-slate-50 rounded-xl p-3">
+              <p className="text-slate-400 text-xs font-bold mb-1">ผู้ลา</p>
+              <p className="font-black text-slate-800">{fullName(r.user)}</p>
+              <p className="text-slate-500 text-xs">{r.user?.position}</p>
+            </div>
+            <div className="bg-slate-50 rounded-xl p-3">
+              <p className="text-slate-400 text-xs font-bold mb-1">จำนวนวัน</p>
+              <p className={`font-black text-2xl ${c.text}`}>{r.days_count}</p>
+              <p className="text-slate-400 text-xs">วัน{r.half_day ? ` (ครึ่ง${r.half_day === "morning" ? "เช้า" : "บ่าย"})` : ""}</p>
+            </div>
+          </div>
+
+          <div className="bg-slate-50 rounded-xl p-3">
+            <p className="text-slate-400 text-xs font-bold mb-1">วันที่ลา</p>
+            <p className="font-bold text-slate-800">{toThaiDate(r.start_date)} – {toThaiDate(r.end_date)}</p>
+          </div>
+
+          <div className="bg-slate-50 rounded-xl p-3">
+            <p className="text-slate-400 text-xs font-bold mb-1">เหตุผล</p>
+            <p className="text-slate-700">{r.reason}</p>
+          </div>
+
+          {r.contact_info && (
+            <div className="bg-slate-50 rounded-xl p-3">
+              <p className="text-slate-400 text-xs font-bold mb-1">ติดต่อระหว่างลา</p>
+              <p className="font-bold text-slate-800">📞 {r.contact_info}</p>
+            </div>
+          )}
+
+          {/* เอกสารแนบ */}
+          {r.document_url && (
+            <div className="rounded-xl border-2 border-blue-200 overflow-hidden">
+              <div className="bg-blue-50 px-4 py-2 flex items-center justify-between">
+                <p className="text-blue-700 font-black text-xs">📎 เอกสารแนบ</p>
+                <a href={r.document_url} target="_blank" rel="noopener noreferrer"
+                  className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-1 bg-white rounded-lg border border-blue-200">
+                  เปิดไฟล์ ↗
+                </a>
+              </div>
+              {/* Preview ถ้าเป็นรูป */}
+              {/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(r.document_url) ? (
+                <img src={r.document_url} alt="แนบ" className="w-full max-h-48 object-contain bg-slate-100" />
+              ) : /\.pdf(\?|$)/i.test(r.document_url) ? (
+                <iframe src={r.document_url} title="เอกสาร" className="w-full h-48" />
+              ) : null}
+            </div>
+          )}
+
+          {/* Status approvers */}
+          <div className="flex gap-2">
+            {[r.approver_1_status, r.approver_2_status, r.approver_3_status].map((s, i) => {
+              if (![r.approver_1_id, r.approver_2_id, r.approver_3_id][i]) return null;
+              return (
+                <span key={i} className={`flex-1 py-2 rounded-xl text-xs font-black text-center border-2 ${
+                  s === "approved" ? "bg-green-100 border-green-300 text-green-700" :
+                  s === "rejected" ? "bg-red-100 border-red-300 text-red-700" :
+                  "bg-amber-100 border-amber-300 text-amber-700"
+                }`}>
+                  {i + 1}. {s === "approved" ? "✅ อนุมัติ" : s === "rejected" ? "❌ ไม่อนุมัติ" : "⏳ รอ"}
+                </span>
+              );
+            })}
+          </div>
+
+          <div><StatusBadge status={r.status} /></div>
+        </div>
+
+        <div className="px-6 pb-6 flex gap-2">
+          <button onClick={onPrint}
+            className="flex-1 py-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-700 font-black text-sm hover:bg-slate-50">
+            🖨️ พิมพ์
+          </button>
+          <button onClick={onClose}
+            className="flex-1 py-3 rounded-2xl bg-slate-800 text-white font-black text-sm">
+            ปิด
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RejectModal({ onConfirm, onClose }: {
+  onConfirm: (reason: string) => void; onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+        <h3 className="font-black text-slate-800 text-lg mb-2">❌ ระบุเหตุผลที่ไม่อนุมัติ</h3>
+        <textarea value={reason} onChange={e => setReason(e.target.value)} rows={4}
+          placeholder="กรุณาระบุเหตุผล..."
+          className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-medium resize-none focus:border-red-400 focus:outline-none mb-4" />
+        <div className="flex gap-2">
+          <button onClick={onClose}
+            className="flex-1 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">
+            ยกเลิก
+          </button>
+          <button onClick={() => { if (!reason.trim()) { alert("กรุณาระบุเหตุผล"); return; } onConfirm(reason); }}
+            className="flex-[2] py-3 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-sm">
+            ❌ ยืนยันไม่อนุมัติ
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════════
 // ── AdminDashboard ─────────────────────────────────────────
 //   ใช้สำหรับ: ผู้อนุมัติ (phansa/titima/thananut) + admin/hr
@@ -1053,6 +1182,9 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
   const [showApproverSigPad, setShowApproverSigPad] = useState(false);
   const [approverSigUrl,     setApproverSigUrl]     = useState(user.signature_url || "");
   const [pendingApproveId, setPendingApproveId] = useState<{id:string;slot:1|2|3;action:"approved"|"rejected"}|null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [viewModal, setViewModal] = useState<any | null>(null);
+  const [rejectModal, setRejectModal] = useState<{id:string; slot:1|2|3} | null>(null);
 
   const canPrint = true; // admin dashboard เห็นทุกอย่าง พิมพ์ได้ทุกใบ
 
@@ -1123,9 +1255,13 @@ const loadAll = useCallback(async () => {
     handleApprove(id, slot, action);
   }
 
-  async function handleApprove(id:string, slot:1|2|3, action:"approved"|"rejected") {
+  async function handleApprove(id: string, slot: 1|2|3, action: "approved"|"rejected", reason?: string) {
     const req = requests.find(r=>r.id===id)!;
-    const updates: any = { [`approver_${slot}_status`]: action };
+    const updates: any = {
+      [`approver_${slot}_status`]: action,
+    ...(reason ? { reject_reason: reason } : {})
+  };
+
     const newSlots = [
       slot===1 ? action : req.approver_1_status,
       slot===2 ? action : req.approver_2_status,
@@ -1207,21 +1343,35 @@ const loadAll = useCallback(async () => {
     : user.email===HR_EMAIL ? "📋 ฝ่ายบุคคล (HR)" : "🔧 ผู้ดูแลระบบ";
 
   return (
-    <div className="min-h-screen">
-      {/* SignaturePad modal — เฉพาะผู้อนุมัติ */}
-      {canApprove && showApproverSigPad && (
-        <SignaturePad
-          title="✍️ ลายเซ็นผู้อนุมัติ"
-          initialUrl={approverSigUrl}
-          onSave={async (d) => {
-            await saveApproverSignature(d);
-            if (pendingApproveId) {
-              handleApprove(pendingApproveId.id, pendingApproveId.slot, pendingApproveId.action);
-            }
-          }}
-          onClose={() => { setShowApproverSigPad(false); setPendingApproveId(null); }}
-        />
-      )}
+  <div className="min-h-screen">
+    {/* Modals */}
+    {viewModal && (
+      <LeaveViewModal
+        r={viewModal}
+        user={user}
+        onClose={() => setViewModal(null)}
+        onPrint={() => printLeave(
+          { fullName: fullName(viewModal.user), position: viewModal.user?.position,
+            leaveType: viewModal.leave_type,
+            leaveTypeName: LEAVE_TYPE_CONFIG[viewModal.leave_type as LeaveType]?.label ?? "",
+            otherLeaveName: viewModal.other_leave_name,
+            startDate: viewModal.start_date, endDate: viewModal.end_date,
+            days: viewModal.days_count, halfDay: viewModal.half_day,
+            reason: viewModal.reason, phone: viewModal.user?.phone,
+            contactInfo: viewModal.contact_info },
+          viewModal.user?.signature_url || ""
+        )}
+      />
+    )}
+    {rejectModal && (
+      <RejectModal
+        onConfirm={(reason) => {
+          handleApprove(rejectModal.id, rejectModal.slot, "rejected", reason);
+          setRejectModal(null);
+        }}
+        onClose={() => setRejectModal(null)}
+      />
+    )}
 
       {/* Header */}
       <div className="bg-gradient-to-br from-indigo-500 to-purple-600 px-6 py-8 text-white flex items-center justify-between flex-wrap gap-4">
@@ -1344,6 +1494,11 @@ const loadAll = useCallback(async () => {
                           📎 ดูเอกสารแนบ
                         </a>
                       )}
+                      <button onClick={() => setViewModal(r)}
+                        className="w-full py-2.5 mt-3 rounded-xl border-2 border-blue-200 bg-blue-50 text-blue-700 font-black text-sm hover:bg-blue-100">
+                        👁️ ดูใบลาและเอกสารแนบ
+                      </button>
+
                       {/* แสดง slot badges */}
                       <div className="flex gap-2 mt-3">
                         {[r.approver_1_status,r.approver_2_status,r.approver_3_status].map((s,i)=>{
@@ -1353,19 +1508,18 @@ const loadAll = useCallback(async () => {
                       </div>
                       {/* ปุ่มอนุมัติ — เฉพาะผู้อนุมัติที่มีลายเซ็นแล้ว */}
                       {canAct && (
-                        <div className="flex gap-2 mt-4">
-                          {!approverSigUrl ? (
-                            <div className="flex-1 py-2.5 rounded-xl bg-amber-100 text-amber-700 font-black text-sm text-center">
-                              ⚠️ เพิ่มลายเซ็นก่อน แล้วค่อยอนุมัติ
-                            </div>
-                          ) : (
-                            <>
-                              <button onClick={()=>tryApprove(r.id, slot!, "approved")} className="flex-1 py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-black text-sm">✅ อนุมัติ</button>
-                              <button onClick={()=>tryApprove(r.id, slot!, "rejected")} className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-sm">❌ ไม่อนุมัติ</button>
-                            </>
-                          )}
+                        <div className="flex gap-2 mt-2">
+                          <button onClick={() => tryApprove(r.id, slot!, "approved")}
+                            className="flex-1 py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-black text-sm">
+                            ✅ อนุมัติ
+                          </button>
+                          <button onClick={() => setRejectModal({ id: r.id, slot: slot! })}
+                            className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-sm">
+                            ❌ ไม่อนุมัติ
+                          </button>
                         </div>
                       )}
+
                       {canApprove && slot && myStatus && myStatus!=="pending" && (
                         <div className={`mt-3 text-center text-sm font-black py-2 rounded-xl ${myStatus==="approved"?"bg-green-100 text-green-700":"bg-red-100 text-red-700"}`}>
                           {myStatus==="approved"?"✅ คุณอนุมัติแล้ว":"❌ คุณไม่อนุมัติ"}
@@ -1405,6 +1559,10 @@ const loadAll = useCallback(async () => {
                           {(r as any).document_url&&(
                             <a href={(r as any).document_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-1 text-xs font-bold text-blue-500 hover:text-blue-700">📎 เอกสารแนบ</a>
                           )}
+                          <button onClick={() => setViewModal(r)}
+                            className="text-xs font-bold text-blue-600 px-2 py-1 rounded-lg border border-blue-200 hover:bg-blue-50">
+                            👁️ ดู
+                          </button>
                         </div>
                         <div className="flex flex-col items-end gap-2">
                           <StatusBadge status={r.status}/>
