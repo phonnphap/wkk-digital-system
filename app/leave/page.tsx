@@ -1036,11 +1036,27 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
   );
 }
 
-function LeaveViewModal({ r, user, onClose, onPrint }: {
-  r: any; user: UserProfile; onClose: () => void; onPrint: () => void;
+function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose, onPrint, onApprove, onReject }: {
+  r: any;
+  user: UserProfile;
+  canApprove: boolean;
+  approverSigUrl: string;
+  mySlotFn: (r: any) => 1|2|3|null;
+  onClose: () => void;
+  onPrint: () => void;
+  onApprove: (id: string, slot: 1|2|3) => void;
+  onReject: (id: string, slot: 1|2|3) => void;
 }) {
   const typeCfg = LEAVE_TYPE_CONFIG[r.leave_type as LeaveType];
   const c = COLORS[r.leave_type] ?? COLORS.other;
+
+  // คำนวณ slot และ canAct ภายใน modal
+  const slot = mySlotFn(r);
+  const myStatus = slot === 1 ? r.approver_1_status
+                 : slot === 2 ? r.approver_2_status
+                 : slot === 3 ? r.approver_3_status
+                 : null;
+  const canAct = canApprove && slot !== null && myStatus === "pending" && r.status === "pending";
 
   return (
     <div className="fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center p-4 overflow-auto">
@@ -1055,7 +1071,7 @@ function LeaveViewModal({ r, user, onClose, onPrint }: {
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-3 text-sm">
+        <div className="p-6 space-y-3 text-sm max-h-[65vh] overflow-y-auto">
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-slate-50 rounded-xl p-3">
               <p className="text-slate-400 text-xs font-bold mb-1">ผู้ลา</p>
@@ -1065,7 +1081,9 @@ function LeaveViewModal({ r, user, onClose, onPrint }: {
             <div className="bg-slate-50 rounded-xl p-3">
               <p className="text-slate-400 text-xs font-bold mb-1">จำนวนวัน</p>
               <p className={`font-black text-2xl ${c.text}`}>{r.days_count}</p>
-              <p className="text-slate-400 text-xs">วัน{r.half_day ? ` (ครึ่ง${r.half_day === "morning" ? "เช้า" : "บ่าย"})` : ""}</p>
+              <p className="text-slate-400 text-xs">
+                วัน{r.half_day ? ` (ครึ่ง${r.half_day === "morning" ? "เช้า" : "บ่าย"})` : ""}
+              </p>
             </div>
           </div>
 
@@ -1096,16 +1114,19 @@ function LeaveViewModal({ r, user, onClose, onPrint }: {
                   เปิดไฟล์ ↗
                 </a>
               </div>
-              {/* Preview ถ้าเป็นรูป */}
               {/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(r.document_url) ? (
                 <img src={r.document_url} alt="แนบ" className="w-full max-h-48 object-contain bg-slate-100" />
               ) : /\.pdf(\?|$)/i.test(r.document_url) ? (
                 <iframe src={r.document_url} title="เอกสาร" className="w-full h-48" />
-              ) : null}
+              ) : (
+                <div className="bg-slate-50 px-4 py-3 text-center text-sm text-slate-500">
+                  ไม่สามารถแสดงตัวอย่างได้ กรุณากดเปิดไฟล์
+                </div>
+              )}
             </div>
           )}
 
-          {/* Status approvers */}
+          {/* Approver status badges */}
           <div className="flex gap-2">
             {[r.approver_1_status, r.approver_2_status, r.approver_3_status].map((s, i) => {
               if (![r.approver_1_id, r.approver_2_id, r.approver_3_id][i]) return null;
@@ -1122,9 +1143,49 @@ function LeaveViewModal({ r, user, onClose, onPrint }: {
           </div>
 
           <div><StatusBadge status={r.status} /></div>
+
+          {/* ── ปุ่มอนุมัติ/ไม่อนุมัติ ── แสดงเฉพาะผู้มีสิทธิ์ */}
+          {canApprove && (
+            <div className="pt-2">
+              {!approverSigUrl ? (
+                <div className="bg-amber-50 border-2 border-amber-300 rounded-xl px-4 py-3 text-center">
+                  <p className="text-amber-700 font-black text-sm">⚠️ กรุณาเพิ่มลายเซ็นก่อนอนุมัติ</p>
+                  <p className="text-amber-600 text-xs mt-1">ปิด modal นี้แล้วกดปุ่มลายเซ็นที่ header</p>
+                </div>
+              ) : canAct ? (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { onApprove(r.id, slot!); onClose(); }}
+                    className="flex-1 py-3.5 rounded-2xl bg-green-500 hover:bg-green-600 text-white font-black text-base shadow-lg">
+                    ✅ อนุมัติ
+                  </button>
+                  <button
+                    onClick={() => { onReject(r.id, slot!); onClose(); }}
+                    className="flex-1 py-3.5 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-black text-base shadow-lg">
+                    ❌ ไม่อนุมัติ
+                  </button>
+                </div>
+              ) : myStatus && myStatus !== "pending" ? (
+                <div className={`text-center py-3 rounded-2xl font-black text-base ${
+                  myStatus === "approved" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                }`}>
+                  {myStatus === "approved" ? "✅ คุณอนุมัติรายการนี้แล้ว" : "❌ คุณไม่อนุมัติรายการนี้แล้ว"}
+                </div>
+              ) : r.status !== "pending" ? (
+                <div className="text-center py-3 rounded-2xl bg-slate-100 text-slate-500 font-bold text-sm">
+                  รายการนี้ {r.status === "approved" ? "อนุมัติแล้ว" : r.status === "rejected" ? "ถูกปฏิเสธแล้ว" : "ไม่อยู่ในสถานะรออนุมัติ"}
+                </div>
+              ) : (
+                <div className="text-center py-3 rounded-2xl bg-slate-100 text-slate-500 font-bold text-sm">
+                  ไม่ใช่ลำดับการอนุมัติของคุณ
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        <div className="px-6 pb-6 flex gap-2">
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-slate-100 flex gap-2">
           <button onClick={onPrint}
             className="flex-1 py-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-700 font-black text-sm hover:bg-slate-50">
             🖨️ พิมพ์
@@ -1349,18 +1410,27 @@ const loadAll = useCallback(async () => {
       <LeaveViewModal
         r={viewModal}
         user={user}
+        canApprove={canApprove}           
+        approverSigUrl={approverSigUrl}   
+        mySlotFn={mySlot}                 
         onClose={() => setViewModal(null)}
         onPrint={() => printLeave(
-          { fullName: fullName(viewModal.user), position: viewModal.user?.position,
+          { fullName: fullName(viewModal.user),
+            position: viewModal.user?.position,
             leaveType: viewModal.leave_type,
             leaveTypeName: LEAVE_TYPE_CONFIG[viewModal.leave_type as LeaveType]?.label ?? "",
             otherLeaveName: viewModal.other_leave_name,
-            startDate: viewModal.start_date, endDate: viewModal.end_date,
-            days: viewModal.days_count, halfDay: viewModal.half_day,
-            reason: viewModal.reason, phone: viewModal.user?.phone,
+            startDate: viewModal.start_date,
+            endDate: viewModal.end_date,
+            days: viewModal.days_count,
+            halfDay: viewModal.half_day,
+            reason: viewModal.reason,
+            phone: viewModal.user?.phone,
             contactInfo: viewModal.contact_info },
           viewModal.user?.signature_url || ""
         )}
+        onApprove={(id, slot) => tryApprove(id, slot, "approved")}   
+        onReject={(id, slot) => setRejectModal({ id, slot })}        
       />
     )}
     {rejectModal && (
@@ -1494,9 +1564,10 @@ const loadAll = useCallback(async () => {
                           📎 ดูเอกสารแนบ
                         </a>
                       )}
-                      <button onClick={() => setViewModal(r)}
-                        className="w-full py-2.5 mt-3 rounded-xl border-2 border-blue-200 bg-blue-50 text-blue-700 font-black text-sm hover:bg-blue-100">
-                        👁️ ดูใบลาและเอกสารแนบ
+                      <button
+                        onClick={() => setViewModal(r)}
+                        className="w-full mt-3 py-2.5 rounded-xl border-2 border-blue-200 bg-blue-50 text-blue-700 font-black text-sm hover:bg-blue-100 flex items-center justify-center gap-2">
+                        👁️ ดูใบลาและเอกสารแนบ / อนุมัติ
                       </button>
 
                       {/* แสดง slot badges */}
