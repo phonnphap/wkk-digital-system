@@ -1,3 +1,4 @@
+//ลาใหม่
 "use client";
 export const dynamic = 'force-dynamic';
 
@@ -13,8 +14,11 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 
 const supabase = createClient();
 const HR_EMAIL = "hr@khienkhet.ac.th";
+const ADMIN_EMAIL = "admin@khienkhet.ac.th";
 const PRINT_ROLES = ["admin","director","deputy_director","dept_head"];
 const ADMIN_ROLES = ["admin","director","deputy_director","dept_head","grade_head"];
+// อีเมลที่มีสิทธิ์ดูข้อมูลทั้งหมด (แอดมินพิเศษ)
+const SUPER_ADMIN_EMAILS = [ADMIN_EMAIL, HR_EMAIL];
 
 // ─── helpers ──────────────────────────────────────────────
 function toThaiDate(iso: string) {
@@ -36,6 +40,16 @@ function getEvalRound(d: string): "1"|"2" { const m=new Date(d).getMonth()+1; re
 function isPersonalTooSoon(startDate: string): boolean {
   if (!startDate) return false;
   return (new Date(startDate).getTime()-Date.now())/86400000 < 3;
+}
+// [NEW] ลาป่วยเลือกล่วงหน้าได้แค่ 1 วัน
+function isSickTooFarAhead(startDate: string): boolean {
+  if (!startDate) return false;
+  const diff = (new Date(startDate).getTime() - Date.now()) / 86400000;
+  return diff > 1;
+}
+// [NEW] ตรวจสอบว่า user เป็น super admin
+function isSuperAdmin(email: string): boolean {
+  return SUPER_ADMIN_EMAILS.includes(email);
 }
 
 // ─── Types ────────────────────────────────────────────────
@@ -68,7 +82,7 @@ const sel = (err?: boolean) => `w-full bg-white border-2 ${err?"border-red-400":
 // ══════════════════════════════════════════════════════════
 // ── PDF Builder ────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════
-function buildLeaveHTML(data: any, signatureUrl: string): string {
+function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: { name: string; position: string; signature_url?: string }[]): string {
   const now = new Date();
   const thDay   = now.getDate();
   const thMonth = now.toLocaleDateString("th-TH",{ month:"long", timeZone:"Asia/Bangkok" });
@@ -80,6 +94,11 @@ function buildLeaveHTML(data: any, signatureUrl: string): string {
   const halfText    = data.halfDay==="morning"?" (ครึ่งวันเช้า)":data.halfDay==="afternoon"?" (ครึ่งวันบ่าย)":"";
   const leaveLabel  = data.leaveType==="other"&&data.otherLeaveName?data.otherLeaveName:data.leaveTypeName;
   const reasonClean = (data.reason||"").replace(/\[.+?\]/g,"").trim();
+
+  // [NEW] สร้าง HTML ลายเซ็นผู้อนุมัติ
+  const approver1 = approverSignatures?.[0];
+  const approver2 = approverSignatures?.[1];
+  const approver3 = approverSignatures?.[2];
 
   return `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700;900&display=swap" rel="stylesheet">
@@ -181,22 +200,22 @@ table.stat th{background:#f0f0f0;font-weight:700}
     <div class="box" style="margin-bottom:10px;font-size:11.5pt;line-height:1.9">
       <div style="font-weight:700;margin-bottom:5px">ความเห็นของรอง.ผอ.กลุ่มบริหารงานบุคคล</div>
       <div class="dotline" style="height:20px;margin:4px 0"></div>
-      <div class="dotline" style="height:20px;margin:4px 0"></div>
       <div style="text-align:center;margin-top:8px">
+        ${approver1?.signature_url ? `<div style="height:50px;display:flex;align-items:flex-end;justify-content:center"><img src="${approver1.signature_url}" style="max-height:50px;max-width:140px;object-fit:contain"/></div>` : `<div style="height:50px"></div>`}
         ลงชื่อ...........................................<br>
-        (นางสาวฐิติมา กาบแก้ว)<br>
-        รองผู้อำนวยการกลุ่มบริหารงานบุคคล
+        (${approver1?.name || "นางสาวฐิติมา กาบแก้ว"})<br>
+        ${approver1?.position || "รองผู้อำนวยการกลุ่มบริหารงานบุคคล"}
       </div>
     </div>
     <div class="box" style="font-size:11.5pt;line-height:1.9">
       <div style="font-weight:700;margin-bottom:4px">ความเห็นของผู้บังคับบัญชา</div>
       <div style="margin-bottom:6px"><span class="chk"></span>อนุญาต &nbsp;&nbsp;&nbsp; <span class="chk"></span>ไม่อนุญาต</div>
       <div class="dotline" style="height:20px;margin:4px 0"></div>
-      <div class="dotline" style="height:20px;margin:4px 0"></div>
       <div style="text-align:center;margin-top:8px">
+        ${approver3?.signature_url ? `<div style="height:50px;display:flex;align-items:flex-end;justify-content:center"><img src="${approver3.signature_url}" style="max-height:50px;max-width:140px;object-fit:contain"/></div>` : `<div style="height:50px"></div>`}
         ลงชื่อ...........................................<br>
-        (นายธนณัฐ ศิระวงษ์)<br>
-        ผู้อำนวยการโรงเรียนวัดเขียนเขต<br>
+        (${approver3?.name || "นายธนณัฐ ศิระวงษ์"})<br>
+        ${approver3?.position || "ผู้อำนวยการโรงเรียนวัดเขียนเขต"}<br>
         วันที่...............................
       </div>
     </div>
@@ -206,8 +225,8 @@ table.stat th{background:#f0f0f0;font-weight:700}
 </div></body></html>`;
 }
 
-function printLeave(data: any, signatureUrl: string) {
-  const html = buildLeaveHTML(data, signatureUrl);
+function printLeave(data: any, signatureUrl: string, approverSignatures?: any[]) {
+  const html = buildLeaveHTML(data, signatureUrl, approverSignatures);
   const win = window.open("","_blank","width=900,height=700");
   if (!win) return;
   win.document.open(); win.document.write(html); win.document.close();
@@ -215,9 +234,9 @@ function printLeave(data: any, signatureUrl: string) {
 }
 
 // ══════════════════════════════════════════════════════════
-// ── SignaturePad ───────────────────────────────────────────
+// ── SignaturePad (ใช้ทั้งครูและผู้อนุมัติ) ─────────────────
 // ══════════════════════════════════════════════════════════
-function SignaturePad({ initialUrl, onSave, onClose }: { initialUrl:string; onSave:(d:string)=>void; onClose:()=>void }) {
+function SignaturePad({ initialUrl, onSave, onClose, title = "✍️ ลายเซ็น" }: { initialUrl:string; onSave:(d:string)=>void; onClose:()=>void; title?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileRef   = useRef<HTMLInputElement>(null);
   const [drawing, setDrawing] = useState(false);
@@ -250,7 +269,7 @@ function SignaturePad({ initialUrl, onSave, onClose }: { initialUrl:string; onSa
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div><h3 className="font-black text-slate-800">✍️ ลายเซ็น</h3><p className="text-xs text-slate-400">วาดเอง หรือแนบไฟล์ PNG พื้นหลังโปร่งใส</p></div>
+          <div><h3 className="font-black text-slate-800">{title}</h3><p className="text-xs text-slate-400">วาดเอง หรือแนบไฟล์ PNG พื้นหลังโปร่งใส</p></div>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 text-lg font-bold">✕</button>
         </div>
         <div className="flex border-b border-slate-100">
@@ -344,12 +363,12 @@ function LeavePDFPreview({ data, signatureUrl, onConfirm, onCancel, onUpdateSign
 function StatusBadge({status}:{status:LeaveStatus}){
   const cfg=LEAVE_STATUS_CONFIG[status];
   const cls: Record<LeaveStatus, string> = {
-  draft: "bg-gray-100 text-gray-600 border-gray-300", // 🌟 เพิ่มสีสำหรับสถานะฉบับร่าง (ตัวอย่างสีเทา)
-  pending: "bg-amber-100 text-amber-700 border-amber-300",
-  approved: "bg-green-100 text-green-700 border-green-300",
-  rejected: "bg-red-100 text-red-700 border-red-300",
-  cancelled: "bg-slate-100 text-slate-600 border-slate-300"
-};
+    draft: "bg-gray-100 text-gray-600 border-gray-300",
+    pending: "bg-amber-100 text-amber-700 border-amber-300",
+    approved: "bg-green-100 text-green-700 border-green-300",
+    rejected: "bg-red-100 text-red-700 border-red-300",
+    cancelled: "bg-slate-100 text-slate-600 border-slate-300"
+  };
   return <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-black border ${cls[status]}`}>{cfg.icon} {cfg.label}</span>;
 }
 
@@ -404,9 +423,18 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
   const rawDays = startDate&&endDate ? daysBetween(startDate,endDate) : 0;
   const days    = rawDays===1&&halfDay ? 0.5 : rawDays;
   const tooSoon = leaveType==="personal" && startDate && isPersonalTooSoon(startDate);
+  // [NEW] ลาป่วยเลือกล่วงหน้าได้แค่ 1 วัน
+  const sickTooFarAhead = leaveType==="sick" && startDate && isSickTooFarAhead(startDate);
   const typeColor = COLORS[leaveType]??COLORS.other;
   const isEdit = !!editData?.id;
   
+  // [NEW] วันสูงสุดที่เลือกได้สำหรับลาป่วย (วันพรุ่งนี้)
+  const sickMaxDate = leaveType==="sick" ? (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split("T")[0];
+  })() : undefined;
+
   useEffect(()=>{
     if(!startDate){setDutyOfficer(null);setIsOwnDuty(false);return;}
     (async()=>{
@@ -424,6 +452,14 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
     })();
   },[startDate,user.id]);
 
+  // [NEW] เมื่อเปลี่ยนประเภทเป็นลาป่วย ให้ reset วันที่ถ้าเกินกว่าพรุ่งนี้
+  useEffect(()=>{
+    if(leaveType==="sick" && sickMaxDate){
+      if(startDate > sickMaxDate) setStartDate("");
+      if(endDate > sickMaxDate) setEndDate("");
+    }
+  },[leaveType]);
+
   const PERIODS=["1","2","3","4","5","6","7","8"];
   const togglePeriod=(p:string)=>setMissedPeriods(prev=>prev.includes(p)?prev.filter(x=>x!==p):[...prev,p]);
   const touch=(f:string)=>setTouched(t=>({...t,[f]:true}));
@@ -437,25 +473,25 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
     tripDest:  touched.tripDest&&leaveType==="official"&&!tripDest,
     contactInfo: touched.contactInfo&&!contactInfo,
   };
-  const canSubmit = startDate&&endDate&&reason&&contactInfo&&(!tooSoon)&&(leaveType!=="other"||otherName)&&(leaveType!=="official"||tripDest);
+  const canSubmit = startDate&&endDate&&reason&&contactInfo&&(!tooSoon)&&(!sickTooFarAhead)&&(leaveType!=="other"||otherName)&&(leaveType!=="official"||tripDest);
 
   async function handleSubmit(isDraft=false){
     setTouched({startDate:true,endDate:true,reason:true,otherName:true,tripDest:true,contactInfo:true});
     if(!isDraft&&!canSubmit){alert("กรุณากรอกข้อมูลให้ครบ");return;}
     if(!isDraft&&tooSoon){alert("ลากิจต้องยื่นล่วงหน้าอย่างน้อย 3 วัน");return;}
+    if(!isDraft&&sickTooFarAhead){alert("ลาป่วยสามารถยื่นล่วงหน้าได้ไม่เกิน 1 วัน");return;}
 
-  // แทนที่ส่วน upload เดิม
-  let docUrl: string | null = null;
-  if (docFile) {
-    const formData = new FormData();
-    formData.append("file", docFile);
-    const year = new Date().getFullYear() + 543;
-    formData.append("path", `WKK_Leave_System/${year}/${Date.now()}_${docFile.name}`);
-  
-    const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
-    const { webUrl, downloadUrl } = await res.json();
-    docUrl = downloadUrl || webUrl || null;
-  }
+    let docUrl: string | null = null;
+    if (docFile) {
+      const formData = new FormData();
+      formData.append("file", docFile);
+      const year = new Date().getFullYear() + 543;
+      formData.append("path", `WKK_Leave_System/${year}/${Date.now()}_${docFile.name}`);
+    
+      const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+      const { webUrl, downloadUrl } = await res.json();
+      docUrl = downloadUrl || webUrl || null;
+    }
 
     const reasonFull = leaveType==="official"
       ?`[ปลายทาง: ${tripDest}] [พาหนะ: ${vehicle==="school"?"รถโรงเรียน":"รถส่วนตัว"}] [ผู้ร่วมเดินทาง: ${companions||"-"}] ${reason}`
@@ -537,6 +573,13 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
               {errors.otherName&&<p className="text-red-500 text-xs mt-1">กรุณาระบุประเภทการลา</p>}
             </div>
           )}
+          {/* [NEW] แจ้งเตือนลาป่วยล่วงหน้าไม่ได้ */}
+          {leaveType==="sick"&&(
+            <div className="mt-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 flex items-center gap-2">
+              <span className="text-blue-500">ℹ️</span>
+              <p className="text-blue-700 text-xs font-bold">ลาป่วยสามารถยื่นได้วันนี้หรือล่วงหน้าได้ไม่เกิน 1 วัน</p>
+            </div>
+          )}
         </div>
 
         {/* วันที่ */}
@@ -545,6 +588,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
             <div>
               <label className="block text-sm font-bold text-slate-600 mb-1">วันที่เริ่มลา <span className="text-red-500">*</span></label>
               <input type="date" value={startDate} onBlur={()=>touch("startDate")}
+                max={leaveType==="sick" ? sickMaxDate : undefined}
                 onChange={e=>{setStartDate(e.target.value);if(!endDate||e.target.value>endDate)setEndDate(e.target.value);}}
                 className={inp(errors.startDate)}/>
               {errors.startDate&&<p className="text-red-500 text-xs mt-1">กรุณาเลือกวันที่</p>}
@@ -552,14 +596,16 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
             </div>
             <div>
               <label className="block text-sm font-bold text-slate-600 mb-1">วันที่สิ้นสุด <span className="text-red-500">*</span></label>
-              <input type="date" value={endDate} min={startDate} onBlur={()=>touch("endDate")}
+              <input type="date" value={endDate} min={startDate}
+                max={leaveType==="sick" ? sickMaxDate : undefined}
+                onBlur={()=>touch("endDate")}
                 onChange={e=>setEndDate(e.target.value)} className={inp(errors.endDate)}/>
               {errors.endDate&&<p className="text-red-500 text-xs mt-1">กรุณาเลือกวันที่</p>}
               {endDate&&<p className="text-xs text-blue-600 mt-1 font-medium">{toThaiDateLong(endDate)}</p>}
             </div>
           </div>
 
-          {/* ครึ่งวัน — ไม่แสดงสำหรับลาบวช */}
+          {/* ครึ่งวัน */}
           {rawDays===1&&leaveType!=="ordination"&&(
             <div>
               <label className="block text-sm font-bold text-slate-600 mb-2">ครึ่งวัน</label>
@@ -578,7 +624,8 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
             <div className={`rounded-xl px-4 py-3 flex items-center gap-3 border-2 ${typeColor.bg} ${typeColor.border}`}>
               <span className="text-3xl font-black text-slate-800">{days}</span>
               <span className={`font-bold ${typeColor.text}`}>วัน{rawDays===1&&halfDay?" (ครึ่งวัน)":""}</span>
-              {tooSoon&&<span className="text-red-600 text-xs font-black bg-red-50 border border-red-300 px-2 py-1 rounded-lg">⚠️ ลากิจต้องยื่นล่วงหน้า 3 วัน — ไม่สามารถส่งได้</span>}
+              {tooSoon&&<span className="text-red-600 text-xs font-black bg-red-50 border border-red-300 px-2 py-1 rounded-lg">⚠️ ลากิจต้องยื่นล่วงหน้า 3 วัน</span>}
+              {sickTooFarAhead&&<span className="text-red-600 text-xs font-black bg-red-50 border border-red-300 px-2 py-1 rounded-lg">⚠️ ลาป่วยล่วงหน้าได้ไม่เกิน 1 วัน</span>}
             </div>
           )}
 
@@ -599,7 +646,6 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
             {errors.reason&&<p className="text-red-500 text-xs mt-1">กรุณากรอกเหตุผล</p>}
           </div>
 
-          {/* ช่องติดต่อ */}
           <div>
             <label className="block text-sm font-bold text-slate-600 mb-1">ที่อยู่/เบอร์โทรที่ติดต่อได้ระหว่างลา <span className="text-red-500">*</span></label>
             <input type="text" value={contactInfo} onChange={e=>setContactInfo(e.target.value)} onBlur={()=>touch("contactInfo")}
@@ -607,14 +653,13 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
             {errors.contactInfo&&<p className="text-red-500 text-xs mt-1">กรุณากรอกข้อมูลติดต่อ</p>}
           </div>
 
-          {/* แนบใบรับรองแพทย์ */}
           <div>
             <label className="block text-sm font-bold text-slate-600 mb-1">แนบใบรับรองแพทย์ / เอกสาร {leaveType==="sick"&&<span className="text-amber-500">(แนะนำ)</span>}</label>
             <div onClick={()=>fileRef.current?.click()} className="border-2 border-dashed border-blue-200 hover:border-blue-400 rounded-xl px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-blue-50 transition-colors">
               <span className="text-2xl">📎</span>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-slate-600 truncate">{docFile?docFile.name:"คลิกเพื่อแนบไฟล์"}</p>
-                <p className="text-xs text-slate-400">รองรับ PDF, JPG, PNG (ไม่เกิน 10MB)</p>
+                <p className="text-xs text-slate-400">รองรับ PDF, JPG, PNG (ไม่เกิน 10MB) · บันทึกใน OneDrive</p>
               </div>
               {docFile&&<button type="button" onClick={e=>{e.stopPropagation();setDocFile(null);}} className="w-6 h-6 rounded-full bg-red-100 text-red-500 text-xs flex items-center justify-center font-black">✕</button>}
             </div>
@@ -679,7 +724,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
           <div>
             <label className="block text-sm font-bold text-slate-600 mb-2">คาบสอนที่จะขาด</label>
             <div className="flex flex-wrap gap-2">
-              {PERIODS.map(p=>(
+              {["1","2","3","4","5","6","7","8"].map(p=>(
                 <button key={p} type="button" onClick={()=>togglePeriod(p)}
                   className={`w-12 h-12 rounded-xl font-black text-sm border-2 transition-all ${missedPeriods.includes(p)?"bg-blue-500 border-blue-500 text-white":"bg-white border-blue-100 text-slate-600 hover:bg-blue-50"}`}>{p}</button>
               ))}
@@ -841,7 +886,7 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
           </select>
         </div>
 
-        {/* Quota cards — แสดง used/quota */}
+        {/* Quota cards */}
         <div className="flex gap-3 overflow-x-auto pb-2">
           {(Object.entries(LEAVE_TYPE_CONFIG) as [LeaveType,any][]).map(([type,cfg])=>{
             const used=usedByType[type]??0;
@@ -881,7 +926,6 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
           </div>
         ):null}
 
-        {/* หมายเหตุ — สีแดง ตัวใหญ่ */}
         <div className="bg-red-50 border-2 border-red-200 rounded-xl px-4 py-3">
           <p className="text-red-600 text-base font-black">
             ⚠️ หมายเหตุ: ในรอบครึ่งปี (1 รอบการประเมิน) หากลากิจ + ลาป่วย รวมกันเกิน 6 ครั้ง หรือเกิน 23 วัน ส่งผลต่อการพิจารณาเลื่อนเงินเดือน
@@ -914,18 +958,15 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
                         <span className="text-slate-700 font-bold text-sm">{toThaiDate(r.start_date)}{r.start_date!==r.end_date&&` – ${toThaiDate(r.end_date)}`}</span>
                         <span className="text-slate-400 text-xs line-clamp-1">{r.reason}</span>
                         <div className="flex gap-1 mt-1 flex-wrap">
-                          {/* ปุ่มดูใบลา */}
                           <button onClick={()=>setViewId(r.id)} className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg hover:bg-blue-50 border border-blue-200">
                             👁️ ดูใบลา
                           </button>
-                          {/* ปุ่มปริ้นท์ — ถ้าอนุมัติแล้ว หรือเป็น canPrint */}
                           {(isApproved||canPrint)&&(
                             <button onClick={()=>printLeave({fullName:fullName(user),position:user.position??user.role,leaveType:r.leave_type,leaveTypeName:LEAVE_TYPE_LIST.find(t=>t.key===r.leave_type)?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:user.phone,contactInfo:(r as any).contact_info},(r as any).signature_url||savedSignature)}
                               className="text-xs font-bold text-slate-600 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-slate-100 border border-slate-200">
                               🖨️ พิมพ์
                             </button>
                           )}
-                          {/* แก้ไข/ลบ — เฉพาะก่อน approver_1 กด */}
                           {canEdit&&(
                             <>
                               <button onClick={()=>setEditRequest(r)} className="text-xs font-bold text-amber-600 hover:text-amber-800 px-2 py-1 rounded-lg hover:bg-amber-50 border border-amber-200">✏️ แก้ไข</button>
@@ -995,7 +1036,14 @@ function AdminDashboard({user}:{user:UserProfile}){
   const [filterGrade,  setFilterGrade]  = useState("all");
   const [tab,          setTab]          = useState<"pending"|"history"|"official"|"graph">("pending");
   const [loading,      setLoading]      = useState(true);
-  const canPrint = PRINT_ROLES.includes(user.role)||user.email===HR_EMAIL;
+  // [NEW] state สำหรับ signature ของผู้อนุมัติ
+  const [showApproverSigPad, setShowApproverSigPad] = useState(false);
+  const [approverSigUrl,     setApproverSigUrl]     = useState(user.signature_url || "");
+  // [NEW] รายการรออนุมัติ pending ที่รอ action ของ user นี้
+  const [pendingApproveId, setPendingApproveId] = useState<{id:string;slot:1|2|3;action:"approved"|"rejected"}|null>(null);
+
+  const canPrint = PRINT_ROLES.includes(user.role)||user.email===HR_EMAIL||user.email===ADMIN_EMAIL;
+  const isSuperAdminUser = isSuperAdmin(user.email);
 
   const loadAll=useCallback(async()=>{
     setLoading(true);
@@ -1004,6 +1052,29 @@ function AdminDashboard({user}:{user:UserProfile}){
     setLoading(false);
   },[]);
   useEffect(()=>{loadAll();},[loadAll]);
+
+  // [NEW] โหลด signature ของ user จาก DB
+  useEffect(()=>{
+    if(user.signature_url) setApproverSigUrl(user.signature_url);
+  },[user.signature_url]);
+
+  // [NEW] บันทึก approver signature
+  async function saveApproverSignature(dataUrl: string) {
+    setApproverSigUrl(dataUrl);
+    setShowApproverSigPad(false);
+    await (supabase.from("users") as any).update({ signature_url: dataUrl }).eq("id", user.id);
+  }
+
+  // [NEW] ตรวจสอบ signature ก่อนอนุมัติ
+  function tryApprove(id: string, slot: 1|2|3, action: "approved"|"rejected") {
+    if (action === "approved" && !approverSigUrl) {
+      // ต้องเพิ่มลายเซ็นก่อน
+      setPendingApproveId({id, slot, action});
+      setShowApproverSigPad(true);
+      return;
+    }
+    handleApprove(id, slot, action);
+  }
 
   async function handleApprove(id:string,slot:1|2|3,action:"approved"|"rejected"){
     const req=requests.find(r=>r.id===id)!;
@@ -1015,7 +1086,6 @@ function AdminDashboard({user}:{user:UserProfile}){
     } else if (filled.every(s => s === "approved")) {
       updates.status = "approved"; 
       
-      // ส่งอีเมลแจ้ง HR เมื่ออนุมัติครบ
       const r = requests.find(x => x.id === id)!;
       const typeCfg = LEAVE_TYPE_CONFIG[r.leave_type];
       const teacherName = fullName((r as any).user);
@@ -1039,19 +1109,20 @@ function AdminDashboard({user}:{user:UserProfile}){
           </div>
         </div>`;
 
-      // ส่งไป HR
+      // [NEW] ส่งอีเมลไป HR และ admin ผ่าน Resend
       fetch("/api/send-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          to: [HR_EMAIL, "admin@khienkhet.ac.th"],
+          to: [HR_EMAIL, ADMIN_EMAIL],
           subject: `[อนุมัติแล้ว] ใบลา ${teacherName} · ${typeCfg?.label} · ${r.days_count} วัน`,
           html,
         }),
       }).catch(console.warn);
-    } // 🌟 ปิดปีกกาของ else if ตรงนี้แทน โดยไม่มี }).catch ซ้อนท้ายตัวโดด ๆ
+    }
 
     await (supabase.from("leave_requests") as any).update(updates).eq("id",id);
+    setPendingApproveId(null);
     await loadAll();
   }
 
@@ -1059,6 +1130,11 @@ function AdminDashboard({user}:{user:UserProfile}){
   const summaryByType=Object.fromEntries((Object.keys(LEAVE_TYPE_CONFIG) as LeaveType[]).map(t=>[t,{approved:fyAll.filter(r=>r.leave_type===t&&r.status==="approved").reduce((s,r)=>s+Number(r.days_count),0),pending:fyAll.filter(r=>r.leave_type===t&&r.status==="pending").length}])) as Record<LeaveType,{approved:number;pending:number}>;
   const pendingList=requests.filter(r=>r.status==="pending");
   const allGrades=["all",...Array.from(new Set(requests.map(r=>(r as any).user?.grade_level).filter(Boolean)))];
+
+  // [NEW] สรุปสถิติรวม
+  const totalRequests = fyAll.length;
+  const totalApproved = fyAll.filter(r=>r.status==="approved").length;
+  const totalPending  = fyAll.filter(r=>r.status==="pending").length;
 
   const TH_MONTHS=["ต.ค.","พ.ย.","ธ.ค.","ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย."];
   const graphData=TH_MONTHS.map((month,i)=>{
@@ -1074,23 +1150,69 @@ function AdminDashboard({user}:{user:UserProfile}){
     if(r.approver_1_id===user.id)return 1;
     if(r.approver_2_id===user.id)return 2;
     if(r.approver_3_id===user.id)return 3;
+    // [NEW] super admin เห็นทุกรายการและสามารถ override ได้
+    if(isSuperAdminUser) return 3;
     return null;
   }
 
   return(
     <div className="min-h-screen">
+      {/* [NEW] SignaturePad modal สำหรับผู้อนุมัติ */}
+      {showApproverSigPad && (
+        <SignaturePad
+          title="✍️ ลายเซ็นผู้อนุมัติ"
+          initialUrl={approverSigUrl}
+          onSave={async (d) => {
+            await saveApproverSignature(d);
+            // ถ้ามี pending approve ให้ดำเนินการต่อ
+            if (pendingApproveId) {
+              handleApprove(pendingApproveId.id, pendingApproveId.slot, pendingApproveId.action);
+            }
+          }}
+          onClose={() => { setShowApproverSigPad(false); setPendingApproveId(null); }}
+        />
+      )}
+
       <div className="bg-gradient-to-br from-indigo-500 to-purple-600 px-6 py-8 text-white flex items-center justify-between flex-wrap gap-4">
         <div>
-          <p className="text-indigo-200 text-sm font-bold">แดชบอร์ดผู้บริหาร</p>
+          <p className="text-indigo-200 text-sm font-bold">
+            {isSuperAdminUser ? "👑 ผู้ดูแลระบบ (Super Admin)" : "แดชบอร์ดผู้บริหาร"}
+          </p>
           <h2 className="text-3xl font-black">{fullName(user)}</h2>
-          <p className="text-indigo-200">{user.position}</p>
+          <p className="text-indigo-200">{user.email}</p>
         </div>
-        <select value={filterFY} onChange={e=>setFilterFY(Number(e.target.value))} className="bg-white/20 border border-white/30 rounded-xl px-4 py-2.5 text-white text-sm font-bold focus:outline-none">
-          {[0,1,2].map(i=>{const fy=getCurrentFiscalYear()-i;return<option key={fy} value={fy} className="text-slate-800">{fiscalYearLabel(fy)}</option>;})}
-        </select>
+        <div className="flex flex-col items-end gap-2">
+          <select value={filterFY} onChange={e=>setFilterFY(Number(e.target.value))} className="bg-white/20 border border-white/30 rounded-xl px-4 py-2.5 text-white text-sm font-bold focus:outline-none">
+            {[0,1,2].map(i=>{const fy=getCurrentFiscalYear()-i;return<option key={fy} value={fy} className="text-slate-800">{fiscalYearLabel(fy)}</option>;})}
+          </select>
+          {/* [NEW] ปุ่มลายเซ็นผู้อนุมัติ */}
+          <button onClick={()=>setShowApproverSigPad(true)} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-black border-2 ${approverSigUrl?"bg-white/20 border-white/40 text-white":"bg-amber-400 border-amber-300 text-amber-900 animate-pulse"}`}>
+            {approverSigUrl ? "✅ ลายเซ็นพร้อมแล้ว — คลิกเปลี่ยน" : "⚠️ เพิ่มลายเซ็นก่อนอนุมัติ"}
+          </button>
+        </div>
       </div>
 
       <div className="px-4 py-5 space-y-5">
+
+        {/* [NEW] การ์ดสรุปจำนวนคำขอลา */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 text-center shadow-sm">
+            <div className="text-3xl font-black text-slate-800">{totalRequests}</div>
+            <div className="text-slate-500 text-xs font-bold mt-1">คำขอลาทั้งหมด</div>
+            <div className="text-slate-400 text-[10px]">{fiscalYearLabel(filterFY)}</div>
+          </div>
+          <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 text-center shadow-sm">
+            <div className="text-3xl font-black text-green-700">{totalApproved}</div>
+            <div className="text-green-600 text-xs font-bold mt-1">อนุมัติแล้ว</div>
+            <div className="text-green-400 text-[10px]">{totalRequests > 0 ? Math.round(totalApproved/totalRequests*100) : 0}% ของทั้งหมด</div>
+          </div>
+          <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4 text-center shadow-sm">
+            <div className="text-3xl font-black text-amber-700">{totalPending}</div>
+            <div className="text-amber-600 text-xs font-bold mt-1">รออนุมัติ</div>
+            <div className="text-amber-400 text-[10px]">ต้องดำเนินการ</div>
+          </div>
+        </div>
+
         <div className="flex gap-2 flex-wrap">
           {(["all","1","2"] as const).map(v=>(
             <button key={v} onClick={()=>setFilterEval(v)} className={`px-4 py-2 rounded-xl text-sm font-black border-2 ${filterEval===v?"bg-indigo-500 border-indigo-500 text-white":"bg-white border-slate-200 text-slate-600"}`}>
@@ -1123,11 +1245,25 @@ function AdminDashboard({user}:{user:UserProfile}){
 
         {tab==="pending"&&(
           <div className="space-y-3">
+            {/* [NEW] แจ้งเตือนถ้ายังไม่มีลายเซ็น */}
+            {!approverSigUrl && (
+              <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 flex items-center gap-3">
+                <span className="text-2xl">✍️</span>
+                <div className="flex-1">
+                  <p className="font-black text-amber-700">ต้องเพิ่มลายเซ็นก่อนอนุมัติ</p>
+                  <p className="text-amber-600 text-sm">กรุณาเพิ่มลายเซ็นของคุณก่อน จึงจะสามารถกดอนุมัติได้</p>
+                </div>
+                <button onClick={()=>setShowApproverSigPad(true)} className="px-4 py-2.5 rounded-xl bg-amber-500 text-white font-black text-sm">✍️ เพิ่มลายเซ็น</button>
+              </div>
+            )}
             {loading?<div className="text-center py-10 text-slate-400">กำลังโหลด...</div>
               :pendingList.length===0?<div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">✅ ไม่มีรายการรออนุมัติ</div>
               :pendingList.map(r=>{
                 const typeCfg=LEAVE_TYPE_CONFIG[r.leave_type]; const c=COLORS[r.leave_type]??COLORS.other;
-                const slot=mySlot(r); const myStatus=slot===1?r.approver_1_status:slot===2?r.approver_2_status:slot===3?r.approver_3_status:null;
+                const slot=mySlot(r);
+                const myStatus=slot===1?r.approver_1_status:slot===2?r.approver_2_status:slot===3?r.approver_3_status:null;
+                // [NEW] super admin เห็นได้ทุกรายการ แม้ไม่ใช่ผู้อนุมัติ
+                const canAct = (slot && myStatus==="pending") || (isSuperAdminUser && r.status==="pending");
                 return(
                   <div key={r.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className={`${c.bg} border-b ${c.border} px-5 py-3 flex items-center justify-between`}>
@@ -1143,20 +1279,35 @@ function AdminDashboard({user}:{user:UserProfile}){
                       <p className="text-slate-600 text-sm font-bold mt-2">{toThaiDate(r.start_date)} – {toThaiDate(r.end_date)}</p>
                       <p className="text-slate-400 text-sm mt-1 line-clamp-2">{r.reason}</p>
                       {(r as any).contact_info&&<p className="text-xs text-slate-500 mt-1">📞 {(r as any).contact_info}</p>}
+                      {/* [NEW] แสดงเอกสารแนบ */}
+                      {(r as any).document_url&&(
+                        <a href={(r as any).document_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 mt-2 text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg bg-blue-50 border border-blue-200">
+                          📎 ดูเอกสารแนบ
+                        </a>
+                      )}
                       <div className="flex gap-2 mt-3">
                         {[r.approver_1_status,r.approver_2_status,r.approver_3_status].map((s,i)=>{
                           if(![r.approver_1_id,r.approver_2_id,r.approver_3_id][i])return null;
                           return<span key={i} className={`w-7 h-7 rounded-full border-2 text-xs font-black flex items-center justify-center ${s==="approved"?"bg-green-100 border-green-300 text-green-700":s==="rejected"?"bg-red-100 border-red-300 text-red-700":"bg-amber-100 border-amber-300 text-amber-700"}`}>{i+1}</span>;
                         })}
                       </div>
-                      {slot&&myStatus==="pending"&&(
+                      {/* [NEW] ปุ่มอนุมัติ — ต้องมีลายเซ็นก่อน */}
+                      {canAct && (
                         <div className="flex gap-2 mt-4">
-                          <button onClick={()=>handleApprove(r.id,slot,"approved")} className="flex-1 py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-black text-sm">✅ อนุมัติ</button>
-                          <button onClick={()=>handleApprove(r.id,slot,"rejected")} className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-sm">❌ ไม่อนุมัติ</button>
+                          {!approverSigUrl ? (
+                            <div className="flex-1 py-2.5 rounded-xl bg-amber-100 text-amber-700 font-black text-sm text-center">
+                              ⚠️ เพิ่มลายเซ็นก่อน แล้วค่อยอนุมัติ
+                            </div>
+                          ) : (
+                            <>
+                              <button onClick={()=>tryApprove(r.id, slot || 3,"approved")} className="flex-1 py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-black text-sm">✅ อนุมัติ</button>
+                              <button onClick={()=>tryApprove(r.id, slot || 3,"rejected")} className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-sm">❌ ไม่อนุมัติ</button>
+                            </>
+                          )}
                         </div>
                       )}
-                      {slot&&myStatus!=="pending"&&<div className={`mt-3 text-center text-sm font-black py-2 rounded-xl ${myStatus==="approved"?"bg-green-100 text-green-700":"bg-red-100 text-red-700"}`}>{myStatus==="approved"?"✅ คุณอนุมัติแล้ว":"❌ คุณไม่อนุมัติ"}</div>}
-                      {!slot&&<p className="mt-3 text-xs text-slate-400 text-center">คุณไม่ใช่ผู้อนุมัติในรายการนี้</p>}
+                      {slot&&myStatus&&myStatus!=="pending"&&<div className={`mt-3 text-center text-sm font-black py-2 rounded-xl ${myStatus==="approved"?"bg-green-100 text-green-700":"bg-red-100 text-red-700"}`}>{myStatus==="approved"?"✅ คุณอนุมัติแล้ว":"❌ คุณไม่อนุมัติ"}</div>}
+                      {!slot&&!isSuperAdminUser&&<p className="mt-3 text-xs text-slate-400 text-center">คุณไม่ใช่ผู้อนุมัติในรายการนี้</p>}
                     </div>
                   </div>
                 );
@@ -1184,6 +1335,10 @@ function AdminDashboard({user}:{user:UserProfile}){
                           <p className="text-slate-500 text-xs">{(r as any).user?.position} {(r as any).user?.grade_level?`· ${(r as any).user.grade_level}`:""}</p>
                           <span className={`inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-lg border ${c.bg} ${c.border} ${c.text}`}>{typeCfg?.icon} {typeCfg?.label} · {r.days_count} วัน</span>
                           <p className="text-slate-400 text-xs mt-1">{toThaiDate(r.start_date)} – {toThaiDate(r.end_date)}</p>
+                          {/* [NEW] ลิงก์เอกสารแนบ */}
+                          {(r as any).document_url&&(
+                            <a href={(r as any).document_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-1 text-xs font-bold text-blue-500 hover:text-blue-700">📎 เอกสารแนบ</a>
+                          )}
                         </div>
                         <div className="flex flex-col items-end gap-2">
                           <StatusBadge status={r.status}/>
@@ -1231,7 +1386,6 @@ function AdminDashboard({user}:{user:UserProfile}){
                 {allGrades.map(g=><option key={g} value={g}>{g==="all"?"📊 ภาพรวมทั้งโรงเรียน":"สายชั้น: "+g}</option>)}
               </select>
             </div>
-            {allGrades.length<=1&&<p className="text-center text-slate-400 text-sm py-2 mb-2">ℹ️ ยังไม่มีข้อมูลสายชั้น — กรุณาเพิ่ม grade_level ในตาราง users</p>}
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={graphData} margin={{top:5,right:10,left:0,bottom:5}}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
@@ -1272,50 +1426,58 @@ export default function LeavePage(){
   const [loading,        setLoading]        = useState(true);
 
   useEffect(() => {
-  const init = async () => {
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (!authUser) { setLoading(false); return; }
+    const init = async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) { setLoading(false); return; }
 
-    let { data } = await supabase.from("users")
-      .select("id, title, first_name, last_name, email, role, position, signature_url, grade_level, phone")
-      .eq("auth_id", authUser.id)
-      .maybeSingle();
+      let { data } = await supabase.from("users")
+        .select("id, title, first_name, last_name, email, role, position, signature_url, grade_level, phone")
+        .eq("auth_id", authUser.id)
+        .maybeSingle();
 
-    if (!data) {
-      const email = authUser.email || authUser.user_metadata?.email || "";
-      if (email) {
-        const res = await supabase.from("users")
-          .select("id, title, first_name, last_name, email, role, position, signature_url, grade_level, phone")
-          .eq("email", email)
-          .maybeSingle();
-        data = res.data;
-        if (data) await supabase.from("users").update({ auth_id: authUser.id }).eq("id", data.id);
+      if (!data) {
+        const email = authUser.email || authUser.user_metadata?.email || "";
+        if (email) {
+          const res = await supabase.from("users")
+            .select("id, title, first_name, last_name, email, role, position, signature_url, grade_level, phone")
+            .eq("email", email)
+            .maybeSingle();
+          data = res.data;
+          if (data) await supabase.from("users").update({ auth_id: authUser.id }).eq("id", data.id);
+        }
       }
-    }
 
-    if (data) {
-      const profile: UserProfile = {
-        ...data,
-        full_name: (data as any).full_name || `${data.title ?? ""} ${data.first_name ?? ""} ${data.last_name ?? ""}`.replace(/\s+/g, " ").trim(),
-      };
-      setUser(profile);
-      if (data.signature_url) setSavedSignature(data.signature_url);
-    }
+      if (data) {
+        const profile: UserProfile = {
+          ...data,
+          full_name: (data as any).full_name || `${data.title ?? ""} ${data.first_name ?? ""} ${data.last_name ?? ""}`.replace(/\s+/g, " ").trim(),
+        };
+        setUser(profile);
+        if (data.signature_url) setSavedSignature(data.signature_url);
+      }
 
-    setLoading(false);
-  };
-  init();
-}, []);
+      setLoading(false);
+    };
+    init();
+  }, []);
 
   if(loading)return<div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-blue-500 font-black text-lg animate-pulse">กำลังโหลดระบบ...</div></div>;
   if(!user)return<div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-red-500 font-black">❌ กรุณาเข้าสู่ระบบก่อน</div></div>;
 
-  const ADMIN_EMAILS = ["admin@khienkhet.ac.th", "hr@khienkhet.ac.th"];
+  // [NEW] super admin emails ได้รับสิทธิ์แดชบอร์ดแอดมินเสมอ
+  const isSuperAdminUser = isSuperAdmin(user.email);
   const isTeacher = ["homeroom_teacher","subject_teacher","staff","teacher"].includes(user.role)
-    && !ADMIN_EMAILS.includes(user.email);
-  const isAdmin=ADMIN_ROLES.includes(user.role);
-  const canPrint=PRINT_ROLES.includes(user.role)||user.email===HR_EMAIL;
-  const roleLabel=user.role==="director"?"👔 ผู้อำนวยการ":user.role==="deputy_director"?"👔 รองผู้อำนวยการ":user.role==="admin"?"🔧 ผู้ดูแลระบบ":user.role==="dept_head"?"👔 หัวหน้าฝ่าย":"👩‍🏫 ครู";
+    && !isSuperAdminUser;
+  const isAdmin = ADMIN_ROLES.includes(user.role) || isSuperAdminUser;
+  const canPrint = PRINT_ROLES.includes(user.role) || user.email===HR_EMAIL || user.email===ADMIN_EMAIL;
+
+  const roleLabel = isSuperAdminUser
+    ? "👑 Super Admin"
+    : user.role==="director"?"👔 ผู้อำนวยการ"
+    : user.role==="deputy_director"?"👔 รองผู้อำนวยการ"
+    : user.role==="admin"?"🔧 ผู้ดูแลระบบ"
+    : user.role==="dept_head"?"👔 หัวหน้าฝ่าย"
+    :"👩‍🏫 ครู";
 
   return(
     <div className="min-h-screen bg-slate-50" style={{fontFamily:"'Sarabun','IBM Plex Sans Thai',sans-serif"}}>
@@ -1325,7 +1487,7 @@ export default function LeavePage(){
             <button onClick={()=>router.push("/dashboard")} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg">🏠</button>
             <div><h1 className="text-base font-black text-slate-800 leading-none">ระบบลา / ไปราชการ</h1><p className="text-slate-400 text-xs">โรงเรียนวัดเขียนเขต</p></div>
           </div>
-          <span className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 ${isTeacher?"bg-blue-50 text-blue-600 border-blue-200":"bg-indigo-50 text-indigo-600 border-indigo-200"}`}>{roleLabel}</span>
+          <span className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 ${isTeacher?"bg-blue-50 text-blue-600 border-blue-200":isSuperAdminUser?"bg-purple-50 text-purple-600 border-purple-200":"bg-indigo-50 text-indigo-600 border-indigo-200"}`}>{roleLabel}</span>
         </div>
       </div>
       <div suppressHydrationWarning>
