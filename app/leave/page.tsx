@@ -1,3 +1,4 @@
+//ลาใหม่สุด
 //ลาใหม่
 "use client";
 export const dynamic = 'force-dynamic';
@@ -13,12 +14,19 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 const supabase = createClient();
-const HR_EMAIL = "hr@khienkhet.ac.th";
+const HR_EMAIL    = "hr@khienkhet.ac.th";
 const ADMIN_EMAIL = "admin@khienkhet.ac.th";
-const PRINT_ROLES = ["admin","director","deputy_director","dept_head"];
-const ADMIN_ROLES = ["admin","director","deputy_director","dept_head","grade_head"];
-// อีเมลที่มีสิทธิ์ดูข้อมูลทั้งหมด (แอดมินพิเศษ)
-const SUPER_ADMIN_EMAILS = [ADMIN_EMAIL, HR_EMAIL];
+const PRINT_ROLES = ["admin","director","deputy_director"];
+const ADMIN_ROLES = ["admin","director","deputy_director"];
+
+// ─── Approver emails (slot ตายตัว) ───────────────────────
+const APPROVER_1_EMAIL = "phansa@khienkhet.ac.th";
+const APPROVER_2_EMAIL = "titima@khienkhet.ac.th";
+const APPROVER_3_EMAIL = "thananut@khienkhet.ac.th";
+const APPROVER_EMAILS  = [APPROVER_1_EMAIL, APPROVER_2_EMAIL, APPROVER_3_EMAIL];
+
+// ─── ดูข้อมูลทั้งหมด (admin/hr/approvers) ────────────────
+const VIEW_ALL_EMAILS = [ADMIN_EMAIL, HR_EMAIL, ...APPROVER_EMAILS];
 
 // ─── helpers ──────────────────────────────────────────────
 function toThaiDate(iso: string) {
@@ -41,15 +49,18 @@ function isPersonalTooSoon(startDate: string): boolean {
   if (!startDate) return false;
   return (new Date(startDate).getTime()-Date.now())/86400000 < 3;
 }
-// [NEW] ลาป่วยเลือกล่วงหน้าได้แค่ 1 วัน
 function isSickTooFarAhead(startDate: string): boolean {
   if (!startDate) return false;
   const diff = (new Date(startDate).getTime() - Date.now()) / 86400000;
   return diff > 1;
 }
-// [NEW] ตรวจสอบว่า user เป็น super admin
-function isSuperAdmin(email: string): boolean {
-  return SUPER_ADMIN_EMAILS.includes(email);
+
+/** email → slot ที่แน่นอน (1/2/3) หรือ null */
+function approverSlotByEmail(email: string): 1|2|3|null {
+  if (email === APPROVER_1_EMAIL) return 1;
+  if (email === APPROVER_2_EMAIL) return 2;
+  if (email === APPROVER_3_EMAIL) return 3;
+  return null;
 }
 
 // ─── Types ────────────────────────────────────────────────
@@ -75,7 +86,6 @@ const LEAVE_TYPE_LIST: { key:LeaveType; label:string; icon:string }[] = [
   { key:"other" as LeaveType, label:"ลาประเภทอื่นๆ",            icon:"📌" },
 ];
 
-// Input class helpers
 const inp = (err?: boolean) => `w-full bg-white border-2 ${err?"border-red-400":"border-blue-200"} rounded-xl px-4 py-3 text-slate-800 text-sm font-medium focus:border-blue-500 focus:outline-none transition-colors`;
 const sel = (err?: boolean) => `w-full bg-white border-2 ${err?"border-red-400":"border-blue-200"} rounded-xl px-4 py-3 text-slate-800 text-sm font-medium focus:border-blue-500 focus:outline-none appearance-none transition-colors`;
 
@@ -95,7 +105,6 @@ function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: { 
   const leaveLabel  = data.leaveType==="other"&&data.otherLeaveName?data.otherLeaveName:data.leaveTypeName;
   const reasonClean = (data.reason||"").replace(/\[.+?\]/g,"").trim();
 
-  // [NEW] สร้าง HTML ลายเซ็นผู้อนุมัติ
   const approver1 = approverSignatures?.[0];
   const approver2 = approverSignatures?.[1];
   const approver3 = approverSignatures?.[2];
@@ -198,15 +207,27 @@ table.stat th{background:#f0f0f0;font-weight:700}
 
   <div style="flex:1;border-left:1px dashed #ccc;padding-left:14px">
     <div class="box" style="margin-bottom:10px;font-size:11.5pt;line-height:1.9">
-      <div style="font-weight:700;margin-bottom:5px">ความเห็นของรอง.ผอ.กลุ่มบริหารงานบุคคล</div>
+      <div style="font-weight:700;margin-bottom:5px">ความเห็นของผู้อนุมัติลำดับที่ 1</div>
       <div class="dotline" style="height:20px;margin:4px 0"></div>
       <div style="text-align:center;margin-top:8px">
         ${approver1?.signature_url ? `<div style="height:50px;display:flex;align-items:flex-end;justify-content:center"><img src="${approver1.signature_url}" style="max-height:50px;max-width:140px;object-fit:contain"/></div>` : `<div style="height:50px"></div>`}
         ลงชื่อ...........................................<br>
-        (${approver1?.name || "นางสาวฐิติมา กาบแก้ว"})<br>
-        ${approver1?.position || "รองผู้อำนวยการกลุ่มบริหารงานบุคคล"}
+        (${approver1?.name || "นางสาวพรรษา แก้วใหญ่"})<br>
+        ${approver1?.position || "ครู ตรวจสอบสถิติการลา / ผู้อนุมัติคนที่ 1"}
       </div>
     </div>
+
+    <div class="box" style="margin-bottom:10px;font-size:11.5pt;line-height:1.9">
+      <div style="font-weight:700;margin-bottom:5px">ความเห็นของรอง.ผอ.กลุ่มบริหารงานบุคคล</div>
+      <div class="dotline" style="height:20px;margin:4px 0"></div>
+      <div style="text-align:center;margin-top:8px">
+        ${approver2?.signature_url ? `<div style="height:50px;display:flex;align-items:flex-end;justify-content:center"><img src="${approver2.signature_url}" style="max-height:50px;max-width:140px;object-fit:contain"/></div>` : `<div style="height:50px"></div>`}
+        ลงชื่อ...........................................<br>
+        (${approver2?.name || "นางสาวฐิติมา กาบแก้ว"})<br>
+        ${approver2?.position || "รองผู้อำนวยการกลุ่มบริหารงานบุคคล"}
+      </div>
+    </div>
+
     <div class="box" style="font-size:11.5pt;line-height:1.9">
       <div style="font-weight:700;margin-bottom:4px">ความเห็นของผู้บังคับบัญชา</div>
       <div style="margin-bottom:6px"><span class="chk"></span>อนุญาต &nbsp;&nbsp;&nbsp; <span class="chk"></span>ไม่อนุญาต</div>
@@ -234,7 +255,7 @@ function printLeave(data: any, signatureUrl: string, approverSignatures?: any[])
 }
 
 // ══════════════════════════════════════════════════════════
-// ── SignaturePad (ใช้ทั้งครูและผู้อนุมัติ) ─────────────────
+// ── SignaturePad ───────────────────────────────────────────
 // ══════════════════════════════════════════════════════════
 function SignaturePad({ initialUrl, onSave, onClose, title = "✍️ ลายเซ็น" }: { initialUrl:string; onSave:(d:string)=>void; onClose:()=>void; title?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -423,12 +444,10 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
   const rawDays = startDate&&endDate ? daysBetween(startDate,endDate) : 0;
   const days    = rawDays===1&&halfDay ? 0.5 : rawDays;
   const tooSoon = leaveType==="personal" && startDate && isPersonalTooSoon(startDate);
-  // [NEW] ลาป่วยเลือกล่วงหน้าได้แค่ 1 วัน
   const sickTooFarAhead = leaveType==="sick" && startDate && isSickTooFarAhead(startDate);
   const typeColor = COLORS[leaveType]??COLORS.other;
   const isEdit = !!editData?.id;
-  
-  // [NEW] วันสูงสุดที่เลือกได้สำหรับลาป่วย (วันพรุ่งนี้)
+
   const sickMaxDate = leaveType==="sick" ? (() => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
@@ -452,7 +471,6 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
     })();
   },[startDate,user.id]);
 
-  // [NEW] เมื่อเปลี่ยนประเภทเป็นลาป่วย ให้ reset วันที่ถ้าเกินกว่าพรุ่งนี้
   useEffect(()=>{
     if(leaveType==="sick" && sickMaxDate){
       if(startDate > sickMaxDate) setStartDate("");
@@ -460,11 +478,9 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
     }
   },[leaveType]);
 
-  const PERIODS=["1","2","3","4","5","6","7","8"];
   const togglePeriod=(p:string)=>setMissedPeriods(prev=>prev.includes(p)?prev.filter(x=>x!==p):[...prev,p]);
   const touch=(f:string)=>setTouched(t=>({...t,[f]:true}));
 
-  // Validation
   const errors = {
     startDate: touched.startDate&&!startDate,
     endDate:   touched.endDate&&!endDate,
@@ -487,7 +503,6 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
       formData.append("file", docFile);
       const year = new Date().getFullYear() + 543;
       formData.append("path", `WKK_Leave_System/${year}/${Date.now()}_${docFile.name}`);
-    
       const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
       const { webUrl, downloadUrl } = await res.json();
       docUrl = downloadUrl || webUrl || null;
@@ -539,7 +554,6 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
         />
       )}
 
-      {/* Header */}
       <div className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm px-4 py-3 flex items-center gap-3">
         <button onClick={onCancel} className="w-10 h-10 rounded-xl bg-white border-2 border-slate-200 hover:bg-slate-100 flex items-center justify-center text-slate-600 text-xl">←</button>
         <div className="flex-1">
@@ -573,7 +587,6 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
               {errors.otherName&&<p className="text-red-500 text-xs mt-1">กรุณาระบุประเภทการลา</p>}
             </div>
           )}
-          {/* [NEW] แจ้งเตือนลาป่วยล่วงหน้าไม่ได้ */}
           {leaveType==="sick"&&(
             <div className="mt-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 flex items-center gap-2">
               <span className="text-blue-500">ℹ️</span>
@@ -605,7 +618,6 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
             </div>
           </div>
 
-          {/* ครึ่งวัน */}
           {rawDays===1&&leaveType!=="ordination"&&(
             <div>
               <label className="block text-sm font-bold text-slate-600 mb-2">ครึ่งวัน</label>
@@ -663,7 +675,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
               </div>
               {docFile&&<button type="button" onClick={e=>{e.stopPropagation();setDocFile(null);}} className="w-6 h-6 rounded-full bg-red-100 text-red-500 text-xs flex items-center justify-center font-black">✕</button>}
             </div>
-            <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" 
+            <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
               onChange={e => {
                 const f = e.target.files?.[0] ?? null;
                 setDocFile(f);
@@ -1026,8 +1038,10 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
 
 // ══════════════════════════════════════════════════════════
 // ── AdminDashboard ─────────────────────────────────────────
+//   ใช้สำหรับ: ผู้อนุมัติ (phansa/titima/thananut) + admin/hr
+//   props.canApprove = true เฉพาะผู้อนุมัติทั้ง 3 คน
 // ══════════════════════════════════════════════════════════
-function AdminDashboard({user}:{user:UserProfile}){
+function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: boolean }) {
   const [requests,     setRequests]     = useState<LeaveRequest[]>([]);
   const [filterFY,     setFilterFY]     = useState(getCurrentFiscalYear());
   const [filterEval,   setFilterEval]   = useState<"all"|"1"|"2">("all");
@@ -1036,39 +1050,32 @@ function AdminDashboard({user}:{user:UserProfile}){
   const [filterGrade,  setFilterGrade]  = useState("all");
   const [tab,          setTab]          = useState<"pending"|"history"|"official"|"graph">("pending");
   const [loading,      setLoading]      = useState(true);
-  // [NEW] state สำหรับ signature ของผู้อนุมัติ
   const [showApproverSigPad, setShowApproverSigPad] = useState(false);
   const [approverSigUrl,     setApproverSigUrl]     = useState(user.signature_url || "");
-  // [NEW] รายการรออนุมัติ pending ที่รอ action ของ user นี้
   const [pendingApproveId, setPendingApproveId] = useState<{id:string;slot:1|2|3;action:"approved"|"rejected"}|null>(null);
 
-  const canPrint = PRINT_ROLES.includes(user.role)||user.email===HR_EMAIL||user.email===ADMIN_EMAIL;
-  const isSuperAdminUser = isSuperAdmin(user.email);
+  const canPrint = true; // admin dashboard เห็นทุกอย่าง พิมพ์ได้ทุกใบ
 
-  const loadAll=useCallback(async()=>{
+  const loadAll = useCallback(async()=>{
     setLoading(true);
     const {data}=await supabase.from("leave_requests").select("*, user:users(title,first_name,last_name,full_name,position,email,grade_level,phone,signature_url)").order("created_at",{ascending:false});
     setRequests((data as LeaveRequest[])||[]);
     setLoading(false);
   },[]);
-  useEffect(()=>{loadAll();},[loadAll]);
+  useEffect(()=>{ loadAll(); },[loadAll]);
 
-  // [NEW] โหลด signature ของ user จาก DB
   useEffect(()=>{
     if(user.signature_url) setApproverSigUrl(user.signature_url);
   },[user.signature_url]);
 
-  // [NEW] บันทึก approver signature
   async function saveApproverSignature(dataUrl: string) {
     setApproverSigUrl(dataUrl);
     setShowApproverSigPad(false);
     await (supabase.from("users") as any).update({ signature_url: dataUrl }).eq("id", user.id);
   }
 
-  // [NEW] ตรวจสอบ signature ก่อนอนุมัติ
   function tryApprove(id: string, slot: 1|2|3, action: "approved"|"rejected") {
     if (action === "approved" && !approverSigUrl) {
-      // ต้องเพิ่มลายเซ็นก่อน
       setPendingApproveId({id, slot, action});
       setShowApproverSigPad(true);
       return;
@@ -1076,16 +1083,20 @@ function AdminDashboard({user}:{user:UserProfile}){
     handleApprove(id, slot, action);
   }
 
-  async function handleApprove(id:string,slot:1|2|3,action:"approved"|"rejected"){
-    const req=requests.find(r=>r.id===id)!;
-    const updates:any={[`approver_${slot}_status`]:action};
-    const newSlots=[slot===1?action:req.approver_1_status,slot===2?action:req.approver_2_status,slot===3?action:req.approver_3_status];
-    const filled=newSlots.filter((s,i)=>[req.approver_1_id,req.approver_2_id,req.approver_3_id][i]);
+  async function handleApprove(id:string, slot:1|2|3, action:"approved"|"rejected") {
+    const req = requests.find(r=>r.id===id)!;
+    const updates: any = { [`approver_${slot}_status`]: action };
+    const newSlots = [
+      slot===1 ? action : req.approver_1_status,
+      slot===2 ? action : req.approver_2_status,
+      slot===3 ? action : req.approver_3_status,
+    ];
+    const filled = newSlots.filter((s,i) => [req.approver_1_id,req.approver_2_id,req.approver_3_id][i]);
     if (action === "rejected") {
       updates.status = "rejected";
     } else if (filled.every(s => s === "approved")) {
-      updates.status = "approved"; 
-      
+      updates.status = "approved";
+
       const r = requests.find(x => x.id === id)!;
       const typeCfg = LEAVE_TYPE_CONFIG[r.leave_type];
       const teacherName = fullName((r as any).user);
@@ -1109,7 +1120,6 @@ function AdminDashboard({user}:{user:UserProfile}){
           </div>
         </div>`;
 
-      // [NEW] ส่งอีเมลไป HR และ admin ผ่าน Resend
       fetch("/api/send-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1126,45 +1136,45 @@ function AdminDashboard({user}:{user:UserProfile}){
     await loadAll();
   }
 
-  const fyAll=requests.filter(r=>isInFiscalYear(r.start_date,filterFY)&&r.status!=="cancelled");
-  const summaryByType=Object.fromEntries((Object.keys(LEAVE_TYPE_CONFIG) as LeaveType[]).map(t=>[t,{approved:fyAll.filter(r=>r.leave_type===t&&r.status==="approved").reduce((s,r)=>s+Number(r.days_count),0),pending:fyAll.filter(r=>r.leave_type===t&&r.status==="pending").length}])) as Record<LeaveType,{approved:number;pending:number}>;
-  const pendingList=requests.filter(r=>r.status==="pending");
-  const allGrades=["all",...Array.from(new Set(requests.map(r=>(r as any).user?.grade_level).filter(Boolean)))];
+  /** หา slot ที่ user นี้ต้องอนุมัติ โดยใช้ email เป็นหลัก */
+  function mySlot(r: LeaveRequest): 1|2|3|null {
+    return approverSlotByEmail(user.email);
+  }
 
-  // [NEW] สรุปสถิติรวม
+  const fyAll = requests.filter(r=>isInFiscalYear(r.start_date,filterFY)&&r.status!=="cancelled");
+  const summaryByType = Object.fromEntries((Object.keys(LEAVE_TYPE_CONFIG) as LeaveType[]).map(t=>[t,{approved:fyAll.filter(r=>r.leave_type===t&&r.status==="approved").reduce((s,r)=>s+Number(r.days_count),0),pending:fyAll.filter(r=>r.leave_type===t&&r.status==="pending").length}])) as Record<LeaveType,{approved:number;pending:number}>;
+  const pendingList = requests.filter(r=>r.status==="pending");
+  const allGrades   = ["all",...Array.from(new Set(requests.map(r=>(r as any).user?.grade_level).filter(Boolean)))];
+
   const totalRequests = fyAll.length;
   const totalApproved = fyAll.filter(r=>r.status==="approved").length;
   const totalPending  = fyAll.filter(r=>r.status==="pending").length;
 
-  const TH_MONTHS=["ต.ค.","พ.ย.","ธ.ค.","ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย."];
-  const graphData=TH_MONTHS.map((month,i)=>{
+  const TH_MONTHS = ["ต.ค.","พ.ย.","ธ.ค.","ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย."];
+  const graphData = TH_MONTHS.map((month,i)=>{
     const calMonth=i<3?i+10:i-2; const calYear=i<3?filterFY-1:filterFY;
     const mr=requests.filter(r=>{const d=new Date(r.start_date);return d.getFullYear()===calYear&&(d.getMonth()+1)===calMonth&&r.status!=="cancelled"&&(filterGrade==="all"||(r as any).user?.grade_level===filterGrade);});
     return{month,"ลาป่วย":mr.filter(r=>r.leave_type==="sick").reduce((s,r)=>s+Number(r.days_count),0),"ลากิจ":mr.filter(r=>r.leave_type==="personal").reduce((s,r)=>s+Number(r.days_count),0),"ไปราชการ":mr.filter(r=>r.leave_type==="official").reduce((s,r)=>s+Number(r.days_count),0),"อื่นๆ":mr.filter(r=>!["sick","personal","official"].includes(r.leave_type)).reduce((s,r)=>s+Number(r.days_count),0)};
   });
 
-  const historyList=requests.filter(r=>isInFiscalYear(r.start_date,filterFY)&&(filterType==="all"||r.leave_type===filterType)&&(filterStatus==="all"||r.status===filterStatus)&&(filterEval==="all"||getEvalRound(r.start_date)===filterEval)&&(filterGrade==="all"||(r as any).user?.grade_level===filterGrade));
-  const officialList=requests.filter(r=>r.leave_type==="official"&&isInFiscalYear(r.start_date,filterFY));
+  const historyList = requests.filter(r=>isInFiscalYear(r.start_date,filterFY)&&(filterType==="all"||r.leave_type===filterType)&&(filterStatus==="all"||r.status===filterStatus)&&(filterEval==="all"||getEvalRound(r.start_date)===filterEval)&&(filterGrade==="all"||(r as any).user?.grade_level===filterGrade));
+  const officialList = requests.filter(r=>r.leave_type==="official"&&isInFiscalYear(r.start_date,filterFY));
 
-  function mySlot(r:LeaveRequest):1|2|3|null{
-    if(r.approver_1_id===user.id)return 1;
-    if(r.approver_2_id===user.id)return 2;
-    if(r.approver_3_id===user.id)return 3;
-    // [NEW] super admin เห็นทุกรายการและสามารถ override ได้
-    if(isSuperAdminUser) return 3;
-    return null;
-  }
+  // label บทบาทสำหรับ header
+  const slot = approverSlotByEmail(user.email);
+  const roleDisplay = canApprove
+    ? slot===1 ? "👤 ผู้อนุมัติลำดับที่ 1" : slot===2 ? "👤 ผู้อนุมัติลำดับที่ 2" : "👤 ผู้อนุมัติลำดับที่ 3"
+    : user.email===HR_EMAIL ? "📋 ฝ่ายบุคคล (HR)" : "🔧 ผู้ดูแลระบบ";
 
-  return(
+  return (
     <div className="min-h-screen">
-      {/* [NEW] SignaturePad modal สำหรับผู้อนุมัติ */}
-      {showApproverSigPad && (
+      {/* SignaturePad modal — เฉพาะผู้อนุมัติ */}
+      {canApprove && showApproverSigPad && (
         <SignaturePad
           title="✍️ ลายเซ็นผู้อนุมัติ"
           initialUrl={approverSigUrl}
           onSave={async (d) => {
             await saveApproverSignature(d);
-            // ถ้ามี pending approve ให้ดำเนินการต่อ
             if (pendingApproveId) {
               handleApprove(pendingApproveId.id, pendingApproveId.slot, pendingApproveId.action);
             }
@@ -1173,11 +1183,10 @@ function AdminDashboard({user}:{user:UserProfile}){
         />
       )}
 
+      {/* Header */}
       <div className="bg-gradient-to-br from-indigo-500 to-purple-600 px-6 py-8 text-white flex items-center justify-between flex-wrap gap-4">
         <div>
-          <p className="text-indigo-200 text-sm font-bold">
-            {isSuperAdminUser ? "👑 ผู้ดูแลระบบ (Super Admin)" : "แดชบอร์ดผู้บริหาร"}
-          </p>
+          <p className="text-indigo-200 text-sm font-bold">{roleDisplay}</p>
           <h2 className="text-3xl font-black">{fullName(user)}</h2>
           <p className="text-indigo-200">{user.email}</p>
         </div>
@@ -1185,16 +1194,18 @@ function AdminDashboard({user}:{user:UserProfile}){
           <select value={filterFY} onChange={e=>setFilterFY(Number(e.target.value))} className="bg-white/20 border border-white/30 rounded-xl px-4 py-2.5 text-white text-sm font-bold focus:outline-none">
             {[0,1,2].map(i=>{const fy=getCurrentFiscalYear()-i;return<option key={fy} value={fy} className="text-slate-800">{fiscalYearLabel(fy)}</option>;})}
           </select>
-          {/* [NEW] ปุ่มลายเซ็นผู้อนุมัติ */}
-          <button onClick={()=>setShowApproverSigPad(true)} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-black border-2 ${approverSigUrl?"bg-white/20 border-white/40 text-white":"bg-amber-400 border-amber-300 text-amber-900 animate-pulse"}`}>
-            {approverSigUrl ? "✅ ลายเซ็นพร้อมแล้ว — คลิกเปลี่ยน" : "⚠️ เพิ่มลายเซ็นก่อนอนุมัติ"}
-          </button>
+          {/* ปุ่มลายเซ็น — เฉพาะผู้อนุมัติ */}
+          {canApprove && (
+            <button onClick={()=>setShowApproverSigPad(true)} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-black border-2 ${approverSigUrl?"bg-white/20 border-white/40 text-white":"bg-amber-400 border-amber-300 text-amber-900 animate-pulse"}`}>
+              {approverSigUrl ? "✅ ลายเซ็นพร้อมแล้ว — คลิกเปลี่ยน" : "⚠️ เพิ่มลายเซ็นก่อนอนุมัติ"}
+            </button>
+          )}
         </div>
       </div>
 
       <div className="px-4 py-5 space-y-5">
 
-        {/* [NEW] การ์ดสรุปจำนวนคำขอลา */}
+        {/* การ์ดสรุปจำนวน */}
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 text-center shadow-sm">
             <div className="text-3xl font-black text-slate-800">{totalRequests}</div>
@@ -1235,6 +1246,7 @@ function AdminDashboard({user}:{user:UserProfile}){
           })}
         </div>
 
+        {/* Tab bar */}
         <div className="flex gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
           {[["pending","⏳ รออนุมัติ"],["history","📋 ทั้งหมด"],["official","🏛️ ไปราชการ"],["graph","📊 กราฟ"]].map(([k,l])=>(
             <button key={k} onClick={()=>setTab(k as any)} className={`flex-1 py-2.5 rounded-xl text-sm font-black flex items-center justify-center gap-1 ${tab===k?"bg-white text-slate-800 shadow border border-slate-200":"text-slate-500 hover:text-slate-700"}`}>
@@ -1243,10 +1255,11 @@ function AdminDashboard({user}:{user:UserProfile}){
           ))}
         </div>
 
+        {/* ─── Tab: รออนุมัติ ─── */}
         {tab==="pending"&&(
           <div className="space-y-3">
-            {/* [NEW] แจ้งเตือนถ้ายังไม่มีลายเซ็น */}
-            {!approverSigUrl && (
+            {/* แจ้งเตือนลายเซ็น */}
+            {canApprove && !approverSigUrl && (
               <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 flex items-center gap-3">
                 <span className="text-2xl">✍️</span>
                 <div className="flex-1">
@@ -1256,21 +1269,28 @@ function AdminDashboard({user}:{user:UserProfile}){
                 <button onClick={()=>setShowApproverSigPad(true)} className="px-4 py-2.5 rounded-xl bg-amber-500 text-white font-black text-sm">✍️ เพิ่มลายเซ็น</button>
               </div>
             )}
-            {loading?<div className="text-center py-10 text-slate-400">กำลังโหลด...</div>
-              :pendingList.length===0?<div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">✅ ไม่มีรายการรออนุมัติ</div>
-              :pendingList.map(r=>{
-                const typeCfg=LEAVE_TYPE_CONFIG[r.leave_type]; const c=COLORS[r.leave_type]??COLORS.other;
-                const slot=mySlot(r);
-                const myStatus=slot===1?r.approver_1_status:slot===2?r.approver_2_status:slot===3?r.approver_3_status:null;
-                // [NEW] super admin เห็นได้ทุกรายการ แม้ไม่ใช่ผู้อนุมัติ
-                const canAct = (slot && myStatus==="pending") || (isSuperAdminUser && r.status==="pending");
+            {/* แจ้ง admin/hr ว่าดูได้แต่อนุมัติไม่ได้ */}
+            {!canApprove && (
+              <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-4 flex items-center gap-3">
+                <span className="text-2xl">👁️</span>
+                <p className="text-slate-600 font-bold text-sm">คุณมีสิทธิ์ดูและพิมพ์ใบลาเท่านั้น ไม่สามารถกดอนุมัติได้</p>
+              </div>
+            )}
+            {loading ? <div className="text-center py-10 text-slate-400">กำลังโหลด...</div>
+              : pendingList.length===0 ? <div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">✅ ไม่มีรายการรออนุมัติ</div>
+              : pendingList.map(r=>{
+                const typeCfg = LEAVE_TYPE_CONFIG[r.leave_type];
+                const c = COLORS[r.leave_type]??COLORS.other;
+                const slot = mySlot(r);
+                const myStatus = slot===1?r.approver_1_status:slot===2?r.approver_2_status:slot===3?r.approver_3_status:null;
+                const canAct = canApprove && slot !== null && myStatus === "pending";
                 return(
                   <div key={r.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className={`${c.bg} border-b ${c.border} px-5 py-3 flex items-center justify-between`}>
                       <span className={`font-black text-sm ${c.text}`}>{typeCfg?.icon} {typeCfg?.label}</span>
                       <div className="flex items-center gap-2">
                         <span className={`font-black text-sm ${c.text}`}>{r.days_count} วัน</span>
-                        {canPrint&&<button onClick={()=>printLeave({fullName:fullName((r as any).user),position:(r as any).user?.position,leaveType:r.leave_type,leaveTypeName:typeCfg?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:(r as any).user?.phone,contactInfo:(r as any).contact_info},(r as any).user?.signature_url||"")} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-white border border-slate-300 font-bold">🖨️ พิมพ์</button>}
+                        <button onClick={()=>printLeave({fullName:fullName((r as any).user),position:(r as any).user?.position,leaveType:r.leave_type,leaveTypeName:typeCfg?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:(r as any).user?.phone,contactInfo:(r as any).contact_info},(r as any).user?.signature_url||"")} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-white border border-slate-300 font-bold">🖨️ พิมพ์</button>
                       </div>
                     </div>
                     <div className="p-5">
@@ -1279,19 +1299,19 @@ function AdminDashboard({user}:{user:UserProfile}){
                       <p className="text-slate-600 text-sm font-bold mt-2">{toThaiDate(r.start_date)} – {toThaiDate(r.end_date)}</p>
                       <p className="text-slate-400 text-sm mt-1 line-clamp-2">{r.reason}</p>
                       {(r as any).contact_info&&<p className="text-xs text-slate-500 mt-1">📞 {(r as any).contact_info}</p>}
-                      {/* [NEW] แสดงเอกสารแนบ */}
                       {(r as any).document_url&&(
                         <a href={(r as any).document_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 mt-2 text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg bg-blue-50 border border-blue-200">
                           📎 ดูเอกสารแนบ
                         </a>
                       )}
+                      {/* แสดง slot badges */}
                       <div className="flex gap-2 mt-3">
                         {[r.approver_1_status,r.approver_2_status,r.approver_3_status].map((s,i)=>{
                           if(![r.approver_1_id,r.approver_2_id,r.approver_3_id][i])return null;
                           return<span key={i} className={`w-7 h-7 rounded-full border-2 text-xs font-black flex items-center justify-center ${s==="approved"?"bg-green-100 border-green-300 text-green-700":s==="rejected"?"bg-red-100 border-red-300 text-red-700":"bg-amber-100 border-amber-300 text-amber-700"}`}>{i+1}</span>;
                         })}
                       </div>
-                      {/* [NEW] ปุ่มอนุมัติ — ต้องมีลายเซ็นก่อน */}
+                      {/* ปุ่มอนุมัติ — เฉพาะผู้อนุมัติที่มีลายเซ็นแล้ว */}
                       {canAct && (
                         <div className="flex gap-2 mt-4">
                           {!approverSigUrl ? (
@@ -1300,14 +1320,20 @@ function AdminDashboard({user}:{user:UserProfile}){
                             </div>
                           ) : (
                             <>
-                              <button onClick={()=>tryApprove(r.id, slot || 3,"approved")} className="flex-1 py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-black text-sm">✅ อนุมัติ</button>
-                              <button onClick={()=>tryApprove(r.id, slot || 3,"rejected")} className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-sm">❌ ไม่อนุมัติ</button>
+                              <button onClick={()=>tryApprove(r.id, slot!, "approved")} className="flex-1 py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-black text-sm">✅ อนุมัติ</button>
+                              <button onClick={()=>tryApprove(r.id, slot!, "rejected")} className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-sm">❌ ไม่อนุมัติ</button>
                             </>
                           )}
                         </div>
                       )}
-                      {slot&&myStatus&&myStatus!=="pending"&&<div className={`mt-3 text-center text-sm font-black py-2 rounded-xl ${myStatus==="approved"?"bg-green-100 text-green-700":"bg-red-100 text-red-700"}`}>{myStatus==="approved"?"✅ คุณอนุมัติแล้ว":"❌ คุณไม่อนุมัติ"}</div>}
-                      {!slot&&!isSuperAdminUser&&<p className="mt-3 text-xs text-slate-400 text-center">คุณไม่ใช่ผู้อนุมัติในรายการนี้</p>}
+                      {canApprove && slot && myStatus && myStatus!=="pending" && (
+                        <div className={`mt-3 text-center text-sm font-black py-2 rounded-xl ${myStatus==="approved"?"bg-green-100 text-green-700":"bg-red-100 text-red-700"}`}>
+                          {myStatus==="approved"?"✅ คุณอนุมัติแล้ว":"❌ คุณไม่อนุมัติ"}
+                        </div>
+                      )}
+                      {canApprove && !slot && (
+                        <p className="mt-3 text-xs text-slate-400 text-center">คุณไม่ใช่ผู้อนุมัติในรายการนี้</p>
+                      )}
                     </div>
                   </div>
                 );
@@ -1315,6 +1341,7 @@ function AdminDashboard({user}:{user:UserProfile}){
           </div>
         )}
 
+        {/* ─── Tab: ทั้งหมด ─── */}
         {tab==="history"&&(
           <div>
             <div className="flex gap-2 mb-4 flex-wrap">
@@ -1335,14 +1362,13 @@ function AdminDashboard({user}:{user:UserProfile}){
                           <p className="text-slate-500 text-xs">{(r as any).user?.position} {(r as any).user?.grade_level?`· ${(r as any).user.grade_level}`:""}</p>
                           <span className={`inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-lg border ${c.bg} ${c.border} ${c.text}`}>{typeCfg?.icon} {typeCfg?.label} · {r.days_count} วัน</span>
                           <p className="text-slate-400 text-xs mt-1">{toThaiDate(r.start_date)} – {toThaiDate(r.end_date)}</p>
-                          {/* [NEW] ลิงก์เอกสารแนบ */}
                           {(r as any).document_url&&(
                             <a href={(r as any).document_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-1 text-xs font-bold text-blue-500 hover:text-blue-700">📎 เอกสารแนบ</a>
                           )}
                         </div>
                         <div className="flex flex-col items-end gap-2">
                           <StatusBadge status={r.status}/>
-                          {canPrint&&<button onClick={()=>printLeave({fullName:fullName((r as any).user),position:(r as any).user?.position,leaveType:r.leave_type,leaveTypeName:typeCfg?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:(r as any).user?.phone,contactInfo:(r as any).contact_info},(r as any).user?.signature_url||"")} className="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50">🖨️ พิมพ์</button>}
+                          <button onClick={()=>printLeave({fullName:fullName((r as any).user),position:(r as any).user?.position,leaveType:r.leave_type,leaveTypeName:typeCfg?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:(r as any).user?.phone,contactInfo:(r as any).contact_info},(r as any).user?.signature_url||"")} className="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50">🖨️ พิมพ์</button>
                         </div>
                       </div>
                     );
@@ -1352,6 +1378,7 @@ function AdminDashboard({user}:{user:UserProfile}){
           </div>
         )}
 
+        {/* ─── Tab: ไปราชการ ─── */}
         {tab==="official"&&(
           <div className="space-y-3">
             {officialList.length===0?<div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">ไม่มีข้อมูล</div>
@@ -1378,6 +1405,7 @@ function AdminDashboard({user}:{user:UserProfile}){
           </div>
         )}
 
+        {/* ─── Tab: กราฟ ─── */}
         {tab==="graph"&&(
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -1410,6 +1438,51 @@ function AdminDashboard({user}:{user:UserProfile}){
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+// ── ApproverPage — ผู้อนุมัติ (phansa/titima/thananut)
+//    มีปุ่มสลับ: หน้าฝ่ายบริหาร ↔ บันทึกการลา
+// ══════════════════════════════════════════════════════════
+function ApproverPage({ user, approvers, allTeachers, savedSignature }: {
+  user: UserProfile;
+  approvers: ApproverInfo[];
+  allTeachers: UserProfile[];
+  savedSignature: string;
+}) {
+  // "admin" = หน้าฝ่ายบริหาร, "leave" = บันทึกการลา
+  const [mode, setMode] = useState<"admin"|"leave">("admin");
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      {/* ปุ่มสลับโหมด — ลอยอยู่ด้านบนเสมอ */}
+      <div className="sticky top-0 z-50 bg-white border-b border-slate-200 shadow-sm px-4 py-2 flex items-center gap-2 justify-end">
+        <span className="text-xs text-slate-400 font-bold mr-auto">โหมด:</span>
+        <button
+          onClick={()=>setMode("admin")}
+          className={`px-4 py-2 rounded-xl text-sm font-black border-2 transition-all ${mode==="admin"?"bg-indigo-600 border-indigo-600 text-white":"bg-white border-slate-200 text-slate-600 hover:bg-indigo-50"}`}>
+          🏛️ หน้าฝ่ายบริหาร
+        </button>
+        <button
+          onClick={()=>setMode("leave")}
+          className={`px-4 py-2 rounded-xl text-sm font-black border-2 transition-all ${mode==="leave"?"bg-blue-600 border-blue-600 text-white":"bg-white border-slate-200 text-slate-600 hover:bg-blue-50"}`}>
+          ✍️ บันทึกการลา
+        </button>
+      </div>
+
+      {mode==="admin" ? (
+        <AdminDashboard user={user} canApprove={true} />
+      ) : (
+        <TeacherDashboard
+          user={user}
+          approvers={approvers}
+          allTeachers={allTeachers}
+          savedSignature={savedSignature}
+          canPrint={true}
+        />
+      )}
     </div>
   );
 }
@@ -1456,45 +1529,91 @@ export default function LeavePage(){
         if (data.signature_url) setSavedSignature(data.signature_url);
       }
 
+      // โหลด approvers และ allTeachers
+      const { data: teachers } = await supabase
+        .from("users")
+        .select("id, title, first_name, last_name, full_name, position, email, role")
+        .order("first_name");
+      setAllTeachers((teachers as UserProfile[]) || []);
+
+      // approvers ตาม email ที่กำหนด
+      const approverEmails = [APPROVER_1_EMAIL, APPROVER_2_EMAIL, APPROVER_3_EMAIL];
+      const approverList: ApproverInfo[] = [];
+      for (const email of approverEmails) {
+        const found = (teachers || []).find((t: any) => t.email === email);
+        if (found) {
+          approverList.push({
+            id: (found as any).id,
+            full_name: fullName(found),
+            position: (found as any).position,
+            email: (found as any).email,
+          });
+        }
+      }
+      setApprovers(approverList);
+
       setLoading(false);
     };
     init();
   }, []);
 
-  if(loading)return<div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-blue-500 font-black text-lg animate-pulse">กำลังโหลดระบบ...</div></div>;
-  if(!user)return<div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-red-500 font-black">❌ กรุณาเข้าสู่ระบบก่อน</div></div>;
+  if(loading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-blue-500 font-black text-lg animate-pulse">กำลังโหลดระบบ...</div></div>;
+  if(!user)   return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-red-500 font-black">❌ กรุณาเข้าสู่ระบบก่อน</div></div>;
 
-  // [NEW] super admin emails ได้รับสิทธิ์แดชบอร์ดแอดมินเสมอ
-  const isSuperAdminUser = isSuperAdmin(user.email);
-  const isTeacher = ["homeroom_teacher","subject_teacher","staff","teacher"].includes(user.role)
-    && !isSuperAdminUser;
-  const isAdmin = ADMIN_ROLES.includes(user.role) || isSuperAdminUser;
-  const canPrint = PRINT_ROLES.includes(user.role) || user.email===HR_EMAIL || user.email===ADMIN_EMAIL;
+  // ─── จำแนกบทบาท ─────────────────────────────────────────
+  const isApprover  = APPROVER_EMAILS.includes(user.email);
+  const isViewAdmin = [ADMIN_EMAIL, HR_EMAIL].includes(user.email); // เห็นข้อมูลทั้งหมดแต่อนุมัติไม่ได้
+  const isTeacher   = !isApprover && !isViewAdmin;
 
-  const roleLabel = isSuperAdminUser
-    ? "👑 Super Admin"
-    : user.role==="director"?"👔 ผู้อำนวยการ"
-    : user.role==="deputy_director"?"👔 รองผู้อำนวยการ"
-    : user.role==="admin"?"🔧 ผู้ดูแลระบบ"
-    : user.role==="dept_head"?"👔 หัวหน้าฝ่าย"
-    :"👩‍🏫 ครู";
+  const roleLabel = isApprover
+    ? approverSlotByEmail(user.email)===1 ? "👤 ผู้อนุมัติลำดับที่ 1"
+      : approverSlotByEmail(user.email)===2 ? "👤 ผู้อนุมัติลำดับที่ 2"
+      : "👤 ผู้อนุมัติลำดับที่ 3"
+    : user.email===ADMIN_EMAIL ? "🔧 ผู้ดูแลระบบ"
+    : user.email===HR_EMAIL    ? "📋 ฝ่ายบุคคล (HR)"
+    : user.role==="director"   ? "👔 ผู้อำนวยการ"
+    : user.role==="deputy_director" ? "👔 รองผู้อำนวยการ"
+    : "👩‍🏫 ครู";
 
-  return(
+  return (
     <div className="min-h-screen bg-slate-50" style={{fontFamily:"'Sarabun','IBM Plex Sans Thai',sans-serif"}}>
+      {/* Top bar */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={()=>router.push("/dashboard")} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg">🏠</button>
             <div><h1 className="text-base font-black text-slate-800 leading-none">ระบบลา / ไปราชการ</h1><p className="text-slate-400 text-xs">โรงเรียนวัดเขียนเขต</p></div>
           </div>
-          <span className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 ${isTeacher?"bg-blue-50 text-blue-600 border-blue-200":isSuperAdminUser?"bg-purple-50 text-purple-600 border-purple-200":"bg-indigo-50 text-indigo-600 border-indigo-200"}`}>{roleLabel}</span>
+          <span className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 ${
+            isApprover  ? "bg-indigo-50 text-indigo-600 border-indigo-200" :
+            isViewAdmin ? "bg-slate-50 text-slate-600 border-slate-200" :
+                          "bg-blue-50 text-blue-600 border-blue-200"
+          }`}>{roleLabel}</span>
         </div>
       </div>
+
       <div suppressHydrationWarning>
-        {isTeacher
-          ?<TeacherDashboard user={user} approvers={approvers.slice(0,3)} allTeachers={allTeachers} savedSignature={savedSignature} canPrint={canPrint}/>
-          :<AdminDashboard user={user}/>
-        }
+        {isApprover ? (
+          /* ผู้อนุมัติ 3 คน — มีปุ่มสลับโหมด */
+          <ApproverPage
+            user={user}
+            approvers={approvers}
+            allTeachers={allTeachers}
+            savedSignature={savedSignature}
+          />
+        ) : isViewAdmin ? (
+          /* admin/hr — เห็นข้อมูลทั้งหมด พิมพ์ได้ อนุมัติไม่ได้ */
+          <AdminDashboard user={user} canApprove={false} />
+        ) : (
+          /* ครูทั่วไป */
+          <TeacherDashboard
+            user={user}
+            approvers={approvers}
+            allTeachers={allTeachers}
+            savedSignature={savedSignature}
+            canPrint={PRINT_ROLES.includes(user.role)}
+          />
+        )}
       </div>
     </div>
   );
