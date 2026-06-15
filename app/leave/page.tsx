@@ -1062,7 +1062,7 @@ const loadAll = useCallback(async () => {
     .from("leave_requests")
     .select(`
       *,
-      user:users (
+      user:users!user_id(
         title,
         first_name,
         last_name,
@@ -1072,7 +1072,7 @@ const loadAll = useCallback(async () => {
         phone,
         signature_url
       )
-    `) // 🟢 ปรับตรงนี้ให้เหลือแค่ user:users เพื่อให้ระเบียบการดึง Relationship ทำงานอัตโนมัติ
+    `)
     .order("created_at", { ascending: false });
 
   if (error) {
