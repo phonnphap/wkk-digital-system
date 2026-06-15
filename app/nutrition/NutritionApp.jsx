@@ -390,7 +390,7 @@ function ClassAssessPage({currentUser}) {
   const handlePrint=()=>{
     const termLabel=term==="term1"?"ครั้งที่ 1 (เทอม 1)":"ครั้งที่ 2 (เทอม 2)";
     const html=`
-      <h3 style="margin:0 0 4px">${selectedClass?.room_name} — ${termLabel} — วันที่ ${format(new Date(measuredDate),"d MMMM yyyy",{locale:th})}</h3>
+      <h3 style="margin:0 0 4px">${selectedClass?.room_name} — ${termLabel} — วันที่ ${format(new Date(measuredDate),"dd/MM/yyyy",{locale:th})}</h3>
       <table>
         <thead><tr>
           <th>เลขที่</th><th>ชื่อ-นามสกุล</th><th>อายุ</th><th>น้ำหนัก</th><th>ส่วนสูง</th>
