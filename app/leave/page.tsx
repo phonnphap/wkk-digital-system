@@ -1062,7 +1062,7 @@ const loadAll = useCallback(async () => {
     .from("leave_requests")
     .select(`
       *,
-      user:users!user_id(
+      user:users!leave_requests_user_id_fkey(
         title,
         first_name,
         last_name,
@@ -1077,7 +1077,25 @@ const loadAll = useCallback(async () => {
 
   if (error) {
     console.error("loadAll error:", error.message);
-    alert("โหลดข้อมูลไม่สำเร็จ: " + error.message);
+    // fallback: โหลดแยก
+    const { data: requests } = await supabase
+      .from("leave_requests")
+      .select("*")
+      .order("created_at", { ascending: false });
+    
+    if (requests) {
+      const userIds = [...new Set(requests.map(r => r.user_id))];
+      const { data: users } = await supabase
+        .from("users")
+        .select("id, title, first_name, last_name, position, email, grade_level, phone, signature_url")
+        .in("id", userIds);
+      
+      const userMap = Object.fromEntries((users || []).map(u => [u.id, u]));
+      const merged = requests.map(r => ({ ...r, user: userMap[r.user_id] || null }));
+      setRequests(merged as LeaveRequest[]);
+    }
+    setLoading(false);
+    return;
   }
 
   setRequests((data as LeaveRequest[]) || []);
