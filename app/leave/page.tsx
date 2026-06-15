@@ -1057,27 +1057,32 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
   const canPrint = true; // admin dashboard เห็นทุกอย่าง พิมพ์ได้ทุกใบ
 
   const loadAll = useCallback(async () => {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from("leave_requests")
-      .select(`
-        *,
-        user:users!leave_requests_user_id_fkey(
-          title, first_name, last_name, full_name,
-          position, email, grade_level, phone, signature_url
-        )
-      `)
-      .order("created_at", { ascending: false });
+  setLoading(true);
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .select(`
+      *,
+      user:users(
+        title,
+        first_name,
+        last_name,
+        position,
+        email,
+        grade_level,
+        phone,
+        signature_url
+      )
+    `)
+    .order("created_at", { ascending: false });
 
-    // เพิ่ม error log
-    if (error) {
-      console.error("loadAll error:", error.message, error.details, error.hint);
-      alert("โหลดข้อมูลไม่สำเร็จ: " + error.message);
-    }
+  if (error) {
+    console.error("loadAll error:", error.message);
+    alert("โหลดข้อมูลไม่สำเร็จ: " + error.message);
+  }
 
-    setRequests((data as LeaveRequest[]) || []);
-    setLoading(false);
-  }, []);
+  setRequests((data as LeaveRequest[]) || []);
+  setLoading(false);
+}, []);
 
   useEffect(()=>{ loadAll(); },[loadAll]);
 
