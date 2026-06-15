@@ -2,7 +2,7 @@
 const nextConfig = {
   // ✅ บอก Next.js ให้ใช้ webpack แทน Turbopack ชัดเจน
   experimental: {
-    turbo: {},
+
   },
   images: {
     remotePatterns: [
