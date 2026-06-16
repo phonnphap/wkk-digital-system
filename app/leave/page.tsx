@@ -224,7 +224,7 @@ table.stat th{background:#f0f0f0;font-weight:700}
         ${approver1?.signature_url ? `<div style="height:50px;display:flex;align-items:flex-end;justify-content:center"><img src="${approver1.signature_url}" style="max-height:50px;max-width:140px;object-fit:contain"/></div>` : `<div style="height:50px"></div>`}
         ลงชื่อ...........................................<br>
         (${approver1?.name || "นางสาวพรรษา แก้วใหญ่"})<br>
-        ${approver1?.position || "ครู ตรวจสอบสถิติการลา / ผู้อนุมัติคนที่ 1"}
+        ${approver1?.position || "ครู ตรวจสอบสถิติการลา"}
       </div>
     </div>
 
@@ -1051,6 +1051,12 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
                 <p><span className="text-slate-400">เหตุผล:</span> {r.reason}</p>
                 {(r as any).contact_info&&<p><span className="text-slate-400">ติดต่อ:</span> {(r as any).contact_info}</p>}
                 <div className="mt-3"><StatusBadge status={r.status}/></div>
+                {(r as any).reject_reason && r.status === "rejected" && (
+                  <div className="bg-red-50 border-2 border-red-200 rounded-xl p-3 mt-2">
+                    <p className="text-red-500 text-xs font-bold mb-1">❌ เหตุผลที่ไม่อนุมัติ</p>
+                    <p className="text-red-700 font-bold text-sm">{(r as any).reject_reason}</p>
+                  </div>
+                )}
               </div>
               <div className="flex gap-2 mt-4">
                 <button onClick={()=>{printLeave({fullName:fullName(user),position:user.position??user.role,leaveType:r.leave_type,leaveTypeName:LEAVE_TYPE_LIST.find(t=>t.key===r.leave_type)?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:user.phone,contactInfo:(r as any).contact_info},(r as any).signature_url||savedSignature);}}
@@ -1379,6 +1385,9 @@ const loadAll = useCallback(async () => {
     [`approver_${slot}_status`]: action,
     [`approver_${slot}_id`]: user.id,
   };
+  if (action === "approved") {
+    updates[`approver_${slot}_signature`] = approverSigUrl;
+  }
 
   if (action === "rejected" && reason) {
     updates[`approver_${slot}_reject_reason`] = reason;
@@ -1552,22 +1561,26 @@ function mySlot(r: LeaveRequest): 1|2|3|null {
           mySlotFn={mySlot}                 
           onClose={() => setViewModal(null)}
           onPrint={() => printLeave(
-            { fullName: fullName(viewModal.user),
-              position: viewModal.user?.position,
-              leaveType: viewModal.leave_type,
-              leaveTypeName: LEAVE_TYPE_CONFIG[viewModal.leave_type as LeaveType]?.label ?? "",
-              otherLeaveName: viewModal.other_leave_name,
-              startDate: viewModal.start_date,
-              endDate: viewModal.end_date,
-              days: viewModal.days_count,
-              halfDay: viewModal.half_day,
-              reason: viewModal.reason,
-              phone: viewModal.user?.phone,
-              contactInfo: viewModal.contact_info },
-            viewModal.user?.signature_url || "",
-            undefined,
-            viewModal.document_url
-          )}
+  { fullName: fullName(viewModal.user),
+    position: viewModal.user?.position,
+    leaveType: viewModal.leave_type,
+    leaveTypeName: LEAVE_TYPE_CONFIG[viewModal.leave_type as LeaveType]?.label ?? "",
+    otherLeaveName: viewModal.other_leave_name,
+    startDate: viewModal.start_date,
+    endDate: viewModal.end_date,
+    days: viewModal.days_count,
+    halfDay: viewModal.half_day,
+    reason: viewModal.reason,
+    phone: viewModal.user?.phone,
+    contactInfo: viewModal.contact_info },
+  viewModal.user?.signature_url || "",
+  [
+    { name: "นางสาวพรรษา แก้วใหญ่", position: "ครู ตรวจสอบสถิติการลา", signature_url: viewModal.approver_1_signature },
+    { name: "นางสาวฐิติมา กาบแก้ว", position: "รองผู้อำนวยการกลุ่มบริหารงานบุคคล", signature_url: viewModal.approver_2_signature },
+    { name: "นายธนณัฐ ศิระวงษ์", position: "ผู้อำนวยการโรงเรียนวัดเขียนเขต", signature_url: viewModal.approver_3_signature },
+  ],
+  viewModal.document_url
+)}
           onApprove={(id, slot) => tryApprove(id, slot, "approved")}   
           onReject={(id, slot) => setRejectModal({ id, slot })}        
         />
