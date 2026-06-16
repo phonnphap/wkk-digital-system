@@ -77,6 +77,13 @@ const COLORS: Record<string, { bg:string; border:string; text:string; activeBg:s
   other:      { bg:"bg-slate-50",  border:"border-slate-200",  text:"text-slate-700",  activeBg:"bg-slate-100",  dot:"bg-slate-400",  ring:"ring-slate-300"  },
 };
 
+const GRADE_LABEL: Record<string, string> = {
+  "k2": "อ.2", "k3": "อ.3",
+  "p1": "ป.1", "p2": "ป.2", "p3": "ป.3",
+  "p4": "ป.4", "p5": "ป.5", "p6": "ป.6",
+  "m1": "ม.1", "m2": "ม.2", "m3": "ม.3", "m4": "ม.4", "m5": "ม.5", "m6": "ม.6",
+};
+
 const LEAVE_TYPE_LIST: { key:LeaveType; label:string; icon:string }[] = [
   { key:"sick",       label:"ลาป่วย",                           icon:"🤒" },
   { key:"personal",   label:"ลากิจส่วนตัว",                     icon:"📋" },
@@ -92,7 +99,9 @@ const sel = (err?: boolean) => `w-full bg-white border-2 ${err?"border-red-400":
 // ══════════════════════════════════════════════════════════
 // ── PDF Builder ────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════
-function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: { name: string; position: string; signature_url?: string }[], documentUrl?: string): string {
+function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: { 
+  name: string; position: string; signature_url?: string; approved_at?: string;
+}[], documentUrl?: string): string {
   const now = new Date();
   const thDay   = now.getDate();
   const thMonth = now.toLocaleDateString("th-TH",{ month:"long", timeZone:"Asia/Bangkok" });
@@ -108,7 +117,6 @@ function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: { 
   const approver2 = approverSignatures?.[1];
   const approver3 = approverSignatures?.[2];
 
-  // ✅ ต้องอยู่นอก return ก่อน
   const attachmentPage = documentUrl ? `
     <div style="page-break-before:always;padding:14mm 18mm 10mm">
       <div style="font-size:14pt;font-weight:900;margin-bottom:12px;border-bottom:2px solid #000;padding-bottom:8px">
@@ -120,6 +128,54 @@ function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: { 
       }
     </div>` : '';
 
+  const checkerBlock = `
+    <div style="margin-top:14px;font-size:11.5pt;line-height:2">
+      ${approver1?.signature_url
+        ? `<div style="height:55px;display:flex;align-items:flex-end">
+             <img src="${approver1.signature_url}" style="max-height:55px;max-width:150px;object-fit:contain"/>
+           </div>`
+        : `<div style="height:55px"></div>`}
+      ลงชื่อ.......................................ผู้ตรวจสอบ<br>
+      (${approver1?.name || "นางสาวพรรษา แก้วใหญ่"})<br>
+      ตำแหน่ง ครู<br>
+      วันที่ ${(approver1 as any)?.approved_at || ".............................."}
+    </div>`;
+
+  const box2 = `
+    <div class="box" style="margin-bottom:10px;font-size:11.5pt;line-height:1.9">
+      <div style="font-weight:700;margin-bottom:5px">ความเห็นของรอง.ผอ.กลุ่มบริหารงานบุคคล</div>
+      <div class="dotline" style="height:20px;margin:4px 0"></div>
+      <div style="text-align:center;margin-top:8px">
+        ${approver2?.signature_url
+          ? `<div style="height:50px;display:flex;align-items:flex-end;justify-content:center">
+               <img src="${approver2.signature_url}" style="max-height:50px;max-width:140px;object-fit:contain"/>
+             </div>`
+          : `<div style="height:50px"></div>`}
+        ลงชื่อ...........................................<br>
+        (${approver2?.name || "นางสาวฐิติมา กาบแก้ว"})<br>
+        ${approver2?.position || "รองผู้อำนวยการกลุ่มบริหารงานบุคคล"}<br>
+        วันที่ ${(approver2 as any)?.approved_at || ".............................."}
+      </div>
+    </div>`;
+
+  const box3 = `
+    <div class="box" style="font-size:11.5pt;line-height:1.9">
+      <div style="font-weight:700;margin-bottom:4px">ความเห็นของผู้บังคับบัญชา</div>
+      <div style="margin-bottom:6px"><span class="chk"></span>อนุญาต &nbsp;&nbsp;&nbsp; <span class="chk"></span>ไม่อนุญาต</div>
+      <div class="dotline" style="height:20px;margin:4px 0"></div>
+      <div style="text-align:center;margin-top:8px">
+        ${approver3?.signature_url
+          ? `<div style="height:50px;display:flex;align-items:flex-end;justify-content:center">
+               <img src="${approver3.signature_url}" style="max-height:50px;max-width:140px;object-fit:contain"/>
+             </div>`
+          : `<div style="height:50px"></div>`}
+        ลงชื่อ...........................................<br>
+        (${approver3?.name || "นายธนณัฐ ศิระวงษ์"})<br>
+        ${approver3?.position || "ผู้อำนวยการโรงเรียนวัดเขียนเขต"}<br>
+        วันที่ ${(approver3 as any)?.approved_at || ".............................."}
+      </div>
+    </div>`;
+
   return `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
@@ -129,7 +185,7 @@ html,body{width:210mm;font-family:'Sarabun',Arial,sans-serif;font-size:13.5pt;co
 .dotline{border-bottom:1px dotted #555}
 .box{border:1px solid #888;padding:10px 12px;min-height:95px;border-radius:3px}
 .chk{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border:1.5px solid #000;margin-right:5px;font-size:11pt;vertical-align:middle}
-table.stat{border-collapse:collapse;font-size:11.5pt;width:55%}
+table.stat{border-collapse:collapse;font-size:11.5pt;width:100%}
 table.stat td,table.stat th{border:1px solid #000;padding:4px 8px;text-align:center}
 table.stat th{background:#f0f0f0;font-weight:700}
 </style></head><body><div class="page">
@@ -203,54 +259,17 @@ table.stat th{background:#f0f0f0;font-weight:700}
 <div style="display:flex;gap:18px;margin-top:20px">
   <div style="flex:1">
     <div style="font-weight:700;text-decoration:underline;margin-bottom:7px;font-size:11.5pt">สถิติการลาในปีงบประมาณนี้</div>
-    <table class="stat" style="width:100%">
+    <table class="stat">
       <tr><th>ประเภทการลา</th><th>ลามาแล้ว</th><th>ลาครั้งนี้</th><th>รวมเป็น</th></tr>
       <tr><td>ลาป่วย</td><td></td><td>${isSick?daysDisplay:""}</td><td></td></tr>
       <tr><td>ลากิจส่วนตัว</td><td></td><td>${isPersonal?daysDisplay:""}</td><td></td></tr>
       <tr><td>ลาคลอดบุตร</td><td></td><td>${isMat?daysDisplay:""}</td><td></td></tr>
     </table>
-    <div style="margin-top:14px;font-size:11.5pt;line-height:2">
-      ลงชื่อ.......................................ผู้ตรวจสอบ<br>
-      (นางสาวพรรษา แก้วใหญ่)<br>
-      ตำแหน่ง ครู วันที่...............................
-    </div>
+    ${checkerBlock}
   </div>
-
   <div style="flex:1;border-left:1px dashed #ccc;padding-left:14px">
-    <div class="box" style="margin-bottom:10px;font-size:11.5pt;line-height:1.9">
-      <div style="font-weight:700;margin-bottom:5px">ความเห็นของผู้อนุมัติลำดับที่ 1</div>
-      <div class="dotline" style="height:20px;margin:4px 0"></div>
-      <div style="text-align:center;margin-top:8px">
-        ${approver1?.signature_url ? `<div style="height:50px;display:flex;align-items:flex-end;justify-content:center"><img src="${approver1.signature_url}" style="max-height:50px;max-width:140px;object-fit:contain"/></div>` : `<div style="height:50px"></div>`}
-        ลงชื่อ...........................................<br>
-        (${approver1?.name || "นางสาวพรรษา แก้วใหญ่"})<br>
-        ${approver1?.position || "ครู ตรวจสอบสถิติการลา"}
-      </div>
-    </div>
-
-    <div class="box" style="margin-bottom:10px;font-size:11.5pt;line-height:1.9">
-      <div style="font-weight:700;margin-bottom:5px">ความเห็นของรอง.ผอ.กลุ่มบริหารงานบุคคล</div>
-      <div class="dotline" style="height:20px;margin:4px 0"></div>
-      <div style="text-align:center;margin-top:8px">
-        ${approver2?.signature_url ? `<div style="height:50px;display:flex;align-items:flex-end;justify-content:center"><img src="${approver2.signature_url}" style="max-height:50px;max-width:140px;object-fit:contain"/></div>` : `<div style="height:50px"></div>`}
-        ลงชื่อ...........................................<br>
-        (${approver2?.name || "นางสาวฐิติมา กาบแก้ว"})<br>
-        ${approver2?.position || "รองผู้อำนวยการกลุ่มบริหารงานบุคคล"}
-      </div>
-    </div>
-
-    <div class="box" style="font-size:11.5pt;line-height:1.9">
-      <div style="font-weight:700;margin-bottom:4px">ความเห็นของผู้บังคับบัญชา</div>
-      <div style="margin-bottom:6px"><span class="chk"></span>อนุญาต &nbsp;&nbsp;&nbsp; <span class="chk"></span>ไม่อนุญาต</div>
-      <div class="dotline" style="height:20px;margin:4px 0"></div>
-      <div style="text-align:center;margin-top:8px">
-        ${approver3?.signature_url ? `<div style="height:50px;display:flex;align-items:flex-end;justify-content:center"><img src="${approver3.signature_url}" style="max-height:50px;max-width:140px;object-fit:contain"/></div>` : `<div style="height:50px"></div>`}
-        ลงชื่อ...........................................<br>
-        (${approver3?.name || "นายธนณัฐ ศิระวงษ์"})<br>
-        ${approver3?.position || "ผู้อำนวยการโรงเรียนวัดเขียนเขต"}<br>
-        วันที่...............................
-      </div>
-    </div>
+    ${box2}
+    ${box3}
   </div>
 </div>
 
@@ -681,10 +700,10 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
           <div>
             <label className="block text-sm font-bold text-slate-600 mb-1">
               {leaveType==="official"?"รายละเอียดการไปราชการ":"เหตุผลการลา"} <span className="text-red-500">*</span>
-              <span className="text-slate-400 font-normal ml-2">({reason.length}/100)</span>
+              <span className="text-slate-400 font-normal ml-2">({reason.length}/50)</span>
             </label>
-            <textarea value={reason} onChange={e=>e.target.value.length<=100&&setReason(e.target.value)} onBlur={()=>touch("reason")} rows={3}
-              placeholder={leaveType==="official"?"ระบุวัตถุประสงค์...":"ระบุเหตุผล (ไม่เกิน 100 ตัวอักษร)"}
+            <textarea value={reason} onChange={e=>e.target.value.length<=50&&setReason(e.target.value)} onBlur={()=>touch("reason")} rows={3}
+              placeholder={leaveType==="official"?"ระบุวัตถุประสงค์...":"ระบุเหตุผล (ไม่เกิน 50 ตัวอักษร)"}
               className={inp(errors.reason)+" resize-none"}/>
             {errors.reason&&<p className="text-red-500 text-xs mt-1">กรุณากรอกเหตุผล</p>}
           </div>
@@ -1287,7 +1306,7 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
   const [filterType,   setFilterType]   = useState<LeaveType|"all">("all");
   const [filterStatus, setFilterStatus] = useState<LeaveStatus|"all">("pending");
   const [filterGrade,  setFilterGrade]  = useState("all");
-  const [tab,          setTab]          = useState<"pending"|"history"|"official"|"graph">("pending");
+  const [tab,          setTab]          = useState<"pending"|"history"|"official"|"graph"|"summary">("pending");
   const [loading,      setLoading]      = useState(true);
   const [showApproverSigPad, setShowApproverSigPad] = useState(false);
   const [approverSigUrl,     setApproverSigUrl]     = useState(user.signature_url || "");
@@ -1371,7 +1390,8 @@ const loadAll = useCallback(async () => {
   }
 
   function tryApprove(id: string, slot: 1|2|3, action: "approved"|"rejected") {
-    if (action === "approved" && !approverSigUrl) {
+    // slot 3 (ผอ.) ไม่ต้องเช็คลายเซ็น
+    if (action === "approved" && !approverSigUrl && slot !== 3) {
       setPendingApproveId({id, slot, action});
       setShowApproverSigPad(true);
       return;
@@ -1387,6 +1407,9 @@ const loadAll = useCallback(async () => {
   };
   if (action === "approved") {
     updates[`approver_${slot}_signature`] = approverSigUrl;
+    updates[`approver_${slot}_approved_at`] = new Date().toLocaleDateString("th-TH", {
+      day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Bangkok"
+    });
   }
 
   if (action === "rejected" && reason) {
@@ -1660,7 +1683,7 @@ function mySlot(r: LeaveRequest): 1|2|3|null {
 
         {/* Tab bar */}
         <div className="flex gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
-          {[["pending","⏳ รออนุมัติ"],["history","📋 ทั้งหมด"],["official","🏛️ ไปราชการ"],["graph","📊 กราฟ"]].map(([k,l])=>(
+          {[["pending","⏳ รออนุมัติ"],["history","📋 ทั้งหมด"],["summary","👥 รายบุคคล"], ["official","🏛️ ไปราชการ"],["graph","📊 กราฟ"]].map(([k,l])=>(
             <button key={k} onClick={()=>setTab(k as any)} className={`flex-1 py-2.5 rounded-xl text-sm font-black flex items-center justify-center gap-1 ${tab===k?"bg-white text-slate-800 shadow border border-slate-200":"text-slate-500 hover:text-slate-700"}`}>
               {l}{k==="pending"&&pendingList.length>0&&<span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">{pendingList.length}</span>}
             </button>
@@ -1762,7 +1785,13 @@ function mySlot(r: LeaveRequest): 1|2|3|null {
         {tab==="history"&&(
           <div>
             <div className="flex gap-2 mb-4 flex-wrap">
-              <select value={filterGrade} onChange={e=>setFilterGrade(e.target.value)} className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none">{allGrades.map(g=><option key={g} value={g}>{g==="all"?"ทุกสายชั้น":g}</option>)}</select>
+              <select value={filterGrade} onChange={e=>setFilterGrade(e.target.value)} className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none">
+                {allGrades.map(g => (
+                  <option key={g} value={g}>
+                    {g === "all" ? "ทุกสายชั้น" : GRADE_LABEL[g] ?? g}
+                  </option>
+                ))}
+              </select>
               <select value={filterType} onChange={e=>setFilterType(e.target.value as any)} className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none"><option value="all">ทุกประเภท</option>{(Object.entries(LEAVE_TYPE_CONFIG) as any[]).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}</select>
               <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value as any)} className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none"><option value="all">ทุกสถานะ</option>{(Object.entries(LEAVE_STATUS_CONFIG) as any[]).map(([k,v])=><option key={k} value={k}>{(v as any).icon} {(v as any).label}</option>)}</select>
             </div>
@@ -1776,7 +1805,7 @@ function mySlot(r: LeaveRequest): 1|2|3|null {
                       <div key={r.id} className="px-5 py-4 flex items-center justify-between gap-3 flex-wrap hover:bg-slate-50">
                         <div>
                           <p className="font-black text-slate-800 text-sm">{fullName((r as any).user)}</p>
-                          <p className="text-slate-500 text-xs">{(r as any).user?.position} {(r as any).user?.grade_level?`· ${(r as any).user.grade_level}`:""}</p>
+                          <p className="text-slate-500 text-xs">{(r as any).user?.position} {(r as any).user?.grade_level ? `· ${GRADE_LABEL[(r as any).user.grade_level] ?? (r as any).user.grade_level}` : ""}</p>
                           <span className={`inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-lg border ${c.bg} ${c.border} ${c.text}`}>{typeCfg?.icon} {typeCfg?.label} · {r.days_count} วัน</span>
                           <p className="text-slate-400 text-xs mt-1">{toThaiDate(r.start_date)} – {toThaiDate(r.end_date)}</p>
                           {(r as any).document_url&&(
@@ -1795,6 +1824,80 @@ function mySlot(r: LeaveRequest): 1|2|3|null {
                     );
                   })}
                 </div>}
+            </div>
+          </div>
+        )}
+
+        // ─── Tab: สรุปรายบุคคล ───
+        {tab==="summary" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="bg-slate-50 border-b px-5 py-3">
+              <h3 className="font-black text-slate-700">👥 สรุปการลารายบุคคล {fiscalYearLabel(filterFY)}</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b">
+                    <th className="text-left px-4 py-3 font-black text-slate-600">ชื่อ-สกุล</th>
+                    <th className="text-left px-4 py-3 font-black text-slate-600">ตำแหน่ง</th>
+                    <th className="text-center px-3 py-3 font-black text-red-600">🤒 ลาป่วย</th>
+                    <th className="text-center px-3 py-3 font-black text-amber-600">📋 ลากิจ</th>
+                    <th className="text-center px-3 py-3 font-black text-pink-600">👶 ลาคลอด</th>
+                    <th className="text-center px-3 py-3 font-black text-sky-600">🏛️ ราชการ</th>
+                    <th className="text-center px-3 py-3 font-black text-violet-600">🙏 อุปสมบท</th>
+                    <th className="text-center px-3 py-3 font-black text-slate-600">📌 อื่นๆ</th>
+                    <th className="text-center px-3 py-3 font-black text-slate-800">รวม</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(() => {
+                    // group requests by user
+                    const byUser = new Map<string, any>();
+                    fyAll.filter(r => r.status !== "rejected" && r.status !== "cancelled").forEach(r => {
+                      const uid = r.user_id;
+                      if (!byUser.has(uid)) byUser.set(uid, {
+                        user: (r as any).user,
+                        sick: 0, personal: 0, maternity: 0,
+                        official: 0, ordination: 0, other: 0, total: 0
+                      });
+                      const row = byUser.get(uid);
+                      const days = Number(r.days_count);
+                      row[r.leave_type] = (row[r.leave_type] ?? 0) + days;
+                      row.total += days;
+                    });
+            
+                    return Array.from(byUser.values())
+                      .sort((a, b) => b.total - a.total)
+                      .map((row, i) => (
+                        <tr key={i} className={`hover:bg-slate-50 ${row.sick + row.personal > 15 ? "bg-red-50" : ""}`}>
+                          <td className="px-4 py-3 font-bold text-slate-800">{fullName(row.user)}</td>
+                          <td className="px-4 py-3 text-slate-500 text-xs">{row.user?.position}</td>
+                          <td className="px-3 py-3 text-center">
+                            <span className={`font-black ${row.sick > 0 ? "text-red-600" : "text-slate-300"}`}>{row.sick || "-"}</span>
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <span className={`font-black ${row.personal > 0 ? "text-amber-600" : "text-slate-300"}`}>{row.personal || "-"}</span>
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <span className={`font-black ${row.maternity > 0 ? "text-pink-600" : "text-slate-300"}`}>{row.maternity || "-"}</span>
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <span className={`font-black ${row.official > 0 ? "text-sky-600" : "text-slate-300"}`}>{row.official || "-"}</span>
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <span className={`font-black ${row.ordination > 0 ? "text-violet-600" : "text-slate-300"}`}>{row.ordination || "-"}</span>
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <span className={`font-black ${row.other > 0 ? "text-slate-600" : "text-slate-300"}`}>{row.other || "-"}</span>
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <span className={`font-black text-base ${row.total > 20 ? "text-red-600" : "text-slate-800"}`}>{row.total}</span>
+                          </td>
+                        </tr>
+                      ));
+                  })()}
+                </tbody>
+              </table>
             </div>
           </div>
         )}

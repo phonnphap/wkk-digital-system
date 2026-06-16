@@ -3,10 +3,13 @@ import { NextRequest, NextResponse } from "next/server";
 const TENANT_ID  = process.env.MICROSOFT_TENANT_ID!;
 const CLIENT_ID  = process.env.MICROSOFT_CLIENT_ID!;
 const CLIENT_SEC = process.env.MICROSOFT_CLIENT_SECRET!;
-const TARGET_UPN = process.env.MICROSOFT_TARGET_EMAIL!; // admin@khienkhet.ac.th
+const TARGET_UPN = process.env.MICROSOFT_TARGET_EMAIL!;
 
-// ใช้ฟังก์ชันดึง Token ร่วมกัน
 async function getAccessToken() {
+  console.log("TENANT_ID:", TENANT_ID);
+  console.log("CLIENT_ID:", CLIENT_ID);
+  console.log("CLIENT_SEC exists:", !!CLIENT_SEC);
+
   const res = await fetch(
     `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
     {
@@ -21,9 +24,11 @@ async function getAccessToken() {
     }
   );
   const json = await res.json();
+  console.log("Token response:", json);
   return json.access_token as string;
 }
 
+// ← มีแค่อันเดียว
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -33,27 +38,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "No file provided" }, { status: 400 });
     }
 
-    // 🌟 ดึงค่าจากฟอร์มรองรับทั้ง 2 ระบบ (ระบบซ่อมเดิม และ ระบบลาใหม่)
     const folder    = formData.get("folder") as string;
     const fileName  = formData.get("fileName") as string;
     const fixedPath = formData.get("path") as string;
 
     let finalPath = "";
-
-    // ถ้าระบบลาส่งค่า path ยาวมา เช่น "WKK_Leave_System/2569/ใบลา_xxx.pdf"
     if (fixedPath) {
       finalPath = fixedPath.split("/").map(encodeURIComponent).join("/");
     } else {
-      // ถ้าระบบซ่อมเดิมส่งแยกโฟลเดอร์กับชื่อไฟล์มา
       const targetFolder = folder || "WKK_Repair_System";
       const targetName   = fileName || file.name;
       finalPath = `${encodeURIComponent(targetFolder)}/${encodeURIComponent(targetName)}`;
     }
 
+    console.log("TARGET_UPN:", TARGET_UPN);
+    console.log("finalPath:", finalPath);
+
     const token  = await getAccessToken();
     const buffer = await file.arrayBuffer();
 
-    // 1. ส่งคำสั่ง Upload ไฟล์ไปยัง OneDrive
     const uploadUrl = `https://graph.microsoft.com/v1.0/users/${TARGET_UPN}/drive/root:/${finalPath}:/content`;
     const upRes = await fetch(uploadUrl, {
       method:  "PUT",
@@ -64,14 +67,16 @@ export async function POST(req: NextRequest) {
       body: buffer,
     });
 
+    console.log("upRes status:", upRes.status);
+
     if (!upRes.ok) {
       const err = await upRes.json();
+      console.error("Upload failed:", err);
       return NextResponse.json({ ok: false, error: err }, { status: 500 });
     }
 
     const fileData = await upRes.json();
 
-    // 2. สร้าง Sharing Link สำหรับแชร์ในองค์กร (ตามระบบซ่อมเดิม)
     let publicUrl = fileData.webUrl;
     try {
       const shareRes = await fetch(
@@ -90,12 +95,11 @@ export async function POST(req: NextRequest) {
       console.warn("Sharing link creation failed, using webUrl fallback.");
     }
 
-    // 🌟 3. ส่งข้อมูลกลับแบบ Hybrid (ได้ทั้งค่า url เดิม และข้อมูลฝั่งระบบลาใหม่)
     return NextResponse.json({
       ok: true,
-      url: publicUrl, // ระบบซ่อมเดิมดึงค่านี่ไปใช้งาน
+      url: publicUrl,
       webUrl: fileData.webUrl,
-      downloadUrl: fileData["@microsoft.graph.downloadUrl"], // ระบบลาใหม่เอาตัวนี้ไปเปิดไฟล์ตรง ๆ
+      downloadUrl: fileData["@microsoft.graph.downloadUrl"],
     });
 
   } catch (e: any) {
