@@ -92,7 +92,7 @@ const sel = (err?: boolean) => `w-full bg-white border-2 ${err?"border-red-400":
 // ══════════════════════════════════════════════════════════
 // ── PDF Builder ────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════
-function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: { name: string; position: string; signature_url?: string }[]): string {
+function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: { name: string; position: string; signature_url?: string }[], documentUrl?: string): string {
   const now = new Date();
   const thDay   = now.getDate();
   const thMonth = now.toLocaleDateString("th-TH",{ month:"long", timeZone:"Asia/Bangkok" });
@@ -104,10 +104,21 @@ function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: { 
   const halfText    = data.halfDay==="morning"?" (ครึ่งวันเช้า)":data.halfDay==="afternoon"?" (ครึ่งวันบ่าย)":"";
   const leaveLabel  = data.leaveType==="other"&&data.otherLeaveName?data.otherLeaveName:data.leaveTypeName;
   const reasonClean = (data.reason||"").replace(/\[.+?\]/g,"").trim();
-
   const approver1 = approverSignatures?.[0];
   const approver2 = approverSignatures?.[1];
   const approver3 = approverSignatures?.[2];
+
+  // ✅ ต้องอยู่นอก return ก่อน
+  const attachmentPage = documentUrl ? `
+    <div style="page-break-before:always;padding:14mm 18mm 10mm">
+      <div style="font-size:14pt;font-weight:900;margin-bottom:12px;border-bottom:2px solid #000;padding-bottom:8px">
+        เอกสารแนบ
+      </div>
+      ${/\.(jpg|jpeg|png|gif|webp)/i.test(documentUrl)
+        ? `<img src="${documentUrl}" style="max-width:100%;max-height:220mm;object-fit:contain;display:block;margin:0 auto"/>`
+        : `<iframe src="${documentUrl}" style="width:100%;height:220mm;border:1px solid #ccc"></iframe>`
+      }
+    </div>` : '';
 
   return `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700;900&display=swap" rel="stylesheet">
@@ -243,11 +254,11 @@ table.stat th{background:#f0f0f0;font-weight:700}
   </div>
 </div>
 
-</div></body></html>`;
+</div>${attachmentPage}</body></html>`;
 }
 
-function printLeave(data: any, signatureUrl: string, approverSignatures?: any[]) {
-  const html = buildLeaveHTML(data, signatureUrl, approverSignatures);
+function printLeave(data: any, signatureUrl: string, approverSignatures?: any[], documentUrl?: string) {
+  const html = buildLeaveHTML(data, signatureUrl, approverSignatures, documentUrl);
   const win = window.open("","_blank","width=900,height=700");
   if (!win) return;
   win.document.open(); win.document.write(html); win.document.close();
@@ -499,13 +510,33 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
 
     let docUrl: string | null = null;
     if (docFile) {
-      const formData = new FormData();
-      formData.append("file", docFile);
-      const year = new Date().getFullYear() + 543;
-      formData.append("path", `WKK_Leave_System/${year}/${Date.now()}_${docFile.name}`);
-      const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
-      const { webUrl, downloadUrl } = await res.json();
-      docUrl = downloadUrl || webUrl || null;
+      try {
+        const formData = new FormData();
+        formData.append("file", docFile);
+        const year = new Date().getFullYear() + 543;
+        formData.append("path", `WKK_Leave_System/${year}/${Date.now()}_${docFile.name}`);
+    
+        const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+    
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+    
+        const json = await res.json();
+        console.log("OneDrive response:", json); // ดู log
+    
+        if (!json.ok) {
+          throw new Error(JSON.stringify(json.error));
+        }
+    
+        docUrl = json.downloadUrl || json.webUrl || null;
+        console.log("docUrl:", docUrl);
+    
+      } catch (err) {
+        console.error("Upload error:", err);
+        const go = confirm("⚠️ แนบไฟล์ไม่สำเร็จ\nต้องการส่งใบลาโดยไม่มีเอกสารแนบหรือไม่?");
+        if (!go) return;
+      }
     }
 
     const reasonFull = leaveType==="official"
@@ -1332,56 +1363,116 @@ const loadAll = useCallback(async () => {
   const s2 = slot === 2 ? action : req.approver_2_status;
   const s3 = slot === 3 ? action : req.approver_3_status;
 
+  const teacherName = fullName((req as any).user);
+  const typeCfg = LEAVE_TYPE_CONFIG[req.leave_type];
+  const teacherEmail = (req as any).user?.email;
+
   if (action === "rejected") {
     updates.status = "rejected";
+
+    // แจ้งครูว่าไม่อนุมัติ
+    fetch("/api/send-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: [teacherEmail, HR_EMAIL].filter(Boolean),
+        subject: `[ไม่อนุมัติ] ใบลา ${teacherName} · ${typeCfg?.label}`,
+        html: `
+          <div style="font-family:Sarabun,Arial,sans-serif;max-width:600px;margin:0 auto">
+            <div style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:12px 12px 0 0;color:white">
+              <h2 style="margin:0">❌ ใบลาไม่ได้รับการอนุมัติ</h2>
+            </div>
+            <div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px">
+              <table style="width:100%;border-collapse:collapse;font-size:14px">
+                <tr><td style="padding:8px 0;color:#64748b;width:120px">ผู้ลา</td><td style="font-weight:700">${teacherName}</td></tr>
+                <tr><td style="padding:8px 0;color:#64748b">ประเภท</td><td>${typeCfg?.icon} ${typeCfg?.label}</td></tr>
+                <tr><td style="padding:8px 0;color:#64748b">วันที่</td><td>${toThaiDate(req.start_date)} – ${toThaiDate(req.end_date)}</td></tr>
+                <tr><td style="padding:8px 0;color:#64748b">จำนวน</td><td>${req.days_count} วัน</td></tr>
+                <tr><td style="padding:8px 0;color:#64748b;color:#dc2626">เหตุผลที่ไม่อนุมัติ</td><td style="font-weight:700;color:#dc2626">${reason || "-"}</td></tr>
+              </table>
+              <p style="margin-top:16px;font-size:12px;color:#94a3b8">อีเมลนี้ส่งโดยอัตโนมัติ · ${new Date().toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})}</p>
+            </div>
+          </div>`,
+      }),
+    }).catch(console.warn);
+
   } else {
-    const hasSlot2 = req.approver_2_id || slot === 2;
-    const hasSlot3 = req.approver_3_id || slot === 3;
-    const allApproved =
-      s1 === "approved" &&
-      (!hasSlot2 || s2 === "approved") &&
-      (!hasSlot3 || s3 === "approved");
+    // อนุมัติ — เช็คว่าครบทุก slot ไหม
+    // slot 2 และ 3 ถือว่ามีเสมอ (approver กำหนดตาย)
+    const allApproved = s1 === "approved" && s2 === "approved" && s3 === "approved";
 
     if (allApproved) {
       updates.status = "approved";
 
-      // ส่ง email แจ้งเตือน
-      const r = requests.find(x => x.id === id)!;
-      const typeCfg = LEAVE_TYPE_CONFIG[r.leave_type];
-      const teacherName = fullName((r as any).user);
-      const html = `
-        <div style="font-family:Sarabun,Arial,sans-serif;max-width:600px;margin:0 auto">
-          <div style="background:linear-gradient(135deg,#10b981,#059669);padding:24px;border-radius:12px 12px 0 0;color:white">
-            <h2 style="margin:0">✅ ใบลาได้รับการอนุมัติครบแล้ว</h2>
-            <p style="margin:4px 0 0;opacity:0.85;font-size:13px">ระบบลา โรงเรียนวัดเขียนเขต</p>
-          </div>
-          <div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px">
-            <table style="width:100%;border-collapse:collapse;font-size:14px">
-              <tr><td style="padding:8px 0;color:#64748b;width:120px">ผู้ลา</td><td style="font-weight:700">${teacherName}</td></tr>
-              <tr><td style="padding:8px 0;color:#64748b">ประเภท</td><td>${typeCfg?.icon} ${typeCfg?.label}</td></tr>
-              <tr><td style="padding:8px 0;color:#64748b">วันที่</td><td>${toThaiDate(r.start_date)} – ${toThaiDate(r.end_date)}</td></tr>
-              <tr><td style="padding:8px 0;color:#64748b">จำนวน</td><td><strong>${r.days_count} วัน</strong></td></tr>
-              <tr><td style="padding:8px 0;color:#64748b">เหตุผล</td><td>${r.reason}</td></tr>
-            </table>
-            <p style="margin-top:16px;font-size:12px;color:#94a3b8">
-              อีเมลนี้ส่งโดยอัตโนมัติ · ${new Date().toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})}
-            </p>
-          </div>
-        </div>`;
-
+      // แจ้งครูและ HR ว่าอนุมัติครบ
       fetch("/api/send-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          to: [HR_EMAIL, ADMIN_EMAIL],
-          subject: `[อนุมัติแล้ว] ใบลา ${teacherName} · ${typeCfg?.label} · ${r.days_count} วัน`,
-          html,
+          to: [teacherEmail, HR_EMAIL, ADMIN_EMAIL].filter(Boolean),
+          subject: `[อนุมัติแล้ว] ใบลา ${teacherName} · ${typeCfg?.label} · ${req.days_count} วัน`,
+          html: `
+            <div style="font-family:Sarabun,Arial,sans-serif;max-width:600px;margin:0 auto">
+              <div style="background:linear-gradient(135deg,#10b981,#059669);padding:24px;border-radius:12px 12px 0 0;color:white">
+                <h2 style="margin:0">✅ ใบลาได้รับการอนุมัติครบแล้ว</h2>
+              </div>
+              <div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px">
+                <table style="width:100%;border-collapse:collapse;font-size:14px">
+                  <tr><td style="padding:8px 0;color:#64748b;width:120px">ผู้ลา</td><td style="font-weight:700">${teacherName}</td></tr>
+                  <tr><td style="padding:8px 0;color:#64748b">ประเภท</td><td>${typeCfg?.icon} ${typeCfg?.label}</td></tr>
+                  <tr><td style="padding:8px 0;color:#64748b">วันที่</td><td>${toThaiDate(req.start_date)} – ${toThaiDate(req.end_date)}</td></tr>
+                  <tr><td style="padding:8px 0;color:#64748b">จำนวน</td><td><strong>${req.days_count} วัน</strong></td></tr>
+                </table>
+                <p style="margin-top:16px;font-size:12px;color:#94a3b8">อีเมลนี้ส่งโดยอัตโนมัติ · ${new Date().toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})}</p>
+              </div>
+            </div>`,
         }),
       }).catch(console.warn);
+
+    } else {
+      // ยังไม่ครบ — แจ้งผู้อนุมัติคนถัดไป
+      const nextSlot = slot + 1 as 2|3;
+      const nextEmail = nextSlot === 2 ? APPROVER_2_EMAIL : nextSlot === 3 ? APPROVER_3_EMAIL : null;
+
+      if (nextEmail && nextSlot <= 3) {
+        fetch("/api/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: [nextEmail],
+            subject: `[รออนุมัติ] ใบลา ${teacherName} · ${typeCfg?.label} · ${req.days_count} วัน`,
+            html: `
+              <div style="font-family:Sarabun,Arial,sans-serif;max-width:600px;margin:0 auto">
+                <div style="background:linear-gradient(135deg,#6366f1,#4f46e5);padding:24px;border-radius:12px 12px 0 0;color:white">
+                  <h2 style="margin:0">⏳ มีใบลารอการอนุมัติจากคุณ</h2>
+                  <p style="margin:4px 0 0;opacity:0.85;font-size:13px">ผู้อนุมัติลำดับที่ ${nextSlot}</p>
+                </div>
+                <div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px">
+                  <table style="width:100%;border-collapse:collapse;font-size:14px">
+                    <tr><td style="padding:8px 0;color:#64748b;width:120px">ผู้ลา</td><td style="font-weight:700">${teacherName}</td></tr>
+                    <tr><td style="padding:8px 0;color:#64748b">ประเภท</td><td>${typeCfg?.icon} ${typeCfg?.label}</td></tr>
+                    <tr><td style="padding:8px 0;color:#64748b">วันที่</td><td>${toThaiDate(req.start_date)} – ${toThaiDate(req.end_date)}</td></tr>
+                    <tr><td style="padding:8px 0;color:#64748b">จำนวน</td><td><strong>${req.days_count} วัน</strong></td></tr>
+                    <tr><td style="padding:8px 0;color:#64748b">เหตุผล</td><td>${req.reason}</td></tr>
+                  </table>
+                  <p style="margin-top:16px;font-size:13px;color:#4f46e5;font-weight:700">
+                    กรุณาเข้าสู่ระบบเพื่ออนุมัติ: <a href="https://system.khienkhet.ac.th/leave">คลิกที่นี่</a>
+                  </p>
+                  <p style="margin-top:8px;font-size:12px;color:#94a3b8">อีเมลนี้ส่งโดยอัตโนมัติ · ${new Date().toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})}</p>
+                </div>
+              </div>`,
+          }),
+        }).catch(console.warn);
+      }
     }
   }
 
-  await (supabase.from("leave_requests") as any).update(updates).eq("id", id);
+  const { error } = await (supabase.from("leave_requests") as any).update(updates).eq("id", id);
+  if (error) {
+    alert("❌ บันทึกไม่สำเร็จ: " + error.message);
+    console.error("handleApprove error:", error);
+    return;
+  }
   setPendingApproveId(null);
   await loadAll();
 }
@@ -1439,7 +1530,9 @@ function mySlot(r: LeaveRequest): 1|2|3|null {
             reason: viewModal.reason,
             phone: viewModal.user?.phone,
             contactInfo: viewModal.contact_info },
-          viewModal.user?.signature_url || ""
+          viewModal.user?.signature_url || "",
+          undefined,
+          viewModal.document_url
         )}
         onApprove={(id, slot) => tryApprove(id, slot, "approved")}   
         onReject={(id, slot) => setRejectModal({ id, slot })}        
