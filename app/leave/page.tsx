@@ -1179,6 +1179,14 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
 
           <div><StatusBadge status={r.status} /></div>
 
+          {/* เหตุผลที่ไม่อนุมัติ */}
+          {r.reject_reason && r.status === "rejected" && (
+            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-3">
+              <p className="text-red-500 text-xs font-bold mb-1">❌ เหตุผลที่ไม่อนุมัติ</p>
+              <p className="text-red-700 font-bold text-sm">{r.reject_reason}</p>
+            </div>
+          )}
+
           {/* ── ปุ่มอนุมัติ/ไม่อนุมัติ ── แสดงเฉพาะผู้มีสิทธิ์ */}
           {canApprove && (
             <div className="pt-2">
@@ -1339,7 +1347,19 @@ const loadAll = useCallback(async () => {
   async function saveApproverSignature(dataUrl: string) {
     setApproverSigUrl(dataUrl);
     setShowApproverSigPad(false);
-    await (supabase.from("users") as any).update({ signature_url: dataUrl }).eq("id", user.id);
+  
+    const { error } = await (supabase.from("users") as any)
+      .update({ signature_url: dataUrl })
+      .eq("id", user.id);
+    
+    if (error) {
+      console.error("Save signature error:", error.message);
+      alert("⚠️ บันทึกลายเซ็นไม่สำเร็จ: " + error.message);
+    }
+  
+    if (pendingApproveId) {
+      handleApprove(pendingApproveId.id, pendingApproveId.slot, pendingApproveId.action);
+    }
   }
 
   function tryApprove(id: string, slot: 1|2|3, action: "approved"|"rejected") {
@@ -1356,8 +1376,12 @@ const loadAll = useCallback(async () => {
   const updates: any = {
     [`approver_${slot}_status`]: action,
     [`approver_${slot}_id`]: user.id,
-    ...(reason ? { reject_reason: reason } : {})
   };
+
+  if (action === "rejected" && reason) {
+    updates[`approver_${slot}_reject_reason`] = reason;
+    updates.reject_reason = reason; // เก็บไว้ด้วยเผื่อดึงง่าย
+  }
 
   const s1 = slot === 1 ? action : req.approver_1_status;
   const s2 = slot === 2 ? action : req.approver_2_status;
@@ -1537,7 +1561,7 @@ function mySlot(r: LeaveRequest): 1|2|3|null {
         onApprove={(id, slot) => tryApprove(id, slot, "approved")}   
         onReject={(id, slot) => setRejectModal({ id, slot })}        
       />
-    )}
+    )} 
     {rejectModal && (
       <RejectModal
         onConfirm={(reason) => {
