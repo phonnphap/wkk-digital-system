@@ -1353,10 +1353,12 @@ const loadAll = useCallback(async () => {
       .eq("id", user.id);
     
     if (error) {
-      console.error("Save signature error:", error.message);
+      console.error("Save signature error:", error);
       alert("⚠️ บันทึกลายเซ็นไม่สำเร็จ: " + error.message);
+      return;
     }
-  
+
+  // ถ้ามี pending approve ค้างอยู่ ให้ทำต่อ
     if (pendingApproveId) {
       handleApprove(pendingApproveId.id, pendingApproveId.slot, pendingApproveId.action);
     }
@@ -1531,37 +1533,45 @@ function mySlot(r: LeaveRequest): 1|2|3|null {
     : user.email===HR_EMAIL ? "📋 ฝ่ายบุคคล (HR)" : "🔧 ผู้ดูแลระบบ";
 
   return (
-  <div className="min-h-screen">
-    {/* Modals */}
-    {viewModal && (
-      <LeaveViewModal
-        r={viewModal}
-        user={user}
-        canApprove={canApprove}           
-        approverSigUrl={approverSigUrl}   
-        mySlotFn={mySlot}                 
-        onClose={() => setViewModal(null)}
-        onPrint={() => printLeave(
-          { fullName: fullName(viewModal.user),
-            position: viewModal.user?.position,
-            leaveType: viewModal.leave_type,
-            leaveTypeName: LEAVE_TYPE_CONFIG[viewModal.leave_type as LeaveType]?.label ?? "",
-            otherLeaveName: viewModal.other_leave_name,
-            startDate: viewModal.start_date,
-            endDate: viewModal.end_date,
-            days: viewModal.days_count,
-            halfDay: viewModal.half_day,
-            reason: viewModal.reason,
-            phone: viewModal.user?.phone,
-            contactInfo: viewModal.contact_info },
-          viewModal.user?.signature_url || "",
-          undefined,
-          viewModal.document_url
-        )}
-        onApprove={(id, slot) => tryApprove(id, slot, "approved")}   
-        onReject={(id, slot) => setRejectModal({ id, slot })}        
-      />
-    )} 
+    <div className="min-h-screen">
+      {/* Modals */}
+      {showApproverSigPad && (
+        <SignaturePad
+          initialUrl={approverSigUrl}
+          title="✍️ ลายเซ็นผู้อนุมัติ"
+          onSave={saveApproverSignature}
+          onClose={() => { setShowApproverSigPad(false); setPendingApproveId(null); }}
+        />
+      )}
+      {viewModal && (
+        <LeaveViewModal
+          r={viewModal}
+          user={user}
+          canApprove={canApprove}           
+          approverSigUrl={approverSigUrl}   
+          mySlotFn={mySlot}                 
+          onClose={() => setViewModal(null)}
+          onPrint={() => printLeave(
+            { fullName: fullName(viewModal.user),
+              position: viewModal.user?.position,
+              leaveType: viewModal.leave_type,
+              leaveTypeName: LEAVE_TYPE_CONFIG[viewModal.leave_type as LeaveType]?.label ?? "",
+              otherLeaveName: viewModal.other_leave_name,
+              startDate: viewModal.start_date,
+              endDate: viewModal.end_date,
+              days: viewModal.days_count,
+              halfDay: viewModal.half_day,
+              reason: viewModal.reason,
+              phone: viewModal.user?.phone,
+              contactInfo: viewModal.contact_info },
+            viewModal.user?.signature_url || "",
+            undefined,
+            viewModal.document_url
+          )}
+          onApprove={(id, slot) => tryApprove(id, slot, "approved")}   
+          onReject={(id, slot) => setRejectModal({ id, slot })}        
+        />
+      )} 
     {rejectModal && (
       <RejectModal
         onConfirm={(reason) => {
@@ -1930,7 +1940,7 @@ export default function LeavePage(){
       // โหลด approvers และ allTeachers
       const { data: teachers } = await supabase
         .from("users")
-        .select("id, title, first_name, last_name, full_name, position, email, role")
+        .select("id, title, first_name, last_name, position, email, role")
         .order("first_name");
       setAllTeachers((teachers as UserProfile[]) || []);
 
