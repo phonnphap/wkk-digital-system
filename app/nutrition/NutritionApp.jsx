@@ -73,12 +73,11 @@ function genderPrefix(g){ return genderLabel(g)==="ชาย"?"ด.ช.":"ด.�
 
 async function fetchMyClassrooms(userId) {
   const rpc=await supabase.rpc("get_my_classrooms");
-  if(rpc.data&&rpc.data.length>0) return rpc.data;
+  if(rpc.data&&rpc.data.length>0) return sortClassrooms(rpc.data);
   const fb=await supabase.from("classrooms")
     .select("id,room_name,room_number,academic_year_id")
-    .or(`homeroom_teacher_id.eq.${userId},homeroom_teacher_2_id.eq.${userId}`)
-    .order("room_number");
-  return (fb.data||[]).map(c=>({...c,classroom_id:c.id}));
+    .or(`homeroom_teacher_id.eq.${userId},homeroom_teacher_2_id.eq.${userId}`);
+  return sortClassrooms((fb.data||[]).map(c=>({...c,classroom_id:c.id})));
 }
 
 // ── Print helper ──────────────────────────────────────────────────────────────
@@ -111,6 +110,23 @@ function printElement(id, title) {
     <script>window.onload=()=>{window.print();}<\/script>
   </body></html>`);
   w.document.close();
+}
+
+const GRADE_ORDER = { "อ": 0, "ป": 1, "ม": 2 };
+function classroomSortKey(roomName) {
+  // roomName เช่น "อ.2/1", "ป.6/2", "ม.3/1"
+  const match = (roomName || "").match(/^([อปม])\.?(\d+)\/(\d+)/);
+  if (!match) return [9, 0, 0];
+  const [, prefix, grade, room] = match;
+  return [GRADE_ORDER[prefix] ?? 9, Number(grade), Number(room)];
+}
+
+function sortClassrooms(rooms) {
+  return [...rooms].sort((a, b) => {
+    const ka = classroomSortKey(a.room_name);
+    const kb = classroomSortKey(b.room_name);
+    return ka[0] - kb[0] || ka[1] - kb[1] || ka[2] - kb[2];
+  });
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -722,8 +738,8 @@ function ClassPage({currentUser,isAdmin}) {
     const load=async()=>{
       let rooms=[];
       if(isAdmin){
-        const {data}=await supabase.from("classrooms").select("id,room_name,room_number,academic_year_id").order("room_number");
-        rooms=(data||[]).map(c=>({...c,classroom_id:c.id}));
+        const {data}=await supabase.from("classrooms").select("id,room_name,room_number,academic_year_id");
+        rooms=sortClassrooms((data||[]).map(c=>({...c,classroom_id:c.id})));
       } else {
         rooms=await fetchMyClassrooms(currentUser.id);
       }
@@ -738,12 +754,26 @@ function ClassPage({currentUser,isAdmin}) {
     setLoading(true);
     const {data}=await supabase.from("v_nutrition_student_detail").select("*")
       .eq("classroom_id",selectedClass.classroom_id||selectedClass.id)
-      .eq("term",term).order("last_name");
+      .eq("term",term).order("seat_number",{ascending:true,nullsFirst:false});
     setRecords(data||[]);
     setLoading(false);
   },[selectedClass,term]);
 
   useEffect(()=>{if(classrooms.length===1&&selectedClass) load();},[selectedClass]);
+
+  const [statusFilter, setStatusFilter] = useState(null); // null | "normal" | "risk" | "urgent"
+
+function classifyWH(whStatus) {
+  if (!whStatus) return null;
+  if (whStatus === "สมส่วน") return "normal";
+  if (whStatus.includes("ผอม") && !whStatus.includes("แห้ง")) return "risk";
+  return "urgent"; // อ้วน, ผอมแห้ง, เริ่มอ้วน, ท้วม ฯลฯ ที่ไม่ใช่สมส่วน/เสี่ยง
+}
+
+const displayRecords = useMemo(() => {
+  if (!statusFilter) return records;
+  return records.filter(r => classifyWH(r.wh_status) === statusFilter);
+}, [records, statusFilter]);
 
   const summary=useMemo(()=>{
     let normal=0,risk=0,urgent=0;
@@ -826,11 +856,27 @@ function ClassPage({currentUser,isAdmin}) {
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
-        <StatCard label="ทั้งหมด"         value={summary.total}  color="#3b82f6" icon="👨‍👩‍👧‍👦"/>
-        <StatCard label="สมส่วน"           value={summary.normal} color="#16a34a" icon="✅"/>
-        <StatCard label="เสี่ยงโภชนาการ"  value={summary.risk}   color="#f59e0b" icon="⚠️"/>
-        <StatCard label="ต้องดูแลเร่งด่วน" value={summary.urgent} color="#dc2626" icon="🚨"/>
-      </div>
+  <div onClick={()=>setStatusFilter(null)} style={{cursor:"pointer"}}>
+    <StatCard label="ทั้งหมด" value={summary.total} color="#3b82f6" icon="👨‍👩‍👧‍👦"/>
+  </div>
+  <div onClick={()=>setStatusFilter(statusFilter==="normal"?null:"normal")} style={{cursor:"pointer"}}>
+    <StatCard label="สมส่วน" value={summary.normal} color="#16a34a" icon="✅"/>
+  </div>
+  <div onClick={()=>setStatusFilter(statusFilter==="risk"?null:"risk")} style={{cursor:"pointer"}}>
+    <StatCard label="เสี่ยงโภชนาการ" value={summary.risk} color="#f59e0b" icon="⚠️"/>
+  </div>
+  <div onClick={()=>setStatusFilter(statusFilter==="urgent"?null:"urgent")} style={{cursor:"pointer"}}>
+    <StatCard label="ต้องดูแลเร่งด่วน" value={summary.urgent} color="#dc2626" icon="🚨"/>
+  </div>
+</div>
+{statusFilter && (
+  <div style={{marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+    <span style={{fontSize:13,color:"#1e40af",fontWeight:700}}>
+      🔍 กรองแสดง: {statusFilter==="normal"?"สมส่วน":statusFilter==="risk"?"เสี่ยงโภชนาการ":"ต้องดูแลเร่งด่วน"}
+    </span>
+    <button onClick={()=>setStatusFilter(null)} style={{...S.btnSm,background:"#f1f5f9",color:"#6b7280"}}>✕ ล้างตัวกรอง</button>
+  </div>
+)}
 
       {loading?(
         <div style={{textAlign:"center",padding:40,color:"#6b7280"}}>⏳ กำลังโหลด...</div>
@@ -849,7 +895,7 @@ function ClassPage({currentUser,isAdmin}) {
               <tbody>
                 {records.map((r,i)=>(
                   <tr key={r.student_id+r.term} style={{background:i%2===0?"#f8faff":"#fff"}}>
-                    <td style={{padding:"7px 8px",color:"#6b7280",textAlign:"center"}}>{r.seat_number??i+1}</td>
+                    <td style={{padding:"7px 8px",color:"#6b7280",textAlign:"center"}}>{r.seat_number??"—"}</td>
                     <td style={{padding:"7px 8px",fontWeight:600,color:"#1e3a8a",whiteSpace:"nowrap"}}>
                       {genderPrefix(r.gender)} {r.first_name} {r.last_name}
                     </td>
@@ -892,7 +938,7 @@ function ComparePage({currentUser,isAdmin}) {
       let rooms=[];
       if(isAdmin){
         const {data}=await supabase.from("classrooms").select("id,room_name").order("room_number");
-        rooms=(data||[]).map(c=>({...c,classroom_id:c.id}));
+        rooms=sortClassrooms((data||[]).map(c=>({...c,classroom_id:c.id})));
       } else rooms=await fetchMyClassrooms(currentUser.id);
       setClassrooms(rooms);
       if(rooms.length===1) setSelectedClass(rooms[0]);
@@ -1021,8 +1067,12 @@ function AdminPage({currentUser}) {
   const GRADE_GROUPS=["อนุบาล","ประถมศึกษา","มัธยมศึกษาตอนต้น","มัธยมศึกษาตอนปลาย"];
 
   useEffect(()=>{
-    supabase.from("classrooms").select("id,room_name,room_number,student_count,academic_year_id").order("room_number")
-      .then(({data})=>{setClassrooms(data||[]);if(data?.[0]) setSelectedYear(data[0].academic_year_id);});
+    supabase.from("classrooms").select("id,room_name,room_number,student_count,academic_year_id")
+      .then(({data})=>{
+        const sorted = sortClassrooms(data||[]);
+        setClassrooms(sorted);
+        if(sorted?.[0]) setSelectedYear(sorted[0].academic_year_id);
+      });
   },[]);
 
   const load=async()=>{
@@ -1100,13 +1150,9 @@ function AdminPage({currentUser}) {
                 <XAxis dataKey="room_name" tick={{fontSize:11}} angle={-40} textAnchor="end"/>
                 <YAxis tick={{fontSize:11}} unit="%" domain={[0,100]}/>
                 <Tooltip contentStyle={{borderRadius:10}} formatter={v=>v+"%"}/>
-                <Bar dataKey="wh_normal_pct" name="% สมส่วน" fill="url(#blueGrad)" radius={[6,6,0,0]}/>
-                <defs>
-                  <linearGradient id="blueGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3b82f6"/>
-                    <stop offset="100%" stopColor="#1e40af"/>
-                  </linearGradient>
-                </defs>
+                <Bar dataKey="wh_normal_pct" name="% สมส่วน" fill="#16a34a" radius={[4,4,0,0]} stackId="a"/>
+                <Bar dataKey="wh_risk_pct"   name="% เสี่ยง"  fill="#f59e0b" radius={[4,4,0,0]} stackId="a"/>
+                <Bar dataKey="wh_urgent_pct" name="% เร่งด่วน" fill="#dc2626" radius={[4,4,0,0]} stackId="a"/>
               </BarChart>
             </ResponsiveContainer>
           </div>
