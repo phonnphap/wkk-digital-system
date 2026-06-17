@@ -9,6 +9,7 @@ import {
 } from "recharts";
 import { differenceInMonths, differenceInYears, format, parseISO } from "date-fns";
 import { th } from "date-fns/locale";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 const supabase = createClient();
 const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head"];
@@ -759,7 +760,9 @@ function ClassPage({currentUser,isAdmin}) {
     setLoading(false);
   },[selectedClass,term]);
 
-  useEffect(()=>{if(classrooms.length===1&&selectedClass) load();},[selectedClass]);
+  useEffect(()=>{
+    if(selectedClass) load();
+  },[selectedClass, term]);
 
   const [statusFilter, setStatusFilter] = useState(null); // null | "normal" | "risk" | "urgent"
 
@@ -1150,6 +1153,7 @@ function AdminPage({currentUser}) {
                 <XAxis dataKey="room_name" tick={{fontSize:11}} angle={-40} textAnchor="end"/>
                 <YAxis tick={{fontSize:11}} unit="%" domain={[0,100]}/>
                 <Tooltip contentStyle={{borderRadius:10}} formatter={v=>v+"%"}/>
+                <Legend verticalAlign="top" height={36}/>  {/* เพิ่มตรงนี้ */}
                 <Bar dataKey="wh_normal_pct" name="% สมส่วน" fill="#16a34a" radius={[4,4,0,0]} stackId="a"/>
                 <Bar dataKey="wh_risk_pct"   name="% เสี่ยง"  fill="#f59e0b" radius={[4,4,0,0]} stackId="a"/>
                 <Bar dataKey="wh_urgent_pct" name="% เร่งด่วน" fill="#dc2626" radius={[4,4,0,0]} stackId="a"/>
@@ -1199,10 +1203,21 @@ function ManagersPage({currentUser}) {
 
   const handleAdd=async(user)=>{
     setAdding(true);
-    const {error}=await supabase.from("nutrition_project_managers")
-      .insert([{user_id:user.id,added_by:currentUser.id}]);
-    if(error) alert("❌ "+error.message);
-    else {setSearch(""); await loadData();}
+    console.log("Adding manager:", user.id, "added_by:", currentUser.id);
+    const { error } = await supabase
+      .from("nutrition_project_managers")
+      .insert([{ 
+        user_id: user.id,        // ต้องเป็น users.id (UUID จาก users table)
+        added_by: currentUser.id // ต้องเป็น users.id ของ currentUser
+      }]);
+    
+    if (error) {
+      console.error("Insert error:", error);
+      alert("❌ " + error.message + "\n\nuser_id: " + user.id + "\nadded_by: " + currentUser.id);
+    } else {
+      setSearch("");
+      await loadData();
+    }
     setAdding(false);
   };
 
