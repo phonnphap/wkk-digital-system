@@ -9,7 +9,10 @@ import {
 } from "recharts";
 import { differenceInMonths, differenceInYears, format, parseISO } from "date-fns";
 import { th } from "date-fns/locale";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import {
+  BarChart, Bar, LineChart, Line, XAxis, YAxis,
+  CartesianGrid, Tooltip, ResponsiveContainer, Legend,  // ✅ เพิ่ม Legend ตรงนี้
+} from "recharts";
 
 const supabase = createClient();
 const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head"];
