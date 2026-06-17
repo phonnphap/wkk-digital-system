@@ -3,10 +3,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer,
-} from "recharts";
 import { differenceInMonths, differenceInYears, format, parseISO } from "date-fns";
 import { th } from "date-fns/locale";
 import {
