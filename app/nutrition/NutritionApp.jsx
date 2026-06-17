@@ -754,7 +754,7 @@ function ClassPage({currentUser,isAdmin}) {
     setLoading(true);
     const {data}=await supabase.from("v_nutrition_student_detail").select("*")
       .eq("classroom_id",selectedClass.classroom_id||selectedClass.id)
-      .eq("term",term).order("seat_number",{ascending:true,nullsFirst:false});
+      .eq("term",term).order("student_code",{ascending:true});
     setRecords(data||[]);
     setLoading(false);
   },[selectedClass,term]);
