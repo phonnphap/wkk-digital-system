@@ -895,7 +895,7 @@ const displayRecords = useMemo(() => {
                 </tr>
               </thead>
               <tbody>
-                {records.map((r,i)=>(
+                {displayRecords.map((r,i)=>(
                   <tr key={r.student_id+r.term} style={{background:i%2===0?"#f8faff":"#fff"}}>
                     <td style={{padding:"7px 8px",color:"#6b7280",textAlign:"center"}}>{r.seat_number??"—"}</td>
                     <td style={{padding:"7px 8px",fontWeight:600,color:"#1e3a8a",whiteSpace:"nowrap"}}>
@@ -1084,11 +1084,16 @@ function AdminPage({currentUser}) {
     setLoading(false);
   };
 
-  const totals=useMemo(()=>({
-    total:classrooms.reduce((s,c)=>s+(c.student_count||0),0),
-    measured:summary.reduce((s,r)=>s+Number(r.measured_count||0),0),
-    normalAvg:summary.length?Math.round(summary.reduce((s,r)=>s+Number(r.wh_normal_pct||0),0)/summary.length):0,
-  }),[classrooms,summary]);
+  // เพิ่ม totals คำนวณ risk/urgent
+const totals=useMemo(()=>({
+  total:classrooms.reduce((s,c)=>s+(c.student_count||0),0),
+  measured:summary.reduce((s,r)=>s+Number(r.measured_count||0),0),
+  normalAvg:summary.length?Math.round(summary.reduce((s,r)=>s+Number(r.wh_normal_pct||0),0)/summary.length):0,
+  riskCount:summary.reduce((s,r)=>s+Number(r.wh_risk_count||0),0),
+  urgentCount:summary.reduce((s,r)=>s+Number(r.wh_urgent_count||0),0),
+  riskAvg:summary.length?Math.round(summary.reduce((s,r)=>s+Number(r.wh_risk_pct||0),0)/summary.length):0,
+  urgentAvg:summary.length?Math.round(summary.reduce((s,r)=>s+Number(r.wh_urgent_pct||0),0)/summary.length):0,
+}),[classrooms,summary]);
 
   const handlePrint=()=>{
     if(!summary.length) return;
@@ -1136,33 +1141,83 @@ function AdminPage({currentUser}) {
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
-        <StatCard label="นักเรียนทั้งหมด" value={totals.total.toLocaleString()} color="#3b82f6" icon="👨‍👩‍👧‍👦" sub="คน"/>
-        <StatCard label="วัดแล้ว" value={totals.measured.toLocaleString()} color="#8b5cf6" icon="✅" sub="คน"/>
-        <StatCard label="% สมส่วน (เฉลี่ย)" value={`${totals.normalAvg}%`} color="#16a34a" icon="🎯"/>
-      </div>
+      
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:16}}>
+  <StatCard label="นักเรียนทั้งหมด" value={totals.total.toLocaleString()} color="#3b82f6" icon="👨‍👩‍👧‍👦" sub="คน"/>
+  <StatCard label="วัดแล้ว" value={totals.measured.toLocaleString()} color="#8b5cf6" icon="✅" sub="คน"/>
+  <StatCard label="สมส่วน (เฉลี่ย)" value={`${totals.normalAvg}%`} color="#16a34a" icon="🎯"/>
+  <StatCard label="เสี่ยงโภชนาการ" 
+    value={`${totals.riskCount} คน`} 
+    color="#f59e0b" icon="⚠️" 
+    sub={`เฉลี่ย ${totals.riskAvg}%`}/>
+  <StatCard label="ต้องดูแลเร่งด่วน" 
+    value={`${totals.urgentCount} คน`} 
+    color="#dc2626" icon="🚨" 
+    sub={`เฉลี่ย ${totals.urgentAvg}%`}/>
+</div>
 
       {loading?<div style={{textAlign:"center",padding:40,color:"#6b7280"}}>⏳ กำลังโหลด...</div>
         :summary.length>0&&(
           <div style={S.card}>
-            <div style={S.cardTitle}>🏫 สรุปรายห้องเรียน</div>
-            <ResponsiveContainer width="100%" height={320}>
-              <BarChart data={summary} margin={{top:4,right:8,left:0,bottom:50}}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f4ff"/>
-                <XAxis dataKey="room_name" tick={{fontSize:11}} angle={-40} textAnchor="end"/>
-                <YAxis tick={{fontSize:11}} unit="%" domain={[0,100]}/>
-                <Tooltip contentStyle={{borderRadius:10}} formatter={v=>v+"%"}/>
-                <Legend verticalAlign="top" height={36}/>  {/* เพิ่มตรงนี้ */}
-                <Bar dataKey="wh_normal_pct" name="% สมส่วน" fill="#16a34a" radius={[4,4,0,0]} stackId="a"/>
-                <Bar dataKey="wh_risk_pct"   name="% เสี่ยง"  fill="#f59e0b" radius={[4,4,0,0]} stackId="a"/>
-                <Bar dataKey="wh_urgent_pct" name="% เร่งด่วน" fill="#dc2626" radius={[4,4,0,0]} stackId="a"/>
-              </BarChart>
-            </ResponsiveContainer>
+      <div style={S.cardTitle}>🏫 สรุปรายห้องเรียน (% น้ำหนักตามเกณฑ์ส่วนสูง)</div>
+      <ResponsiveContainer width="100%" height={360}>
+        <BarChart data={summary} margin={{top:8,right:16,left:0,bottom:60}}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f0f4ff"/>
+          <XAxis dataKey="room_name" tick={{fontSize:11}} angle={-40} textAnchor="end" interval={0}/>
+          <YAxis tick={{fontSize:11}} unit="%" domain={[0,100]}/>
+          <Tooltip 
+            contentStyle={{borderRadius:10,fontSize:12}} 
+            formatter={(v,name)=>[`${v}%`, name]}/>
+          <Legend verticalAlign="top" height={36}/>
+          <Bar dataKey="wh_normal_pct"  name="✅ สมส่วน"        fill="#16a34a" stackId="a"/>
+          <Bar dataKey="wh_risk_pct"    name="⚠️ เสี่ยง"        fill="#f59e0b" stackId="a"/>
+          <Bar dataKey="wh_urgent_pct"  name="🚨 เร่งด่วน"      fill="#dc2626" stackId="a" radius={[4,4,0,0]}/>
+        </BarChart>
+      </ResponsiveContainer>
           </div>
         )}
+
+ {/* ตารางสรุปรายห้อง */}
+      <div style={{overflowX:"auto",marginTop:16}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+          <thead>
+            <tr style={{background:"linear-gradient(135deg,#1e40af,#3b82f6)"}}>
+              {["ห้องเรียน","วัดแล้ว","สมส่วน","% สมส่วน","เสี่ยง","% เสี่ยง","เร่งด่วน","% เร่งด่วน"].map(h=>(
+                <th key={h} style={{padding:"8px",color:"#fff",fontWeight:700,fontSize:11,textAlign:"center"}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {summary.map((r,i)=>(
+              <tr key={r.room_name} style={{background:i%2===0?"#f8faff":"#fff",textAlign:"center"}}>
+                <td style={{padding:"7px 8px",fontWeight:700,color:"#1e3a8a"}}>{r.room_name}</td>
+                <td style={{padding:"7px 8px"}}>{r.measured_count}</td>
+                <td style={{padding:"7px 8px",color:"#16a34a",fontWeight:700}}>{r.wh_normal_count??"-"}</td>
+                <td style={{padding:"7px 8px"}}>
+                  <span style={{background:"#dcfce7",color:"#166534",padding:"2px 8px",borderRadius:12,fontSize:11,fontWeight:700}}>
+                    {r.wh_normal_pct}%
+                  </span>
+                </td>
+                <td style={{padding:"7px 8px",color:"#f59e0b",fontWeight:700}}>{r.wh_risk_count??"-"}</td>
+                <td style={{padding:"7px 8px"}}>
+                  <span style={{background:"#fef9c3",color:"#854d0e",padding:"2px 8px",borderRadius:12,fontSize:11,fontWeight:700}}>
+                    {r.wh_risk_pct}%
+                  </span>
+                </td>
+                <td style={{padding:"7px 8px",color:"#dc2626",fontWeight:700}}>{r.wh_urgent_count??"-"}</td>
+                <td style={{padding:"7px 8px"}}>
+                  <span style={{background:"#fee2e2",color:"#991b1b",padding:"2px 8px",borderRadius:12,fontSize:11,fontWeight:700}}>
+                    {r.wh_urgent_pct}%
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
-  );
-}
+  )}
 
 // ── ManagersPage — จัดการผู้ดูแลโครงการ ─────────────────────────────────────
 function ManagersPage({currentUser}) {
