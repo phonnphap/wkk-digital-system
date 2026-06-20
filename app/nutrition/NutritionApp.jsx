@@ -766,9 +766,12 @@ function ClassPage({currentUser,isAdmin}) {
   setLoading(true);
 
   const classroomId = selectedClass.classroom_id || selectedClass.id;
+  
+  // DEBUG — ดูค่าจริงๆ ที่ส่งไป
+  console.log("classroomId:", classroomId);
+  console.log("selectedClass:", selectedClass);
 
-  // ดึงทั้ง 2 อย่างพร้อมกัน
-  const [{ data: nutritionData }, { data: studentData }] = await Promise.all([
+  const [{ data: nutritionData, error: e1 }, { data: studentData, error: e2 }] = await Promise.all([
     supabase
       .from("v_nutrition_student_detail")
       .select("*")
@@ -780,13 +783,18 @@ function ClassPage({currentUser,isAdmin}) {
       .eq("classroom_id", classroomId),
   ]);
 
-  // Map: students.id → seat_number
+  // DEBUG — ดูผลลัพธ์
+  console.log("nutritionData[0]:", nutritionData?.[0]);
+  console.log("studentData:", studentData);
+  console.log("e1:", e1, "e2:", e2);
+
   const seatMap = {};
   (studentData || []).forEach((s) => {
     seatMap[s.id] = s.seat_number;
   });
 
-  // Merge แล้วเรียงตาม seat_number
+  console.log("seatMap:", seatMap);
+
   const merged = (nutritionData || [])
     .map((r) => ({
       ...r,
@@ -798,6 +806,8 @@ function ClassPage({currentUser,isAdmin}) {
       if (b.seat_number == null) return -1;
       return Number(a.seat_number) - Number(b.seat_number);
     });
+
+  console.log("merged[0]:", merged?.[0]);
 
   setRecords(merged);
   setLoading(false);
