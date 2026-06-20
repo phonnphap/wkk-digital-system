@@ -766,48 +766,23 @@ function ClassPage({currentUser,isAdmin}) {
   setLoading(true);
 
   const classroomId = selectedClass.classroom_id || selectedClass.id;
-  
-  // DEBUG — ดูค่าจริงๆ ที่ส่งไป
-  console.log("classroomId:", classroomId);
-  console.log("selectedClass:", selectedClass);
 
-  const [{ data: nutritionData, error: e1 }, { data: studentData, error: e2 }] = await Promise.all([
-    supabase
-      .from("v_nutrition_student_detail")
-      .select("*")
-      .eq("classroom_id", classroomId)
-      .eq("term", term),
-    supabase
-      .from("students")
-      .select("id, seat_number")
-      .eq("classroom_id", classroomId),
-  ]);
+  const { data: nutritionData, error: e1 } = await supabase
+    .from("v_nutrition_student_detail")
+    .select("*")
+    .eq("classroom_id", classroomId)
+    .eq("term", term);
 
-  // DEBUG — ดูผลลัพธ์
-  console.log("nutritionData[0]:", nutritionData?.[0]);
-  console.log("studentData:", studentData);
-  console.log("e1:", e1, "e2:", e2);
-
-  const seatMap = {};
-  (studentData || []).forEach((s) => {
-    seatMap[s.id] = s.seat_number;
-  });
-
-  console.log("seatMap:", seatMap);
-
+  // ตัด query ตาราง students ออก — ใช้ seat_number จาก view โดยตรง
   const merged = (nutritionData || [])
-    .map((r) => ({
-      ...r,
-      seat_number: seatMap[r.student_id] ?? null,
-    }))
+    .slice()
     .sort((a, b) => {
-      if (a.seat_number == null && b.seat_number == null) return 0;
-      if (a.seat_number == null) return 1;
-      if (b.seat_number == null) return -1;
-      return Number(a.seat_number) - Number(b.seat_number);
+      const sa = a.seat_number, sb = b.seat_number;
+      if (sa == null && sb == null) return 0;
+      if (sa == null) return 1;
+      if (sb == null) return -1;
+      return Number(sa) - Number(sb);
     });
-
-  console.log("merged[0]:", merged?.[0]);
 
   setRecords(merged);
   setLoading(false);
