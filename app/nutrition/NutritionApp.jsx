@@ -765,6 +765,13 @@ function ClassPage({currentUser,isAdmin}) {
   if (!selectedClass) return;
   setLoading(true);
 
+  (studentData || []).forEach((s) => {
+    seatMap[s.id] = s.seat_number;
+  });
+
+  console.log("seatMap:", seatMap); // ← เพิ่มตรงนี้ชั่วคราว
+  console.log("nutritionData[0]:", nutritionData?.[0]); // ← ดู student_id ตรงกันไหม
+
   const classroomId = selectedClass.classroom_id || selectedClass.id;
 
   const { data: nutritionData } = await supabase
@@ -937,7 +944,7 @@ const displayRecords = useMemo(() => {
               <tbody>
                 {displayRecords.map((r,i)=>(
                   <tr key={r.student_id+r.term} style={{background:i%2===0?"#f8faff":"#fff"}}>
-                    <td style={{padding:"7px 8px",color:"#6b7280",textAlign:"center"}}>{r.seat_number??"—"}</td>
+                    <td style={{padding:"7px 8px",color:"#6b7280",textAlign:"center",fontWeight:700}}>{r.seat_number ?? (i + 1)}</td>
                     <td style={{padding:"7px 8px",fontWeight:600,color:"#1e3a8a",whiteSpace:"nowrap"}}>
                       {genderPrefix(r.gender, selectedClass?.room_name)} {r.first_name} {r.last_name}
                     </td>
