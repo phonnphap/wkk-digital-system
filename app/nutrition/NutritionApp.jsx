@@ -765,24 +765,18 @@ function ClassPage({currentUser,isAdmin}) {
   if (!selectedClass) return;
   setLoading(true);
 
-  (studentData || []).forEach((s) => {
-    seatMap[s.id] = s.seat_number;
-  });
-
-  console.log("seatMap:", seatMap); // ← เพิ่มตรงนี้ชั่วคราว
-  console.log("nutritionData[0]:", nutritionData?.[0]); // ← ดู student_id ตรงกันไหม
-
   const classroomId = selectedClass.classroom_id || selectedClass.id;
 
+  // 1. ดึงข้อมูลโภชนาการก่อน
   const { data: nutritionData } = await supabase
     .from("v_nutrition_student_detail")
     .select("*")
     .eq("classroom_id", classroomId)
     .eq("term", term);
 
+  // 2. ดึง seat_number จาก students
   const studentIds = (nutritionData || []).map(r => r.student_id).filter(Boolean);
   
-  // ✅ ลบ : Record<string, number> ออก
   let seatMap = {};
   if (studentIds.length > 0) {
     const { data: studentData } = await supabase
@@ -790,12 +784,15 @@ function ClassPage({currentUser,isAdmin}) {
       .select("id, seat_number")
       .in("id", studentIds);
     
-    // ✅ ลบ : any ออก
     (studentData || []).forEach((s) => {
       seatMap[s.id] = s.seat_number;
     });
+
+    console.log("seatMap:", seatMap);
+    console.log("nutritionData[0]:", nutritionData?.[0]);
   }
 
+  // 3. รวมและ sort
   const merged = (nutritionData || [])
     .map(r => ({ ...r, seat_number: seatMap[r.student_id] ?? null }))
     .sort((a, b) => {
