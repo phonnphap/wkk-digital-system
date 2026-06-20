@@ -607,7 +607,7 @@ export default function AdminFaceRegisterPage() {
         <div className="mt-5 pt-4 border-t border-slate-800 flex flex-col sm:flex-row gap-3">
           <button
             type="button"
-            onClick={() => router.push('/')}
+            onClick={()=>router.push("/dashboard")}
             className="w-full sm:w-1/4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 px-4 rounded-xl shadow-md transition-all text-xs border border-slate-700"
           >
             🏠 กลับสู่หน้าหลัก

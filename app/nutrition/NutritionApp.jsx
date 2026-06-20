@@ -767,15 +767,30 @@ function ClassPage({currentUser,isAdmin}) {
 
   const classroomId = selectedClass.classroom_id || selectedClass.id;
 
-  const { data: nutritionData, error: e1 } = await supabase
+  const { data: nutritionData } = await supabase
     .from("v_nutrition_student_detail")
     .select("*")
     .eq("classroom_id", classroomId)
     .eq("term", term);
 
-  // ตัด query ตาราง students ออก — ใช้ seat_number จาก view โดยตรง
+  const studentIds = (nutritionData || []).map(r => r.student_id).filter(Boolean);
+  
+  // ✅ ลบ : Record<string, number> ออก
+  let seatMap = {};
+  if (studentIds.length > 0) {
+    const { data: studentData } = await supabase
+      .from("students")
+      .select("id, seat_number")
+      .in("id", studentIds);
+    
+    // ✅ ลบ : any ออก
+    (studentData || []).forEach((s) => {
+      seatMap[s.id] = s.seat_number;
+    });
+  }
+
   const merged = (nutritionData || [])
-    .slice()
+    .map(r => ({ ...r, seat_number: seatMap[r.student_id] ?? null }))
     .sort((a, b) => {
       const sa = a.seat_number, sb = b.seat_number;
       if (sa == null && sb == null) return 0;
