@@ -69,7 +69,18 @@ function genderLabel(g) {
   if(v==="female"||v==="หญิง"||v==="f") return "หญิง";
   return g;
 }
-function genderPrefix(g){ return genderLabel(g)==="ชาย"?"ด.ช.":"ด.ญ."; }
+function isHighSchool(roomName) {
+  const match = (roomName || "").match(/^ม\.?(\d+)/);
+  if (!match) return false;
+  return Number(match[1]) >= 4; // ม.4, ม.5, ม.6
+}
+function genderPrefix(g, roomName){
+  const isMale = genderLabel(g)==="ชาย";
+  if (isHighSchool(roomName)) {
+    return isMale ? "นาย" : "นางสาว";
+  }
+  return isMale ? "ด.ช." : "ด.ญ.";
+}
 
 async function fetchMyClassrooms(userId) {
   const rpc=await supabase.rpc("get_my_classrooms");
@@ -421,7 +432,7 @@ function ClassAssessPage({currentUser}) {
             const haCls=ha?(ha.label.includes("ตามเกณฑ์")?"normal":ha.label.includes("เตี้ย")?"danger":"blue"):"";
             return `<tr>
               <td style="text-align:center">${r.v.seat||s.seat_number||(i+1)}</td>
-              <td>${genderPrefix(s.gender)} ${s.first_name} ${s.last_name}</td>
+              <td>${genderPrefix(s.gender, selectedClass?.room_name)} ${s.first_name} ${s.last_name}</td>
               <td>${formatAge(s.birth_date)}</td>
               <td>${r.result?r.result.weight_kg:"—"}</td>
               <td>${r.result?r.result.height_cm:"—"}</td>
@@ -549,7 +560,7 @@ function ClassAssessPage({currentUser}) {
                           {r.v.seat||s.seat_number||(i+1)}
                         </td>
                         <td style={{padding:"6px 8px",fontWeight:600,color:isActive?"#1e40af":"#1e3a8a",whiteSpace:"nowrap",fontSize:12}}>
-                          {isActive?"▶ ":""}{genderPrefix(s.gender)} {s.first_name} {s.last_name}
+                          {isActive?"▶ ":""}{genderPrefix(s.gender, selectedClass?.room_name)} {s.first_name} {s.last_name}
                           {s.nick_name&&<span style={{color:"#9ca3af",fontWeight:400}}> ({s.nick_name})</span>}
                         </td>
                         <td style={{padding:"6px 8px",color:"#6b7280",whiteSpace:"nowrap",fontSize:11}}>{formatAge(s.birth_date)}</td>
@@ -609,6 +620,7 @@ function ClassAssessPage({currentUser}) {
             currentResult={rows.find(r=>(r.student.student_id||r.student.id)===(detailStudent.student_id||detailStudent.id))?.result}
             measuredDate={measuredDate}
             onClose={()=>setDetailStudent(null)}
+            roomName={selectedClass?.room_name}
           />
         ):(
           <div style={{...S.card,textAlign:"center",padding:48,border:"2px dashed #c7d2fe"}}>
@@ -622,7 +634,7 @@ function ClassAssessPage({currentUser}) {
 }
 
 // ── StudentDetailPanel ────────────────────────────────────────────────────────
-function StudentDetailPanel({student,currentResult,measuredDate,onClose}) {
+function StudentDetailPanel({student,currentResult,measuredDate,onClose,roomName}) {
   const [records,setRecords]=useState([]);
   const [loading,setLoading]=useState(true);
 
@@ -649,7 +661,7 @@ function StudentDetailPanel({student,currentResult,measuredDate,onClose}) {
     <div style={{...S.card,border:"2px solid #c7d2fe"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
         <div style={{fontWeight:700,color:"#1e3a8a",fontSize:14}}>
-          {genderPrefix(student.gender)==="ด.ช."?"เด็กชาย":"เด็กหญิง"} {student.first_name} {student.last_name}
+          {genderPrefix(student.gender, roomName)==="นาย"||genderPrefix(student.gender, roomName)==="ด.ช."?"เด็กชาย":"เด็กหญิง"} {student.first_name} {student.last_name}
           {student.nick_name&&<span style={{color:"#9ca3af",fontWeight:400}}> ({student.nick_name})</span>}
         </div>
         <button onClick={onClose} style={{background:"#f1f5f9",border:"none",borderRadius:8,
@@ -749,19 +761,47 @@ function ClassPage({currentUser,isAdmin}) {
     load();
   },[currentUser,isAdmin]);
 
-  const load=useCallback(async()=>{
-    if(!selectedClass) return;
-    setLoading(true);
-    const {data}=await supabase.from("v_nutrition_student_detail").select("*")
-      .eq("classroom_id",selectedClass.classroom_id||selectedClass.id)
-      .eq("term",term).order("student_code",{ascending:true});
-    setRecords(data||[]);
-    setLoading(false);
-  },[selectedClass,term]);
+  const load = useCallback(async () => {
+  if (!selectedClass) return;
+  setLoading(true);
 
-  useEffect(()=>{
-    if(selectedClass) load();
-  },[selectedClass, term]);
+  const classroomId = selectedClass.classroom_id || selectedClass.id;
+
+  // ดึงทั้ง 2 อย่างพร้อมกัน
+  const [{ data: nutritionData }, { data: studentData }] = await Promise.all([
+    supabase
+      .from("v_nutrition_student_detail")
+      .select("*")
+      .eq("classroom_id", classroomId)
+      .eq("term", term),
+    supabase
+      .from("students")
+      .select("id, seat_number")
+      .eq("classroom_id", classroomId),
+  ]);
+
+  // Map: students.id → seat_number
+  const seatMap = {};
+  (studentData || []).forEach((s) => {
+    seatMap[s.id] = s.seat_number;
+  });
+
+  // Merge แล้วเรียงตาม seat_number
+  const merged = (nutritionData || [])
+    .map((r) => ({
+      ...r,
+      seat_number: seatMap[r.student_id] ?? null,
+    }))
+    .sort((a, b) => {
+      if (a.seat_number == null && b.seat_number == null) return 0;
+      if (a.seat_number == null) return 1;
+      if (b.seat_number == null) return -1;
+      return Number(a.seat_number) - Number(b.seat_number);
+    });
+
+  setRecords(merged);
+  setLoading(false);
+}, [selectedClass, term]);
 
   const [statusFilter, setStatusFilter] = useState(null); // null | "normal" | "risk" | "urgent"
 
@@ -795,12 +835,12 @@ const displayRecords = useMemo(() => {
       <th>เลขที่</th><th>ชื่อ-นามสกุล</th><th>อายุ</th><th>เพศ</th>
       <th>น้ำหนัก</th><th>ส่วนสูง</th><th>IBW</th><th>%HA</th><th>%WH</th><th>ภาวะ WH</th><th>ภาวะ HA</th>
     </tr></thead><tbody>
-      ${records.map((r,i)=>{
+      ${displayRecords.map((r, i) => {
         const wh=r.wh_status?getWHStatus(r.pct_weight_for_height):null;
         const ha=r.ha_status?getHAStatus(r.pct_height_for_age):null;
         return `<tr>
           <td style="text-align:center">${r.seat_number||i+1}</td>
-          <td>${genderPrefix(r.gender)} ${r.first_name} ${r.last_name}</td>
+          <td>${genderPrefix(r.gender, selectedClass?.room_name)} ${r.first_name} ${r.last_name}</td>
           <td>${r.birth_date?formatAge(r.birth_date):"—"}</td>
           <td>${genderLabel(r.gender)}</td>
           <td>${r.weight_kg??"—"}</td><td>${r.height_cm??"—"}</td>
@@ -899,7 +939,7 @@ const displayRecords = useMemo(() => {
                   <tr key={r.student_id+r.term} style={{background:i%2===0?"#f8faff":"#fff"}}>
                     <td style={{padding:"7px 8px",color:"#6b7280",textAlign:"center"}}>{r.seat_number??"—"}</td>
                     <td style={{padding:"7px 8px",fontWeight:600,color:"#1e3a8a",whiteSpace:"nowrap"}}>
-                      {genderPrefix(r.gender)} {r.first_name} {r.last_name}
+                      {genderPrefix(r.gender, selectedClass?.room_name)} {r.first_name} {r.last_name}
                     </td>
                     <td style={{padding:"7px 8px",color:"#6b7280"}}>{r.birth_date?formatAge(r.birth_date):"—"}</td>
                     <td style={{padding:"7px 8px"}}>{genderLabel(r.gender)}</td>
@@ -1157,7 +1197,7 @@ const totals=useMemo(()=>({
     sub={`เฉลี่ย ${totals.urgentAvg}%`}/>
 </div>
 
-      {loading?<div style={{textAlign:"center",padding:40,color:"#6b7280"}}>⏳ กำลังโหลด...</div>
+{loading?<div style={{textAlign:"center",padding:40,color:"#6b7280"}}>⏳ กำลังโหลด...</div>
         :summary.length>0&&(
           <div style={S.card}>
       <div style={S.cardTitle}>🏫 สรุปรายห้องเรียน (% น้ำหนักตามเกณฑ์ส่วนสูง)</div>
@@ -1175,10 +1215,11 @@ const totals=useMemo(()=>({
           <Bar dataKey="wh_urgent_pct"  name="🚨 เร่งด่วน"      fill="#dc2626" stackId="a" radius={[4,4,0,0]}/>
         </BarChart>
       </ResponsiveContainer>
-          </div>
-        )}
+    </div>
+    )}
 
- {/* ตารางสรุปรายห้อง */}
+    {/* ตารางสรุปรายห้อง */}
+    <div style={S.card}>
       <div style={{overflowX:"auto",marginTop:16}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
           <thead>
@@ -1196,20 +1237,17 @@ const totals=useMemo(()=>({
                 <td style={{padding:"7px 8px",color:"#16a34a",fontWeight:700}}>{r.wh_normal_count??"-"}</td>
                 <td style={{padding:"7px 8px"}}>
                   <span style={{background:"#dcfce7",color:"#166534",padding:"2px 8px",borderRadius:12,fontSize:11,fontWeight:700}}>
-                    {r.wh_normal_pct}%
-                  </span>
+                    {r.wh_normal_pct}% </span>
                 </td>
                 <td style={{padding:"7px 8px",color:"#f59e0b",fontWeight:700}}>{r.wh_risk_count??"-"}</td>
                 <td style={{padding:"7px 8px"}}>
                   <span style={{background:"#fef9c3",color:"#854d0e",padding:"2px 8px",borderRadius:12,fontSize:11,fontWeight:700}}>
-                    {r.wh_risk_pct}%
-                  </span>
+                    {r.wh_risk_pct}% </span>
                 </td>
                 <td style={{padding:"7px 8px",color:"#dc2626",fontWeight:700}}>{r.wh_urgent_count??"-"}</td>
                 <td style={{padding:"7px 8px"}}>
                   <span style={{background:"#fee2e2",color:"#991b1b",padding:"2px 8px",borderRadius:12,fontSize:11,fontWeight:700}}>
-                    {r.wh_urgent_pct}%
-                  </span>
+                    {r.wh_urgent_pct}% </span>
                 </td>
               </tr>
             ))}
@@ -1217,7 +1255,9 @@ const totals=useMemo(()=>({
         </table>
       </div>
     </div>
-  )}
+  </div>
+  );
+}
 
 // ── ManagersPage — จัดการผู้ดูแลโครงการ ─────────────────────────────────────
 function ManagersPage({currentUser}) {
