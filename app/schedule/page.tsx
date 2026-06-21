@@ -31,7 +31,6 @@ const SUBJECT_COLORS = [
   { bg: "bg-cyan-100",   border: "border-cyan-300",   text: "text-cyan-800"   },
 ];
 
-// ตารางเวลา 3 แบบ (สำหรับ seed ลง DB)
 export const SCHEDULE_TEMPLATES = [
   {
     key: "primary",
@@ -87,6 +86,7 @@ type Subject = { id: string; subject_code: string; name_th: string; subject_grou
 type Teacher = { id: string; first_name?: string; last_name?: string; full_name?: string; position?: string };
 type Classroom = { id: string; room_number: number; room_name?: string; grade_group?: string; academic_year_id?: string; schedule_type?: string };
 type TimetableEntry = { id: string; classroom_id: string; subject_id: string; teacher_id: string; day_of_week: number; time_slot_id: string; academic_year_id: string; subject?: Subject; teacher?: Teacher };
+type AcademicYearRaw = { id: string; year_name: string; semester?: number; is_current?: boolean };
 
 function fullName(u: any) {
   if (!u) return "—";
@@ -135,6 +135,9 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
               <option value="">— เลือกวิชา —</option>
               {subjects.map(s => <option key={s.id} value={s.id}>{s.subject_code} {s.name_th}</option>)}
             </select>
+            {subjects.length === 0 && (
+              <p className="text-xs text-red-500 font-bold mt-1">⚠️ ไม่พบข้อมูลวิชาในระบบ กรุณาเพิ่มข้อมูลในตาราง subjects</p>
+            )}
           </div>
           <div>
             <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-2">ครูผู้สอน *</label>
@@ -143,6 +146,9 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
               <option value="">— เลือกครู —</option>
               {teachers.map(t => <option key={t.id} value={t.id}>{fullName(t)}</option>)}
             </select>
+            {teachers.length === 0 && (
+              <p className="text-xs text-red-500 font-bold mt-1">⚠️ ไม่พบรายชื่อครูในระบบ ตรวจสอบ role ในตาราง users</p>
+            )}
           </div>
         </div>
         <div className="px-6 pb-6 flex gap-2">
@@ -161,7 +167,7 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
   );
 }
 
-// ── Timetable Grid (วันแนวตั้งซ้าย, คาบแนวนอนบน) ──────────────────────────
+// ── Timetable Grid ─────────────────────────────────────────────────────────────
 function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, academicYearId, isAdmin, currentUser, onRefresh }: {
   classroom: Classroom; entries: TimetableEntry[]; timeSlots: TimeSlot[];
   subjects: Subject[]; teachers: Teacher[]; academicYearId: string;
@@ -203,16 +209,13 @@ function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, acad
           onSave={handleSave} onDelete={handleDelete} onClose={() => setModal(null)} />
       )}
 
-      {/* Layout: วันแนวตั้งซ้าย, คาบแนวนอนบน */}
       <div className="overflow-x-auto rounded-2xl border border-slate-200 shadow-sm bg-white">
         <table className="border-collapse text-xs" style={{ minWidth: `${nonBreakSlots.length * 110 + 100}px` }}>
           <thead>
             <tr>
-              {/* corner */}
               <th className="w-24 px-3 py-3 bg-slate-50 border-b-2 border-r-2 border-slate-200 text-slate-400 font-black text-xs uppercase tracking-wider text-center sticky left-0 z-10">
                 วัน / คาบ
               </th>
-              {/* คาบแนวนอน — รวม break ด้วย */}
               {timeSlots.map(slot => (
                 <th key={slot.id}
                   className={`px-2 py-2 border-b-2 border-r border-slate-200 text-center font-black
@@ -238,12 +241,10 @@ function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, acad
               const dc = DAY_COLORS[day - 1];
               return (
                 <tr key={day} className="border-b border-slate-100">
-                  {/* วันแนวตั้งซ้าย */}
                   <td className={`px-3 py-2 border-r-2 border-slate-200 sticky left-0 z-10 ${dc.bg}`}>
                     <div className={`font-black text-sm ${dc.text}`}>{DAYS[day - 1]}</div>
                     <div className={`text-[10px] font-medium ${dc.text} opacity-60`}>{DAY_SHORT[day - 1]}</div>
                   </td>
-                  {/* เซลล์แต่ละคาบ */}
                   {timeSlots.map(slot => {
                     if (slot.is_break) {
                       return (
@@ -309,7 +310,6 @@ function ScheduleSettingsModal({ onClose, onApply }: { onClose: () => void; onAp
           <p className="text-slate-300 text-sm mt-0.5">เลือกแบบตารางเวลาสำหรับห้องนี้</p>
         </div>
         <div className="p-6">
-          {/* Template selector */}
           <div className="flex gap-2 mb-5">
             {SCHEDULE_TEMPLATES.map(t => (
               <button key={t.key} onClick={() => setSelected(t.key)}
@@ -318,8 +318,6 @@ function ScheduleSettingsModal({ onClose, onApply }: { onClose: () => void; onAp
               </button>
             ))}
           </div>
-
-          {/* Preview */}
           <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
             <div className="bg-slate-200 px-4 py-2">
               <p className="text-xs font-black text-slate-600">ตัวอย่างตารางเวลา — {tmpl.label}</p>
@@ -357,7 +355,6 @@ function MobileView({ entries, timeSlots, subjects, teachers, isAdmin, currentUs
   onCellClick: (slot: TimeSlot, day: number, entry?: TimetableEntry) => void;
 }) {
   const [activeDay, setActiveDay] = useState(1);
-  const nonBreakSlots = timeSlots.filter(s => !s.is_break);
 
   return (
     <div className="md:hidden">
@@ -423,18 +420,21 @@ export default function SchedulePage() {
   const router = useRouter();
   const [user,           setUser]           = useState<UserProfile | null>(null);
   const [loading,        setLoading]        = useState(true);
-  const [classrooms,     setClassrooms]     = useState<Classroom[]>([]);
+  const [allClassrooms,  setAllClassrooms]  = useState<Classroom[]>([]); // ★ เก็บห้องเรียนทั้งหมดแบบไม่กรอง
+  const [classrooms,     setClassrooms]     = useState<Classroom[]>([]); // ห้องเรียนหลังกรองตามปีที่เลือก
   const [timeSlots,      setTimeSlots]      = useState<TimeSlot[]>([]);
   const [subjects,       setSubjects]       = useState<Subject[]>([]);
   const [teachers,       setTeachers]       = useState<Teacher[]>([]);
   const [entries,        setEntries]        = useState<TimetableEntry[]>([]);
-  const [academicYears,  setAcademicYears]  = useState<{ id: string; year_name: string }[]>([]);
+  const [academicYearsRaw, setAcademicYearsRaw] = useState<AcademicYearRaw[]>([]); // ★ เก็บข้อมูลดิบ (มี semester, is_current)
+  const [academicYears,  setAcademicYears]  = useState<{ id: string; year_name: string }[]>([]); // สำหรับ dropdown (unique year_name)
   const [selectedYear,   setSelectedYear]   = useState("");
   const [selectedRoom,   setSelectedRoom]   = useState("");
   const [viewMode,       setViewMode]       = useState<"room" | "teacher">("room");
   const [showSettings,   setShowSettings]   = useState(false);
   const [roomTimeSlots,  setRoomTimeSlots]  = useState<TimeSlot[]>([]);
   const [modal,          setModal]          = useState<{ slot: TimeSlot; day: number; entry?: TimetableEntry } | null>(null);
+  const [debugInfo,      setDebugInfo]      = useState<string>("");
 
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -468,48 +468,91 @@ export default function SchedulePage() {
 
       setUser({ ...profileData, full_name: profileData.full_name || `${profileData.first_name ?? ""} ${profileData.last_name ?? ""}`.trim() });
 
+      // ★ ดึง academic_years พร้อม semester และ is_current
       const [yearsRes, slotsRes, subjectsRes, teachersRes, classroomsRes] = await Promise.all([
-        supabase.from("academic_years").select("id, year_name").order("year_name", { ascending: false }),
+        supabase.from("academic_years").select("id, year_name, semester, is_current")
+          .order("year_name", { ascending: false }).order("semester", { ascending: false }),
         supabase.from("time_slots").select("*").order("slot_number").order("start_time"),
         supabase.from("subjects").select("id, subject_code, name_th, subject_group").order("subject_code"),
         supabase.from("users").select("id, first_name, last_name, full_name, position")
           .in("role", ["subject_teacher", "homeroom_teacher", "teacher", "staff"]),
+        // ★ ดึงห้องเรียนทั้งหมด ไม่ filter ตาม year ตอน fetch แรก
         supabase.from("classrooms").select("id, room_number, room_name, grade_group, academic_year_id, schedule_type")
           .order("grade_group").order("room_number"),
       ]);
 
-      const years = (yearsRes.data ?? []) as any[];
-      setAcademicYears(years);
+      const yearsRaw = (yearsRes.data ?? []) as AcademicYearRaw[];
+      setAcademicYearsRaw(yearsRaw);
+
+      // unique year_name สำหรับ dropdown (ใช้ id ของแถวแรกที่เจอ เป็น representative)
+      const uniqueYearMap = new Map<string, string>(); // year_name -> id
+      yearsRaw.forEach(y => { if (!uniqueYearMap.has(y.year_name)) uniqueYearMap.set(y.year_name, y.id); });
+      const uniqueYears = Array.from(uniqueYearMap.entries()).map(([year_name, id]) => ({ id, year_name }));
+      setAcademicYears(uniqueYears);
+
       setTimeSlots((slotsRes.data ?? []) as TimeSlot[]);
       setSubjects((subjectsRes.data ?? []) as Subject[]);
       setTeachers(((teachersRes.data ?? []) as any[]).map(t => ({
         ...t, full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim(),
       })));
 
-      const rooms = (classroomsRes.data ?? []) as Classroom[];
-      if (years.length > 0) {
-        setSelectedYear(years[0].id);
-        const filtered = rooms.filter(r => r.academic_year_id === years[0].id);
-        setClassrooms(filtered);
-        if (filtered.length > 0) setSelectedRoom(filtered[0].id);
+      const allRooms = (classroomsRes.data ?? []) as Classroom[];
+      setAllClassrooms(allRooms);
+
+      // ★ เลือกปีปัจจุบัน: is_current ก่อน, ไม่มีก็เอาแถวแรก
+      const currentYearRow = yearsRaw.find(y => y.is_current) ?? yearsRaw[0];
+
+      let dbg = `academic_years พบ ${yearsRaw.length} แถว | classrooms พบ ${allRooms.length} ห้อง | `;
+
+      if (currentYearRow) {
+        setSelectedYear(uniqueYearMap.get(currentYearRow.year_name) ?? currentYearRow.id);
+
+        // ★ จับคู่ห้องที่ผูกกับ "ปีการศึกษา" เดียวกัน (เทียบทุก id ของปีนั้น ไม่ใช่แค่ id เดียว)
+        const sameYearIds = yearsRaw.filter(y => y.year_name === currentYearRow.year_name).map(y => y.id);
+        const matched = allRooms.filter(r => sameYearIds.includes(r.academic_year_id ?? ""));
+
+        dbg += `ปีปัจจุบัน: ${currentYearRow.year_name} | ห้องที่ตรงปี: ${matched.length}`;
+
+        if (matched.length > 0) {
+          setClassrooms(matched);
+          setSelectedRoom(matched[0].id);
+        } else if (allRooms.length > 0) {
+          // ★ Fallback: ไม่เจอห้องที่ตรง academic_year_id เลย แต่มีห้องอยู่ในระบบ
+          // แสดงห้องทั้งหมดไปก่อน เพื่อไม่ให้หน้าว่างเปล่า (ปัญหาส่วนใหญ่คือ id ไม่ตรงกัน)
+          setClassrooms(allRooms);
+          setSelectedRoom(allRooms[0].id);
+          dbg += " | ⚠️ ไม่พบห้องที่ผูก academic_year_id ตรงกับปีที่เลือก แสดงห้องทั้งหมดแทน";
+        }
+      } else if (allRooms.length > 0) {
+        setClassrooms(allRooms);
+        setSelectedRoom(allRooms[0].id);
+        dbg += " | ⚠️ ไม่พบข้อมูล academic_years เลย แสดงห้องทั้งหมดแทน";
       }
+
+      setDebugInfo(dbg);
       setLoading(false);
     };
     init();
   }, []);
 
-  // Filter classrooms by year
+  // ── Filter classrooms เมื่อเปลี่ยนปีที่เลือก ──────────────────────────────
   useEffect(() => {
-    if (!selectedYear) return;
-    supabase.from("classrooms")
-      .select("id, room_number, room_name, grade_group, academic_year_id, schedule_type")
-      .eq("academic_year_id", selectedYear).order("grade_group").order("room_number")
-      .then(({ data }) => {
-        const rooms = (data ?? []) as Classroom[];
-        setClassrooms(rooms);
-        if (rooms.length > 0 && !rooms.find(r => r.id === selectedRoom)) setSelectedRoom(rooms[0].id);
-      });
-  }, [selectedYear]);
+    if (!selectedYear || academicYearsRaw.length === 0) return;
+
+    const selectedYearRow = academicYearsRaw.find(y => y.id === selectedYear);
+    if (!selectedYearRow) return;
+
+    // หา id ทั้งหมดที่มี year_name เดียวกัน (รวมทุก semester)
+    const sameYearIds = academicYearsRaw.filter(y => y.year_name === selectedYearRow.year_name).map(y => y.id);
+    const matched = allClassrooms.filter(r => sameYearIds.includes(r.academic_year_id ?? ""));
+
+    const roomList = matched.length > 0 ? matched : allClassrooms;
+    setClassrooms(roomList);
+
+    if (roomList.length > 0 && !roomList.find(r => r.id === selectedRoom)) {
+      setSelectedRoom(roomList[0].id);
+    }
+  }, [selectedYear, academicYearsRaw, allClassrooms]);
 
   // Load time slots for selected room's schedule_type
   useEffect(() => {
@@ -517,35 +560,46 @@ export default function SchedulePage() {
     const type = room?.schedule_type ?? "primary";
     const tmpl = SCHEDULE_TEMPLATES.find(t => t.key === type) ?? SCHEDULE_TEMPLATES[0];
 
-    // ลองดึงจาก DB ก่อน ถ้าไม่มีใช้ template
     if (timeSlots.length > 0) {
-      // กรองตาม schedule_type ถ้ามี field นั้น
       const filtered = timeSlots.filter(s => !s.schedule_type || s.schedule_type === type);
       setRoomTimeSlots(filtered.length > 0 ? filtered : timeSlots);
     } else {
-      // fallback to template (ไม่มี id จริง ใช้ index แทน)
       setRoomTimeSlots(tmpl.slots.map((s, i) => ({ ...s, id: `tmpl-${i}` })));
     }
   }, [selectedRoom, classrooms, timeSlots]);
 
   const loadEntries = useCallback(async () => {
     if (!selectedYear) return;
+    // ★ ดึง entries ของทุก id ในปีเดียวกัน (กันกรณี entries ผูกกับ semester id อื่น)
+    const selectedYearRow = academicYearsRaw.find(y => y.id === selectedYear);
+    const sameYearIds = selectedYearRow
+      ? academicYearsRaw.filter(y => y.year_name === selectedYearRow.year_name).map(y => y.id)
+      : [selectedYear];
+
     const { data } = await (supabase.from("timetable_entries") as any)
       .select("*, subject:subjects(id,subject_code,name_th), teacher:users(id,first_name,last_name,full_name)")
-      .eq("academic_year_id", selectedYear);
+      .in("academic_year_id", sameYearIds);
     setEntries((data ?? []) as TimetableEntry[]);
-  }, [selectedYear]);
+  }, [selectedYear, academicYearsRaw]);
 
   useEffect(() => { loadEntries(); }, [loadEntries]);
 
-  // Apply schedule type to classroom
   async function applyScheduleType(type: string) {
     await (supabase.from("classrooms") as any).update({ schedule_type: type }).eq("id", selectedRoom);
-    // refresh classrooms
     const { data } = await supabase.from("classrooms")
       .select("id, room_number, room_name, grade_group, academic_year_id, schedule_type")
-      .eq("academic_year_id", selectedYear).order("grade_group").order("room_number");
-    setClassrooms((data ?? []) as Classroom[]);
+      .order("grade_group").order("room_number");
+    const allRooms = (data ?? []) as Classroom[];
+    setAllClassrooms(allRooms);
+
+    const selectedYearRow = academicYearsRaw.find(y => y.id === selectedYear);
+    if (selectedYearRow) {
+      const sameYearIds = academicYearsRaw.filter(y => y.year_name === selectedYearRow.year_name).map(y => y.id);
+      const matched = allRooms.filter(r => sameYearIds.includes(r.academic_year_id ?? ""));
+      setClassrooms(matched.length > 0 ? matched : allRooms);
+    } else {
+      setClassrooms(allRooms);
+    }
   }
 
   if (loading) return (
@@ -613,13 +667,25 @@ export default function SchedulePage() {
         </div>
       </div>
 
+      {/* ★ Debug banner — ลบทิ้งได้เมื่อใช้งานจริงแน่นอนแล้ว */}
+      {isAdmin && debugInfo && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 print:hidden">
+          <p className="text-[11px] text-amber-700 font-mono">{debugInfo}</p>
+        </div>
+      )}
+
       <div className="flex h-[calc(100vh-65px)] print:h-auto">
         {/* Sidebar */}
         <aside className="w-52 bg-white border-r border-slate-200 overflow-y-auto shrink-0 print:hidden">
           <div className="p-3">
             <p className="text-xs font-black text-slate-400 uppercase tracking-wider px-2 mb-2">ห้องเรียน</p>
             {classrooms.length === 0 && (
-              <p className="text-xs text-slate-400 px-2 py-4 text-center">ยังไม่มีข้อมูลห้องเรียน</p>
+              <div className="text-xs text-slate-400 px-2 py-4 text-center space-y-2">
+                <p>ยังไม่มีข้อมูลห้องเรียน</p>
+                {isAdmin && (
+                  <p className="text-amber-600 font-bold">เพิ่มห้องเรียนในตาราง classrooms ของ Supabase ก่อน</p>
+                )}
+              </div>
             )}
             {gradeGroups.map(grade => {
               const gradeRooms = classrooms.filter(c => c.grade_group === grade);
@@ -649,7 +715,6 @@ export default function SchedulePage() {
 
         {/* Main */}
         <main className="flex-1 overflow-auto p-4 print:p-0">
-          {/* Print header */}
           <div className="hidden print:block mb-4 text-center border-b pb-4">
             <h1 className="text-xl font-black">ตารางสอนโรงเรียนวัดเขียนเขต</h1>
             {viewMode === "room" && selectedClassroom && (
@@ -666,7 +731,6 @@ export default function SchedulePage() {
                 </div>
               </div>
 
-              {/* Desktop grid */}
               <div className="hidden md:block">
                 <TimetableGrid
                   classroom={selectedClassroom} entries={roomEntries} timeSlots={roomTimeSlots}
@@ -675,7 +739,6 @@ export default function SchedulePage() {
                 />
               </div>
 
-              {/* Mobile */}
               <MobileView
                 entries={roomEntries} timeSlots={roomTimeSlots} subjects={subjects} teachers={teachers}
                 isAdmin={isAdmin} currentUser={user} subjectColorMap={subjectColorMap}

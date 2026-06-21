@@ -738,126 +738,116 @@ function StudentDetailPanel({student,currentResult,measuredDate,onClose,roomName
 }
 
 // ── ClassPage ─────────────────────────────────────────────────────────────────
-function ClassPage({currentUser,isAdmin}) {
-  const [classrooms,setClassrooms]=useState([]);
-  const [selectedClass,setSelectedClass]=useState(null);
-  const [term,setTerm]=useState("term1");
-  const [records,setRecords]=useState([]);
-  const [loading,setLoading]=useState(false);
+function ClassPage({currentUser, isAdmin}) {
+  const [classrooms, setClassrooms] = useState([]);
+  const [selectedClass, setSelectedClass] = useState(null);
+  const [term, setTerm] = useState("term1");
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState(null);
 
-  useEffect(()=>{
-    if(!currentUser) return;
-    const load=async()=>{
-      let rooms=[];
-      if(isAdmin){
-        const {data}=await supabase.from("classrooms").select("id,room_name,room_number,academic_year_id");
-        rooms=sortClassrooms((data||[]).map(c=>({...c,classroom_id:c.id})));
+  useEffect(() => {
+    if (!currentUser) return;
+    const loadRooms = async () => {
+      let rooms = [];
+      if (isAdmin) {
+        const { data } = await supabase.from("classrooms").select("id,room_name,room_number,academic_year_id");
+        rooms = sortClassrooms((data || []).map(c => ({ ...c, classroom_id: c.id })));
       } else {
-        rooms=await fetchMyClassrooms(currentUser.id);
+        rooms = await fetchMyClassrooms(currentUser.id);
       }
       setClassrooms(rooms);
-      if(rooms.length===1) setSelectedClass(rooms[0]);
+      if (rooms.length === 1) setSelectedClass(rooms[0]);
     };
-    load();
-  },[currentUser,isAdmin]);
+    loadRooms();
+  }, [currentUser, isAdmin]);
 
   const load = useCallback(async () => {
-  if (!selectedClass) return;
-  setLoading(true);
+    if (!selectedClass) return;
+    setLoading(true);
 
-  const classroomId = selectedClass.classroom_id || selectedClass.id;
+    const classroomId = selectedClass.classroom_id || selectedClass.id;
 
-  // 1. ดึงข้อมูลโภชนาการก่อน
-  const { data: nutritionData } = await supabase
-    .from("v_nutrition_student_detail")
-    .select("*")
-    .eq("classroom_id", classroomId)
-    .eq("term", term);
+    const { data: nutritionData } = await supabase
+      .from("v_nutrition_student_detail")
+      .select("*")
+      .eq("classroom_id", classroomId)
+      .eq("term", term);
 
-  // 2. ดึง seat_number จาก students
-  const studentIds = (nutritionData || []).map(r => r.student_id).filter(Boolean);
-  
-  let seatMap = {};
-  if (studentIds.length > 0) {
-    const { data: studentData } = await supabase
-      .from("students")
-      .select("id, seat_number")
-      .in("id", studentIds);
-    
-    (studentData || []).forEach((s) => {
-      seatMap[s.id] = s.seat_number;
-    });
+    const studentIds = (nutritionData || []).map(r => r.student_id).filter(Boolean);
 
-    console.log("seatMap:", seatMap);
-    console.log("nutritionData[0]:", nutritionData?.[0]);
+    let seatMap = {};
+    if (studentIds.length > 0) {
+      const { data: studentData } = await supabase
+        .from("students")
+        .select("id, seat_number")
+        .in("id", studentIds);
+      (studentData || []).forEach(s => { seatMap[s.id] = s.seat_number; });
+    }
+
+    const merged = (nutritionData || [])
+      .map(r => ({ ...r, seat_number: seatMap[r.student_id] ?? null }))
+      .sort((a, b) => {
+        const sa = a.seat_number, sb = b.seat_number;
+        if (sa == null && sb == null) return 0;
+        if (sa == null) return 1;
+        if (sb == null) return -1;
+        return Number(sa) - Number(sb);
+      });
+
+    setRecords(merged);
+    setLoading(false);
+  }, [selectedClass, term]);
+
+  function classifyWH(whStatus) {
+    if (!whStatus) return null;
+    if (whStatus === "สมส่วน") return "normal";
+    if (whStatus.includes("ผอม") && !whStatus.includes("แห้ง")) return "risk";
+    return "urgent";
   }
 
-  // 3. รวมและ sort
-  const merged = (nutritionData || [])
-    .map(r => ({ ...r, seat_number: seatMap[r.student_id] ?? null }))
-    .sort((a, b) => {
-      const sa = a.seat_number, sb = b.seat_number;
-      if (sa == null && sb == null) return 0;
-      if (sa == null) return 1;
-      if (sb == null) return -1;
-      return Number(sa) - Number(sb);
-    });
+  const displayRecords = useMemo(() => {
+    if (!statusFilter) return records;
+    return records.filter(r => classifyWH(r.wh_status) === statusFilter);
+  }, [records, statusFilter]);
 
-  setRecords(merged);
-  setLoading(false);
-}, [selectedClass, term]);
-
-  const [statusFilter, setStatusFilter] = useState(null); // null | "normal" | "risk" | "urgent"
-
-function classifyWH(whStatus) {
-  if (!whStatus) return null;
-  if (whStatus === "สมส่วน") return "normal";
-  if (whStatus.includes("ผอม") && !whStatus.includes("แห้ง")) return "risk";
-  return "urgent"; // อ้วน, ผอมแห้ง, เริ่มอ้วน, ท้วม ฯลฯ ที่ไม่ใช่สมส่วน/เสี่ยง
-}
-
-const displayRecords = useMemo(() => {
-  if (!statusFilter) return records;
-  return records.filter(r => classifyWH(r.wh_status) === statusFilter);
-}, [records, statusFilter]);
-
-  const summary=useMemo(()=>{
-    let normal=0,risk=0,urgent=0;
-    records.forEach(r=>{
-      if(!r.wh_status) return;
-      if(r.wh_status==="สมส่วน") normal++;
-      else if(r.wh_status.includes("ผอม")&&!r.wh_status.includes("แห้ง")) risk++;
+  const summary = useMemo(() => {
+    let normal = 0, risk = 0, urgent = 0;
+    records.forEach(r => {
+      if (!r.wh_status) return;
+      if (r.wh_status === "สมส่วน") normal++;
+      else if (r.wh_status.includes("ผอม") && !r.wh_status.includes("แห้ง")) risk++;
       else urgent++;
     });
-    return {total:records.length,normal,risk,urgent};
-  },[records]);
+    return { total: records.length, normal, risk, urgent };
+  }, [records]);
 
-  const handlePrint=()=>{
-    const termLabel=term==="term1"?"ครั้งที่ 1":"ครั้งที่ 2";
-    const html=`<h3>${selectedClass?.room_name} — ${termLabel}</h3>
+  const handlePrint = () => {
+    const termLabel = term === "term1" ? "ครั้งที่ 1" : "ครั้งที่ 2";
+    const html = `<h3>${selectedClass?.room_name} — ${termLabel}</h3>
     <table><thead><tr>
       <th>เลขที่</th><th>ชื่อ-นามสกุล</th><th>อายุ</th><th>เพศ</th>
       <th>น้ำหนัก</th><th>ส่วนสูง</th><th>IBW</th><th>%HA</th><th>%WH</th><th>ภาวะ WH</th><th>ภาวะ HA</th>
     </tr></thead><tbody>
       ${displayRecords.map((r, i) => {
-        const wh=r.wh_status?getWHStatus(r.pct_weight_for_height):null;
-        const ha=r.ha_status?getHAStatus(r.pct_height_for_age):null;
+        const wh = r.wh_status ? getWHStatus(r.pct_weight_for_height) : null;
+        const ha = r.ha_status ? getHAStatus(r.pct_height_for_age) : null;
         return `<tr>
-          <td style="text-align:center">${r.seat_number||i+1}</td>
+          <td style="text-align:center">${r.seat_number ?? (i + 1)}</td>
           <td>${genderPrefix(r.gender, selectedClass?.room_name)} ${r.first_name} ${r.last_name}</td>
-          <td>${r.birth_date?formatAge(r.birth_date):"—"}</td>
+          <td>${r.birth_date ? formatAge(r.birth_date) : "—"}</td>
           <td>${genderLabel(r.gender)}</td>
-          <td>${r.weight_kg??"—"}</td><td>${r.height_cm??"—"}</td>
-          <td>${r.ibw_kg??"—"}</td>
-          <td>${r.pct_height_for_age?r.pct_height_for_age+"%":"—"}</td>
-          <td>${r.pct_weight_for_height?r.pct_weight_for_height+"%":"—"}</td>
-          <td>${wh?`<span class="badge ${wh.label.includes("สมส่วน")?"normal":wh.label.includes("ผอม")||wh.label.includes("อ้วน")?"danger":"warn"}">${wh.label}</span>`:"—"}</td>
-          <td>${ha?`<span class="badge ${ha.label.includes("ตามเกณฑ์")?"normal":ha.label.includes("เตี้ย")?"danger":"blue"}">${ha.label}</span>`:"—"}</td>
+          <td>${r.weight_kg ?? "—"}</td><td>${r.height_cm ?? "—"}</td>
+          <td>${r.ibw_kg ?? "—"}</td>
+          <td>${r.pct_height_for_age ? r.pct_height_for_age + "%" : "—"}</td>
+          <td>${r.pct_weight_for_height ? r.pct_weight_for_height + "%" : "—"}</td>
+          <td>${wh ? `<span class="badge ${wh.label.includes("สมส่วน") ? "normal" : wh.label.includes("ผอม") || wh.label.includes("อ้วน") ? "danger" : "warn"}">${wh.label}</span>` : "—"}</td>
+          <td>${ha ? `<span class="badge ${ha.label.includes("ตามเกณฑ์") ? "normal" : ha.label.includes("เตี้ย") ? "danger" : "blue"}">${ha.label}</span>` : "—"}</td>
         </tr>`;
       }).join("")}
     </tbody></table>
     <p style="margin-top:12px;font-size:11px;color:#6b7280">สมส่วน ${summary.normal} คน | เสี่ยง ${summary.risk} คน | เร่งด่วน ${summary.urgent} คน | รวม ${summary.total} คน</p>`;
-    const w=window.open("","_blank","width=1100,height=750");
+    const w = window.open("", "_blank", "width=1100,height=750");
     w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>รายงาน ${selectedClass?.room_name}</title>
       <style>body{font-family:'Sarabun',sans-serif;font-size:12px;margin:20px}h2,h3{color:#1e40af}
       table{width:100%;border-collapse:collapse}th{background:#1e40af;color:#fff;padding:6px 8px;font-size:11px;text-align:left}
@@ -875,88 +865,89 @@ const displayRecords = useMemo(() => {
     <div>
       <div style={S.card}>
         <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
-          {(isAdmin||classrooms.length>1)?(
+          {(isAdmin || classrooms.length > 1) ? (
             <div style={{flex:1,minWidth:160}}>
               <label style={S.label}>ห้องเรียน</label>
               <select style={S.select} value={selectedClass?.classroom_id||selectedClass?.id||""}
-                onChange={e=>setSelectedClass(classrooms.find(c=>(c.classroom_id||c.id)===e.target.value))}>
+                onChange={e => setSelectedClass(classrooms.find(c => (c.classroom_id||c.id) === e.target.value))}>
                 <option value="">— เลือกห้องเรียน —</option>
-                {classrooms.map(c=><option key={c.classroom_id||c.id} value={c.classroom_id||c.id}>{c.room_name}</option>)}
+                {classrooms.map(c => <option key={c.classroom_id||c.id} value={c.classroom_id||c.id}>{c.room_name}</option>)}
               </select>
             </div>
-          ):(
+          ) : (
             <div style={{flex:1,background:"#eff6ff",borderRadius:10,padding:"10px 14px",color:"#1e40af",fontWeight:700,fontSize:14}}>
               📚 {classrooms[0]?.room_name}
             </div>
           )}
           <div style={{minWidth:140}}>
             <label style={S.label}>ครั้งที่</label>
-            <select style={S.select} value={term} onChange={e=>setTerm(e.target.value)}>
+            <select style={S.select} value={term} onChange={e => setTerm(e.target.value)}>
               <option value="term1">🌸 ครั้งที่ 1</option>
               <option value="term2">🍂 ครั้งที่ 2</option>
             </select>
           </div>
           <button onClick={load} style={S.btn}>🔍 แสดงผล</button>
-          {records.length>0&&<button onClick={handlePrint} style={S.btnPrint}>🖨️ พิมพ์รายงาน</button>}
+          {records.length > 0 && <button onClick={handlePrint} style={S.btnPrint}>🖨️ พิมพ์รายงาน</button>}
         </div>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
-  <div onClick={()=>setStatusFilter(null)} style={{cursor:"pointer"}}>
-    <StatCard label="ทั้งหมด" value={summary.total} color="#3b82f6" icon="👨‍👩‍👧‍👦"/>
-  </div>
-  <div onClick={()=>setStatusFilter(statusFilter==="normal"?null:"normal")} style={{cursor:"pointer"}}>
-    <StatCard label="สมส่วน" value={summary.normal} color="#16a34a" icon="✅"/>
-  </div>
-  <div onClick={()=>setStatusFilter(statusFilter==="risk"?null:"risk")} style={{cursor:"pointer"}}>
-    <StatCard label="เสี่ยงโภชนาการ" value={summary.risk} color="#f59e0b" icon="⚠️"/>
-  </div>
-  <div onClick={()=>setStatusFilter(statusFilter==="urgent"?null:"urgent")} style={{cursor:"pointer"}}>
-    <StatCard label="ต้องดูแลเร่งด่วน" value={summary.urgent} color="#dc2626" icon="🚨"/>
-  </div>
-</div>
-{statusFilter && (
-  <div style={{marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
-    <span style={{fontSize:13,color:"#1e40af",fontWeight:700}}>
-      🔍 กรองแสดง: {statusFilter==="normal"?"สมส่วน":statusFilter==="risk"?"เสี่ยงโภชนาการ":"ต้องดูแลเร่งด่วน"}
-    </span>
-    <button onClick={()=>setStatusFilter(null)} style={{...S.btnSm,background:"#f1f5f9",color:"#6b7280"}}>✕ ล้างตัวกรอง</button>
-  </div>
-)}
+        <div onClick={() => setStatusFilter(null)} style={{cursor:"pointer"}}>
+          <StatCard label="ทั้งหมด" value={summary.total} color="#3b82f6" icon="👨‍👩‍👧‍👦"/>
+        </div>
+        <div onClick={() => setStatusFilter(statusFilter==="normal"?null:"normal")} style={{cursor:"pointer"}}>
+          <StatCard label="สมส่วน" value={summary.normal} color="#16a34a" icon="✅"/>
+        </div>
+        <div onClick={() => setStatusFilter(statusFilter==="risk"?null:"risk")} style={{cursor:"pointer"}}>
+          <StatCard label="เสี่ยงโภชนาการ" value={summary.risk} color="#f59e0b" icon="⚠️"/>
+        </div>
+        <div onClick={() => setStatusFilter(statusFilter==="urgent"?null:"urgent")} style={{cursor:"pointer"}}>
+          <StatCard label="ต้องดูแลเร่งด่วน" value={summary.urgent} color="#dc2626" icon="🚨"/>
+        </div>
+      </div>
 
-      {loading?(
+      {statusFilter && (
+        <div style={{marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:13,color:"#1e40af",fontWeight:700}}>
+            🔍 กรองแสดง: {statusFilter==="normal"?"สมส่วน":statusFilter==="risk"?"เสี่ยงโภชนาการ":"ต้องดูแลเร่งด่วน"}
+          </span>
+          <button onClick={() => setStatusFilter(null)} style={{...S.btnSm,background:"#f1f5f9",color:"#6b7280"}}>✕ ล้างตัวกรอง</button>
+        </div>
+      )}
+
+      {loading ? (
         <div style={{textAlign:"center",padding:40,color:"#6b7280"}}>⏳ กำลังโหลด...</div>
-      ):(
+      ) : (
         <div style={S.card}>
           <div style={S.cardTitle}>📋 รายชื่อนักเรียน ({records.length} คน)</div>
           <div style={{overflowX:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:800}}>
               <thead>
                 <tr style={{background:"linear-gradient(135deg,#1e40af,#3b82f6)"}}>
-                  {["เลขที่","ชื่อ-นามสกุล","อายุ","เพศ","น้ำหนัก","ส่วนสูง","IBW","% HA","% WH","ภาวะ WH","ภาวะ HA"].map(h=>(
+                  {["เลขที่","ชื่อ-นามสกุล","อายุ","เพศ","น้ำหนัก","ส่วนสูง","IBW","% HA","% WH","ภาวะ WH","ภาวะ HA"].map(h => (
                     <th key={h} style={{padding:"9px 8px",textAlign:"left",color:"#fff",fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {displayRecords.map((r,i)=>(
+                {displayRecords.map((r, i) => (
                   <tr key={r.student_id+r.term} style={{background:i%2===0?"#f8faff":"#fff"}}>
                     <td style={{padding:"7px 8px",color:"#6b7280",textAlign:"center",fontWeight:700}}>{r.seat_number ?? (i + 1)}</td>
                     <td style={{padding:"7px 8px",fontWeight:600,color:"#1e3a8a",whiteSpace:"nowrap"}}>
                       {genderPrefix(r.gender, selectedClass?.room_name)} {r.first_name} {r.last_name}
                     </td>
-                    <td style={{padding:"7px 8px",color:"#6b7280"}}>{r.birth_date?formatAge(r.birth_date):"—"}</td>
+                    <td style={{padding:"7px 8px",color:"#6b7280"}}>{r.birth_date ? formatAge(r.birth_date) : "—"}</td>
                     <td style={{padding:"7px 8px"}}>{genderLabel(r.gender)}</td>
-                    <td style={{padding:"7px 8px",fontWeight:700}}>{r.weight_kg??"—"}</td>
-                    <td style={{padding:"7px 8px",fontWeight:700}}>{r.height_cm??"—"}</td>
-                    <td style={{padding:"7px 8px"}}>{r.ibw_kg??"—"}</td>
-                    <td style={{padding:"7px 8px"}}>{r.pct_height_for_age?r.pct_height_for_age+"%":"—"}</td>
-                    <td style={{padding:"7px 8px"}}>{r.pct_weight_for_height?r.pct_weight_for_height+"%":"—"}</td>
-                    <td style={{padding:"7px 8px"}}><Badge status={r.wh_status?getWHStatus(r.pct_weight_for_height):null}/></td>
-                    <td style={{padding:"7px 8px"}}><Badge status={r.ha_status?getHAStatus(r.pct_height_for_age):null}/></td>
+                    <td style={{padding:"7px 8px",fontWeight:700}}>{r.weight_kg ?? "—"}</td>
+                    <td style={{padding:"7px 8px",fontWeight:700}}>{r.height_cm ?? "—"}</td>
+                    <td style={{padding:"7px 8px"}}>{r.ibw_kg ?? "—"}</td>
+                    <td style={{padding:"7px 8px"}}>{r.pct_height_for_age ? r.pct_height_for_age+"%" : "—"}</td>
+                    <td style={{padding:"7px 8px"}}>{r.pct_weight_for_height ? r.pct_weight_for_height+"%" : "—"}</td>
+                    <td style={{padding:"7px 8px"}}><Badge status={r.wh_status ? getWHStatus(r.pct_weight_for_height) : null}/></td>
+                    <td style={{padding:"7px 8px"}}><Badge status={r.ha_status ? getHAStatus(r.pct_height_for_age) : null}/></td>
                   </tr>
                 ))}
-                {records.length===0&&(
+                {records.length === 0 && (
                   <tr><td colSpan={11} style={{textAlign:"center",padding:32,color:"#9ca3af"}}>
                     📭 กด "แสดงผล" เพื่อโหลดข้อมูล
                   </td></tr>
@@ -1104,13 +1095,12 @@ function ComparePage({currentUser,isAdmin}) {
 
 // ── AdminPage ─────────────────────────────────────────────────────────────────
 function AdminPage({currentUser}) {
-  const [gradeGroup,setGradeGroup]=useState("");
-  const [classrooms,setClassrooms]=useState([]);
-  const [summary,setSummary]=useState([]);
-  const [selectedYear,setSelectedYear]=useState(null);
-  const [term,setTerm]=useState("term1");
-  const [loading,setLoading]=useState(false);
-  const GRADE_GROUPS=["อนุบาล","ประถมศึกษา","มัธยมศึกษาตอนต้น","มัธยมศึกษาตอนปลาย"];
+  const [gradeGroup, setGradeGroup] = useState("");
+  const [classrooms, setClassrooms] = useState([]);
+  const [summary, setSummary] = useState([]);
+  const [selectedYear, setSelectedYear] = useState(null);
+  const [term, setTerm] = useState("term1");
+  const [loading, setLoading] = useState(false);
 
   useEffect(()=>{
     supabase.from("classrooms").select("id,room_name,room_number,student_count,academic_year_id")
@@ -1129,15 +1119,15 @@ function AdminPage({currentUser}) {
   };
 
   // เพิ่ม totals คำนวณ risk/urgent
-const totals=useMemo(()=>({
-  total:classrooms.reduce((s,c)=>s+(c.student_count||0),0),
-  measured:summary.reduce((s,r)=>s+Number(r.measured_count||0),0),
-  normalAvg:summary.length?Math.round(summary.reduce((s,r)=>s+Number(r.wh_normal_pct||0),0)/summary.length):0,
-  riskCount:summary.reduce((s,r)=>s+Number(r.wh_risk_count||0),0),
-  urgentCount:summary.reduce((s,r)=>s+Number(r.wh_urgent_count||0),0),
-  riskAvg:summary.length?Math.round(summary.reduce((s,r)=>s+Number(r.wh_risk_pct||0),0)/summary.length):0,
-  urgentAvg:summary.length?Math.round(summary.reduce((s,r)=>s+Number(r.wh_urgent_pct||0),0)/summary.length):0,
-}),[classrooms,summary]);
+  const totals = useMemo(() => ({
+    total: classrooms.reduce((s,c) => s + (c.student_count||0), 0),
+    measured: summary.reduce((s,r) => s + Number(r.measured_count||0), 0),
+    normalAvg: summary.length ? Math.round(summary.reduce((s,r) => s + Number(r.wh_normal_pct||0), 0) / summary.length) : 0,
+    riskCount: summary.reduce((s,r) => s + Number(r.wh_risk_count||0), 0),
+    urgentCount: summary.reduce((s,r) => s + Number(r.wh_urgent_count||0), 0),
+    riskAvg: summary.length ? Math.round(summary.reduce((s,r) => s + Number(r.wh_risk_pct||0), 0) / summary.length) : 0,
+    urgentAvg: summary.length ? Math.round(summary.reduce((s,r) => s + Number(r.wh_urgent_pct||0), 0) / summary.length) : 0,
+  }), [classrooms, summary]);
 
   const handlePrint=()=>{
     if(!summary.length) return;
@@ -1190,15 +1180,9 @@ const totals=useMemo(()=>({
       <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:16}}>
   <StatCard label="นักเรียนทั้งหมด" value={totals.total.toLocaleString()} color="#3b82f6" icon="👨‍👩‍👧‍👦" sub="คน"/>
   <StatCard label="วัดแล้ว" value={totals.measured.toLocaleString()} color="#8b5cf6" icon="✅" sub="คน"/>
-  <StatCard label="สมส่วน (เฉลี่ย)" value={`${totals.normalAvg}%`} color="#16a34a" icon="🎯"/>
-  <StatCard label="เสี่ยงโภชนาการ" 
-    value={`${totals.riskCount} คน`} 
-    color="#f59e0b" icon="⚠️" 
-    sub={`เฉลี่ย ${totals.riskAvg}%`}/>
-  <StatCard label="ต้องดูแลเร่งด่วน" 
-    value={`${totals.urgentCount} คน`} 
-    color="#dc2626" icon="🚨" 
-    sub={`เฉลี่ย ${totals.urgentAvg}%`}/>
+  <StatCard label="สมส่วน" value={`${summary.reduce((s,r)=>s+Number(r.wh_normal_count||0),0)} คน`} color="#16a34a" icon="✅" sub={`เฉลี่ย ${totals.normalAvg}%`}/>
+  <StatCard label="เสี่ยงโภชนาการ" value={`${totals.riskCount} คน`} color="#f59e0b" icon="⚠️" sub={`เฉลี่ย ${totals.riskAvg}%`}/>
+  <StatCard label="ต้องดูแลเร่งด่วน" value={`${totals.urgentCount} คน`} color="#dc2626" icon="🚨" sub={`เฉลี่ย ${totals.urgentAvg}%`}/>
 </div>
 
 {loading?<div style={{textAlign:"center",padding:40,color:"#6b7280"}}>⏳ กำลังโหลด...</div>
