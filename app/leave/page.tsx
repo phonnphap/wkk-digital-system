@@ -1586,8 +1586,8 @@ const loadAll = useCallback(async () => {
     console.error("handleApprove error:", error);
     return;
   }
-  setPendingApproveId(null);
-  await loadAll();
+    await loadAll();
+    setPendingApproveId(null);
 }
 
 function mySlot(r: LeaveRequest): 1|2|3|null {
