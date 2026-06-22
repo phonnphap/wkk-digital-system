@@ -214,6 +214,28 @@ export default function NutritionApp() {
   const [tab, setTab] = useState("assess");
   const [isProjectManager, setIsProjectManager] = useState(false);
 
+  const isAdmin = useMemo(()=>
+    ADMIN_ROLES.includes(currentUser?.role)||isProjectManager
+  ,[currentUser,isProjectManager]);
+
+  const isRealAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
+
+  useEffect(()=>{
+    if(!currentUser) return;
+    setTab(isRealAdmin ? "class" : "assess");
+  },[currentUser, isRealAdmin]);
+
+
+  useEffect(()=>{
+    if(!currentUser) return;
+    setLoadingRooms(true);
+    fetchMyClassrooms(currentUser.id).then(rooms=>{
+      setClassrooms(rooms);
+      if(rooms.length>0) setSelectedClass(rooms[0]);
+      setLoadingRooms(false);
+    });
+  },[currentUser]);
+
   useEffect(() => {
     const init = async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -251,16 +273,6 @@ export default function NutritionApp() {
     };
     init();
   }, []);
-
-
-  const isAdmin = useMemo(()=>
-    ADMIN_ROLES.includes(currentUser?.role)||isProjectManager
-  ,[currentUser,isProjectManager]);
-
-  useEffect(()=>{
-    if(!currentUser) return;
-    setTab(isRealAdmin ? "class" : "assess");
-  },[currentUser,isAdmin]);
 
   if(loading) return (
     <div style={{...S.page,display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -342,28 +354,6 @@ function ClassAssessPage({currentUser}) {
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingRooms, setLoadingRooms] = useState(true);
   const printRef = useRef(null);
-
-  const isAdmin = useMemo(()=>
-    ADMIN_ROLES.includes(currentUser?.role)||isProjectManager
-  ,[currentUser,isProjectManager]);
-
-  const isRealAdmin = ADMIN_ROLES.includes(currentUser?.role); // ✅ ย้ายขึ้นมาก่อน useEffect
-
-  useEffect(()=>{
-    if(!currentUser) return;
-    setTab(isRealAdmin ? "class" : "assess");
-  },[currentUser, isRealAdmin]);
-
-
-  useEffect(()=>{
-    if(!currentUser) return;
-    setLoadingRooms(true);
-    fetchMyClassrooms(currentUser.id).then(rooms=>{
-      setClassrooms(rooms);
-      if(rooms.length>0) setSelectedClass(rooms[0]);
-      setLoadingRooms(false);
-    });
-  },[currentUser]);
 
   useEffect(()=>{
     if(!selectedClass) return;
@@ -771,11 +761,6 @@ function ClassPage({currentUser, isAdmin}) {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState(null);
-
-  useEffect(() => {
-  if (!currentUser) return;
-  setTab(isRealAdmin ? "class" : "assess");
-}, [currentUser, isRealAdmin]);
 
 // useEffect 2 — โหลดห้องเรียน (อยู่ใน ClassPage)
 useEffect(() => {
