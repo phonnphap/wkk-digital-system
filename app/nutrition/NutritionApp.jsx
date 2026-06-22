@@ -259,7 +259,7 @@ export default function NutritionApp() {
 
   useEffect(()=>{
     if(!currentUser) return;
-    setTab(isAdmin?"class":"assess");
+    setTab(isRealAdmin ? "class" : "assess");
   },[currentUser,isAdmin]);
 
   if(loading) return (
@@ -279,6 +279,7 @@ export default function NutritionApp() {
   const isRealAdmin = ADMIN_ROLES.includes(currentUser.role);
   const tabs = isAdmin
   ? [
+      {key:"assess", label:"✏️ ประเมินรายห้อง"},
       {key:"class",  label:"📋 รายห้องเรียน"},
       {key:"compare",label:"📊 เปรียบเทียบเทอม"},
       {key:"admin",  label:"🏫 ภาพรวมโรงเรียน"},
@@ -318,7 +319,7 @@ export default function NutritionApp() {
       </div>
 
       <div style={S.content}>
-        {tab==="assess"  && !isAdmin && <ClassAssessPage currentUser={currentUser}/>}
+        {tab==="assess"  && <ClassAssessPage currentUser={currentUser}/>}  {/* ✅ ลบ !isAdmin ออก */}
         {tab==="class"   && <ClassPage   currentUser={currentUser} isAdmin={isAdmin}/>}
         {tab==="compare" && <ComparePage currentUser={currentUser} isAdmin={isAdmin}/>}
         {tab==="admin"   && isAdmin && <AdminPage currentUser={currentUser}/>}
@@ -761,20 +762,26 @@ function ClassPage({currentUser, isAdmin}) {
   const [statusFilter, setStatusFilter] = useState(null);
 
   useEffect(() => {
-    if (!currentUser) return;
-    const loadRooms = async () => {
-      let rooms = [];
-      if (isAdmin) {
-        const { data } = await supabase.from("classrooms").select("id,room_name,room_number,academic_year_id");
-        rooms = sortClassrooms((data || []).map(c => ({ ...c, classroom_id: c.id })));
-      } else {
-        rooms = await fetchMyClassrooms(currentUser.id);
-      }
-      setClassrooms(rooms);
-      if (rooms.length === 1) setSelectedClass(rooms[0]);
-    };
-    loadRooms();
-  }, [currentUser, isAdmin]);
+  if (!currentUser) return;
+  setTab(isRealAdmin ? "class" : "assess");
+}, [currentUser, isRealAdmin]);
+
+// useEffect 2 — โหลดห้องเรียน (อยู่ใน ClassPage)
+useEffect(() => {
+  if (!currentUser) return;
+  const loadRooms = async () => {
+    let rooms = [];
+    if (isAdmin) {
+      const { data } = await supabase.from("classrooms").select("id,room_name,room_number,academic_year_id");
+      rooms = sortClassrooms((data || []).map(c => ({ ...c, classroom_id: c.id })));
+    } else {
+      rooms = await fetchMyClassrooms(currentUser.id);
+    }
+    setClassrooms(rooms);
+    if (rooms.length === 1) setSelectedClass(rooms[0]);
+  };
+  loadRooms();
+}, [currentUser, isAdmin])
 
   const load = useCallback(async () => {
     if (!selectedClass) return;
