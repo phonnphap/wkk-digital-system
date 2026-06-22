@@ -356,7 +356,7 @@ function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, acad
                     if (slot.is_break) {
                       return (
                         <td key={slot.id} className="bg-slate-50 border-r border-slate-100 align-middle text-center">
-                          <div className="text-[10px] text-slate-300 font-bold rotate-90 whitespace-nowrap mx-auto" style={{ writingMode: "vertical-rl" }}>พัก</div>
+                          <div className="text-[10px] text-slate-300 font-bold -rotate-90 whitespace-nowrap mx-auto" style={{ writingMode: "vertical-rl" }}> พัก </div>
                         </td>
                       );
                     }
