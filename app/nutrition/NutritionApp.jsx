@@ -225,17 +225,6 @@ export default function NutritionApp() {
     setTab(isRealAdmin ? "class" : "assess");
   },[currentUser, isRealAdmin]);
 
-
-  useEffect(()=>{
-    if(!currentUser) return;
-    setLoadingRooms(true);
-    fetchMyClassrooms(currentUser.id).then(rooms=>{
-      setClassrooms(rooms);
-      if(rooms.length>0) setSelectedClass(rooms[0]);
-      setLoadingRooms(false);
-    });
-  },[currentUser]);
-
   useEffect(() => {
     const init = async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -365,6 +354,16 @@ function ClassAssessPage({currentUser}) {
       setLoadingStudents(false);
     });
   },[selectedClass]);
+
+  useEffect(()=>{
+    if(!currentUser) return;
+    setLoadingRooms(true);
+    fetchMyClassrooms(currentUser.id).then(rooms=>{
+      setClassrooms(rooms);
+      if(rooms.length>0) setSelectedClass(rooms[0]);
+      setLoadingRooms(false);
+    });
+  },[currentUser]);
 
   useEffect(()=>{
     if(!selectedClass||students.length===0) return;
