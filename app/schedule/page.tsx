@@ -107,56 +107,163 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
   subjects: Subject[]; teachers: Teacher[]; academicYearId: string;
   onSave: (d: any) => Promise<void>; onDelete?: (id: string) => Promise<void>; onClose: () => void;
 }) {
+  const [subjectGroup, setSubjectGroup] = useState("");
   const [subjectId, setSubjectId] = useState(entry?.subject_id ?? "");
-  const [teacherId, setTeacherId] = useState(entry?.teacher_id ?? "");
+  const [teacherId1, setTeacherId1] = useState(entry?.teacher_id ?? "");
+  const [teacherId2, setTeacherId2] = useState((entry as any)?.teacher_id_2 ?? "");
+  const [gradeFilter, setGradeFilter] = useState(""); // เช่น "ป.1", "ป.2"
   const [loading, setLoading] = useState(false);
   const dc = DAY_COLORS[day - 1];
 
+  // ── ดึงตัวเลขตัวที่ 2 ของ subject_code ──────────────────────────────────
+  function getGradeDigit(code: string): string {
+    // ท11101 → "1", ท21101 → "2", ว11282 → "1"
+    const match = code?.match(/^[ก-ฮA-Za-z]+(\d)(\d)/);
+    return match ? match[2] : "";
+  }
+
+  // ── หา grade level จากชื่อห้อง เช่น ป.1/1 → "1" ──────────────────────
+  function getRoomGradeLevel(): string {
+    const m = (classroom.room_name ?? "").match(/[ปมอ]\.?(\d+)/);
+    return m ? m[1] : "";
+  }
+
+  const roomGrade = getRoomGradeLevel();
+
+  // ── กลุ่มสาระไม่ซ้ำ ──────────────────────────────────────────────────────
+  const subjectGroups = [...new Set(subjects.map(s => s.subject_group).filter(Boolean))].sort();
+
+  // ── กรองวิชาตาม group + ตัวเลขตำแหน่งที่ 2 ตรงกับ grade ──────────────
+  const filteredSubjects = subjects.filter(s => {
+    const gradeMatch = !roomGrade || getGradeDigit(s.subject_code) === roomGrade;
+    const groupMatch = !subjectGroup || s.subject_group === subjectGroup;
+    return gradeMatch && groupMatch;
+  });
+
+  // ── กรองครูตาม gradeFilter เช่น "ป.1" ──────────────────────────────────
+  const filteredTeachers = teachers.filter(t => {
+    if (!gradeFilter) return true;
+    // ครูสายชั้น: เช็คจาก position หรือ grade_level (ถ้ามี)
+    const pos = ((t as any).position ?? "").toLowerCase();
+    return pos.includes(gradeFilter.toLowerCase()) || gradeFilter === "";
+  });
+
+  // unique grade prefixes จาก position ของครู
+  const gradeOptions = [...new Set(
+    teachers.map(t => {
+      const pos = (t as any).position ?? "";
+      const m = pos.match(/(ป\.\d+|ม\.\d+|อ\.\d+)/);
+      return m ? m[1] : "";
+    }).filter(Boolean)
+  )].sort();
+
   async function handleSave() {
-    if (!subjectId || !teacherId) { alert("กรุณาเลือกวิชาและครู"); return; }
+    if (!subjectId || !teacherId1) { alert("กรุณาเลือกวิชาและครูอย่างน้อย 1 คน"); return; }
     setLoading(true);
-    await onSave({ id: entry?.id, classroom_id: classroom.id, subject_id: subjectId, teacher_id: teacherId, day_of_week: day, time_slot_id: slot.id, academic_year_id: academicYearId });
+    await onSave({
+      id: entry?.id,
+      classroom_id: classroom.id,
+      subject_id: subjectId,
+      teacher_id: teacherId1,
+      teacher_id_2: teacherId2 || null,
+      day_of_week: day,
+      time_slot_id: slot.id,
+      academic_year_id: academicYearId
+    });
     setLoading(false);
   }
+
+  const inputCls = "w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm font-bold focus:border-blue-400 focus:outline-none";
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        {/* Header */}
         <div className={`${dc.header} px-6 py-4`}>
           <p className="text-sm text-white/80 font-medium">{DAYS[day - 1]} · {slot.slot_label} · {formatTime(slot.start_time)}–{formatTime(slot.end_time)}</p>
           <h3 className="text-lg font-black text-white mt-0.5">{entry ? "✏️ แก้ไขคาบเรียน" : "➕ เพิ่มคาบเรียน"}</h3>
           <p className="text-sm text-white/70 mt-0.5">ห้อง {classroom.grade_group} {classroom.room_name}</p>
         </div>
-        <div className="p-6 space-y-4">
+
+        <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+
+          {/* ── วิชา: กลุ่มสาระ + รายวิชา ── */}
           <div>
-            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-2">วิชา *</label>
-            <select value={subjectId} onChange={e => setSubjectId(e.target.value)}
-              className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm font-bold focus:border-blue-400 focus:outline-none">
-              <option value="">— เลือกวิชา —</option>
-              {subjects.map(s => <option key={s.id} value={s.id}>{s.subject_code} {s.name_th}</option>)}
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+              กลุ่มสาระ
+            </label>
+            <select value={subjectGroup} onChange={e => { setSubjectGroup(e.target.value); setSubjectId(""); }}
+              className={inputCls}>
+              <option value="">— ทุกกลุ่มสาระ —</option>
+              {subjectGroups.map(g => <option key={g} value={g!}>{g}</option>)}
             </select>
-            {subjects.length === 0 && (
-              <p className="text-xs text-red-500 font-bold mt-1">⚠️ ไม่พบข้อมูลวิชาในระบบ กรุณาเพิ่มข้อมูลในตาราง subjects</p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+              รายวิชา * <span className="text-slate-400 font-normal normal-case">(กรองเฉพาะ{classroom.room_name?.match(/[ปมอ]/)?.[0] ?? ""}ชั้น {roomGrade})</span>
+            </label>
+            <select value={subjectId} onChange={e => setSubjectId(e.target.value)} className={inputCls}>
+              <option value="">— เลือกรายวิชา —</option>
+              {filteredSubjects.map(s => (
+                <option key={s.id} value={s.id}>{s.subject_code} {s.name_th}</option>
+              ))}
+            </select>
+            {filteredSubjects.length === 0 && (
+              <p className="text-xs text-amber-600 font-bold mt-1">
+                ⚠️ ไม่พบวิชาสำหรับชั้นนี้ (รหัสตัวที่ 2 = {roomGrade})
+              </p>
             )}
           </div>
+
+          {/* ── ครูผู้สอน ── */}
           <div>
-            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-2">ครูผู้สอน *</label>
-            <select value={teacherId} onChange={e => setTeacherId(e.target.value)}
-              className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm font-bold focus:border-blue-400 focus:outline-none">
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+              กรองครูตามสายชั้น
+            </label>
+            <select value={gradeFilter} onChange={e => setGradeFilter(e.target.value)} className={inputCls}>
+              <option value="">— ครูทุกสายชั้น —</option>
+              {gradeOptions.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+              ครูผู้สอน คนที่ 1 *
+            </label>
+            <select value={teacherId1} onChange={e => setTeacherId1(e.target.value)} className={inputCls}>
               <option value="">— เลือกครู —</option>
-              {teachers.map(t => <option key={t.id} value={t.id}>{fullName(t)}</option>)}
+              {filteredTeachers.map(t => (
+                <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>
+              ))}
             </select>
-            {teachers.length === 0 && (
-              <p className="text-xs text-red-500 font-bold mt-1">⚠️ ไม่พบรายชื่อครูในระบบ ตรวจสอบ role ในตาราง users</p>
-            )}
           </div>
+
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+              ครูผู้สอน คนที่ 2 <span className="text-slate-400 font-normal normal-case">(ถ้ามี)</span>
+            </label>
+            <select value={teacherId2} onChange={e => setTeacherId2(e.target.value)} className={inputCls}>
+              <option value="">— ไม่มีครูคนที่ 2 —</option>
+              {filteredTeachers.filter(t => t.id !== teacherId1).map(t => (
+                <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>
+              ))}
+            </select>
+          </div>
+
         </div>
-        <div className="px-6 pb-6 flex gap-2">
+
+        {/* Footer */}
+        <div className="px-5 pb-5 flex gap-2 border-t border-slate-100 pt-4">
           {entry && onDelete && (
             <button onClick={async () => { if (confirm("ลบคาบนี้?")) { setLoading(true); await onDelete(entry.id); setLoading(false); } }}
-              className="px-4 py-2.5 rounded-xl border-2 border-red-200 bg-red-50 text-red-600 font-black text-sm hover:bg-red-100">🗑️ ลบ</button>
+              className="px-4 py-2.5 rounded-xl border-2 border-red-200 bg-red-50 text-red-600 font-black text-sm hover:bg-red-100">
+              🗑️ ลบ
+            </button>
           )}
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm">ยกเลิก</button>
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm">
+            ยกเลิก
+          </button>
           <button onClick={handleSave} disabled={loading}
             className="flex-[2] py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm disabled:opacity-50">
             {loading ? "⏳..." : "💾 บันทึก"}
