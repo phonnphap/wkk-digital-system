@@ -259,7 +259,7 @@ export default function NutritionApp() {
 
   useEffect(()=>{
     if(!currentUser) return;
-    setTab(isRealAdmin ? "class" : "assess");
+    setTab(isAdmin?"class":"assess");
   },[currentUser,isAdmin]);
 
   if(loading) return (
