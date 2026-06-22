@@ -58,6 +58,11 @@ export async function POST(req: NextRequest) {
     const buffer = await file.arrayBuffer();
 
     const uploadUrl = `https://graph.microsoft.com/v1.0/users/${TARGET_UPN}/drive/root:/${finalPath}:/content`;
+
+    // ★ เพิ่ม log นี้เพื่อดู URL เต็มที่ยิงจริง
+    console.log("Upload URL:", uploadUrl);
+    console.log("File size:", file.size, "bytes");
+
     const upRes = await fetch(uploadUrl, {
       method:  "PUT",
       headers: {

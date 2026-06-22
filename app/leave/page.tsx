@@ -530,6 +530,12 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
     // ✅ ใหม่ — ตั้งชื่อไฟล์ตามฟอร์แมต DDMMYYYY_ชื่อครู และเก็บที่ WKK_Leave_System ตรงๆ
 let docUrl: string | null = null;
 if (docFile) {
+  // ★ เช็คขนาดไฟล์ก่อน — Graph API simple upload รองรับไม่เกิน 4MB
+  const MAX_SIZE = 4 * 1024 * 1024; // 4MB
+  if (docFile.size > MAX_SIZE) {
+    alert(`⚠️ ไฟล์ใหญ่เกินไป (${(docFile.size / 1024 / 1024).toFixed(1)} MB)\nกรุณาใช้ไฟล์ขนาดไม่เกิน 4MB`);
+    return;
+  }
   try {
     const now = new Date();
     const dd = String(now.getDate()).padStart(2, "0");
