@@ -1127,16 +1127,21 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
 
   // คำนวณ slot และ canAct ภายใน modal
   const slot = mySlotFn(r);
-  const myStatus = slot === 1 ? r.approver_1_status
-                 : slot === 2 ? r.approver_2_status
-                 : slot === 3 ? r.approver_3_status
-                 : null;
+const myStatus = slot === 1 ? r.approver_1_status
+               : slot === 2 ? r.approver_2_status
+               : slot === 3 ? r.approver_3_status
+               : null;
+
+// เพิ่มบรรทัดนี้
+console.log("slot:", slot, "myStatus:", myStatus, 
+  "approver_3_id:", r.approver_3_id,
+  "approver_2_status:", r.approver_2_status,
+  "r.status:", r.status);
   const canAct = canApprove
   && slot !== null
   && r.status === "pending"
   && myStatus !== "approved"
   && myStatus !== "rejected"
-  // ✅ เช็คว่า slot ก่อนหน้าอนุมัติแล้ว
   && (slot === 1 || (slot === 2 && r.approver_1_status === "approved"))
   && (slot === 1 || slot === 2 || (slot === 3 && r.approver_2_status === "approved"));
 
@@ -1586,9 +1591,9 @@ const loadAll = useCallback(async () => {
 }
 
 function mySlot(r: LeaveRequest): 1|2|3|null {
-  console.log("user.email:", user.email);
-  console.log("APPROVER_3_EMAIL:", APPROVER_3_EMAIL);
-  return approverSlotByEmail(user.email);
+  const result = approverSlotByEmail(user.email);
+  console.log("mySlot result:", result, "user:", user.email);
+  return result;
 }
 
   const fyAll = requests.filter(r=>isInFiscalYear(r.start_date,filterFY)&&r.status!=="cancelled");
