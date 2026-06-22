@@ -1131,10 +1131,13 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
                  : slot === 3 ? r.approver_3_status
                  : null;
   const canAct = canApprove
-    && slot !== null          // email ตรงกับ approver slot
-    && r.status === "pending" // ใบลายัง pending
-    && myStatus !== "approved"
-    && myStatus !== "rejected";
+  && slot !== null
+  && r.status === "pending"
+  && myStatus !== "approved"
+  && myStatus !== "rejected"
+  // ✅ เช็คว่า slot ก่อนหน้าอนุมัติแล้ว
+  && (slot === 1 || (slot === 2 && r.approver_1_status === "approved"))
+  && (slot === 1 || slot === 2 || (slot === 3 && r.approver_2_status === "approved"));
 
   return (
     <div className="fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center p-4 overflow-auto">
@@ -1184,25 +1187,41 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
 
           {/* เอกสารแนบ */}
           {r.document_url && (
-            <div className="rounded-xl border-2 border-blue-200 overflow-hidden">
-              <div className="bg-blue-50 px-4 py-2 flex items-center justify-between">
-                <p className="text-blue-700 font-black text-xs">📎 เอกสารแนบ</p>
-                <a href={r.document_url} target="_blank" rel="noopener noreferrer"
-                  className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-1 bg-white rounded-lg border border-blue-200">
-                  เปิดไฟล์ ↗
-                </a>
-              </div>
-              {/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(r.document_url) ? (
-                <img src={r.document_url} alt="แนบ" className="w-full max-h-48 object-contain bg-slate-100" />
-              ) : /\.pdf(\?|$)/i.test(r.document_url) ? (
-                <iframe src={r.document_url} title="เอกสาร" className="w-full h-48" />
-              ) : (
-                <div className="bg-slate-50 px-4 py-3 text-center text-sm text-slate-500">
-                  ไม่สามารถแสดงตัวอย่างได้ กรุณากดเปิดไฟล์
-                </div>
-              )}
-            </div>
-          )}
+  <div className="rounded-xl border-2 border-blue-200 overflow-hidden">
+    <div className="bg-blue-50 px-4 py-2 flex items-center justify-between">
+      <p className="text-blue-700 font-black text-xs">📎 เอกสารแนบ</p>
+      <a href={r.document_url} target="_blank" rel="noopener noreferrer"
+        className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-1 bg-white rounded-lg border border-blue-200">
+        เปิดไฟล์เต็ม ↗
+      </a>
+    </div>
+    {/* ✅ แสดงรูปอัตโนมัติ */}
+    {/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(r.document_url) ? (
+      <img
+        src={r.document_url}
+        alt="เอกสารแนบ"
+        className="w-full max-h-64 object-contain bg-slate-100 cursor-pointer"
+        onClick={() => window.open(r.document_url, "_blank")}
+      />
+    ) : /\.pdf(\?|$)/i.test(r.document_url) ? (
+      <div className="bg-slate-50 px-4 py-6 text-center">
+        <div className="text-4xl mb-2">📄</div>
+        <p className="text-sm font-bold text-slate-600 mb-3">ไฟล์ PDF</p>
+        <a href={r.document_url} target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700">
+          📂 เปิดดู PDF
+        </a>
+      </div>
+    ) : (
+      <div className="bg-slate-50 px-4 py-3 text-center text-sm text-slate-500">
+        <a href={r.document_url} target="_blank" rel="noopener noreferrer"
+          className="text-blue-600 font-bold hover:underline">
+          📎 คลิกเพื่อดูเอกสาร
+        </a>
+      </div>
+    )}
+  </div>
+)}
 
           {/* Approver status badges */}
           <div className="flex gap-2">
@@ -1424,11 +1443,11 @@ const loadAll = useCallback(async () => {
     [`approver_${slot}_id`]: user.id,
   };
   if (action === "approved") {
-    updates[`approver_${slot}_signature`] = approverSigUrl;
-    updates[`approver_${slot}_approved_at`] = new Date().toLocaleDateString("th-TH", {
-      day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Bangkok"
-    });
-  }
+  updates[`approver_${slot}_signature`] = approverSigUrl; // ลายเซ็น
+  updates[`approver_${slot}_approved_at`] = new Date().toLocaleDateString("th-TH", {
+    day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Bangkok"
+  });
+}
 
   if (action === "rejected" && reason) {
     updates[`approver_${slot}_reject_reason`] = reason;
@@ -1478,7 +1497,19 @@ const loadAll = useCallback(async () => {
     const allApproved = s1 === "approved" && s2 === "approved" && s3 === "approved";
 
     if (allApproved) {
-      updates.status = "approved";
+  updates.status = "approved";
+
+  // ดึง document_url จาก req
+  const docUrl = (req as any).document_url;
+  const attachments = [];
+  
+  // แนบเอกสารที่ครูอัพโหลด (ถ้ามี)
+  if (docUrl) {
+    attachments.push({
+      filename: "เอกสารแนบ" + (docUrl.includes(".pdf") ? ".pdf" : ".jpg"),
+      path: docUrl, // Resend รองรับ URL โดยตรง
+    });
+  }
 
       // แจ้งครูและ HR ว่าอนุมัติครบ
       fetch("/api/send-email", {
@@ -1616,10 +1647,25 @@ function mySlot(r: LeaveRequest): 1|2|3|null {
     contactInfo: viewModal.contact_info },
   viewModal.user?.signature_url || "",
   [
-    { name: "นางสาวพรรษา แก้วใหญ่", position: "ครู ตรวจสอบสถิติการลา", signature_url: viewModal.approver_1_signature },
-    { name: "นางสาวฐิติมา กาบแก้ว", position: "รองผู้อำนวยการกลุ่มบริหารงานบุคคล", signature_url: viewModal.approver_2_signature },
-    { name: "นายธนณัฐ ศิระวงษ์", position: "ผู้อำนวยการโรงเรียนวัดเขียนเขต", signature_url: viewModal.approver_3_signature },
-  ],
+    { 
+    name: "นางสาวพรรษา แก้วใหญ่", 
+    position: "ครู ตรวจสอบสถิติการลา", 
+    signature_url: viewModal.approver_1_signature,
+    approved_at: viewModal.approver_1_approved_at  // ✅ เพิ่ม
+  },
+  { 
+    name: "นางสาวฐิติมา กาบแก้ว", 
+    position: "รองผู้อำนวยการกลุ่มบริหารงานบุคคล", 
+    signature_url: viewModal.approver_2_signature,
+    approved_at: viewModal.approver_2_approved_at  // ✅ เพิ่ม
+  },
+  { 
+    name: "นายธนณัฐ ศิระวงษ์", 
+    position: "ผู้อำนวยการโรงเรียนวัดเขียนเขต", 
+    signature_url: viewModal.approver_3_signature,
+    approved_at: viewModal.approver_3_approved_at  // ✅ เพิ่ม
+  },
+],
   viewModal.document_url
 )}
           onApprove={(id, slot) => tryApprove(id, slot, "approved")}   
@@ -1736,7 +1782,20 @@ function mySlot(r: LeaveRequest): 1|2|3|null {
                 const c = COLORS[r.leave_type]??COLORS.other;
                 const slot = mySlot(r);
                 const myStatus = slot===1?r.approver_1_status:slot===2?r.approver_2_status:slot===3?r.approver_3_status:null;
-                const canAct = canApprove && slot !== null && myStatus === "pending";
+                const canAct = canApprove
+  && slot !== null
+  && myStatus === "pending"
+  // ✅ เช็คลำดับ
+  && (slot === 1 || (slot === 2 && r.approver_1_status === "approved"))
+  && (slot === 1 || slot === 2 || (slot === 3 && r.approver_2_status === "approved"));
+
+  {canApprove && slot && myStatus === "pending" && !canAct && (
+  <div className="mt-3 bg-slate-50 border-2 border-slate-200 rounded-xl px-4 py-3 text-center">
+    <p className="text-slate-500 font-bold text-sm">
+      ⏳ รอผู้อนุมัติลำดับที่ {slot - 1} ดำเนินการก่อน
+    </p>
+  </div>
+)}
                 return(
                   <div key={r.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className={`${c.bg} border-b ${c.border} px-5 py-3 flex items-center justify-between`}>
