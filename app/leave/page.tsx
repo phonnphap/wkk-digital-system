@@ -1127,25 +1127,23 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
 
   // คำนวณ slot และ canAct ภายใน modal
   const slot = mySlotFn(r);
-const myStatus = slot === 1 ? r.approver_1_status
+  const myStatus = slot === 1 ? r.approver_1_status
                : slot === 2 ? r.approver_2_status
                : slot === 3 ? r.approver_3_status
                : null;
 
-// เพิ่มบรรทัดนี้
-console.log("slot:", slot, "myStatus:", myStatus, 
-  "approver_3_id:", r.approver_3_id,
-  "approver_2_status:", r.approver_2_status,
-  "r.status:", r.status);
-  const canAct = canApprove
-  && slot !== null
-  && r.status === "pending"
-  && myStatus !== "approved"
-  && myStatus !== "rejected"
-  && (slot === 1 || (slot === 2 && r.approver_1_status === "approved"))
-  && (slot === 1 || slot === 2 || (slot === 3 && r.approver_2_status === "approved"));
+const canAct = 
+  slot !== null &&
+  r.status === "pending" &&
+  myStatus === "pending" && 
+  (
+    slot === 1 ||
+    (slot === 2 && r.approver_1_status === "approved") || // คนที่ 2 ต้องรอคนที่ 1 อนุมัติก่อน
+    (slot === 3 && r.approver_2_status === "approved")    // คนที่ 3 ต้องรอคนที่ 2 อนุมัติก่อน
+  );
 
-  return (
+// 3. ต่อด้วยคำสั่ง return JSX แสดงผลหน้าต่าง (ของเดิมของพี่ยาวลงไป)
+return (
     <div className="fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center p-4 overflow-auto">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
         {/* Header */}
