@@ -439,8 +439,17 @@ export default function SchedulePage() {
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const { data: { user: authUser }, error: authErr } = await supabase.auth.getUser();
+      console.log("=== DEBUG AUTH ===", { authUser, authErr });
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      console.log("=== DEBUG SESSION ===", sessionData);
+
       if (!authUser) { setLoading(false); return; }
+
+      // ★ ทดสอบ query classrooms ตรงๆ ก่อนอย่างอื่น
+      const testQuery = await supabase.from("classrooms").select("*");
+      console.log("=== DEBUG CLASSROOMS QUERY ===", testQuery);
 
       const meta = authUser.user_metadata ?? {};
       const claims = meta.custom_claims ?? {};
