@@ -319,7 +319,7 @@ export default function NutritionApp() {
       </div>
 
       <div style={S.content}>
-        {tab==="assess"  && !isAdmin && <ClassAssessPage currentUser={currentUser}/>}
+        {tab==="assess" && <ClassAssessPage currentUser={currentUser}/>}
         {tab==="class"   && <ClassPage   currentUser={currentUser} isAdmin={isAdmin}/>}
         {tab==="compare" && <ComparePage currentUser={currentUser} isAdmin={isAdmin}/>}
         {tab==="admin"   && isAdmin && <AdminPage currentUser={currentUser}/>}
