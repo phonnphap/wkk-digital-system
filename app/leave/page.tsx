@@ -57,9 +57,10 @@ function isSickTooFarAhead(startDate: string): boolean {
 
 /** email → slot ที่แน่นอน (1/2/3) หรือ null */
 function approverSlotByEmail(email: string): 1|2|3|null {
-  if (email === APPROVER_1_EMAIL) return 1;
-  if (email === APPROVER_2_EMAIL) return 2;
-  if (email === APPROVER_3_EMAIL) return 3;
+  const e = email?.toLowerCase().trim();
+  if (e === APPROVER_1_EMAIL.toLowerCase()) return 1;
+  if (e === APPROVER_2_EMAIL.toLowerCase()) return 2;
+  if (e === APPROVER_3_EMAIL.toLowerCase()) return 3;
   return null;
 }
 
@@ -1585,6 +1586,8 @@ const loadAll = useCallback(async () => {
 }
 
 function mySlot(r: LeaveRequest): 1|2|3|null {
+  console.log("user.email:", user.email);
+  console.log("APPROVER_3_EMAIL:", APPROVER_3_EMAIL);
   return approverSlotByEmail(user.email);
 }
 
