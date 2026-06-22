@@ -276,7 +276,6 @@ export default function NutritionApp() {
     </div>
   );
 
-  const isRealAdmin = ADMIN_ROLES.includes(currentUser.role);
   const tabs = isAdmin
   ? [
       {key:"assess", label:"✏️ ประเมินรายห้อง"},
@@ -344,9 +343,15 @@ function ClassAssessPage({currentUser}) {
   const [loadingRooms, setLoadingRooms] = useState(true);
   const printRef = useRef(null);
 
+  const isAdmin = useMemo(()=>
+    ADMIN_ROLES.includes(currentUser?.role)||isProjectManager
+  ,[currentUser,isProjectManager]);
+
+  const isRealAdmin = ADMIN_ROLES.includes(currentUser?.role); // ✅ ย้ายขึ้นมาก่อน useEffect
+
   useEffect(()=>{
     if(!currentUser) return;
-    setTab(isRealAdmin ? "class" : "assess");  // ← แก้จาก isAdmin เป็น isRealAdmin
+    setTab(isRealAdmin ? "class" : "assess");
   },[currentUser, isRealAdmin]);
 
 

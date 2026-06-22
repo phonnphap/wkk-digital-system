@@ -627,12 +627,23 @@ export default function SchedulePage() {
   const selectedClassroom = classrooms.find(c => c.id === selectedRoom);
   const roomEntries = entries.filter(e => e.classroom_id === selectedRoom);
   const myEntries = entries.filter(e => e.teacher_id === user.id);
-  const gradeGroups = [...new Set(classrooms.map(c => c.grade_group))].filter(Boolean).sort() as string[];
+  const gradeGroups = [...new Set(classrooms.map(c => c.grade_group))]
+    .filter(Boolean)
+    .sort((a, b) => gradeGroupSortKey(a as string) - gradeGroupSortKey(b as string)) as string[];
 
   const subjectColorMap: Record<string, typeof SUBJECT_COLORS[0]> = {};
   subjects.forEach((s, i) => { subjectColorMap[s.id] = SUBJECT_COLORS[i % SUBJECT_COLORS.length]; });
 
   const currentScheduleType = SCHEDULE_TEMPLATES.find(t => t.key === selectedClassroom?.schedule_type)?.label ?? "ประถม";
+
+  function gradeGroupSortKey(grade?: string): number {
+    if (!grade) return 999;
+    if (grade.includes("อนุบาล")) return 0;
+    if (grade.includes("ประถม")) return 1;
+    if (grade.includes("มัธยมศึกษาตอนต้น")) return 2;
+    if (grade.includes("มัธยมศึกษาตอนปลาย")) return 3;
+    return 999;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans print:bg-white">
@@ -697,7 +708,9 @@ export default function SchedulePage() {
               </div>
             )}
             {gradeGroups.map(grade => {
-              const gradeRooms = classrooms.filter(c => c.grade_group === grade);
+              const gradeRooms = classrooms
+                .filter(c => c.grade_group === grade)
+                .sort((a, b) => (a.room_name ?? "").localeCompare(b.room_name ?? "", "th", { numeric: true }));
               return (
                 <div key={grade} className="mb-3">
                   <p className="text-[10px] font-black text-slate-400 uppercase px-2 mb-1">{grade}</p>
