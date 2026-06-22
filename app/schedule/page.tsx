@@ -472,7 +472,7 @@ export default function SchedulePage() {
       }
 
       if (!profileData) {
-        profileData = { id: authUser.id, email: authUser.email ?? "", first_name: meta.name ?? "", last_name: "", role: "teacher" };
+        profileData = { id: authUser.id, email: authUser.email ?? "", first_name: meta.name ?? "", last_name: "", role: "subject_teacher" };
       }
 
       setUser({ ...profileData, full_name: profileData.full_name || `${profileData.first_name ?? ""} ${profileData.last_name ?? ""}`.trim() });
@@ -484,7 +484,7 @@ export default function SchedulePage() {
         supabase.from("time_slots").select("*").order("slot_number").order("start_time"),
         supabase.from("subjects").select("id, subject_code, name_th, subject_group").order("subject_code"),
         supabase.from("users").select("id, first_name, last_name, full_name, position")
-          .in("role", ["subject_teacher", "homeroom_teacher", "teacher", "staff"]),
+          .in("role", ["subject_teacher", "homeroom_teacher", "grade_head", "staff"]),
         // ★ ดึงห้องเรียนทั้งหมด ไม่ filter ตาม year ตอน fetch แรก
         supabase.from("classrooms").select("id, room_number, room_name, grade_group, academic_year_id, schedule_type")
           .order("grade_group").order("room_number"),
