@@ -527,36 +527,48 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
     if(!isDraft&&tooSoon){alert("ลากิจต้องยื่นล่วงหน้าอย่างน้อย 3 วัน");return;}
     if(!isDraft&&sickTooFarAhead){alert("ลาป่วยสามารถยื่นล่วงหน้าได้ไม่เกิน 1 วัน");return;}
 
-    let docUrl: string | null = null;
-    if (docFile) {
-      try {
-        const formData = new FormData();
-        formData.append("file", docFile);
-        const year = new Date().getFullYear() + 543;
-        formData.append("path", `WKK_Leave_System/${year}/${Date.now()}_${docFile.name}`);
-    
-        const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
-    
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-    
-        const json = await res.json();
-        console.log("OneDrive response:", json); // ดู log
-    
-        if (!json.ok) {
-          throw new Error(JSON.stringify(json.error));
-        }
-    
-        docUrl = json.downloadUrl || json.webUrl || null;
-        console.log("docUrl:", docUrl);
-    
-      } catch (err) {
-        console.error("Upload error:", err);
-        const go = confirm("⚠️ แนบไฟล์ไม่สำเร็จ\nต้องการส่งใบลาโดยไม่มีเอกสารแนบหรือไม่?");
-        if (!go) return;
-      }
+    // ✅ ใหม่ — ตั้งชื่อไฟล์ตามฟอร์แมต DDMMYYYY_ชื่อครู และเก็บที่ WKK_Leave_System ตรงๆ
+let docUrl: string | null = null;
+if (docFile) {
+  try {
+    const now = new Date();
+    const dd = String(now.getDate()).padStart(2, "0");
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const yyyyBE = now.getFullYear() + 543;
+    const teacherFirstName = (user.first_name || fullName(user).split(" ")[0] || "ไม่ระบุชื่อ").trim();
+    const ext = docFile.name.includes(".") ? docFile.name.split(".").pop() : "";
+
+    // ตัวอย่างผลลัพธ์: 22062569_พรนภา.pdf
+    // ถ้ามีหลายไฟล์ในวันเดียวกันของครูคนเดียวกัน เติม timestamp กันชื่อซ้ำทับกัน
+    const baseFileName = `${dd}${mm}${yyyyBE}_${teacherFirstName}`;
+    const uniqueSuffix = `_${Date.now()}`;
+    const finalFileName = ext
+      ? `${baseFileName}${uniqueSuffix}.${ext}`
+      : `${baseFileName}${uniqueSuffix}`;
+
+    const formData = new FormData();
+    formData.append("file", docFile);
+    // ★ ส่ง path ตรงไปที่โฟลเดอร์ WKK_Leave_System ไม่ซ้อนปีหรือ subfolder อื่น
+    formData.append("path", `WKK_Leave_System/${finalFileName}`);
+
+    const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok || !json?.ok) {
+      // ★ ดึง error message จริงจาก response มาแสดง ไม่ใช่แค่ HTTP status
+      const errMsg = json?.error
+        ? (typeof json.error === "string" ? json.error : JSON.stringify(json.error))
+        : `HTTP ${res.status}`;
+      throw new Error(errMsg);
     }
+
+    docUrl = json.downloadUrl || json.url || json.webUrl || null;
+  } catch (err: any) {
+    console.error("Upload error:", err);
+    const go = confirm(`⚠️ แนบไฟล์ไม่สำเร็จ\n\nรายละเอียด: ${err.message}\n\nต้องการส่งใบลาโดยไม่มีเอกสารแนบหรือไม่?`);
+    if (!go) return;
+  }
+}
 
     const reasonFull = leaveType==="official"
       ?`[ปลายทาง: ${tripDest}] [พาหนะ: ${vehicle==="school"?"รถโรงเรียน":"รถส่วนตัว"}] [ผู้ร่วมเดินทาง: ${companions||"-"}] ${reason}`
