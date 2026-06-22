@@ -672,17 +672,38 @@ export default function SchedulePage() {
 
   // Load time slots for selected room's schedule_type
   useEffect(() => {
-    const room = classrooms.find(c => c.id === selectedRoom);
-    const type = room?.schedule_type ?? "primary";
-    const tmpl = SCHEDULE_TEMPLATES.find(t => t.key === type) ?? SCHEDULE_TEMPLATES[0];
+  const room = classrooms.find(c => c.id === selectedRoom);
+  const type = room?.schedule_type ?? "primary";
+  const tmpl = SCHEDULE_TEMPLATES.find(t => t.key === type) ?? SCHEDULE_TEMPLATES[0];
 
-    if (timeSlots.length > 0) {
-      const filtered = timeSlots.filter(s => !s.schedule_type || s.schedule_type === type);
-      setRoomTimeSlots(filtered.length > 0 ? filtered : timeSlots);
-    } else {
-      setRoomTimeSlots(tmpl.slots.map((s, i) => ({ ...s, id: `tmpl-${i}` })));
-    }
-  }, [selectedRoom, classrooms, timeSlots]);
+  if (timeSlots.length > 0) {
+    // จับคู่ time_slots จาก DB กับ template โดยใช้ start_time เป็น key
+    // เรียงตาม order ของ template เป๊ะๆ
+    const ordered: TimeSlot[] = tmpl.slots.map((tmplSlot, idx) => {
+      const matched = timeSlots.find(s =>
+        s.start_time.slice(0, 5) === tmplSlot.start_time &&
+        (!s.schedule_type || s.schedule_type === type)
+      );
+      if (matched) return matched;
+      // fallback: สร้าง slot จาก template ถ้าไม่เจอใน DB
+      return {
+        id: `tmpl-${type}-${idx}`,
+        slot_number: tmplSlot.slot_number,
+        start_time: tmplSlot.start_time,
+        end_time: tmplSlot.end_time,
+        slot_label: tmplSlot.slot_label,
+        is_break: tmplSlot.is_break,
+        schedule_type: type,
+      } as TimeSlot;
+    });
+    setRoomTimeSlots(ordered);
+  } else {
+    // ไม่มีข้อมูลจาก DB เลย ใช้ template ล้วนๆ
+    setRoomTimeSlots(tmpl.slots.map((s, i) => ({
+      ...s, id: `tmpl-${i}`,
+    })));
+  }
+}, [selectedRoom, classrooms, timeSlots]);
 
   const loadEntries = useCallback(async () => {
     if (!selectedYear) return;
