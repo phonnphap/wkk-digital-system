@@ -259,7 +259,7 @@ export default function NutritionApp() {
 
   useEffect(()=>{
     if(!currentUser) return;
-    setTab(isAdmin?"class":"assess");
+    setTab(isRealAdmin ? "class" : "assess");
   },[currentUser,isAdmin]);
 
   if(loading) return (
@@ -319,7 +319,6 @@ export default function NutritionApp() {
       </div>
 
       <div style={S.content}>
-        {tab==="assess"  && <ClassAssessPage currentUser={currentUser}/>}  {/* ✅ ลบ !isAdmin ออก */}
         {tab==="class"   && <ClassPage   currentUser={currentUser} isAdmin={isAdmin}/>}
         {tab==="compare" && <ComparePage currentUser={currentUser} isAdmin={isAdmin}/>}
         {tab==="admin"   && isAdmin && <AdminPage currentUser={currentUser}/>}
@@ -343,6 +342,12 @@ function ClassAssessPage({currentUser}) {
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingRooms, setLoadingRooms] = useState(true);
   const printRef = useRef(null);
+
+  useEffect(()=>{
+    if(!currentUser) return;
+    setTab(isRealAdmin ? "class" : "assess");  // ← แก้จาก isAdmin เป็น isRealAdmin
+  },[currentUser, isRealAdmin]);
+
 
   useEffect(()=>{
     if(!currentUser) return;
