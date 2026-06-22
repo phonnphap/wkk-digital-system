@@ -218,9 +218,11 @@ export default function NutritionApp() {
     const init = async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) { setLoading(false); return; }
+
       let { data } = await supabase.from("users")
         .select("id, first_name, last_name, role, department_id")
         .eq("auth_id", authUser.id).maybeSingle();
+
       if (!data) {
         const email = authUser.email || authUser.user_metadata?.email || "";
         if (email) {
@@ -231,7 +233,20 @@ export default function NutritionApp() {
           if (data) await supabase.from("users").update({ auth_id: authUser.id }).eq("id", data.id);
         }
       }
-      if (data) setCurrentUser(data);
+
+      if (data) {
+        setCurrentUser(data);
+
+        // ✅ เช็คว่าเป็นผู้ดูแลโครงการไหม
+        const { data: pmData } = await supabase
+          .from("nutrition_project_managers")
+          .select("id")
+          .eq("user_id", data.id)
+          .maybeSingle();
+
+        if (pmData) setIsProjectManager(true);
+      }
+
       setLoading(false);
     };
     init();
@@ -263,18 +278,17 @@ export default function NutritionApp() {
 
   const isRealAdmin = ADMIN_ROLES.includes(currentUser.role);
   const tabs = isAdmin
-    ? [
-        ...(!isRealAdmin?[]:[]),
-        {key:"class",label:"📋 รายห้องเรียน"},
-        {key:"compare",label:"📊 เปรียบเทียบเทอม"},
-        {key:"admin",label:"🏫 ภาพรวมโรงเรียน"},
-        ...(isRealAdmin?[{key:"managers",label:"⚙️ ผู้ดูแลโครงการ"}]:[]),
-      ]
-    : [
-        {key:"assess",label:"✏️ ประเมินรายห้อง"},
-        {key:"class",label:"📋 รายห้องเรียน"},
-        {key:"compare",label:"📊 เปรียบเทียบเทอม"},
-      ];
+  ? [
+      {key:"class",  label:"📋 รายห้องเรียน"},
+      {key:"compare",label:"📊 เปรียบเทียบเทอม"},
+      {key:"admin",  label:"🏫 ภาพรวมโรงเรียน"},
+      ...(isRealAdmin?[{key:"managers",label:"⚙️ ผู้ดูแลโครงการ"}]:[]),
+    ]
+  : [
+      {key:"assess", label:"✏️ ประเมินรายห้อง"},
+      {key:"class",  label:"📋 รายห้องเรียน"},
+      {key:"compare",label:"📊 เปรียบเทียบเทอม"},
+    ];
 
   const roleLabel={homeroom_teacher:"ครูประจำชั้น",subject_teacher:"ครูผู้สอน",
     admin:"ผู้ดูแลระบบ",director:"ผู้อำนวยการ",deputy_director:"รองผู้อำนวยการ",
@@ -1300,19 +1314,33 @@ function ManagersPage({currentUser}) {
   const [loading,setLoading]=useState(true);
   const [adding,setAdding]=useState(false);
 
-  const loadData=useCallback(async()=>{
+  const loadData = useCallback(async () => {
     setLoading(true);
-    const [mgRes,usrRes]=await Promise.all([
-      supabase.from("nutrition_project_managers")
-        .select("id,user_id,created_at,user:users(first_name,last_name,title,role)"),
-      supabase.from("users")
-        .select("id,first_name,last_name,title,role")
-        .order("first_name"),
-    ]);
-    setManagers(mgRes.data||[]);
-    setAllUsers(usrRes.data||[]);
+
+    // ดึง managers แยก — ไม่ join เพื่อหลีกเลี่ยง FK ชื่อผิด
+    const { data: mgData } = await supabase
+      .from("nutrition_project_managers")
+      .select("id, user_id, created_at")
+      .order("created_at", { ascending: false });
+
+    const { data: usrData } = await supabase
+      .from("users")
+      .select("id, first_name, last_name, title, role")
+      .order("first_name");
+
+    // merge ด้วย JS
+    const userMap = {};
+    (usrData || []).forEach(u => { userMap[u.id] = u; });
+
+    const merged = (mgData || []).map(m => ({
+      ...m,
+      user: userMap[m.user_id] || null,
+    }));
+
+    setManagers(merged);
+    setAllUsers(usrData || []);
     setLoading(false);
-  },[]);
+  }, []);
 
   useEffect(()=>{loadData();},[loadData]);
 
@@ -1328,19 +1356,17 @@ function ManagersPage({currentUser}) {
     ).slice(0,8);
   },[allUsers,search,managerIds]);
 
-  const handleAdd=async(user)=>{
+  const handleAdd = async (userToAdd) => {
     setAdding(true);
-    console.log("Adding manager:", user.id, "added_by:", currentUser.id);
     const { error } = await supabase
       .from("nutrition_project_managers")
-      .insert([{ 
-        user_id: user.id,        // ต้องเป็น users.id (UUID จาก users table)
-        added_by: currentUser.id // ต้องเป็น users.id ของ currentUser
-      }]);
-    
+      .upsert(
+        [{ user_id: userToAdd.id, added_by: currentUser.id }],
+        { onConflict: "user_id", ignoreDuplicates: true }
+      );
+
     if (error) {
-      console.error("Insert error:", error);
-      alert("❌ " + error.message + "\n\nuser_id: " + user.id + "\nadded_by: " + currentUser.id);
+      alert("❌ " + error.message);
     } else {
       setSearch("");
       await loadData();
