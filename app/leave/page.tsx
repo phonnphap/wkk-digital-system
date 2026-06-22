@@ -1408,6 +1408,13 @@ const loadAll = useCallback(async () => {
 
   useEffect(()=>{ loadAll(); },[loadAll]);
 
+  useEffect(() => {
+  if (viewModal) {
+    const updated = requests.find(r => r.id === viewModal.id);
+    if (updated) setViewModal(updated);
+  }
+}, [requests]);
+
   useEffect(()=>{
     if(user.signature_url) setApproverSigUrl(user.signature_url);
   },[user.signature_url]);
@@ -1588,6 +1595,10 @@ const loadAll = useCallback(async () => {
   }
     await loadAll();
     setPendingApproveId(null);
+
+    if (viewModal?.id === id) {
+    setViewModal(null); // ปิด modal แล้วให้ user เปิดใหม่
+  }
 }
 
 function mySlot(r: LeaveRequest): 1|2|3|null {
