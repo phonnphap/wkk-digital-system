@@ -273,38 +273,45 @@ async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
   const remaining = 4 - images.length;
   if (remaining <= 0) { alert("แนบได้สูงสุด 4 รูปเท่านั้น"); return; }
   const toUpload = files.slice(0, remaining);
+  if (files.length > remaining) alert(`แนบได้อีก ${remaining} รูป`);
 
   setUploading(true);
   for (const file of toUpload) {
     if (file.size > 5 * 1024 * 1024) { alert(`"${file.name}" ใหญ่เกิน 5MB`); continue; }
-    
+
+    // สร้าง preview ทันที
     const previewUrl = URL.createObjectURL(file);
-    const ext = file.name.split(".").pop() ?? "jpg";
-    const path = `plc-images/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    
+
     try {
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("plc")
-        .upload(path, file, { cacheControl: "3600", upsert: false });
-      
-      if (uploadError) {
-        console.error("Upload error:", uploadError);
-        // Fallback: เก็บเป็น base64 ถ้า storage ไม่ work
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const base64 = ev.target?.result as string;
-          setImages(prev => [...prev, { url: base64, preview: previewUrl }]);
-        };
-        reader.readAsDataURL(file);
-        alert(`⚠️ Storage: ${uploadError.message}\nใช้รูปชั่วคราวแทน`);
-        continue;
+      const ext = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
+      const now = new Date();
+      const dd = String(now.getDate()).padStart(2, "0");
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const yyyyBE = now.getFullYear() + 543;
+      const finalFileName = `PLC_${dd}${mm}${yyyyBE}_${Date.now()}.${ext}`;
+
+      const formData = new FormData();
+      formData.append("file", file);
+      // ✅ อัพไปโฟลเดอร์ WKK_PLC_System บน OneDrive
+      formData.append("path", `WKK_PLC_System/${finalFileName}`);
+
+      const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || !json?.ok) {
+        const errMsg = json?.error
+          ? (typeof json.error === "string" ? json.error : JSON.stringify(json.error))
+          : `HTTP ${res.status}`;
+        throw new Error(errMsg);
       }
-      
-      const { data: urlData } = supabase.storage.from("plc").getPublicUrl(path);
-      setImages(prev => [...prev, { url: urlData?.publicUrl ?? previewUrl, preview: previewUrl }]);
+
+      const fileUrl = json.downloadUrl || json.url || json.webUrl || previewUrl;
+      setImages(prev => [...prev, { url: fileUrl, preview: previewUrl }]);
+
     } catch (err: any) {
-      console.error("Upload catch:", err);
-      alert(`อัพโหลดไม่สำเร็จ: ${err.message}`);
+      console.error("Upload error:", err);
+      alert(`⚠️ อัพโหลดไม่สำเร็จ: ${err.message}`);
+      URL.revokeObjectURL(previewUrl);
     }
   }
   setUploading(false);
