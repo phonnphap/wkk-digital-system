@@ -167,6 +167,8 @@ function getTotalMonths(birthDate, measuredDate) {
   const m = new Date(measuredDate);
   return (m.getFullYear() - b.getFullYear()) * 12 + (m.getMonth() - b.getMonth());
 }
+const getMonthsDiff = getTotalMonths;
+
 function formatAge(bd) {
   const y=differenceInYears(new Date(),new Date(bd));
   const m=differenceInMonths(new Date(),new Date(bd))%12;
