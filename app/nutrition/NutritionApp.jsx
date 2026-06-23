@@ -30,14 +30,60 @@ function medH(age,g) { return closestVal(g==="male"?MEDIAN_HEIGHT.male:MEDIAN_HE
 function medW(h,g)   { return closestVal(g==="male"?MEDIAN_WFH.male:MEDIAN_WFH.female,Math.round(h/10)*10)||20; }
 function gKey(gender){ return (gender||"").toLowerCase().includes("male")||(gender||"").includes("ชาย")?"male":"female"; }
 
-function calcNutrition(student,weightKg,heightCm,measuredDate) {
-  const ageM=differenceInMonths(new Date(measuredDate),new Date(student.birth_date));
-  const g=gKey(student.gender);
-  const mH=medH(ageM,g), mW=medW(heightCm,g), ibw=medW(mH,g);
-  const pctHA=Math.round((heightCm/mH)*100), pctWH=Math.round((weightKg/mW)*100);
-  return {age_months:ageM,median_height:+mH.toFixed(2),median_weight_for_height:+mW.toFixed(2),
-    ibw_kg:+ibw.toFixed(2),pct_height_for_age:pctHA,pct_weight_for_height:pctWH,
-    ha_status:getHAStatus(pctHA).label,wh_status:getWHStatus(pctWH).label};
+function interpolate(table, key) {
+  const keys = Object.keys(table).map(Number).sort((a, b) => a - b);
+  
+  // ถ้าตรงกับ key ที่มี ใช้ค่าตรงเลย
+  if (table[key] !== undefined) return table[key];
+  
+  // หา lower และ upper bound
+  const lower = keys.filter(k => k <= key).pop();
+  const upper = keys.filter(k => k >= key)[0];
+  
+  if (lower === undefined) return table[upper];
+  if (upper === undefined) return table[lower];
+  if (lower === upper) return table[lower];
+  
+  // Linear interpolation
+  const ratio = (key - lower) / (upper - lower);
+  return table[lower] + ratio * (table[upper] - table[lower]);
+}
+
+// แก้ medH และ medW ให้ใช้ interpolate แทน closestVal
+function medH(age, g) {
+  return interpolate(g === "male" ? MEDIAN_HEIGHT.male : MEDIAN_HEIGHT.female, age) || 110;
+}
+function medW(h, g) {
+  // สำหรับ WFH ส่วนสูงเป็นซม. ไม่ต้อง round
+  return interpolate(g === "male" ? MEDIAN_WFH.male : MEDIAN_WFH.female, h) || 20;
+}
+
+function calcNutrition(student, weightKg, heightCm, measuredDate) {
+  const ageM = differenceInMonths(new Date(measuredDate), new Date(student.birth_date));
+  const g = gKey(student.gender);
+
+  // ส่วนสูงมาตรฐานตามอายุ (interpolated)
+  const mH = medH(ageM, g);
+
+  // IBW = น้ำหนักมาตรฐานตามส่วนสูงมาตรฐาน
+  const ibw = medW(mH, g);
+
+  // %HA = ส่วนสูงจริง / ส่วนสูงมาตรฐาน × 100
+  const pctHA = Math.round((heightCm / mH) * 100);
+
+  // %WH = น้ำหนักจริง / IBW × 100  ← แก้จากเดิมที่ใช้ medW(heightCm)
+  const pctWH = Math.round((weightKg / ibw) * 100);
+
+  return {
+    age_months: ageM,
+    median_height: +mH.toFixed(1),
+    median_weight_for_height: +ibw.toFixed(1),  // IBW
+    ibw_kg: +ibw.toFixed(1),
+    pct_height_for_age: pctHA,
+    pct_weight_for_height: pctWH,
+    ha_status: getHAStatus(pctHA).label,
+    wh_status: getWHStatus(pctWH).label,
+  };
 }
 function getHAStatus(pct) {
   if(pct<85) return {label:"เตี้ยแคระแกร็น",color:"#fff",bg:"#dc2626",emoji:"⚠️"};
