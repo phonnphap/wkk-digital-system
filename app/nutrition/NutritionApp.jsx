@@ -144,21 +144,23 @@ function calcNutrition(student, weightKg, heightCm, measuredDate) {
 
 // ── Classification ตาม PDF กรมอนามัย ────────────────────────────────────────
 function getHAStatus(z) {
-  if (z < -3)   return { label: "เตี้ย",         color: "#fff",     bg: "#dc2626", emoji: "⚠️" };
-  if (z < -2)   return { label: "ค่อนข้างเตี้ย", color: "#92400e", bg: "#fef3c7", emoji: "📉" };
-  if (z <= 1.5) return { label: "สูงตามเกณฑ์",   color: "#fff",     bg: "#16a34a", emoji: "✅" };
-  if (z <= 2)   return { label: "ค่อนข้างสูง",   color: "#fff",     bg: "#2563eb", emoji: "📈" };
-  if (z <= 3)   return { label: "สูง",            color: "#fff",     bg: "#7c3aed", emoji: "🌟" };
-  return          { label: "สูงมาก",         color: "#fff",     bg: "#4f46e5", emoji: "🏆" };
+  if (z < -3)   return { label: "เตี้ยแคระแกร็น", color: "#fff", bg: "#dc2626", emoji: "⚠️" };
+  if (z < -2)   return { label: "เตี้ย",         color: "#fff", bg: "#ef4444", emoji: "📉" };
+  if (z < -1.5) return { label: "ค่อนข้างเตี้ย", color: "#92400e", bg: "#fef3c7", emoji: "📊" };
+  if (z <= 1.5) return { label: "สูงตามเกณฑ์",   color: "#fff", bg: "#16a34a", emoji: "✅" };
+  if (z <= 2)   return { label: "ค่อนข้างสูง",   color: "#fff", bg: "#2563eb", emoji: "📈" };
+  if (z <= 3)   return { label: "สูง",           color: "#fff", bg: "#7c3aed", emoji: "🌟" };
+  return               { label: "สูงมาก",        color: "#fff", bg: "#4f46e5", emoji: "🏆" };
 }
 
 function getWHStatus(z) {
-  if (z < -3)   return { label: "ผอม",         color: "#fff",     bg: "#dc2626", emoji: "⚠️" };
-  if (z < -2)   return { label: "ค่อนข้างผอม", color: "#92400e", bg: "#fef3c7", emoji: "📉" };
-  if (z <= 1.5) return { label: "สมส่วน",       color: "#fff",     bg: "#16a34a", emoji: "✅" };
-  if (z <= 2)   return { label: "ท้วม",         color: "#92400e", bg: "#fed7aa", emoji: "📊" };
-  if (z <= 3)   return { label: "เริ่มอ้วน",    color: "#fff",     bg: "#ea580c", emoji: "📈" };
-  return          { label: "อ้วน",          color: "#fff",     bg: "#b91c1c", emoji: "⚠️" };
+  if (z < -3)   return { label: "ผอมแห้งรุนแรง", color: "#fff", bg: "#991b1b", emoji: "⚠️" };
+  if (z < -2)   return { label: "ผอม",           color: "#fff", bg: "#dc2626", emoji: "📉" };
+  if (z < -1.5) return { label: "ค่อนข้างผอม",   color: "#92400e", bg: "#fef3c7", emoji: "📊" };
+  if (z <= 1.5) return { label: "สมส่วน",        color: "#fff", bg: "#16a34a", emoji: "✅" };
+  if (z <= 2)   return { label: "ท้วม",          color: "#92400e", bg: "#fed7aa", emoji: "📊" };
+  if (z <= 3)   return { label: "เริ่มอ้วน",     color: "#fff", bg: "#ea580c", emoji: "📈" };
+  return               { label: "อ้วน",          color: "#fff", bg: "#b91c1c", emoji: "⚠️" };
 }
 
 function whStatusFromLabel(label) {
