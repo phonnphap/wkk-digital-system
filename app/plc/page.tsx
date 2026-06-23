@@ -220,7 +220,7 @@ function MeetingModal({ meeting, allTeachers, sameGroupTeachers, academicYears, 
   const [topic,       setTopic]       = useState(meeting?.topic ?? "");
   const [hours,       setHours]       = useState<number>(meeting?.duration_hours ?? 4);
   const [location,    setLocation]    = useState(meeting?.location ?? "");
-  const [facilId,     setFacilId]     = useState(meeting?.facilitator_id ?? currentUserId);
+  const facilId = currentUserId;
   const [selected,    setSelected]    = useState<string[]>(meeting?.participants ?? sameGroupTeachers.map(t => t.id));
   const [problem,     setProblem]     = useState(meeting?.problem_description ?? "");
   const [objectives,  setObjectives]  = useState(meeting?.objectives ?? "");
@@ -320,22 +320,22 @@ async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
 
   // ─── Validation ──────────────────────────────────────────────────────────
   const errors = {
-    date:       submitted && !date,
-    title:      submitted && !title.trim(),
-    topic:      submitted && !topic.trim(),
-    location:   submitted && !location.trim(),
-    facilId:    submitted && !facilId,
-    selected:   submitted && selected.length === 0,
-    problem:    submitted && !problem.trim(),
-    objectives: submitted && !objectives.trim(),
-    methods:    submitted && !methods.trim(),
-    results:    submitted && !results.trim(),
-    solutions:  submitted && !solutions.trim(),
-    reflections:submitted && !reflections.trim(),
-    futuredev:  submitted && !futuredev.trim(),
-    images:     submitted && images.length === 0,
-  };
-  const allBasicFilled = date && title.trim() && topic.trim() && location.trim() && facilId && selected.length > 0;
+  date:        submitted && !date,
+  title:       submitted && !title.trim(),
+  topic:       submitted && !topic.trim(),
+  location:    submitted && !location.trim(),
+  // ลบบรรทัด facilId ออก
+  selected:    submitted && selected.length === 0,
+  problem:     submitted && !problem.trim(),
+  objectives:  submitted && !objectives.trim(),
+  methods:     submitted && !methods.trim(),
+  results:     submitted && !results.trim(),
+  solutions:   submitted && !solutions.trim(),
+  reflections: submitted && !reflections.trim(),
+  futuredev:   submitted && !futuredev.trim(),
+  images:      submitted && images.length === 0,
+};
+  const allBasicFilled = date && title.trim() && topic.trim() && location.trim() && selected.length > 0;
   const allReportFilled = problem.trim() && objectives.trim() && methods.trim() && results.trim() && solutions.trim() && reflections.trim() && futuredev.trim() && images.length > 0;
   const canSubmit = allBasicFilled && allReportFilled;
 
@@ -462,22 +462,22 @@ async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
               </div>
 
               {/* Location + Facilitator */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>สถานที่ {reqStar}</label>
-                  <input type="text" value={location} onChange={e => setLocation(e.target.value)}
-                    placeholder="ห้องประชุม..." className={inp(errors.location)} />
-                  {errors.location && <p className="text-red-500 text-xs mt-1">กรุณากรอกสถานที่</p>}
-                </div>
-                <div>
-                  <label className={labelCls}>วิทยากร / ผู้นำ {reqStar}</label>
-                  <select value={facilId} onChange={e => setFacilId(e.target.value)} className={inp(errors.facilId)}>
-                    <option value="">— เลือกวิทยากร —</option>
-                    {sameGroupTeachers.map(t => <option key={t.id} value={t.id}>{fullName(t)}</option>)}
-                  </select>
-                  {errors.facilId && <p className="text-red-500 text-xs mt-1">กรุณาเลือกวิทยากร</p>}
-                </div>
-              </div>
+<div className="grid grid-cols-2 gap-3">
+  <div>
+    <label className={labelCls}>สถานที่ {reqStar}</label>
+    <input type="text" value={location} onChange={e => setLocation(e.target.value)}
+      placeholder="ห้องประชุม..." className={inp(errors.location)} />
+    {errors.location && <p className="text-red-500 text-xs mt-1">กรุณากรอกสถานที่</p>}
+  </div>
+  <div>
+    <label className={labelCls}>วิทยากร / ผู้นำ</label>
+    {/* ✅ แสดงชื่อ login แบบ lock ไม่ให้แก้ */}
+    <div className="w-full bg-blue-50 border-2 border-blue-200 rounded-xl px-3 py-2.5 text-blue-700 font-black text-sm flex items-center gap-2">
+      <span>👤</span>
+      <span>{fullName(currentUser)}</span>
+    </div>
+  </div>
+</div>
 
               {/* Participants — กรองด้วย academic_level */}
               <div>
