@@ -101,9 +101,9 @@ function getHAStatus(pct) {
   return {label:"สูงมาก",color:"#fff",bg:"#4f46e5",emoji:"🏆"};
 }
 function getWHStatus(pct) {
-  if(pct<60) return {label:"ผอมแห้ง (SAM)",color:"#fff",bg:"#dc2626",emoji:"⚠️"};
-  if(pct<70) return {label:"ผอม",color:"#fff",bg:"#ef4444",emoji:"📉"};
-  if(pct<80) return {label:"ค่อนข้างผอม",color:"#92400e",bg:"#fef3c7",emoji:"📊"};
+  if(pct<70) return {label:"ผอมแห้ง (SAM)",color:"#fff",bg:"#dc2626",emoji:"⚠️"};
+  if(pct<80) return {label:"ผอม",color:"#fff",bg:"#ef4444",emoji:"📉"};
+  if(pct<90) return {label:"ค่อนข้างผอม",color:"#92400e",bg:"#fef3c7",emoji:"📊"};
   if(pct<=110) return {label:"สมส่วน",color:"#fff",bg:"#16a34a",emoji:"✅"};
   if(pct<=120) return {label:"ท้วม",color:"#92400e",bg:"#fed7aa",emoji:"📊"};
   if(pct<=130) return {label:"เริ่มอ้วน",color:"#fff",bg:"#ea580c",emoji:"📈"};
