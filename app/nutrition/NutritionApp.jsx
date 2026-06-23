@@ -13,128 +13,155 @@ import {
 const supabase = createClient();
 const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head"];
 
-const NUTRITION_DATA = {
-  // Height-for-Age (HA)
-  HA: {
-    male:   { 24: {m: 87.1, sd: 3.2}, 72: {m: 114.7, sd: 4.5}, 120: {m: 136.8, sd: 5.7}, 216: {m: 170.1, sd: 6.8} },
-    female: { 24: {m: 85.7, sd: 3.1}, 72: {m: 113.6, sd: 4.6}, 120: {m: 135.5, sd: 5.9}, 216: {m: 163.8, sd: 6.1} }
-  },
-  // Weight-for-Height (WH)
-  WH: {
-    male:   { 80: {m: 10.5, sd: 0.8}, 120: {m: 21.0, sd: 1.5}, 150: {m: 36.0, sd: 2.8}, 180: {m: 60.0, sd: 4.5} },
-    female: { 80: {m: 10.0, sd: 0.7}, 120: {m: 20.5, sd: 1.4}, 150: {m: 35.0, sd: 2.7}, 180: {m: 54.0, sd: 4.0} }
-  }
+// ============================================================
+// WHO / กรมอนามัย LMS Parameters — ถูกต้องตามมาตรฐาน
+// ============================================================
+
+// Height-for-Age (HA) — อายุเป็นเดือน { L, M, S }
+const WHO_HA_MALE = {
+  24:{L:1,M:87.8,S:0.03655},  30:{L:1,M:91.9,S:0.03639},  36:{L:1,M:96.1,S:0.03467},
+  42:{L:1,M:99.9,S:0.03534},  48:{L:1,M:103.3,S:0.03600}, 54:{L:1,M:106.7,S:0.03649},
+  60:{L:1,M:110.0,S:0.03692}, 66:{L:1,M:113.0,S:0.03743}, 72:{L:1,M:115.9,S:0.03751},
+  78:{L:1,M:118.7,S:0.03815}, 84:{L:1,M:121.7,S:0.03821}, 90:{L:1,M:124.5,S:0.03830},
+  96:{L:1,M:127.3,S:0.03843},102:{L:1,M:130.0,S:0.03873},108:{L:1,M:132.6,S:0.03891},
+  114:{L:1,M:135.2,S:0.03902},120:{L:1,M:137.8,S:0.03921},126:{L:1,M:140.3,S:0.03954},
+  132:{L:1,M:142.8,S:0.03977},138:{L:1,M:145.2,S:0.04014},144:{L:1,M:147.7,S:0.04057},
+  150:{L:1,M:150.0,S:0.04108},156:{L:1,M:152.9,S:0.04153},162:{L:1,M:155.8,S:0.04198},
+  168:{L:1,M:159.0,S:0.04216},174:{L:1,M:162.3,S:0.04200},180:{L:1,M:165.3,S:0.04161},
+  186:{L:1,M:167.7,S:0.04094},192:{L:1,M:169.4,S:0.04025},198:{L:1,M:170.5,S:0.03955},
+  204:{L:1,M:171.2,S:0.03892},210:{L:1,M:171.5,S:0.03838},216:{L:1,M:171.6,S:0.03793},
+  228:{L:1,M:171.7,S:0.03750}
 };
 
-const MEDIAN_HEIGHT = {
-  male: {
-    24: 87.1, 36: 95.2, 48: 102.0, 60: 108.0, 72: 114.7, 84: 120.7, 96: 126.4,
-    108: 131.7, 120: 136.8, 132: 141.6, 144: 146.2, 156: 151.5, 168: 157.3,
-    180: 163.1, 192: 167.0, 204: 169.5, 216: 170.1
-  },
-  female: {
-    24: 85.7, 36: 94.1, 48: 100.9, 60: 107.2, 72: 113.6, 84: 119.6, 96: 125.4,
-    108: 130.7, 120: 135.5, 132: 140.8, 144: 147.0, 156: 152.4, 168: 157.1,
-    180: 160.5, 192: 162.5, 204: 163.8, 216: 163.8
-  }
+const WHO_HA_FEMALE = {
+  24:{L:1,M:86.4,S:0.03779},  30:{L:1,M:90.7,S:0.03674},  36:{L:1,M:95.1,S:0.03602},
+  42:{L:1,M:98.8,S:0.03628},  48:{L:1,M:102.7,S:0.03671}, 54:{L:1,M:105.9,S:0.03712},
+  60:{L:1,M:109.4,S:0.03755}, 66:{L:1,M:112.0,S:0.03779}, 72:{L:1,M:114.6,S:0.03812},
+  78:{L:1,M:117.1,S:0.03840}, 84:{L:1,M:120.0,S:0.03861}, 90:{L:1,M:122.8,S:0.03876},
+  96:{L:1,M:125.5,S:0.03896},102:{L:1,M:128.2,S:0.03914},108:{L:1,M:130.9,S:0.03924},
+  114:{L:1,M:133.5,S:0.03930},120:{L:1,M:136.2,S:0.03934},126:{L:1,M:138.8,S:0.03938},
+  132:{L:1,M:141.5,S:0.03953},138:{L:1,M:144.0,S:0.03993},144:{L:1,M:147.0,S:0.04045},
+  150:{L:1,M:149.8,S:0.04100},156:{L:1,M:152.2,S:0.04128},162:{L:1,M:154.2,S:0.04136},
+  168:{L:1,M:155.8,S:0.04117},174:{L:1,M:157.0,S:0.04076},180:{L:1,M:157.9,S:0.04025},
+  186:{L:1,M:158.6,S:0.03972},192:{L:1,M:159.1,S:0.03929},198:{L:1,M:159.5,S:0.03893},
+  204:{L:1,M:159.7,S:0.03862},210:{L:1,M:160.0,S:0.03836},216:{L:1,M:160.3,S:0.03814},
+  228:{L:1,M:160.5,S:0.03793}
 };
 
-const MEDIAN_WFH = {
-  // ข้อมูลละเอียดขึ้นในช่วง 80-180 ซม. เพื่อรองรับเด็กโตและเด็กเล็ก
-  male:   {80:10.5, 90:12.5, 100:14.5, 110:17.5, 120:21.0, 130:25.0, 140:30.0, 150:36.0, 160:43.0, 170:52.0, 180:60.0},
-  female: {80:10.0, 90:12.0, 100:14.0, 110:17.0, 120:20.5, 130:24.0, 140:29.0, 150:35.0, 160:42.0, 170:48.0, 180:54.0}
+// Weight-for-Height (WH) — ความสูงเป็น ซม. { L, M, S }
+const WHO_WH_MALE = {
+  65:{L:-0.3521,M:7.4327,S:0.09001},  70:{L:-0.3521,M:8.4329,S:0.09009},
+  75:{L:-0.3521,M:9.5159,S:0.09015},  80:{L:-0.3521,M:10.5656,S:0.09023},
+  85:{L:-0.3521,M:11.6374,S:0.09015}, 90:{L:-0.3521,M:12.7307,S:0.09018},
+  95:{L:-0.3521,M:13.9015,S:0.09024},100:{L:-0.3521,M:15.1774,S:0.09075},
+  105:{L:-0.3521,M:16.5981,S:0.09154},110:{L:-0.3521,M:18.1579,S:0.09252},
+  115:{L:-0.3521,M:19.8607,S:0.09361},120:{L:-0.3521,M:21.7300,S:0.09473},
+  125:{L:1,M:23.79,S:0.13200},130:{L:1,M:26.27,S:0.13250},
+  135:{L:1,M:29.08,S:0.13300},140:{L:1,M:32.18,S:0.13400},
+  145:{L:1,M:35.78,S:0.13520},150:{L:1,M:39.74,S:0.13600},
+  155:{L:1,M:44.02,S:0.13700},160:{L:1,M:48.55,S:0.13750},
+  165:{L:1,M:53.20,S:0.13780},170:{L:1,M:57.80,S:0.13760},
+  175:{L:1,M:62.00,S:0.13700},180:{L:1,M:65.80,S:0.13600}
 };
 
-function closestVal(table,key) {
-  const keys=Object.keys(table).map(Number).sort((a,b)=>a-b);
-  return table[keys.reduce((p,c)=>Math.abs(c-key)<Math.abs(p-key)?c:p)];
-}
+const WHO_WH_FEMALE = {
+  65:{L:-0.3833,M:7.2402,S:0.09191},  70:{L:-0.3833,M:8.1765,S:0.09209},
+  75:{L:-0.3833,M:9.2341,S:0.09224},  80:{L:-0.3833,M:10.1571,S:0.09238},
+  85:{L:-0.3833,M:11.0761,S:0.09201}, 90:{L:-0.3833,M:12.0548,S:0.09186},
+  95:{L:-0.3833,M:13.1071,S:0.09204},100:{L:-0.3833,M:14.2828,S:0.09267},
+  105:{L:-0.3833,M:15.5962,S:0.09374},110:{L:-0.3833,M:17.0666,S:0.09495},
+  115:{L:-0.3833,M:18.6891,S:0.09626},120:{L:-0.3833,M:20.4739,S:0.09745},
+  125:{L:1,M:22.46,S:0.13100},130:{L:1,M:24.74,S:0.13200},
+  135:{L:1,M:27.36,S:0.13350},140:{L:1,M:30.44,S:0.13500},
+  145:{L:1,M:33.90,S:0.13650},150:{L:1,M:37.66,S:0.13750},
+  155:{L:1,M:41.60,S:0.13800},160:{L:1,M:45.58,S:0.13820},
+  165:{L:1,M:49.40,S:0.13780},170:{L:1,M:52.90,S:0.13700},
+  175:{L:1,M:56.00,S:0.13580},180:{L:1,M:58.70,S:0.13450}
+};
 
-function gKey(gender){ return (gender||"").toLowerCase().includes("male")||(gender||"").includes("ชาย")?"male":"female"; }
-
-function interpolate(table, key) {
+// ── Interpolation LMS ─────────────────────────────────────────────────────────
+function interpolateLMS(table, key) {
   const keys = Object.keys(table).map(Number).sort((a, b) => a - b);
-  
-  // ถ้าตรงกับ key ที่มี ใช้ค่าตรงเลย
   if (table[key] !== undefined) return table[key];
-  
-  // หา lower และ upper bound
   const lower = keys.filter(k => k <= key).pop();
   const upper = keys.filter(k => k >= key)[0];
-  
-  if (lower === undefined) return table[upper];
-  if (upper === undefined) return table[lower];
+  if (lower === undefined) return table[keys[0]];
+  if (upper === undefined) return table[keys[keys.length - 1]];
   if (lower === upper) return table[lower];
-  
-  // Linear interpolation
-  const ratio = (key - lower) / (upper - lower);
-  return table[lower] + ratio * (table[upper] - table[lower]);
+  const r = (key - lower) / (upper - lower);
+  const lo = table[lower], hi = table[upper];
+  return { L: lo.L + r*(hi.L-lo.L), M: lo.M + r*(hi.M-lo.M), S: lo.S + r*(hi.S-lo.S) };
 }
 
-// แก้ medH และ medW ให้ใช้ interpolate แทน closestVal
-function medH(age, g) {
-  return interpolate(g === "male" ? MEDIAN_HEIGHT.male : MEDIAN_HEIGHT.female, age) || 110;
-}
-function medW(h, g) {
-  // สำหรับ WFH ส่วนสูงเป็นซม. ไม่ต้อง round
-  return interpolate(g === "male" ? MEDIAN_WFH.male : MEDIAN_WFH.female, h) || 20;
+// ── Z-score ตาม WHO LMS method ───────────────────────────────────────────────
+function calcZScoreLMS(value, lms) {
+  const { L, M, S } = lms;
+  if (Math.abs(L) < 0.0001) return Math.log(value / M) / S;
+  return (Math.pow(value / M, L) - 1) / (L * S);
 }
 
+// ── Median Height/Weight สำหรับกราฟ ─────────────────────────────────────────
+function medH(ageMonths, g) {
+  const lms = interpolateLMS(g === "male" ? WHO_HA_MALE : WHO_HA_FEMALE, ageMonths);
+  return lms?.M ?? 110;
+}
+function medW(heightCm, g) {
+  const lms = interpolateLMS(g === "male" ? WHO_WH_MALE : WHO_WH_FEMALE, heightCm);
+  return lms?.M ?? 20;
+}
+
+// ── Main calculation ─────────────────────────────────────────────────────────
 function calcNutrition(student, weightKg, heightCm, measuredDate) {
   const ageM = getMonthsDiff(student.birth_date, measuredDate);
-  const g = gKey(student.gender);
+  const g    = gKey(student.gender);
 
-  // 1. ดึงค่า Median และ SD แบบ Interpolated
-  const haRef = interpolateData(NUTRITION_DATA.HA[g], ageM);
-  const whRef = interpolateData(NUTRITION_DATA.WH[g], heightCm);
+  const haLMS = interpolateLMS(g === "male" ? WHO_HA_MALE : WHO_HA_FEMALE, ageM);
+  const whLMS = interpolateLMS(g === "male" ? WHO_WH_MALE : WHO_WH_FEMALE, heightCm);
 
-  // 2. คำนวณ Z-Score
-  const zHA = calculateZScore(heightCm, haRef.m, haRef.sd);
-  const zWH = calculateZScore(weightKg, whRef.m, whRef.sd);
+  const zHA = calcZScoreLMS(heightCm, haLMS);
+  const zWH = calcZScoreLMS(weightKg, whLMS);
+
+  const medianH = parseFloat(haLMS.M.toFixed(1));
+  const medianW = parseFloat(whLMS.M.toFixed(1));
+  const pctHA   = parseFloat((heightCm / haLMS.M * 100).toFixed(1));
+  const pctWH   = parseFloat((weightKg / whLMS.M * 100).toFixed(1));
 
   return {
-    z_height_for_age: parseFloat(zHA.toFixed(2)),
-    z_weight_for_height: parseFloat(zWH.toFixed(2)),
-    ha_status: getHAStatus(zHA),
-    wh_status: getWHStatus(zWH)
+    age_months:               ageM,
+    weight_kg:                weightKg,
+    height_cm:                heightCm,
+    ibw_kg:                   medianW,
+    median_height:            medianH,
+    median_weight_for_height: medianW,
+    pct_height_for_age:       pctHA,
+    pct_weight_for_height:    pctWH,
+    z_height_for_age:         parseFloat(zHA.toFixed(2)),
+    z_weight_for_height:      parseFloat(zWH.toFixed(2)),
+    ha_status:                getHAStatus(zHA),
+    wh_status:                getWHStatus(zWH),
   };
 }
 
-// ฟังก์ชันช่วย Interpolate สำหรับข้อมูลที่มีทั้ง m และ sd
-function interpolateData(table, key) {
-  const keys = Object.keys(table).map(Number).sort((a, b) => a - b);
-  const lower = keys.filter(k => k <= key).pop() || keys[0];
-  const upper = keys.filter(k => k >= key)[0] || keys[keys.length - 1];
-  
-  if (lower === upper) return table[lower];
-  const ratio = (key - lower) / (upper - lower);
-  return {
-    m: table[lower].m + ratio * (table[upper].m - table[lower].m),
-    sd: table[lower].sd + ratio * (table[upper].sd - table[lower].sd)
-  };
-}
-function calculateZScore(value, median, sd) {
-  return (value - median) / sd;
-}
-
+// ── Classification ตาม PDF กรมอนามัย ────────────────────────────────────────
 function getHAStatus(z) {
-  if (z < -3) return {label: "เตี้ยแคระแกร็น", bg: "#dc2626"};
-  if (z < -2) return {label: "เตี้ย", bg: "#ef4444"};
-  if (z < -1) return {label: "ค่อนข้างเตี้ย", bg: "#fef3c7"};
-  if (z <= 1) return {label: "ตามเกณฑ์", bg: "#16a34a"};
-  if (z <= 2) return {label: "ค่อนข้างสูง", bg: "#2563eb"};
-  return {label: "สูง", bg: "#7c3aed"};
+  if (z < -3)   return { label: "เตี้ย",         color: "#fff",     bg: "#dc2626", emoji: "⚠️" };
+  if (z < -2)   return { label: "ค่อนข้างเตี้ย", color: "#92400e", bg: "#fef3c7", emoji: "📉" };
+  if (z <= 1.5) return { label: "สูงตามเกณฑ์",   color: "#fff",     bg: "#16a34a", emoji: "✅" };
+  if (z <= 2)   return { label: "ค่อนข้างสูง",   color: "#fff",     bg: "#2563eb", emoji: "📈" };
+  if (z <= 3)   return { label: "สูง",            color: "#fff",     bg: "#7c3aed", emoji: "🌟" };
+  return          { label: "สูงมาก",         color: "#fff",     bg: "#4f46e5", emoji: "🏆" };
 }
 
 function getWHStatus(z) {
-  if (z < -3) return {label: "ผอมแห้งรุนแรง", bg: "#dc2626"};
-  if (z < -2) return {label: "ผอม", bg: "#ef4444"};
-  if (z < -1) return {label: "ค่อนข้างผอม", bg: "#fef3c7"};
-  if (z <= 1) return {label: "สมส่วน", bg: "#16a34a"};
-  if (z <= 2) return {label: "ท้วม", bg: "#fed7aa"};
-  if (z <= 3) return {label: "เริ่มอ้วน", bg: "#ea580c"};
-  return {label: "อ้วน", bg: "#b91c1c"};
+  if (z < -3)   return { label: "ผอม",         color: "#fff",     bg: "#dc2626", emoji: "⚠️" };
+  if (z < -2)   return { label: "ค่อนข้างผอม", color: "#92400e", bg: "#fef3c7", emoji: "📉" };
+  if (z <= 1.5) return { label: "สมส่วน",       color: "#fff",     bg: "#16a34a", emoji: "✅" };
+  if (z <= 2)   return { label: "ท้วม",         color: "#92400e", bg: "#fed7aa", emoji: "📊" };
+  if (z <= 3)   return { label: "เริ่มอ้วน",    color: "#fff",     bg: "#ea580c", emoji: "📈" };
+  return          { label: "อ้วน",          color: "#fff",     bg: "#b91c1c", emoji: "⚠️" };
 }
+
+
 function getTotalMonths(birthDate, measuredDate) {
   const b = new Date(birthDate);
   const m = new Date(measuredDate);
