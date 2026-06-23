@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
 
-const resend = new Resend("re_Cgm1XFjG_5omt399isc7k6fXoH7zWpJcD");
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: NextRequest) {
   try {
     const { to, subject, html, attachments } = await req.json();
     
     const { data, error } = await resend.emails.send({
-      from: "ระบบลา WKK <leave@mail.khienkhet.ac.th>",
+      from: "ระบบลา WKK <leave@.khienkhet.ac.th>",
       to: Array.isArray(to) ? to : [to],
       subject,
       html,
