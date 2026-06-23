@@ -161,6 +161,29 @@ function getWHStatus(z) {
   return          { label: "อ้วน",          color: "#fff",     bg: "#b91c1c", emoji: "⚠️" };
 }
 
+function whStatusFromLabel(label) {
+  const map = {
+    "ผอม":         { label:"ผอม",         color:"#fff",     bg:"#dc2626", emoji:"⚠️" },
+    "ค่อนข้างผอม": { label:"ค่อนข้างผอม", color:"#92400e", bg:"#fef3c7", emoji:"📉" },
+    "สมส่วน":      { label:"สมส่วน",       color:"#fff",     bg:"#16a34a", emoji:"✅" },
+    "ท้วม":        { label:"ท้วม",         color:"#92400e", bg:"#fed7aa", emoji:"📊" },
+    "เริ่มอ้วน":   { label:"เริ่มอ้วน",    color:"#fff",     bg:"#ea580c", emoji:"📈" },
+    "อ้วน":        { label:"อ้วน",          color:"#fff",     bg:"#b91c1c", emoji:"⚠️" },
+  };
+  return label ? map[label] ?? { label, color:"#6b7280", bg:"#f3f4f6", emoji:"❓" } : null;
+}
+
+function haStatusFromLabel(label) {
+  const map = {
+    "เตี้ย":         { label:"เตี้ย",         color:"#fff",     bg:"#dc2626", emoji:"⚠️" },
+    "ค่อนข้างเตี้ย": { label:"ค่อนข้างเตี้ย", color:"#92400e", bg:"#fef3c7", emoji:"📉" },
+    "สูงตามเกณฑ์":   { label:"สูงตามเกณฑ์",   color:"#fff",     bg:"#16a34a", emoji:"✅" },
+    "ค่อนข้างสูง":   { label:"ค่อนข้างสูง",   color:"#fff",     bg:"#2563eb", emoji:"📈" },
+    "สูง":           { label:"สูง",            color:"#fff",     bg:"#7c3aed", emoji:"🌟" },
+    "สูงมาก":        { label:"สูงมาก",         color:"#fff",     bg:"#4f46e5", emoji:"🏆" },
+  };
+  return label ? map[label] ?? { label, color:"#6b7280", bg:"#f3f4f6", emoji:"❓" } : null;
+}
 
 function getTotalMonths(birthDate, measuredDate) {
   const b = new Date(birthDate);
@@ -1074,8 +1097,8 @@ useEffect(() => {
                     <td style={{padding:"7px 8px"}}>{r.ibw_kg ?? "—"}</td>
                     <td style={{padding:"7px 8px"}}>{r.pct_height_for_age ? r.pct_height_for_age+"%" : "—"}</td>
                     <td style={{padding:"7px 8px"}}>{r.pct_weight_for_height ? r.pct_weight_for_height+"%" : "—"}</td>
-                    <td style={{padding:"7px 8px"}}><Badge status={r.wh_status ? getWHStatus(r.pct_weight_for_height) : null}/></td>
-                    <td style={{padding:"7px 8px"}}><Badge status={r.ha_status ? getHAStatus(r.pct_height_for_age) : null}/></td>
+                    <td style={{padding:"7px 8px"}}><Badge status={whStatusFromLabel(r.wh_status)}/></td>
+                    <td style={{padding:"7px 8px"}}><Badge status={haStatusFromLabel(r.ha_status)}/></td>
                   </tr>
                 ))}
                 {records.length === 0 && (
