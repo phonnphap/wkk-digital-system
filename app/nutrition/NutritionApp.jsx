@@ -26,8 +26,7 @@ function closestVal(table,key) {
   const keys=Object.keys(table).map(Number).sort((a,b)=>a-b);
   return table[keys.reduce((p,c)=>Math.abs(c-key)<Math.abs(p-key)?c:p)];
 }
-function medH(age,g) { return closestVal(g==="male"?MEDIAN_HEIGHT.male:MEDIAN_HEIGHT.female,age)||110; }
-function medW(h,g)   { return closestVal(g==="male"?MEDIAN_WFH.male:MEDIAN_WFH.female,Math.round(h/10)*10)||20; }
+
 function gKey(gender){ return (gender||"").toLowerCase().includes("male")||(gender||"").includes("ชาย")?"male":"female"; }
 
 function interpolate(table, key) {
