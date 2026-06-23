@@ -556,7 +556,8 @@ function ClassAssessPage({currentUser}) {
       median_weight_for_height:r.result.median_weight_for_height,
       ibw_kg:r.result.ibw_kg,pct_height_for_age:r.result.pct_height_for_age,
       pct_weight_for_height:r.result.pct_weight_for_height,
-      ha_status:r.result.ha_status,wh_status:r.result.wh_status,
+      ha_status: r.result.ha_status.label,  // ✅ เอาแค่ label
+      wh_status: r.result.wh_status.label,  // ✅ เอาแค่ label
     }));
     if(toSave.length===0){setSaveMsg("⚠️ กรุณากรอกน้ำหนัก/ส่วนสูงอย่างน้อย 1 คน");return;}
     setSaving(true);setSaveMsg("");
@@ -728,11 +729,13 @@ function ClassAssessPage({currentUser}) {
                             style={{...S.input,padding:"5px 7px",width:82,fontSize:13}}/>
                         </td>
                         <td style={{padding:"6px 8px"}}>
-                          {r.result?<Badge status={getWHStatus(r.result.pct_weight_for_height)}/>:<span style={{color:"#d1d5db",fontSize:11}}>—</span>}
-                        </td>
-                        <td style={{padding:"6px 8px"}}>
-                          {r.result?<Badge status={getHAStatus(r.result.pct_height_for_age)}/>:<span style={{color:"#d1d5db",fontSize:11}}>—</span>}
-                        </td>
+  {r.result ? <Badge status={getWHStatus(r.result.z_weight_for_height)}/> 
+             : <span style={{color:"#d1d5db",fontSize:11}}>—</span>}
+</td>
+<td style={{padding:"6px 8px"}}>
+  {r.result ? <Badge status={getHAStatus(r.result.z_height_for_age)}/>
+             : <span style={{color:"#d1d5db",fontSize:11}}>—</span>}
+</td>
                         <td style={{padding:"6px 8px"}} onClick={e=>e.stopPropagation()}>
                           <button onClick={()=>setDetailStudent(isActive?null:s)}
                             style={{...S.btnSm,background:isActive?"#e0e7ff":"",color:isActive?"#3730a3":"",
@@ -803,12 +806,17 @@ function StudentDetailPanel({student,currentResult,measuredDate,onClose,roomName
   const g=gKey(student.gender);
 
   // ใช้ currentResult ถ้ายังไม่ได้บันทึก (กรอกไว้แล้ว)
-  const displayResult = currentResult || (latest?{
-    weight_kg:latest.weight_kg,height_cm:latest.height_cm,
-    ibw_kg:latest.ibw_kg,age_months:latest.age_months,
-    pct_height_for_age:latest.pct_height_for_age,
-    pct_weight_for_height:latest.pct_weight_for_height,
-  }:null);
+  const displayResult = currentResult || (latest ? {
+  weight_kg: latest.weight_kg,
+  height_cm: latest.height_cm,
+  ibw_kg: latest.ibw_kg,
+  age_months: latest.age_months,
+  pct_height_for_age: latest.pct_height_for_age,
+  pct_weight_for_height: latest.pct_weight_for_height,
+  // ✅ เพิ่ม z-score จาก DB ถ้ามี หรือคำนวณจาก pct
+  z_weight_for_height: latest.z_weight_for_height ?? null,
+  z_height_for_age: latest.z_height_for_age ?? null,
+} : null);
 
   return (
     <div style={{...S.card,border:"2px solid #c7d2fe"}}>
@@ -849,8 +857,12 @@ function StudentDetailPanel({student,currentResult,measuredDate,onClose,roomName
           {/* Badge สถานะ */}
           {displayResult&&(
             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
-              <Badge status={getWHStatus(displayResult.pct_weight_for_height)}/>
-              <Badge status={getHAStatus(displayResult.pct_height_for_age)}/>
+              <Badge status={displayResult.z_weight_for_height != null 
+  ? getWHStatus(displayResult.z_weight_for_height) 
+  : whStatusFromLabel(latest?.wh_status)}/>
+<Badge status={displayResult.z_height_for_age != null 
+  ? getHAStatus(displayResult.z_height_for_age) 
+  : haStatusFromLabel(latest?.ha_status)}/>
             </div>
           )}
 
@@ -984,8 +996,8 @@ useEffect(() => {
       <th>น้ำหนัก</th><th>ส่วนสูง</th><th>IBW</th><th>%HA</th><th>%WH</th><th>ภาวะ WH</th><th>ภาวะ HA</th>
     </tr></thead><tbody>
       ${displayRecords.map((r, i) => {
-        const wh = r.wh_status ? getWHStatus(r.pct_weight_for_height) : null;
-        const ha = r.ha_status ? getHAStatus(r.pct_height_for_age) : null;
+        const wh = r.result ? getWHStatus(r.result.z_weight_for_height) : null;
+        const ha = r.result ? getHAStatus(r.result.z_height_for_age) : null;
         return `<tr>
           <td style="text-align:center">${r.seat_number ?? (i + 1)}</td>
           <td>${genderPrefix(r.gender, selectedClass?.room_name)} ${r.first_name} ${r.last_name}</td>
