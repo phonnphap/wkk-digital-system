@@ -13,6 +13,19 @@ import {
 const supabase = createClient();
 const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head"];
 
+const NUTRITION_DATA = {
+  // Height-for-Age (HA)
+  HA: {
+    male:   { 24: {m: 87.1, sd: 3.2}, 72: {m: 114.7, sd: 4.5}, 120: {m: 136.8, sd: 5.7}, 216: {m: 170.1, sd: 6.8} },
+    female: { 24: {m: 85.7, sd: 3.1}, 72: {m: 113.6, sd: 4.6}, 120: {m: 135.5, sd: 5.9}, 216: {m: 163.8, sd: 6.1} }
+  },
+  // Weight-for-Height (WH)
+  WH: {
+    male:   { 80: {m: 10.5, sd: 0.8}, 120: {m: 21.0, sd: 1.5}, 150: {m: 36.0, sd: 2.8}, 180: {m: 60.0, sd: 4.5} },
+    female: { 80: {m: 10.0, sd: 0.7}, 120: {m: 20.5, sd: 1.4}, 150: {m: 35.0, sd: 2.7}, 180: {m: 54.0, sd: 4.0} }
+  }
+};
+
 const MEDIAN_HEIGHT = {
   male: {
     24: 87.1, 36: 95.2, 48: 102.0, 60: 108.0, 72: 114.7, 84: 120.7, 96: 126.4,
@@ -71,43 +84,56 @@ function calcNutrition(student, weightKg, heightCm, measuredDate) {
   const ageM = getMonthsDiff(student.birth_date, measuredDate);
   const g = gKey(student.gender);
 
-  // 1. หาค่าส่วนสูงมาตรฐานตามอายุ (mH)
-  const mH = interpolate(MEDIAN_HEIGHT[g], ageM);
-  
-  // 2. หาค่า IBW (คือน้ำหนักมัธยฐานที่ความสูงนั้นๆ)
-  const ibw = interpolate(MEDIAN_WFH[g], heightCm);
+  // 1. ดึงค่า Median และ SD แบบ Interpolated
+  const haRef = interpolateData(NUTRITION_DATA.HA[g], ageM);
+  const whRef = interpolateData(NUTRITION_DATA.WH[g], heightCm);
 
-  // 3. คำนวณ %
-  const pctHA = Math.round((heightCm / mH) * 100);
-  const pctWH = Math.round((weightKg / ibw) * 100);
+  // 2. คำนวณ Z-Score
+  const zHA = calculateZScore(heightCm, haRef.m, haRef.sd);
+  const zWH = calculateZScore(weightKg, whRef.m, whRef.sd);
 
   return {
-    age_months: ageM,
-    median_height: parseFloat(mH.toFixed(1)),
-    ibw_kg: parseFloat(ibw.toFixed(1)),
-    pct_height_for_age: pctHA,
-    pct_weight_for_height: pctWH,
-    ha_status: getHAStatus(pctHA), // ตรวจสอบเงื่อนไข label ในฟังก์ชันนี้
-    wh_status: getWHStatus(pctWH)
+    z_height_for_age: parseFloat(zHA.toFixed(2)),
+    z_weight_for_height: parseFloat(zWH.toFixed(2)),
+    ha_status: getHAStatus(zHA),
+    wh_status: getWHStatus(zWH)
   };
 }
-function getHAStatus(pct) {
-  if(pct<85) return {label:"เตี้ยแคระแกร็น",color:"#fff",bg:"#dc2626",emoji:"⚠️"};
-  if(pct<90) return {label:"เตี้ย",color:"#fff",bg:"#ef4444",emoji:"📉"};
-  if(pct<95) return {label:"ค่อนข้างเตี้ย",color:"#92400e",bg:"#fef3c7",emoji:"📊"};
-  if(pct<=105) return {label:"ตามเกณฑ์",color:"#fff",bg:"#16a34a",emoji:"✅"};
-  if(pct<=110) return {label:"ค่อนข้างสูง",color:"#fff",bg:"#2563eb",emoji:"📈"};
-  if(pct<=120) return {label:"สูง",color:"#fff",bg:"#7c3aed",emoji:"🌟"};
-  return {label:"สูงมาก",color:"#fff",bg:"#4f46e5",emoji:"🏆"};
+
+// ฟังก์ชันช่วย Interpolate สำหรับข้อมูลที่มีทั้ง m และ sd
+function interpolateData(table, key) {
+  const keys = Object.keys(table).map(Number).sort((a, b) => a - b);
+  const lower = keys.filter(k => k <= key).pop() || keys[0];
+  const upper = keys.filter(k => k >= key)[0] || keys[keys.length - 1];
+  
+  if (lower === upper) return table[lower];
+  const ratio = (key - lower) / (upper - lower);
+  return {
+    m: table[lower].m + ratio * (table[upper].m - table[lower].m),
+    sd: table[lower].sd + ratio * (table[upper].sd - table[lower].sd)
+  };
 }
-function getWHStatus(pct) {
-  if(pct<70) return {label:"ผอมแห้ง (SAM)",color:"#fff",bg:"#dc2626",emoji:"⚠️"};
-  if(pct<80) return {label:"ผอม",color:"#fff",bg:"#ef4444",emoji:"📉"};
-  if(pct<90) return {label:"ค่อนข้างผอม",color:"#92400e",bg:"#fef3c7",emoji:"📊"};
-  if(pct<=110) return {label:"สมส่วน",color:"#fff",bg:"#16a34a",emoji:"✅"};
-  if(pct<=120) return {label:"ท้วม",color:"#92400e",bg:"#fed7aa",emoji:"📊"};
-  if(pct<=130) return {label:"เริ่มอ้วน",color:"#fff",bg:"#ea580c",emoji:"📈"};
-  return {label:"อ้วน",color:"#fff",bg:"#b91c1c",emoji:"⚠️"};
+function calculateZScore(value, median, sd) {
+  return (value - median) / sd;
+}
+
+function getHAStatus(z) {
+  if (z < -3) return {label: "เตี้ยแคระแกร็น", bg: "#dc2626"};
+  if (z < -2) return {label: "เตี้ย", bg: "#ef4444"};
+  if (z < -1) return {label: "ค่อนข้างเตี้ย", bg: "#fef3c7"};
+  if (z <= 1) return {label: "ตามเกณฑ์", bg: "#16a34a"};
+  if (z <= 2) return {label: "ค่อนข้างสูง", bg: "#2563eb"};
+  return {label: "สูง", bg: "#7c3aed"};
+}
+
+function getWHStatus(z) {
+  if (z < -3) return {label: "ผอมแห้งรุนแรง", bg: "#dc2626"};
+  if (z < -2) return {label: "ผอม", bg: "#ef4444"};
+  if (z < -1) return {label: "ค่อนข้างผอม", bg: "#fef3c7"};
+  if (z <= 1) return {label: "สมส่วน", bg: "#16a34a"};
+  if (z <= 2) return {label: "ท้วม", bg: "#fed7aa"};
+  if (z <= 3) return {label: "เริ่มอ้วน", bg: "#ea580c"};
+  return {label: "อ้วน", bg: "#b91c1c"};
 }
 function getTotalMonths(birthDate, measuredDate) {
   const b = new Date(birthDate);
