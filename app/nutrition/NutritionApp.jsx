@@ -14,12 +14,22 @@ const supabase = createClient();
 const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head"];
 
 const MEDIAN_HEIGHT = {
-  male:   {24:87.1,30:91.2,36:95.2,42:98.7,48:102.0,54:105.1,60:108.0,66:111.5,72:114.7,84:120.7,96:126.4,108:131.7,120:136.8,132:141.6,144:146.2,156:151.5,168:157.3,180:163.1,192:167.0,204:169.5,216:170.1},
-  female: {24:85.7,30:90.2,36:94.1,42:97.6,48:100.9,54:103.9,60:107.2,66:110.5,72:113.6,84:119.6,96:125.4,108:130.7,120:135.5,132:140.8,144:147.0,156:152.4,168:157.1,180:160.5,192:162.5,204:163.8,216:163.8}
+  male: {
+    24: 87.1, 36: 95.2, 48: 102.0, 60: 108.0, 72: 114.7, 84: 120.7, 96: 126.4,
+    108: 131.7, 120: 136.8, 132: 141.6, 144: 146.2, 156: 151.5, 168: 157.3,
+    180: 163.1, 192: 167.0, 204: 169.5, 216: 170.1
+  },
+  female: {
+    24: 85.7, 36: 94.1, 48: 100.9, 60: 107.2, 72: 113.6, 84: 119.6, 96: 125.4,
+    108: 130.7, 120: 135.5, 132: 140.8, 144: 147.0, 156: 152.4, 168: 157.1,
+    180: 160.5, 192: 162.5, 204: 163.8, 216: 163.8
+  }
 };
+
 const MEDIAN_WFH = {
-  male:   {80:11,90:12.5,100:14.5,110:17,120:20,130:24,140:28.5,150:34,160:41,170:50,180:58},
-  female: {80:10.5,90:12,100:14,110:16.5,120:19.5,130:23,140:27.5,150:34,160:42,170:49,180:53}
+  // ข้อมูลละเอียดขึ้นในช่วง 80-180 ซม. เพื่อรองรับเด็กโตและเด็กเล็ก
+  male:   {80:10.5, 90:12.5, 100:14.5, 110:17.5, 120:21.0, 130:25.0, 140:30.0, 150:36.0, 160:43.0, 170:52.0, 180:60.0},
+  female: {80:10.0, 90:12.0, 100:14.0, 110:17.0, 120:20.5, 130:24.0, 140:29.0, 150:35.0, 160:42.0, 170:48.0, 180:54.0}
 };
 
 function closestVal(table,key) {
@@ -58,30 +68,27 @@ function medW(h, g) {
 }
 
 function calcNutrition(student, weightKg, heightCm, measuredDate) {
-  const ageM = differenceInMonths(new Date(measuredDate), new Date(student.birth_date));
+  const ageM = getMonthsDiff(student.birth_date, measuredDate);
   const g = gKey(student.gender);
 
-  // ส่วนสูงมาตรฐานตามอายุ (interpolated)
-  const mH = medH(ageM, g);
+  // 1. หาค่าส่วนสูงมาตรฐานตามอายุ (mH)
+  const mH = interpolate(MEDIAN_HEIGHT[g], ageM);
+  
+  // 2. หาค่า IBW (คือน้ำหนักมัธยฐานที่ความสูงนั้นๆ)
+  const ibw = interpolate(MEDIAN_WFH[g], heightCm);
 
-  // IBW = น้ำหนักมาตรฐานตามส่วนสูงมาตรฐาน
-  const ibw = medW(mH, g);
-
-  // %HA = ส่วนสูงจริง / ส่วนสูงมาตรฐาน × 100
+  // 3. คำนวณ %
   const pctHA = Math.round((heightCm / mH) * 100);
-
-  // %WH = น้ำหนักจริง / IBW × 100  ← แก้จากเดิมที่ใช้ medW(heightCm)
   const pctWH = Math.round((weightKg / ibw) * 100);
 
   return {
     age_months: ageM,
-    median_height: +mH.toFixed(1),
-    median_weight_for_height: +ibw.toFixed(1),  // IBW
-    ibw_kg: +ibw.toFixed(1),
+    median_height: parseFloat(mH.toFixed(1)),
+    ibw_kg: parseFloat(ibw.toFixed(1)),
     pct_height_for_age: pctHA,
     pct_weight_for_height: pctWH,
-    ha_status: getHAStatus(pctHA).label,
-    wh_status: getWHStatus(pctWH).label,
+    ha_status: getHAStatus(pctHA), // ตรวจสอบเงื่อนไข label ในฟังก์ชันนี้
+    wh_status: getWHStatus(pctWH)
   };
 }
 function getHAStatus(pct) {
@@ -101,6 +108,11 @@ function getWHStatus(pct) {
   if(pct<=120) return {label:"ท้วม",color:"#92400e",bg:"#fed7aa",emoji:"📊"};
   if(pct<=130) return {label:"เริ่มอ้วน",color:"#fff",bg:"#ea580c",emoji:"📈"};
   return {label:"อ้วน",color:"#fff",bg:"#b91c1c",emoji:"⚠️"};
+}
+function getTotalMonths(birthDate, measuredDate) {
+  const b = new Date(birthDate);
+  const m = new Date(measuredDate);
+  return (m.getFullYear() - b.getFullYear()) * 12 + (m.getMonth() - b.getMonth());
 }
 function formatAge(bd) {
   const y=differenceInYears(new Date(),new Date(bd));
