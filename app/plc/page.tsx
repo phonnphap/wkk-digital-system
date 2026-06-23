@@ -266,30 +266,50 @@ function MeetingModal({ meeting, allTeachers, sameGroupTeachers, academicYears, 
   }
 
   // ─── Upload รูป → Supabase Storage (แสดง preview ก่อน) ─────────────────
-  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
-    const remaining = 4 - images.length;
-    if (remaining <= 0) { alert("แนบได้สูงสุด 4 รูปเท่านั้น"); return; }
-    const toUpload = files.slice(0, remaining);
-    if (files.length > remaining) alert(`แนบได้อีก ${remaining} รูป (เลือกไว้ ${files.length} รูป ใช้เฉพาะ ${remaining} รูปแรก)`);
+  // แก้ฟังก์ชัน handleImageUpload ทั้งหมด
+async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  const files = Array.from(e.target.files ?? []);
+  if (files.length === 0) return;
+  const remaining = 4 - images.length;
+  if (remaining <= 0) { alert("แนบได้สูงสุด 4 รูปเท่านั้น"); return; }
+  const toUpload = files.slice(0, remaining);
 
-    setUploading(true);
-    for (const file of toUpload) {
-      if (file.size > 5 * 1024 * 1024) { alert(`"${file.name}" ใหญ่เกิน 5MB`); continue; }
-      // สร้าง preview ทันที
-      const previewUrl = URL.createObjectURL(file);
-      const ext = file.name.split(".").pop();
-      const path = `plc-images/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      // upload to Supabase Storage
-      const { error } = await supabase.storage.from("plc").upload(path, file, { cacheControl: "3600", upsert: false });
-      if (error) { alert(`อัพโหลดไม่สำเร็จ: ${error.message}`); URL.revokeObjectURL(previewUrl); continue; }
+  setUploading(true);
+  for (const file of toUpload) {
+    if (file.size > 5 * 1024 * 1024) { alert(`"${file.name}" ใหญ่เกิน 5MB`); continue; }
+    
+    const previewUrl = URL.createObjectURL(file);
+    const ext = file.name.split(".").pop() ?? "jpg";
+    const path = `plc-images/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    
+    try {
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("plc")
+        .upload(path, file, { cacheControl: "3600", upsert: false });
+      
+      if (uploadError) {
+        console.error("Upload error:", uploadError);
+        // Fallback: เก็บเป็น base64 ถ้า storage ไม่ work
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const base64 = ev.target?.result as string;
+          setImages(prev => [...prev, { url: base64, preview: previewUrl }]);
+        };
+        reader.readAsDataURL(file);
+        alert(`⚠️ Storage: ${uploadError.message}\nใช้รูปชั่วคราวแทน`);
+        continue;
+      }
+      
       const { data: urlData } = supabase.storage.from("plc").getPublicUrl(path);
       setImages(prev => [...prev, { url: urlData?.publicUrl ?? previewUrl, preview: previewUrl }]);
+    } catch (err: any) {
+      console.error("Upload catch:", err);
+      alert(`อัพโหลดไม่สำเร็จ: ${err.message}`);
     }
-    setUploading(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   }
+  setUploading(false);
+  if (fileInputRef.current) fileInputRef.current.value = "";
+}
 
   // ─── Validation ──────────────────────────────────────────────────────────
   const errors = {
@@ -321,7 +341,7 @@ function MeetingModal({ meeting, allTeachers, sameGroupTeachers, academicYears, 
       alert("กรุณากรอกข้อมูลให้ครบทุกช่อง");
       return;
     }
-    if (isDraft && !date || isDraft && !title.trim()) { alert("กรุณากรอกวันที่และชื่อกิจกรรม"); return; }
+    if (isDraft && (!date || !title.trim())) { alert("กรุณากรอกวันที่และชื่อกิจกรรม"); return; }
     setLoading(true);
     await onSave({
       meeting_date: date, start_time: startTime, end_time: endTime,
@@ -446,7 +466,7 @@ function MeetingModal({ meeting, allTeachers, sameGroupTeachers, academicYears, 
                   <label className={labelCls}>วิทยากร / ผู้นำ {reqStar}</label>
                   <select value={facilId} onChange={e => setFacilId(e.target.value)} className={inp(errors.facilId)}>
                     <option value="">— เลือกวิทยากร —</option>
-                    {sameAcademicLevelTeachers.map(t => <option key={t.id} value={t.id}>{fullName(t)}</option>)}
+                    {sameGroupTeachers.map(t => <option key={t.id} value={t.id}>{fullName(t)}</option>)}
                   </select>
                   {errors.facilId && <p className="text-red-500 text-xs mt-1">กรุณาเลือกวิทยากร</p>}
                 </div>
