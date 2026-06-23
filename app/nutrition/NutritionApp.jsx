@@ -168,6 +168,9 @@ function getTotalMonths(birthDate, measuredDate) {
   return (m.getFullYear() - b.getFullYear()) * 12 + (m.getMonth() - b.getMonth());
 }
 const getMonthsDiff = getTotalMonths;
+function gKey(gender) {
+  return (gender || "").toLowerCase().includes("male") || (gender || "").includes("ชาย") ? "male" : "female";
+}
 
 function formatAge(bd) {
   const y=differenceInYears(new Date(),new Date(bd));
