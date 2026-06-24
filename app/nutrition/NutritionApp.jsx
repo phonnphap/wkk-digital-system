@@ -998,21 +998,28 @@ useEffect(() => {
       <th>น้ำหนัก</th><th>ส่วนสูง</th><th>IBW</th><th>%HA</th><th>%WH</th><th>ภาวะ WH</th><th>ภาวะ HA</th>
     </tr></thead><tbody>
       ${displayRecords.map((r, i) => {
-        const wh = whStatusFromLabel(r.wh_status);
-        const ha = haStatusFromLabel(r.ha_status);
-        return `<tr>
-          <td style="text-align:center">${r.seat_number ?? (i + 1)}</td>
-          <td>${genderPrefix(r.gender, selectedClass?.room_name)} ${r.first_name} ${r.last_name}</td>
-          <td>${r.birth_date ? formatAge(r.birth_date) : "—"}</td>
-          <td>${genderLabel(r.gender)}</td>
-          <td>${r.weight_kg ?? "—"}</td><td>${r.height_cm ?? "—"}</td>
-          <td>${r.ibw_kg ?? "—"}</td>
-          <td>${r.pct_height_for_age ? r.pct_height_for_age + "%" : "—"}</td>
-          <td>${r.pct_weight_for_height ? r.pct_weight_for_height + "%" : "—"}</td>
-          <td>${wh.label === "สมส่วน" ? "normal" : wh.label.includes("ผอม") || wh.label.includes("อ้วน") || wh.label.includes("รุนแรง") ? "danger" : "warn"}</td>
-          <td>${ha.label.includes("ตามเกณฑ์") ? "normal" : ha.label.includes("เตี้ย") || ha.label.includes("แคระ") ? "danger" : "blue"}</td>
-        </tr>`;
-      }).join("")}
+  const wh = whStatusFromLabel(r.wh_status);
+  const ha = haStatusFromLabel(r.ha_status);
+  // ★ class (สี badge) คำนวณแยกจาก label — label ต้องเป็นข้อความไทยที่ระบบประเมินไว้เท่านั้น
+  const whCls = !wh ? "" : wh.label === "สมส่วน" ? "normal"
+    : (wh.label.includes("ผอม") || wh.label.includes("อ้วน") || wh.label.includes("รุนแรง")) ? "danger"
+    : "warn";
+  const haCls = !ha ? "" : ha.label.includes("ตามเกณฑ์") ? "normal"
+    : (ha.label.includes("เตี้ย") || ha.label.includes("แคระ")) ? "danger"
+    : "blue";
+  return `<tr>
+    <td style="text-align:center">${r.seat_number ?? (i + 1)}</td>
+    <td>${genderPrefix(r.gender, selectedClass?.room_name)} ${r.first_name} ${r.last_name}</td>
+    <td>${r.birth_date ? formatAge(r.birth_date) : "—"}</td>
+    <td>${genderLabel(r.gender)}</td>
+    <td>${r.weight_kg ?? "—"}</td><td>${r.height_cm ?? "—"}</td>
+    <td>${r.ibw_kg ?? "—"}</td>
+    <td>${r.pct_height_for_age ? r.pct_height_for_age + "%" : "—"}</td>
+    <td>${r.pct_weight_for_height ? r.pct_weight_for_height + "%" : "—"}</td>
+    <td>${wh ? `<span class="badge ${whCls}">${wh.emoji} ${wh.label}</span>` : "—"}</td>
+    <td>${ha ? `<span class="badge ${haCls}">${ha.emoji} ${ha.label}</span>` : "—"}</td>
+  </tr>`;
+}).join("")}
     </tbody></table>
     <p style="margin-top:12px;font-size:11px;color:#6b7280">สมส่วน ${summary.normal} คน | เสี่ยง ${summary.risk} คน | เร่งด่วน ${summary.urgent} คน | รวม ${summary.total} คน</p>`;
     const w = window.open("", "_blank", "width=1100,height=750");
