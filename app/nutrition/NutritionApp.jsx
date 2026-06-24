@@ -582,8 +582,8 @@ function ClassAssessPage({currentUser}) {
         <tbody>
           ${rows.map((r,i)=>{
             const s=r.student;
-            const wh=r.result?getWHStatus(r.result.pct_weight_for_height):null;
-            const ha=r.result?getHAStatus(r.result.pct_height_for_age):null;
+            const wh = r.result ? getWHStatus(r.result.z_weight_for_height) : null;
+            const ha = r.result ? getHAStatus(r.result.z_height_for_age)    : null;
             const whCls=wh?(wh.label.includes("สมส่วน")?"normal":wh.label.includes("เตี้ย")||wh.label.includes("ผอม")?"danger":"warn"):"";
             const haCls=ha?(ha.label.includes("ตามเกณฑ์")?"normal":ha.label.includes("เตี้ย")?"danger":"blue"):"";
             return `<tr>
@@ -592,9 +592,9 @@ function ClassAssessPage({currentUser}) {
               <td>${formatAge(s.birth_date)}</td>
               <td>${r.result?r.result.weight_kg:"—"}</td>
               <td>${r.result?r.result.height_cm:"—"}</td>
-              <td>${r.result?r.result.ibw_kg:"—"}</td>
-              <td>${r.result?r.result.pct_height_for_age+"%":"—"}</td>
-              <td>${r.result?r.result.pct_weight_for_height+"%":"—"}</td>
+              <td>${r.result ? r.result.median_weight_for_height : "—"}</td>
+              <td>${r.result ? r.result.pct_height_for_age + "%" : "—"}</td>
+              <td>${r.result ? r.result.pct_weight_for_height + "%" : "—"}</td>
               <td>${wh?`<span class="badge ${whCls}">${wh.label}</span>`:"—"}</td>
               <td>${ha?`<span class="badge ${haCls}">${ha.label}</span>`:"—"}</td>
             </tr>`;
