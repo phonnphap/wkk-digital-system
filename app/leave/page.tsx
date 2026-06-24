@@ -184,13 +184,20 @@ function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: {
   // [FIX-2] กล่องผู้ตรวจสอบ — เอาเส้นจุดประใต้ "ลงชื่อ" ออก เหลือแค่รูปลายเซ็นลอย + ชื่อ/ตำแหน่ง/วันที่
   const checkerBlock = `
   <div style="margin-top:10px;font-size:10.5pt;line-height:1.7;text-align:center">
-    <div style="height:42px;display:flex;align-items:flex-end;justify-content:center;margin-bottom:2px">
-      ${approver1?.signature_url
-        ? `<img src="${approver1.signature_url}" style="max-height:42px;max-width:140px;object-fit:contain"/>`
-        : ``}
+    <!-- ชุดลายเซ็นแบบ: ลงชื่อ  [ลายเซ็น]  ผู้ตรวจ -->
+    <div style="height:42px; display:inline-flex; align-items:flex-end; justify-content:center; gap:12px; margin-bottom:2px">
+      <span style="white-space:nowrap">ลงชื่อ</span>
+      <div style="min-width:120px; max-height:42px; display:flex; items-content:center; justify-content:center">
+        ${approver1?.signature_url
+          ? `<img src="${approver1.signature_url}" style="max-height:42px; max-width:140px; object-fit:contain"/>`
+          : `<span style="color:#64748b; letter-spacing:2px">...................</span>`}
+      </div>
+      <span style="white-space:nowrap">ผู้ตรวจสอบ</span>
     </div>
+    
+    <br>
     (${approver1?.name || "นางสาวพรรษา แก้วใหญ่"})<br>
-    ตำแหน่ง ครู วันที่ ${approver1?.approved_at || ".............................."}
+    หัวหน้ากลุ่มบริหารงานบุคคล <br> วันที่ ${approver1?.approved_at || ".............................."}
   </div>`;
 
   // [FIX-2] box2/box3 — เอา border-bottom (เส้นขีด) ใต้รูปลายเซ็นออก เหลือแค่รูปลอยอยู่
