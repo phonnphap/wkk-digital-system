@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     const { to, subject, html, attachments } = await req.json();
     
     const { data, error } = await resend.emails.send({
-      from: "ระบบลา WKK <onboarding@resend.dev>",
+      from: "ระบบลา WKK <noreply@khienkhet.ac.th>",
       to: Array.isArray(to) ? to : [to],
       subject,
       html,
