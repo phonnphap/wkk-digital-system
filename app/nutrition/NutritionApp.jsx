@@ -602,8 +602,8 @@ function ClassAssessPage({currentUser}) {
         </tbody>
       </table>
       <p style="margin-top:16px;font-size:11px;color:#6b7280">
-        สมส่วน: ${rows.filter(r=>r.result?.wh_status==="สมส่วน").length} คน &nbsp;|&nbsp;
-        ตามเกณฑ์ (HA): ${rows.filter(r=>r.result?.ha_status==="ตามเกณฑ์").length} คน &nbsp;|&nbsp;
+        สมส่วน: ${rows.filter(r => r.result && getWHStatus(r.result.z_weight_for_height).label === "สมส่วน").length} คน &nbsp;|&nbsp;
+        สูงตามเกณฑ์ (HA): ${rows.filter(r => r.result && getHAStatus(r.result.z_height_for_age).label === "สูงตามเกณฑ์").length} คน &nbsp;|&nbsp;
         รวมทั้งหมด: ${students.length} คน วัดแล้ว: ${filledCount} คน
       </p>`;
     const w=window.open("","_blank","width=1000,height=700");
