@@ -1,5 +1,4 @@
-//ลาใหม่สุด
-//ลาใหม่
+//ลาใหม่สุด-fixed
 "use client";
 export const dynamic = 'force-dynamic';
 
@@ -44,7 +43,6 @@ function fullName(u: any) {
   if (u.full_name) return u.full_name;
   return `${u.title??""} ${u.first_name??""} ${u.last_name??""}`.replace(/\s+/g," ").trim();
 }
-// แสดง title first_name last_name แยก
 function displayName(u: any) {
   if (!u) return "";
   return `${u.title??""} ${u.first_name??""} ${u.last_name??""}`.replace(/\s+/g," ").trim();
@@ -69,17 +67,37 @@ function approverSlotByEmail(email: string): 1|2|3|null {
   return null;
 }
 
+// [FIX-4] ──────────────────────────────────────────────────
+// OneDrive @microsoft.graph.downloadUrl ที่ได้ตอนอัพโหลดจะหมดอายุหลังผ่านไปสักพัก
+// (เป็นลิงก์ pre-authenticated ชั่วคราว) ทำให้ <img>/<iframe> เอกสารแนบใช้ไม่ได้
+// เมื่อเปิดดูใบลาในวันหลัง ฟังก์ชันนี้ขอลิงก์ใหม่สด ๆ จาก /api/resolve-onedrive
+// โดยใช้ document_path ที่บันทึกไว้ตอนอัพโหลด (ดู api-resolve-onedrive-route.ts)
+async function resolveAttachmentUrl(documentPath?: string | null, fallbackUrl?: string | null): Promise<string | null> {
+  if (!documentPath) return fallbackUrl ?? null;
+  try {
+    const res = await fetch("/api/resolve-onedrive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: documentPath }),
+    });
+    const json = await res.json();
+    if (json.ok && json.downloadUrl) return json.downloadUrl as string;
+  } catch {
+    // เงียบไว้ ใช้ fallback
+  }
+  return fallbackUrl ?? null;
+}
+
 // ─── Types ────────────────────────────────────────────────
 type UserProfile = { id:string; title?:string; first_name?:string; last_name?:string; full_name?:string; email:string; role:string; position?:string; signature_url?:string; grade_level?:string; phone?:string; };
 type ApproverInfo = { id:string; full_name:string; position?:string; email?:string };
 type DutyOfficer  = { id:string; full_name:string; position?:string; email?:string };
 
-// ─── สถิติการลา (ดึงจาก DB) ──────────────────────────────
-type LeaveStats = { 
-  sick: number; 
-  personal: number; 
+type LeaveStats = {
+  sick: number;
+  personal: number;
   maternity: number;
-  lastLeave?: {          // ✅ ใหม่
+  lastLeave?: {
     type: "sick"|"personal"|"maternity"|"ordination"|"other";
     startDate: string;
     endDate: string;
@@ -117,8 +135,10 @@ const sel = (err?: boolean) => `w-full bg-white border-2 ${err?"border-red-400":
 
 // ══════════════════════════════════════════════════════════
 // ── PDF Builder ────────────────────────────────────────────
+// [FIX-3] ลดขนาดฟอนต์/padding/margin ทั้งหมดให้พอดี A4 หน้าเดียว
+// [FIX-2] เอาเส้นใต้ลายเซ็นออก ให้เหลือแค่รูปลายเซ็นลอย
 // ══════════════════════════════════════════════════════════
-function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: { 
+function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: {
   name: string; position: string; signature_url?: string; approved_at?: string;
 }[], documentUrl?: string, leaveStats?: LeaveStats): string {
   const now = new Date();
@@ -130,7 +150,6 @@ function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: {
   const lastIsSick     = last?.type === "sick";
   const lastIsPersonal = last && ["personal","other","ordination"].includes(last.type);
   const lastIsMat      = last?.type === "maternity";
-  // ✅ isPersonal รวม ordination ด้วย (นับเป็นลากิจในตาราง)
   const isPersonal = data.leaveType==="personal"||data.leaveType==="other"||data.leaveType==="ordination";
   const isMat      = data.leaveType==="maternity";
   const isOfficial = data.leaveType==="official";
@@ -142,57 +161,52 @@ function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: {
   const approver2 = approverSignatures?.[1];
   const approver3 = approverSignatures?.[2];
 
-  // ✅ สถิติจาก DB (ถ้าไม่มีให้แสดงว่าง)
   const statSick     = leaveStats?.sick     ?? 0;
-  const statPersonal = leaveStats?.personal ?? 0;  // รวม ordination แล้ว
+  const statPersonal = leaveStats?.personal ?? 0;
   const statMat      = leaveStats?.maternity?? 0;
 
-  // ✅ สถิติรวม ครั้งนี้
   const thisSick     = isSick     ? Number(daysDisplay) : 0;
   const thisPersonal = isPersonal ? Number(daysDisplay) : 0;
   const thisMat      = isMat      ? Number(daysDisplay) : 0;
 
+  // [FIX-3] เอกสารแนบอยู่หน้าใหม่เสมอ (ไม่กระทบหน้าใบลาหลัก ซึ่งทำให้พอดี 1 แผ่นแล้ว)
   const attachmentPage = documentUrl ? `
-    <div style="page-break-before:always;padding:14mm 18mm 10mm">
-      <div style="font-size:14pt;font-weight:900;margin-bottom:12px;border-bottom:2px solid #000;padding-bottom:8px">
+    <div style="page-break-before:always;padding:10mm 16mm 8mm">
+      <div style="font-size:13pt;font-weight:900;margin-bottom:10px;border-bottom:2px solid #000;padding-bottom:6px">
         เอกสารแนบ
       </div>
-      ${/\.(jpg|jpeg|png|gif|webp)/i.test(documentUrl)
-        ? `<img src="${documentUrl}" style="max-width:100%;max-height:220mm;object-fit:contain;display:block;margin:0 auto"/>`
-        : `<iframe src="${documentUrl}" style="width:100%;height:220mm;border:1px solid #ccc"></iframe>`
+      ${/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(documentUrl)
+        ? `<img src="${documentUrl}" style="max-width:100%;max-height:230mm;object-fit:contain;display:block;margin:0 auto" onerror="this.outerHTML='<p style=&quot;text-align:center;color:#999;padding:40px&quot;>⚠️ ไม่สามารถโหลดรูปภาพเอกสารแนบได้ (ลิงก์อาจหมดอายุ)</p>'"/>`
+        : `<iframe src="${documentUrl}" style="width:100%;height:230mm;border:1px solid #ccc"></iframe>`
       }
     </div>` : '';
 
+  // [FIX-2] กล่องผู้ตรวจสอบ — เอาเส้นจุดประใต้ "ลงชื่อ" ออก เหลือแค่รูปลายเซ็นลอย + ชื่อ/ตำแหน่ง/วันที่
   const checkerBlock = `
-  <div style="margin-top:14px;font-size:11.5pt;line-height:2;text-align:center">
-    <div style="display:flex;flex-direction:column;align-items:center">
+  <div style="margin-top:10px;font-size:10.5pt;line-height:1.7;text-align:center">
+    <div style="height:42px;display:flex;align-items:flex-end;justify-content:center;margin-bottom:2px">
       ${approver1?.signature_url
-        ? `<img src="${approver1.signature_url}" style="max-height:55px;max-width:150px;object-fit:contain;margin-bottom:2px"/>`
-        : `<div style="height:55px"></div>`}
-      <div style="border-bottom:1px solid #000;width:220px;margin-bottom:4px"></div>
+        ? `<img src="${approver1.signature_url}" style="max-height:42px;max-width:140px;object-fit:contain"/>`
+        : ``}
     </div>
-    ลงชื่อ.......................................ผู้ตรวจสอบ<br>
     (${approver1?.name || "นางสาวพรรษา แก้วใหญ่"})<br>
-    ตำแหน่ง ครู<br>
-    วันที่ ${approver1?.approved_at || ".............................."}
+    ตำแหน่ง ครู วันที่ ${approver1?.approved_at || ".............................."}
   </div>`;
 
+  // [FIX-2] box2/box3 — เอา border-bottom (เส้นขีด) ใต้รูปลายเซ็นออก เหลือแค่รูปลอยอยู่
   const box2 = `
-  <div class="box" style="margin-bottom:10px;font-size:11.5pt;line-height:1.9">
-    <div style="font-weight:700;margin-bottom:5px">ความเห็นของรอง ผอ.กลุ่มบริหารงานบุคคล</div>
-    <div style="min-height:20px;padding:2px 4px;margin:4px 0;border-bottom:1px dotted #555">
+  <div class="box" style="margin-bottom:7px;font-size:10.5pt;line-height:1.6">
+    <div style="font-weight:700;margin-bottom:3px">ความเห็นของรอง ผอ.กลุ่มบริหารงานบุคคล</div>
+    <div style="min-height:15px;padding:1px 4px;margin:2px 0;border-bottom:1px dotted #555">
       ${approver2?.approved_at ? "เห็นควรอนุญาต" : ""}
     </div>
-    <div style="display:flex;flex-direction:column;align-items:center;margin-top:10px">
-      <div style="position:relative;width:220px">
+    <div style="display:flex;flex-direction:column;align-items:center;margin-top:6px">
+      <div style="height:40px;display:flex;align-items:flex-end;justify-content:center">
         ${approver2?.signature_url
-          ? `<img src="${approver2.signature_url}"
-               style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);
-                      max-height:52px;max-width:160px;object-fit:contain;z-index:1"/>`
-          : `<div style="height:52px"></div>`}
-        <div style="border-bottom:1px solid #000;width:220px;margin-top:54px"></div>
+          ? `<img src="${approver2.signature_url}" style="max-height:40px;max-width:150px;object-fit:contain"/>`
+          : ``}
       </div>
-      <div style="margin-top:4px;text-align:center">
+      <div style="margin-top:2px;text-align:center">
         (${approver2?.name || "นางสาวฐิติมา กาบแก้ว"})<br>
         ${approver2?.position || "รองผู้อำนวยการกลุ่มบริหารงานบุคคล"}<br>
         วันที่ ${approver2?.approved_at || ".............................."}
@@ -201,26 +215,23 @@ function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: {
   </div>`;
 
   const box3 = `
-  <div class="box" style="font-size:11.5pt;line-height:1.9">
-    <div style="font-weight:700;margin-bottom:4px">ความเห็นของผู้บังคับบัญชา</div>
-    <div style="margin-bottom:6px">
+  <div class="box" style="font-size:10.5pt;line-height:1.6">
+    <div style="font-weight:700;margin-bottom:3px">ความเห็นของผู้บังคับบัญชา</div>
+    <div style="margin-bottom:4px">
       <span class="chk">${approver3?.signature_url ? "✓" : ""}</span>อนุญาต
       &nbsp;&nbsp;&nbsp;
       <span class="chk"></span>ไม่อนุญาต
     </div>
-    <div style="min-height:20px;padding:2px 4px;margin:4px 0;border-bottom:1px dotted #555">
+    <div style="min-height:15px;padding:1px 4px;margin:2px 0;border-bottom:1px dotted #555">
       ${approver3?.signature_url ? "พิจารณาแล้วเห็นสมควรอนุญาต" : ""}
     </div>
-    <div style="display:flex;flex-direction:column;align-items:center;margin-top:10px">
-      <div style="position:relative;width:220px">
+    <div style="display:flex;flex-direction:column;align-items:center;margin-top:6px">
+      <div style="height:40px;display:flex;align-items:flex-end;justify-content:center">
         ${approver3?.signature_url
-          ? `<img src="${approver3.signature_url}"
-               style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);
-                      max-height:52px;max-width:160px;object-fit:contain;z-index:1"/>`
-          : `<div style="height:52px"></div>`}
-        <div style="border-bottom:1px solid #000;width:220px;margin-top:54px"></div>
+          ? `<img src="${approver3.signature_url}" style="max-height:40px;max-width:150px;object-fit:contain"/>`
+          : ``}
       </div>
-      <div style="margin-top:4px;text-align:center">
+      <div style="margin-top:2px;text-align:center">
         (${approver3?.name || "นายธนณัฐ ศิระวงษ์"})<br>
         ${approver3?.position || "ผู้อำนวยการโรงเรียนวัดเขียนเขต"}<br>
         วันที่ ${approver3?.approved_at || ".............................."}
@@ -228,7 +239,6 @@ function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: {
     </div>
   </div>`;
 
-  // ✅ ตารางสถิติ — ถ้าไปราชการไม่แสดงจำนวนวัน แต่ยังคงโครงตาราง
   const statsTableRows = isOfficial ? `
       <tr><td>ลาป่วย</td><td></td><td></td><td></td></tr>
       <tr><td>ลากิจส่วนตัว</td><td></td><td></td><td></td></tr>
@@ -258,102 +268,104 @@ function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: {
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:210mm;font-family:'Sarabun',Arial,sans-serif;font-size:13.5pt;color:#000;background:white}
-.page{padding:14mm 18mm 10mm}
+html,body{width:210mm;font-family:'Sarabun',Arial,sans-serif;font-size:12pt;color:#000;background:white}
+.page{padding:10mm 16mm 8mm}
 .dotline{border-bottom:1px dotted #555}
-.box{border:1px solid #888;padding:10px 12px;min-height:95px;border-radius:3px}
-.chk{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border:1.5px solid #000;margin-right:5px;font-size:11pt;vertical-align:middle}
-table.stat{border-collapse:collapse;font-size:11.5pt;width:100%}
-table.stat td,table.stat th{border:1px solid #000;padding:4px 8px;text-align:center}
+.box{border:1px solid #888;padding:7px 10px;min-height:76px;border-radius:3px}
+.chk{display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border:1.5px solid #000;margin-right:4px;font-size:10pt;vertical-align:middle}
+table.stat{border-collapse:collapse;font-size:10.5pt;width:100%}
+table.stat td,table.stat th{border:1px solid #000;padding:3px 6px;text-align:center}
 table.stat th{background:#f0f0f0;font-weight:700}
 table.stat td:first-child{text-align:left}
+@page{size:A4;margin:0}
+@media print{.page{page-break-after:avoid}}
 </style></head><body><div class="page">
 
-<div style="text-align:center;margin-bottom:7px">
-  <img src="/school-logo.png" style="width:70px;height:70px;object-fit:contain" onerror="this.style.display='none'"/>
+<div style="text-align:center;margin-bottom:4px">
+  <img src="/school-logo.png" style="width:54px;height:54px;object-fit:contain" onerror="this.style.display='none'"/>
 </div>
-<div style="font-size:16pt;font-weight:900;text-align:center;margin:5px 0">แบบใบลาป่วย ลากิจส่วนตัว ลาคลอดบุตร</div>
-<div style="text-align:right;line-height:1.9;font-size:12.5pt;margin-bottom:10px">
+<div style="font-size:14.5pt;font-weight:900;text-align:center;margin:3px 0">แบบใบลาป่วย ลากิจส่วนตัว ลาคลอดบุตร</div>
+<div style="text-align:right;line-height:1.5;font-size:11pt;margin-bottom:7px">
   โรงเรียนวัดเขียนเขต ตำบลบึงยี่โถ<br>อำเภอธัญบุรี จังหวัดปทุมธานี
 </div>
 
-<div style="text-align:right;margin-bottom:12px;font-size:12.5pt">
-  วันที่ <span class="dotline" style="min-width:35px;display:inline-block;text-align:center;font-weight:700">&nbsp;${thDay}&nbsp;</span>
-  เดือน <span class="dotline" style="min-width:100px;display:inline-block;text-align:center;font-weight:700">&nbsp;${thMonth}&nbsp;</span>
-  พ.ศ. <span class="dotline" style="min-width:55px;display:inline-block;text-align:center;font-weight:700">&nbsp;${thYear}&nbsp;</span>
+<div style="text-align:right;margin-bottom:8px;font-size:11pt">
+  วันที่ <span class="dotline" style="min-width:32px;display:inline-block;text-align:center;font-weight:700">&nbsp;${thDay}&nbsp;</span>
+  เดือน <span class="dotline" style="min-width:90px;display:inline-block;text-align:center;font-weight:700">&nbsp;${thMonth}&nbsp;</span>
+  พ.ศ. <span class="dotline" style="min-width:50px;display:inline-block;text-align:center;font-weight:700">&nbsp;${thYear}&nbsp;</span>
 </div>
 
-<div style="display:flex;align-items:baseline;gap:4px;margin-bottom:7px;font-size:12.5pt">
+<div style="display:flex;align-items:baseline;gap:4px;margin-bottom:5px;font-size:11pt">
   <span style="white-space:nowrap">เรื่อง</span>
   <span class="dotline" style="flex:1;font-weight:700;padding-left:8px">ขออนุญาต${leaveLabel}${halfText}</span>
 </div>
-<div style="margin-bottom:12px;font-size:12.5pt">เรียน ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
+<div style="margin-bottom:8px;font-size:11pt">เรียน ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
 
-<div style="display:flex;gap:6px;align-items:baseline;margin-bottom:8px;padding-left:50px;font-size:12.5pt">
+<div style="display:flex;gap:6px;align-items:baseline;margin-bottom:6px;padding-left:40px;font-size:11pt">
   <span style="white-space:nowrap">ข้าพเจ้า</span>
   <span class="dotline" style="flex:1;font-weight:700;padding-left:6px">${data.fullName}</span>
   <span style="white-space:nowrap">ตำแหน่ง</span>
   <span class="dotline" style="flex:1;font-weight:700;padding-left:6px">${data.position}</span>
 </div>
-<div style="margin-bottom:10px;font-size:12.5pt">สังกัดโรงเรียนวัดเขียนเขต สำนักงานเขตพื้นที่การศึกษาประถมศึกษาปทุมธานี เขต 2</div>
+<div style="margin-bottom:7px;font-size:11pt">สังกัดโรงเรียนวัดเขียนเขต สำนักงานเขตพื้นที่การศึกษาประถมศึกษาปทุมธานี เขต 2</div>
 
-<div style="line-height:2.3;margin-bottom:8px;font-size:12.5pt">
+<div style="line-height:1.8;margin-bottom:6px;font-size:11pt">
   ขออนุญาต${leaveLabel} เนื่องจาก${reasonClean}
 </div>
 
-<div style="display:flex;gap:4px;align-items:baseline;margin-bottom:8px;font-size:12.5pt;flex-wrap:wrap">
+<div style="display:flex;gap:4px;align-items:baseline;margin-bottom:6px;font-size:11pt;flex-wrap:wrap">
   <span style="white-space:nowrap">ตั้งแต่วันที่</span>
-  <span class="dotline" style="flex:1;min-width:120px;text-align:center;font-weight:700">${toThaiDateLong(data.startDate)}</span>
+  <span class="dotline" style="flex:1;min-width:110px;text-align:center;font-weight:700">${toThaiDateLong(data.startDate)}</span>
   <span style="white-space:nowrap">ถึงวันที่</span>
-  <span class="dotline" style="flex:1;min-width:120px;text-align:center;font-weight:700">${toThaiDateLong(data.endDate)}</span>
+  <span class="dotline" style="flex:1;min-width:110px;text-align:center;font-weight:700">${toThaiDateLong(data.endDate)}</span>
   <span style="white-space:nowrap">มีกำหนด</span>
-  <span class="dotline" style="min-width:45px;text-align:center;font-weight:700">${daysDisplay}</span>
+  <span class="dotline" style="min-width:40px;text-align:center;font-weight:700">${daysDisplay}</span>
   <span style="white-space:nowrap">วัน${halfText}</span>
 </div>
 
-<div style="margin-bottom:10px;font-size:12.5pt;line-height:2.2">
-  ข้าพเจ้า ได้ 
-  <span class="chk">${lastIsSick?"✓":""}</span> ลาป่วย 
-  <span class="chk">${lastIsPersonal?"✓":""}</span> ลากิจส่วนตัว 
+<div style="margin-bottom:7px;font-size:11pt;line-height:1.7">
+  ข้าพเจ้า ได้
+  <span class="chk">${lastIsSick?"✓":""}</span> ลาป่วย
+  <span class="chk">${lastIsPersonal?"✓":""}</span> ลากิจส่วนตัว
   <span class="chk">${lastIsMat?"✓":""}</span> ลาคลอดบุตร ครั้งสุดท้าย<br>
-  ตั้งแต่วันที่<span class="dotline" style="min-width:120px;display:inline-block">
+  ตั้งแต่วันที่<span class="dotline" style="min-width:110px;display:inline-block">
     ${last ? `&nbsp;${toThaiDateLong(last.startDate)}&nbsp;` : "&nbsp;&nbsp;&nbsp;&nbsp;"}
   </span>
-  ถึงวันที่<span class="dotline" style="min-width:120px;display:inline-block">
+  ถึงวันที่<span class="dotline" style="min-width:110px;display:inline-block">
     ${last ? `&nbsp;${toThaiDateLong(last.endDate)}&nbsp;` : "&nbsp;&nbsp;&nbsp;&nbsp;"}
   </span>
-  มีกำหนด<span class="dotline" style="min-width:45px;display:inline-block">
+  มีกำหนด<span class="dotline" style="min-width:40px;display:inline-block">
     ${last ? `&nbsp;${last.days}&nbsp;` : "&nbsp;&nbsp;"}
   </span>วัน
 </div>
 
-<div style="display:flex;align-items:baseline;gap:4px;margin-bottom:5px;font-size:12.5pt">
+<div style="display:flex;align-items:baseline;gap:4px;margin-bottom:4px;font-size:11pt">
   <span style="white-space:nowrap">ในระหว่างลาจะติดต่อข้าพเจ้าได้ที่</span>
   <span class="dotline" style="flex:1;font-weight:700;padding-left:8px">${data.contactInfo||data.phone||""}</span>
 </div>
-<div class="dotline" style="height:20px;margin-bottom:18px"></div>
+<div class="dotline" style="height:14px;margin-bottom:10px"></div>
 
-<div style="text-align:right;padding-right:8%;margin-top:12px">
-  <div style="display:inline-flex;flex-direction:column;align-items:center;width:260px">
-    <div style="font-size:12.5pt;margin-bottom:8px">ขอแสดงความนับถือ</div>
-    <div style="height:65px;display:flex;align-items:flex-end;justify-content:center;width:100%">
-      ${signatureUrl?`<img src="${signatureUrl}" style="max-height:70px;max-width:180px;object-fit:contain" alt="ลายเซ็น"/>`:``}
+<div style="text-align:right;padding-right:8%;margin-top:6px">
+  <div style="display:inline-flex;flex-direction:column;align-items:center;width:240px">
+    <div style="font-size:11pt;margin-bottom:4px">ขอแสดงความนับถือ</div>
+    <div style="height:46px;display:flex;align-items:flex-end;justify-content:center;width:100%">
+      ${signatureUrl?`<img src="${signatureUrl}" style="max-height:46px;max-width:160px;object-fit:contain" alt="ลายเซ็น"/>`:``}
     </div>
-    <div style="border-bottom:1px solid #000;width:240px;margin-top:3px"></div>
-    <div style="font-size:12.5pt;margin-top:6px">(${data.fullName})</div>
+    <div style="border-bottom:1px solid #000;width:220px;margin-top:2px"></div>
+    <div style="font-size:11pt;margin-top:4px">(${data.fullName})</div>
   </div>
 </div>
 
-<div style="display:flex;gap:18px;margin-top:20px">
+<div style="display:flex;gap:14px;margin-top:10px">
   <div style="flex:1">
-    <div style="font-weight:700;text-decoration:underline;margin-bottom:7px;font-size:11.5pt">สถิติการลาในปีงบประมาณนี้</div>
+    <div style="font-weight:700;text-decoration:underline;margin-bottom:5px;font-size:10.5pt">สถิติการลาในปีงบประมาณนี้</div>
     <table class="stat">
       <tr><th>ประเภทการลา</th><th>ลามาแล้ว</th><th>ลาครั้งนี้</th><th>รวมเป็น</th></tr>
       ${statsTableRows}
     </table>
     ${checkerBlock}
   </div>
-  <div style="flex:1;border-left:1px dashed #ccc;padding-left:14px">
+  <div style="flex:1;border-left:1px dashed #ccc;padding-left:12px">
     ${box2}
     ${box3}
   </div>
@@ -368,6 +380,15 @@ function printLeave(data: any, signatureUrl: string, approverSignatures?: any[],
   if (!win) return;
   win.document.open(); win.document.write(html); win.document.close();
   win.onload = () => { win.focus(); win.print(); };
+}
+
+// [FIX-4] เวอร์ชัน async — resolve เอกสารแนบให้สดก่อนพิมพ์ ถ้ามี document_path เก็บไว้
+async function printLeaveAsync(
+  data: any, signatureUrl: string, approverSignatures?: any[],
+  documentUrl?: string, documentPath?: string | null, leaveStats?: LeaveStats
+) {
+  const freshUrl = await resolveAttachmentUrl(documentPath, documentUrl);
+  printLeave(data, signatureUrl, approverSignatures, freshUrl ?? undefined, leaveStats);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -440,18 +461,17 @@ function SignaturePad({ initialUrl, onSave, onClose, title = "✍️ ลาย�
 }
 
 // ══════════════════════════════════════════════════════════
-// ── CompanionSelector — ✅ ใหม่: เลือกผู้ร่วมเดินทางแบบ multi-select + search
+// ── CompanionSelector ───────────────────────────────────────
 // ══════════════════════════════════════════════════════════
 function CompanionSelector({ allTeachers, selected, onChange }: {
   allTeachers: UserProfile[];
-  selected: string[];       // array of user id
+  selected: string[];
   onChange: (ids: string[]) => void;
 }) {
   const [search, setSearch] = useState("");
   const [open, setOpen]     = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // ปิด dropdown เมื่อคลิกนอก
   useEffect(() => {
     function handle(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
@@ -474,7 +494,6 @@ function CompanionSelector({ allTeachers, selected, onChange }: {
 
   return (
     <div ref={ref} className="relative">
-      {/* Chips แสดงที่เลือก */}
       <div
         onClick={() => setOpen(v => !v)}
         className="w-full bg-white border-2 border-blue-200 rounded-xl px-4 py-3 text-slate-800 text-sm font-medium focus-within:border-blue-500 cursor-pointer min-h-[46px] flex flex-wrap gap-1.5 items-center"
@@ -495,10 +514,8 @@ function CompanionSelector({ allTeachers, selected, onChange }: {
         <span className="ml-auto text-slate-400 text-xs">{open ? "▲" : "▼"}</span>
       </div>
 
-      {/* Dropdown */}
       {open && (
         <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border-2 border-blue-200 rounded-xl shadow-xl overflow-hidden">
-          {/* Search box */}
           <div className="px-3 py-2 border-b border-slate-100">
             <input
               type="text"
@@ -650,7 +667,6 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
   const [docFile,      setDocFile]      = useState<File|null>(null);
   const [tripDest,     setTripDest]     = useState("");
   const [vehicle,      setVehicle]      = useState<"school"|"personal">("school");
-  // ✅ เปลี่ยนจาก string เป็น array of user ids
   const [companionIds, setCompanionIds] = useState<string[]>([]);
   const [missedPeriods,setMissedPeriods]= useState<string[]>([]);
   const [substitute,   setSubstitute]   = useState("");
@@ -667,7 +683,6 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
   const [touched,      setTouched]      = useState<Record<string,boolean>>({});
   const [docPreview,   setDocPreview]   = useState<string|null>(null);
   const [docMime,      setDocMime]      = useState<string>("");
-  // ✅ สถิติการลาจาก DB
   const [leaveStats,   setLeaveStats]   = useState<LeaveStats>({ sick:0, personal:0, maternity:0 });
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -684,40 +699,35 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
     return d.toISOString().split("T")[0];
   })() : undefined;
 
-  // ✅ โหลดสถิติการลาจาก DB
   useEffect(()=>{
     (async()=>{
       const fy = getCurrentFiscalYear();
-      // ดึง leave_requests ของ user ในปีงบประมาณปัจจุบัน ที่ไม่ถูก reject/cancel
       const { data } = await supabase
-  .from("leave_requests")
-  .select("*, approver_1_signature, approver_1_approved_at, approver_2_signature, approver_2_approved_at, approver_3_signature, approver_3_approved_at")
-  .eq("user_id", user.id)
-  .order("created_at", { ascending: false });
-      
+        .from("leave_requests")
+        .select("*, approver_1_signature, approver_1_approved_at, approver_2_signature, approver_2_approved_at, approver_3_signature, approver_3_approved_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
       if (!data) return;
-      // กรองเฉพาะปีงบประมาณปัจจุบัน
       const fyData = data.filter(r => isInFiscalYear(r.start_date, fy));
-      // ยกเว้นรายการ editData ตัวเอง (ถ้าแก้ไข)
       const filtered = editData?.id ? fyData.filter((r:any) => r.id !== editData.id) : fyData;
-      
+
       const sick     = filtered.filter((r:any) => r.leave_type === "sick").reduce((s:number,r:any) => s + Number(r.days_count), 0);
-      // ✅ ordination นับรวมกับ personal ในตาราง
       const personal = filtered.filter((r:any) => ["personal","other","ordination"].includes(r.leave_type)).reduce((s:number,r:any) => s + Number(r.days_count), 0);
       const maternity = filtered.filter((r:any) => r.leave_type === "maternity").reduce((s:number,r:any) => s + Number(r.days_count), 0);
-      
+
       const lastLeaveReq = filtered
-  .filter((r:any) => r.leave_type !== "official")
-  .sort((a:any,b:any) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())[0];
+        .filter((r:any) => r.leave_type !== "official")
+        .sort((a:any,b:any) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())[0];
 
-const lastLeave = lastLeaveReq ? {
-  type: lastLeaveReq.leave_type,
-  startDate: lastLeaveReq.start_date,
-  endDate: lastLeaveReq.end_date,
-  days: Number(lastLeaveReq.days_count),
-} : null;
+      const lastLeave = lastLeaveReq ? {
+        type: lastLeaveReq.leave_type,
+        startDate: lastLeaveReq.start_date,
+        endDate: lastLeaveReq.end_date,
+        days: Number(lastLeaveReq.days_count),
+      } : null;
 
-setLeaveStats({ sick, personal, maternity, lastLeave });
+      setLeaveStats({ sick, personal, maternity, lastLeave });
     })();
   }, [user.id, editData?.id]);
 
@@ -765,6 +775,7 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
     if(!isDraft&&sickTooFarAhead){alert("ลาป่วยสามารถยื่นล่วงหน้าได้ไม่เกิน 1 วัน");return;}
 
     let docUrl: string | null = null;
+    let docPath: string | null = null; // [FIX-4] เก็บ path ไว้ resolve ใหม่ได้ทุกครั้ง
     if (docFile) {
       const MAX_SIZE = 4 * 1024 * 1024;
       if (docFile.size > MAX_SIZE) {
@@ -781,10 +792,11 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
         const baseFileName = `${dd}${mm}${yyyyBE}_${teacherFirstName}`;
         const uniqueSuffix = `_${Date.now()}`;
         const finalFileName = ext ? `${baseFileName}${uniqueSuffix}.${ext}` : `${baseFileName}${uniqueSuffix}`;
+        const relPath = `WKK_Leave_System/${finalFileName}`;
 
         const formData = new FormData();
         formData.append("file", docFile);
-        formData.append("path", `WKK_Leave_System/${finalFileName}`);
+        formData.append("path", relPath);
 
         const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
         const json = await res.json().catch(() => null);
@@ -795,7 +807,8 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
             : `HTTP ${res.status}`;
           throw new Error(errMsg);
         }
-        docUrl = json.downloadUrl || json.url || json.webUrl || null;
+        docUrl  = json.downloadUrl || json.url || json.webUrl || null;
+        docPath = relPath; // [FIX-4]
       } catch (err: any) {
         console.error("Upload error:", err);
         const go = confirm(`⚠️ แนบไฟล์ไม่สำเร็จ\n\nรายละเอียด: ${err.message}\n\nต้องการส่งใบลาโดยไม่มีเอกสารแนบหรือไม่?`);
@@ -803,7 +816,6 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
       }
     }
 
-    // ✅ แปลง companionIds เป็นชื่อสำหรับเก็บใน reason
     const companionNames = allTeachers
       .filter(t => companionIds.includes(t.id))
       .map(t => displayName(t))
@@ -820,6 +832,7 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
       other_leave_name:leaveType==="other"?otherName:null,
       half_day:rawDays===1&&leaveType!=="ordination"?halfDay:null,
       document_url: docUrl,
+      document_path: docPath, // [FIX-4] คอลัมน์ใหม่ — ใช้ resolve ลิงก์สดในอนาคต
       status:isDraft?"draft":"pending",
       missed_periods:missedPeriods.join(","), substitute_id:substitute||null,
       duty_officer_id:dutyOfficer?.id??null,
@@ -866,7 +879,6 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
 
       <div className="flex-1 px-4 py-5 max-w-4xl w-full mx-auto space-y-5">
 
-        {/* ประเภทการลา */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
           <label className="block text-sm font-bold text-slate-600 mb-3">ประเภทการลา <span className="text-red-500">*</span></label>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
@@ -903,7 +915,6 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
           )}
         </div>
 
-        {/* วันที่ */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -953,7 +964,6 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
           {!dutyLoading&&<DutyOfficerAlert officer={dutyOfficer} isOwnDuty={isOwnDuty}/>}
         </div>
 
-        {/* เหตุผล + แนบไฟล์ */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
           <div>
             <label className="block text-sm font-bold text-slate-600 mb-1">
@@ -1014,7 +1024,6 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
           </div>
         )}
 
-        {/* ไปราชการ */}
         {leaveType==="official"&&(
           <div className="bg-sky-50 rounded-2xl border border-sky-200 shadow-sm p-6 space-y-4">
             <h3 className="font-black text-sky-700">🏛️ ข้อมูลการไปราชการ</h3>
@@ -1031,7 +1040,6 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
                 </label>
               ))}
             </div>
-            {/* ✅ ใหม่: เปลี่ยนเป็น CompanionSelector */}
             <div>
               <label className="block text-sm font-bold text-slate-600 mb-1">ผู้ร่วมเดินทาง</label>
               <CompanionSelector
@@ -1046,7 +1054,6 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
           </div>
         )}
 
-        {/* ภาระงาน */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
           <h3 className="font-black text-slate-700">📚 ข้อมูลภาระงาน (ถ้ามี)</h3>
           <div>
@@ -1069,7 +1076,6 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
           </div>
         </div>
 
-        {/* ลำดับอนุมัติ */}
         {approvers.length>0&&(
           <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5">
             <p className="text-xs font-black text-blue-600 uppercase tracking-widest mb-3">ลำดับการอนุมัติ</p>
@@ -1087,7 +1093,6 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
           </div>
         )}
 
-        {/* ลายเซ็น */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5">
           <div className="flex items-center justify-between">
             <div>
@@ -1103,7 +1108,6 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
           </div>
         </div>
 
-        {/* ปุ่ม */}
         <div className="flex gap-3 pb-8">
           <button onClick={()=>handleSubmit(true)} disabled={loading}
             className="flex-1 py-4 rounded-2xl border-2 border-slate-300 bg-white text-slate-700 font-black text-base hover:bg-slate-50 disabled:opacity-50">
@@ -1121,6 +1125,9 @@ setLeaveStats({ sick, personal, maternity, lastLeave });
 
 // ══════════════════════════════════════════════════════════
 // ── TeacherDashboard ──────────────────────────────────────
+// [FIX-1] ปุ่มพิมพ์ใน view modal เล็ก ตอนนี้ดึง approver signatures + leaveStats
+//         เหมือนปุ่มพิมพ์แถวประวัติแล้ว — ไม่ขึ้นกล่องเปล่าอีกต่อไป
+// [FIX-4] ใช้ printLeaveAsync + document_path เพื่อ resolve เอกสารแนบให้สดก่อนพิมพ์
 // ══════════════════════════════════════════════════════════
 function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPrint }: {
   user:UserProfile; approvers:ApproverInfo[]; allTeachers:UserProfile[]; savedSignature:string; canPrint:boolean;
@@ -1162,6 +1169,61 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
     await loadRequests();
   }
 
+  // [FIX-1][FIX-4] ฟังก์ชันพิมพ์กลางที่ดึงสถิติ + ลายเซ็นผู้อนุมัติ + resolve เอกสารแนบให้สด
+  // ใช้ร่วมกันทั้งปุ่มพิมพ์แถวประวัติ และปุ่มพิมพ์ใน view modal เล็ก
+  async function printFullLeave(r: LeaveRequest) {
+    const fy = getCurrentFiscalYear();
+    const { data: statsData } = await supabase
+      .from("leave_requests")
+      .select("id, leave_type, days_count, start_date, status")
+      .eq("user_id", user.id)
+      .not("status", "in", '("rejected","cancelled","draft")');
+
+    const fyData = (statsData || []).filter(x => isInFiscalYear(x.start_date, fy) && x.id !== r.id);
+    const stats: LeaveStats = {
+      sick:      fyData.filter(x => x.leave_type === "sick").reduce((s,x) => s + Number(x.days_count), 0),
+      personal:  fyData.filter(x => ["personal","other","ordination"].includes(x.leave_type)).reduce((s,x) => s + Number(x.days_count), 0),
+      maternity: fyData.filter(x => x.leave_type === "maternity").reduce((s,x) => s + Number(x.days_count), 0),
+    };
+
+    await printLeaveAsync(
+      {
+        fullName: fullName(user), position: user.position ?? user.role,
+        leaveType: r.leave_type,
+        leaveTypeName: LEAVE_TYPE_LIST.find(t => t.key === r.leave_type)?.label ?? "",
+        otherLeaveName: (r as any).other_leave_name,
+        startDate: r.start_date, endDate: r.end_date,
+        days: r.days_count, halfDay: (r as any).half_day,
+        reason: r.reason, phone: user.phone,
+        contactInfo: (r as any).contact_info,
+      },
+      (r as any).signature_url || savedSignature,
+      [
+        {
+          name: "นางสาวพรรษา แก้วใหญ่",
+          position: "ครู ตรวจสอบสถิติการลา",
+          signature_url: (r as any).approver_1_signature,
+          approved_at:   (r as any).approver_1_approved_at,
+        },
+        {
+          name: "นางสาวฐิติมา กาบแก้ว",
+          position: "รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
+          signature_url: (r as any).approver_2_signature,
+          approved_at:   (r as any).approver_2_approved_at,
+        },
+        {
+          name: "นายธนณัฐ ศิระวงษ์",
+          position: "ผู้อำนวยการโรงเรียนวัดเขียนเขต",
+          signature_url: (r as any).approver_3_signature,
+          approved_at:   (r as any).approver_3_approved_at,
+        },
+      ],
+      (r as any).document_url,
+      (r as any).document_path, // [FIX-4]
+      stats
+    );
+  }
+
   if(showForm||editRequest) return <LeaveForm user={user} approvers={approvers} allTeachers={allTeachers} savedSignature={savedSignature} onSubmit={submitLeave} onCancel={()=>{setShowForm(false);setEditRequest(null);}} editData={editRequest}/>;
 
   const fyReqs=requests.filter(r=>isInFiscalYear(r.start_date,filterFY)&&r.status!=="rejected"&&r.status!=="cancelled");
@@ -1196,7 +1258,6 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
       </div>
 
       <div className="px-4 py-5 space-y-5 max-w-5xl mx-auto">
-        {/* Filters */}
         <div className="flex gap-2 flex-wrap">
           {[0,1,2].map(i=>{const fy=getCurrentFiscalYear()-i;return(
             <button key={fy} onClick={()=>setFilterFY(fy)} className={`px-3 py-2 rounded-xl text-sm font-black border-2 ${filterFY===fy?"bg-blue-500 border-blue-500 text-white":"bg-white border-slate-200 text-slate-600"}`}>
@@ -1214,7 +1275,6 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
           </select>
         </div>
 
-        {/* Quota cards */}
         <div className="flex gap-3 overflow-x-auto pb-2">
           {(Object.entries(LEAVE_TYPE_CONFIG) as [LeaveType,any][]).map(([type,cfg])=>{
             const used=usedByType[type]??0;
@@ -1238,7 +1298,6 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
           })}
         </div>
 
-        {/* Warning */}
         {spTimes>=6||spDays>=23?(
           <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-4 flex items-start gap-3">
             <span className="text-2xl">⚠️</span>
@@ -1260,7 +1319,6 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
           </p>
         </div>
 
-        {/* ประวัติ */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="bg-slate-50 border-b border-slate-200 px-5 py-3 flex items-center justify-between">
             <h3 className="font-black text-slate-700">📋 ประวัติการลา</h3>
@@ -1290,58 +1348,7 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
                             👁️ ดูใบลา
                           </button>
                           {(isApproved||canPrint)&&(
-                            <button onClick={async () => {
-  // โหลด leaveStats ก่อนพิมพ์
-  const fy = getCurrentFiscalYear();
-  const { data: statsData } = await supabase
-    .from("leave_requests")
-    .select("id, leave_type, days_count, start_date, status")
-    .eq("user_id", user.id)
-    .not("status", "in", '("rejected","cancelled","draft")');
-  
-  const fyData = (statsData || []).filter(x => isInFiscalYear(x.start_date, fy) && x.id !== r.id);
-  const stats: LeaveStats = {
-    sick:     fyData.filter(x => x.leave_type === "sick").reduce((s,x) => s + Number(x.days_count), 0),
-    personal: fyData.filter(x => ["personal","other","ordination"].includes(x.leave_type)).reduce((s,x) => s + Number(x.days_count), 0),
-    maternity:fyData.filter(x => x.leave_type === "maternity").reduce((s,x) => s + Number(x.days_count), 0),
-  };
-
-  printLeave(
-    {
-      fullName: fullName(user), position: user.position ?? user.role,
-      leaveType: r.leave_type,
-      leaveTypeName: LEAVE_TYPE_LIST.find(t => t.key === r.leave_type)?.label ?? "",
-      otherLeaveName: (r as any).other_leave_name,
-      startDate: r.start_date, endDate: r.end_date,
-      days: r.days_count, halfDay: (r as any).half_day,
-      reason: r.reason, phone: user.phone,
-      contactInfo: (r as any).contact_info,
-    },
-    (r as any).signature_url || savedSignature,
-    [
-      {
-        name: "นางสาวพรรษา แก้วใหญ่",
-        position: "ครู ตรวจสอบสถิติการลา",
-        signature_url: (r as any).approver_1_signature,
-        approved_at:   (r as any).approver_1_approved_at,
-      },
-      {
-        name: "นางสาวฐิติมา กาบแก้ว",
-        position: "รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
-        signature_url: (r as any).approver_2_signature,
-        approved_at:   (r as any).approver_2_approved_at,
-      },
-      {
-        name: "นายธนณัฐ ศิระวงษ์",
-        position: "ผู้อำนวยการโรงเรียนวัดเขียนเขต",
-        signature_url: (r as any).approver_3_signature,
-        approved_at:   (r as any).approver_3_approved_at,
-      },
-    ],
-    (r as any).document_url,
-    stats
-  );
-}}
+                            <button onClick={()=>printFullLeave(r)}
                               className="text-xs font-bold text-slate-600 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-slate-100 border border-slate-200">
                               🖨️ พิมพ์
                             </button>
@@ -1369,7 +1376,8 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
         </div>
       </div>
 
-      {/* View modal */}
+      {/* [FIX-1] View modal — ปุ่มพิมพ์เปลี่ยนมาเรียก printFullLeave(r) แทน printLeave ตรง ๆ
+          ทำให้ดึง approver signatures + leaveStats + resolve เอกสารแนบสดเหมือนปุ่มพิมพ์แถวประวัติแล้ว */}
       {viewId&&(()=>{
         const r=requests.find(x=>x.id===viewId);
         if(!r) return null;
@@ -1395,7 +1403,7 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
                 )}
               </div>
               <div className="flex gap-2 mt-4">
-                <button onClick={()=>{printLeave({fullName:fullName(user),position:user.position??user.role,leaveType:r.leave_type,leaveTypeName:LEAVE_TYPE_LIST.find(t=>t.key===r.leave_type)?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:user.phone,contactInfo:(r as any).contact_info},(r as any).signature_url||savedSignature);}}
+                <button onClick={()=>printFullLeave(r)}
                   className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-bold text-sm hover:bg-slate-50">
                   🖨️ พิมพ์
                 </button>
@@ -1422,6 +1430,17 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
 }) {
   const typeCfg = LEAVE_TYPE_CONFIG[r.leave_type as LeaveType];
   const c = COLORS[r.leave_type] ?? COLORS.other;
+
+  // [FIX-4] resolve เอกสารแนบให้สดตอนเปิด modal (ไม่ต้องรอจนกดพิมพ์)
+  const [liveDocUrl, setLiveDocUrl] = useState<string | null>(r.document_url ?? null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const fresh = await resolveAttachmentUrl(r.document_path, r.document_url);
+      if (!cancelled) setLiveDocUrl(fresh);
+    })();
+    return () => { cancelled = true; };
+  }, [r.id, r.document_path, r.document_url]);
 
   const slot = mySlotFn(r);
   const myStatus = slot === 1 ? r.approver_1_status
@@ -1485,35 +1504,40 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
             </div>
           )}
 
-          {/* เอกสารแนบ */}
-          {r.document_url && (
+          {/* เอกสารแนบ — [FIX-4] ใช้ liveDocUrl (resolve สดแล้ว) แทน r.document_url ตรง ๆ */}
+          {(liveDocUrl || r.document_url) && (
             <div className="rounded-xl border-2 border-blue-200 overflow-hidden">
               <div className="bg-blue-50 px-4 py-2 flex items-center justify-between">
                 <p className="text-blue-700 font-black text-xs">📎 เอกสารแนบ</p>
-                <a href={r.document_url} target="_blank" rel="noopener noreferrer"
-                  className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-1 bg-white rounded-lg border border-blue-200">
-                  เปิดไฟล์เต็ม ↗
-                </a>
+                {liveDocUrl && (
+                  <a href={liveDocUrl} target="_blank" rel="noopener noreferrer"
+                    className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-1 bg-white rounded-lg border border-blue-200">
+                    เปิดไฟล์เต็ม ↗
+                  </a>
+                )}
               </div>
-              {/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(r.document_url) ? (
+              {!liveDocUrl ? (
+                <div className="bg-slate-50 px-4 py-6 text-center text-sm text-slate-400 animate-pulse">⏳ กำลังโหลดเอกสาร...</div>
+              ) : /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(liveDocUrl) ? (
                 <img
-                  src={r.document_url}
+                  src={liveDocUrl}
                   alt="เอกสารแนบ"
                   className="w-full max-h-64 object-contain bg-slate-100 cursor-pointer"
-                  onClick={() => window.open(r.document_url, "_blank")}
+                  onClick={() => window.open(liveDocUrl, "_blank")}
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                 />
-              ) : /\.pdf(\?|$)/i.test(r.document_url) ? (
+              ) : /\.pdf(\?|$)/i.test(liveDocUrl) ? (
                 <div className="bg-slate-50 px-4 py-6 text-center">
                   <div className="text-4xl mb-2">📄</div>
                   <p className="text-sm font-bold text-slate-600 mb-3">ไฟล์ PDF</p>
-                  <a href={r.document_url} target="_blank" rel="noopener noreferrer"
+                  <a href={liveDocUrl} target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700">
                     📂 เปิดดู PDF
                   </a>
                 </div>
               ) : (
                 <div className="bg-slate-50 px-4 py-3 text-center text-sm text-slate-500">
-                  <a href={r.document_url} target="_blank" rel="noopener noreferrer"
+                  <a href={liveDocUrl} target="_blank" rel="noopener noreferrer"
                     className="text-blue-600 font-bold hover:underline">
                     📎 คลิกเพื่อดูเอกสาร
                   </a>
@@ -1630,6 +1654,7 @@ function RejectModal({ onConfirm, onClose }: {
 
 // ══════════════════════════════════════════════════════════
 // ── AdminDashboard ─────────────────────────────────────────
+// [FIX-1][FIX-4] onPrint ใน LeaveViewModal ใช้ printLeaveAsync + document_path
 // ══════════════════════════════════════════════════════════
 function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: boolean }) {
   const [requests,     setRequests]     = useState<LeaveRequest[]>([]);
@@ -1764,64 +1789,61 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
       if (allApproved) {
         updates.status = "approved";
 
-  // ✅ สร้าง HTML ใบลา → แปลงเป็น PDF → อัพ OneDrive
         try {
           const reqUser = (req as any).user;
           const leaveData = {
-      fullName: fullName(reqUser),
-      position: reqUser?.position,
-      leaveType: req.leave_type,
-      leaveTypeName: LEAVE_TYPE_CONFIG[req.leave_type]?.label ?? "",
-      otherLeaveName: (req as any).other_leave_name,
-      startDate: req.start_date,
-      endDate: req.end_date,
-      days: req.days_count,
-      halfDay: (req as any).half_day,
-      reason: req.reason,
-      phone: reqUser?.phone,
-      contactInfo: (req as any).contact_info,
-          
-    };
+            fullName: fullName(reqUser),
+            position: reqUser?.position,
+            leaveType: req.leave_type,
+            leaveTypeName: LEAVE_TYPE_CONFIG[req.leave_type]?.label ?? "",
+            otherLeaveName: (req as any).other_leave_name,
+            startDate: req.start_date,
+            endDate: req.end_date,
+            days: req.days_count,
+            halfDay: (req as any).half_day,
+            reason: req.reason,
+            phone: reqUser?.phone,
+            contactInfo: (req as any).contact_info,
+          };
 
-    const approverSigs = [
-      { name:"นางสาวพรรษา แก้วใหญ่", position:"ครู ตรวจสอบสถิติการลา",
-        signature_url: (req as any).approver_1_signature, approved_at: (req as any).approver_1_approved_at },
-      { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
-        signature_url: (req as any).approver_2_signature, approved_at: (req as any).approver_2_approved_at },
-      { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต",
-        signature_url: updates.approver_3_signature ?? (req as any).approver_3_signature,
-        approved_at: updates.approver_3_approved_at ?? (req as any).approver_3_approved_at },
-    ];
+          const approverSigs = [
+            { name:"นางสาวพรรษา แก้วใหญ่", position:"ครู ตรวจสอบสถิติการลา",
+              signature_url: (req as any).approver_1_signature, approved_at: (req as any).approver_1_approved_at },
+            { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
+              signature_url: (req as any).approver_2_signature, approved_at: (req as any).approver_2_approved_at },
+            { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต",
+              signature_url: updates.approver_3_signature ?? (req as any).approver_3_signature,
+              approved_at: updates.approver_3_approved_at ?? (req as any).approver_3_approved_at },
+          ];
 
-    const html = buildLeaveHTML(leaveData, reqUser?.signature_url || "", approverSigs, (req as any).document_url);
+          const html = buildLeaveHTML(leaveData, reqUser?.signature_url || "", approverSigs, (req as any).document_url);
 
-    // ✅ ส่ง HTML → /api/html-to-pdf → รับ PDF blob → อัพ OneDrive
-    const now = new Date();
-    const dd = String(now.getDate()).padStart(2,"0");
-    const mm = String(now.getMonth()+1).padStart(2,"0");
-    const yyyyBE = now.getFullYear()+543;
-    const firstName = reqUser?.first_name || fullName(reqUser).split(" ")[0] || "ไม่ระบุ";
-    const lastName  = reqUser?.last_name  || fullName(reqUser).split(" ").slice(-1)[0] || "";
-    const fileName  = `${dd}${mm}${yyyyBE}_${firstName}_${lastName}.pdf`;
+          const now = new Date();
+          const dd = String(now.getDate()).padStart(2,"0");
+          const mm = String(now.getMonth()+1).padStart(2,"0");
+          const yyyyBE = now.getFullYear()+543;
+          const firstName = reqUser?.first_name || fullName(reqUser).split(" ")[0] || "ไม่ระบุ";
+          const lastName  = reqUser?.last_name  || fullName(reqUser).split(" ").slice(-1)[0] || "";
+          const fileName  = `${dd}${mm}${yyyyBE}_${firstName}_${lastName}.pdf`;
 
-    const pdfRes = await fetch("/api/html-to-pdf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html }),
-    });
+          const pdfRes = await fetch("/api/html-to-pdf", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ html }),
+          });
 
-      if (pdfRes.ok) {
-        const pdfBlob = await pdfRes.blob();
-        const formData = new FormData();
-        formData.append("file", pdfBlob, fileName);
-        formData.append("path", `WKK_Leave_System/${fileName}`);
-        await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+          if (pdfRes.ok) {
+            const pdfBlob = await pdfRes.blob();
+            const formData = new FormData();
+            formData.append("file", pdfBlob, fileName);
+            formData.append("path", `WKK_Leave_System/${fileName}`);
+            await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+          }
+        } catch (err) {
+          console.warn("PDF upload failed:", err);
+        }
       }
-    } catch (err) {
-      console.warn("PDF upload failed:", err);
-    } 
-  }
-}
+    }
 
     const { error } = await (supabase.from("leave_requests") as any).update(updates).eq("id", id);
   if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); return; }
@@ -1860,7 +1882,6 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
 
   return (
     <div className="min-h-screen">
-      {/* Modals */}
       {showApproverSigPad && (
         <SignaturePad
           initialUrl={approverSigUrl}
@@ -1877,7 +1898,7 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
           approverSigUrl={approverSigUrl}
           mySlotFn={mySlot}
           onClose={() => setViewModal(null)}
-          onPrint={() => printLeave(
+          onPrint={() => printLeaveAsync(
             {
               fullName: fullName(viewModal.user),
               position: viewModal.user?.position,
@@ -1914,7 +1935,8 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
                 comment:       viewModal.approver_3_comment,
               },
             ],
-            viewModal.document_url
+            viewModal.document_url,
+            viewModal.document_path // [FIX-4]
           )}
           onApprove={(id, slot) => tryApprove(id, slot, "approved")}
           onReject={(id, slot) => setRejectModal({ id, slot })}
@@ -1930,8 +1952,6 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
         />
       )}
 
-
-      {/* Header */}
       <div className="bg-gradient-to-br from-indigo-500 to-purple-600 px-6 py-8 text-white flex items-center justify-between flex-wrap gap-4">
         <div>
           <p className="text-indigo-200 text-sm font-bold">{roleDisplay}</p>
@@ -1951,7 +1971,6 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
       </div>
 
       <div className="px-4 py-5 space-y-5">
-        {/* การ์ดสรุปจำนวน */}
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 text-center shadow-sm">
             <div className="text-3xl font-black text-slate-800">{totalRequests}</div>
@@ -1992,7 +2011,6 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
           })}
         </div>
 
-        {/* Tab bar */}
         <div className="flex gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
           {[["pending","⏳ รออนุมัติ"],["history","📋 ทั้งหมด"],["summary","👥 รายบุคคล"],["official","🏛️ ไปราชการ"],["graph","📊 กราฟ"]].map(([k,l])=>(
             <button key={k} onClick={()=>setTab(k as any)} className={`flex-1 py-2.5 rounded-xl text-sm font-black flex items-center justify-center gap-1 ${tab===k?"bg-white text-slate-800 shadow border border-slate-200":"text-slate-500 hover:text-slate-700"}`}>
@@ -2001,7 +2019,6 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
           ))}
         </div>
 
-        {/* ─── Tab: รออนุมัติ ─── */}
         {tab==="pending"&&(
           <div className="space-y-3">
             {canApprove && !approverSigUrl && (
@@ -2039,7 +2056,7 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
                       <span className={`font-black text-sm ${c.text}`}>{typeCfg?.icon} {typeCfg?.label}</span>
                       <div className="flex items-center gap-2">
                         <span className={`font-black text-sm ${c.text}`}>{r.days_count} วัน</span>
-                        <button onClick={()=>printLeave({fullName:fullName((r as any).user),position:(r as any).user?.position,leaveType:r.leave_type,leaveTypeName:typeCfg?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:(r as any).user?.phone,contactInfo:(r as any).contact_info},(r as any).user?.signature_url||"")} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-white border border-slate-300 font-bold">🖨️ พิมพ์</button>
+                        <button onClick={()=>printLeaveAsync({fullName:fullName((r as any).user),position:(r as any).user?.position,leaveType:r.leave_type,leaveTypeName:typeCfg?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:(r as any).user?.phone,contactInfo:(r as any).contact_info},(r as any).user?.signature_url||"",undefined,(r as any).document_url,(r as any).document_path)} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-white border border-slate-300 font-bold">🖨️ พิมพ์</button>
                       </div>
                     </div>
                     <div className="p-5">
@@ -2090,7 +2107,6 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
         )}
         
 
-        {/* ─── Tab: ทั้งหมด ─── */}
         {tab==="history"&&(
           <div>
             <div className="flex gap-2 mb-4 flex-wrap">
@@ -2130,7 +2146,7 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
                         </div>
                         <div className="flex flex-col items-end gap-2">
                           <StatusBadge status={r.status}/>
-                          <button onClick={()=>printLeave({fullName:fullName((r as any).user),position:(r as any).user?.position,leaveType:r.leave_type,leaveTypeName:typeCfg?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:(r as any).user?.phone,contactInfo:(r as any).contact_info},(r as any).user?.signature_url||"")} className="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50">🖨️ พิมพ์</button>
+                          <button onClick={()=>printLeaveAsync({fullName:fullName((r as any).user),position:(r as any).user?.position,leaveType:r.leave_type,leaveTypeName:typeCfg?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:(r as any).user?.phone,contactInfo:(r as any).contact_info},(r as any).user?.signature_url||"",undefined,(r as any).document_url,(r as any).document_path)} className="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50">🖨️ พิมพ์</button>
                         </div>
                       </div>
                     );
@@ -2140,7 +2156,6 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
           </div>
         )}
 
-        {/* ─── Tab: สรุปรายบุคคล ─── */}
         {tab==="summary" && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="bg-slate-50 border-b px-5 py-3">
@@ -2198,7 +2213,6 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
           </div>
         )}
 
-        {/* ─── Tab: ไปราชการ ─── */}
         {tab==="official"&&(
           <div className="space-y-3">
             {officialList.length===0?<div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">ไม่มีข้อมูล</div>
@@ -2225,7 +2239,6 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
           </div>
         )}
 
-        {/* ─── Tab: กราฟ ─── */}
         {tab==="graph"&&(
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
