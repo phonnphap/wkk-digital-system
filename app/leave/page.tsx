@@ -138,9 +138,13 @@ const sel = (err?: boolean) => `w-full bg-white border-2 ${err?"border-red-400":
 // [FIX-3] ลดขนาดฟอนต์/padding/margin ทั้งหมดให้พอดี A4 หน้าเดียว
 // [FIX-2] เอาเส้นใต้ลายเซ็นออก ให้เหลือแค่รูปลายเซ็นลอย
 // ══════════════════════════════════════════════════════════
-function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: {
-  name: string; position: string; signature_url?: string; approved_at?: string;
-}[], documentUrl?: string, leaveStats?: LeaveStats): string {
+function buildLeaveHTML(
+  data: any,
+  signatureUrl: string,
+  approverSignatures?: { name: string; position: string; signature_url?: string; approved_at?: string; }[],
+  documentUrl?: string,   // ← เพิ่มตรงนี้
+  leaveStats?: LeaveStats
+): string {
   const now = new Date();
   const thDay   = now.getDate();
   const thMonth = now.toLocaleDateString("th-TH",{ month:"long", timeZone:"Asia/Bangkok" });
@@ -168,18 +172,6 @@ function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: {
   const thisSick     = isSick     ? Number(daysDisplay) : 0;
   const thisPersonal = isPersonal ? Number(daysDisplay) : 0;
   const thisMat      = isMat      ? Number(daysDisplay) : 0;
-
-  // [FIX-3] เอกสารแนบอยู่หน้าใหม่เสมอ (ไม่กระทบหน้าใบลาหลัก ซึ่งทำให้พอดี 1 แผ่นแล้ว)
-  const attachmentPage = documentUrl ? `
-    <div style="page-break-before:always;padding:10mm 16mm 8mm">
-      <div style="font-size:13pt;font-weight:900;margin-bottom:10px;border-bottom:2px solid #000;padding-bottom:6px">
-        เอกสารแนบ
-      </div>
-      ${/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(documentUrl)
-        ? `<img src="${documentUrl}" style="max-width:100%;max-height:230mm;object-fit:contain;display:block;margin:0 auto" onerror="this.outerHTML='<p style=&quot;text-align:center;color:#999;padding:40px&quot;>⚠️ ไม่สามารถโหลดรูปภาพเอกสารแนบได้ (ลิงก์อาจหมดอายุ)</p>'"/>`
-        : `<iframe src="${documentUrl}" style="width:100%;height:230mm;border:1px solid #ccc"></iframe>`
-      }
-    </div>` : '';
 
   // [FIX-2] กล่องผู้ตรวจสอบ — เอาเส้นจุดประใต้ "ลงชื่อ" ออก เหลือแค่รูปลายเซ็นลอย + ชื่อ/ตำแหน่ง/วันที่
   const checkerBlock = `
@@ -378,7 +370,7 @@ table.stat td:first-child{text-align:left}
   </div>
 </div>
 
-</div>${attachmentPage}</body></html>`;
+</div></body></html>`;
 }
 
 function printLeave(data: any, signatureUrl: string, approverSignatures?: any[], documentUrl?: string, leaveStats?: LeaveStats) {
