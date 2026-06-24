@@ -998,8 +998,8 @@ useEffect(() => {
       <th>น้ำหนัก</th><th>ส่วนสูง</th><th>IBW</th><th>%HA</th><th>%WH</th><th>ภาวะ WH</th><th>ภาวะ HA</th>
     </tr></thead><tbody>
       ${displayRecords.map((r, i) => {
-        const wh = r.result ? getWHStatus(r.result.z_weight_for_height) : null;
-        const ha = r.result ? getHAStatus(r.result.z_height_for_age) : null;
+        const wh = whStatusFromLabel(r.wh_status);
+        const ha = haStatusFromLabel(r.ha_status);
         return `<tr>
           <td style="text-align:center">${r.seat_number ?? (i + 1)}</td>
           <td>${genderPrefix(r.gender, selectedClass?.room_name)} ${r.first_name} ${r.last_name}</td>
@@ -1009,8 +1009,8 @@ useEffect(() => {
           <td>${r.ibw_kg ?? "—"}</td>
           <td>${r.pct_height_for_age ? r.pct_height_for_age + "%" : "—"}</td>
           <td>${r.pct_weight_for_height ? r.pct_weight_for_height + "%" : "—"}</td>
-          <td>${wh ? `<span class="badge ${wh.label.includes("สมส่วน") ? "normal" : wh.label.includes("ผอม") || wh.label.includes("อ้วน") ? "danger" : "warn"}">${wh.label}</span>` : "—"}</td>
-          <td>${ha ? `<span class="badge ${ha.label.includes("ตามเกณฑ์") ? "normal" : ha.label.includes("เตี้ย") ? "danger" : "blue"}">${ha.label}</span>` : "—"}</td>
+          <td>${wh.label === "สมส่วน" ? "normal" : wh.label.includes("ผอม") || wh.label.includes("อ้วน") || wh.label.includes("รุนแรง") ? "danger" : "warn"}</td>
+          <td>${ha.label.includes("ตามเกณฑ์") ? "normal" : ha.label.includes("เตี้ย") || ha.label.includes("แคระ") ? "danger" : "blue"}</td>
         </tr>`;
       }).join("")}
     </tbody></table>

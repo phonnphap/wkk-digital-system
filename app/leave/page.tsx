@@ -163,39 +163,61 @@ function buildLeaveHTML(data: any, signatureUrl: string, approverSignatures?: {
     </div>`;
 
   const box2 = `
-    <div class="box" style="margin-bottom:10px;font-size:11.5pt;line-height:1.9">
-      <div style="font-weight:700;margin-bottom:5px">ความเห็นของรอง.ผอ.กลุ่มบริหารงานบุคคล</div>
-      <div class="dotline" style="height:20px;margin:4px 0"></div>
-      <div style="text-align:center;margin-top:8px">
+  <div class="box" style="margin-bottom:10px;font-size:11.5pt;line-height:1.9">
+    <div style="font-weight:700;margin-bottom:5px">ความเห็นของรอง.ผอ.กลุ่มบริหารงานบุคคล</div>
+    <div class="dotline" style="height:20px;margin:4px 0"></div>
+
+    <div style="display:flex;flex-direction:column;align-items:center;margin-top:10px">
+      <div style="position:relative;width:220px">
         ${approver2?.signature_url
-          ? `<div style="height:50px;display:flex;align-items:flex-end;justify-content:center">
-               <img src="${approver2.signature_url}" style="max-height:50px;max-width:140px;object-fit:contain"/>
-             </div>`
-          : `<div style="height:50px"></div>`}
-        ลงชื่อ...........................................<br>
+          ? `<img src="${approver2.signature_url}"
+               style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);
+                      max-height:52px;max-width:160px;object-fit:contain;z-index:1"/>`
+          : `<div style="height:52px"></div>`
+        }
+        <div style="border-bottom:1px solid #000;width:220px;margin-top:54px"></div>
+      </div>
+      <div style="margin-top:4px;text-align:center">
         (${approver2?.name || "นางสาวฐิติมา กาบแก้ว"})<br>
         ${approver2?.position || "รองผู้อำนวยการกลุ่มบริหารงานบุคคล"}<br>
         วันที่ ${(approver2 as any)?.approved_at || ".............................."}
       </div>
-    </div>`;
+    </div>
+  </div>`;
 
   const box3 = `
-    <div class="box" style="font-size:11.5pt;line-height:1.9">
-      <div style="font-weight:700;margin-bottom:4px">ความเห็นของผู้บังคับบัญชา</div>
-      <div style="margin-bottom:6px"><span class="chk"></span>อนุญาต &nbsp;&nbsp;&nbsp; <span class="chk"></span>ไม่อนุญาต</div>
-      <div class="dotline" style="height:20px;margin:4px 0"></div>
-      <div style="text-align:center;margin-top:8px">
+  <div class="box" style="font-size:11.5pt;line-height:1.9">
+    <div style="font-weight:700;margin-bottom:4px">ความเห็นของผู้บังคับบัญชา</div>
+
+    <div style="margin-bottom:6px">
+      <span class="chk">${approver3?.signature_url ? "✓" : ""}</span>อนุญาต
+      &nbsp;&nbsp;&nbsp;
+      <span class="chk"></span>ไม่อนุญาต
+    </div>
+
+    <!-- ช่องความเห็น: แสดงถ้ามีข้อความ -->
+    <div class="dotline" style="min-height:20px;padding:2px 4px;margin:4px 0">
+      ${(approver3 as any)?.comment ?? ""}
+    </div>
+
+    <!-- ลายเซ็น: วางทับกลางเส้น -->
+    <div style="display:flex;flex-direction:column;align-items:center;margin-top:10px">
+      <div style="position:relative;width:220px">
         ${approver3?.signature_url
-          ? `<div style="height:50px;display:flex;align-items:flex-end;justify-content:center">
-               <img src="${approver3.signature_url}" style="max-height:50px;max-width:140px;object-fit:contain"/>
-             </div>`
-          : `<div style="height:50px"></div>`}
-        ลงชื่อ...........................................<br>
+          ? `<img src="${approver3.signature_url}"
+               style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);
+                      max-height:52px;max-width:160px;object-fit:contain;z-index:1"/>`
+          : `<div style="height:52px"></div>`
+        }
+        <div style="border-bottom:1px solid #000;width:220px;margin-top:54px"></div>
+      </div>
+      <div style="margin-top:4px;text-align:center">
         (${approver3?.name || "นายธนณัฐ ศิระวงษ์"})<br>
         ${approver3?.position || "ผู้อำนวยการโรงเรียนวัดเขียนเขต"}<br>
         วันที่ ${(approver3 as any)?.approved_at || ".............................."}
       </div>
-    </div>`;
+    </div>
+  </div>`;
 
   // ✅ ตารางสถิติ — ถ้าไปราชการไม่แสดงจำนวนวัน แต่ยังคงโครงตาราง
   const statsTableRows = isOfficial ? `
@@ -650,10 +672,10 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
       const fy = getCurrentFiscalYear();
       // ดึง leave_requests ของ user ในปีงบประมาณปัจจุบัน ที่ไม่ถูก reject/cancel
       const { data } = await supabase
-        .from("leave_requests")
-        .select("leave_type, days_count, start_date, status")
-        .eq("user_id", user.id)
-        .not("status", "in", '("rejected","cancelled","draft")');
+  .from("leave_requests")
+  .select("*, approver_1_signature, approver_1_approved_at, approver_2_signature, approver_2_approved_at, approver_3_signature, approver_3_approved_at")
+  .eq("user_id", user.id)
+  .order("created_at", { ascending: false });
       
       if (!data) return;
       // กรองเฉพาะปีงบประมาณปัจจุบัน
@@ -1239,7 +1261,58 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
                             👁️ ดูใบลา
                           </button>
                           {(isApproved||canPrint)&&(
-                            <button onClick={()=>printLeave({fullName:fullName(user),position:user.position??user.role,leaveType:r.leave_type,leaveTypeName:LEAVE_TYPE_LIST.find(t=>t.key===r.leave_type)?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:user.phone,contactInfo:(r as any).contact_info},(r as any).signature_url||savedSignature)}
+                            <button onClick={async () => {
+  // โหลด leaveStats ก่อนพิมพ์
+  const fy = getCurrentFiscalYear();
+  const { data: statsData } = await supabase
+    .from("leave_requests")
+    .select("id, leave_type, days_count, start_date, status")
+    .eq("user_id", user.id)
+    .not("status", "in", '("rejected","cancelled","draft")');
+  
+  const fyData = (statsData || []).filter(x => isInFiscalYear(x.start_date, fy) && x.id !== r.id);
+  const stats: LeaveStats = {
+    sick:     fyData.filter(x => x.leave_type === "sick").reduce((s,x) => s + Number(x.days_count), 0),
+    personal: fyData.filter(x => ["personal","other","ordination"].includes(x.leave_type)).reduce((s,x) => s + Number(x.days_count), 0),
+    maternity:fyData.filter(x => x.leave_type === "maternity").reduce((s,x) => s + Number(x.days_count), 0),
+  };
+
+  printLeave(
+    {
+      fullName: fullName(user), position: user.position ?? user.role,
+      leaveType: r.leave_type,
+      leaveTypeName: LEAVE_TYPE_LIST.find(t => t.key === r.leave_type)?.label ?? "",
+      otherLeaveName: (r as any).other_leave_name,
+      startDate: r.start_date, endDate: r.end_date,
+      days: r.days_count, halfDay: (r as any).half_day,
+      reason: r.reason, phone: user.phone,
+      contactInfo: (r as any).contact_info,
+    },
+    (r as any).signature_url || savedSignature,
+    [
+      {
+        name: "นางสาวพรรษา แก้วใหญ่",
+        position: "ครู ตรวจสอบสถิติการลา",
+        signature_url: (r as any).approver_1_signature,
+        approved_at:   (r as any).approver_1_approved_at,
+      },
+      {
+        name: "นางสาวฐิติมา กาบแก้ว",
+        position: "รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
+        signature_url: (r as any).approver_2_signature,
+        approved_at:   (r as any).approver_2_approved_at,
+      },
+      {
+        name: "นายธนณัฐ ศิระวงษ์",
+        position: "ผู้อำนวยการโรงเรียนวัดเขียนเขต",
+        signature_url: (r as any).approver_3_signature,
+        approved_at:   (r as any).approver_3_approved_at,
+      },
+    ],
+    (r as any).document_url,
+    stats
+  );
+}}
                               className="text-xs font-bold text-slate-600 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-slate-100 border border-slate-200">
                               🖨️ พิมพ์
                             </button>
@@ -1543,6 +1616,8 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
   const [pendingApproveId, setPendingApproveId] = useState<{id:string;slot:1|2|3;action:"approved"|"rejected"}|null>(null);
   const [viewModal, setViewModal] = useState<any | null>(null);
   const [rejectModal, setRejectModal] = useState<{id:string; slot:1|2|3} | null>(null);
+  const [approveModal,   setApproveModal]   = useState<{id:string; slot:1|2|3} | null>(null);
+  const [approveComment, setApproveComment] = useState("");
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -1595,20 +1670,30 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
   }
 
   function tryApprove(id: string, slot: 1|2|3, action: "approved"|"rejected") {
-    if (action === "approved" && !approverSigUrl && slot !== 3) {
-      setPendingApproveId({id, slot, action});
-      setShowApproverSigPad(true);
-      return;
-    }
-    handleApprove(id, slot, action);
+  if (action === "rejected") { setRejectModal({ id, slot }); return; }
+  if (action === "approved" && !approverSigUrl && slot !== 3) {
+    setPendingApproveId({ id, slot, action });
+    setShowApproverSigPad(true);
+    return;
   }
+  if (action === "approved" && slot === 3) {
+    // เปิด modal ถามความเห็น (ไม่บังคับ)
+    setApproveModal({ id, slot });
+    setApproveComment("");
+    return;
+  }
+  handleApprove(id, slot, action);
+}
 
-  async function handleApprove(id: string, slot: 1|2|3, action: "approved"|"rejected", reason?: string) {
+  async function handleApprove(id: string, slot: 1|2|3, action: "approved"|"rejected",
+  reason?: string,
+  comment?: string) {
     const req = requests.find(r => r.id === id)!;
     const updates: any = {
       [`approver_${slot}_status`]: action,
       [`approver_${slot}_id`]: user.id,
     };
+    if (comment) updates[`approver_${slot}_comment`] = comment; 
     if (action === "approved") {
       // ✅ บันทึกลายเซ็นและวันที่อนุมัติทันที
       updates[`approver_${slot}_signature`] = approverSigUrl;
@@ -1805,7 +1890,8 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
                 name: "นายธนณัฐ ศิระวงษ์", 
                 position: "ผู้อำนวยการโรงเรียนวัดเขียนเขต", 
                 signature_url: viewModal.approver_3_signature,
-                approved_at: viewModal.approver_3_approved_at
+                approved_at: viewModal.approver_3_approved_at,
+                comment:       viewModal.approver_3_comment,
               },
             ],
             viewModal.document_url
@@ -1822,6 +1908,38 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
           }}
           onClose={() => setRejectModal(null)}
         />
+      )}
+      {approveModal && (
+        <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="font-black text-slate-800 text-lg mb-1">✅ ความเห็นก่อนอนุมัติ</h3>
+            <p className="text-slate-400 text-xs mb-3">ไม่บังคับกรอก — จะแสดงในใบลา</p>
+            <textarea
+              value={approveComment}
+              onChange={e => setApproveComment(e.target.value)}
+              rows={3}
+              placeholder="เช่น อนุมัติตามความเหมาะสม..."
+              className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm resize-none focus:border-green-400 focus:outline-none mb-4"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setApproveModal(null)}
+                className="flex-1 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={() => {
+                  handleApprove(approveModal.id, approveModal.slot, "approved", undefined, approveComment);
+                  setApproveModal(null);
+                }}
+                className="flex-[2] py-3 rounded-xl bg-green-500 hover:bg-green-600 text-white font-black text-sm"
+              >
+                ✅ ยืนยันอนุมัติ
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Header */}
