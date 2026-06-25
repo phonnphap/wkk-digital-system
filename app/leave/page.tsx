@@ -700,7 +700,10 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
 
       if (!data) return;
       const fyData = data.filter(r => isInFiscalYear(r.start_date, fy));
-      const filtered = editData?.id ? fyData.filter((r:any) => r.id !== editData.id) : fyData;
+      const filtered = (editData?.id
+  ? fyData.filter((r: any) => r.id !== editData.id)
+  : fyData
+).filter((r: any) => r.status !== "rejected" && r.status !== "cancelled" && r.status !== "draft");
 
       const sick     = filtered.filter((r:any) => r.leave_type === "sick").reduce((s:number,r:any) => s + Number(r.days_count), 0);
       const personal = filtered.filter((r:any) => ["personal","other","ordination"].includes(r.leave_type)).reduce((s:number,r:any) => s + Number(r.days_count), 0);
@@ -783,7 +786,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
         const uniqueSuffix = `_${Date.now()}`;
         const finalFileName = ext ? `${baseFileName}${uniqueSuffix}.${ext}` : `${baseFileName}${uniqueSuffix}`;
         // [FIX-3] อัพไฟล์แนบไปที่โฟลเดอร์ HR บน OneDrive
-        const relPath = `HR_Leave_Attachments/${finalFileName}`;
+        const relPath = `ใบลา_เอกสารแนบ/${finalFileName}`; 
 
         const formData = new FormData();
         formData.append("file", docFile);
@@ -1868,7 +1871,7 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
             const formData = new FormData();
             formData.append("file", pdfBlob, fileName);
             // [FIX-3] อัพ PDF ที่อนุมัติแล้วไปโฟลเดอร์ HR บน OneDrive
-            formData.append("path", `HR_Approved_Leaves/${fileName}`);
+            formData.append("path", `ใบลา/${fileName}`); 
             formData.append("account", HR_EMAIL); // ระบุ account HR (ถ้า API รองรับ)
 
             const uploadRes = await fetch("/api/upload-onedrive", { method: "POST", body: formData });

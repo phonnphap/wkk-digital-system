@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 const TENANT_ID  = process.env.MICROSOFT_TENANT_ID!;
 const CLIENT_ID  = process.env.MICROSOFT_CLIENT_ID!;
 const CLIENT_SEC = process.env.MICROSOFT_CLIENT_SECRET!;
-const TARGET_UPN = process.env.MICROSOFT_TARGET_EMAIL!;
+const TARGET_UPN = process.env.MICROSOFT_HR_EMAIL || process.env.MICROSOFT_TARGET_EMAIL!;
 
 async function getAccessToken() {
   console.log("TENANT_ID:", TENANT_ID);
