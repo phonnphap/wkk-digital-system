@@ -176,17 +176,15 @@ function buildLeaveHTML(
   // [FIX-2] กล่องผู้ตรวจสอบ — เอาเส้นจุดประใต้ "ลงชื่อ" ออก เหลือแค่รูปลายเซ็นลอย + ชื่อ/ตำแหน่ง/วันที่
   const checkerBlock = `
   <div style="margin-top:10px;font-size:10.5pt;line-height:1.7;text-align:center">
-    <!-- ชุดลายเซ็นแบบ: ลงชื่อ  [ลายเซ็น]  ผู้ตรวจ -->
-    <div style="height:42px; display:inline-flex; align-items:flex-end; justify-content:center; gap:12px; margin-bottom:2px">
+    <div style="display:flex; align-items:flex-end; justify-content:center; gap:12px; height:42px; margin-bottom:2px; width:100%">
       <span style="white-space:nowrap">ลงชื่อ</span>
-      <div style="min-width:120px; max-height:42px; display:flex; items-content:center; justify-content:center">
+      <div style="min-width:120px; max-height:42px; display:flex; align-items:flex-end; justify-content:center">
         ${approver1?.signature_url
           ? `<img src="${approver1.signature_url}" style="max-height:42px; max-width:140px; object-fit:contain"/>`
           : `<span style="color:#64748b; letter-spacing:2px">...................</span>`}
       </div>
       <span style="white-space:nowrap">ผู้ตรวจสอบ</span>
     </div>
-    
     <br>
     (${approver1?.name || "นางสาวพรรษา แก้วใหญ่"})<br>
     หัวหน้ากลุ่มบริหารงานบุคคล <br> วันที่ ${approver1?.approved_at || ".............................."}
@@ -1879,6 +1877,52 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
     ? slot===1 ? "👤 ผู้อนุมัติลำดับที่ 1" : slot===2 ? "👤 ผู้อนุมัติลำดับที่ 2" : "👤 ผู้อนุมัติลำดับที่ 3"
     : user.email===HR_EMAIL ? "📋 ฝ่ายบุคคล (HR)" : "🔧 ผู้ดูแลระบบ";
 
+  async function printFullLeaveAdmin(r: any) {
+  const fy = getCurrentFiscalYear();
+  const reqUser = r.user;
+  const { data: statsData } = await supabase
+    .from("leave_requests")
+    .select("id, leave_type, days_count, start_date, status")
+    .eq("user_id", r.user_id)
+    .not("status", "in", '("rejected","cancelled","draft")');
+
+  const fyData = (statsData || []).filter((x: any) => isInFiscalYear(x.start_date, fy) && x.id !== r.id);
+  const stats: LeaveStats = {
+    sick:      fyData.filter((x:any) => x.leave_type === "sick").reduce((s:number,x:any) => s + Number(x.days_count), 0),
+    personal:  fyData.filter((x:any) => ["personal","other","ordination"].includes(x.leave_type)).reduce((s:number,x:any) => s + Number(x.days_count), 0),
+    maternity: fyData.filter((x:any) => x.leave_type === "maternity").reduce((s:number,x:any) => s + Number(x.days_count), 0),
+  };
+
+  await printLeaveAsync(
+    {
+      fullName: fullName(reqUser),
+      position: reqUser?.position,
+      leaveType: r.leave_type,
+      leaveTypeName: LEAVE_TYPE_CONFIG[r.leave_type as LeaveType]?.label ?? "",
+      otherLeaveName: r.other_leave_name,
+      startDate: r.start_date,
+      endDate: r.end_date,
+      days: r.days_count,
+      halfDay: r.half_day,
+      reason: r.reason,
+      phone: reqUser?.phone,
+      contactInfo: r.contact_info,
+    },
+    reqUser?.signature_url || "",
+    [
+      { name:"นางสาวพรรษา แก้วใหญ่", position:"ครู ตรวจสอบสถิติการลา",
+        signature_url: r.approver_1_signature, approved_at: r.approver_1_approved_at },
+      { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
+        signature_url: r.approver_2_signature, approved_at: r.approver_2_approved_at },
+      { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต",
+        signature_url: r.approver_3_signature, approved_at: r.approver_3_approved_at },
+    ],
+    r.document_url,
+    r.document_path,
+    stats
+  );
+}
+
   return (
     <div className="min-h-screen">
       {showApproverSigPad && (
@@ -1897,46 +1941,7 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
           approverSigUrl={approverSigUrl}
           mySlotFn={mySlot}
           onClose={() => setViewModal(null)}
-          onPrint={() => printLeaveAsync(
-            {
-              fullName: fullName(viewModal.user),
-              position: viewModal.user?.position,
-              leaveType: viewModal.leave_type,
-              leaveTypeName: LEAVE_TYPE_CONFIG[viewModal.leave_type as LeaveType]?.label ?? "",
-              otherLeaveName: viewModal.other_leave_name,
-              startDate: viewModal.start_date,
-              endDate: viewModal.end_date,
-              days: viewModal.days_count,
-              halfDay: viewModal.half_day,
-              reason: viewModal.reason,
-              phone: viewModal.user?.phone,
-              contactInfo: viewModal.contact_info
-            },
-            viewModal.user?.signature_url || "",
-            [
-              { 
-                name: "นางสาวพรรษา แก้วใหญ่", 
-                position: "ครู ตรวจสอบสถิติการลา", 
-                signature_url: viewModal.approver_1_signature,
-                approved_at: viewModal.approver_1_approved_at
-              },
-              { 
-                name: "นางสาวฐิติมา กาบแก้ว", 
-                position: "รองผู้อำนวยการกลุ่มบริหารงานบุคคล", 
-                signature_url: viewModal.approver_2_signature,
-                approved_at: viewModal.approver_2_approved_at
-              },
-              { 
-                name: "นายธนณัฐ ศิระวงษ์", 
-                position: "ผู้อำนวยการโรงเรียนวัดเขียนเขต", 
-                signature_url: viewModal.approver_3_signature,
-                approved_at: viewModal.approver_3_approved_at,
-                comment:       viewModal.approver_3_comment,
-              },
-            ],
-            viewModal.document_url,
-            viewModal.document_path // [FIX-4]
-          )}
+          onPrint={() => printFullLeaveAdmin(viewModal)}
           onApprove={(id, slot) => tryApprove(id, slot, "approved")}
           onReject={(id, slot) => setRejectModal({ id, slot })}
         />
@@ -2055,7 +2060,7 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
                       <span className={`font-black text-sm ${c.text}`}>{typeCfg?.icon} {typeCfg?.label}</span>
                       <div className="flex items-center gap-2">
                         <span className={`font-black text-sm ${c.text}`}>{r.days_count} วัน</span>
-                        <button onClick={()=>printLeaveAsync({fullName:fullName((r as any).user),position:(r as any).user?.position,leaveType:r.leave_type,leaveTypeName:typeCfg?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:(r as any).user?.phone,contactInfo:(r as any).contact_info},(r as any).user?.signature_url||"",undefined,(r as any).document_url,(r as any).document_path)} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-white border border-slate-300 font-bold">🖨️ พิมพ์</button>
+                        <button onClick={()=>printFullLeaveAdmin(r)} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-white border border-slate-300 font-bold">🖨️ พิมพ์</button>
                       </div>
                     </div>
                     <div className="p-5">
@@ -2145,7 +2150,7 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
                         </div>
                         <div className="flex flex-col items-end gap-2">
                           <StatusBadge status={r.status}/>
-                          <button onClick={()=>printLeaveAsync({fullName:fullName((r as any).user),position:(r as any).user?.position,leaveType:r.leave_type,leaveTypeName:typeCfg?.label??"",otherLeaveName:(r as any).other_leave_name,startDate:r.start_date,endDate:r.end_date,days:r.days_count,halfDay:(r as any).half_day,reason:r.reason,phone:(r as any).user?.phone,contactInfo:(r as any).contact_info},(r as any).user?.signature_url||"",undefined,(r as any).document_url,(r as any).document_path)} className="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50">🖨️ พิมพ์</button>
+                          <button onClick={()=>printFullLeaveAdmin(r)} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-white border border-slate-300 font-bold">🖨️ พิมพ์</button>
                         </div>
                       </div>
                     );
