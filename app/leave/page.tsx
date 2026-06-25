@@ -67,11 +67,7 @@ function approverSlotByEmail(email: string): 1|2|3|null {
   return null;
 }
 
-// [FIX-4] ──────────────────────────────────────────────────
-// OneDrive @microsoft.graph.downloadUrl ที่ได้ตอนอัพโหลดจะหมดอายุหลังผ่านไปสักพัก
-// (เป็นลิงก์ pre-authenticated ชั่วคราว) ทำให้ <img>/<iframe> เอกสารแนบใช้ไม่ได้
-// เมื่อเปิดดูใบลาในวันหลัง ฟังก์ชันนี้ขอลิงก์ใหม่สด ๆ จาก /api/resolve-onedrive
-// โดยใช้ document_path ที่บันทึกไว้ตอนอัพโหลด (ดู api-resolve-onedrive-route.ts)
+// [FIX-4] resolve OneDrive download URL ให้สดก่อนแสดงหรือพิมพ์
 async function resolveAttachmentUrl(documentPath?: string | null, fallbackUrl?: string | null): Promise<string | null> {
   if (!documentPath) return fallbackUrl ?? null;
   try {
@@ -135,14 +131,13 @@ const sel = (err?: boolean) => `w-full bg-white border-2 ${err?"border-red-400":
 
 // ══════════════════════════════════════════════════════════
 // ── PDF Builder ────────────────────────────────────────────
-// [FIX-3] ลดขนาดฟอนต์/padding/margin ทั้งหมดให้พอดี A4 หน้าเดียว
-// [FIX-2] เอาเส้นใต้ลายเซ็นออก ให้เหลือแค่รูปลายเซ็นลอย
+// [FIX-1] เว้น 1 บรรทัดหลัง "แบบใบลาป่วย ลากิจส่วนตัว ลาคลอดบุตร"
 // ══════════════════════════════════════════════════════════
 function buildLeaveHTML(
   data: any,
   signatureUrl: string,
   approverSignatures?: { name: string; position: string; signature_url?: string; approved_at?: string; }[],
-  documentUrl?: string,   // ← เพิ่มตรงนี้
+  documentUrl?: string,
   leaveStats?: LeaveStats
 ): string {
   const now = new Date();
@@ -173,7 +168,6 @@ function buildLeaveHTML(
   const thisPersonal = isPersonal ? Number(daysDisplay) : 0;
   const thisMat      = isMat      ? Number(daysDisplay) : 0;
 
-  // [FIX-2] กล่องผู้ตรวจสอบ — เอาเส้นจุดประใต้ "ลงชื่อ" ออก เหลือแค่รูปลายเซ็นลอย + ชื่อ/ตำแหน่ง/วันที่
   const checkerBlock = `
   <div style="margin-top:10px;font-size:10.5pt;line-height:1.7;text-align:center">
     <div style="display:flex; align-items:flex-end; justify-content:center; gap:12px; height:42px; margin-bottom:2px; width:100%">
@@ -190,7 +184,6 @@ function buildLeaveHTML(
     หัวหน้ากลุ่มบริหารงานบุคคล <br> วันที่ ${approver1?.approved_at || ".............................."}
   </div>`;
 
-  // [FIX-2] box2/box3 — เอา border-bottom (เส้นขีด) ใต้รูปลายเซ็นออก เหลือแค่รูปลอยอยู่
   const box2 = `
   <div class="box" style="margin-bottom:7px;font-size:10.5pt;line-height:1.6">
     <div style="font-weight:700;margin-bottom:3px">ความเห็นของรอง ผอ.กลุ่มบริหารงานบุคคล</div>
@@ -282,6 +275,7 @@ table.stat td:first-child{text-align:left}
   <img src="/school-logo.png" style="width:54px;height:54px;object-fit:contain" onerror="this.style.display='none'"/>
 </div>
 <div style="font-size:14.5pt;font-weight:900;text-align:center;margin:3px 0">แบบใบลาป่วย ลากิจส่วนตัว ลาคลอดบุตร</div>
+<div style="height:14pt"></div>
 <div style="text-align:right;line-height:1.5;font-size:11pt;margin-bottom:7px">
   โรงเรียนวัดเขียนเขต ตำบลบึงยี่โถ<br>อำเภอธัญบุรี จังหวัดปทุมธานี
 </div>
@@ -379,7 +373,6 @@ function printLeave(data: any, signatureUrl: string, approverSignatures?: any[],
   win.onload = () => { win.focus(); win.print(); };
 }
 
-// [FIX-4] เวอร์ชัน async — resolve เอกสารแนบให้สดก่อนพิมพ์ ถ้ามี document_path เก็บไว้
 async function printLeaveAsync(
   data: any, signatureUrl: string, approverSignatures?: any[],
   documentUrl?: string, documentPath?: string | null, leaveStats?: LeaveStats
@@ -701,7 +694,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
       const fy = getCurrentFiscalYear();
       const { data } = await supabase
         .from("leave_requests")
-        .select("*, approver_1_signature, approver_1_approved_at, approver_2_signature, approver_2_approved_at, approver_3_signature, approver_3_approved_at")
+        .select("id, leave_type, days_count, start_date, end_date, status")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
@@ -772,7 +765,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
     if(!isDraft&&sickTooFarAhead){alert("ลาป่วยสามารถยื่นล่วงหน้าได้ไม่เกิน 1 วัน");return;}
 
     let docUrl: string | null = null;
-    let docPath: string | null = null; // [FIX-4] เก็บ path ไว้ resolve ใหม่ได้ทุกครั้ง
+    let docPath: string | null = null;
     if (docFile) {
       const MAX_SIZE = 4 * 1024 * 1024;
       if (docFile.size > MAX_SIZE) {
@@ -789,11 +782,13 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
         const baseFileName = `${dd}${mm}${yyyyBE}_${teacherFirstName}`;
         const uniqueSuffix = `_${Date.now()}`;
         const finalFileName = ext ? `${baseFileName}${uniqueSuffix}.${ext}` : `${baseFileName}${uniqueSuffix}`;
-        const relPath = `WKK_Leave_System/${finalFileName}`;
+        // [FIX-3] อัพไฟล์แนบไปที่โฟลเดอร์ HR บน OneDrive
+        const relPath = `HR_Leave_Attachments/${finalFileName}`;
 
         const formData = new FormData();
         formData.append("file", docFile);
         formData.append("path", relPath);
+        formData.append("account", HR_EMAIL); // ระบุ account HR (ถ้า API รองรับ)
 
         const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
         const json = await res.json().catch(() => null);
@@ -805,7 +800,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
           throw new Error(errMsg);
         }
         docUrl  = json.downloadUrl || json.url || json.webUrl || null;
-        docPath = relPath; // [FIX-4]
+        docPath = relPath;
       } catch (err: any) {
         console.error("Upload error:", err);
         const go = confirm(`⚠️ แนบไฟล์ไม่สำเร็จ\n\nรายละเอียด: ${err.message}\n\nต้องการส่งใบลาโดยไม่มีเอกสารแนบหรือไม่?`);
@@ -829,7 +824,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
       other_leave_name:leaveType==="other"?otherName:null,
       half_day:rawDays===1&&leaveType!=="ordination"?halfDay:null,
       document_url: docUrl,
-      document_path: docPath, // [FIX-4] คอลัมน์ใหม่ — ใช้ resolve ลิงก์สดในอนาคต
+      document_path: docPath,
       status:isDraft?"draft":"pending",
       missed_periods:missedPeriods.join(","), substitute_id:substitute||null,
       duty_officer_id:dutyOfficer?.id??null,
@@ -986,7 +981,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
               <span className="text-2xl">📎</span>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-slate-600 truncate">{docFile?docFile.name:"คลิกเพื่อแนบไฟล์"}</p>
-                <p className="text-xs text-slate-400">รองรับ PDF, JPG, PNG (ไม่เกิน 10MB) · บันทึกใน OneDrive</p>
+                <p className="text-xs text-slate-400">รองรับ PDF, JPG, PNG (ไม่เกิน 10MB) · บันทึกใน OneDrive ของ HR</p>
               </div>
               {docFile&&<button type="button" onClick={e=>{e.stopPropagation();setDocFile(null);}} className="w-6 h-6 rounded-full bg-red-100 text-red-500 text-xs flex items-center justify-center font-black">✕</button>}
             </div>
@@ -1122,9 +1117,6 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
 
 // ══════════════════════════════════════════════════════════
 // ── TeacherDashboard ──────────────────────────────────────
-// [FIX-1] ปุ่มพิมพ์ใน view modal เล็ก ตอนนี้ดึง approver signatures + leaveStats
-//         เหมือนปุ่มพิมพ์แถวประวัติแล้ว — ไม่ขึ้นกล่องเปล่าอีกต่อไป
-// [FIX-4] ใช้ printLeaveAsync + document_path เพื่อ resolve เอกสารแนบให้สดก่อนพิมพ์
 // ══════════════════════════════════════════════════════════
 function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPrint }: {
   user:UserProfile; approvers:ApproverInfo[]; allTeachers:UserProfile[]; savedSignature:string; canPrint:boolean;
@@ -1166,21 +1158,30 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
     await loadRequests();
   }
 
-  // [FIX-1][FIX-4] ฟังก์ชันพิมพ์กลางที่ดึงสถิติ + ลายเซ็นผู้อนุมัติ + resolve เอกสารแนบให้สด
-  // ใช้ร่วมกันทั้งปุ่มพิมพ์แถวประวัติ และปุ่มพิมพ์ใน view modal เล็ก
+  // [FIX-2] printFullLeave — ดึง end_date + lastLeave ด้วย
   async function printFullLeave(r: LeaveRequest) {
     const fy = getCurrentFiscalYear();
     const { data: statsData } = await supabase
       .from("leave_requests")
-      .select("id, leave_type, days_count, start_date, status")
+      .select("id, leave_type, days_count, start_date, end_date, status")
       .eq("user_id", user.id)
       .not("status", "in", '("rejected","cancelled","draft")');
 
     const fyData = (statsData || []).filter(x => isInFiscalYear(x.start_date, fy) && x.id !== r.id);
+    const lastLeaveReq = fyData
+      .filter((x: any) => x.leave_type !== "official")
+      .sort((a: any, b: any) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())[0];
+
     const stats: LeaveStats = {
       sick:      fyData.filter(x => x.leave_type === "sick").reduce((s,x) => s + Number(x.days_count), 0),
       personal:  fyData.filter(x => ["personal","other","ordination"].includes(x.leave_type)).reduce((s,x) => s + Number(x.days_count), 0),
       maternity: fyData.filter(x => x.leave_type === "maternity").reduce((s,x) => s + Number(x.days_count), 0),
+      lastLeave: lastLeaveReq ? {
+        type: lastLeaveReq.leave_type,
+        startDate: lastLeaveReq.start_date,
+        endDate: lastLeaveReq.end_date,
+        days: Number(lastLeaveReq.days_count),
+      } : null,
     };
 
     await printLeaveAsync(
@@ -1216,7 +1217,7 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
         },
       ],
       (r as any).document_url,
-      (r as any).document_path, // [FIX-4]
+      (r as any).document_path,
       stats
     );
   }
@@ -1373,8 +1374,6 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
         </div>
       </div>
 
-      {/* [FIX-1] View modal — ปุ่มพิมพ์เปลี่ยนมาเรียก printFullLeave(r) แทน printLeave ตรง ๆ
-          ทำให้ดึง approver signatures + leaveStats + resolve เอกสารแนบสดเหมือนปุ่มพิมพ์แถวประวัติแล้ว */}
       {viewId&&(()=>{
         const r=requests.find(x=>x.id===viewId);
         if(!r) return null;
@@ -1428,7 +1427,6 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
   const typeCfg = LEAVE_TYPE_CONFIG[r.leave_type as LeaveType];
   const c = COLORS[r.leave_type] ?? COLORS.other;
 
-  // [FIX-4] resolve เอกสารแนบให้สดตอนเปิด modal (ไม่ต้องรอจนกดพิมพ์)
   const [liveDocUrl, setLiveDocUrl] = useState<string | null>(r.document_url ?? null);
   useEffect(() => {
     let cancelled = false;
@@ -1458,7 +1456,6 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
   return (
     <div className="fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center p-4 overflow-auto">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-        {/* Header */}
         <div className={`${c.bg} border-b ${c.border} px-6 py-4 flex items-center justify-between`}>
           <div>
             <p className={`font-black text-lg ${c.text}`}>{typeCfg?.icon} {typeCfg?.label}</p>
@@ -1467,7 +1464,6 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
           <button onClick={onClose} className="w-9 h-9 rounded-xl bg-white/60 flex items-center justify-center text-slate-600 font-bold text-lg">✕</button>
         </div>
 
-        {/* Content */}
         <div className="p-6 space-y-3 text-sm max-h-[65vh] overflow-y-auto">
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-slate-50 rounded-xl p-3">
@@ -1501,7 +1497,6 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
             </div>
           )}
 
-          {/* เอกสารแนบ — [FIX-4] ใช้ liveDocUrl (resolve สดแล้ว) แทน r.document_url ตรง ๆ */}
           {(liveDocUrl || r.document_url) && (
             <div className="rounded-xl border-2 border-blue-200 overflow-hidden">
               <div className="bg-blue-50 px-4 py-2 flex items-center justify-between">
@@ -1543,7 +1538,6 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
             </div>
           )}
 
-          {/* Approver status badges */}
           <div className="flex gap-2">
             {[r.approver_1_status, r.approver_2_status, r.approver_3_status].map((s, i) => {
               if (![r.approver_1_id, r.approver_2_id, r.approver_3_id][i]) return null;
@@ -1607,7 +1601,6 @@ function LeaveViewModal({ r, user, canApprove, approverSigUrl, mySlotFn, onClose
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-100 flex gap-2">
           <button onClick={onPrint}
             className="flex-1 py-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-700 font-black text-sm hover:bg-slate-50">
@@ -1651,7 +1644,8 @@ function RejectModal({ onConfirm, onClose }: {
 
 // ══════════════════════════════════════════════════════════
 // ── AdminDashboard ─────────────────────────────────────────
-// [FIX-1][FIX-4] onPrint ใน LeaveViewModal ใช้ printLeaveAsync + document_path
+// [FIX-2] printFullLeaveAdmin — ดึง end_date + lastLeave ด้วย
+// [FIX-3] handleApprove allApproved — ใช้ sig จาก updates ก่อนเสมอ + อัพ PDF ไป HR OneDrive
 // ══════════════════════════════════════════════════════════
 function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: boolean }) {
   const [requests,     setRequests]     = useState<LeaveRequest[]>([]);
@@ -1719,37 +1713,40 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
   }
 
   function tryApprove(id: string, slot: 1|2|3, action: "approved"|"rejected") {
-  if (action === "rejected") { setRejectModal({ id, slot }); return; }
-  if (action === "approved" && !approverSigUrl && slot !== 3) {
-    setPendingApproveId({ id, slot, action });
-    setShowApproverSigPad(true);
-    return;
-  }
-  handleApprove(id, slot, action);
+    if (action === "rejected") { setRejectModal({ id, slot }); return; }
+    if (action === "approved" && !approverSigUrl && slot !== 3) {
+      setPendingApproveId({ id, slot, action });
+      setShowApproverSigPad(true);
+      return;
+    }
+    handleApprove(id, slot, action);
   }
 
   async function handleApprove(id: string, slotNum: 1|2|3, action: "approved"|"rejected",
-  reason?: string, comment?: string) {
-  const req = requests.find(r => r.id === id)!;
-  const updates: any = {
-    [`approver_${slotNum}_status`]: action,
-    [`approver_${slotNum}_id`]: user.id,
-  };
-  if (comment) updates[`approver_${slotNum}_comment`] = comment;
-  if (action === "approved") {
-    updates[`approver_${slotNum}_signature`] = approverSigUrl;
-    updates[`approver_${slotNum}_approved_at`] = new Date().toLocaleDateString("th-TH", {
+    reason?: string, comment?: string) {
+    const req = requests.find(r => r.id === id)!;
+    const now = new Date();
+    const approvedAtStr = now.toLocaleDateString("th-TH", {
       day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Bangkok"
     });
-  }
-  if (action === "rejected" && reason) {
-    updates[`approver_${slotNum}_reject_reason`] = reason;
-    updates.reject_reason = reason;
-  }
 
-  const s1 = slotNum === 1 ? action : req.approver_1_status;
-  const s2 = slotNum === 2 ? action : req.approver_2_status;
-  const s3 = slotNum === 3 ? action : req.approver_3_status;
+    const updates: any = {
+      [`approver_${slotNum}_status`]: action,
+      [`approver_${slotNum}_id`]: user.id,
+    };
+    if (comment) updates[`approver_${slotNum}_comment`] = comment;
+    if (action === "approved") {
+      updates[`approver_${slotNum}_signature`] = approverSigUrl;
+      updates[`approver_${slotNum}_approved_at`] = approvedAtStr;
+    }
+    if (action === "rejected" && reason) {
+      updates[`approver_${slotNum}_reject_reason`] = reason;
+      updates.reject_reason = reason;
+    }
+
+    const s1 = slotNum === 1 ? action : req.approver_1_status;
+    const s2 = slotNum === 2 ? action : req.approver_2_status;
+    const s3 = slotNum === 3 ? action : req.approver_3_status;
 
     const teacherName  = fullName((req as any).user);
     const typeCfg      = LEAVE_TYPE_CONFIG[req.leave_type];
@@ -1776,7 +1773,7 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
                   <tr><td style="padding:8px 0;color:#64748b">จำนวน</td><td>${req.days_count} วัน</td></tr>
                   <tr><td style="padding:8px 0;color:#dc2626">เหตุผลที่ไม่อนุมัติ</td><td style="font-weight:700;color:#dc2626">${reason || "-"}</td></tr>
                 </table>
-                <p style="margin-top:16px;font-size:12px;color:#94a3b8">อีเมลนี้ส่งโดยอัตโนมัติ · ${new Date().toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})}</p>
+                <p style="margin-top:16px;font-size:12px;color:#94a3b8">อีเมลนี้ส่งโดยอัตโนมัติ · ${now.toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})}</p>
               </div>
             </div>`,
         }),
@@ -1788,6 +1785,15 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
 
         try {
           const reqUser = (req as any).user;
+
+          // [FIX-3] ใช้ค่าจาก updates ก่อนเสมอ เพื่อให้ลายเซ็น slot ที่เพิ่งกดอนุมัติ (slotNum) ปรากฏในใบลาด้วย
+          const sig1 = slotNum === 1 ? (updates.approver_1_signature ?? (req as any).approver_1_signature) : (req as any).approver_1_signature;
+          const sig2 = slotNum === 2 ? (updates.approver_2_signature ?? (req as any).approver_2_signature) : (req as any).approver_2_signature;
+          const sig3 = slotNum === 3 ? (updates.approver_3_signature ?? (req as any).approver_3_signature) : (req as any).approver_3_signature;
+          const at1  = slotNum === 1 ? (updates.approver_1_approved_at ?? (req as any).approver_1_approved_at) : (req as any).approver_1_approved_at;
+          const at2  = slotNum === 2 ? (updates.approver_2_approved_at ?? (req as any).approver_2_approved_at) : (req as any).approver_2_approved_at;
+          const at3  = slotNum === 3 ? (updates.approver_3_approved_at ?? (req as any).approver_3_approved_at) : (req as any).approver_3_approved_at;
+
           const leaveData = {
             fullName: fullName(reqUser),
             position: reqUser?.position,
@@ -1805,17 +1811,45 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
 
           const approverSigs = [
             { name:"นางสาวพรรษา แก้วใหญ่", position:"ครู ตรวจสอบสถิติการลา",
-              signature_url: (req as any).approver_1_signature, approved_at: (req as any).approver_1_approved_at },
+              signature_url: sig1, approved_at: at1 },
             { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
-              signature_url: (req as any).approver_2_signature, approved_at: (req as any).approver_2_approved_at },
+              signature_url: sig2, approved_at: at2 },
             { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต",
-              signature_url: updates.approver_3_signature ?? (req as any).approver_3_signature,
-              approved_at: updates.approver_3_approved_at ?? (req as any).approver_3_approved_at },
+              signature_url: sig3, approved_at: at3 },
           ];
 
-          const html = buildLeaveHTML(leaveData, reqUser?.signature_url || "", approverSigs, (req as any).document_url);
+          // [FIX-2] ดึงสถิติ + lastLeave ก่อนสร้าง HTML
+          const fy = getCurrentFiscalYear();
+          const { data: statsData } = await supabase
+            .from("leave_requests")
+            .select("id, leave_type, days_count, start_date, end_date, status")
+            .eq("user_id", req.user_id)
+            .not("status", "in", '("rejected","cancelled","draft")');
 
-          const now = new Date();
+          const fyStats = (statsData || []).filter((x: any) =>
+            isInFiscalYear(x.start_date, fy) && x.id !== req.id
+          );
+          const lastLeaveReq = fyStats
+            .filter((x: any) => x.leave_type !== "official")
+            .sort((a: any, b: any) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())[0];
+
+          const leaveStats: LeaveStats = {
+            sick:      fyStats.filter((x:any) => x.leave_type === "sick").reduce((s:number,x:any) => s + Number(x.days_count), 0),
+            personal:  fyStats.filter((x:any) => ["personal","other","ordination"].includes(x.leave_type)).reduce((s:number,x:any) => s + Number(x.days_count), 0),
+            maternity: fyStats.filter((x:any) => x.leave_type === "maternity").reduce((s:number,x:any) => s + Number(x.days_count), 0),
+            lastLeave: lastLeaveReq ? {
+              type: lastLeaveReq.leave_type,
+              startDate: lastLeaveReq.start_date,
+              endDate: lastLeaveReq.end_date,
+              days: Number(lastLeaveReq.days_count),
+            } : null,
+          };
+
+          // resolve เอกสารแนบให้สดก่อนใส่ใน PDF
+          const freshDocUrl = await resolveAttachmentUrl((req as any).document_path, (req as any).document_url);
+
+          const html = buildLeaveHTML(leaveData, reqUser?.signature_url || "", approverSigs, freshDocUrl ?? undefined, leaveStats);
+
           const dd = String(now.getDate()).padStart(2,"0");
           const mm = String(now.getMonth()+1).padStart(2,"0");
           const yyyyBE = now.getFullYear()+543;
@@ -1833,24 +1867,87 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
             const pdfBlob = await pdfRes.blob();
             const formData = new FormData();
             formData.append("file", pdfBlob, fileName);
-            formData.append("path", `WKK_Leave_System/${fileName}`);
-            await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+            // [FIX-3] อัพ PDF ที่อนุมัติแล้วไปโฟลเดอร์ HR บน OneDrive
+            formData.append("path", `HR_Approved_Leaves/${fileName}`);
+            formData.append("account", HR_EMAIL); // ระบุ account HR (ถ้า API รองรับ)
+
+            const uploadRes = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+            if (!uploadRes.ok) {
+              console.warn("PDF upload to HR OneDrive failed:", await uploadRes.text());
+            }
           }
         } catch (err) {
-          console.warn("PDF upload failed:", err);
+          console.warn("PDF build/upload failed:", err);
         }
       }
     }
 
     const { error } = await (supabase.from("leave_requests") as any).update(updates).eq("id", id);
-  if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); return; }
-  await loadAll();
-  setPendingApproveId(null);
-  if (viewModal?.id === id) setViewModal(null);
-} 
+    if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); return; }
+    await loadAll();
+    setPendingApproveId(null);
+    if (viewModal?.id === id) setViewModal(null);
+  }
 
   function mySlot(r: LeaveRequest): 1|2|3|null {
     return approverSlotByEmail(user.email);
+  }
+
+  // [FIX-2] printFullLeaveAdmin — ดึง end_date + lastLeave ด้วย
+  async function printFullLeaveAdmin(r: any) {
+    const fy = getCurrentFiscalYear();
+    const reqUser = r.user;
+    const { data: statsData } = await supabase
+      .from("leave_requests")
+      .select("id, leave_type, days_count, start_date, end_date, status")
+      .eq("user_id", r.user_id)
+      .not("status", "in", '("rejected","cancelled","draft")');
+
+    const fyData = (statsData || []).filter((x: any) => isInFiscalYear(x.start_date, fy) && x.id !== r.id);
+    const lastLeaveReq = fyData
+      .filter((x: any) => x.leave_type !== "official")
+      .sort((a: any, b: any) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())[0];
+
+    const stats: LeaveStats = {
+      sick:      fyData.filter((x:any) => x.leave_type === "sick").reduce((s:number,x:any) => s + Number(x.days_count), 0),
+      personal:  fyData.filter((x:any) => ["personal","other","ordination"].includes(x.leave_type)).reduce((s:number,x:any) => s + Number(x.days_count), 0),
+      maternity: fyData.filter((x:any) => x.leave_type === "maternity").reduce((s:number,x:any) => s + Number(x.days_count), 0),
+      lastLeave: lastLeaveReq ? {
+        type: lastLeaveReq.leave_type,
+        startDate: lastLeaveReq.start_date,
+        endDate: lastLeaveReq.end_date,
+        days: Number(lastLeaveReq.days_count),
+      } : null,
+    };
+
+    await printLeaveAsync(
+      {
+        fullName: fullName(reqUser),
+        position: reqUser?.position,
+        leaveType: r.leave_type,
+        leaveTypeName: LEAVE_TYPE_CONFIG[r.leave_type as LeaveType]?.label ?? "",
+        otherLeaveName: r.other_leave_name,
+        startDate: r.start_date,
+        endDate: r.end_date,
+        days: r.days_count,
+        halfDay: r.half_day,
+        reason: r.reason,
+        phone: reqUser?.phone,
+        contactInfo: r.contact_info,
+      },
+      reqUser?.signature_url || "",
+      [
+        { name:"นางสาวพรรษา แก้วใหญ่", position:"ครู ตรวจสอบสถิติการลา",
+          signature_url: r.approver_1_signature, approved_at: r.approver_1_approved_at },
+        { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
+          signature_url: r.approver_2_signature, approved_at: r.approver_2_approved_at },
+        { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต",
+          signature_url: r.approver_3_signature, approved_at: r.approver_3_approved_at },
+      ],
+      r.document_url,
+      r.document_path,
+      stats
+    );
   }
 
   const fyAll = requests.filter(r=>isInFiscalYear(r.start_date,filterFY)&&r.status!=="cancelled");
@@ -1877,52 +1974,6 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
     ? slot===1 ? "👤 ผู้อนุมัติลำดับที่ 1" : slot===2 ? "👤 ผู้อนุมัติลำดับที่ 2" : "👤 ผู้อนุมัติลำดับที่ 3"
     : user.email===HR_EMAIL ? "📋 ฝ่ายบุคคล (HR)" : "🔧 ผู้ดูแลระบบ";
 
-  async function printFullLeaveAdmin(r: any) {
-  const fy = getCurrentFiscalYear();
-  const reqUser = r.user;
-  const { data: statsData } = await supabase
-    .from("leave_requests")
-    .select("id, leave_type, days_count, start_date, status")
-    .eq("user_id", r.user_id)
-    .not("status", "in", '("rejected","cancelled","draft")');
-
-  const fyData = (statsData || []).filter((x: any) => isInFiscalYear(x.start_date, fy) && x.id !== r.id);
-  const stats: LeaveStats = {
-    sick:      fyData.filter((x:any) => x.leave_type === "sick").reduce((s:number,x:any) => s + Number(x.days_count), 0),
-    personal:  fyData.filter((x:any) => ["personal","other","ordination"].includes(x.leave_type)).reduce((s:number,x:any) => s + Number(x.days_count), 0),
-    maternity: fyData.filter((x:any) => x.leave_type === "maternity").reduce((s:number,x:any) => s + Number(x.days_count), 0),
-  };
-
-  await printLeaveAsync(
-    {
-      fullName: fullName(reqUser),
-      position: reqUser?.position,
-      leaveType: r.leave_type,
-      leaveTypeName: LEAVE_TYPE_CONFIG[r.leave_type as LeaveType]?.label ?? "",
-      otherLeaveName: r.other_leave_name,
-      startDate: r.start_date,
-      endDate: r.end_date,
-      days: r.days_count,
-      halfDay: r.half_day,
-      reason: r.reason,
-      phone: reqUser?.phone,
-      contactInfo: r.contact_info,
-    },
-    reqUser?.signature_url || "",
-    [
-      { name:"นางสาวพรรษา แก้วใหญ่", position:"ครู ตรวจสอบสถิติการลา",
-        signature_url: r.approver_1_signature, approved_at: r.approver_1_approved_at },
-      { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
-        signature_url: r.approver_2_signature, approved_at: r.approver_2_approved_at },
-      { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต",
-        signature_url: r.approver_3_signature, approved_at: r.approver_3_approved_at },
-    ],
-    r.document_url,
-    r.document_path,
-    stats
-  );
-}
-
   return (
     <div className="min-h-screen">
       {showApproverSigPad && (
@@ -1945,7 +1996,7 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
           onApprove={(id, slot) => tryApprove(id, slot, "approved")}
           onReject={(id, slot) => setRejectModal({ id, slot })}
         />
-      )} 
+      )}
       {rejectModal && (
         <RejectModal
           onConfirm={(reason) => {
@@ -2109,7 +2160,6 @@ function AdminDashboard({ user, canApprove }: { user: UserProfile; canApprove: b
               })}
           </div>
         )}
-        
 
         {tab==="history"&&(
           <div>
@@ -2308,7 +2358,6 @@ function ApproverPage({ user, approvers, allTeachers, savedSignature }: {
     </div>
   );
 }
-
 
 // ══════════════════════════════════════════════════════════
 // ── Main Page ──────────────────────────────────────────────
