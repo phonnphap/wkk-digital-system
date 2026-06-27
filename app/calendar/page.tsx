@@ -261,8 +261,12 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
   const [hasEndTime,   setHasEndTime]  = useState(!!event?.end_time);
   const [isAllDay,     setIsAllDay]    = useState(event?.is_all_day ?? true);
   const [audiences,    setAudiences]   = useState<string[]>(event?.target_roles ?? ["all"]);
-  const [attachments,  setAttachments] = useState<string[]>(event?.attachment_urls ?? []);
-  const [attachmentMimes, setAttachmentMimes] = useState<Record<string,string>>({});  // ← เพิ่มบรรทัดนี้
+
+  // ★ FIX 1: attachments เป็น array ของ {url, mime} ตั้งแต่ initial state — ไม่ยัด JSX เข้า useState
+  const [attachments, setAttachments] = useState<{url:string; mime:string}[]>(
+    (event?.attachment_urls ?? []).map(url => ({ url, mime: "" }))
+  );
+
   const [colorOvr,     setColorOvr]    = useState(event?.color_override ?? "");
   const [rejectReason, setRejectReason]= useState("");
   const [showReject,   setShowReject]  = useState(false);
@@ -284,53 +288,48 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
     });
   }
 
+  // ★ FIX 2 & 3: ลบ useState ที่อยู่กลางฟังก์ชัน (ผิดกฎ Hooks) และเก็บ url แค่ครั้งเดียวเป็น object
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-  const files = Array.from(e.target.files ?? []);
-  if (!files.length) return;
-  setUploading(true);
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    setUploading(true);
 
-  for (const file of files) {
-    if (file.size > 10 * 1024 * 1024) {
-      alert(`${file.name} ขนาดเกิน 10MB`);
-      continue;
-    }
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      // ✅ บันทึกใน WKK_Event_System บน OneDrive
-      formData.append("path", `WKK_Event_System/${Date.now()}_${file.name}`);
-
-      const res  = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
-      const json = await res.json().catch(() => null);
-
-      if (!res.ok || !json?.ok) {
-        const msg = json?.error
-          ? (typeof json.error === "string" ? json.error : JSON.stringify(json.error))
-          : `HTTP ${res.status}`;
-        alert(`อัปโหลดไม่สำเร็จ: ${msg}`);
+    for (const file of files) {
+      if (file.size > 10 * 1024 * 1024) {
+        alert(`${file.name} ขนาดเกิน 10MB`);
         continue;
       }
-      const [attachmentMimes, setAttachmentMimes] = useState<Record<string,string>>({});
 
-      // ✅ ใช้ downloadUrl เพื่อเปิดดูไฟล์ได้โดยตรง
-      const url = json.downloadUrl || json.webUrl || json.url;
-      if (url) setAttachments(prev => [...prev, url]);
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        // บันทึกใน WKK_Event_System บน OneDrive
+        formData.append("path", `WKK_Event_System/${Date.now()}_${file.name}`);
 
-      if (url) {
-  setAttachments(prev => [...prev, url]);
-  // เก็บ mime จากไฟล์จริงก่อนอัปโหลด
-  setAttachmentMimes(prev => ({...prev, [url]: file.type}));
-}
+        const res  = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+        const json = await res.json().catch(() => null);
 
-    } catch (err: any) {
-      alert("อัปโหลดไม่สำเร็จ: " + err.message);
+        if (!res.ok || !json?.ok) {
+          const msg = json?.error
+            ? (typeof json.error === "string" ? json.error : JSON.stringify(json.error))
+            : `HTTP ${res.status}`;
+          alert(`อัปโหลดไม่สำเร็จ: ${msg}`);
+          continue;
+        }
+
+        // ใช้ downloadUrl เพื่อเปิดดูไฟล์ได้โดยตรง — เก็บเป็น object เดียว ไม่ซ้ำ
+        const url = json.downloadUrl || json.webUrl || json.url;
+        if (url) {
+          setAttachments(prev => [...prev, { url, mime: file.type }]);
+        }
+      } catch (err: any) {
+        alert("อัปโหลดไม่สำเร็จ: " + err.message);
+      }
     }
-  }
 
-  setUploading(false);
-  if (fileRef.current) fileRef.current.value = "";
-}
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+  }
 
   async function handleSave(asDraft: boolean) {
     if (!title || !startDate) { alert("กรุณากรอกชื่อกิจกรรมและวันที่"); return; }
@@ -347,7 +346,7 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
       created_by: user.id,
       is_public: true,
       target_roles: audiences,
-      attachment_urls: attachments,
+      attachment_urls: attachments.map(a => a.url),
     });
     setLoading(false);
   }
@@ -422,7 +421,11 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
               <button key={k} onClick={()=>setTab(k)}
                 className={`px-4 py-3 text-sm font-bold border-b-2 transition-all ${tab===k?"border-blue-500 text-blue-600":"border-transparent text-slate-400 hover:text-slate-600"}`}>
                 {l}
-                {k==="attach"&&attachments.length>0&&<span className="ml-1 bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{attachments.length}</span>}
+                {k==="attach" && attachments.length > 0 && (
+                  <span className="ml-1 bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+                    {attachments.length}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -451,7 +454,7 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
                 <div>
                   <p className="text-xs font-bold text-slate-400 mb-2">เอกสารแนบ</p>
                   {event!.attachment_urls!.map((url,i)=>(
-                    <FilePreview key={i} url={url} />  // ไม่มี mimeHint แต่จะพยายาม guess จาก URL
+                    <FilePreview key={i} url={url} />
                   ))}
                 </div>
               )}
@@ -589,6 +592,7 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
             </>
           )}
 
+          {/* ★ FIX 4: ปิด tag ครบ — เขียนเป็น if/else ที่ชัดเจนแทน ternary ที่เปิดไม่ปิด */}
           {canEdit && tab === "attach" && (
             <>
               <div>
@@ -607,10 +611,10 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
               {attachments.length > 0 ? (
                 <div>
                   <p className="text-xs font-bold text-slate-400 mb-2">ไฟล์ที่แนบ ({attachments.length} ไฟล์)</p>
-                  {attachments.map((url,i)=>(
+                  {attachments.map((a, i) => (
                     <div key={i} className="relative group">
-                      <FilePreview url={url} mimeHint={attachmentMimes[url]} />
-                      <button onClick={()=>setAttachments(prev=>prev.filter((_,j)=>j!==i))}
+                      <FilePreview url={a.url} mimeHint={a.mime} />
+                      <button onClick={() => setAttachments(prev => prev.filter((_,j) => j !== i))}
                         className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs hidden group-hover:flex items-center justify-center font-bold shadow">
                         ×
                       </button>
@@ -625,9 +629,6 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
               )}
             </>
           )}
-
-          {/* Read-only attachments for viewer */}
-          {isEdit && !canEdit && (event?.attachment_urls??[]).length === 0 && null}
 
           {/* Reject reason display */}
           {isEdit && event?.status === "rejected" && event?.reject_reason && (
