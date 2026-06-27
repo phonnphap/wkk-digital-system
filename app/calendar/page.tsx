@@ -250,39 +250,39 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
   const files = Array.from(e.target.files ?? []);
   if (!files.length) return;
   setUploading(true);
-  
+
   for (const file of files) {
-    if (file.size > 10 * 1024 * 1024) { 
-      alert(`${file.name} ขนาดเกิน 10MB`); 
-      continue; 
+    if (file.size > 10 * 1024 * 1024) {
+      alert(`${file.name} ขนาดเกิน 10MB`);
+      continue;
     }
-    
+
     try {
       const formData = new FormData();
       formData.append("file", file);
-      // ✅ บันทึกใน WKK_Event_System
+      // ✅ บันทึกใน WKK_Event_System บน OneDrive
       formData.append("path", `WKK_Event_System/${Date.now()}_${file.name}`);
-      
-      const res = await fetch("/api/upload-onedrive", { 
-        method: "POST", 
-        body: formData 
-      });
-      const json = await res.json();
-      
+
+      const res  = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+      const json = await res.json().catch(() => null);
+
       if (!res.ok || !json?.ok) {
-        alert("อัปโหลดไม่สำเร็จ: " + (json?.error ?? res.status));
+        const msg = json?.error
+          ? (typeof json.error === "string" ? json.error : JSON.stringify(json.error))
+          : `HTTP ${res.status}`;
+        alert(`อัปโหลดไม่สำเร็จ: ${msg}`);
         continue;
       }
-      
-      // ✅ ใช้ downloadUrl เพื่อเปิดดูได้โดยตรง
+
+      // ✅ ใช้ downloadUrl เพื่อเปิดดูไฟล์ได้โดยตรง
       const url = json.downloadUrl || json.webUrl || json.url;
       if (url) setAttachments(prev => [...prev, url]);
-      
+
     } catch (err: any) {
       alert("อัปโหลดไม่สำเร็จ: " + err.message);
     }
   }
-  
+
   setUploading(false);
   if (fileRef.current) fileRef.current.value = "";
 }
