@@ -6,18 +6,18 @@ import { createClient } from "@/lib/supabase/client";
 
 const supabase = createClient();
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ── Types ─────────────────────────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════════════
-type EventCategory = "academic"|"student"|"meeting"|"holiday"|"training"|"document"|"other";
-type EventStatus   = "draft"|"pending"|"approved"|"rejected";
-type CalView       = "month"|"week"|"day"|"agenda";
+// ══════════════════════════════════════════════════════
+// Types
+// ══════════════════════════════════════════════════════
+type EventStatus = "draft" | "pending" | "approved" | "rejected";
+type CalView = "month" | "week" | "day" | "agenda";
 
 interface CalEvent {
   id: string;
   title: string;
   description?: string;
-  category: EventCategory;
+  schedule?: string;
+  categories: string[];
   location?: string;
   start_date: string;
   end_date: string;
@@ -29,6 +29,8 @@ interface CalEvent {
   approved_by?: string;
   approved_at?: string;
   reject_reason?: string;
+  edit_requested?: boolean;
+  edit_request_note?: string;
   is_public: boolean;
   target_roles: string[];
   color_override?: string;
@@ -43,149 +45,240 @@ interface UserProfile {
   last_name: string;
   email: string;
   role: string;
-  position?: string;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ── Config ────────────────────────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════════════
-const APPROVER_ROLES = ["admin","director","deputy_director","dept_head","grade_head"];
+// ══════════════════════════════════════════════════════
+// Config
+// ══════════════════════════════════════════════════════
+const APPROVER_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head"];
 
-const CAT_CONFIG: Record<EventCategory, { label: string; color: string; light: string; border: string; text: string }> = {
-  academic:  { label:"วิชาการ",          color:"#185FA5", light:"#E6F1FB", border:"#A8C9EB", text:"#0C447C" },
-  student:   { label:"กิจกรรมนักเรียน",  color:"#3B6D11", light:"#EBF4D6", border:"#ADCC80", text:"#264708" },
-  meeting:   { label:"ประชุม",           color:"#854F0B", light:"#FAF0DC", border:"#F0C97A", text:"#5A3408" },
-  holiday:   { label:"วันหยุด / สำคัญ", color:"#A32D2D", light:"#FAEAEA", border:"#EFA8A8", text:"#791F1F" },
-  training:  { label:"อบรม / พัฒนา",    color:"#534AB7", light:"#EEECFB", border:"#B9B5E8", text:"#3C3489" },
-  document:  { label:"ส่งเอกสาร",       color:"#0F6E56", light:"#D9F4EC", border:"#7FDAC2", text:"#085041" },
-  other:     { label:"อื่นๆ",           color:"#6B7280", light:"#F3F4F6", border:"#D1D5DB", text:"#374151" },
+const CATEGORIES: Record<string, { label: string; color: string; light: string; text: string }> = {
+  academic:  { label: "วิชาการ",         color: "#185FA5", light: "#E6F1FB", text: "#0C447C" },
+  budget:    { label: "งบประมาณ",        color: "#0F6E56", light: "#D9F4EC", text: "#085041" },
+  general:   { label: "ทั่วไป",          color: "#6B7280", light: "#F3F4F6", text: "#374151" },
+  personnel: { label: "บุคคล",           color: "#854F0B", light: "#FAF0DC", text: "#5A3408" },
+  parent:    { label: "ผู้ปกครอง",       color: "#534AB7", light: "#EEECFB", text: "#3C3489" },
+  student:   { label: "กิจการนักเรียน",  color: "#3B6D11", light: "#EBF4D6", text: "#264708" },
+  holiday:   { label: "วันหยุด",         color: "#A32D2D", light: "#FAEAEA", text: "#791F1F" },
+  meeting:   { label: "ประชุม",          color: "#1e40af", light: "#dbeafe", text: "#1e3a8a" },
+  training:  { label: "อบรม",            color: "#7c3aed", light: "#ede9fe", text: "#5b21b6" },
+  important: { label: "วันสำคัญ",        color: "#b45309", light: "#fef3c7", text: "#92400e" },
 };
 
-const STATUS_CONFIG: Record<EventStatus, { label: string; cls: string }> = {
-  draft:    { label:"ร่าง",         cls:"bg-slate-100 text-slate-600 border-slate-300" },
-  pending:  { label:"รออนุมัติ",    cls:"bg-amber-50 text-amber-700 border-amber-300" },
-  approved: { label:"อนุมัติแล้ว", cls:"bg-emerald-50 text-emerald-700 border-emerald-300" },
-  rejected: { label:"ไม่อนุมัติ",  cls:"bg-red-50 text-red-700 border-red-300" },
+const AUDIENCES = [
+  { value: "all",      label: "👥 ทุกคน" },
+  { value: "teacher",  label: "👩‍🏫 ครู" },
+  { value: "student",  label: "🎒 นักเรียน" },
+  { value: "parent",   label: "👨‍👩‍👧 ผู้ปกครอง" },
+  { value: "staff",    label: "🏢 บุคลากร" },
+  { value: "admin",    label: "🔐 ผู้บริหาร" },
+];
+
+const STATUS_CFG: Record<EventStatus, { label: string; cls: string }> = {
+  draft:    { label: "ร่าง",        cls: "bg-slate-100 text-slate-600 border-slate-300" },
+  pending:  { label: "รออนุมัติ",   cls: "bg-amber-50 text-amber-700 border-amber-300" },
+  approved: { label: "อนุมัติแล้ว", cls: "bg-emerald-50 text-emerald-700 border-emerald-300" },
+  rejected: { label: "ไม่อนุมัติ",  cls: "bg-red-50 text-red-700 border-red-300" },
 };
 
 const TH_MONTHS = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
 const TH_DAYS_SHORT = ["อา","จ","อ","พ","พฤ","ศ","ส"];
 const TH_DAYS_FULL  = ["อาทิตย์","จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์"];
 
-// ── Date helpers ──────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════
+// Helpers
+// ══════════════════════════════════════════════════════
 const ymd = (d: Date) => {
   const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const day = String(d.getDate()).padStart(2,"0");
   return `${y}-${m}-${day}`;
 };
-const toDate = (s: string) => new Date(s + "T00:00:00");
+const toDate = (s: string) => new Date(s+"T00:00:00");
+const addDays = (d: Date, n: number) => { const r=new Date(d); r.setDate(r.getDate()+n); return r; };
+const startOfWeek = (d: Date) => { const r=new Date(d); r.setDate(d.getDate()-d.getDay()); return r; };
 
-function thaiDateShort(iso: string) {
+function fullName(u: any) {
+  if (!u) return "—";
+  return `${u.first_name??""} ${u.last_name??""}`.trim()||"—";
+}
+function thaiDate(iso: string) {
   const d = toDate(iso);
   return `${d.getDate()} ${TH_MONTHS[d.getMonth()].slice(0,3)} ${d.getFullYear()+543}`;
 }
-function fullName(u: any) {
-  if (!u) return "—";
-  return `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() || "—";
+function thaiTime(t?: string) {
+  if (!t) return "";
+  return t.slice(0,5) + " น.";
 }
-function addDays(d: Date, n: number) {
-  const r = new Date(d); r.setDate(r.getDate() + n); return r;
+function getCatColor(categories: string[]) {
+  const first = categories?.[0];
+  return CATEGORIES[first]?.color ?? "#6B7280";
 }
-function startOfWeek(d: Date) {
-  const r = new Date(d); r.setDate(d.getDate() - d.getDay()); return r;
+function getCatLight(categories: string[]) {
+  const first = categories?.[0];
+  return CATEGORIES[first]?.light ?? "#F3F4F6";
+}
+function getCatText(categories: string[]) {
+  const first = categories?.[0];
+  return CATEGORIES[first]?.text ?? "#374151";
+}
+function getCatLabels(categories: string[]) {
+  return (categories||[]).map(c => CATEGORIES[c]?.label ?? c).join(", ");
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ── EventPill ─────────────────────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+// EventPill
+// ══════════════════════════════════════════════════════
 function EventPill({ ev, onClick }: { ev: CalEvent; onClick: () => void }) {
-  const cfg = CAT_CONFIG[ev.category];
-  const statusLabel = ev.status === "pending" ? " ⏳"
-    : ev.status === "rejected" ? " ❌"
-    : ev.status === "draft" ? " 📝"
-    : "";
-
-  const style: React.CSSProperties = {
-    display: "block",
-    fontSize: 11,
-    fontWeight: 600,
-    padding: "1px 4px",
-    marginBottom: 1,
-    borderRadius: 4,
-    cursor: "pointer",
-    overflow: "hidden",
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-    background: ev.color_override ? ev.color_override + "22" : cfg.light,
-    color: ev.color_override ?? cfg.text,
-    borderLeft: `3px solid ${ev.color_override ?? cfg.color}`,
-  };
-
+  const color = ev.color_override ?? getCatColor(ev.categories);
+  const light = ev.color_override ? ev.color_override+"22" : getCatLight(ev.categories);
+  const text  = ev.color_override ?? getCatText(ev.categories);
+  const badge = ev.status==="pending"?" ⏳" : ev.status==="rejected"?" ❌" : ev.status==="draft"?" 📝" : "";
   return (
-    <span style={style} onClick={onClick}>
-      {ev.is_all_day ? "" : (ev.start_time?.slice(0, 5) + " ")}
-      {ev.title}{statusLabel}
+    <span onClick={onClick} style={{
+      display:"block", fontSize:11, fontWeight:600, padding:"2px 5px", marginBottom:2,
+      borderRadius:4, cursor:"pointer", overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis",
+      background: light, color: text, borderLeft:`3px solid ${color}`,
+    }}>
+      {!ev.is_all_day && ev.start_time && <span style={{opacity:0.7}}>{thaiTime(ev.start_time)} </span>}
+      {ev.title}{badge}
     </span>
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ── EventModal (Add / Edit) ───────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════════════
-function EventModal({
-  event, user, isApprover, onSave, onDelete, onApprove, onReject, onClose,
-}: {
-  event: Partial<CalEvent> | null;
+// ══════════════════════════════════════════════════════
+// CategoryBadges
+// ══════════════════════════════════════════════════════
+function CatBadges({ cats }: { cats: string[] }) {
+  return (
+    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+      {(cats||[]).map(c => {
+        const cfg = CATEGORIES[c];
+        if (!cfg) return null;
+        return (
+          <span key={c} style={{
+            background:cfg.light, color:cfg.text, fontSize:10, fontWeight:700,
+            padding:"2px 8px", borderRadius:12, border:`1px solid ${cfg.color}40`
+          }}>{cfg.label}</span>
+        );
+      })}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// FilePreview
+// ══════════════════════════════════════════════════════
+function FilePreview({ url }: { url: string }) {
+  const name = url.split("/").pop()?.split("?")[0] ?? "ไฟล์";
+  const ext  = name.split(".").pop()?.toLowerCase() ?? "";
+  const isImg = ["jpg","jpeg","png","gif","webp"].includes(ext);
+  const isPdf = ext === "pdf";
+
+  return (
+    <div style={{
+      border:"1px solid #e0e7ff", borderRadius:10, overflow:"hidden",
+      background:"#f8faff", marginBottom:8
+    }}>
+      {isImg && (
+        <img src={url} alt={name} style={{width:"100%",maxHeight:180,objectFit:"cover",display:"block"}}
+          onClick={() => window.open(url,"_blank")} className="cursor-pointer" />
+      )}
+      {isPdf && (
+        <iframe src={url} style={{width:"100%",height:200,border:"none",display:"block"}} title={name} />
+      )}
+      <div style={{padding:"8px 12px",display:"flex",alignItems:"center",gap:8,fontSize:12}}>
+        <span>{isPdf?"📄":isImg?"🖼️":"📎"}</span>
+        <span style={{flex:1,fontWeight:600,color:"#1e3a8a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</span>
+        <a href={url} target="_blank" rel="noreferrer"
+          style={{color:"#3b82f6",fontWeight:700,fontSize:11,textDecoration:"none"}}>เปิด ↗</a>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+// EventModal
+// ══════════════════════════════════════════════════════
+function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
+  event: Partial<CalEvent>|null;
   user: UserProfile;
   isApprover: boolean;
   onSave: (data: any) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
-  onApprove: (id: string) => Promise<void>;
-  onReject: (id: string, reason: string) => Promise<void>;
   onClose: () => void;
 }) {
-  const isEdit = !!event?.id;
+  const isEdit  = !!event?.id;
   const isOwner = !event?.id || event.created_by === user.id;
+  const canEdit = isOwner || isApprover;
 
-  // ── 1. useState ทั้งหมดอยู่บนสุด ──
   const [title,        setTitle]       = useState(event?.title ?? "");
   const [desc,         setDesc]        = useState(event?.description ?? "");
-  const [category,     setCategory]    = useState<EventCategory>(event?.category ?? "academic");
+  const [schedule,     setSchedule]    = useState(event?.schedule ?? "");
+  const [cats,         setCats]        = useState<string[]>(event?.categories ?? []);
   const [location,     setLocation]    = useState(event?.location ?? "");
   const [startDate,    setStartDate]   = useState(event?.start_date ?? ymd(new Date()));
   const [endDate,      setEndDate]     = useState(event?.end_date ?? ymd(new Date()));
   const [startTime,    setStartTime]   = useState(event?.start_time?.slice(0,5) ?? "08:30");
-  const [endTime,      setEndTime]     = useState(event?.end_time?.slice(0,5) ?? "16:30");
+  const [endTime,      setEndTime]     = useState(event?.end_time?.slice(0,5) ?? "");
+  const [hasEndTime,   setHasEndTime]  = useState(!!event?.end_time);
   const [isAllDay,     setIsAllDay]    = useState(event?.is_all_day ?? true);
+  const [audiences,    setAudiences]   = useState<string[]>(event?.target_roles ?? ["all"]);
+  const [attachments,  setAttachments] = useState<string[]>(event?.attachment_urls ?? []);
   const [colorOvr,     setColorOvr]    = useState(event?.color_override ?? "");
-  const [audience,     setAudience]    = useState(event?.target_roles?.[0] ?? "all");
   const [rejectReason, setRejectReason]= useState("");
   const [showReject,   setShowReject]  = useState(false);
+  const [editNote,     setEditNote]    = useState("");
+  const [showEditReq,  setShowEditReq] = useState(false);
   const [loading,      setLoading]     = useState(false);
+  const [uploading,    setUploading]   = useState(false);
+  const [tab,          setTab]         = useState<"basic"|"detail"|"attach">("basic");
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  // ── 2. ตัวแปรที่คำนวณจาก state ──
-  const canEdit = isOwner || isApprover;
-  const cfg = CAT_CONFIG[category];
-  const inputCls = "w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium focus:border-blue-400 focus:outline-none focus:bg-white transition-colors text-slate-800";
-  const labelCls = "block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5";
+  function toggleCat(k: string) {
+    setCats(prev => prev.includes(k) ? prev.filter(x=>x!==k) : [...prev, k]);
+  }
+  function toggleAudience(v: string) {
+    if (v === "all") { setAudiences(["all"]); return; }
+    setAudiences(prev => {
+      const without = prev.filter(x=>x!=="all");
+      return without.includes(v) ? without.filter(x=>x!==v) : [...without, v];
+    });
+  }
 
-  // ── 3. ฟังก์ชันทั้งหมด ──
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    setUploading(true);
+    for (const file of files) {
+      if (file.size > 10*1024*1024) { alert(`${file.name} ขนาดเกิน 10MB`); continue; }
+      const ext = file.name.split(".").pop();
+      const path = `calendar-docs/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { data: up, error } = await supabase.storage.from("calendar-docs").upload(path, file, { upsert: false });
+      if (error) { alert("อัปโหลดไม่สำเร็จ: "+error.message); continue; }
+      const { data: urlData } = supabase.storage.from("calendar-docs").getPublicUrl(path);
+      if (urlData?.publicUrl) setAttachments(prev => [...prev, urlData.publicUrl]);
+    }
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
   async function handleSave(asDraft: boolean) {
-    if (!title || !startDate || !endDate) { alert("กรุณากรอกข้อมูลให้ครบ"); return; }
-    if (endDate < startDate) { alert("วันที่สิ้นสุดต้องไม่น้อยกว่าวันเริ่มต้น"); return; }
+    if (!title || !startDate) { alert("กรุณากรอกชื่อกิจกรรมและวันที่"); return; }
+    if (cats.length === 0) { alert("กรุณาเลือกหมวดหมู่อย่างน้อย 1 หมวด"); return; }
     setLoading(true);
     await onSave({
-      title, description: desc, category, location,
-      start_date: startDate, end_date: endDate,
-      start_time: isAllDay ? null : startTime + ":00",
-      end_time:   isAllDay ? null : endTime + ":00",
+      title, description: desc, schedule, categories: cats, location,
+      start_date: startDate, end_date: endDate || startDate,
+      start_time: isAllDay ? null : startTime+":00",
+      end_time:   isAllDay||!hasEndTime ? null : endTime+":00",
       is_all_day: isAllDay,
       color_override: colorOvr || null,
       status: asDraft ? "draft" : "pending",
       created_by: user.id,
       is_public: true,
-      target_roles: [audience],
+      target_roles: audiences,
+      attachment_urls: attachments,
     });
     setLoading(false);
   }
@@ -193,101 +286,155 @@ function EventModal({
   async function handleApprove() {
     if (!event?.id) return;
     setLoading(true);
-    await onApprove(event.id);
+    await (supabase.from("calendar_events") as any).update({
+      status: "approved", approved_by: user.id, approved_at: new Date().toISOString(),
+      edit_requested: false,
+    }).eq("id", event.id);
+    onClose();
     setLoading(false);
   }
 
   async function handleReject() {
     if (!event?.id || !rejectReason.trim()) { alert("กรุณาระบุเหตุผล"); return; }
     setLoading(true);
-    await onReject(event.id, rejectReason.trim());
+    await (supabase.from("calendar_events") as any).update({
+      status: "rejected", reject_reason: rejectReason.trim(),
+    }).eq("id", event.id);
+    onClose();
     setLoading(false);
   }
 
-  // ── 4. return เดียว ที่ครอบ UI ทั้งหมด ──
+  async function handleRequestEdit() {
+    if (!event?.id || !editNote.trim()) { alert("กรุณาระบุสิ่งที่ต้องการแก้ไข"); return; }
+    setLoading(true);
+    await (supabase.from("calendar_events") as any).update({
+      edit_requested: true, edit_request_note: editNote.trim(), status: "pending",
+    }).eq("id", event.id);
+    onClose();
+    setLoading(false);
+  }
+
+  const iCls = "w-full bg-white border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm font-medium focus:border-blue-500 focus:outline-none transition-colors text-slate-800";
+  const lCls = "block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5";
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
       onClick={onClose}>
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[90vh]"
+      <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh]"
         onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full" style={{ background: cfg.color }} />
+          <div className="flex items-center gap-2 flex-wrap">
+            {cats.length > 0 && (
+              <div className="w-3 h-3 rounded-full shrink-0" style={{background: getCatColor(cats)}} />
+            )}
             <h3 className="font-bold text-slate-800 text-base">
-              {isEdit ? "แก้ไขกิจกรรม" : "เพิ่มกิจกรรม"}
+              {isEdit ? "รายละเอียดกิจกรรม" : "เพิ่มกิจกรรม"}
             </h3>
             {isEdit && (
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-lg border ${STATUS_CONFIG[event?.status ?? "pending"].cls}`}>
-                {STATUS_CONFIG[event?.status ?? "pending"].label}
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-lg border ${STATUS_CFG[event?.status??"pending"].cls}`}>
+                {STATUS_CFG[event?.status??"pending"].label}
+              </span>
+            )}
+            {isEdit && event?.edit_requested && (
+              <span className="text-xs font-bold px-2 py-0.5 rounded-lg border bg-purple-50 text-purple-700 border-purple-300">
+                ✏️ ขอแก้ไข
               </span>
             )}
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 text-lg">✕</button>
         </div>
 
-        {/* Body */}
-        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
+        {/* Tabs */}
+        {canEdit && (
+          <div className="flex border-b border-slate-100 shrink-0 px-6">
+            {([["basic","📋 ข้อมูล"],["detail","📝 รายละเอียด"],["attach","📎 เอกสาร"]] as const).map(([k,l])=>(
+              <button key={k} onClick={()=>setTab(k)}
+                className={`px-4 py-3 text-sm font-bold border-b-2 transition-all ${tab===k?"border-blue-500 text-blue-600":"border-transparent text-slate-400 hover:text-slate-600"}`}>
+                {l}
+                {k==="attach"&&attachments.length>0&&<span className="ml-1 bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{attachments.length}</span>}
+              </button>
+            ))}
+          </div>
+        )}
 
-          {/* Read-only view for non-owner */}
-          {isEdit && !canEdit ? (
+        {/* Body */}
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
+
+          {/* View-only for non-owners */}
+          {isEdit && !canEdit && (
             <div className="space-y-3">
-              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-2 text-sm">
-                <p><span className="text-slate-400">ชื่อ: </span><strong>{event?.title}</strong></p>
-                <p><span className="text-slate-400">ประเภท: </span>{cfg.label}</p>
-                <p><span className="text-slate-400">วันที่: </span>{thaiDateShort(event?.start_date!)}
-                  {event?.start_date !== event?.end_date && ` – ${thaiDateShort(event?.end_date!)}`}</p>
-                {!event?.is_all_day && <p><span className="text-slate-400">เวลา: </span>{event?.start_time?.slice(0,5)} – {event?.end_time?.slice(0,5)}</p>}
-                {event?.location && <p><span className="text-slate-400">สถานที่: </span>{event.location}</p>}
-                {event?.description && <p className="whitespace-pre-wrap text-slate-600">{event.description}</p>}
+              <h2 className="text-lg font-bold text-slate-800">{event?.title}</h2>
+              <CatBadges cats={event?.categories??[]} />
+              <div className="text-sm text-slate-600 space-y-1">
+                <p>📅 {thaiDate(event?.start_date!)}
+                  {event?.start_date !== event?.end_date && ` – ${thaiDate(event?.end_date!)}`}
+                </p>
+                {!event?.is_all_day && event?.start_time && (
+                  <p>🕐 {thaiTime(event.start_time)}{event.end_time ? ` – ${thaiTime(event.end_time)}` : ""}</p>
+                )}
+                {event?.location && <p>📍 {event.location}</p>}
+                {event?.description && <p className="whitespace-pre-wrap mt-2">{event.description}</p>}
+                {event?.schedule && <div className="bg-blue-50 rounded-xl p-3 mt-2 text-slate-700 whitespace-pre-wrap text-sm">{event.schedule}</div>}
               </div>
+              {(event?.attachment_urls??[]).length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-slate-400 mb-2">เอกสารแนบ</p>
+                  {event!.attachment_urls!.map((url,i)=><FilePreview key={i} url={url}/>)}
+                </div>
+              )}
             </div>
-          ) : (
+          )}
+
+          {/* Editable tabs */}
+          {canEdit && tab === "basic" && (
             <>
-              {/* Category */}
+              {/* Categories — multi select */}
               <div>
-                <label className={labelCls}>ประเภทกิจกรรม</label>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                  {(Object.entries(CAT_CONFIG) as [EventCategory, typeof CAT_CONFIG[EventCategory]][]).map(([k, v]) => (
-                    <button key={k} type="button" onClick={() => setCategory(k)}
-                      style={category === k ? { background: v.light, borderColor: v.color, color: v.text } : {}}
-                      className={`p-2 rounded-xl border-2 text-xs font-bold text-left transition-all ${
-                        category === k ? "border-2" : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-                      }`}>
-                      {v.label}
-                    </button>
-                  ))}
+                <label className={lCls}>หมวดหมู่ <span className="text-red-400">*</span> <span className="text-slate-300 font-normal normal-case">(เลือกได้หลายหมวด)</span></label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {Object.entries(CATEGORIES).map(([k,v])=>{
+                    const on = cats.includes(k);
+                    return (
+                      <button key={k} type="button" onClick={()=>toggleCat(k)}
+                        style={on ? {background:v.light, borderColor:v.color, color:v.text} : {}}
+                        className={`p-2 rounded-xl border-2 text-xs font-bold text-left transition-all ${on?"border-2":"bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"}`}>
+                        {v.label}
+                        {on && <span className="float-right">✓</span>}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
               {/* Title */}
               <div>
-                <label className={labelCls}>ชื่อกิจกรรม <span className="text-red-400">*</span></label>
-                <input type="text" value={title} onChange={e => setTitle(e.target.value)}
-                  placeholder="เช่น ประชุมคณะครูประจำเดือน" className={inputCls} />
+                <label className={lCls}>ชื่อกิจกรรม <span className="text-red-400">*</span></label>
+                <input type="text" value={title} onChange={e=>setTitle(e.target.value)}
+                  placeholder="เช่น ประชุมคณะครูประจำเดือน" className={iCls} />
               </div>
 
-              {/* Date */}
+              {/* Dates */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className={labelCls}>วันที่เริ่ม <span className="text-red-400">*</span></label>
+                  <label className={lCls}>วันที่เริ่ม <span className="text-red-400">*</span></label>
                   <input type="date" value={startDate}
-                    onChange={e => { setStartDate(e.target.value); if (endDate < e.target.value) setEndDate(e.target.value); }}
-                    className={inputCls} />
+                    onChange={e=>{setStartDate(e.target.value); if(endDate<e.target.value) setEndDate(e.target.value);}}
+                    className={iCls} />
                 </div>
                 <div>
-                  <label className={labelCls}>วันที่สิ้นสุด</label>
+                  <label className={lCls}>วันที่สิ้นสุด</label>
                   <input type="date" value={endDate} min={startDate}
-                    onChange={e => setEndDate(e.target.value)} className={inputCls} />
+                    onChange={e=>setEndDate(e.target.value)} className={iCls} />
                 </div>
               </div>
 
-              {/* All-day toggle */}
+              {/* All day toggle */}
               <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                <div className={`relative w-10 h-6 rounded-full transition-colors ${isAllDay ? "bg-blue-500" : "bg-slate-200"}`}
-                  onClick={() => setIsAllDay(!isAllDay)}>
-                  <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${isAllDay ? "translate-x-5" : "translate-x-1"}`} />
+                <div className={`relative w-10 h-6 rounded-full transition-colors ${isAllDay?"bg-blue-500":"bg-slate-200"}`}
+                  onClick={()=>setIsAllDay(!isAllDay)}>
+                  <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${isAllDay?"translate-x-5":"translate-x-1"}`}/>
                 </div>
                 <span className="text-sm font-medium text-slate-600">กิจกรรมทั้งวัน</span>
               </label>
@@ -296,104 +443,191 @@ function EventModal({
               {!isAllDay && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className={labelCls}>เวลาเริ่ม</label>
-                    <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className={inputCls} />
+                    <label className={lCls}>เวลาเริ่ม (เวลาไทย)</label>
+                    <input type="time" value={startTime} onChange={e=>setStartTime(e.target.value)} className={iCls} />
+                    {startTime && <p className="text-xs text-slate-400 mt-1">{thaiTime(startTime)}</p>}
                   </div>
                   <div>
-                    <label className={labelCls}>เวลาสิ้นสุด</label>
-                    <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className={inputCls} />
+                    <label className={lCls}>
+                      เวลาสิ้นสุด
+                      <button type="button" onClick={()=>setHasEndTime(!hasEndTime)}
+                        className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold normal-case ${hasEndTime?"bg-blue-100 text-blue-600":"bg-slate-100 text-slate-400"}`}>
+                        {hasEndTime?"มี":"ไม่มี"}
+                      </button>
+                    </label>
+                    {hasEndTime ? (
+                      <>
+                        <input type="time" value={endTime} onChange={e=>setEndTime(e.target.value)} className={iCls} />
+                        {endTime && <p className="text-xs text-slate-400 mt-1">{thaiTime(endTime)}</p>}
+                      </>
+                    ) : (
+                      <div className={`${iCls} text-slate-400`}>ไม่ระบุ</div>
+                    )}
                   </div>
                 </div>
               )}
 
               {/* Location */}
               <div>
-                <label className={labelCls}>สถานที่</label>
-                <input type="text" value={location} onChange={e => setLocation(e.target.value)}
-                  placeholder="เช่น ห้องประชุมใหญ่ / โรงยิม" className={inputCls} />
+                <label className={lCls}>สถานที่</label>
+                <input type="text" value={location} onChange={e=>setLocation(e.target.value)}
+                  placeholder="เช่น ห้องประชุมใหญ่" className={iCls} />
               </div>
 
-              {/* Description */}
+              {/* Audience — multi select */}
               <div>
-                <label className={labelCls}>รายละเอียด</label>
-                <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={3}
-                  placeholder="อธิบายรายละเอียดเพิ่มเติม..." className={inputCls + " resize-none"} />
+                <label className={lCls}>ผู้เข้าร่วม <span className="text-slate-300 font-normal normal-case">(เลือกได้หลายกลุ่ม)</span></label>
+                <div className="grid grid-cols-3 gap-2">
+                  {AUDIENCES.map(({value,label})=>{
+                    const on = audiences.includes(value);
+                    return (
+                      <button key={value} type="button" onClick={()=>toggleAudience(value)}
+                        className={`p-2.5 rounded-xl border-2 text-xs font-bold transition-all ${on?"bg-blue-50 border-blue-500 text-blue-700":"bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"}`}>
+                        {label}{on&&" ✓"}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              {/* Color override */}
+              {/* Color */}
               <div className="flex items-center gap-3">
-                <label className={labelCls + " mb-0"}>สีที่กำหนดเอง</label>
-                <input type="color" value={colorOvr || cfg.color}
-                  onChange={e => setColorOvr(e.target.value)}
+                <label className={lCls+" mb-0"}>สีที่กำหนดเอง</label>
+                <input type="color" value={colorOvr||getCatColor(cats)||"#3b82f6"}
+                  onChange={e=>setColorOvr(e.target.value)}
                   className="w-10 h-9 rounded-lg border-2 border-slate-200 cursor-pointer p-0.5" />
-                {colorOvr && (
-                  <button onClick={() => setColorOvr("")} className="text-xs text-slate-400 hover:text-slate-600 underline">
-                    รีเซ็ต
-                  </button>
-                )}
-              </div>
-
-              {/* Reject reason (if rejected) */}
-              {event?.status === "rejected" && event?.reject_reason && (
-                <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-                  <p className="text-xs font-bold text-red-500 mb-1">เหตุผลที่ไม่อนุมัติ</p>
-                  <p className="text-sm text-red-700">{event.reject_reason}</p>
-                </div>
-              )}
-
-              {/* ✅ Audience selector อยู่ใน return นี้ */}
-              <div>
-                <label className={labelCls}>ผู้ร่วมกิจกรรม</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { value: "all",     label: "👥 ทุกคน" },
-                    { value: "teacher", label: "👩‍🏫 ครู" },
-                    { value: "student", label: "🎒 นักเรียน" },
-                    { value: "staff",   label: "🏢 บุคลากร" },
-                  ].map(({ value, label }) => (
-                    <button key={value} type="button" onClick={() => setAudience(value)}
-                      className={`p-2.5 rounded-xl border-2 text-sm font-bold transition-all ${
-                        audience === value
-                          ? "bg-blue-50 border-blue-500 text-blue-700"
-                          : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-                      }`}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
+                {colorOvr && <button onClick={()=>setColorOvr("")} className="text-xs text-slate-400 hover:text-slate-600 underline">รีเซ็ต</button>}
               </div>
             </>
           )}
 
+          {canEdit && tab === "detail" && (
+            <>
+              <div>
+                <label className={lCls}>รายละเอียด</label>
+                <textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={4}
+                  placeholder="อธิบายรายละเอียดเพิ่มเติม..." className={iCls+" resize-none"} />
+              </div>
+              <div>
+                <label className={lCls}>หมายกำหนดการ / กำหนดการ</label>
+                <textarea value={schedule} onChange={e=>setSchedule(e.target.value)} rows={6}
+                  placeholder={"08:30 น. — ลงทะเบียน\n09:00 น. — พิธีเปิด\n12:00 น. — รับประทานอาหารกลางวัน\n13:00 น. — อบรม..."}
+                  className={iCls+" resize-none font-mono text-xs"} />
+                <p className="text-xs text-slate-400 mt-1">กรอกกำหนดการตามลำดับเวลา หนึ่งบรรทัดต่อรายการ</p>
+              </div>
+            </>
+          )}
+
+          {canEdit && tab === "attach" && (
+            <>
+              <div>
+                <label className={lCls}>แนบเอกสาร / ไฟล์ประกาศ / คำสั่ง</label>
+                <label className={`flex items-center gap-3 cursor-pointer bg-blue-50 border-2 border-dashed border-blue-300 rounded-xl px-4 py-4 transition-colors ${uploading?"opacity-60":""} hover:border-blue-500`}>
+                  <span className="text-2xl">{uploading?"⏳":"📁"}</span>
+                  <div>
+                    <p className="font-bold text-blue-700 text-sm">{uploading?"กำลังอัปโหลด...":"คลิกเพื่อเลือกไฟล์"}</p>
+                    <p className="text-blue-400 text-xs">PDF, Word, รูปภาพ — ไม่เกิน 10MB ต่อไฟล์</p>
+                  </div>
+                  <input ref={fileRef} type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif"
+                    disabled={uploading} onChange={handleUpload} className="hidden" />
+                </label>
+              </div>
+
+              {attachments.length > 0 ? (
+                <div>
+                  <p className="text-xs font-bold text-slate-400 mb-2">ไฟล์ที่แนบ ({attachments.length} ไฟล์)</p>
+                  {attachments.map((url,i)=>(
+                    <div key={i} className="relative group">
+                      <FilePreview url={url} />
+                      <button onClick={()=>setAttachments(prev=>prev.filter((_,j)=>j!==i))}
+                        className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs hidden group-hover:flex items-center justify-center font-bold shadow">
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  <p className="text-3xl mb-2">📎</p>
+                  <p className="text-sm">ยังไม่มีเอกสารแนบ</p>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Read-only attachments for viewer */}
+          {isEdit && !canEdit && (event?.attachment_urls??[]).length === 0 && null}
+
+          {/* Reject reason display */}
+          {isEdit && event?.status === "rejected" && event?.reject_reason && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+              <p className="text-xs font-bold text-red-500 mb-1">เหตุผลที่ไม่อนุมัติ</p>
+              <p className="text-sm text-red-700">{event.reject_reason}</p>
+            </div>
+          )}
+
+          {/* Edit request note display */}
+          {isEdit && event?.edit_requested && event?.edit_request_note && isApprover && (
+            <div className="bg-purple-50 border border-purple-200 rounded-xl px-4 py-3">
+              <p className="text-xs font-bold text-purple-600 mb-1">✏️ ขอแก้ไข</p>
+              <p className="text-sm text-purple-700">{event.edit_request_note}</p>
+            </div>
+          )}
+
           {/* Approver section */}
-          {isEdit && isApprover && event?.status === "pending" && (
+          {isEdit && isApprover && (event?.status === "pending") && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <p className="text-sm font-bold text-amber-700 mb-3">⏳ รออนุมัติ</p>
               {!showReject ? (
                 <div className="flex gap-2">
                   <button onClick={handleApprove} disabled={loading}
-                    className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm transition-all">
+                    className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm disabled:opacity-50">
                     ✅ อนุมัติ
                   </button>
-                  <button onClick={() => setShowReject(true)}
-                    className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-sm transition-all">
+                  <button onClick={()=>setShowReject(true)}
+                    className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-sm">
                     ❌ ไม่อนุมัติ
                   </button>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                  <textarea value={rejectReason} onChange={e=>setRejectReason(e.target.value)}
                     rows={2} placeholder="ระบุเหตุผล..."
                     className="w-full bg-white border-2 border-red-200 rounded-xl px-3 py-2 text-sm focus:outline-none resize-none" />
                   <div className="flex gap-2">
                     <button onClick={handleReject} disabled={loading}
-                      className="flex-1 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-sm">
+                      className="flex-1 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-sm disabled:opacity-50">
                       ยืนยันไม่อนุมัติ
                     </button>
-                    <button onClick={() => setShowReject(false)}
-                      className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium">
-                      ยกเลิก
+                    <button onClick={()=>setShowReject(false)}
+                      className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm">ยกเลิก</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Owner: request edit (for approved events) */}
+          {isEdit && isOwner && !isApprover && event?.status === "approved" && (
+            <div>
+              {!showEditReq ? (
+                <button onClick={()=>setShowEditReq(true)}
+                  className="w-full py-2.5 rounded-xl border-2 border-purple-200 bg-purple-50 text-purple-700 font-bold text-sm hover:bg-purple-100">
+                  ✏️ ขอแก้ไขกิจกรรม (ต้องรออนุมัติ)
+                </button>
+              ) : (
+                <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 space-y-3">
+                  <p className="text-sm font-bold text-purple-700">ระบุสิ่งที่ต้องการแก้ไข</p>
+                  <textarea value={editNote} onChange={e=>setEditNote(e.target.value)} rows={3}
+                    placeholder="เช่น ต้องการเปลี่ยนวันที่จาก 25 เป็น 27 มิถุนายน..."
+                    className="w-full bg-white border-2 border-purple-200 rounded-xl px-3 py-2 text-sm focus:outline-none resize-none" />
+                  <div className="flex gap-2">
+                    <button onClick={handleRequestEdit} disabled={loading}
+                      className="flex-1 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm disabled:opacity-50">
+                      ส่งคำขอแก้ไข
                     </button>
+                    <button onClick={()=>setShowEditReq(false)}
+                      className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm">ยกเลิก</button>
                   </div>
                 </div>
               )}
@@ -404,24 +638,24 @@ function EventModal({
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-100 flex gap-2 shrink-0 bg-slate-50 rounded-b-2xl">
           {isEdit && canEdit && (
-            <button onClick={() => { if (confirm("ยืนยันการลบ?")) onDelete(event!.id!); }}
+            <button onClick={()=>{if(confirm("ยืนยันการลบ?")) onDelete(event!.id!);}}
               className="px-3 py-2.5 rounded-xl border border-red-200 bg-red-50 text-red-600 text-sm font-bold hover:bg-red-100">
               🗑️
             </button>
           )}
-          <div className="flex-1" />
+          <div className="flex-1"/>
           <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-slate-600 text-sm font-medium">
             ปิด
           </button>
           {canEdit && (
             <>
-              <button onClick={() => handleSave(true)} disabled={loading || !title}
+              <button onClick={()=>handleSave(true)} disabled={loading||!title}
                 className="px-4 py-2.5 rounded-xl border-2 border-amber-200 bg-amber-50 text-amber-700 text-sm font-bold hover:bg-amber-100 disabled:opacity-50">
-                📝 บันทึกร่าง
+                📝 ร่าง
               </button>
-              <button onClick={() => handleSave(false)} disabled={loading || !title}
+              <button onClick={()=>handleSave(false)} disabled={loading||!title||cats.length===0}
                 className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold disabled:opacity-50">
-                {loading ? "กำลังส่ง..." : (isEdit ? "💾 บันทึก" : "📤 ส่งอนุมัติ")}
+                {loading?"กำลังส่ง...":(isEdit?"💾 บันทึก":"📤 ส่งอนุมัติ")}
               </button>
             </>
           )}
@@ -431,73 +665,50 @@ function EventModal({
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ── Month View ────────────────────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+// Month View
+// ══════════════════════════════════════════════════════
 function MonthView({ year, month, events, today, onDayClick, onEventClick }: {
   year: number; month: number; events: CalEvent[];
-  today: string; onDayClick: (d: string) => void; onEventClick: (e: CalEvent) => void;
+  today: string; onDayClick: (d:string)=>void; onEventClick: (e:CalEvent)=>void;
 }) {
   const firstDay = new Date(year, month, 1);
-  const lastDay  = new Date(year, month + 1, 0);
+  const lastDay  = new Date(year, month+1, 0);
   const startPad = firstDay.getDay();
-  const totalCells = Math.ceil((startPad + lastDay.getDate()) / 7) * 7;
-
-  const cells: (Date | null)[] = [];
-  for (let i = 0; i < totalCells; i++) {
-    const dayNum = i - startPad + 1;
-    cells.push(dayNum >= 1 && dayNum <= lastDay.getDate() ? new Date(year, month, dayNum) : null);
-  }
-
-  function eventsForDay(d: Date) {
-    const ds = ymd(d);
-    return events.filter(e => e.start_date <= ds && e.end_date >= ds);
-  }
+  const total    = Math.ceil((startPad+lastDay.getDate())/7)*7;
+  const cells: (Date|null)[] = Array.from({length:total},(_,i)=>{
+    const n=i-startPad+1;
+    return n>=1&&n<=lastDay.getDate() ? new Date(year,month,n) : null;
+  });
 
   return (
-    <div>
-      {/* Day headers */}
-      <div className="grid grid-cols-7 border-b border-slate-200">
-        {TH_DAYS_SHORT.map((d, i) => (
-          <div key={i} className={`text-center py-2 text-xs font-bold ${i === 0 ? "text-red-500" : i === 6 ? "text-blue-500" : "text-slate-400"}`}>
-            {d}
-          </div>
+    <div className="flex flex-col h-full">
+      <div className="grid grid-cols-7 border-b border-slate-200 shrink-0">
+        {TH_DAYS_SHORT.map((d,i)=>(
+          <div key={i} className={`text-center py-2 text-xs font-bold ${i===0?"text-red-500":i===6?"text-blue-500":"text-slate-400"}`}>{d}</div>
         ))}
       </div>
-
-      {/* Grid */}
-      <div className="grid grid-cols-7" style={{ borderLeft: "0.5px solid #e2e8f0" }}>
-        {cells.map((d, i) => {
-          const isToday = d && ymd(d) === today;
-          const isOther = !d;
-          const dayEvents = d ? eventsForDay(d) : [];
-
+      <div className="grid grid-cols-7 flex-1" style={{borderLeft:"0.5px solid #e2e8f0"}}>
+        {cells.map((d,i)=>{
+          const isToday = d&&ymd(d)===today;
+          const ds = d?ymd(d):"";
+          const dayEvs = d ? events.filter(e=>e.start_date<=ds&&e.end_date>=ds) : [];
           return (
-            <div key={i}
-              onClick={() => d && onDayClick(ymd(d))}
-              style={{ borderRight: "0.5px solid #e2e8f0", borderBottom: "0.5px solid #e2e8f0", minHeight: 80 }}
-              className={`p-1 cursor-pointer transition-colors ${isOther ? "bg-slate-50" : isToday ? "bg-blue-50" : "bg-white hover:bg-slate-50"}`}>
-
-              {/* Day number */}
-              <div className="mb-1">
-                {d && (
+            <div key={i} onClick={()=>d&&onDayClick(ymd(d))}
+              style={{borderRight:"0.5px solid #e2e8f0",borderBottom:"0.5px solid #e2e8f0",minHeight:90}}
+              className={`p-1 cursor-pointer transition-colors ${!d?"bg-slate-50":isToday?"bg-blue-50":"bg-white hover:bg-slate-50"}`}>
+              {d && (
+                <div className="mb-1">
                   <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
-                    isToday ? "bg-blue-600 text-white" : d.getDay() === 0 ? "text-red-500" : d.getDay() === 6 ? "text-blue-600" : "text-slate-600"
-                  }`}>
+                    isToday?"bg-blue-600 text-white":d.getDay()===0?"text-red-500":d.getDay()===6?"text-blue-600":"text-slate-600"}`}>
                     {d.getDate()}
                   </span>
-                )}
-              </div>
-
-              {/* Events */}
-              <div>
-                {dayEvents.slice(0, 3).map(ev => (
-                  <EventPill key={ev.id} ev={ev} onClick={() => onEventClick(ev)} />
-                ))}
-                {dayEvents.length > 3 && (
-                  <span className="text-[10px] text-slate-400 font-bold px-1">+{dayEvents.length - 3} รายการ</span>
-                )}
-              </div>
+                </div>
+              )}
+              {dayEvs.slice(0,3).map(ev=>(
+                <EventPill key={ev.id} ev={ev} onClick={()=>onEventClick(ev)}/>
+              ))}
+              {dayEvs.length>3 && <span className="text-[10px] text-slate-400 font-bold px-1">+{dayEvs.length-3}</span>}
             </div>
           );
         })}
@@ -506,47 +717,36 @@ function MonthView({ year, month, events, today, onDayClick, onEventClick }: {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ── Week View ─────────────────────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+// Week View
+// ══════════════════════════════════════════════════════
 function WeekView({ currentDate, events, today, onEventClick, onDayClick }: {
   currentDate: Date; events: CalEvent[]; today: string;
-  onEventClick: (e: CalEvent) => void; onDayClick: (d: string) => void;
+  onEventClick:(e:CalEvent)=>void; onDayClick:(d:string)=>void;
 }) {
-  const weekStart = startOfWeek(currentDate);
-  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-
+  const ws = startOfWeek(currentDate);
+  const days = Array.from({length:7},(_,i)=>addDays(ws,i));
   return (
     <div>
-      {/* Header */}
       <div className="grid grid-cols-7 border-b border-slate-200">
-        {days.map((d, i) => {
-          const ds = ymd(d);
-          const isToday = ds === today;
+        {days.map((d,i)=>{
+          const ds=ymd(d); const isT=ds===today;
           return (
-            <div key={i} onClick={() => onDayClick(ds)} className={`text-center py-3 cursor-pointer transition-colors ${isToday ? "bg-blue-50" : "hover:bg-slate-50"}`}>
-              <div className={`text-xs font-bold mb-1 ${d.getDay() === 0 ? "text-red-400" : d.getDay() === 6 ? "text-blue-400" : "text-slate-400"}`}>
-                {TH_DAYS_SHORT[d.getDay()]}
-              </div>
-              <div className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold mx-auto ${isToday ? "bg-blue-600 text-white" : "text-slate-700"}`}>
-                {d.getDate()}
-              </div>
+            <div key={i} onClick={()=>onDayClick(ds)}
+              className={`text-center py-3 cursor-pointer transition-colors ${isT?"bg-blue-50":"hover:bg-slate-50"}`}>
+              <div className={`text-xs font-bold mb-1 ${d.getDay()===0?"text-red-400":d.getDay()===6?"text-blue-400":"text-slate-400"}`}>{TH_DAYS_SHORT[d.getDay()]}</div>
+              <div className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${isT?"bg-blue-600 text-white":"text-slate-700"}`}>{d.getDate()}</div>
             </div>
           );
         })}
       </div>
-
-      {/* Events */}
-      <div className="grid grid-cols-7" style={{ borderLeft: "0.5px solid #e2e8f0" }}>
-        {days.map((d, i) => {
-          const ds = ymd(d);
-          const dayEvs = events.filter(e => e.start_date <= ds && e.end_date >= ds);
+      <div className="grid grid-cols-7" style={{borderLeft:"0.5px solid #e2e8f0"}}>
+        {days.map((d,i)=>{
+          const ds=ymd(d);
+          const dayEvs=events.filter(e=>e.start_date<=ds&&e.end_date>=ds);
           return (
-            <div key={i} style={{ borderRight: "0.5px solid #e2e8f0", minHeight: 200 }}
-              className="p-1.5 bg-white">
-              {dayEvs.map(ev => (
-                <EventPill key={ev.id} ev={ev} onClick={() => onEventClick(ev)} />
-              ))}
+            <div key={i} style={{borderRight:"0.5px solid #e2e8f0",minHeight:220}} className="p-1.5 bg-white">
+              {dayEvs.map(ev=><EventPill key={ev.id} ev={ev} onClick={()=>onEventClick(ev)}/>)}
             </div>
           );
         })}
@@ -555,46 +755,54 @@ function WeekView({ currentDate, events, today, onEventClick, onDayClick }: {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ── Day View ──────────────────────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+// Day View
+// ══════════════════════════════════════════════════════
 function DayView({ currentDate, events, today, onEventClick }: {
-  currentDate: Date; events: CalEvent[]; today: string; onEventClick: (e: CalEvent) => void;
+  currentDate: Date; events: CalEvent[]; today: string; onEventClick:(e:CalEvent)=>void;
 }) {
   const ds = ymd(currentDate);
-  const dayEvs = events.filter(e => e.start_date <= ds && e.end_date >= ds)
-    .sort((a, b) => (a.start_time ?? "00:00") < (b.start_time ?? "00:00") ? -1 : 1);
-  const isToday = ds === today;
+  const dayEvs = events.filter(e=>e.start_date<=ds&&e.end_date>=ds)
+    .sort((a,b)=>(a.start_time??"00:00")<(b.start_time??"00:00")?-1:1);
+  const isToday = ds===today;
 
   return (
-    <div className="p-5 max-w-xl mx-auto">
-      <div className={`text-center mb-5 p-4 rounded-2xl border ${isToday ? "bg-blue-50 border-blue-200" : "bg-slate-50 border-slate-200"}`}>
+    <div className="p-5 max-w-2xl mx-auto">
+      <div className={`text-center mb-5 p-4 rounded-2xl border ${isToday?"bg-blue-50 border-blue-200":"bg-slate-50 border-slate-200"}`}>
         <p className="text-sm font-medium text-slate-400">{TH_DAYS_FULL[currentDate.getDay()]}</p>
-        <p className={`text-3xl font-bold ${isToday ? "text-blue-600" : "text-slate-800"}`}>{currentDate.getDate()}</p>
-        <p className="text-sm text-slate-400">{TH_MONTHS[currentDate.getMonth()]} {currentDate.getFullYear() + 543}</p>
+        <p className={`text-4xl font-bold ${isToday?"text-blue-600":"text-slate-800"}`}>{currentDate.getDate()}</p>
+        <p className="text-sm text-slate-400">{TH_MONTHS[currentDate.getMonth()]} {currentDate.getFullYear()+543}</p>
       </div>
-
-      {dayEvs.length === 0 ? (
-        <div className="text-center py-12 text-slate-400 text-sm">ไม่มีกิจกรรมในวันนี้</div>
+      {dayEvs.length===0 ? (
+        <div className="text-center py-12 text-slate-400 text-sm bg-slate-50 rounded-2xl">ไม่มีกิจกรรมในวันนี้</div>
       ) : (
-        <div className="space-y-2">
-          {dayEvs.map(ev => {
-            const cfg = CAT_CONFIG[ev.category];
+        <div className="space-y-3">
+          {dayEvs.map(ev=>{
+            const color = ev.color_override ?? getCatColor(ev.categories);
+            const light = ev.color_override ? ev.color_override+"11" : getCatLight(ev.categories);
+            const text  = ev.color_override ?? getCatText(ev.categories);
             return (
-              <div key={ev.id} onClick={() => onEventClick(ev)}
-                style={{ borderLeft: `4px solid ${ev.color_override ?? cfg.color}`, background: ev.color_override ? ev.color_override + "11" : cfg.light }}
-                className="rounded-r-xl px-4 py-3 cursor-pointer hover:brightness-95 transition-all">
+              <div key={ev.id} onClick={()=>onEventClick(ev)}
+                style={{borderLeft:`5px solid ${color}`, background:light}}
+                className="rounded-r-2xl px-5 py-4 cursor-pointer hover:brightness-95 transition-all">
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-bold text-sm" style={{ color: ev.color_override ?? cfg.text }}>{ev.title}</p>
-                    {ev.location && <p className="text-xs text-slate-400 mt-0.5">📍 {ev.location}</p>}
-                    {!ev.is_all_day && ev.start_time && (
-                      <p className="text-xs text-slate-400 mt-0.5">🕐 {ev.start_time.slice(0,5)} – {ev.end_time?.slice(0,5)}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-base" style={{color:text}}>{ev.title}</p>
+                    <CatBadges cats={ev.categories} />
+                    <div className="flex flex-wrap gap-3 mt-1.5 text-xs text-slate-500">
+                      {ev.is_all_day ? <span>📅 ทั้งวัน</span> : ev.start_time && (
+                        <span>🕐 {thaiTime(ev.start_time)}{ev.end_time?` – ${thaiTime(ev.end_time)}`:""}</span>
+                      )}
+                      {ev.location && <span>📍 {ev.location}</span>}
+                    </div>
+                    {ev.schedule && (
+                      <div className="mt-2 bg-white/60 rounded-lg px-3 py-2 text-xs text-slate-600 font-mono whitespace-pre-wrap">
+                        {ev.schedule}
+                      </div>
                     )}
-                    {ev.is_all_day && <p className="text-xs text-slate-400 mt-0.5">ทั้งวัน</p>}
                   </div>
-                  <span className="text-xs font-bold px-2 py-0.5 rounded-lg" style={{ background: cfg.color + "22", color: cfg.text }}>
-                    {cfg.label}
+                  <span className={`text-xs font-bold px-2 py-1 rounded-lg border shrink-0 ${STATUS_CFG[ev.status].cls}`}>
+                    {STATUS_CFG[ev.status].label}
                   </span>
                 </div>
               </div>
@@ -606,69 +814,48 @@ function DayView({ currentDate, events, today, onEventClick }: {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ── Agenda View ───────────────────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════════════
-function AgendaView({ events, onEventClick }: {
-  events: CalEvent[]; onEventClick: (e: CalEvent) => void;
-}) {
-  const sorted = [...events].sort((a, b) => a.start_date.localeCompare(b.start_date));
-
-  // Group by month
-  const groups: { monthKey: string; label: string; items: CalEvent[] }[] = [];
+// ══════════════════════════════════════════════════════
+// Agenda View
+// ══════════════════════════════════════════════════════
+function AgendaView({ events, onEventClick }: { events: CalEvent[]; onEventClick:(e:CalEvent)=>void; }) {
+  const sorted = [...events].sort((a,b)=>a.start_date.localeCompare(b.start_date));
+  const groups: {key:string;label:string;items:CalEvent[]}[] = [];
   for (const ev of sorted) {
     const d = toDate(ev.start_date);
     const key = `${d.getFullYear()}-${d.getMonth()}`;
-    const last = groups[groups.length - 1];
-    if (last?.monthKey === key) { last.items.push(ev); }
-    else groups.push({ monthKey: key, label: `${TH_MONTHS[d.getMonth()]} ${d.getFullYear() + 543}`, items: [ev] });
+    const last = groups[groups.length-1];
+    if (last?.key===key) last.items.push(ev);
+    else groups.push({key, label:`${TH_MONTHS[d.getMonth()]} ${d.getFullYear()+543}`, items:[ev]});
   }
-
-  if (sorted.length === 0) return (
-    <div className="text-center py-16 text-slate-400 text-sm">ไม่มีกิจกรรม</div>
-  );
-
+  if (!sorted.length) return <div className="text-center py-16 text-slate-400 text-sm">ไม่มีกิจกรรม</div>;
   return (
-    <div className="p-4 space-y-6 max-w-2xl mx-auto">
-      {groups.map(g => (
-        <div key={g.monthKey}>
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3 border-b border-slate-200 pb-2">
-            {g.label}
-          </h3>
+    <div className="p-4 space-y-6 max-w-3xl mx-auto">
+      {groups.map(g=>(
+        <div key={g.key}>
+          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3 border-b border-slate-200 pb-2">{g.label}</h3>
           <div className="space-y-2">
-            {g.items.map(ev => {
-              const cfg = CAT_CONFIG[ev.category];
-              const startD = toDate(ev.start_date);
-              const span = ev.start_date !== ev.end_date
-                ? ` – ${toDate(ev.end_date).getDate()} ${TH_MONTHS[toDate(ev.end_date).getMonth()].slice(0,3)}`
-                : "";
+            {g.items.map(ev=>{
+              const d=toDate(ev.start_date);
+              const color=ev.color_override??getCatColor(ev.categories);
               return (
-                <div key={ev.id} onClick={() => onEventClick(ev)}
-                  className="flex gap-3 items-start cursor-pointer group">
-                  {/* Date bubble */}
+                <div key={ev.id} onClick={()=>onEventClick(ev)} className="flex gap-3 items-start cursor-pointer group">
                   <div className="text-center w-10 shrink-0">
-                    <div className="text-lg font-bold leading-none text-slate-700">{startD.getDate()}</div>
-                    <div className="text-[10px] text-slate-400">{TH_DAYS_SHORT[startD.getDay()]}</div>
+                    <div className="text-lg font-bold leading-none text-slate-700">{d.getDate()}</div>
+                    <div className="text-[10px] text-slate-400">{TH_DAYS_SHORT[d.getDay()]}</div>
                   </div>
-                  {/* Bar */}
-                  <div className="w-1 self-stretch rounded-full shrink-0 mt-1" style={{ background: ev.color_override ?? cfg.color }} />
-                  {/* Content */}
+                  <div className="w-1 self-stretch rounded-full shrink-0 mt-1" style={{background:color}}/>
                   <div className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2.5 group-hover:border-slate-300 transition-colors">
                     <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="font-bold text-slate-800 text-sm">{ev.title}{span}</p>
-                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: cfg.light, color: cfg.text }}>
-                            {cfg.label}
-                          </span>
-                          {ev.location && <span className="text-xs text-slate-400">📍 {ev.location}</span>}
-                          {!ev.is_all_day && ev.start_time && (
-                            <span className="text-xs text-slate-400">🕐 {ev.start_time.slice(0,5)}</span>
-                          )}
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-800 text-sm truncate">{ev.title}</p>
+                        <div className="flex gap-2 mt-1 flex-wrap">
+                          <CatBadges cats={ev.categories}/>
+                          {ev.location&&<span className="text-xs text-slate-400">📍 {ev.location}</span>}
+                          {!ev.is_all_day&&ev.start_time&&<span className="text-xs text-slate-400">🕐 {thaiTime(ev.start_time)}</span>}
                         </div>
                       </div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border shrink-0 ${STATUS_CONFIG[ev.status].cls}`}>
-                        {STATUS_CONFIG[ev.status].label}
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border shrink-0 ${STATUS_CFG[ev.status].cls}`}>
+                        {STATUS_CFG[ev.status].label}
                       </span>
                     </div>
                   </div>
@@ -682,45 +869,34 @@ function AgendaView({ events, onEventClick }: {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ── Mini Calendar (sidebar) ───────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════════════
-function MiniCalendar({ year, month, today, hasEvent, onSelect, selected }: {
-  year: number; month: number; today: string;
-  hasEvent: (d: string) => boolean;
-  onSelect: (d: string) => void;
-  selected: string;
+// ══════════════════════════════════════════════════════
+// Mini Calendar
+// ══════════════════════════════════════════════════════
+function MiniCal({ year, month, today, hasEv, onSelect, selected }: {
+  year:number; month:number; today:string; hasEv:(d:string)=>boolean;
+  onSelect:(d:string)=>void; selected:string;
 }) {
-  const firstDay = new Date(year, month, 1);
-  const lastDay  = new Date(year, month + 1, 0);
-  const startPad = firstDay.getDay();
-  const totalCells = Math.ceil((startPad + lastDay.getDate()) / 7) * 7;
-  const cells: (number | null)[] = Array.from({ length: totalCells }, (_, i) => {
-    const n = i - startPad + 1;
-    return n >= 1 && n <= lastDay.getDate() ? n : null;
-  });
-
+  const first=new Date(year,month,1); const last=new Date(year,month+1,0);
+  const pad=first.getDay(); const total=Math.ceil((pad+last.getDate())/7)*7;
+  const cells:(number|null)[]=Array.from({length:total},(_,i)=>{const n=i-pad+1;return n>=1&&n<=last.getDate()?n:null;});
   return (
     <div>
       <div className="grid grid-cols-7 mb-1">
-        {TH_DAYS_SHORT.map((d, i) => (
+        {TH_DAYS_SHORT.map((d,i)=>(
           <div key={i} className={`text-center text-[10px] font-bold pb-1 ${i===0?"text-red-400":i===6?"text-blue-400":"text-slate-400"}`}>{d}</div>
         ))}
       </div>
       <div className="grid grid-cols-7 gap-y-0.5">
-        {cells.map((n, i) => {
-          if (!n) return <div key={i} />;
-          const ds = ymd(new Date(year, month, n));
-          const isTd = ds === today;
-          const isSel = ds === selected;
-          const hasEv = hasEvent(ds);
+        {cells.map((n,i)=>{
+          if (!n) return <div key={i}/>;
+          const ds=ymd(new Date(year,month,n));
+          const isTd=ds===today; const isSel=ds===selected; const has=hasEv(ds);
           return (
-            <button key={i} type="button" onClick={() => onSelect(ds)}
+            <button key={i} type="button" onClick={()=>onSelect(ds)}
               className={`w-full aspect-square flex flex-col items-center justify-center rounded-lg text-[11px] font-bold transition-colors relative ${
-                isSel ? "bg-blue-600 text-white" : isTd ? "bg-blue-100 text-blue-700" : "hover:bg-slate-100 text-slate-600"
-              }`}>
+                isSel?"bg-blue-600 text-white":isTd?"bg-blue-100 text-blue-700":"hover:bg-slate-100 text-slate-600"}`}>
               {n}
-              {hasEv && !isSel && <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-blue-400" />}
+              {has&&!isSel&&<span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-blue-400"/>}
             </button>
           );
         })}
@@ -729,274 +905,182 @@ function MiniCalendar({ year, month, today, hasEvent, onSelect, selected }: {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ── Main Page ─────────────────────────────────════════════════════════════════
-// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+// Main Page
+// ══════════════════════════════════════════════════════
 export default function CalendarPage() {
   const router = useRouter();
+  const [user,        setUser]       = useState<UserProfile|null>(null);
+  const [events,      setEvents]     = useState<CalEvent[]>([]);
+  const [loading,     setLoading]    = useState(true);
+  const [view,        setView]       = useState<CalView>("month");
+  const [curDate,     setCurDate]    = useState(()=>new Date());
+  const todayDate  = useMemo(()=>new Date(),[]);
+  const todayStr   = useMemo(()=>ymd(todayDate),[todayDate]);
+  const [selected,    setSelected]   = useState(todayStr);
+  const [modalEv,     setModalEv]    = useState<Partial<CalEvent>|null|false>(false);
+  const [catFilter,   setCatFilter]  = useState<Set<string>>(new Set(Object.keys(CATEGORIES)));
+  const [showPending, setShowPending]= useState(false);
 
-  // ── State ───────────────────────────────────────────────────────────────────
-  const [user,       setUser]       = useState<UserProfile | null>(null);
-  const [events,     setEvents]     = useState<CalEvent[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [view,       setView]       = useState<CalView>("month");
-  const [curDate,    setCurDate]    = useState(() => new Date());
-  const todayDate = useMemo(() => new Date(), []);
-  const todayStr  = useMemo(() => ymd(todayDate), [todayDate]);
-  const [selected,   setSelected]   = useState(todayStr);
-  const [modalEv,    setModalEv]    = useState<Partial<CalEvent> | null | false>(false);
-  const [catFilter,  setCatFilter]  = useState<Set<EventCategory>>(new Set(Object.keys(CAT_CONFIG) as EventCategory[]));
-  const [showPending, setShowPending] = useState(false);
+  const isApprover = !!(user&&APPROVER_ROLES.includes(user.role));
 
-  // ── Derived ─────────────────────────────────────────────────────────────────
-  const isApprover = !!(user && APPROVER_ROLES.includes(user.role));
-
-  // ── Auth + load ─────────────────────────────────────────────────────────────
-  useEffect(() => {
-  const init = async () => {
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (!authUser) { setLoading(false); return; }
-
-    const meta = authUser.user_metadata ?? {};
-    const claims = meta.custom_claims ?? {};
-    const email =
-      authUser.email || meta.email || meta.preferred_username || meta.upn ||
-      claims.email || claims.preferred_username || claims.upn ||
-      claims["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"] || "";
-
-    let { data } = await supabase
-      .from("users")
-      .select("id, first_name, last_name, email, role, position")
-      .eq("auth_id", authUser.id)
-      .maybeSingle();
-
-    if (!data && email) {
-      const res = await supabase
-        .from("users")
-        .select("id, first_name, last_name, email, role, position")
-        .eq("email", email)
-        .maybeSingle();
-      data = res.data;
-      if (data) {
-        await (supabase.from("users") as any)
-          .update({ auth_id: authUser.id })
-          .eq("id", (data as any).id);
+  // Auth
+  useEffect(()=>{
+    const init=async()=>{
+      const {data:{user:au}}=await supabase.auth.getUser();
+      if (!au){setLoading(false);return;}
+      const meta=au.user_metadata??{};
+      const email=au.email||meta.email||meta.preferred_username||"";
+      let {data}=await supabase.from("users").select("id,first_name,last_name,email,role").eq("auth_id",au.id).maybeSingle();
+      if (!data&&email){
+        const res=await supabase.from("users").select("id,first_name,last_name,email,role").eq("email",email).maybeSingle();
+        data=res.data;
+        if (data) await (supabase.from("users") as any).update({auth_id:au.id}).eq("id",(data as any).id);
       }
-    }
+      if (data) setUser(data as UserProfile);
+      setLoading(false);
+    };
+    init();
+  },[]);
 
-    if (data) setUser(data as UserProfile);
-    setLoading(false);
-  };
-  init();
-}, []);
-
-  const loadEvents = useCallback(async () => {
-    const from = ymd(new Date(curDate.getFullYear(), curDate.getMonth() - 1, 1));
-    const to   = ymd(new Date(curDate.getFullYear(), curDate.getMonth() + 2, 0));
-
-    let query = (supabase.from("calendar_events") as any)
-        .select("*, creator:users!created_by(first_name,last_name)")
-        .order("start_date", { ascending: true });
-
-  // Admin/approver โหลดทุก pending ด้วย ไม่จำกัด date
-    if (isApprover) {
-        const { data } = await (supabase.from("calendar_events") as any)
+  const loadEvents=useCallback(async()=>{
+    const from=ymd(new Date(curDate.getFullYear(),curDate.getMonth()-1,1));
+    const to  =ymd(new Date(curDate.getFullYear(),curDate.getMonth()+2,0));
+    if (isApprover){
+      const {data}=await (supabase.from("calendar_events") as any)
         .select("*, creator:users!created_by(first_name,last_name)")
         .or(`status.eq.pending,and(end_date.gte.${from},start_date.lte.${to})`)
-        .order("start_date", { ascending: true });
-        setEvents((data || []) as CalEvent[]);
+        .order("start_date",{ascending:true});
+      setEvents((data||[]) as CalEvent[]);
     } else {
-        const { data } = await query
-        .gte("end_date", from)
-        .lte("start_date", to);
-        setEvents((data || []) as CalEvent[]);
+      const {data}=await (supabase.from("calendar_events") as any)
+        .select("*, creator:users!created_by(first_name,last_name)")
+        .gte("end_date",from).lte("start_date",to)
+        .order("start_date",{ascending:true});
+      setEvents((data||[]) as CalEvent[]);
     }
-    }, [curDate, isApprover]);
+  },[curDate,isApprover]);
 
-  useEffect(() => { if (!loading && user) loadEvents(); }, [loading, user, loadEvents]);
+  useEffect(()=>{if (!loading&&user) loadEvents();},[loading,user,loadEvents]);
 
-  // ── Filtered events ──────────────────────────────────────────────────────────
-  const filteredEvents = useMemo(() =>
-    events.filter(ev => {
-      if (!catFilter.has(ev.category)) return false;
-      if (ev.status === "draft" && ev.created_by !== user?.id) return false;
-      if (!isApprover && ev.status === "pending" && ev.created_by !== user?.id) return false;
+  const filteredEvents=useMemo(()=>
+    events.filter(ev=>{
+      const cats=ev.categories||[];
+      if (!cats.some(c=>catFilter.has(c))&&cats.length>0) return false;
+      if (ev.status==="draft"&&ev.created_by!==user?.id) return false;
+      if (!isApprover&&ev.status==="pending"&&ev.created_by!==user?.id) return false;
       return true;
-    }),
-    [events, catFilter, user, isApprover]
-  );
+    }),[events,catFilter,user,isApprover]);
 
-  const pendingCount = useMemo(() =>
-    events.filter(e => e.status === "pending").length,
-    [events]
-  );
+  const pendingCount=useMemo(()=>events.filter(e=>e.status==="pending").length,[events]);
 
-  // ── Navigation ──────────────────────────────────────────────────────────────
-  function navigate(dir: 1 | -1) {
-    const d = new Date(curDate);
-    if (view === "month") d.setMonth(d.getMonth() + dir);
-    else if (view === "week") d.setDate(d.getDate() + dir * 7);
-    else d.setDate(d.getDate() + dir);
+  function navigate(dir:1|-1){
+    const d=new Date(curDate);
+    if (view==="month") d.setMonth(d.getMonth()+dir);
+    else if (view==="week") d.setDate(d.getDate()+dir*7);
+    else d.setDate(d.getDate()+dir);
     setCurDate(d);
   }
 
-  function getTitle() {
-    if (view === "month") return `${TH_MONTHS[curDate.getMonth()]} ${curDate.getFullYear() + 543}`;
-    if (view === "week") {
-      const ws = startOfWeek(curDate);
-      const we = addDays(ws, 6);
-      return `${ws.getDate()} – ${we.getDate()} ${TH_MONTHS[we.getMonth()]} ${we.getFullYear() + 543}`;
+  function getTitle(){
+    if (view==="month") return `${TH_MONTHS[curDate.getMonth()]} ${curDate.getFullYear()+543}`;
+    if (view==="week"){
+      const ws=startOfWeek(curDate); const we=addDays(ws,6);
+      return `${ws.getDate()} – ${we.getDate()} ${TH_MONTHS[we.getMonth()]} ${we.getFullYear()+543}`;
     }
-    if (view === "day") return `${curDate.getDate()} ${TH_MONTHS[curDate.getMonth()]} ${curDate.getFullYear() + 543}`;
-    return "รายการ";
+    if (view==="day") return `${curDate.getDate()} ${TH_MONTHS[curDate.getMonth()]} ${curDate.getFullYear()+543}`;
+    return "รายการกิจกรรม";
   }
 
-  // ── CRUD ─────────────────────────────────────────────────────────────────────
-  async function handleSave(data: any) {
-    const isEdit = !!(modalEv as CalEvent)?.id;
-    if (isEdit) {
-      await (supabase.from("calendar_events") as any).update(data).eq("id", (modalEv as CalEvent).id);
-    } else {
-      await (supabase.from("calendar_events") as any).insert([data]);
-    }
-    setModalEv(false);
-    await loadEvents();
+  async function handleSave(data:any){
+    const id=(modalEv as CalEvent)?.id;
+    if (id) await (supabase.from("calendar_events") as any).update(data).eq("id",id);
+    else    await (supabase.from("calendar_events") as any).insert([data]);
+    setModalEv(false); await loadEvents();
   }
 
-  async function handleDelete(id: string) {
-    await supabase.from("calendar_events").delete().eq("id", id);
-    setModalEv(false);
-    await loadEvents();
+  async function handleDelete(id:string){
+    await supabase.from("calendar_events").delete().eq("id",id);
+    setModalEv(false); await loadEvents();
   }
 
-  async function handleApprove(id: string) {
-    await (supabase.from("calendar_events") as any).update({
-      status: "approved", approved_by: user!.id, approved_at: new Date().toISOString(),
-    }).eq("id", id);
-    setModalEv(false);
-    await loadEvents();
-  }
+  const upcoming=useMemo(()=>
+    filteredEvents.filter(e=>e.end_date>=todayStr&&e.status==="approved").slice(0,8)
+  ,[filteredEvents,todayStr]);
 
-  async function handleReject(id: string, reason: string) {
-    await (supabase.from("calendar_events") as any).update({
-      status: "rejected", reject_reason: reason,
-    }).eq("id", id);
-    setModalEv(false);
-    await loadEvents();
-  }
-
-  function openAdd(startDate?: string) {
-    setModalEv({ start_date: startDate ?? todayStr, end_date: startDate ?? todayStr });
-  }
-
-  // ── Upcoming (sidebar) ───────────────────────────────────────────────────────
-  const upcoming = useMemo(() =>
-    filteredEvents
-      .filter(e => e.end_date >= todayStr && e.status === "approved")
-      .slice(0, 6),
-    [filteredEvents, todayStr]
-  );
-
-  if (loading) return (
-    <div className="min-h-screen flex items-center justify-center">
-        <p className="text-slate-400 animate-pulse">กำลังโหลด...</p>
-    </div>
-    );
-    if (!user) return (
-    <div className="min-h-screen flex items-center justify-center">
-        <p className="text-slate-400 animate-pulse">กำลังโหลดข้อมูลผู้ใช้...</p>
-    </div>
-    );
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><p className="text-slate-400 animate-pulse text-lg">กำลังโหลด...</p></div>;
+  if (!user)   return <div className="min-h-screen flex items-center justify-center"><p className="text-slate-400 text-lg">กรุณาเข้าสู่ระบบ</p></div>;
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* ── Top bar ─────────────────────────────────────────────────────────── */}
-      <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm">
+    <div className="h-screen flex flex-col bg-slate-50 overflow-hidden">
+      {/* Top bar */}
+      <div className="shrink-0 bg-white border-b border-slate-200 shadow-sm z-40">
         <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
-          {/* Back */}
-          <button onClick={() => router.push("/dashboard")}
-            className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 text-lg shrink-0">
-            🏠
-          </button>
+          <button onClick={()=>router.push("/dashboard")}
+            className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 text-lg shrink-0">🏠</button>
 
-          {/* Nav + Title */}
-          <div className="flex items-center gap-2">
-            <button onClick={() => navigate(-1)}
-              className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm">
-              ‹
-            </button>
-            <span className="font-bold text-slate-800 text-base min-w-[160px] text-center">{getTitle()}</span>
-            <button onClick={() => navigate(1)}
-              className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm">
-              ›
-            </button>
-            <button onClick={() => { setCurDate(todayDate); setSelected(todayStr); }}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-500 hover:bg-slate-50">
-              วันนี้
-            </button>
+          <div className="flex items-center gap-1.5">
+            <button onClick={()=>navigate(-1)} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold">‹</button>
+            <span className="font-bold text-slate-800 text-sm sm:text-base min-w-[150px] sm:min-w-[200px] text-center">{getTitle()}</span>
+            <button onClick={()=>navigate(1)}  className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold">›</button>
+            <button onClick={()=>{setCurDate(todayDate);setSelected(todayStr);}}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-500 hover:bg-slate-50">วันนี้</button>
           </div>
 
-          <div className="flex-1" />
+          <div className="flex-1"/>
 
           {/* Views */}
           <div className="flex gap-0.5 bg-slate-100 p-1 rounded-xl">
-            {(["month","week","day","agenda"] as CalView[]).map(v => (
-              <button key={v} onClick={() => setView(v)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${view === v ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
-                {v === "month" ? "เดือน" : v === "week" ? "สัปดาห์" : v === "day" ? "วัน" : "รายการ"}
+            {(["month","week","day","agenda"] as CalView[]).map(v=>(
+              <button key={v} onClick={()=>setView(v)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${view===v?"bg-white text-slate-800 shadow-sm":"text-slate-500 hover:text-slate-700"}`}>
+                {v==="month"?"เดือน":v==="week"?"สัปดาห์":v==="day"?"วัน":"รายการ"}
               </button>
             ))}
           </div>
 
-          {/* Pending badge (approver) */}
-          {isApprover && pendingCount > 0 && (
-            <button onClick={() => setShowPending(!showPending)}
+          {isApprover&&pendingCount>0&&(
+            <button onClick={()=>setShowPending(!showPending)}
               className="relative px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-xs font-bold">
-              ⏳ รออนุมัติ
-              <span className="ml-1.5 bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{pendingCount}</span>
+              ⏳ รออนุมัติ <span className="ml-1 bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{pendingCount}</span>
             </button>
           )}
 
-          {/* Add */}
-          <button onClick={() => openAdd()}
+          <button onClick={()=>setModalEv({})}
             className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm flex items-center gap-1.5">
             + เพิ่มกิจกรรม
           </button>
         </div>
       </div>
 
-      {/* ── Main layout ─────────────────────────────────────────────────────── */}
+      {/* Body */}
       <div className="flex flex-1 overflow-hidden">
-        {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+        {/* Sidebar */}
         <aside className="w-56 shrink-0 border-r border-slate-200 bg-white p-4 overflow-y-auto hidden lg:flex flex-col gap-5">
-          {/* Mini calendar */}
-          <div>
-            <MiniCalendar
-              year={curDate.getFullYear()} month={curDate.getMonth()}
-              today={todayStr} selected={selected}
-              hasEvent={d => filteredEvents.some(e => e.start_date <= d && e.end_date >= d && e.status === "approved")}
-              onSelect={d => { setSelected(d); setCurDate(toDate(d)); if (view !== "month") setView("day"); }}
-            />
-          </div>
+          {/* Mini cal */}
+          <MiniCal year={curDate.getFullYear()} month={curDate.getMonth()}
+            today={todayStr} selected={selected}
+            hasEv={d=>filteredEvents.some(e=>e.start_date<=d&&e.end_date>=d&&e.status==="approved")}
+            onSelect={d=>{setSelected(d);setCurDate(toDate(d));if(view!=="month")setView("day");}}/>
 
           {/* Category filter */}
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">หมวดหมู่</p>
+            <div className="flex justify-between mb-1">
+              <button onClick={()=>setCatFilter(new Set(Object.keys(CATEGORIES)))} className="text-[10px] text-blue-500 font-bold hover:underline">เลือกทั้งหมด</button>
+              <button onClick={()=>setCatFilter(new Set())} className="text-[10px] text-slate-400 font-bold hover:underline">ล้าง</button>
+            </div>
             <div className="space-y-1">
-              {(Object.entries(CAT_CONFIG) as [EventCategory, typeof CAT_CONFIG[EventCategory]][]).map(([k, v]) => {
-                const on = catFilter.has(k);
+              {Object.entries(CATEGORIES).map(([k,v])=>{
+                const on=catFilter.has(k);
                 return (
                   <label key={k} className="flex items-center gap-2 cursor-pointer select-none group">
-                    <div className={`w-4 h-4 rounded flex items-center justify-center border transition-all ${on ? "border-transparent" : "border-slate-300 bg-white"}`}
-                      style={on ? { background: v.color } : {}}
-                      onClick={() => {
-                        const s = new Set(catFilter);
-                        on ? s.delete(k) : s.add(k);
-                        setCatFilter(s);
-                      }}>
-                      {on && <span className="text-white text-[9px] font-black">✓</span>}
+                    <div className={`w-4 h-4 rounded flex items-center justify-center border transition-all shrink-0 ${on?"border-transparent":"border-slate-300 bg-white"}`}
+                      style={on?{background:v.color}:{}}
+                      onClick={()=>{const s=new Set(catFilter);on?s.delete(k):s.add(k);setCatFilter(s);}}>
+                      {on&&<span className="text-white text-[9px] font-black">✓</span>}
                     </div>
-                    <span className="text-xs font-medium text-slate-600 group-hover:text-slate-800">{v.label}</span>
+                    <span className="text-xs font-medium text-slate-600 group-hover:text-slate-800 truncate">{v.label}</span>
                   </label>
                 );
               })}
@@ -1004,26 +1088,24 @@ export default function CalendarPage() {
           </div>
 
           {/* Upcoming */}
-          {upcoming.length > 0 && (
+          {upcoming.length>0&&(
             <div>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">กิจกรรมที่จะมาถึง</p>
               <div className="space-y-2">
-                {upcoming.map(ev => {
-                  const cfg = CAT_CONFIG[ev.category];
-                  const d   = toDate(ev.start_date);
+                {upcoming.map(ev=>{
+                  const d=toDate(ev.start_date);
+                  const color=ev.color_override??getCatColor(ev.categories);
                   return (
-                    <div key={ev.id} onClick={() => setModalEv(ev)}
-                      className="flex gap-2 items-start cursor-pointer hover:bg-slate-50 rounded-lg p-1 transition-colors">
+                    <div key={ev.id} onClick={()=>setModalEv(ev)}
+                      className="flex gap-2 items-start cursor-pointer hover:bg-slate-50 rounded-lg p-1.5 transition-colors">
                       <div className="text-center w-8 shrink-0">
                         <div className="text-base font-bold leading-none text-slate-700">{d.getDate()}</div>
                         <div className="text-[9px] text-slate-400">{TH_MONTHS[d.getMonth()].slice(0,3)}</div>
                       </div>
-                      <div className="w-0.5 self-stretch rounded-full shrink-0" style={{ background: ev.color_override ?? cfg.color }} />
+                      <div className="w-1 self-stretch rounded-full shrink-0" style={{background:color}}/>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-bold text-slate-700 leading-tight truncate">{ev.title}</p>
-                        {!ev.is_all_day && ev.start_time && (
-                          <p className="text-[10px] text-slate-400">{ev.start_time.slice(0,5)}</p>
-                        )}
+                        {!ev.is_all_day&&ev.start_time&&<p className="text-[10px] text-slate-400">{thaiTime(ev.start_time)}</p>}
                       </div>
                     </div>
                   );
@@ -1033,21 +1115,23 @@ export default function CalendarPage() {
           )}
         </aside>
 
-        {/* ── Calendar area ───────────────────────────────────────────────── */}
-        <main className="flex-1 overflow-y-auto bg-white">
-          {/* Pending panel (approver) */}
-          {isApprover && showPending && (
-            <div className="border-b border-amber-200 bg-amber-50 p-4">
-              <h3 className="text-sm font-bold text-amber-700 mb-3">⏳ รออนุมัติ ({pendingCount} รายการ)</h3>
+        {/* Main calendar */}
+        <main className="flex-1 overflow-y-auto bg-white flex flex-col">
+          {/* Pending panel */}
+          {isApprover&&showPending&&(
+            <div className="border-b border-amber-200 bg-amber-50 p-4 shrink-0">
+              <h3 className="text-sm font-bold text-amber-700 mb-3">⏳ รออนุมัติ ({pendingCount})</h3>
               <div className="flex gap-3 flex-wrap">
-                {events.filter(e => e.status === "pending").map(ev => {
-                  const cfg = CAT_CONFIG[ev.category];
+                {events.filter(e=>e.status==="pending").map(ev=>{
+                  const color=getCatColor(ev.categories);
+                  const light=getCatLight(ev.categories);
+                  const text=getCatText(ev.categories);
                   return (
-                    <div key={ev.id} onClick={() => setModalEv(ev)}
-                      style={{ borderLeft: `3px solid ${cfg.color}`, background: cfg.light }}
+                    <div key={ev.id} onClick={()=>setModalEv(ev)}
+                      style={{borderLeft:`3px solid ${color}`,background:light}}
                       className="rounded-r-xl px-3 py-2 cursor-pointer hover:brightness-95 transition-all max-w-xs">
-                      <p className="text-xs font-bold truncate" style={{ color: cfg.text }}>{ev.title}</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">{thaiDateShort(ev.start_date)}</p>
+                      <p className="text-xs font-bold truncate" style={{color:text}}>{ev.title}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{thaiDate(ev.start_date)}</p>
                       <p className="text-[10px] text-slate-400">{fullName(ev.creator)}</p>
                     </div>
                   );
@@ -1056,25 +1140,19 @@ export default function CalendarPage() {
             </div>
           )}
 
-          {view === "month"  && <MonthView year={curDate.getFullYear()} month={curDate.getMonth()} events={filteredEvents} today={todayStr} onDayClick={d => { setSelected(d); setView("day"); setCurDate(toDate(d)); }} onEventClick={setModalEv} />}
-          {view === "week"   && <WeekView currentDate={curDate} events={filteredEvents} today={todayStr} onEventClick={setModalEv} onDayClick={d => { setSelected(d); setCurDate(toDate(d)); setView("day"); }} />}
-          {view === "day"    && <DayView currentDate={curDate} events={filteredEvents} today={todayStr} onEventClick={setModalEv} />}
-          {view === "agenda" && <AgendaView events={filteredEvents} onEventClick={setModalEv} />}
+          <div className="flex-1">
+            {view==="month"&&<MonthView year={curDate.getFullYear()} month={curDate.getMonth()} events={filteredEvents} today={todayStr} onDayClick={d=>{setSelected(d);setCurDate(toDate(d));setView("day");}} onEventClick={ev=>setModalEv(ev)}/>}
+            {view==="week" &&<WeekView currentDate={curDate} events={filteredEvents} today={todayStr} onEventClick={ev=>setModalEv(ev)} onDayClick={d=>{setSelected(d);setCurDate(toDate(d));setView("day");}}/>}
+            {view==="day"  &&<DayView currentDate={curDate} events={filteredEvents} today={todayStr} onEventClick={ev=>setModalEv(ev)}/>}
+            {view==="agenda"&&<AgendaView events={filteredEvents} onEventClick={ev=>setModalEv(ev)}/>}
+          </div>
         </main>
       </div>
 
-      {/* ── Event Modal ──────────────────────────────────────────────────────── */}
-      {modalEv !== false && (
-        <EventModal
-          event={modalEv}
-          user={user}
-          isApprover={isApprover}
-          onSave={handleSave}
-          onDelete={handleDelete}
-          onApprove={handleApprove}
-          onReject={handleReject}
-          onClose={() => setModalEv(false)}
-        />
+      {/* Modal */}
+      {modalEv!==false&&(
+        <EventModal event={modalEv} user={user} isApprover={isApprover}
+          onSave={handleSave} onDelete={handleDelete} onClose={()=>setModalEv(false)}/>
       )}
     </div>
   );
