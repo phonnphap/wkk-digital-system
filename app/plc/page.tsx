@@ -230,14 +230,13 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const myAcademicLevel = (currentUser.academic_level ?? "").trim();
 
   const sameAcademicLevelTeachers = useMemo(() => {
-    if (!myAcademicLevel) {
-      // ถ้าไม่มี academic_level → แสดงทุกคน
-      return allTeachers;
-    }
-    const filtered = allTeachers.filter(t => (t.academic_level ?? "").trim() === myAcademicLevel);
-    // ถ้ากรองแล้วได้ 0 คน → fallback แสดงทุกคน
-    return filtered.length > 0 ? filtered : allTeachers;
-  }, [allTeachers, myAcademicLevel]);
+  const myLevel = myAcademicLevel.toLowerCase().trim();
+  if (!myLevel) return allTeachers;
+  const filtered = allTeachers.filter(t =>
+    (t.academic_level ?? "").toLowerCase().trim() === myLevel
+  );
+  return filtered.length > 0 ? filtered : allTeachers;
+}, [allTeachers, myAcademicLevel]);
 
   const [selected, setSelected] = useState<string[]>(
     meeting?.participants ?? sameAcademicLevelTeachers.map(t => t.id)
@@ -245,6 +244,10 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
 
   const selectedYear = academicYears.find(y => y.id === yearId);
   const yearLabel = selectedYear ? `ปีการศึกษา ${selectedYear.year_name} ภาคเรียนที่ ${selectedYear.semester}` : "";
+
+  // เพิ่มชั่วคราวใน MeetingModal เพื่อ debug
+  console.log("myAcademicLevel:", JSON.stringify(currentUser.academic_level));
+  console.log("teachers academic_level sample:", allTeachers.slice(0,3).map(t => JSON.stringify(t.academic_level)));
 
   // คำนวณชั่วโมงอัตโนมัติ
   useEffect(() => {
@@ -498,7 +501,8 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                   <div className="mb-2 flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
                     <span className="text-blue-500 text-sm">🏷️</span>
                     <span className="text-blue-700 text-xs font-bold">
-                      แสดงครูที่มี academic_level = "{myAcademicLevel}" ({sameAcademicLevelTeachers.length} คน)
+                      แสดงครูกลุ่ม "{myAcademicLevel}" · พบ {sameAcademicLevelTeachers.length} คน
+                      (คุณ: "{currentUser.academic_level ?? "ไม่มีค่า"}")
                     </span>
                   </div>
                 ) : (
@@ -922,7 +926,7 @@ export default function PLCHoursPage() {
 
       let profileData: any = null;
       const { data: byAuthId } = await supabase.from("users")
-        .select("id, first_name, last_name, full_name, email, role, position, academic_level")
+        .select("id, first_name, last_name, full_name, email, role, position, academic_level") // ✅ มี academic_level
         .eq("auth_id", authUser.id).maybeSingle();
       profileData = byAuthId;
 

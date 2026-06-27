@@ -303,8 +303,8 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
       try {
         const formData = new FormData();
         formData.append("file", file);
-        // บันทึกใน WKK_Event_System บน OneDrive
-        formData.append("path", `WKK_Event_System/${Date.now()}_${file.name}`);
+        formData.append("path", `Events/${Date.now()}_${file.name}`); // ★ เปลี่ยน path ให้ตรงกับโฟลเดอร์ "Events" ที่เห็นใน URL ของ SharePoint
+        formData.append("account", "academic@khienkhet.ac.th"); // ★ เพิ่มบรรทัดนี้
 
         const res  = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
         const json = await res.json().catch(() => null);

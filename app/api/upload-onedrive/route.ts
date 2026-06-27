@@ -1,15 +1,18 @@
 // app/api/upload-onedrive/route.ts
-// อัพโหลดไฟล์ไปยัง OneDrive ของ hr@khienkhet.ac.th
-// - เอกสารแนบใบลา  → Documents/ใบลา_เอกสารแนบ/
-// - PDF ใบลาอนุมัติ → Documents/ใบลา/
+// อัพโหลดไฟล์ไปยัง OneDrive — ปลายทางขึ้นกับ field "account" ที่ frontend ส่งมา
+// ถ้าไม่ส่ง account มา จะ fallback ไปที่ hr@khienkhet.ac.th (ค่า default เดิม)
+//
+// ตัวอย่างการใช้งานปัจจุบันในระบบ:
+// - ระบบลา (เอกสารแนบ + PDF อนุมัติ) → hr@khienkhet.ac.th (ไม่ต้องส่ง account, ใช้ default)
+// - ระบบ Event/Calendar (รูปภาพกิจกรรม) → academic@khienkhet.ac.th (ส่ง account มาตรงๆ)
 
 import { NextRequest, NextResponse } from "next/server";
 
 const TENANT_ID  = process.env.MICROSOFT_TENANT_ID!;
 const CLIENT_ID  = process.env.MICROSOFT_CLIENT_ID!;
 const CLIENT_SEC = process.env.MICROSOFT_CLIENT_SECRET!;
-// ✅ เปลี่ยนเป็น hr@khienkhet.ac.th เสมอ
-const TARGET_UPN = process.env.MICROSOFT_HR_EMAIL || "hr@khienkhet.ac.th";
+// ★ ค่า default เมื่อไม่มีการส่ง account มา — คงไว้ที่ hr ตามระบบลาเดิม
+const DEFAULT_TARGET_UPN = process.env.MICROSOFT_HR_EMAIL || "hr@khienkhet.ac.th";
 
 async function getAccessToken(): Promise<string> {
   const res = await fetch(
@@ -44,6 +47,10 @@ export async function POST(req: NextRequest) {
     const fixedPath = formData.get("path") as string | null;
     const folder    = formData.get("folder") as string | null;
     const fileName  = formData.get("fileName") as string | null;
+
+    // ★ อ่าน account ที่ frontend ส่งมา — ถ้าไม่มีให้ fallback เป็น hr (ค่า default เดิม)
+    const accountFromForm = formData.get("account") as string | null;
+    const TARGET_UPN = accountFromForm?.trim() || DEFAULT_TARGET_UPN;
 
     // ── สร้าง path ──────────────────────────────────────────────────
     // ถ้าส่ง path มาตรงๆ → ใช้เลย (encode แต่ละ segment)
@@ -115,6 +122,7 @@ export async function POST(req: NextRequest) {
       webUrl: fileData.webUrl,
       downloadUrl: fileData["@microsoft.graph.downloadUrl"] ?? null,
       itemId: fileData.id,
+      account: TARGET_UPN, // ★ ส่งกลับไปด้วยเผื่อต้อง debug ว่าอัปโหลดไปบัญชีไหน
     });
   } catch (e: any) {
     console.error("[upload-onedrive] EXCEPTION:", e);
