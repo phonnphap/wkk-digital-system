@@ -89,8 +89,9 @@ type PLCMeeting = {
 
 const TARGET_HOURS = 50;
 const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head"];
-// SharePoint upload path
-const SHAREPOINT_UPLOAD_URL = "https://watkhienkhetschool-my.sharepoint.com/personal/admin_khienkhet_ac_th/Documents/WKK_PLC_System";
+
+// [FIX] OneDrive path ที่ถูกต้อง → hr_khienkhet_ac_th/Documents/Plc
+const PLC_ONEDRIVE_FOLDER = "Plc";
 
 // ─── Progress ring ─────────────────────────────────────────────────────────────
 function RingProgress({ pct, size = 56, stroke = 6, color = "#3b82f6" }: { pct: number; size?: number; stroke?: number; color?: string }) {
@@ -203,11 +204,9 @@ function MeetingModal({ meeting, allTeachers, sameGroupTeachers, academicYears, 
 }) {
   const isEdit = !!meeting?.id;
 
-  // ─── ดึงปีการศึกษาปัจจุบัน + แสดงชื่ออัตโนมัติ ───────────────────────
   const defaultYear = academicYears.find(y => y.is_current) ?? academicYears[0];
   const [yearId,      setYearId]      = useState(meeting?.academic_year_id ?? defaultYear?.id ?? "");
   const selectedYear = academicYears.find(y => y.id === yearId);
-  // label: "ปีการศึกษา 2568 ภาคเรียนที่ 1"
   const yearLabel = selectedYear
     ? `ปีการศึกษา ${selectedYear.year_name} ภาคเรียนที่ ${selectedYear.semester}`
     : "";
@@ -220,8 +219,23 @@ function MeetingModal({ meeting, allTeachers, sameGroupTeachers, academicYears, 
   const [topic,       setTopic]       = useState(meeting?.topic ?? "");
   const [hours,       setHours]       = useState<number>(meeting?.duration_hours ?? 4);
   const [location,    setLocation]    = useState(meeting?.location ?? "");
+  // [FIX] วิทยากร = คน login เสมอ
   const facilId = currentUserId;
-  const [selected,    setSelected]    = useState<string[]>(meeting?.participants ?? sameGroupTeachers.map(t => t.id));
+
+  // [FIX] ผู้เข้าร่วม: กรองจาก academic_level เดียวกับ currentUser
+  const myAcademicLevel = currentUser.academic_level ?? "";
+
+  // ดึงครูที่มี academic_level เดียวกัน (จาก allTeachers ทั้งหมด)
+  const sameAcademicLevelTeachers = useMemo(() => {
+    if (!myAcademicLevel) return sameGroupTeachers;
+    return allTeachers.filter(t => (t.academic_level ?? "") === myAcademicLevel);
+  }, [allTeachers, sameGroupTeachers, myAcademicLevel]);
+
+  // default selected = ทุกคนใน academic_level เดียวกัน
+  const [selected, setSelected] = useState<string[]>(
+    meeting?.participants ?? sameAcademicLevelTeachers.map(t => t.id)
+  );
+
   const [problem,     setProblem]     = useState(meeting?.problem_description ?? "");
   const [objectives,  setObjectives]  = useState(meeting?.objectives ?? "");
   const [methods,     setMethods]     = useState(meeting?.methods ?? "");
@@ -229,14 +243,17 @@ function MeetingModal({ meeting, allTeachers, sameGroupTeachers, academicYears, 
   const [solutions,   setSolutions]   = useState(meeting?.solutions ?? "");
   const [reflections, setReflections] = useState(meeting?.reflections ?? "");
   const [futuredev,   setFuturedev]   = useState(meeting?.future_development ?? "");
-  const [images,      setImages]      = useState<{ url: string; preview: string }[]>(
+
+  // [FIX] images: เก็บทั้ง url (สำหรับ save) และ preview (สำหรับแสดงผล)
+  const [images, setImages] = useState<{ url: string; preview: string }[]>(
     (meeting?.image_urls ?? []).map(u => ({ url: u, preview: u }))
   );
   const [uploading,   setUploading]   = useState(false);
+  const [uploadError, setUploadError] = useState<string>("");
   const [loading,     setLoading]     = useState(false);
   const [search,      setSearch]      = useState("");
   const [tab,         setTab]         = useState<"basic" | "report">("basic");
-  const [submitted,   setSubmitted]   = useState(false); // เพื่อ trigger validation
+  const [submitted,   setSubmitted]   = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ─── คำนวณชั่วโมงอัตโนมัติ ─────────────────────────────────────────────
@@ -249,13 +266,6 @@ function MeetingModal({ meeting, allTeachers, sameGroupTeachers, academicYears, 
     }
   }, [startTime, endTime]);
 
-  // ─── ผู้เข้าร่วม: กรองด้วย academic_level เดียวกับคน login ────────────
-  const myAcademicLevel = currentUser.academic_level ?? "";
-  const sameAcademicLevelTeachers = useMemo(() => {
-    if (!myAcademicLevel) return sameGroupTeachers;
-    return sameGroupTeachers.filter(t => (t.academic_level ?? "") === myAcademicLevel);
-  }, [sameGroupTeachers, myAcademicLevel]);
-
   const filtered = sameAcademicLevelTeachers.filter(t =>
     fullName(t).toLowerCase().includes(search.toLowerCase()) ||
     (t.position ?? "").toLowerCase().includes(search.toLowerCase())
@@ -265,99 +275,139 @@ function MeetingModal({ meeting, allTeachers, sameGroupTeachers, academicYears, 
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
 
-  // ─── Upload รูป → Supabase Storage (แสดง preview ก่อน) ─────────────────
-  // แก้ฟังก์ชัน handleImageUpload ทั้งหมด
-async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
-  const files = Array.from(e.target.files ?? []);
-  if (files.length === 0) return;
-  const remaining = 4 - images.length;
-  if (remaining <= 0) { alert("แนบได้สูงสุด 4 รูปเท่านั้น"); return; }
-  const toUpload = files.slice(0, remaining);
-  if (files.length > remaining) alert(`แนบได้อีก ${remaining} รูป`);
+  // ─── [FIX] Upload รูป → OneDrive ที่ path ถูกต้อง ─────────────────────
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
 
-  setUploading(true);
-  for (const file of toUpload) {
-    if (file.size > 5 * 1024 * 1024) { alert(`"${file.name}" ใหญ่เกิน 5MB`); continue; }
+    const remaining = 4 - images.length;
+    if (remaining <= 0) { alert("แนบได้สูงสุด 4 รูปเท่านั้น"); return; }
+    const toUpload = files.slice(0, remaining);
+    if (files.length > remaining) alert(`แนบได้อีก ${remaining} รูป`);
 
-    // สร้าง preview ทันที
-    const previewUrl = URL.createObjectURL(file);
+    setUploading(true);
+    setUploadError("");
 
-    try {
-      const ext = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
-      const now = new Date();
-      const dd = String(now.getDate()).padStart(2, "0");
-      const mm = String(now.getMonth() + 1).padStart(2, "0");
-      const yyyyBE = now.getFullYear() + 543;
-      const finalFileName = `PLC_${dd}${mm}${yyyyBE}_${Date.now()}.${ext}`;
-
-      const formData = new FormData();
-      formData.append("file", file);
-      // ✅ อัพไปโฟลเดอร์ WKK_PLC_System บน OneDrive
-      formData.append("path", `WKK_PLC_System/${finalFileName}`);
-
-      const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
-      const json = await res.json().catch(() => null);
-
-      if (!res.ok || !json?.ok) {
-        const errMsg = json?.error
-          ? (typeof json.error === "string" ? json.error : JSON.stringify(json.error))
-          : `HTTP ${res.status}`;
-        throw new Error(errMsg);
+    for (const file of toUpload) {
+      if (file.size > 5 * 1024 * 1024) {
+        alert(`"${file.name}" ใหญ่เกิน 5MB`);
+        continue;
       }
 
-      const fileUrl = json.downloadUrl || json.url || json.webUrl || previewUrl;
-      setImages(prev => [...prev, { url: fileUrl, preview: previewUrl }]);
+      // สร้าง preview ทันทีก่อน upload
+      const previewUrl = URL.createObjectURL(file);
+      const placeholderIdx = images.length;
 
-    } catch (err: any) {
-      console.error("Upload error:", err);
-      alert(`⚠️ อัพโหลดไม่สำเร็จ: ${err.message}`);
-      URL.revokeObjectURL(previewUrl);
+      // แสดง preview ก่อนที่ upload จะเสร็จ
+      setImages(prev => [...prev, { url: "", preview: previewUrl }]);
+
+      try {
+        const ext = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
+        const now = new Date();
+        const dd = String(now.getDate()).padStart(2, "0");
+        const mm = String(now.getMonth() + 1).padStart(2, "0");
+        const yyyyBE = now.getFullYear() + 543;
+        const finalFileName = `PLC_${dd}${mm}${yyyyBE}_${Date.now()}.${ext}`;
+
+        const formData = new FormData();
+        formData.append("file", file);
+        // [FIX] path ที่ถูกต้องตาม OneDrive ของ HR:
+        // hr_khienkhet_ac_th/Documents/Plc/FileName
+        formData.append("path", `${PLC_ONEDRIVE_FOLDER}/${finalFileName}`);
+        formData.append("account", "hr@khienkhet.ac.th");
+
+        const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+        const json = await res.json().catch(() => null);
+
+        if (!res.ok || !json?.ok) {
+          const errMsg = json?.error
+            ? (typeof json.error === "string" ? json.error : JSON.stringify(json.error))
+            : `HTTP ${res.status}`;
+          throw new Error(errMsg);
+        }
+
+        const fileUrl = json.downloadUrl || json.url || json.webUrl || previewUrl;
+
+        // อัพเดต url จริง (preview ยังคงเป็น blob สำหรับแสดงผล)
+        setImages(prev => prev.map((img, i) =>
+          img.preview === previewUrl ? { url: fileUrl, preview: previewUrl } : img
+        ));
+
+      } catch (err: any) {
+        console.error("Upload error:", err);
+        setUploadError(`อัพโหลดไม่สำเร็จ: ${err.message}`);
+        // ลบ placeholder ออกถ้า upload fail
+        setImages(prev => prev.filter(img => img.preview !== previewUrl));
+        URL.revokeObjectURL(previewUrl);
+      }
     }
+
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
-  setUploading(false);
-  if (fileInputRef.current) fileInputRef.current.value = "";
-}
 
   // ─── Validation ──────────────────────────────────────────────────────────
-  const errors = {
-  date:        submitted && !date,
-  title:       submitted && !title.trim(),
-  topic:       submitted && !topic.trim(),
-  location:    submitted && !location.trim(),
-  // ลบบรรทัด facilId ออก
-  selected:    submitted && selected.length === 0,
-  problem:     submitted && !problem.trim(),
-  objectives:  submitted && !objectives.trim(),
-  methods:     submitted && !methods.trim(),
-  results:     submitted && !results.trim(),
-  solutions:   submitted && !solutions.trim(),
-  reflections: submitted && !reflections.trim(),
-  futuredev:   submitted && !futuredev.trim(),
-  images:      submitted && images.length === 0,
-};
-  const allBasicFilled = date && title.trim() && topic.trim() && location.trim() && selected.length > 0;
-  const allReportFilled = problem.trim() && objectives.trim() && methods.trim() && results.trim() && solutions.trim() && reflections.trim() && futuredev.trim() && images.length > 0;
+  // [FIX] แยก validation สำหรับ draft (บังคับแค่ date + title)
+  // และ submit (บังคับทุกช่อง)
+  const basicRequired  = !!(date && title.trim());
+  const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim() && selected.length > 0);
+  const allReportFilled = !!(problem.trim() && objectives.trim() && methods.trim() && results.trim() && solutions.trim() && reflections.trim() && futuredev.trim() && images.length > 0);
   const canSubmit = allBasicFilled && allReportFilled;
 
+  const errors = {
+    date:        submitted && !date,
+    title:       submitted && !title.trim(),
+    topic:       submitted && !topic.trim(),
+    location:    submitted && !location.trim(),
+    selected:    submitted && selected.length === 0,
+    problem:     submitted && !problem.trim(),
+    objectives:  submitted && !objectives.trim(),
+    methods:     submitted && !methods.trim(),
+    results:     submitted && !results.trim(),
+    solutions:   submitted && !solutions.trim(),
+    reflections: submitted && !reflections.trim(),
+    futuredev:   submitted && !futuredev.trim(),
+    images:      submitted && images.length === 0,
+  };
+
+  // [FIX] handleSave: draft ตรวจแค่ date+title, submit ตรวจทุกช่อง
   async function handleSave(isDraft: boolean) {
     setSubmitted(true);
-    if (!isDraft && !canSubmit) {
-      // สลับไปหน้าที่มี error
-      if (!allBasicFilled) setTab("basic");
-      else if (!allReportFilled) setTab("report");
-      alert("กรุณากรอกข้อมูลให้ครบทุกช่อง");
-      return;
+
+    if (isDraft) {
+      // ร่าง: บังคับแค่วันที่ + ชื่อกิจกรรม
+      if (!basicRequired) {
+        setTab("basic");
+        alert("กรุณากรอกวันที่และชื่อกิจกรรมก่อนบันทึกร่าง");
+        return;
+      }
+    } else {
+      // ส่ง: บังคับทุกช่อง
+      if (!canSubmit) {
+        if (!allBasicFilled) setTab("basic");
+        else if (!allReportFilled) setTab("report");
+        alert("กรุณากรอกข้อมูลให้ครบทุกช่อง");
+        return;
+      }
+      // ตรวจว่ารูปทุกรูป upload สำเร็จ (url ไม่ว่าง)
+      const pendingImages = images.filter(img => !img.url);
+      if (pendingImages.length > 0) {
+        alert("กรุณารอให้รูปอัพโหลดเสร็จก่อนส่ง");
+        return;
+      }
     }
-    if (isDraft && (!date || !title.trim())) { alert("กรุณากรอกวันที่และชื่อกิจกรรม"); return; }
+
     setLoading(true);
     await onSave({
       meeting_date: date, start_time: startTime, end_time: endTime,
       meeting_number: meetingNo === "" ? null : meetingNo,
       title, topic, duration_hours: hours, location,
-      facilitator_id: facilId, participants: selected, academic_year_id: yearId,
+      facilitator_id: facilId,
+      participants: selected,
+      academic_year_id: yearId,
       problem_description: problem, objectives, methods, results, solutions,
       reflections, future_development: futuredev,
-      image_urls: images.map(i => i.url),
+      image_urls: images.map(i => i.url).filter(Boolean),
       status: isDraft ? "draft" : "submitted",
     }, isDraft);
     setLoading(false);
@@ -378,7 +428,6 @@ async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between shrink-0">
           <div>
             <h3 className="font-black text-slate-800 text-lg">{isEdit ? "✏️ แก้ไขการประชุม" : "➕ บันทึกชั่วโมง PLC"}</h3>
-            {/* แสดงปีการศึกษาอัตโนมัติ */}
             {yearLabel && <p className="text-blue-600 text-xs font-black mt-0.5">{yearLabel}</p>}
           </div>
           <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-lg">✕</button>
@@ -402,10 +451,10 @@ async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
           {tab === "basic" && (
             <>
-              {/* ปีการศึกษา — select พร้อม label */}
+              {/* ปีการศึกษา */}
               <div>
                 <label className={labelCls}>ปีการศึกษา {reqStar}</label>
-                <select value={yearId} onChange={e => setYearId(e.target.value)} className={inp(errors.date)}>
+                <select value={yearId} onChange={e => setYearId(e.target.value)} className={inp()}>
                   {academicYears.map(y => (
                     <option key={y.id} value={y.id}>
                       ปีการศึกษา {y.year_name} ภาคเรียนที่ {y.semester}
@@ -427,7 +476,7 @@ async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
                 </div>
               </div>
 
-              {/* เวลา → ชม.อัตโนมัติ */}
+              {/* เวลา */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className={labelCls}>เวลาเริ่ม {reqStar}</label>
@@ -462,24 +511,24 @@ async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
               </div>
 
               {/* Location + Facilitator */}
-<div className="grid grid-cols-2 gap-3">
-  <div>
-    <label className={labelCls}>สถานที่ {reqStar}</label>
-    <input type="text" value={location} onChange={e => setLocation(e.target.value)}
-      placeholder="ห้องประชุม..." className={inp(errors.location)} />
-    {errors.location && <p className="text-red-500 text-xs mt-1">กรุณากรอกสถานที่</p>}
-  </div>
-  <div>
-    <label className={labelCls}>วิทยากร / ผู้นำ</label>
-    {/* ✅ แสดงชื่อ login แบบ lock ไม่ให้แก้ */}
-    <div className="w-full bg-blue-50 border-2 border-blue-200 rounded-xl px-3 py-2.5 text-blue-700 font-black text-sm flex items-center gap-2">
-      <span>👤</span>
-      <span>{fullName(currentUser)}</span>
-    </div>
-  </div>
-</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>สถานที่ {reqStar}</label>
+                  <input type="text" value={location} onChange={e => setLocation(e.target.value)}
+                    placeholder="ห้องประชุม..." className={inp(errors.location)} />
+                  {errors.location && <p className="text-red-500 text-xs mt-1">กรุณากรอกสถานที่</p>}
+                </div>
+                <div>
+                  <label className={labelCls}>วิทยากร / ผู้นำ</label>
+                  {/* [FIX] แสดงชื่อ login lock ไม่ให้แก้ */}
+                  <div className="w-full bg-blue-50 border-2 border-blue-200 rounded-xl px-3 py-2.5 text-blue-700 font-black text-sm flex items-center gap-2">
+                    <span>👤</span>
+                    <span>{fullName(currentUser)}</span>
+                  </div>
+                </div>
+              </div>
 
-              {/* Participants — กรองด้วย academic_level */}
+              {/* [FIX] ผู้เข้าร่วม — กรองด้วย academic_level เดียวกัน */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className={labelCls}>
@@ -509,15 +558,25 @@ async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
                         </div>
                         <span className={`font-bold flex-1 ${checked ? "text-blue-700" : "text-slate-700"}`}>{fullName(t)}</span>
                         {t.position && <span className="text-slate-400 text-xs">{t.position}</span>}
+                        {t.academic_level && (
+                          <span className="text-blue-400 text-xs bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-lg">{t.academic_level}</span>
+                        )}
                       </button>
                     );
                   })}
                   {filtered.length === 0 && (
                     <div className="text-center py-6 text-slate-400 text-sm">
-                      {myAcademicLevel ? `ไม่พบสมาชิกใน ${myAcademicLevel}` : "ไม่พบสมาชิกในกลุ่มสาระ"}
+                      {myAcademicLevel
+                        ? `ไม่พบสมาชิกใน academic_level: ${myAcademicLevel}`
+                        : "ไม่พบสมาชิกในกลุ่มสาระ"}
                     </div>
                   )}
                 </div>
+                {sameAcademicLevelTeachers.length === 0 && myAcademicLevel && (
+                  <p className="text-amber-600 text-xs mt-1.5 font-bold">
+                    ⚠️ ไม่พบครูที่มี academic_level = "{myAcademicLevel}" ในระบบ
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -541,24 +600,37 @@ async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
                 </div>
               ))}
 
-              {/* Image upload — สูงสุด 4 รูป พร้อม preview */}
+              {/* [FIX] Image upload — preview ทันที, อัพ OneDrive */}
               <div>
                 <label className={labelCls}>
                   📷 แนบรูปการประชุม {reqStar}
                   <span className="text-slate-400 font-normal normal-case ml-1">(สูงสุด 4 รูป)</span>
                 </label>
 
-                {/* Preview grid */}
+                {/* Preview grid — แสดงทันทีแม้ยังอัพไม่เสร็จ */}
                 {images.length > 0 && (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
                     {images.map((img, i) => (
                       <div key={i} className="relative group aspect-square">
                         <img src={img.preview} alt={`รูปที่ ${i + 1}`}
-                          className="w-full h-full object-cover rounded-xl border-2 border-blue-200"
-                          onError={e => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect fill='%23f1f5f9' width='80' height='80' rx='8'/%3E%3Ctext x='50%25' y='55%25' text-anchor='middle' fill='%2394a3b8' font-size='24'%3E🖼%3C/text%3E%3C/svg%3E"; }} />
-                        <button type="button" onClick={() => setImages(prev => prev.filter((_, j) => j !== i))}
+                          className={`w-full h-full object-cover rounded-xl border-2 ${img.url ? "border-blue-200" : "border-amber-300 opacity-70"}`}
+                          onError={e => {
+                            (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect fill='%23f1f5f9' width='80' height='80' rx='8'/%3E%3Ctext x='50%25' y='55%25' text-anchor='middle' fill='%2394a3b8' font-size='24'%3E🖼%3C/text%3E%3C/svg%3E";
+                          }} />
+                        {/* Overlay ถ้ายังอัพโหลดอยู่ */}
+                        {!img.url && (
+                          <div className="absolute inset-0 bg-amber-50/70 rounded-xl flex items-center justify-center">
+                            <span className="text-amber-600 text-xs font-black animate-pulse">⏳</span>
+                          </div>
+                        )}
+                        {/* ✅ badge ถ้าอัพสำเร็จ */}
+                        {img.url && (
+                          <div className="absolute bottom-1 left-1 bg-emerald-500/80 text-white text-[9px] px-1.5 py-0.5 rounded font-bold">✓</div>
+                        )}
+                        <button type="button"
+                          onClick={() => setImages(prev => prev.filter((_, j) => j !== i))}
                           className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full text-xs hidden group-hover:flex items-center justify-center font-black shadow-md">×</button>
-                        <div className="absolute bottom-1 left-1 bg-black/50 text-white text-[9px] px-1.5 py-0.5 rounded font-bold">{i + 1}</div>
+                        <div className="absolute bottom-1 right-1 bg-black/50 text-white text-[9px] px-1.5 py-0.5 rounded font-bold">{i + 1}</div>
                       </div>
                     ))}
                     {/* Placeholder slots */}
@@ -568,15 +640,26 @@ async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
                   </div>
                 )}
 
+                {/* Error message */}
+                {uploadError && (
+                  <div className="mb-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 flex items-start gap-2">
+                    <span className="text-red-500 text-sm">⚠️</span>
+                    <p className="text-red-600 text-xs font-bold">{uploadError}</p>
+                    <button onClick={() => setUploadError("")} className="ml-auto text-red-400 text-xs font-black">✕</button>
+                  </div>
+                )}
+
                 {images.length < 4 ? (
-                  <label className={`flex items-center gap-3 cursor-pointer bg-white border-2 border-dashed ${errors.images ? "border-red-400" : "border-blue-200"} hover:border-blue-400 rounded-xl px-4 py-3 transition-colors`}>
+                  <label className={`flex items-center gap-3 cursor-pointer bg-white border-2 border-dashed ${errors.images ? "border-red-400" : uploading ? "border-amber-300" : "border-blue-200 hover:border-blue-400"} rounded-xl px-4 py-3 transition-colors ${uploading ? "opacity-70 pointer-events-none" : ""}`}>
                     <span className="text-2xl">{uploading ? "⏳" : "📷"}</span>
                     <div>
-                      <p className="font-bold text-slate-600 text-sm">{uploading ? "กำลังอัพโหลด..." : `เพิ่มรูป (เหลือได้อีก ${4 - images.length} รูป)`}</p>
-                      <p className="text-slate-400 text-xs">JPG, PNG ขนาดไม่เกิน 5MB ต่อรูป</p>
+                      <p className="font-bold text-slate-600 text-sm">
+                        {uploading ? "กำลังอัพโหลด..." : `เพิ่มรูป (เหลือได้อีก ${4 - images.length} รูป)`}
+                      </p>
+                      <p className="text-slate-400 text-xs">JPG, PNG ขนาดไม่เกิน 5MB · อัพขึ้น OneDrive HR</p>
                     </div>
-                    <input ref={fileInputRef} type="file" accept="image/*" multiple disabled={uploading}
-                      onChange={handleImageUpload} className="hidden" />
+                    <input ref={fileInputRef} type="file" accept="image/*" multiple
+                      disabled={uploading} onChange={handleImageUpload} className="hidden" />
                   </label>
                 ) : (
                   <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5">
@@ -584,7 +667,20 @@ async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
                     <p className="text-emerald-700 text-sm font-bold">แนบครบ 4 รูปแล้ว</p>
                   </div>
                 )}
+
                 {errors.images && <p className="text-red-500 text-xs mt-1">กรุณาแนบรูปอย่างน้อย 1 รูป</p>}
+
+                {/* แสดงสถานะการอัพโหลด */}
+                {uploading && (
+                  <p className="text-amber-600 text-xs mt-1 font-bold animate-pulse">
+                    ⏳ กำลังอัพโหลดรูปขึ้น OneDrive HR กรุณารอ...
+                  </p>
+                )}
+                {!uploading && images.some(img => !img.url) && (
+                  <p className="text-red-500 text-xs mt-1 font-bold">
+                    ⚠️ มีรูปที่อัพโหลดไม่สำเร็จ กรุณาลบและลองใหม่
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -593,13 +689,21 @@ async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-100 flex gap-2 shrink-0 bg-white rounded-b-3xl">
           <button onClick={onClose} className="px-4 py-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm hover:bg-slate-50">ยกเลิก</button>
-          <button onClick={() => handleSave(true)} disabled={loading}
+
+          {/* [FIX] ร่างรายงาน: ตรวจแค่ date+title */}
+          <button onClick={() => handleSave(true)} disabled={loading || uploading}
             className="flex-1 py-3 rounded-2xl border-2 border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-700 font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2">
             {loading ? <span className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" /> : "📝 ร่างรายงาน"}
           </button>
-          <button onClick={() => handleSave(false)} disabled={loading}
+
+          {/* บันทึกและส่ง: ตรวจทุกช่อง + รอรูปอัพโหลดเสร็จ */}
+          <button onClick={() => handleSave(false)} disabled={loading || uploading}
             className="flex-[2] py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2">
-            {loading ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : (isEdit ? "💾 บันทึกการแก้ไข" : "✅ บันทึกและส่ง")}
+            {loading
+              ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              : uploading
+                ? "⏳ รอรูปอัพโหลด..."
+                : (isEdit ? "💾 บันทึกการแก้ไข" : "✅ บันทึกและส่ง")}
           </button>
         </div>
       </div>
@@ -819,7 +923,6 @@ function TeacherHistorySection({ meetings, userId, onEdit, onDelete, onView }: {
     .filter(m => m.participants?.includes(userId))
     .sort((a, b) => new Date(b.meeting_date).getTime() - new Date(a.meeting_date).getTime());
 
-  // ✅ แก้: แสดงแค่จำนวนชม.รวม ไม่แสดง limit
   const totalHours = myMeetings.reduce((s, m) => s + Number(m.duration_hours), 0);
   const pct = Math.min((totalHours / TARGET_HOURS) * 100, 100);
   const ringColor = pct >= 100 ? "#10b981" : pct >= 60 ? "#f59e0b" : "#3b82f6";
@@ -830,14 +933,12 @@ function TeacherHistorySection({ meetings, userId, onEdit, onDelete, onView }: {
         <div className="relative shrink-0">
           <RingProgress pct={pct} size={72} stroke={7} color={ringColor} />
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            {/* ✅ แสดงแค่ตัวเลข ชม. รวม */}
             <span className="text-sm font-black text-slate-700 leading-none">{totalHours}</span>
             <span className="text-[9px] text-slate-400 font-bold">ชม.</span>
           </div>
         </div>
         <div className="flex-1">
           <p className="font-black text-slate-700 text-base">ชั่วโมง PLC ของฉัน</p>
-          {/* ✅ แสดงแค่จำนวนชม.รวมและจำนวนครั้ง ไม่มี /50 */}
           <p className="text-slate-400 text-sm">{totalHours} ชั่วโมง · {myMeetings.length} ครั้ง</p>
           <div className="mt-2 w-48 h-2 bg-slate-100 rounded-full overflow-hidden">
             <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: ringColor }} />
@@ -938,7 +1039,6 @@ export default function PLCHoursPage() {
         setUser({ ...profileData, full_name: profileData.full_name || `${profileData.first_name ?? ""} ${profileData.last_name ?? ""}`.trim() });
       }
 
-      // ✅ ดึง academic_years พร้อม semester + is_current
       const { data: years } = await supabase.from("academic_years")
         .select("id, year_name, semester, is_current")
         .order("year_name", { ascending: false })
@@ -946,11 +1046,10 @@ export default function PLCHoursPage() {
       const ys = (years as AcademicYear[]) || [];
       setAcademicYears(ys);
 
-      // ✅ เลือกปีปัจจุบัน (is_current) อัตโนมัติ
       const currentYear = ys.find(y => y.is_current) ?? ys[0];
       if (currentYear) setSelectedYearId(currentYear.id);
 
-      // ดึงครูพร้อม academic_level
+      // [FIX] ดึง academic_level ด้วย
       const teacherRoles = ["homeroom_teacher", "subject_teacher", "teacher", "staff"];
       const { data: teacherData } = await supabase.from("users")
         .select("id, first_name, last_name, email, role, position, academic_level")
@@ -1048,7 +1147,6 @@ export default function PLCHoursPage() {
 
   function openAdd() { setEditMeeting({ academic_year_id: selectedYearId }); setModalOpen(true); }
 
-  // ─── แสดง label ปีการศึกษาอัตโนมัติ ────────────────────────────────────
   const currentYearObj = academicYears.find(y => y.id === selectedYearId);
   const currentYearLabel = currentYearObj
     ? `ปีการศึกษา ${currentYearObj.year_name} ภาคเรียนที่ ${currentYearObj.semester}`
@@ -1065,7 +1163,6 @@ export default function PLCHoursPage() {
           <button onClick={() => router.push("/dashboard")} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 text-lg shrink-0">🏠</button>
           <div className="flex-1 min-w-0">
             <h1 className="text-base font-black text-slate-800 leading-none">บันทึกชั่วโมง PLC</h1>
-            {/* ✅ แสดงปีการศึกษาอัตโนมัติ */}
             <p className="text-blue-600 text-xs font-bold truncate">
               {isTeacher ? fullName(user) + " · " : "ผู้บริหาร · "}
               {currentYearLabel}

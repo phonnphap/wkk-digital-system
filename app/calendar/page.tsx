@@ -263,7 +263,7 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
   const [audiences,    setAudiences]   = useState<string[]>(event?.target_roles ?? ["all"]);
 
   // ★ FIX 1: attachments เป็น array ของ {url, mime} ตั้งแต่ initial state — ไม่ยัด JSX เข้า useState
-  const [attachments, setAttachments] = useState<{url:string; mime:string}[]>(
+  const [attachments, setAttachments] = useState<{url:string; mime:string; path?: string}[]>(
     (event?.attachment_urls ?? []).map(url => ({ url, mime: "" }))
   );
 
@@ -316,11 +316,12 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
           alert(`อัปโหลดไม่สำเร็จ: ${msg}`);
           continue;
         }
-
+        const relPath = `WKK_Event_System/${Date.now()}_${file.name}`;
+        formData.append("path", relPath);
         // ใช้ downloadUrl เพื่อเปิดดูไฟล์ได้โดยตรง — เก็บเป็น object เดียว ไม่ซ้ำ
         const url = json.downloadUrl || json.webUrl || json.url;
         if (url) {
-          setAttachments(prev => [...prev, { url, mime: file.type }]);
+          setAttachments(prev => [...prev, { url, mime: file.type, path: relPath }]); // เพิ่ม path
         }
       } catch (err: any) {
         alert("อัปโหลดไม่สำเร็จ: " + err.message);
@@ -347,6 +348,7 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
       is_public: true,
       target_roles: audiences,
       attachment_urls: attachments.map(a => a.url),
+      attachment_paths: attachments.map(a => a.path ?? null), // ★ใหม่
     });
     setLoading(false);
   }
