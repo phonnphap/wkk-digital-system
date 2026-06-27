@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@sparticuz/chromium": "^149.0.0",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.107.0",
     "@tailwindcss/postcss": "^4.3.0",
@@ -22,6 +23,7 @@
     "next": "^16.2.7",
     "postcss": "^8.4.49",
     "puppeteer": "^25.2.1",
+    "puppeteer-core": "^25.2.1",
     "react": "latest",
     "react-datepicker": "^9.1.0",
     "react-dom": "latest",

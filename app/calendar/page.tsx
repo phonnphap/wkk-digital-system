@@ -247,21 +247,45 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
   }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    if (!files.length) return;
-    setUploading(true);
-    for (const file of files) {
-      if (file.size > 10*1024*1024) { alert(`${file.name} ขนาดเกิน 10MB`); continue; }
-      const ext = file.name.split(".").pop();
-      const path = `calendar-docs/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { data: up, error } = await supabase.storage.from("calendar-docs").upload(path, file, { upsert: false });
-      if (error) { alert("อัปโหลดไม่สำเร็จ: "+error.message); continue; }
-      const { data: urlData } = supabase.storage.from("calendar-docs").getPublicUrl(path);
-      if (urlData?.publicUrl) setAttachments(prev => [...prev, urlData.publicUrl]);
+  const files = Array.from(e.target.files ?? []);
+  if (!files.length) return;
+  setUploading(true);
+  
+  for (const file of files) {
+    if (file.size > 10 * 1024 * 1024) { 
+      alert(`${file.name} ขนาดเกิน 10MB`); 
+      continue; 
     }
-    setUploading(false);
-    if (fileRef.current) fileRef.current.value = "";
+    
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      // ✅ บันทึกใน WKK_Event_System
+      formData.append("path", `WKK_Event_System/${Date.now()}_${file.name}`);
+      
+      const res = await fetch("/api/upload-onedrive", { 
+        method: "POST", 
+        body: formData 
+      });
+      const json = await res.json();
+      
+      if (!res.ok || !json?.ok) {
+        alert("อัปโหลดไม่สำเร็จ: " + (json?.error ?? res.status));
+        continue;
+      }
+      
+      // ✅ ใช้ downloadUrl เพื่อเปิดดูได้โดยตรง
+      const url = json.downloadUrl || json.webUrl || json.url;
+      if (url) setAttachments(prev => [...prev, url]);
+      
+    } catch (err: any) {
+      alert("อัปโหลดไม่สำเร็จ: " + err.message);
+    }
   }
+  
+  setUploading(false);
+  if (fileRef.current) fileRef.current.value = "";
+}
 
   async function handleSave(asDraft: boolean) {
     if (!title || !startDate) { alert("กรุณากรอกชื่อกิจกรรมและวันที่"); return; }
