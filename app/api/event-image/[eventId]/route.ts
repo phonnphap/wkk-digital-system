@@ -1,6 +1,6 @@
 // app/api/event-image/[eventId]/route.ts
-// หมายเหตุ: ชื่อโฟลเดอร์ dynamic segment ต้องเป็น [eventId] (camelCase)
-// ให้ตรงกับ params.eventId ที่ใช้ในโค้ด — ถ้าตั้งโฟลเดอร์เป็น [event_id] ต้องเปลี่ยนเป็น params.event_id ด้วย
+// แก้สำหรับ Next.js 15: params เปลี่ยนเป็น Promise ต้อง await ก่อนใช้งาน
+// (Next.js 14 เดิม params เป็น object ตรงๆ ไม่ต้อง await)
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -35,9 +35,10 @@ async function resolveAttachmentUrl(
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { eventId: string } }
+  { params }: { params: Promise<{ eventId: string }> }
 ) {
-  const { eventId } = params;
+  // ★ Next.js 15 — params เป็น Promise ต้อง await ก่อนดึงค่า
+  const { eventId } = await params;
 
   if (!eventId) {
     return NextResponse.json({ error: "missing eventId" }, { status: 400 });
