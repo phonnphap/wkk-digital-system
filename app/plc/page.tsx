@@ -1138,29 +1138,33 @@ export default function PLCHoursPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {allTeachers
-                      .map(t => ({
-                        ...t,
-                        hours: meetings.reduce((s, m) => m.participants?.includes(t.id) ? s + Number(m.duration_hours) : s, 0),
-                        count: meetings.filter(m => m.participants?.includes(t.id)).length,
-                      }))
-                      .sort((a, b) => b.hours - a.hours)
-                      .map(t => (
-                        <tr key={t.id} className="hover:bg-slate-50">
-                          <td className="px-5 py-3 font-bold text-slate-800">{fullName(t)}</td>
-                          <td className="px-3 py-3 text-slate-400 text-xs hidden sm:table-cell">
-                            {t.academic_level || t.position || "—"}
-                          </td>
-                          <td className="px-3 py-3 text-center">
-                            <span className="font-black text-blue-600 text-base">{t.hours}</span>
-                            <span className="text-slate-400 text-xs"> ชม.</span>
-                          </td>
-                          <td className="px-3 py-3 text-center">
-                            <span className="font-black text-slate-600">{t.count}</span>
-                            <span className="text-slate-400 text-xs"> ครั้ง</span>
-                          </td>
-                        </tr>
-                      ))}
+                    {(activeGroupKey === "all"
+  ? allTeachers
+  : allTeachers.filter(t => (t.academic_level ?? "").trim() === activeGroupKey)
+)
+  .map(t => ({
+    ...t,
+    hours: meetings.reduce((s,m) => m.participants?.includes(t.id) ? s+Number(m.duration_hours) : s, 0),
+    count: meetings.filter(m => m.participants?.includes(t.id)).length,
+  }))
+  .sort((a,b) => b.hours - a.hours)
+  .map(t => (
+    <tr key={t.id} className="hover:bg-slate-50">
+      <td className="px-5 py-3 font-bold text-slate-800">{fullName(t)}</td>
+      <td className="px-3 py-3 text-slate-400 text-xs hidden sm:table-cell">
+        {t.academic_level || t.position || "—"}
+      </td>
+      <td className="px-3 py-3 text-center">
+        <span className="font-black text-blue-600 text-base">{t.hours}</span>
+        <span className="text-slate-400 text-xs"> ชม.</span>
+      </td>
+      <td className="px-3 py-3 text-center">
+        <span className="font-black text-slate-600">{t.count}</span>
+        <span className="text-slate-400 text-xs"> ครั้ง</span>
+      </td>
+    </tr>
+  ))
+}
                   </tbody>
                 </table>
                 {allTeachers.length === 0 && (
