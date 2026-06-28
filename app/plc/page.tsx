@@ -72,6 +72,9 @@ function getSubjectGroupForTeacher(teacher: any): string {
   return "other";
 }
 
+// ─── roles ที่ถือว่าเป็น admin (ไม่ใช่ครู) ────────────────────────────────────
+const ADMIN_ROLES_SET = new Set(["admin", "director", "deputy_director", "staff"]);
+
 type UserProfile = { id: string; first_name?: string; last_name?: string; full_name?: string; email: string; role: string; position?: string; academic_level?: string; };
 type Teacher = UserProfile & { subGroupKey: string; subjectGroupKey: string };
 type AcademicYear = { id: string; year_name: string; semester: number; is_current?: boolean };
@@ -85,7 +88,6 @@ type PLCMeeting = {
 };
 
 const TARGET_HOURS = 50;
-const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head"];
 const PLC_ONEDRIVE_FOLDER = "Plc";
 
 // ── Progress ring ──────────────────────────────────────────────────────────────
@@ -225,18 +227,32 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const [submitted,   setSubmitted]   = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ✅ FIX: ดึงครูที่มี academic_level เดียวกับ currentUser
-  // ถ้า academic_level ว่าง → ดึงทุกคน
+  // ✅ FIX: ดึงครูที่มี academic_level เดียวกัน
+  // academic_level ในระบบนี้ = ชื่อกลุ่มสาระ เช่น "คอมพิวเตอร์", "ภาษาไทย"
   const myAcademicLevel = (currentUser.academic_level ?? "").trim();
 
   const sameAcademicLevelTeachers = useMemo(() => {
-  const myLevel = myAcademicLevel.toLowerCase().trim();
-  if (!myLevel) return allTeachers;
-  const filtered = allTeachers.filter(t =>
-    (t.academic_level ?? "").toLowerCase().trim() === myLevel
-  );
-  return filtered.length > 0 ? filtered : allTeachers;
-}, [allTeachers, myAcademicLevel]);
+    if (!myAcademicLevel) {
+      // ไม่มี academic_level → ดึงทุกคน
+      console.log("[PLC] No academic_level for current user, showing all teachers:", allTeachers.length);
+      return allTeachers;
+    }
+
+    // กรองตาม academic_level ที่ตรงกันทั้งหมด (case-insensitive trim)
+    const filtered = allTeachers.filter(t => {
+      const tLevel = (t.academic_level ?? "").trim();
+      return tLevel.toLowerCase() === myAcademicLevel.toLowerCase();
+    });
+
+    console.log(`[PLC] academic_level="${myAcademicLevel}" → found ${filtered.length} teachers`);
+
+    // ถ้ากรองแล้วได้ 0 คน → fallback แสดงทุกคน พร้อมแจ้ง
+    if (filtered.length === 0) {
+      console.warn(`[PLC] No teachers found with academic_level="${myAcademicLevel}", showing all`);
+      return allTeachers;
+    }
+    return filtered;
+  }, [allTeachers, myAcademicLevel]);
 
   const [selected, setSelected] = useState<string[]>(
     meeting?.participants ?? sameAcademicLevelTeachers.map(t => t.id)
@@ -245,11 +261,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const selectedYear = academicYears.find(y => y.id === yearId);
   const yearLabel = selectedYear ? `ปีการศึกษา ${selectedYear.year_name} ภาคเรียนที่ ${selectedYear.semester}` : "";
 
-  // เพิ่มชั่วคราวใน MeetingModal เพื่อ debug
-  console.log("myAcademicLevel:", JSON.stringify(currentUser.academic_level));
-  console.log("teachers academic_level sample:", allTeachers.slice(0,3).map(t => JSON.stringify(t.academic_level)));
-
-  // คำนวณชั่วโมงอัตโนมัติ
   useEffect(() => {
     if (startTime && endTime) {
       const [sh, sm] = startTime.split(":").map(Number);
@@ -261,7 +272,8 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
 
   const filtered = sameAcademicLevelTeachers.filter(t =>
     fullName(t).toLowerCase().includes(search.toLowerCase()) ||
-    (t.position ?? "").toLowerCase().includes(search.toLowerCase())
+    (t.position ?? "").toLowerCase().includes(search.toLowerCase()) ||
+    (t.academic_level ?? "").toLowerCase().includes(search.toLowerCase())
   );
 
   function toggleTeacher(id: string) {
@@ -306,7 +318,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  // Validation
   const basicRequired   = !!(date && title.trim());
   const allBasicFilled  = !!(date && title.trim() && topic.trim() && location.trim() && selected.length > 0);
   const allReportFilled = !!(problem.trim() && objectives.trim() && methods.trim() && results.trim() && solutions.trim() && reflections.trim() && futuredev.trim() && images.length > 0);
@@ -322,36 +333,20 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
     futuredev: submitted && !futuredev.trim(), images: submitted && images.length === 0,
   };
 
-  // ✅ FIX: handleSave แยก draft (บังคับแค่ date + title) และ submit (บังคับทุกช่อง)
   async function handleSave(isDraft: boolean) {
-    setSubmitted(!isDraft); // ถ้า draft ไม่ต้อง validate แสดง error
-
+    setSubmitted(!isDraft);
     if (isDraft) {
-      // ร่าง: ตรวจแค่ date + title
-      if (!basicRequired) {
-        setTab("basic");
-        alert("กรุณากรอกวันที่และชื่อกิจกรรมก่อนบันทึกร่าง");
-        return;
-      }
+      if (!basicRequired) { setTab("basic"); alert("กรุณากรอกวันที่และชื่อกิจกรรมก่อนบันทึกร่าง"); return; }
     } else {
-      // ส่ง: ตรวจทุกช่อง
       if (!canSubmit) {
-        if (!allBasicFilled) setTab("basic");
-        else setTab("report");
-        alert("กรุณากรอกข้อมูลให้ครบทุกช่อง");
-        return;
+        if (!allBasicFilled) setTab("basic"); else setTab("report");
+        alert("กรุณากรอกข้อมูลให้ครบทุกช่อง"); return;
       }
-      if (images.some(img => !img.url)) {
-        alert("กรุณารอให้รูปอัพโหลดเสร็จก่อนส่ง");
-        return;
-      }
+      if (images.some(img => !img.url)) { alert("กรุณารอให้รูปอัพโหลดเสร็จก่อนส่ง"); return; }
     }
-
     setLoading(true);
     await onSave({
-      meeting_date: date,
-      start_time: startTime,
-      end_time: endTime,
+      meeting_date: date, start_time: startTime, end_time: endTime,
       meeting_number: meetingNo === "" ? null : meetingNo,
       title, topic, duration_hours: hours, location,
       facilitator_id: currentUserId,
@@ -371,6 +366,16 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
     `w-full bg-white border-2 ${err ? "border-red-400 animate-pulse" : "border-blue-200"} rounded-xl px-3 py-2.5 text-slate-800 text-sm focus:border-blue-500 focus:outline-none resize-none transition-colors`;
   const labelCls = "block text-xs font-black text-slate-500 mb-1.5 uppercase tracking-wider";
   const reqStar = <span className="text-red-500 ml-0.5">*</span>;
+
+  // แสดงสถิติ academic_level ใน UI เพื่อ debug
+  const levelStats = useMemo(() => {
+    const counts: Record<string, number> = {};
+    allTeachers.forEach(t => {
+      const lv = (t.academic_level ?? "(ไม่มี)").trim() || "(ไม่มี)";
+      counts[lv] = (counts[lv] ?? 0) + 1;
+    });
+    return counts;
+  }, [allTeachers]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
@@ -402,7 +407,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
           {tab === "basic" && (
             <>
-              {/* ปีการศึกษา */}
               <div>
                 <label className={labelCls}>ปีการศึกษา {reqStar}</label>
                 <select value={yearId} onChange={e => setYearId(e.target.value)} className={inp()}>
@@ -412,7 +416,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                 </select>
               </div>
 
-              {/* Date + Meeting No */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>วันที่ประชุม {reqStar}</label>
@@ -425,7 +428,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                 </div>
               </div>
 
-              {/* เวลา */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className={labelCls}>เวลาเริ่ม {reqStar}</label>
@@ -441,7 +443,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                 </div>
               </div>
 
-              {/* Title */}
               <div>
                 <label className={labelCls}>ชื่อการประชุม / กิจกรรม {reqStar}</label>
                 <input type="text" value={title} onChange={e => setTitle(e.target.value)}
@@ -449,7 +450,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                 {errors.title && <p className="text-red-500 text-xs mt-1">กรุณากรอกชื่อกิจกรรม</p>}
               </div>
 
-              {/* Topic */}
               <div>
                 <label className={labelCls}>หัวข้อ / ประเด็น {reqStar}</label>
                 <input type="text" value={topic} onChange={e => setTopic(e.target.value)}
@@ -457,7 +457,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                 {errors.topic && <p className="text-red-500 text-xs mt-1">กรุณากรอกหัวข้อ</p>}
               </div>
 
-              {/* Location + Facilitator */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>สถานที่ {reqStar}</label>
@@ -473,46 +472,50 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                 </div>
               </div>
 
-              {/* ✅ ผู้เข้าร่วม — กรอง academic_level */}
+              {/* ✅ ผู้เข้าร่วม */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className={labelCls}>
                     ผู้เข้าร่วม ({selected.length} คน) {reqStar}
-                    {myAcademicLevel && (
-                      <span className="ml-1 text-blue-500 normal-case font-bold">
-                        · กลุ่ม {myAcademicLevel}
-                      </span>
-                    )}
                   </label>
                   <div className="flex gap-1.5">
-                    <button type="button" onClick={() => setSelected(sameAcademicLevelTeachers.map(t => t.id))}
+                    <button type="button"
+                      onClick={() => setSelected(sameAcademicLevelTeachers.map(t => t.id))}
                       className="text-xs font-black text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50">
                       เลือกทั้งหมด
                     </button>
-                    <button type="button" onClick={() => setSelected([])}
+                    <button type="button"
+                      onClick={() => setSelected([])}
                       className="text-xs font-black text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg hover:bg-slate-100">
                       ล้าง
                     </button>
                   </div>
                 </div>
 
-                {/* ✅ แสดง badge academic_level ที่ใช้กรอง */}
-                {myAcademicLevel ? (
-                  <div className="mb-2 flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
-                    <span className="text-blue-500 text-sm">🏷️</span>
-                    <span className="text-blue-700 text-xs font-bold">
-                      แสดงครูกลุ่ม "{myAcademicLevel}" · พบ {sameAcademicLevelTeachers.length} คน
-                      (คุณ: "{currentUser.academic_level ?? "ไม่มีค่า"}")
-                    </span>
+                {/* ✅ แสดงข้อมูล academic_level ที่ใช้กรอง */}
+                <div className={`mb-2 flex items-center gap-2 rounded-xl px-3 py-2 border ${myAcademicLevel && sameAcademicLevelTeachers.length < allTeachers.length ? "bg-blue-50 border-blue-200" : "bg-amber-50 border-amber-200"}`}>
+                  <span className="text-base">🏷️</span>
+                  <div className="flex-1 min-w-0">
+                    {myAcademicLevel ? (
+                      sameAcademicLevelTeachers.length < allTeachers.length ? (
+                        <p className="text-blue-700 text-xs font-bold">
+                          กลุ่ม: <strong>"{myAcademicLevel}"</strong> · พบ {sameAcademicLevelTeachers.length} คน
+                        </p>
+                      ) : (
+                        <p className="text-amber-700 text-xs font-bold">
+                          ไม่พบครูกลุ่ม "{myAcademicLevel}" → แสดงทั้งหมด {allTeachers.length} คน
+                          <span className="block text-amber-500 text-[10px] mt-0.5">
+                            กลุ่มที่มีในระบบ: {Object.entries(levelStats).map(([k,v]) => `${k}(${v})`).join(", ")}
+                          </span>
+                        </p>
+                      )
+                    ) : (
+                      <p className="text-amber-700 text-xs font-bold">
+                        ไม่พบ academic_level ของคุณ → แสดงทั้งหมด {allTeachers.length} คน
+                      </p>
+                    )}
                   </div>
-                ) : (
-                  <div className="mb-2 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                    <span className="text-amber-500 text-sm">⚠️</span>
-                    <span className="text-amber-700 text-xs font-bold">
-                      ไม่พบ academic_level ของคุณ — แสดงครูทั้งหมด ({allTeachers.length} คน)
-                    </span>
-                  </div>
-                )}
+                </div>
 
                 <input type="text" value={search} onChange={e => setSearch(e.target.value)}
                   placeholder="🔍 ค้นหาชื่อครู..." className={`${inp(errors.selected)} mb-2`} />
@@ -530,11 +533,13 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                           {checked && <span className="text-white text-xs font-black">✓</span>}
                         </div>
                         <span className={`font-bold flex-1 ${checked ? "text-blue-700" : "text-slate-700"}`}>{fullName(t)}</span>
-                        {t.position && <span className="text-slate-400 text-xs hidden sm:inline">{t.position}</span>}
                         {t.academic_level && (
-                          <span className="text-blue-400 text-xs bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-lg shrink-0">
+                          <span className="text-xs bg-blue-50 border border-blue-200 text-blue-600 px-1.5 py-0.5 rounded-lg shrink-0 font-bold">
                             {t.academic_level}
                           </span>
+                        )}
+                        {t.position && (
+                          <span className="text-slate-400 text-xs hidden sm:inline shrink-0">{t.position}</span>
                         )}
                       </button>
                     );
@@ -549,7 +554,7 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
               {[
                 { label:"⚠️ สภาพปัญหา", ph:"ระบุปัญหาหรือความท้าทายที่พบในการจัดการเรียนการสอน...", val:problem, set:setProblem, err:errors.problem },
                 { label:"🎯 วัตถุประสงค์", ph:"ระบุวัตถุประสงค์ของการประชุม PLC ครั้งนี้...", val:objectives, set:setObjectives, err:errors.objectives },
-                { label:"📋 วิธีการดำเนินการ", ph:"อธิบายกระบวนการ/กิจกรรมที่ดำเนินการในการประชุม...", val:methods, set:setMethods, err:errors.methods },
+                { label:"📋 วิธีการดำเนินการ", ph:"อธิบายกระบวนการ/กิจกรรมที่ดำเนินการ...", val:methods, set:setMethods, err:errors.methods },
                 { label:"✨ ผลที่เกิดขึ้น", ph:"ระบุผลลัพธ์ที่เกิดขึ้นจากการประชุม...", val:results, set:setResults, err:errors.results },
                 { label:"🔧 แนวทางแก้ไขปัญหา", ph:"แนวทางหรือมาตรการที่ตกลงร่วมกัน...", val:solutions, set:setSolutions, err:errors.solutions },
                 { label:"🪞 การสะท้อนผล", ph:"สะท้อนสิ่งที่ได้เรียนรู้และข้อค้นพบ...", val:reflections, set:setReflections, err:errors.reflections },
@@ -563,12 +568,8 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                 </div>
               ))}
 
-              {/* Image upload */}
               <div>
-                <label className={labelCls}>
-                  📷 แนบรูปการประชุม {reqStar}
-                  <span className="text-slate-400 font-normal normal-case ml-1">(สูงสุด 4 รูป)</span>
-                </label>
+                <label className={labelCls}>📷 แนบรูปการประชุม {reqStar} <span className="text-slate-400 font-normal normal-case">(สูงสุด 4 รูป)</span></label>
                 {images.length > 0 && (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
                     {images.map((img, i) => (
@@ -616,22 +617,13 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-100 flex gap-2 shrink-0 bg-white rounded-b-3xl">
           <button onClick={onClose} className="px-4 py-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm hover:bg-slate-50">ยกเลิก</button>
-
-          {/* ✅ FIX: ร่างรายงาน — ตรวจแค่ date + title */}
-          <button
-            onClick={() => handleSave(true)}
-            disabled={loading || uploading}
+          <button onClick={() => handleSave(true)} disabled={loading || uploading}
             className="flex-1 py-3 rounded-2xl border-2 border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-700 font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2">
             {loading ? <span className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" /> : "📝 ร่างรายงาน"}
           </button>
-
-          {/* บันทึกและส่ง: ตรวจทุกช่อง */}
-          <button
-            onClick={() => handleSave(false)}
-            disabled={loading || uploading}
+          <button onClick={() => handleSave(false)} disabled={loading || uploading}
             className="flex-[2] py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2">
-            {loading
-              ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            {loading ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               : uploading ? "⏳ รอรูปอัพโหลด..."
               : isEdit ? "💾 บันทึกการแก้ไข" : "✅ บันทึกและส่ง"}
           </button>
@@ -744,7 +736,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
   selectedYearId: string; onClose: () => void; onEdit: (m: PLCMeeting) => void;
   onDelete: (id: string) => void; canEdit: boolean;
 }) {
-  const [search, setSearch]           = useState("");
+  const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all"|"draft"|"submitted">("all");
   const [viewMeeting, setViewMeeting] = useState<PLCMeeting | null>(null);
   const selectedYear = academicYears.find(y => y.id === selectedYearId);
@@ -921,12 +913,11 @@ export default function PLCHoursPage() {
     (async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) { setLoading(false); return; }
-      const meta  = authUser.user_metadata ?? {};
-      const email = authUser.email || meta.email || "";
+      const email = authUser.email || authUser.user_metadata?.email || "";
 
       let profileData: any = null;
       const { data: byAuthId } = await supabase.from("users")
-        .select("id, first_name, last_name, full_name, email, role, position, academic_level") // ✅ มี academic_level
+        .select("id, first_name, last_name, full_name, email, role, position, academic_level")
         .eq("auth_id", authUser.id).maybeSingle();
       profileData = byAuthId;
 
@@ -935,7 +926,9 @@ export default function PLCHoursPage() {
           .select("id, first_name, last_name, full_name, email, role, position, academic_level")
           .eq("email", email).maybeSingle();
         profileData = byEmail;
-        if (profileData) await (supabase.from("users") as any).update({ auth_id: authUser.id }).eq("id", profileData.id);
+        if (profileData) {
+          await (supabase.from("users") as any).update({ auth_id: authUser.id }).eq("id", profileData.id);
+        }
       }
 
       if (profileData) {
@@ -954,35 +947,61 @@ export default function PLCHoursPage() {
       const currentYear = ys.find(y => y.is_current) ?? ys[0];
       if (currentYear) setSelectedYearId(currentYear.id);
 
-      // ✅ ดึง academic_level ด้วยเสมอ
-      const { data: teacherData } = await supabase.from("users")
+      // ✅ FIX: ดึง users ทั้งหมดที่ไม่ใช่ admin roles
+      // ไม่ filter ด้วย role ใน DB query (เพราะ role มีหลายแบบ)
+      // แต่ filter client-side แทน
+      const { data: allUsersData, error: usersError } = await supabase
+        .from("users")
         .select("id, first_name, last_name, full_name, email, role, position, academic_level")
-        .in("role", ["homeroom_teacher","subject_teacher","teacher","staff"]);
+        .order("first_name");
 
-      const teachers: Teacher[] = (teacherData || []).map((t: any) => ({
-        ...t,
-        full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim(),
-        subGroupKey: getSubGroupForTeacher(t),
-        subjectGroupKey: getSubjectGroupForTeacher(t),
-      }));
-      setAllTeachers(teachers);
+      if (usersError) {
+        console.error("[PLC] Error fetching users:", usersError.message);
+        // fallback: ลองดึงแบบ select น้อยคอลัมน์
+        const { data: fallbackData } = await supabase
+          .from("users")
+          .select("id, first_name, last_name, email, role, position")
+          .order("first_name");
+
+        const teachers: Teacher[] = (fallbackData || [])
+          .filter((t: any) => !ADMIN_ROLES_SET.has(t.role ?? ""))
+          .map((t: any) => ({
+            ...t,
+            academic_level: undefined,
+            full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim(),
+            subGroupKey: getSubGroupForTeacher(t),
+            subjectGroupKey: getSubjectGroupForTeacher(t),
+          }));
+
+        console.log("[PLC] Fallback teachers loaded:", teachers.length);
+        setAllTeachers(teachers);
+      } else {
+        // กรอง admin ออก client-side
+        const teachers: Teacher[] = (allUsersData || [])
+          .filter((t: any) => !ADMIN_ROLES_SET.has(t.role ?? ""))
+          .map((t: any) => ({
+            ...t,
+            full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim(),
+            subGroupKey: getSubGroupForTeacher(t),
+            subjectGroupKey: getSubjectGroupForTeacher(t),
+          }));
+
+        console.log("[PLC] Teachers loaded:", teachers.length,
+          "| academic_level samples:", teachers.slice(0,3).map(t => t.academic_level));
+        setAllTeachers(teachers);
+      }
+
       setLoading(false);
     })();
   }, []);
 
-  const isAdmin   = !!(user?.role && ADMIN_ROLES.includes(user.role));
+  const isAdmin   = !!(user?.role && ADMIN_ROLES_SET.has(user.role));
   const isTeacher = !isAdmin;
 
   const mySubjectGroupKey = useMemo(() => {
     if (!user || isAdmin) return null;
     return allTeachers.find(t => t.id === user.id)?.subjectGroupKey ?? null;
   }, [user, allTeachers, isAdmin]);
-
-  const sameGroupTeachers = useMemo(() => {
-    if (isAdmin) return allTeachers;
-    if (!mySubjectGroupKey) return allTeachers;
-    return allTeachers.filter(t => t.subjectGroupKey === mySubjectGroupKey);
-  }, [allTeachers, isAdmin, mySubjectGroupKey]);
 
   const loadMeetings = useCallback(async () => {
     if (!selectedYearId) return;
@@ -1049,9 +1068,8 @@ export default function PLCHoursPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Top bar */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3">
-        <div className="px-2 flex items-center gap-3">
+        <div className="flex items-center gap-3">
           <button onClick={() => router.push("/dashboard")} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 text-lg shrink-0">🏠</button>
           <div className="flex-1 min-w-0">
             <h1 className="text-base font-black text-slate-800 leading-none">บันทึกชั่วโมง PLC</h1>
@@ -1069,8 +1087,6 @@ export default function PLCHoursPage() {
       </div>
 
       <div className="w-full px-4 sm:px-6 py-6 space-y-6">
-
-        {/* ── หน้าครู ── */}
         {isTeacher && (
           <>
             <div className="flex flex-col items-center gap-3 py-4">
@@ -1092,7 +1108,6 @@ export default function PLCHoursPage() {
           </>
         )}
 
-        {/* ── หน้า Admin ── */}
         {isAdmin && (
           <>
             <div className="grid grid-cols-3 gap-3">
@@ -1114,15 +1129,11 @@ export default function PLCHoursPage() {
               className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-2xl px-6 py-4 flex items-center justify-between transition-all shadow-sm group">
               <div className="flex items-center gap-3">
                 <span className="text-3xl">📊</span>
-                <div className="text-left">
-                  <p className="font-black text-base">รายงานทั้งหมด</p>
-                  <p className="text-indigo-200 text-xs">{totalMeetings} รายการ · {totalHoursAll} ชั่วโมง</p>
-                </div>
+                <div className="text-left"><p className="font-black text-base">รายงานทั้งหมด</p><p className="text-indigo-200 text-xs">{totalMeetings} รายการ · {totalHoursAll} ชั่วโมง</p></div>
               </div>
               <span className="text-white/60 group-hover:text-white text-xl">→</span>
             </button>
 
-            {/* Tab bar */}
             <div className="flex gap-2 overflow-x-auto pb-1">
               <button onClick={() => setActiveGroup("all")} className={`px-4 py-2 rounded-xl text-sm font-black border-2 whitespace-nowrap ${activeGroup==="all"?"bg-slate-800 border-slate-800 text-white":"bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>🏫 ทุกกลุ่มสาระ</button>
               {SUBJECT_GROUPS.map(g => {
@@ -1138,7 +1149,6 @@ export default function PLCHoursPage() {
               })}
             </div>
 
-            {/* SubGroup panels */}
             <div className="space-y-4">
               {SUBJECT_GROUPS.filter(g => activeGroup==="all" || activeGroup===g.key).map(g => (
                 <div key={g.key}>
@@ -1158,7 +1168,6 @@ export default function PLCHoursPage() {
               ))}
             </div>
 
-            {/* Summary table */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="bg-slate-50 border-b border-slate-200 px-5 py-3.5 flex items-center justify-between">
                 <h3 className="font-black text-slate-700 text-sm">👩‍🏫 สรุปชั่วโมงรายบุคคล</h3>
@@ -1203,7 +1212,6 @@ export default function PLCHoursPage() {
         )}
       </div>
 
-      {/* Modals */}
       {modalOpen && user && (
         <MeetingModal
           meeting={editMeeting}
