@@ -19,64 +19,15 @@ function fullName(u: any) {
   return `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() || u.email || "—";
 }
 
-type SubGroup = {
-  key: string; label: string; color: string; textColor: string;
-  borderColor: string; bgLight: string; icon: string; match: string[];
-};
-type SubjectGroup = { key: string; label: string; icon: string; color: string; subGroups: SubGroup[] };
-
-const SUBJECT_GROUPS: SubjectGroup[] = [
-  { key:"thai", label:"ภาษาไทย", icon:"📖", color:"rose", subGroups:[
-    { key:"thai_primary", label:"ภาษาไทย ประถม", color:"bg-rose-500", textColor:"text-rose-700", borderColor:"border-rose-300", bgLight:"bg-rose-50", icon:"📗", match:["ภาษาไทย","ประถม"] },
-    { key:"thai_secondary", label:"ภาษาไทย มัธยม", color:"bg-rose-700", textColor:"text-rose-900", borderColor:"border-rose-400", bgLight:"bg-rose-100", icon:"📘", match:["ภาษาไทย","มัธยม"] },
-  ]},
-  { key:"math", label:"คณิตศาสตร์", icon:"🔢", color:"blue", subGroups:[
-    { key:"math_primary", label:"คณิตศาสตร์ ประถม", color:"bg-blue-500", textColor:"text-blue-700", borderColor:"border-blue-300", bgLight:"bg-blue-50", icon:"🔢", match:["คณิต","ประถม"] },
-    { key:"math_secondary", label:"คณิตศาสตร์ มัธยม", color:"bg-blue-700", textColor:"text-blue-900", borderColor:"border-blue-400", bgLight:"bg-blue-100", icon:"📐", match:["คณิต","มัธยม"] },
-  ]},
-  { key:"science", label:"วิทยาศาสตร์", icon:"🔬", color:"emerald", subGroups:[
-    { key:"science_primary", label:"วิทยาศาสตร์ ประถม", color:"bg-emerald-500", textColor:"text-emerald-700", borderColor:"border-emerald-300", bgLight:"bg-emerald-50", icon:"🌿", match:["วิทยาศาสตร์","ประถม"] },
-    { key:"science_secondary", label:"วิทยาศาสตร์ มัธยม", color:"bg-emerald-700", textColor:"text-emerald-900", borderColor:"border-emerald-400", bgLight:"bg-emerald-100", icon:"🔬", match:["วิทยาศาสตร์","มัธยม"] },
-    { key:"computer", label:"คอมพิวเตอร์", color:"bg-emerald-700", textColor:"text-emerald-900", borderColor:"border-emerald-400", bgLight:"bg-emerald-100", icon:"💻", match:["คอมพิวเตอร์"] },
-  ]},
-  { key:"social", label:"สังคมศึกษา", icon:"🌏", color:"amber", subGroups:[
-    { key:"social_all", label:"สังคมศึกษา", color:"bg-amber-500", textColor:"text-amber-700", borderColor:"border-amber-300", bgLight:"bg-amber-50", icon:"🌏", match:["สังคม"] },
-  ]},
-  { key:"english", label:"ภาษาต่างประเทศ", icon:"🌐", color:"sky", subGroups:[
-    { key:"english_primary", label:"ภาษาต่างประเทศ ประถม", color:"bg-sky-500", textColor:"text-sky-700", borderColor:"border-sky-300", bgLight:"bg-sky-50", icon:"🇬🇧", match:["ภาษาต่างประเทศ","ประถม"] },
-    { key:"english_secondary", label:"ภาษาต่างประเทศ มัธยม", color:"bg-sky-700", textColor:"text-sky-900", borderColor:"border-sky-400", bgLight:"bg-sky-100", icon:"🌐", match:["ภาษาต่างประเทศ","มัธยม"] },
-  ]},
-  { key:"pe", label:"สุขศึกษาและพลศึกษา", icon:"⚽", color:"orange", subGroups:[
-    { key:"pe_all", label:"สุขศึกษาและพลศึกษา", color:"bg-orange-500", textColor:"text-orange-700", borderColor:"border-orange-300", bgLight:"bg-orange-50", icon:"⚽", match:["พลศึกษา"] },
-  ]},
-  { key:"arts", label:"ศิลปะ", icon:"🎨", color:"purple", subGroups:[
-    { key:"arts_all", label:"ศิลปะ", color:"bg-purple-500", textColor:"text-purple-700", borderColor:"border-purple-300", bgLight:"bg-purple-50", icon:"🎨", match:["ศิลปะ"] },
-  ]},
-  { key:"career", label:"การงานอาชีพ", icon:"🔧", color:"teal", subGroups:[
-    { key:"career_all", label:"การงานอาชีพ", color:"bg-teal-500", textColor:"text-teal-700", borderColor:"border-teal-300", bgLight:"bg-teal-50", icon:"🔧", match:["การงาน"] },
-  ]},
-];
-
-const ALL_SUBGROUPS = SUBJECT_GROUPS.flatMap(g => g.subGroups);
-
-function getSubGroupForTeacher(teacher: any): string {
-  const pos = ((teacher.position ?? "") + " " + (teacher.department_name ?? "")).toLowerCase();
-  for (const sg of ALL_SUBGROUPS) {
-    if (sg.match.map(m => m.toLowerCase()).every(w => pos.includes(w))) return sg.key;
-  }
-  return "other";
-}
-function getSubjectGroupForTeacher(teacher: any): string {
-  const sgKey = getSubGroupForTeacher(teacher);
-  for (const g of SUBJECT_GROUPS) { if (g.subGroups.some(sg => sg.key === sgKey)) return g.key; }
-  return "other";
-}
-
 // ─── roles ที่ถือว่าเป็น admin (ไม่ใช่ครู) ────────────────────────────────────
 const ADMIN_ROLES_SET = new Set(["admin", "director", "deputy_director", "staff"]);
 
-type UserProfile = { id: string; first_name?: string; last_name?: string; full_name?: string; email: string; role: string; position?: string; academic_level?: string; };
-type Teacher = UserProfile & { subGroupKey: string; subjectGroupKey: string };
+type UserProfile = {
+  id: string; first_name?: string; last_name?: string; full_name?: string;
+  email: string; role: string; position?: string; academic_level?: string;
+  department_id?: string;
+};
+type Teacher = UserProfile & { department_id?: string };
 type AcademicYear = { id: string; year_name: string; semester: number; is_current?: boolean };
 type PLCMeeting = {
   id: string; meeting_number?: number; meeting_date: string; start_time?: string; end_time?: string;
@@ -87,8 +38,40 @@ type PLCMeeting = {
   image_urls?: string[]; status?: "draft" | "submitted"; created_at?: string;
 };
 
-const TARGET_HOURS = 50;
+// ── Department group type ──────────────────────────────────────────────────────
+// แต่ละ "กลุ่ม" คือ academic_level ที่ unique ใน DB
+type DeptGroup = {
+  academic_level: string;  // เช่น "ภาษาไทย"
+  department_id: string | null;
+  teachers: Teacher[];
+  meetings: PLCMeeting[];
+  totalHours: number;
+};
+
 const PLC_ONEDRIVE_FOLDER = "Plc";
+
+// ── ป้ายกำกับ & สีแต่ละกลุ่มสาระ (map จาก academic_level) ──────────────────
+const GROUP_META: Record<string, { icon: string; color: string; textColor: string; borderColor: string; bgLight: string }> = {
+  "ภาษาไทย":            { icon:"📖", color:"bg-rose-500",    textColor:"text-rose-700",    borderColor:"border-rose-300",    bgLight:"bg-rose-50"    },
+  "คณิตศาสตร์":         { icon:"🔢", color:"bg-blue-500",    textColor:"text-blue-700",    borderColor:"border-blue-300",    bgLight:"bg-blue-50"    },
+  "วิทยาศาสตร์":        { icon:"🔬", color:"bg-emerald-500", textColor:"text-emerald-700", borderColor:"border-emerald-300", bgLight:"bg-emerald-50" },
+  "สังคมศึกษา":         { icon:"🌏", color:"bg-amber-500",   textColor:"text-amber-700",   borderColor:"border-amber-300",   bgLight:"bg-amber-50"   },
+  "ภาษาต่างประเทศ":     { icon:"🌐", color:"bg-sky-500",     textColor:"text-sky-700",     borderColor:"border-sky-300",     bgLight:"bg-sky-50"     },
+  "สุขศึกษาและพลศึกษา": { icon:"⚽", color:"bg-orange-500",  textColor:"text-orange-700",  borderColor:"border-orange-300",  bgLight:"bg-orange-50"  },
+  "ศิลปะ":              { icon:"🎨", color:"bg-purple-500",  textColor:"text-purple-700",  borderColor:"border-purple-300",  bgLight:"bg-purple-50"  },
+  "การงานอาชีพ":        { icon:"🔧", color:"bg-teal-500",    textColor:"text-teal-700",    borderColor:"border-teal-300",    bgLight:"bg-teal-50"    },
+  "คอมพิวเตอร์":        { icon:"💻", color:"bg-indigo-500",  textColor:"text-indigo-700",  borderColor:"border-indigo-300",  bgLight:"bg-indigo-50"  },
+};
+const DEFAULT_META = { icon:"📚", color:"bg-slate-500", textColor:"text-slate-700", borderColor:"border-slate-300", bgLight:"bg-slate-50" };
+function getGroupMeta(academic_level: string) {
+  // ค้นหาแบบ contains ด้วย เพื่อรองรับชื่อยาวๆ
+  const exact = GROUP_META[academic_level];
+  if (exact) return exact;
+  for (const [k, v] of Object.entries(GROUP_META)) {
+    if (academic_level.includes(k) || k.includes(academic_level)) return v;
+  }
+  return DEFAULT_META;
+}
 
 // ── Progress ring ──────────────────────────────────────────────────────────────
 function RingProgress({ pct, size = 56, stroke = 6, color = "#3b82f6" }: { pct: number; size?: number; stroke?: number; color?: string }) {
@@ -122,7 +105,7 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
     { label:"แนวทางการพัฒนาต่อ", value:meeting.future_development, icon:"🚀" },
   ];
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-5 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
           <div className="flex-1">
@@ -227,35 +210,16 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const [submitted,   setSubmitted]   = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ✅ FIX: ดึงครูที่มี academic_level เดียวกัน
-  // academic_level ในระบบนี้ = ชื่อกลุ่มสาระ เช่น "คอมพิวเตอร์", "ภาษาไทย"
-  const myAcademicLevel = (currentUser.academic_level ?? "").trim();
-
-  const sameAcademicLevelTeachers = useMemo(() => {
-    if (!myAcademicLevel) {
-      // ไม่มี academic_level → ดึงทุกคน
-      console.log("[PLC] No academic_level for current user, showing all teachers:", allTeachers.length);
-      return allTeachers;
-    }
-
-    // กรองตาม academic_level ที่ตรงกันทั้งหมด (case-insensitive trim)
-    const filtered = allTeachers.filter(t => {
-      const tLevel = (t.academic_level ?? "").trim();
-      return tLevel.toLowerCase() === myAcademicLevel.toLowerCase();
-    });
-
-    console.log(`[PLC] academic_level="${myAcademicLevel}" → found ${filtered.length} teachers`);
-
-    // ถ้ากรองแล้วได้ 0 คน → fallback แสดงทุกคน พร้อมแจ้ง
-    if (filtered.length === 0) {
-      console.warn(`[PLC] No teachers found with academic_level="${myAcademicLevel}", showing all`);
-      return allTeachers;
-    }
-    return filtered;
-  }, [allTeachers, myAcademicLevel]);
+  // กรองครูที่อยู่กลุ่มสาระเดียวกับ currentUser (ตาม department_id)
+  const myDeptId = (currentUser as Teacher).department_id ?? null;
+  const sameGroupTeachers = useMemo(() => {
+    if (!myDeptId) return allTeachers;
+    const filtered = allTeachers.filter(t => t.department_id === myDeptId);
+    return filtered.length > 0 ? filtered : allTeachers;
+  }, [allTeachers, myDeptId]);
 
   const [selected, setSelected] = useState<string[]>(
-    meeting?.participants ?? sameAcademicLevelTeachers.map(t => t.id)
+    meeting?.participants ?? sameGroupTeachers.map(t => t.id)
   );
 
   const selectedYear = academicYears.find(y => y.id === yearId);
@@ -270,7 +234,7 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
     }
   }, [startTime, endTime]);
 
-  const filtered = sameAcademicLevelTeachers.filter(t =>
+  const filtered = sameGroupTeachers.filter(t =>
     fullName(t).toLowerCase().includes(search.toLowerCase()) ||
     (t.position ?? "").toLowerCase().includes(search.toLowerCase()) ||
     (t.academic_level ?? "").toLowerCase().includes(search.toLowerCase())
@@ -367,20 +331,9 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const labelCls = "block text-xs font-black text-slate-500 mb-1.5 uppercase tracking-wider";
   const reqStar = <span className="text-red-500 ml-0.5">*</span>;
 
-  // แสดงสถิติ academic_level ใน UI เพื่อ debug
-  const levelStats = useMemo(() => {
-    const counts: Record<string, number> = {};
-    allTeachers.forEach(t => {
-      const lv = (t.academic_level ?? "(ไม่มี)").trim() || "(ไม่มี)";
-      counts[lv] = (counts[lv] ?? 0) + 1;
-    });
-    return counts;
-  }, [allTeachers]);
-
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
       <div className="bg-white w-full sm:max-w-2xl sm:rounded-3xl rounded-t-3xl shadow-2xl max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        {/* Header */}
         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between shrink-0">
           <div>
             <h3 className="font-black text-slate-800 text-lg">{isEdit ? "✏️ แก้ไขการประชุม" : "➕ บันทึกชั่วโมง PLC"}</h3>
@@ -389,7 +342,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
           <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-lg">✕</button>
         </div>
 
-        {/* Tabs */}
         <div className="flex border-b border-slate-100 shrink-0 px-6">
           {[
             { key:"basic",  label:"📋 ข้อมูลพื้นฐาน",  hasError: submitted && !allBasicFilled  },
@@ -403,7 +355,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
           ))}
         </div>
 
-        {/* Body */}
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
           {tab === "basic" && (
             <>
@@ -415,7 +366,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                   ))}
                 </select>
               </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>วันที่ประชุม {reqStar}</label>
@@ -427,7 +377,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                   <input type="number" min="1" value={meetingNo} onChange={e => setMeetingNo(e.target.value === "" ? "" : +e.target.value)} placeholder="1" className={inp()} />
                 </div>
               </div>
-
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className={labelCls}>เวลาเริ่ม {reqStar}</label>
@@ -442,21 +391,18 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                   <div className="w-full bg-blue-50 border-2 border-blue-200 rounded-xl px-3 py-2.5 text-blue-600 font-black text-sm text-center">{hours} ชม.</div>
                 </div>
               </div>
-
               <div>
                 <label className={labelCls}>ชื่อการประชุม / กิจกรรม {reqStar}</label>
                 <input type="text" value={title} onChange={e => setTitle(e.target.value)}
                   placeholder="เช่น PLC กลุ่มสาระภาษาไทย ครั้งที่ 1" className={inp(errors.title)} />
                 {errors.title && <p className="text-red-500 text-xs mt-1">กรุณากรอกชื่อกิจกรรม</p>}
               </div>
-
               <div>
                 <label className={labelCls}>หัวข้อ / ประเด็น {reqStar}</label>
                 <input type="text" value={topic} onChange={e => setTopic(e.target.value)}
                   placeholder="เช่น การออกแบบกิจกรรมการเรียนรู้เชิงรุก" className={inp(errors.topic)} />
                 {errors.topic && <p className="text-red-500 text-xs mt-1">กรุณากรอกหัวข้อ</p>}
               </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>สถานที่ {reqStar}</label>
@@ -472,55 +418,32 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                 </div>
               </div>
 
-              {/* ✅ ผู้เข้าร่วม */}
+              {/* ผู้เข้าร่วม — กรองจาก department_id เดียวกัน */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className={labelCls}>
-                    ผู้เข้าร่วม ({selected.length} คน) {reqStar}
-                  </label>
+                  <label className={labelCls}>ผู้เข้าร่วม ({selected.length} คน) {reqStar}</label>
                   <div className="flex gap-1.5">
-                    <button type="button"
-                      onClick={() => setSelected(sameAcademicLevelTeachers.map(t => t.id))}
+                    <button type="button" onClick={() => setSelected(sameGroupTeachers.map(t => t.id))}
                       className="text-xs font-black text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50">
                       เลือกทั้งหมด
                     </button>
-                    <button type="button"
-                      onClick={() => setSelected([])}
+                    <button type="button" onClick={() => setSelected([])}
                       className="text-xs font-black text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg hover:bg-slate-100">
                       ล้าง
                     </button>
                   </div>
                 </div>
-
-                {/* ✅ แสดงข้อมูล academic_level ที่ใช้กรอง */}
-                <div className={`mb-2 flex items-center gap-2 rounded-xl px-3 py-2 border ${myAcademicLevel && sameAcademicLevelTeachers.length < allTeachers.length ? "bg-blue-50 border-blue-200" : "bg-amber-50 border-amber-200"}`}>
-                  <span className="text-base">🏷️</span>
-                  <div className="flex-1 min-w-0">
-                    {myAcademicLevel ? (
-                      sameAcademicLevelTeachers.length < allTeachers.length ? (
-                        <p className="text-blue-700 text-xs font-bold">
-                          กลุ่ม: <strong>"{myAcademicLevel}"</strong> · พบ {sameAcademicLevelTeachers.length} คน
-                        </p>
-                      ) : (
-                        <p className="text-amber-700 text-xs font-bold">
-                          ไม่พบครูกลุ่ม "{myAcademicLevel}" → แสดงทั้งหมด {allTeachers.length} คน
-                          <span className="block text-amber-500 text-[10px] mt-0.5">
-                            กลุ่มที่มีในระบบ: {Object.entries(levelStats).map(([k,v]) => `${k}(${v})`).join(", ")}
-                          </span>
-                        </p>
-                      )
-                    ) : (
-                      <p className="text-amber-700 text-xs font-bold">
-                        ไม่พบ academic_level ของคุณ → แสดงทั้งหมด {allTeachers.length} คน
-                      </p>
-                    )}
+                {myDeptId && (
+                  <div className="mb-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                    <span>🏷️</span>
+                    <p className="text-blue-700 text-xs font-bold">
+                      กลุ่ม: <strong>{currentUser.academic_level || "—"}</strong> · {sameGroupTeachers.length} คน
+                    </p>
                   </div>
-                </div>
-
+                )}
                 <input type="text" value={search} onChange={e => setSearch(e.target.value)}
                   placeholder="🔍 ค้นหาชื่อครู..." className={`${inp(errors.selected)} mb-2`} />
                 {errors.selected && <p className="text-red-500 text-xs mb-1">กรุณาเลือกผู้เข้าร่วมอย่างน้อย 1 คน</p>}
-
                 <div className={`border-2 ${errors.selected ? "border-red-400" : "border-slate-200"} rounded-xl overflow-hidden max-h-48 overflow-y-auto divide-y divide-slate-100`}>
                   {filtered.length === 0 ? (
                     <div className="text-center py-6 text-slate-400 text-sm">ไม่พบชื่อที่ค้นหา</div>
@@ -567,7 +490,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                   {f.err && <p className="text-red-500 text-xs mt-1">กรุณากรอกข้อมูล</p>}
                 </div>
               ))}
-
               <div>
                 <label className={labelCls}>📷 แนบรูปการประชุม {reqStar} <span className="text-slate-400 font-normal normal-case">(สูงสุด 4 รูป)</span></label>
                 {images.length > 0 && (
@@ -614,7 +536,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-100 flex gap-2 shrink-0 bg-white rounded-b-3xl">
           <button onClick={onClose} className="px-4 py-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm hover:bg-slate-50">ยกเลิก</button>
           <button onClick={() => handleSave(true)} disabled={loading || uploading}
@@ -633,94 +554,122 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   );
 }
 
-// ── SubGroup Panel ─────────────────────────────────────────────────────────────
-function SubGroupPanel({ subGroup, teachers, meetings, onAddMeeting, onEdit, onDelete, canEdit, isAdmin }: {
-  subGroup: SubGroup; teachers: Teacher[]; meetings: PLCMeeting[];
-  onAddMeeting: (k: string) => void; onEdit: (m: PLCMeeting) => void;
-  onDelete: (id: string) => void; canEdit: boolean; isAdmin: boolean;
+// ── Dept Group Panel (admin view) ──────────────────────────────────────────────
+// แสดงครูและรายงาน PLC ของกลุ่มสาระ 1 กลุ่ม
+function DeptGroupPanel({ group, allTeachers, onEdit, onDelete }: {
+  group: DeptGroup;
+  allTeachers: Teacher[];
+  onEdit: (m: PLCMeeting) => void;
+  onDelete: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [viewMeeting, setViewMeeting] = useState<PLCMeeting | null>(null);
-  const totalHours = meetings.reduce((s,m) => teachers.some(t => m.participants?.includes(t.id)) ? s + Number(m.duration_hours) : s, 0);
-  const pct = (totalHours / TARGET_HOURS) * 100;
-  const ringColor = pct >= 100 ? "#10b981" : pct >= 60 ? "#f59e0b" : "#3b82f6";
+
+  const meta = getGroupMeta(group.academic_level);
+
   return (
     <>
-      {viewMeeting && <ReportDetailModal meeting={viewMeeting} allTeachers={teachers} onClose={() => setViewMeeting(null)} onEdit={m => { setViewMeeting(null); onEdit(m); }} onDelete={id => { onDelete(id); setViewMeeting(null); }} canEdit={canEdit} />}
-      <div className={`border-2 ${subGroup.borderColor} ${subGroup.bgLight} rounded-2xl overflow-hidden`}>
-        <button className="w-full px-5 py-4 flex items-center gap-4 text-left hover:brightness-95 transition-all" onClick={() => setExpanded(!expanded)}>
-          <div className="relative shrink-0">
-            <RingProgress pct={pct} size={52} stroke={5} color={ringColor} />
-            <span className="absolute inset-0 flex items-center justify-center text-lg">{subGroup.icon}</span>
-          </div>
+      {viewMeeting && (
+        <ReportDetailModal
+          meeting={viewMeeting}
+          allTeachers={allTeachers}
+          onClose={() => setViewMeeting(null)}
+          onEdit={m => { setViewMeeting(null); onEdit(m); }}
+          onDelete={id => { onDelete(id); setViewMeeting(null); }}
+          canEdit={false}
+        />
+      )}
+      <div className={`border-2 ${meta.borderColor} ${meta.bgLight} rounded-2xl overflow-hidden`}>
+        <button
+          className="w-full px-5 py-4 flex items-center gap-4 text-left hover:brightness-95 transition-all"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <div className="text-3xl shrink-0">{meta.icon}</div>
           <div className="flex-1 min-w-0">
-            <p className={`font-black text-sm ${subGroup.textColor}`}>{subGroup.label}</p>
+            <p className={`font-black text-sm ${meta.textColor}`}>{group.academic_level}</p>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              <span className="text-slate-500 text-xs font-bold">{teachers.length} คน · {meetings.length} ครั้ง</span>
-              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-black border ${pct>=100?"text-emerald-600 bg-emerald-50 border-emerald-200":pct>=60?"text-amber-600 bg-amber-50 border-amber-200":"text-red-600 bg-red-50 border-red-200"}`}>{totalHours} ชม.</span>
+              <span className="text-slate-500 text-xs font-bold">{group.teachers.length} คน · {group.meetings.length} ครั้ง</span>
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-black border ${meta.textColor} bg-white ${meta.borderColor}`}>
+                {group.totalHours} ชม.
+              </span>
             </div>
           </div>
-          <span className={`${subGroup.textColor} text-sm shrink-0`}>{expanded ? "▲" : "▼"}</span>
+          <span className={`${meta.textColor} text-sm shrink-0`}>{expanded ? "▲" : "▼"}</span>
         </button>
+
         {expanded && (
           <div className="border-t border-white/60">
-            {isAdmin && teachers.length > 0 && (
+            {/* สมาชิกในกลุ่ม */}
+            {group.teachers.length > 0 && (
               <div className="px-5 py-3 border-b border-white/50">
-                <p className="text-xs font-black text-slate-500 mb-2">สมาชิกในกลุ่ม</p>
+                <p className="text-xs font-black text-slate-500 mb-2">สมาชิกในกลุ่ม ({group.teachers.length} คน)</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {teachers.map(t => {
-                    const tHours = meetings.reduce((s,m) => m.participants?.includes(t.id)?s+Number(m.duration_hours):s, 0);
+                  {group.teachers.map(t => {
+                    const tHours = group.meetings.reduce((s, m) =>
+                      m.participants?.includes(t.id) ? s + Number(m.duration_hours) : s, 0
+                    );
                     return (
                       <div key={t.id} className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-sm">
                         <span className="text-slate-700 font-bold text-xs">{fullName(t)}</span>
-                        <span className={`text-xs font-black px-1.5 py-0.5 rounded-lg border ${tHours>=TARGET_HOURS?"text-emerald-600 bg-emerald-50 border-emerald-200":"text-red-600 bg-red-50 border-red-200"}`}>{tHours} ชม.</span>
+                        <span className="text-xs font-black px-1.5 py-0.5 rounded-lg border text-blue-600 bg-blue-50 border-blue-200">
+                          {tHours} ชม.
+                        </span>
                       </div>
                     );
                   })}
                 </div>
               </div>
             )}
+
+            {/* รายงาน PLC */}
             <div className="px-5 py-4">
-              {meetings.length === 0 ? (
+              {group.meetings.length === 0 ? (
                 <div className="text-center py-6 text-slate-400 text-sm">ยังไม่มีการประชุม</div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead><tr className="border-b border-white/80">
-                      <th className="text-left pb-2 text-xs font-black text-slate-400">ครั้งที่</th>
-                      <th className="text-left pb-2 text-xs font-black text-slate-400">วันที่</th>
-                      <th className="text-left pb-2 text-xs font-black text-slate-400">ชื่อ/หัวข้อ</th>
-                      <th className="text-center pb-2 text-xs font-black text-slate-400">ชม.</th>
-                      <th className="text-center pb-2 text-xs font-black text-slate-400">สถานะ</th>
-                      <th className="text-center pb-2 text-xs font-black text-slate-400">จัดการ</th>
-                    </tr></thead>
+                    <thead>
+                      <tr className="border-b border-white/80">
+                        <th className="text-left pb-2 text-xs font-black text-slate-400">ครั้งที่</th>
+                        <th className="text-left pb-2 text-xs font-black text-slate-400">วันที่</th>
+                        <th className="text-left pb-2 text-xs font-black text-slate-400">ชื่อ/หัวข้อ</th>
+                        <th className="text-center pb-2 text-xs font-black text-slate-400">ชม.</th>
+                        <th className="text-center pb-2 text-xs font-black text-slate-400">สถานะ</th>
+                        <th className="text-center pb-2 text-xs font-black text-slate-400">ดูรายงาน</th>
+                      </tr>
+                    </thead>
                     <tbody className="divide-y divide-white/60">
-                      {meetings.map(m => (
+                      {group.meetings.map(m => (
                         <tr key={m.id} className="hover:bg-white/50">
-                          <td className="py-2.5 pr-3 text-center"><span className="text-xs font-black text-slate-500 bg-white border border-slate-200 rounded-lg px-2 py-0.5">{m.meeting_number ?? "—"}</span></td>
+                          <td className="py-2.5 pr-3 text-center">
+                            <span className="text-xs font-black text-slate-500 bg-white border border-slate-200 rounded-lg px-2 py-0.5">{m.meeting_number ?? "—"}</span>
+                          </td>
                           <td className="py-2.5 pr-3 text-xs text-slate-600 font-bold whitespace-nowrap">{toThaiDate(m.meeting_date)}</td>
-                          <td className="py-2.5 pr-3"><p className="font-bold text-slate-700 text-xs line-clamp-1">{m.title}</p>{m.topic && <p className="text-slate-400 text-[10px]">{m.topic}</p>}</td>
-                          <td className="py-2.5 pr-3 text-center"><span className="font-black text-blue-600 text-xs">{m.duration_hours}</span></td>
-                          <td className="py-2.5 pr-3 text-center"><span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${m.status==="submitted"?"bg-emerald-50 text-emerald-700 border-emerald-200":"bg-amber-50 text-amber-700 border-amber-200"}`}>{m.status==="submitted"?"✅ ส่งแล้ว":"📝 ร่าง"}</span></td>
+                          <td className="py-2.5 pr-3">
+                            <p className="font-bold text-slate-700 text-xs line-clamp-1">{m.title}</p>
+                            {m.topic && <p className="text-slate-400 text-[10px]">{m.topic}</p>}
+                          </td>
+                          <td className="py-2.5 pr-3 text-center">
+                            <span className="font-black text-blue-600 text-xs">{m.duration_hours}</span>
+                          </td>
+                          <td className="py-2.5 pr-3 text-center">
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${m.status === "submitted" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
+                              {m.status === "submitted" ? "✅ ส่งแล้ว" : "📝 ร่าง"}
+                            </span>
+                          </td>
                           <td className="py-2.5 text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              <button onClick={() => setViewMeeting(m)} className="text-[10px] font-black text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50">👁️ ดู</button>
-                              {canEdit && <>
-                                <button onClick={() => onEdit(m)} className="text-[10px] font-black text-slate-500 px-2 py-1 rounded-lg hover:bg-slate-100">✏️</button>
-                                <button onClick={() => { if(confirm("ยืนยันลบ?")) onDelete(m.id); }} className="text-[10px] font-black text-red-400 px-2 py-1 rounded-lg hover:bg-red-50">🗑️</button>
-                              </>}
-                            </div>
+                            <button
+                              onClick={() => setViewMeeting(m)}
+                              className="text-[10px] font-black text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50"
+                            >
+                              👁️ ดูรายงาน
+                            </button>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              )}
-              {canEdit && (
-                <button onClick={() => onAddMeeting(subGroup.key)} className={`mt-3 w-full py-3 rounded-xl border-2 border-dashed ${subGroup.borderColor} ${subGroup.textColor} font-black text-sm hover:brightness-95`}>
-                  ➕ บันทึกชั่วโมง PLC
-                </button>
               )}
             </div>
           </div>
@@ -750,7 +699,11 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
   const totalHours = meetings.reduce((s,m) => s + Number(m.duration_hours), 0);
   return (
     <>
-      {viewMeeting && <ReportDetailModal meeting={viewMeeting} allTeachers={allTeachers} onClose={() => setViewMeeting(null)} onEdit={m=>{setViewMeeting(null);onClose();onEdit(m);}} onDelete={id=>{onDelete(id);setViewMeeting(null);}} canEdit={canEdit}/>}
+      {viewMeeting && (
+        <ReportDetailModal meeting={viewMeeting} allTeachers={allTeachers} onClose={() => setViewMeeting(null)}
+          onEdit={m => { setViewMeeting(null); onClose(); onEdit(m); }}
+          onDelete={id => { onDelete(id); setViewMeeting(null); }} canEdit={canEdit} />
+      )}
       <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
         <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
           <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between shrink-0">
@@ -758,7 +711,11 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
             <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-lg">✕</button>
           </div>
           <div className="px-6 py-4 border-b border-slate-100 grid grid-cols-3 gap-3 shrink-0">
-            {[{label:"ชั่วโมงรวม",value:totalHours,unit:"ชม.",color:"text-blue-600",bg:"bg-blue-50",border:"border-blue-200"},{label:"ส่งแล้ว",value:submitted,unit:"ครั้ง",color:"text-emerald-600",bg:"bg-emerald-50",border:"border-emerald-200"},{label:"ร่าง",value:draft,unit:"ครั้ง",color:"text-amber-600",bg:"bg-amber-50",border:"border-amber-200"}].map(c=>(
+            {[
+              { label:"ชั่วโมงรวม", value:totalHours, unit:"ชม.", color:"text-blue-600", bg:"bg-blue-50", border:"border-blue-200" },
+              { label:"ส่งแล้ว", value:submitted, unit:"ครั้ง", color:"text-emerald-600", bg:"bg-emerald-50", border:"border-emerald-200" },
+              { label:"ร่าง", value:draft, unit:"ครั้ง", color:"text-amber-600", bg:"bg-amber-50", border:"border-amber-200" },
+            ].map(c => (
               <div key={c.label} className={`${c.bg} border ${c.border} rounded-2xl px-4 py-3 text-center`}>
                 <div className={`text-2xl font-black ${c.color}`}>{c.value}</div>
                 <div className="text-xs text-slate-400 font-bold">{c.unit} · {c.label}</div>
@@ -766,10 +723,11 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
             ))}
           </div>
           <div className="px-6 py-3 border-b border-slate-100 flex gap-3 shrink-0 flex-wrap">
-            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 ค้นหา..." className="flex-1 min-w-[180px] bg-white border-2 border-blue-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-blue-500 focus:outline-none" />
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 ค้นหา..."
+              className="flex-1 min-w-[180px] bg-white border-2 border-blue-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-blue-500 focus:outline-none" />
             <div className="flex gap-1.5">
-              {(["all","submitted","draft"] as const).map(s=>(
-                <button key={s} onClick={()=>setStatusFilter(s)} className={`px-3 py-2 rounded-xl text-xs font-black border-2 ${statusFilter===s?"bg-slate-800 border-slate-800 text-white":"bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+              {(["all","submitted","draft"] as const).map(s => (
+                <button key={s} onClick={() => setStatusFilter(s)} className={`px-3 py-2 rounded-xl text-xs font-black border-2 ${statusFilter===s?"bg-slate-800 border-slate-800 text-white":"bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
                   {s==="all"?"ทั้งหมด":s==="submitted"?"✅ ส่งแล้ว":"📝 ร่าง"}
                 </button>
               ))}
@@ -788,17 +746,20 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
                     <th className="text-center pb-3 text-xs font-black text-slate-400">จัดการ</th>
                   </tr></thead>
                   <tbody className="divide-y divide-slate-50">
-                    {filtered.map(m=>(
+                    {filtered.map(m => (
                       <tr key={m.id} className="hover:bg-slate-50">
-                        <td className="py-3 pr-3 text-center"><span className="text-xs font-black text-slate-500 bg-slate-100 rounded-lg px-2 py-0.5">{m.meeting_number??"—"}</span></td>
+                        <td className="py-3 pr-3 text-center"><span className="text-xs font-black text-slate-500 bg-slate-100 rounded-lg px-2 py-0.5">{m.meeting_number ?? "—"}</span></td>
                         <td className="py-3 pr-3 text-xs text-slate-600 font-bold whitespace-nowrap">{toThaiDate(m.meeting_date)}</td>
                         <td className="py-3 pr-3"><p className="font-bold text-slate-800 text-sm line-clamp-1">{m.title}</p>{m.topic&&<p className="text-slate-400 text-xs">{m.topic}</p>}</td>
                         <td className="py-3 pr-3 text-center"><span className="font-black text-blue-600">{m.duration_hours}</span></td>
                         <td className="py-3 pr-3 text-center"><span className={`text-xs font-black px-2 py-1 rounded-lg border ${m.status==="submitted"?"bg-emerald-50 text-emerald-700 border-emerald-200":"bg-amber-50 text-amber-700 border-amber-200"}`}>{m.status==="submitted"?"✅ ส่งแล้ว":"📝 ร่าง"}</span></td>
                         <td className="py-3 text-center">
                           <div className="flex items-center justify-center gap-1">
-                            <button onClick={()=>setViewMeeting(m)} className="text-xs font-black text-blue-500 px-2 py-1.5 rounded-lg hover:bg-blue-50">👁️ ดู</button>
-                            {canEdit&&<><button onClick={()=>{onClose();onEdit(m);}} className="text-xs font-black text-slate-500 px-2 py-1.5 rounded-lg hover:bg-slate-100">✏️</button><button onClick={()=>{if(confirm("ยืนยันลบ?"))onDelete(m.id);}} className="text-xs font-black text-red-400 px-2 py-1.5 rounded-lg hover:bg-red-50">🗑️</button></>}
+                            <button onClick={() => setViewMeeting(m)} className="text-xs font-black text-blue-500 px-2 py-1.5 rounded-lg hover:bg-blue-50">👁️ ดู</button>
+                            {canEdit && <>
+                              <button onClick={() => { onClose(); onEdit(m); }} className="text-xs font-black text-slate-500 px-2 py-1.5 rounded-lg hover:bg-slate-100">✏️</button>
+                              <button onClick={() => { if(confirm("ยืนยันลบ?")) onDelete(m.id); }} className="text-xs font-black text-red-400 px-2 py-1.5 rounded-lg hover:bg-red-50">🗑️</button>
+                            </>}
                           </div>
                         </td>
                       </tr>
@@ -819,35 +780,29 @@ function TeacherHistorySection({ meetings, userId, onEdit, onDelete, onView }: {
   meetings: PLCMeeting[]; userId: string;
   onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; onView: (m: PLCMeeting) => void;
 }) {
-  const myMeetings = meetings.filter(m => m.participants?.includes(userId))
+  const myMeetings = meetings
+    .filter(m => m.participants?.includes(userId))
     .sort((a,b) => new Date(b.meeting_date).getTime() - new Date(a.meeting_date).getTime());
   const totalHours = myMeetings.reduce((s,m) => s + Number(m.duration_hours), 0);
-  const pct = Math.min((totalHours / TARGET_HOURS) * 100, 100);
-  const ringColor = pct >= 100 ? "#10b981" : pct >= 60 ? "#f59e0b" : "#3b82f6";
+
   return (
     <div className="space-y-4">
+      {/* สรุปชั่วโมง — ไม่มี limit แสดงแค่ยอดรวม */}
       <div className="bg-white rounded-2xl border border-slate-200 px-6 py-5 flex items-center gap-5">
-        <div className="relative shrink-0">
-          <RingProgress pct={pct} size={72} stroke={7} color={ringColor} />
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-sm font-black text-slate-700 leading-none">{totalHours}</span>
-            <span className="text-[9px] text-slate-400 font-bold">ชม.</span>
-          </div>
+        <div className="w-16 h-16 rounded-2xl bg-blue-50 border-2 border-blue-200 flex flex-col items-center justify-center shrink-0">
+          <span className="text-2xl font-black text-blue-600 leading-none">{totalHours}</span>
+          <span className="text-[10px] text-blue-400 font-bold">ชม.</span>
         </div>
         <div className="flex-1">
           <p className="font-black text-slate-700 text-base">ชั่วโมง PLC ของฉัน</p>
-          <p className="text-slate-400 text-sm">{totalHours} ชั่วโมง · {myMeetings.length} ครั้ง</p>
-          <div className="mt-2 w-48 h-2 bg-slate-100 rounded-full overflow-hidden">
-            <div className="h-full rounded-full transition-all" style={{ width:`${pct}%`, background:ringColor }} />
-          </div>
+          <p className="text-slate-400 text-sm">{myMeetings.length} ครั้ง · รวม {totalHours} ชั่วโมง</p>
         </div>
-        <div className="ml-auto shrink-0">
-          {pct >= 100
-            ? <span className="text-xs font-black px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">✅ ครบเป้าหมาย!</span>
-            : <span className="text-xs font-black px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 border border-blue-200">📊 สะสมอยู่</span>
-          }
-        </div>
+        <span className="text-xs font-black px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 border border-blue-200">
+          📊 สะสมอยู่
+        </span>
       </div>
+
+      {/* รายการ */}
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <h3 className="font-black text-slate-700 text-sm">📋 ประวัติการบันทึก PLC</h3>
@@ -905,7 +860,7 @@ export default function PLCHoursPage() {
   const [loading,        setLoading]        = useState(true);
   const [modalOpen,      setModalOpen]      = useState(false);
   const [editMeeting,    setEditMeeting]    = useState<Partial<PLCMeeting> | null>(null);
-  const [activeGroup,    setActiveGroup]    = useState<string>("all");
+  const [activeGroupKey, setActiveGroupKey] = useState<string>("all");
   const [showReports,    setShowReports]    = useState(false);
   const [viewMeeting,    setViewMeeting]    = useState<PLCMeeting | null>(null);
 
@@ -915,22 +870,19 @@ export default function PLCHoursPage() {
       if (!authUser) { setLoading(false); return; }
       const email = authUser.email || authUser.user_metadata?.email || "";
 
+      // โหลด profile
       let profileData: any = null;
       const { data: byAuthId } = await supabase.from("users")
-        .select("id, first_name, last_name, full_name, email, role, position, academic_level")
+        .select("id, first_name, last_name, full_name, email, role, position, academic_level, department_id")
         .eq("auth_id", authUser.id).maybeSingle();
       profileData = byAuthId;
-
       if (!profileData && email) {
         const { data: byEmail } = await supabase.from("users")
-          .select("id, first_name, last_name, full_name, email, role, position, academic_level")
+          .select("id, first_name, last_name, full_name, email, role, position, academic_level, department_id")
           .eq("email", email).maybeSingle();
         profileData = byEmail;
-        if (profileData) {
-          await (supabase.from("users") as any).update({ auth_id: authUser.id }).eq("id", profileData.id);
-        }
+        if (profileData) await (supabase.from("users") as any).update({ auth_id: authUser.id }).eq("id", profileData.id);
       }
-
       if (profileData) {
         setUser({
           ...profileData,
@@ -938,6 +890,7 @@ export default function PLCHoursPage() {
         });
       }
 
+      // โหลดปีการศึกษา
       const { data: years } = await supabase.from("academic_years")
         .select("id, year_name, semester, is_current")
         .order("year_name", { ascending: false })
@@ -947,61 +900,27 @@ export default function PLCHoursPage() {
       const currentYear = ys.find(y => y.is_current) ?? ys[0];
       if (currentYear) setSelectedYearId(currentYear.id);
 
-      // ✅ FIX: ดึง users ทั้งหมดที่ไม่ใช่ admin roles
-      // ไม่ filter ด้วย role ใน DB query (เพราะ role มีหลายแบบ)
-      // แต่ filter client-side แทน
-      const { data: allUsersData, error: usersError } = await supabase
+      // ✅ โหลด users — กรอง admin roles ออก client-side
+      // ดึง department_id และ academic_level ด้วย
+      const { data: allUsersData } = await supabase
         .from("users")
-        .select("id, first_name, last_name, full_name, email, role, position, academic_level")
+        .select("id, first_name, last_name, full_name, email, role, position, academic_level, department_id")
         .order("first_name");
 
-      if (usersError) {
-        console.error("[PLC] Error fetching users:", usersError.message);
-        // fallback: ลองดึงแบบ select น้อยคอลัมน์
-        const { data: fallbackData } = await supabase
-          .from("users")
-          .select("id, first_name, last_name, email, role, position")
-          .order("first_name");
+      const teachers: Teacher[] = (allUsersData || [])
+        .filter((t: any) => !ADMIN_ROLES_SET.has(t.role ?? ""))
+        .map((t: any) => ({
+          ...t,
+          full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim(),
+        }));
 
-        const teachers: Teacher[] = (fallbackData || [])
-          .filter((t: any) => !ADMIN_ROLES_SET.has(t.role ?? ""))
-          .map((t: any) => ({
-            ...t,
-            academic_level: undefined,
-            full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim(),
-            subGroupKey: getSubGroupForTeacher(t),
-            subjectGroupKey: getSubjectGroupForTeacher(t),
-          }));
-
-        console.log("[PLC] Fallback teachers loaded:", teachers.length);
-        setAllTeachers(teachers);
-      } else {
-        // กรอง admin ออก client-side
-        const teachers: Teacher[] = (allUsersData || [])
-          .filter((t: any) => !ADMIN_ROLES_SET.has(t.role ?? ""))
-          .map((t: any) => ({
-            ...t,
-            full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim(),
-            subGroupKey: getSubGroupForTeacher(t),
-            subjectGroupKey: getSubjectGroupForTeacher(t),
-          }));
-
-        console.log("[PLC] Teachers loaded:", teachers.length,
-          "| academic_level samples:", teachers.slice(0,3).map(t => t.academic_level));
-        setAllTeachers(teachers);
-      }
-
+      setAllTeachers(teachers);
       setLoading(false);
     })();
   }, []);
 
   const isAdmin   = !!(user?.role && ADMIN_ROLES_SET.has(user.role));
   const isTeacher = !isAdmin;
-
-  const mySubjectGroupKey = useMemo(() => {
-    if (!user || isAdmin) return null;
-    return allTeachers.find(t => t.id === user.id)?.subjectGroupKey ?? null;
-  }, [user, allTeachers, isAdmin]);
 
   const loadMeetings = useCallback(async () => {
     if (!selectedYearId) return;
@@ -1013,31 +932,46 @@ export default function PLCHoursPage() {
 
   useEffect(() => { loadMeetings(); }, [loadMeetings]);
 
-  const subGroupMeetings = useMemo(() => {
-    const map: Record<string, PLCMeeting[]> = {};
-    ALL_SUBGROUPS.forEach(sg => { map[sg.key] = []; });
-    map["other"] = [];
-    meetings.forEach(m => {
-      const keys = new Set(allTeachers.filter(t => m.participants?.includes(t.id)).map(t => t.subGroupKey));
-      if (keys.size === 0) { map["other"].push(m); return; }
-      keys.forEach(k => { map[k] = [...(map[k] || []), m]; });
-    });
-    return map;
-  }, [meetings, allTeachers]);
+  // ✅ สร้าง deptGroups จาก academic_level ที่ unique ใน allTeachers
+  // กรองยกเว้น admin roles แล้ว และรวม meetings ที่มี participant ในกลุ่ม
+  const deptGroups = useMemo((): DeptGroup[] => {
+    // สร้าง map: academic_level → { department_id, teachers }
+    const levelMap = new Map<string, { department_id: string | null; teachers: Teacher[] }>();
 
-  const subGroupTeachers = useMemo(() => {
-    const map: Record<string, Teacher[]> = {};
-    ALL_SUBGROUPS.forEach(sg => { map[sg.key] = allTeachers.filter(t => t.subGroupKey === sg.key); });
-    map["other"] = allTeachers.filter(t => t.subGroupKey === "other");
-    return map;
-  }, [allTeachers]);
+    for (const t of allTeachers) {
+      const lv = (t.academic_level ?? "").trim();
+      if (!lv) continue;
+      if (!levelMap.has(lv)) {
+        levelMap.set(lv, { department_id: t.department_id ?? null, teachers: [] });
+      }
+      levelMap.get(lv)!.teachers.push(t);
+    }
 
-  const totalHoursAll    = meetings.reduce((s,m) => s + Number(m.duration_hours), 0);
-  const totalMeetings    = meetings.length;
-  const totalTeachers    = allTeachers.length;
-  const teachersOnTarget = allTeachers.filter(t =>
-    meetings.reduce((s,m) => m.participants?.includes(t.id) ? s + Number(m.duration_hours) : s, 0) >= TARGET_HOURS
-  ).length;
+    // สร้าง groups พร้อม meetings ที่ belong to กลุ่มนี้
+    return Array.from(levelMap.entries()).map(([lv, { department_id, teachers }]) => {
+      const teacherIds = new Set(teachers.map(t => t.id));
+      // meeting อยู่ในกลุ่มนี้ถ้า participant อย่างน้อย 1 คนเป็นสมาชิกกลุ่มนี้
+      const groupMeetings = meetings.filter(m =>
+        m.participants?.some(pid => teacherIds.has(pid))
+      );
+      const totalHours = groupMeetings.reduce((s, m) => s + Number(m.duration_hours), 0);
+      return { academic_level: lv, department_id, teachers, meetings: groupMeetings, totalHours };
+    }).sort((a, b) => a.academic_level.localeCompare(b.academic_level, "th"));
+  }, [allTeachers, meetings]);
+
+  // กลุ่มสาระที่ unique สำหรับ tab filter
+  const uniqueGroupKeys = useMemo(() => {
+    return deptGroups.map(g => g.academic_level);
+  }, [deptGroups]);
+
+  const filteredGroups = useMemo(() => {
+    if (activeGroupKey === "all") return deptGroups;
+    return deptGroups.filter(g => g.academic_level === activeGroupKey);
+  }, [deptGroups, activeGroupKey]);
+
+  const totalHoursAll = meetings.reduce((s, m) => s + Number(m.duration_hours), 0);
+  const totalMeetings = meetings.length;
+  const totalTeachers = allTeachers.length;
 
   async function handleSave(data: any, isDraft: boolean) {
     const payload = { ...data, status: isDraft ? "draft" : "submitted" };
@@ -1068,6 +1002,7 @@ export default function PLCHoursPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* Header */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3">
         <div className="flex items-center gap-3">
           <button onClick={() => router.push("/dashboard")} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 text-lg shrink-0">🏠</button>
@@ -1087,6 +1022,8 @@ export default function PLCHoursPage() {
       </div>
 
       <div className="w-full px-4 sm:px-6 py-6 space-y-6">
+
+        {/* ══ TEACHER VIEW ══ */}
         {isTeacher && (
           <>
             <div className="flex flex-col items-center gap-3 py-4">
@@ -1108,13 +1045,15 @@ export default function PLCHoursPage() {
           </>
         )}
 
+        {/* ══ ADMIN VIEW ══ */}
         {isAdmin && (
           <>
+            {/* Summary cards — ไม่มีเป้าหมาย ชม. */}
             <div className="grid grid-cols-3 gap-3">
               {[
                 { label:"จำนวนครั้ง", value:totalMeetings, unit:"ครั้ง", color:"text-emerald-600", bg:"bg-emerald-50", border:"border-emerald-200", icon:"📅" },
-                { label:"ครูทั้งหมด", value:totalTeachers, unit:"คน", color:"text-amber-600", bg:"bg-amber-50", border:"border-amber-200", icon:"👩‍🏫" },
-                { label:`ครบ ${TARGET_HOURS} ชม.`, value:teachersOnTarget, unit:"คน", color:"text-purple-600", bg:"bg-purple-50", border:"border-purple-200", icon:"✅" },
+                { label:"ครูทั้งหมด", value:totalTeachers, unit:"คน",   color:"text-amber-600",   bg:"bg-amber-50",   border:"border-amber-200",   icon:"👩‍🏫" },
+                { label:"ชั่วโมงรวม", value:totalHoursAll, unit:"ชม.",  color:"text-blue-600",    bg:"bg-blue-50",    border:"border-blue-200",    icon:"⏱️"  },
               ].map(card => (
                 <div key={card.label} className={`${card.bg} border-2 ${card.border} rounded-2xl p-4 text-center`}>
                   <div className="text-2xl mb-1">{card.icon}</div>
@@ -1125,93 +1064,115 @@ export default function PLCHoursPage() {
               ))}
             </div>
 
+            {/* รายงานทั้งหมด button */}
             <button onClick={() => setShowReports(true)}
               className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-2xl px-6 py-4 flex items-center justify-between transition-all shadow-sm group">
               <div className="flex items-center gap-3">
                 <span className="text-3xl">📊</span>
-                <div className="text-left"><p className="font-black text-base">รายงานทั้งหมด</p><p className="text-indigo-200 text-xs">{totalMeetings} รายการ · {totalHoursAll} ชั่วโมง</p></div>
+                <div className="text-left">
+                  <p className="font-black text-base">รายงานทั้งหมด</p>
+                  <p className="text-indigo-200 text-xs">{totalMeetings} รายการ · {totalHoursAll} ชั่วโมง</p>
+                </div>
               </div>
               <span className="text-white/60 group-hover:text-white text-xl">→</span>
             </button>
 
+            {/* ✅ Tab filter — ใช้ academic_level จริงจาก DB */}
             <div className="flex gap-2 overflow-x-auto pb-1">
-              <button onClick={() => setActiveGroup("all")} className={`px-4 py-2 rounded-xl text-sm font-black border-2 whitespace-nowrap ${activeGroup==="all"?"bg-slate-800 border-slate-800 text-white":"bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>🏫 ทุกกลุ่มสาระ</button>
-              {SUBJECT_GROUPS.map(g => {
-                const gMs = Array.from(new Map(g.subGroups.flatMap(sg => subGroupMeetings[sg.key]??[]).map(m=>[m.id,m])).values());
-                const gH  = gMs.reduce((s,m)=>s+Number(m.duration_hours),0);
+              <button
+                onClick={() => setActiveGroupKey("all")}
+                className={`px-4 py-2 rounded-xl text-sm font-black border-2 whitespace-nowrap ${activeGroupKey === "all" ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+              >
+                🏫 ทุกกลุ่มสาระ
+              </button>
+              {uniqueGroupKeys.map(lv => {
+                const meta = getGroupMeta(lv);
+                const grp  = deptGroups.find(g => g.academic_level === lv);
                 return (
-                  <button key={g.key} onClick={() => setActiveGroup(g.key)}
-                    className={`px-4 py-2 rounded-xl text-sm font-black border-2 whitespace-nowrap flex items-center gap-1.5 ${activeGroup===g.key?"bg-slate-800 border-slate-800 text-white":"bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                    {g.icon} {g.label}
-                    {gH > 0 && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${activeGroup===g.key?"bg-white/20 text-white":"bg-slate-100 text-slate-500"}`}>{gH}ชม.</span>}
+                  <button key={lv} onClick={() => setActiveGroupKey(lv)}
+                    className={`px-4 py-2 rounded-xl text-sm font-black border-2 whitespace-nowrap flex items-center gap-1.5 ${activeGroupKey === lv ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                    {meta.icon} {lv}
+                    {grp && grp.totalHours > 0 && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${activeGroupKey === lv ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+                        {grp.totalHours}ชม.
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </div>
 
-            <div className="space-y-4">
-              {SUBJECT_GROUPS.filter(g => activeGroup==="all" || activeGroup===g.key).map(g => (
-                <div key={g.key}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-xl">{g.icon}</span>
-                    <h2 className="font-black text-slate-700 text-base">{g.label}</h2>
-                    <div className="flex-1 h-px bg-slate-200" />
-                  </div>
-                  <div className="space-y-2">
-                    {g.subGroups.map(sg => (
-                      <SubGroupPanel key={sg.key} subGroup={sg} teachers={subGroupTeachers[sg.key]??[]} meetings={subGroupMeetings[sg.key]??[]}
-                        onAddMeeting={openAdd} onEdit={m=>{setEditMeeting(m);setModalOpen(true);}} onDelete={handleDelete}
-                        canEdit={false} isAdmin={true} />
-                    ))}
-                  </div>
+            {/* ✅ กลุ่มสาระ panels — ดึงจาก deptGroups */}
+            <div className="space-y-3">
+              {filteredGroups.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 bg-white rounded-2xl border border-slate-200">
+                  <div className="text-4xl mb-2">📭</div>
+                  <p className="text-sm font-bold">ไม่พบข้อมูลกลุ่มสาระ</p>
+                  <p className="text-xs mt-1">กรุณาตรวจสอบ academic_level ในตาราง users</p>
                 </div>
+              ) : filteredGroups.map(group => (
+                <DeptGroupPanel
+                  key={group.academic_level}
+                  group={group}
+                  allTeachers={allTeachers}
+                  onEdit={m => { setEditMeeting(m); setModalOpen(true); }}
+                  onDelete={handleDelete}
+                />
               ))}
             </div>
 
+            {/* ✅ ตารางสรุปรายบุคคล — ไม่มี limit ชม. */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="bg-slate-50 border-b border-slate-200 px-5 py-3.5 flex items-center justify-between">
                 <h3 className="font-black text-slate-700 text-sm">👩‍🏫 สรุปชั่วโมงรายบุคคล</h3>
-                <span className="text-xs text-slate-400 font-bold">เป้าหมาย {TARGET_HOURS} ชม./คน</span>
+                <span className="text-xs text-slate-400 font-bold">รวมชั่วโมง PLC ทั้งหมด</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead><tr className="border-b border-slate-100">
-                    <th className="text-left px-5 py-3 text-xs font-black text-slate-400">ชื่อ–สกุล</th>
-                    <th className="text-left px-3 py-3 text-xs font-black text-slate-400 hidden sm:table-cell">กลุ่ม</th>
-                    <th className="text-center px-3 py-3 text-xs font-black text-slate-400">ชั่วโมง</th>
-                    <th className="text-left px-3 py-3 text-xs font-black text-slate-400 hidden md:table-cell">ความคืบหน้า</th>
-                    <th className="text-center px-5 py-3 text-xs font-black text-slate-400">สถานะ</th>
-                  </tr></thead>
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      <th className="text-left px-5 py-3 text-xs font-black text-slate-400">ชื่อ–สกุล</th>
+                      <th className="text-left px-3 py-3 text-xs font-black text-slate-400 hidden sm:table-cell">กลุ่มสาระ</th>
+                      <th className="text-center px-3 py-3 text-xs font-black text-slate-400">ชั่วโมง</th>
+                      <th className="text-center px-3 py-3 text-xs font-black text-slate-400">จำนวนครั้ง</th>
+                    </tr>
+                  </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {allTeachers.map(t => ({ ...t, hours: meetings.reduce((s,m) => m.participants?.includes(t.id)?s+Number(m.duration_hours):s, 0) }))
-                      .sort((a,b) => b.hours-a.hours)
-                      .map(t => {
-                        const pct = Math.min((t.hours/TARGET_HOURS)*100, 100);
-                        const status = pct>=100?{label:"✅ ครบ",cls:"bg-emerald-100 text-emerald-700 border-emerald-300"}:pct>=60?{label:"🔶 กำลังดำเนินการ",cls:"bg-amber-100 text-amber-700 border-amber-300"}:{label:"🔴 ยังไม่ครบ",cls:"bg-red-100 text-red-700 border-red-300"};
-                        return (
-                          <tr key={t.id} className="hover:bg-slate-50">
-                            <td className="px-5 py-3 font-bold text-slate-800">{fullName(t)}</td>
-                            <td className="px-3 py-3 text-slate-400 text-xs hidden sm:table-cell">{t.position ?? "—"}</td>
-                            <td className="px-3 py-3 text-center"><span className="font-black text-slate-800">{t.hours}</span><span className="text-slate-400 text-xs"> ชม.</span></td>
-                            <td className="px-3 py-3 hidden md:table-cell">
-                              <div className="flex items-center gap-2">
-                                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full rounded-full ${pct>=100?"bg-emerald-500":pct>=60?"bg-amber-400":"bg-blue-400"}`} style={{width:`${pct}%`}}/></div>
-                                <span className="text-xs font-black text-slate-400 w-9 text-right">{Math.round(pct)}%</span>
-                              </div>
-                            </td>
-                            <td className="px-5 py-3 text-center"><span className={`inline-flex items-center px-2 py-1 rounded-lg text-xs font-black border ${status.cls}`}>{status.label}</span></td>
-                          </tr>
-                        );
-                      })}
+                    {allTeachers
+                      .map(t => ({
+                        ...t,
+                        hours: meetings.reduce((s, m) => m.participants?.includes(t.id) ? s + Number(m.duration_hours) : s, 0),
+                        count: meetings.filter(m => m.participants?.includes(t.id)).length,
+                      }))
+                      .sort((a, b) => b.hours - a.hours)
+                      .map(t => (
+                        <tr key={t.id} className="hover:bg-slate-50">
+                          <td className="px-5 py-3 font-bold text-slate-800">{fullName(t)}</td>
+                          <td className="px-3 py-3 text-slate-400 text-xs hidden sm:table-cell">
+                            {t.academic_level || t.position || "—"}
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <span className="font-black text-blue-600 text-base">{t.hours}</span>
+                            <span className="text-slate-400 text-xs"> ชม.</span>
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <span className="font-black text-slate-600">{t.count}</span>
+                            <span className="text-slate-400 text-xs"> ครั้ง</span>
+                          </td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
-                {allTeachers.length === 0 && <div className="text-center py-10 text-slate-400 text-sm">ไม่พบข้อมูลครู</div>}
+                {allTeachers.length === 0 && (
+                  <div className="text-center py-10 text-slate-400 text-sm">ไม่พบข้อมูลครู</div>
+                )}
               </div>
             </div>
           </>
         )}
       </div>
 
+      {/* Modals */}
       {modalOpen && user && (
         <MeetingModal
           meeting={editMeeting}
@@ -1224,17 +1185,21 @@ export default function PLCHoursPage() {
         />
       )}
       {showReports && (
-        <AllReportsModal meetings={meetings} allTeachers={allTeachers} academicYears={academicYears}
+        <AllReportsModal
+          meetings={meetings} allTeachers={allTeachers} academicYears={academicYears}
           selectedYearId={selectedYearId} onClose={() => setShowReports(false)}
           onEdit={m => { setShowReports(false); setEditMeeting(m); setModalOpen(true); }}
-          onDelete={handleDelete} canEdit={isAdmin} />
+          onDelete={handleDelete} canEdit={isAdmin}
+        />
       )}
       {viewMeeting && user && (
-        <ReportDetailModal meeting={viewMeeting} allTeachers={allTeachers}
+        <ReportDetailModal
+          meeting={viewMeeting} allTeachers={allTeachers}
           onClose={() => setViewMeeting(null)}
           onEdit={m => { setViewMeeting(null); setEditMeeting(m); setModalOpen(true); }}
           onDelete={id => { handleDelete(id); setViewMeeting(null); }}
-          canEdit={true} />
+          canEdit={true}
+        />
       )}
     </div>
   );
