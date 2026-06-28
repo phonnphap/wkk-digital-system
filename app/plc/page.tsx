@@ -66,7 +66,7 @@ type UserProfile = {
   email: string; role: string; position?: string; academic_level?: string;
   department_id?: string; grade_level?: string;
 };
-type Teacher = UserProfile & { department_id?: string; grade_level?: string };
+type Teacher = UserProfile & { department_id?: string; grade_level?: string; signature_url?: string;};
 type AcademicYear = { id: string; year_name: string; semester: number; is_current?: boolean };
 type MeetingScope = "subject" | "grade";
 type PLCMeeting = {
@@ -115,9 +115,12 @@ function getGroupMeta(academic_level: string) {
 
 // [NEW] ป้ายกำกับ & สีของแต่ละสายชั้น (grade_level)
 const GRADE_LABEL: Record<string, string> = {
-  "k1":"อ.1","k2":"อ.2","k3":"อ.3",
+  "k2":"อ.2","k3":"อ.3",
   "p1":"ป.1","p2":"ป.2","p3":"ป.3","p4":"ป.4","p5":"ป.5","p6":"ป.6",
   "m1":"ม.1","m2":"ม.2","m3":"ม.3","m4":"ม.4","m5":"ม.5","m6":"ม.6",
+  "อ.2":"อ.2","อ.3":"อ.3",
+  "ป.1":"ป.1","ป.2":"ป.2","ป.3":"ป.3","ป.4":"ป.4","ป.5":"ป.5","ป.6":"ป.6",
+  "ม.1":"ม.1","ม.2":"ม.2","ม.3":"ม.3","ม.4":"ม.4","ม.5":"ม.5","ม.6":"ม.6",
 };
 const GRADE_META: { icon: string; textColor: string; borderColor: string; bgLight: string } =
   { icon:"🎓", textColor:"text-cyan-700", borderColor:"border-cyan-300", bgLight:"bg-cyan-50" };
@@ -136,7 +139,13 @@ const reqStar = <span className="text-red-500 ml-0.5">*</span>;
 // [NEW] ── Print Report Builder (A4) ────────────────────────
 // ใช้สำหรับปุ่ม "🖨️ พิมพ์รายงาน" — รองรับทั้งประชุมกลุ่มสาระและสายชั้น
 // ══════════════════════════════════════════════════════════
-function buildPLCReportHTML(meeting: PLCMeeting, facilitator: Teacher | undefined, participants: Teacher[], resolvedImageUrls: string[]): string {
+function buildPLCReportHTML(
+  meeting: PLCMeeting,
+  facilitator: Teacher | undefined,
+  participants: Teacher[],
+  resolvedImageUrls: string[],
+  facilitatorSignatureUrl?: string  // ← เพิ่ม
+): string {
   const isGrade = meeting.meeting_scope === "grade";
   const scopeLabel = isGrade ? `ประชุมสายชั้น ${gradeLabel(meeting.grade_level ?? "")}` : "ประชุมกลุ่มสาระการเรียนรู้ (PLC)";
   const now = new Date();
@@ -205,20 +214,22 @@ table.meta td.k{color:#64748b;font-weight:700;white-space:nowrap;width:110px}
 </div>
 
 <div style="margin-top:24px;display:flex;justify-content:flex-end">
-  <div style="text-align:center;width:220px">
-    <div style="height:40px"></div>
-    <div style="border-bottom:1px solid #000;width:200px;margin:0 auto"></div>
-    <div style="font-size:10.5pt;margin-top:4px">(${facilitator ? fullName(facilitator) : "............................"})</div>
-    <div style="font-size:9.5pt;color:#64748b">ผู้บันทึก/วิทยากร</div>
+    <div style="text-align:center;width:220px">
+      ${facilitatorSignatureUrl
+        ? `<img src="${facilitatorSignatureUrl}" style="max-height:60px;max-width:180px;object-fit:contain;margin:0 auto;display:block"/>`
+        : `<div style="height:60px"></div>`}
+      <div style="border-bottom:1px solid #000;width:200px;margin:0 auto"></div>
+      <div style="font-size:10.5pt;margin-top:4px">(${facilitator ? fullName(facilitator) : "............................"})</div>
+      <div style="font-size:9.5pt;color:#64748b">ผู้บันทึก/วิทยากร</div>
+    </div>
   </div>
-</div>
 
 <div style="margin-top:20px;font-size:9pt;color:#94a3b8;text-align:right">พิมพ์เมื่อ ${printedDate}</div>
 
 </div>${imagesHTML}</body></html>`;
 }
 
-function printPLCReport(meeting: PLCMeeting, facilitator: Teacher | undefined, participants: Teacher[], resolvedImageUrls: string[]) {
+function printPLCReport(meeting: PLCMeeting, facilitator: Teacher | undefined, participants: Teacher[], resolvedImageUrls: string[], facilitatorSignatureUrl?: string) {
   const html = buildPLCReportHTML(meeting, facilitator, participants, resolvedImageUrls);
   const win = window.open("", "_blank", "width=900,height=700");
   if (!win) return;
@@ -227,9 +238,17 @@ function printPLCReport(meeting: PLCMeeting, facilitator: Teacher | undefined, p
 }
 
 // [FIX-4] ดึงรูปสดก่อนพิมพ์ (resolve image_paths ใหม่ ป้องกัน downloadUrl หมดอายุ)
-async function printPLCReportAsync(meeting: PLCMeeting, facilitator: Teacher | undefined, participants: Teacher[]) {
-  const freshUrls = await resolveOneDriveUrls(meeting.image_paths ?? [], meeting.image_urls ?? []);
-  printPLCReport(meeting, facilitator, participants, freshUrls);
+async function printPLCReportAsync(
+  meeting: PLCMeeting,
+  facilitator: Teacher | undefined,
+  participants: Teacher[],
+  facilitatorSignatureUrl?: string  // ← เพิ่ม
+) {
+  const freshUrls = await resolveOneDriveUrls(
+    meeting.image_paths ?? [],
+    meeting.image_urls ?? []
+  );
+  printPLCReport(meeting, facilitator, participants, freshUrls, facilitatorSignatureUrl);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -312,7 +331,8 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
   async function handlePrint() {
     setPrinting(true);
     try {
-      await printPLCReportAsync(meeting, facilitator, participants);
+      await printPLCReportAsync(meeting, facilitator, participants, facilitator?.signature_url 
+      );
     } finally {
       setPrinting(false);
     }
@@ -1029,7 +1049,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
     try {
       const facilitator = allTeachers.find(t => t.id === m.facilitator_id);
       const participants = allTeachers.filter(t => m.participants?.includes(t.id));
-      await printPLCReportAsync(m, facilitator, participants);
+      await printPLCReportAsync(m, facilitator, participants, facilitator?.signature_url);
     } finally {
       setPrintingId(null);
     }
@@ -1150,7 +1170,7 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
     try {
       const facilitator = allTeachers.find(t => t.id === m.facilitator_id);
       const participants = allTeachers.filter(t => m.participants?.includes(t.id));
-      await printPLCReportAsync(m, facilitator, participants);
+      await printPLCReportAsync(m, facilitator, participants, facilitator?.signature_url);
     } finally {
       setPrintingId(null);
     }
@@ -1301,7 +1321,7 @@ export default function PLCHoursPage() {
       // [NEW] ดึง grade_level เพิ่มสำหรับกลุ่มสายชั้น
       const { data: allUsersData } = await supabase
         .from("users")
-        .select("id, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level")
+        .select("id, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level, signature_url")
         .order("first_name");
 
       const teachers: Teacher[] = (allUsersData || [])
