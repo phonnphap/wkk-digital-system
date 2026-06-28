@@ -171,48 +171,46 @@ function CatBadges({ cats }: { cats: string[] }) {
 // ══════════════════════════════════════════════════════
 function FilePreview({ url, previewUrl, mimeHint }: { 
   url: string; 
-  previewUrl?: string;  // ← เพิ่ม prop
+  previewUrl?: string;
   mimeHint?: string 
 }) {
-  const pathPart = url.split("?")[0].split("#")[0];
-  const name = pathPart.split("/").pop() ?? "ไฟล์";
+  const name = url.split("?")[0].split("/").pop() ?? "ไฟล์";
   const ext  = name.split(".").pop()?.toLowerCase() ?? "";
 
   const isImg = ["jpg","jpeg","png","gif","webp"].includes(ext)
     || (mimeHint?.startsWith("image/") ?? false);
   const isPdf = ext === "pdf" || mimeHint === "application/pdf";
 
-  // ✅ ใช้ proxy route เพื่อหลีกเลี่ยง CORS
+  // ✅ ใช้ previewUrl (local blob) ก่อน ถ้าไม่มีค่อยใช้ url
   const displaySrc = previewUrl || url;
-  const proxySrc = `/api/file-proxy?url=${encodeURIComponent(displaySrc)}`;
 
   return (
     <div style={{border:"1px solid #e0e7ff", borderRadius:10, overflow:"hidden", background:"#f8faff", marginBottom:8}}>
-      
       {isImg && (
-        <img
-          src={proxySrc}  // ✅ ผ่าน proxy
-          alt={name}
-          style={{width:"100%", maxHeight:200, objectFit:"contain", display:"block", background:"#f1f5f9"}}
-          onClick={() => window.open(url, "_blank")}
-          className="cursor-pointer"
-          onError={e => {
-            // fallback: ซ่อนรูป แสดงไอคอนแทน
-            const img = e.target as HTMLImageElement;
-            img.style.display = "none";
-            img.nextElementSibling?.removeAttribute("style");
-          }}
-        />
+        <>
+          <img
+            src={displaySrc}
+            alt={name}
+            style={{width:"100%", maxHeight:200, objectFit:"contain", display:"block", background:"#f1f5f9", cursor:"pointer"}}
+            onClick={() => window.open(url, "_blank")}
+            onError={e => {
+              const img = e.target as HTMLImageElement;
+              img.style.display = "none";
+              const fallback = img.nextElementSibling as HTMLElement;
+              if (fallback) fallback.style.display = "block";
+            }}
+          />
+          <div style={{display:"none", padding:"24px", textAlign:"center"}}>
+            <div style={{fontSize:40}}>🖼️</div>
+            <p style={{fontSize:12, color:"#64748b", marginTop:8}}>ไม่สามารถแสดงรูปได้</p>
+            <a href={url} target="_blank" rel="noreferrer"
+              style={{color:"#3b82f6", fontSize:12, fontWeight:700}}>
+              เปิดดูที่ OneDrive ↗
+            </a>
+          </div>
+        </>
       )}
-      
-      {/* fallback icon ซ่อนไว้ก่อน */}
-      {isImg && (
-        <div style={{display:"none", padding:"24px", textAlign:"center"}}>
-          <div style={{fontSize:40}}>🖼️</div>
-          <p style={{fontSize:12, color:"#64748b", marginTop:8}}>ไม่สามารถแสดงรูปได้</p>
-        </div>
-      )}
-      
+
       {isPdf && (
         <div className="bg-slate-50 px-4 py-6 text-center">
           <div className="text-4xl mb-2">📄</div>
@@ -223,14 +221,14 @@ function FilePreview({ url, previewUrl, mimeHint }: {
           </a>
         </div>
       )}
-      
+
       {!isImg && !isPdf && (
         <div className="px-4 py-6 text-center">
           <div className="text-4xl mb-2">📎</div>
           <p className="text-sm font-bold text-slate-600">{name}</p>
         </div>
       )}
-      
+
       <div style={{padding:"8px 12px", display:"flex", alignItems:"center", gap:8, fontSize:12, borderTop:"1px solid #e0e7ff"}}>
         <span>{isPdf ? "📄" : isImg ? "🖼️" : "📎"}</span>
         <span style={{flex:1, fontWeight:600, color:"#1e3a8a", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
@@ -306,54 +304,58 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
 
   // ★ FIX 2 & 3: ลบ useState ที่อยู่กลางฟังก์ชัน (ผิดกฎ Hooks) และเก็บ url แค่ครั้งเดียวเป็น object
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    if (!files.length) return;
-    setUploading(true);
+  const files = Array.from(e.target.files ?? []);
+  if (!files.length) return;
+  setUploading(true);
 
-    for (const file of files) {
-      if (file.size > 10 * 1024 * 1024) {
-        alert(`${file.name} ขนาดเกิน 10MB`);
+  for (const file of files) {
+    if (file.size > 10 * 1024 * 1024) {
+      alert(`${file.name} ขนาดเกิน 10MB`);
+      continue;
+    }
+
+    // ✅ สร้าง local preview ทันที ก่อน upload เสร็จ
+    const localPreview = URL.createObjectURL(file);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("path", `WKK_Event_System/${Date.now()}_${file.name}`);
+      // ไม่ต้องส่ง account — ใช้ default hr หรือส่งถ้าต้องการ account อื่น
+
+      const res  = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+      const json = await res.json().catch(() => null);
+
+      console.log("Upload response:", json); // ✅ debug
+
+      if (!res.ok || !json?.ok) {
+        const msg = json?.error
+          ? (typeof json.error === "string" ? json.error : JSON.stringify(json.error))
+          : `HTTP ${res.status}`;
+        alert(`อัปโหลดไม่สำเร็จ: ${msg}`);
+        URL.revokeObjectURL(localPreview);
         continue;
       }
 
-      try {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("path", `Events/${Date.now()}_${file.name}`); // ★ เปลี่ยน path ให้ตรงกับโฟลเดอร์ "Events" ที่เห็นใน URL ของ SharePoint
-        formData.append("account", "academic@khienkhet.ac.th"); // ★ เพิ่มบรรทัดนี้
+      // ✅ ใช้ url (anonymous sharing link) เป็นหลัก
+      const savedUrl = json.url || json.downloadUrl || json.webUrl;
 
-        const res  = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
-        const json = await res.json().catch(() => null);
-
-        if (!res.ok || !json?.ok) {
-          const msg = json?.error
-            ? (typeof json.error === "string" ? json.error : JSON.stringify(json.error))
-            : `HTTP ${res.status}`;
-          alert(`อัปโหลดไม่สำเร็จ: ${msg}`);
-          continue;
-        }
-        const relPath = `WKK_Event_System/${Date.now()}_${file.name}`;
-        formData.append("path", relPath);
-        // ใช้ downloadUrl เพื่อเปิดดูไฟล์ได้โดยตรง — เก็บเป็น object เดียว ไม่ซ้ำ
-        const url = json.downloadUrl || json.webUrl || json.url;
-const previewUrl = json.webUrl || json.downloadUrl || json.url; // ← ใช้ webUrl สำหรับ preview
-
-if (url) {
-  setAttachments(prev => [...prev, { 
-    url,           // ← เก็บไว้ใน DB (downloadUrl)
-    previewUrl,    // ← ใช้แสดงรูปใน browser
-    mime: file.type, 
-    path: `WKK_Event_System/${Date.now()}_${file.name}` 
-  }]);
-}
-      } catch (err: any) {
-        alert("อัปโหลดไม่สำเร็จ: " + err.message);
+      if (savedUrl) {
+        setAttachments(prev => [...prev, { 
+          url: savedUrl,          // เก็บใน DB
+          previewUrl: localPreview, // แสดงใน browser ได้ทันที
+          mime: file.type,
+        }]);
       }
+    } catch (err: any) {
+      alert("อัปโหลดไม่สำเร็จ: " + err.message);
+      URL.revokeObjectURL(localPreview);
     }
-
-    setUploading(false);
-    if (fileRef.current) fileRef.current.value = "";
   }
+
+  setUploading(false);
+  if (fileRef.current) fileRef.current.value = "";
+}
 
   async function handleSave(asDraft: boolean) {
     if (!title || !startDate) { alert("กรุณากรอกชื่อกิจกรรมและวันที่"); return; }

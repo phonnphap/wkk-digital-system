@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ type: "view", scope: "organization" }),
+          body: JSON.stringify({ type: "view", scope: "anonymous" }),
         }
       );
       if (shareRes.ok) {
@@ -117,13 +117,13 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({
-      ok: true,
-      url: publicUrl,
-      webUrl: fileData.webUrl,
-      downloadUrl: fileData["@microsoft.graph.downloadUrl"] ?? null,
-      itemId: fileData.id,
-      account: TARGET_UPN, // ★ ส่งกลับไปด้วยเผื่อต้อง debug ว่าอัปโหลดไปบัญชีไหน
-    });
+  ok: true,
+  url: publicUrl,           // sharing link (anonymous view)
+  webUrl: fileData.webUrl,  // SharePoint page
+  downloadUrl: fileData["@microsoft.graph.downloadUrl"] ?? publicUrl,
+  itemId: fileData.id,
+  account: TARGET_UPN,
+});
   } catch (e: any) {
     console.error("[upload-onedrive] EXCEPTION:", e);
     return NextResponse.json({ ok: false, error: e.message }, { status: 500 });
