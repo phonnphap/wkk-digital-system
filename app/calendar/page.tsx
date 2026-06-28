@@ -169,41 +169,50 @@ function CatBadges({ cats }: { cats: string[] }) {
 // ══════════════════════════════════════════════════════
 // FilePreview
 // ══════════════════════════════════════════════════════
-function FilePreview({ url, mimeHint }: { url: string; mimeHint?: string }) {
-  // ดึง path ก่อน query string แล้วเช็ค extension
+function FilePreview({ url, previewUrl, mimeHint }: { 
+  url: string; 
+  previewUrl?: string;  // ← เพิ่ม prop
+  mimeHint?: string 
+}) {
   const pathPart = url.split("?")[0].split("#")[0];
   const name = pathPart.split("/").pop() ?? "ไฟล์";
   const ext  = name.split(".").pop()?.toLowerCase() ?? "";
 
-  // OneDrive download URL อาจไม่มี ext — เช็คจาก mimeHint หรือ URL keyword ด้วย
   const isImg = ["jpg","jpeg","png","gif","webp"].includes(ext)
-    || (mimeHint?.startsWith("image/") ?? false)
-    || /\/(jpg|jpeg|png|gif|webp)(\/|$)/i.test(url);
+    || (mimeHint?.startsWith("image/") ?? false);
+  const isPdf = ext === "pdf" || mimeHint === "application/pdf";
 
-  const isPdf = ext === "pdf"
-    || mimeHint === "application/pdf"
-    || /\.pdf(\/|$)/i.test(url);
-
-  const displayName = name || "ไฟล์แนบ";
+  // ✅ ใช้ proxy route เพื่อหลีกเลี่ยง CORS
+  const displaySrc = previewUrl || url;
+  const proxySrc = `/api/file-proxy?url=${encodeURIComponent(displaySrc)}`;
 
   return (
-    <div style={{
-      border:"1px solid #e0e7ff", borderRadius:10, overflow:"hidden",
-      background:"#f8faff", marginBottom:8
-    }}>
+    <div style={{border:"1px solid #e0e7ff", borderRadius:10, overflow:"hidden", background:"#f8faff", marginBottom:8}}>
+      
       {isImg && (
         <img
-          src={url}
-          alt={displayName}
+          src={proxySrc}  // ✅ ผ่าน proxy
+          alt={name}
           style={{width:"100%", maxHeight:200, objectFit:"contain", display:"block", background:"#f1f5f9"}}
-          onClick={() => window.open(url,"_blank")}
+          onClick={() => window.open(url, "_blank")}
           className="cursor-pointer"
           onError={e => {
-            // ถ้าโหลดไม่ได้ (CORS/expired) ซ่อนรูป แสดงลิงก์แทน
-            (e.target as HTMLImageElement).style.display = "none";
+            // fallback: ซ่อนรูป แสดงไอคอนแทน
+            const img = e.target as HTMLImageElement;
+            img.style.display = "none";
+            img.nextElementSibling?.removeAttribute("style");
           }}
         />
       )}
+      
+      {/* fallback icon ซ่อนไว้ก่อน */}
+      {isImg && (
+        <div style={{display:"none", padding:"24px", textAlign:"center"}}>
+          <div style={{fontSize:40}}>🖼️</div>
+          <p style={{fontSize:12, color:"#64748b", marginTop:8}}>ไม่สามารถแสดงรูปได้</p>
+        </div>
+      )}
+      
       {isPdf && (
         <div className="bg-slate-50 px-4 py-6 text-center">
           <div className="text-4xl mb-2">📄</div>
@@ -214,16 +223,18 @@ function FilePreview({ url, mimeHint }: { url: string; mimeHint?: string }) {
           </a>
         </div>
       )}
+      
       {!isImg && !isPdf && (
         <div className="px-4 py-6 text-center">
           <div className="text-4xl mb-2">📎</div>
-          <p className="text-sm font-bold text-slate-600">{displayName}</p>
+          <p className="text-sm font-bold text-slate-600">{name}</p>
         </div>
       )}
+      
       <div style={{padding:"8px 12px", display:"flex", alignItems:"center", gap:8, fontSize:12, borderTop:"1px solid #e0e7ff"}}>
         <span>{isPdf ? "📄" : isImg ? "🖼️" : "📎"}</span>
         <span style={{flex:1, fontWeight:600, color:"#1e3a8a", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
-          {displayName}
+          {name}
         </span>
         <a href={url} target="_blank" rel="noreferrer"
           style={{color:"#3b82f6", fontWeight:700, fontSize:11, textDecoration:"none"}}>
@@ -263,9 +274,14 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
   const [audiences,    setAudiences]   = useState<string[]>(event?.target_roles ?? ["all"]);
 
   // ★ FIX 1: attachments เป็น array ของ {url, mime} ตั้งแต่ initial state — ไม่ยัด JSX เข้า useState
-  const [attachments, setAttachments] = useState<{url:string; mime:string; path?: string}[]>(
-    (event?.attachment_urls ?? []).map(url => ({ url, mime: "" }))
-  );
+  const [attachments, setAttachments] = useState<{
+  url: string; 
+  previewUrl?: string;  // ← เพิ่ม
+  mime: string; 
+  path?: string
+}[]>(
+  (event?.attachment_urls ?? []).map(url => ({ url, previewUrl: url, mime: "" }))
+);
 
   const [colorOvr,     setColorOvr]    = useState(event?.color_override ?? "");
   const [rejectReason, setRejectReason]= useState("");
@@ -320,9 +336,16 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
         formData.append("path", relPath);
         // ใช้ downloadUrl เพื่อเปิดดูไฟล์ได้โดยตรง — เก็บเป็น object เดียว ไม่ซ้ำ
         const url = json.downloadUrl || json.webUrl || json.url;
-        if (url) {
-          setAttachments(prev => [...prev, { url, mime: file.type, path: relPath }]); // เพิ่ม path
-        }
+const previewUrl = json.webUrl || json.downloadUrl || json.url; // ← ใช้ webUrl สำหรับ preview
+
+if (url) {
+  setAttachments(prev => [...prev, { 
+    url,           // ← เก็บไว้ใน DB (downloadUrl)
+    previewUrl,    // ← ใช้แสดงรูปใน browser
+    mime: file.type, 
+    path: `WKK_Event_System/${Date.now()}_${file.name}` 
+  }]);
+}
       } catch (err: any) {
         alert("อัปโหลดไม่สำเร็จ: " + err.message);
       }
@@ -524,13 +547,11 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
                     {startTime && <p className="text-xs text-slate-400 mt-1">{thaiTime(startTime)}</p>}
                   </div>
                   <div>
-                    <div className={lCls}>
-                      เวลาสิ้นสุด
-                      <button type="button" onClick={()=>setHasEndTime(!hasEndTime)}
-                        className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold normal-case ${hasEndTime?"bg-blue-100 text-blue-600":"bg-slate-100 text-slate-400"}`}>
-                        {hasEndTime?"มี":"ไม่มี"}
-                      </button>
-                    </div>
+                    <label className={lCls}>เวลาสิ้นสุด</label>
+                    <button type="button" onClick={()=>setHasEndTime(!hasEndTime)}
+                      className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold ${hasEndTime?"bg-blue-100 text-blue-600":"bg-slate-100 text-slate-400"}`}>
+                      {hasEndTime?"มี":"ไม่มี"}
+                    </button>
                     {hasEndTime ? (
                       <>
                         <input type="time" value={endTime} onChange={e=>setEndTime(e.target.value)} className={iCls} />
@@ -614,14 +635,19 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
                 <div>
                   <p className="text-xs font-bold text-slate-400 mb-2">ไฟล์ที่แนบ ({attachments.length} ไฟล์)</p>
                   {attachments.map((a, i) => (
-                    <div key={i} className="relative group">
-                      <FilePreview url={a.url} mimeHint={a.mime} />
-                      <button onClick={() => setAttachments(prev => prev.filter((_,j) => j !== i))}
-                        className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs hidden group-hover:flex items-center justify-center font-bold shadow">
-                        ×
-                      </button>
-                    </div>
-                  ))}
+  <div key={i} className="relative group">
+    <FilePreview 
+      url={a.url} 
+      previewUrl={a.previewUrl}  // ← เพิ่ม
+      mimeHint={a.mime} 
+    />
+    <button onClick={() => setAttachments(prev => prev.filter((_,j) => j !== i))}
+      className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs hidden group-hover:flex items-center justify-center font-bold shadow">
+      ×
+    </button>
+  </div>
+))}
+
                 </div>
               ) : (
                 <div className="text-center py-8 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
