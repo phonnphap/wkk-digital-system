@@ -547,20 +547,29 @@ if (url) {
                     {startTime && <p className="text-xs text-slate-400 mt-1">{thaiTime(startTime)}</p>}
                   </div>
                   <div>
-                    <label className={lCls}>เวลาสิ้นสุด</label>
-                    <button type="button" onClick={()=>setHasEndTime(!hasEndTime)}
-                      className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold ${hasEndTime?"bg-blue-100 text-blue-600":"bg-slate-100 text-slate-400"}`}>
-                      {hasEndTime?"มี":"ไม่มี"}
-                    </button>
-                    {hasEndTime ? (
-                      <>
-                        <input type="time" value={endTime} onChange={e=>setEndTime(e.target.value)} className={iCls} />
-                        {endTime && <p className="text-xs text-slate-400 mt-1">{thaiTime(endTime)}</p>}
-                      </>
-                    ) : (
-                      <div className={`${iCls} text-slate-400`}>ไม่ระบุ</div>
-                    )}
-                  </div>
+  <div className="flex items-center gap-2 mb-1.5">
+    <span className={lCls.replace("mb-1.5","") + " mb-0"}>เวลาสิ้นสุด</span>
+    <button
+      type="button"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setHasEndTime(v => !v); }}
+      className={`text-[10px] px-2 py-0.5 rounded font-bold border transition-all ${
+        hasEndTime
+          ? "bg-blue-100 text-blue-600 border-blue-300"
+          : "bg-slate-100 text-slate-400 border-slate-200"
+      }`}
+    >
+      {hasEndTime ? "มี" : "ไม่มี"}
+    </button>
+  </div>
+  {hasEndTime ? (
+    <>
+      <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className={iCls} />
+      {endTime && <p className="text-xs text-slate-400 mt-1">{thaiTime(endTime)}</p>}
+    </>
+  ) : (
+    <div className={`${iCls} text-slate-400 cursor-default`}>ไม่ระบุ</div>
+  )}
+</div>
                 </div>
               )}
 
