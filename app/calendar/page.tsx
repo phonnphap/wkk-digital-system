@@ -524,13 +524,13 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
                     {startTime && <p className="text-xs text-slate-400 mt-1">{thaiTime(startTime)}</p>}
                   </div>
                   <div>
-                    <label className={lCls}>
-                      เวลาสิ้นสุด
-                      <button type="button" onClick={()=>setHasEndTime(!hasEndTime)}
-                        className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold normal-case ${hasEndTime?"bg-blue-100 text-blue-600":"bg-slate-100 text-slate-400"}`}>
-                        {hasEndTime?"มี":"ไม่มี"}
-                      </button>
-                    </label>
+                    <div className={lCls}>
+  เวลาสิ้นสุด
+  <button type="button" onClick={()=>setHasEndTime(!hasEndTime)}
+    className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold normal-case ${hasEndTime?"bg-blue-100 text-blue-600":"bg-slate-100 text-slate-400"}`}>
+    {hasEndTime?"มี":"ไม่มี"}
+  </button>
+</div>
                     {hasEndTime ? (
                       <>
                         <input type="time" value={endTime} onChange={e=>setEndTime(e.target.value)} className={iCls} />
