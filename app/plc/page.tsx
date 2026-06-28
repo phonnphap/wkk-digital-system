@@ -229,8 +229,14 @@ table.meta td.k{color:#64748b;font-weight:700;white-space:nowrap;width:110px}
 </div>${imagesHTML}</body></html>`;
 }
 
-function printPLCReport(meeting: PLCMeeting, facilitator: Teacher | undefined, participants: Teacher[], resolvedImageUrls: string[], facilitatorSignatureUrl?: string) {
-  const html = buildPLCReportHTML(meeting, facilitator, participants, resolvedImageUrls);
+function printPLCReport(
+  meeting: PLCMeeting,
+  facilitator: Teacher | undefined,
+  participants: Teacher[],
+  resolvedImageUrls: string[],
+  facilitatorSignatureUrl?: string  // ← มี parameter นี้แล้ว
+) {
+  const html = buildPLCReportHTML(meeting, facilitator, participants, resolvedImageUrls, facilitatorSignatureUrl);
   const win = window.open("", "_blank", "width=900,height=700");
   if (!win) return;
   win.document.open(); win.document.write(html); win.document.close();
@@ -451,7 +457,7 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const [date,        setDate]        = useState(meeting?.meeting_date ?? new Date().toISOString().slice(0, 10));
   const [startTime,   setStartTime]   = useState(meeting?.start_time ?? "08:30");
   const [endTime,     setEndTime]     = useState(meeting?.end_time ?? "12:30");
-  const [meetingNo,   setMeetingNo]   = useState<number | "">(meeting?.meeting_number ?? "");
+  const [meetingNo, setMeetingNo] = useState<number | "">("");
   const [title,       setTitle]       = useState(meeting?.title ?? "");
   const [topic,       setTopic]       = useState(meeting?.topic ?? "");
   const [hours,       setHours]       = useState<number>(meeting?.duration_hours ?? 4);
@@ -476,11 +482,26 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // [NEW] รายชื่อ grade_level ที่มีอยู่จริงในระบบ (สำหรับ dropdown เลือกสายชั้น)
-  const availableGrades = useMemo(() => {
-    const set = new Set<string>();
-    allTeachers.forEach(t => { if (t.grade_level) set.add(t.grade_level); });
-    return Array.from(set).sort();
-  }, [allTeachers]);
+  // ลำดับสายชั้นที่ถูกต้อง
+const GRADE_ORDER = [
+  "k2","k3","p1","p2","p3","p4","p5","p6",
+  "m1","m2","m3","m4","m5","m6",
+  "อ.2","อ.3","ป.1","ป.2","ป.3","ป.4","ป.5","ป.6",
+  "ม.1","ม.2","ม.3","ม.4","ม.5","ม.6",
+];
+
+const availableGrades = useMemo(() => {
+  const set = new Set<string>();
+  allTeachers.forEach(t => { if (t.grade_level) set.add(t.grade_level); });
+  return Array.from(set).sort((a, b) => {
+    const ai = GRADE_ORDER.indexOf(a);
+    const bi = GRADE_ORDER.indexOf(b);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.localeCompare(b, "th");
+  });
+}, [allTeachers]);
 
   // กรองครูที่อยู่กลุ่มสาระเดียวกับ currentUser (ตาม department_id) — ใช้เมื่อ scope = subject
   const myDeptId = (currentUser as Teacher).department_id ?? null;
@@ -574,8 +595,9 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   }
 
   const gradeRequired   = scope === "grade" ? !!gradeLevelSel : true;
-  const basicRequired   = !!(date && title.trim()) && gradeRequired;
-  const allBasicFilled  = !!(date && title.trim() && topic.trim() && location.trim() && selected.length > 0) && gradeRequired;
+  const basicRequired = !!(date && title.trim() && meetingNo !== null) && gradeRequired;
+const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim() 
+  && selected.length > 0 && meetingNo !== null) && gradeRequired;
   const allReportFilled = !!(problem.trim() && objectives.trim() && methods.trim() && results.trim() && solutions.trim() && reflections.trim() && futuredev.trim() && images.length > 0);
   const canSubmit = allBasicFilled && allReportFilled;
 
@@ -588,6 +610,7 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
     methods: submitted && !methods.trim(), results: submitted && !results.trim(),
     solutions: submitted && !solutions.trim(), reflections: submitted && !reflections.trim(),
     futuredev: submitted && !futuredev.trim(), images: submitted && images.length === 0,
+    meetingNo: submitted && meetingNo === null,
   };
 
   async function handleSave(isDraft: boolean) {
@@ -606,7 +629,7 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
       meeting_scope: scope,
       grade_level: scope === "grade" ? gradeLevelSel : null,
       meeting_date: date, start_time: startTime, end_time: endTime,
-      meeting_number: meetingNo === "" ? null : meetingNo,
+      meeting_number: meetingNo,
       title, topic, duration_hours: hours, location,
       facilitator_id: currentUserId,
       participants: selected,
@@ -668,7 +691,9 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                   <label className={labelCls}>เลือกสายชั้น {reqStar}</label>
                   <select value={gradeLevelSel} onChange={e => setGradeLevelSel(e.target.value)} className={inp(errors.gradeLevel)}>
                     <option value="">— เลือกสายชั้น —</option>
-                    {availableGrades.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
+                    {availableGrades.map(g => (
+  <option key={g} value={g}>{gradeLabel(g)}</option>
+))}
                   </select>
                   {errors.gradeLevel && <p className="text-red-500 text-xs mt-1">กรุณาเลือกสายชั้น</p>}
                   {gradeLevelSel && (
@@ -694,9 +719,14 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                   {errors.date && <p className="text-red-500 text-xs mt-1">กรุณาเลือกวันที่</p>}
                 </div>
                 <div>
-                  <label className={labelCls}>ครั้งที่</label>
-                  <input type="number" min="1" value={meetingNo} onChange={e => setMeetingNo(e.target.value === "" ? "" : +e.target.value)} placeholder="1" className={inp()} />
-                </div>
+  <label className={labelCls}>ครั้งที่ {reqStar}</label>
+  <input type="number" min="1" value={meetingNo}
+    onChange={e => setMeetingNo(e.target.value === "" ? "" : +e.target.value)}
+  placeholder="1" 
+  className={inp(errors.meetingNo)} 
+/>
+  {errors.meetingNo && <p className="text-red-500 text-xs mt-1">กรุณากรอกครั้งที่</p>}
+</div>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
