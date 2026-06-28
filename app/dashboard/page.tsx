@@ -167,37 +167,53 @@ export default function DashboardPage() {
     { name: "จองรถ / ห้องประชุม", icon: "🚌", bg: "bg-cyan-50 border-cyan-100 text-cyan-700", path: "/booking" },
   ];
 
-  const [schoolEvents, setSchoolEvents] = useState<{date: string; title: string; color: string}[]>([]);
+  const [schoolEvents, setSchoolEvents] = useState<{date: string; title: string; color: string; colorHex: string | null}[]>([]);
 
 useEffect(() => {
   async function loadEvents() {
     const today = new Date().toISOString().split("T")[0];
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("calendar_events")
-      .select("title, start_date, category")
-      .eq("status", "approved")
+      .select("title, start_date, categories, color_override")
+      .eq("status", "approved")              // ★ เฉพาะที่อนุมัติแล้ว ตามที่ขอ
       .gte("end_date", today)
       .order("start_date", { ascending: true })
-      .limit(5);
+      .limit(5);                              // ★ 5 รายการตามที่ขอ
+
+    if (error) {
+      console.error("loadEvents error:", error.message);
+      return;
+    }
 
     if (data) {
       const colorMap: Record<string, string> = {
-        academic: "bg-blue-500",
-        student:  "bg-emerald-500",
-        meeting:  "bg-amber-500",
-        holiday:  "bg-rose-500",
-        training: "bg-violet-500",
-        document: "bg-teal-500",
-        other:    "bg-slate-500",
+        academic:  "bg-blue-500",
+        student:   "bg-emerald-500",
+        meeting:   "bg-amber-500",
+        holiday:   "bg-rose-500",
+        training:  "bg-violet-500",
+        personnel: "bg-amber-700",
+        parent:    "bg-violet-600",
+        budget:    "bg-teal-600",
+        important: "bg-orange-500",
+        general:   "bg-slate-500",
       };
+
       setSchoolEvents(data.map(ev => {
         const d = new Date(ev.start_date + "T00:00:00");
         const day = d.getDate();
         const month = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."][d.getMonth()];
+
+        // ★ categories เป็น array — ดึงตัวแรกมาเทียบกับ colorMap
+        const firstCat = (ev.categories ?? [])[0] ?? "general";
+        const bgClass = colorMap[firstCat] ?? "bg-slate-500";
+
         return {
           date: `${day} ${month}`,
           title: ev.title,
-          color: colorMap[ev.category] ?? "bg-slate-500",
+          // ★ ถ้ามี color_override (hex สีที่ admin เลือกเอง) ให้ใช้ inline style แทน class
+          color: ev.color_override ? "" : bgClass,
+          colorHex: ev.color_override ?? null,
         };
       }));
     }
@@ -297,29 +313,32 @@ return (
       </div>
 
       {/* Calendar */}
-      <div className="space-y-3">
-        <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">📅 ปฏิทินปฏิบัติงาน ภาคเรียนที่ 1/2569</h3>
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center gap-4 overflow-x-auto">
-          {schoolEvents.length === 0 ? (
-            <p className="text-sm text-slate-400">ไม่มีกิจกรรมที่กำลังจะมาถึง</p>
-          ) : schoolEvents.map((event, idx) => (
-            <div key={idx} className="flex-shrink-0 flex items-center gap-3 pr-6 border-r border-slate-100 last:border-0">
-              <div className={`${event.color} w-12 h-12 rounded-xl text-white flex flex-col items-center justify-center text-[10px] font-bold leading-none`}>
-                <span>{event.date.split(" ")[0]}</span>
-                <span>{event.date.split(" ")[1]}</span>
-              </div>
-              <div>
-                <p className="text-sm font-bold text-slate-800">{event.title}</p>
-                <p className="text-[10px] text-slate-400 font-medium">โรงเรียนวัดเขียนเขต</p>
-              </div>
-            </div>
-          ))}
-          <button onClick={() => router.push("/calendar")}
-            className="flex-shrink-0 px-4 py-2 rounded-xl bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-500 text-xs font-bold transition-all border border-slate-200 hover:border-blue-200 whitespace-nowrap">
-            ดูเพิ่มเติม →
-          </button>
+<div className="space-y-3">
+  <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">📅 ปฏิทินปฏิบัติงาน ภาคเรียนที่ 1/2569</h3>
+  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center gap-4 overflow-x-auto">
+    {schoolEvents.length === 0 ? (
+      <p className="text-sm text-slate-400">ไม่มีกิจกรรมที่กำลังจะมาถึง</p>
+    ) : schoolEvents.map((event, idx) => (
+      <div key={idx} className="flex-shrink-0 flex items-center gap-3 pr-6 border-r border-slate-100 last:border-0">
+        <div
+          className={`${event.color} w-12 h-12 rounded-xl text-white flex flex-col items-center justify-center text-[10px] font-bold leading-none`}
+          style={event.colorHex ? { background: event.colorHex } : undefined}
+        >
+          <span>{event.date.split(" ")[0]}</span>
+          <span>{event.date.split(" ")[1]}</span>
+        </div>
+        <div>
+          <p className="text-sm font-bold text-slate-800">{event.title}</p>
+          <p className="text-[10px] text-slate-400 font-medium">โรงเรียนวัดเขียนเขต</p>
         </div>
       </div>
+    ))}
+    <button onClick={() => router.push("/calendar")}
+      className="flex-shrink-0 px-4 py-2 rounded-xl bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-500 text-xs font-bold transition-all border border-slate-200 hover:border-blue-200 whitespace-nowrap">
+      ดูเพิ่มเติม →
+    </button>
+  </div>
+</div>
 
       {/* Menu groups */}
       <div className="space-y-5 pt-2">
