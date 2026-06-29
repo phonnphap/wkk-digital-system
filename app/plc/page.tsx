@@ -1418,6 +1418,9 @@ if (currentYear) setSelectedYearId(currentYear.id);
 const { data: gradeLevelsData } = await supabase
   .from("grade_levels")
   .select("id, name");
+
+console.log("gradeLevelsData:", gradeLevelsData); // ← ดูว่ามีข้อมูลไหม
+
 const glMap: Record<string, string> = {};
 (gradeLevelsData || []).forEach((g: any) => { glMap[g.id] = g.name; });
 setGradeLevelMap(glMap);
