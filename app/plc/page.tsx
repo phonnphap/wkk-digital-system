@@ -124,7 +124,13 @@ const GRADE_LABEL: Record<string, string> = {
 };
 const GRADE_META: { icon: string; textColor: string; borderColor: string; bgLight: string } =
   { icon:"🎓", textColor:"text-cyan-700", borderColor:"border-cyan-300", bgLight:"bg-cyan-50" };
-function gradeLabel(g: string) { return GRADE_LABEL[g] ?? g; }
+function gradeLabel(g: string, glMap?: Record<string, string>): string {
+  if (!g) return "—";
+  // เช็ค map จาก DB ก่อน (UUID → ชื่อจริง)
+  if (glMap && glMap[g]) return glMap[g];
+  // fallback: ถ้าเป็น key แบบ p1/k2 ฯลฯ
+  return GRADE_LABEL[g] ?? g;
+}
 
 const LEAVE_TYPE_LIST_UNUSED = null; // (placeholder removed)
 
@@ -315,9 +321,12 @@ function RingProgress({ pct, size = 56, stroke = 6, color = "#3b82f6" }: { pct: 
 // [FIX-2][FIX-3] ใช้ ResolvedImage แทน <img> ตรง ๆ — แก้ภาพไม่แสดงทุก role
 //                และทำหน้าที่เป็น "preview หลังส่งแล้ว" ไปในตัว
 // ══════════════════════════════════════════════════════════
-function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, canEdit }: {
+function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, canEdit, gradeLevelMap, subjectMap }: {
   meeting: PLCMeeting; allTeachers: Teacher[]; onClose: () => void;
-  onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; canEdit: boolean;
+  onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; 
+  canEdit: boolean;
+  gradeLevelMap: Record<string, string>;
+  subjectMap?: Record<string, string>;   // ← optional, since not every caller passes it
 }) {
   const participants = allTeachers.filter(t => meeting.participants?.includes(t.id));
   const facilitator  = allTeachers.find(t => t.id === meeting.facilitator_id);
@@ -355,7 +364,9 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
               </span>
               {/* [NEW] badge บอกประเภทประชุม */}
               <span className={`text-xs font-black px-2 py-1 rounded-lg border ${isGrade ? `${GRADE_META.bgLight} ${GRADE_META.textColor} ${GRADE_META.borderColor}` : "bg-indigo-50 text-indigo-700 border-indigo-200"}`}>
-                {isGrade ? `${GRADE_META.icon} สายชั้น ${gradeLabel(meeting.grade_level ?? "")}` : "📚 กลุ่มสาระ"}
+                {isGrade 
+  ? `${GRADE_META.icon} สายชั้น ${gradeLabel(meeting.grade_level ?? "", gradeLevelMap)}` 
+  : "📚 กลุ่มสาระ"}
               </span>
               {meeting.meeting_number && <span className="text-xs font-black text-slate-400 bg-slate-100 px-2 py-1 rounded-lg">ครั้งที่ {meeting.meeting_number}</span>}
             </div>
@@ -437,12 +448,14 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
 //         เมื่อเลือกสายชั้น จะกรองรายชื่อผู้เข้าร่วมจาก grade_level เดียวกัน
 // [FIX-4] เก็บ image_paths คู่กับ image_urls เพื่อ resolve ลิงก์สดได้ในอนาคต
 // ══════════════════════════════════════════════════════════
-function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, currentUser, onSave, onClose }: {
+function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, currentUser, gradeLevelMap, subjectMap, onSave, onClose }: {
   meeting: Partial<PLCMeeting> | null;
   allTeachers: Teacher[];
   academicYears: AcademicYear[];
   currentUserId: string;
   currentUser: UserProfile;
+  gradeLevelMap: Record<string, string>; // ★ เพิ่ม
+  subjectMap: Record<string, string>;
   onSave: (data: any, isDraft: boolean) => Promise<void>;
   onClose: () => void;
 }) {
@@ -692,15 +705,15 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
                   <select value={gradeLevelSel} onChange={e => setGradeLevelSel(e.target.value)} className={inp(errors.gradeLevel)}>
                     <option value="">— เลือกสายชั้น —</option>
                     {availableGrades.map(g => (
-  <option key={g} value={g}>{gradeLabel(g)}</option>
+  <option key={g} value={g}>{gradeLabel(g, gradeLevelMap)}</option>
 ))}
                   </select>
                   {errors.gradeLevel && <p className="text-red-500 text-xs mt-1">กรุณาเลือกสายชั้น</p>}
                   {gradeLevelSel && (
-                    <p className="text-cyan-600 text-xs font-bold mt-1.5">
-                      🎓 สายชั้น {gradeLabel(gradeLevelSel)} · {sameGradeTeachers.length} คน
-                    </p>
-                  )}
+  <p className="text-cyan-600 text-xs font-bold mt-1.5">
+    🎓 สายชั้น {gradeLabel(gradeLevelSel, gradeLevelMap)} · {sameGradeTeachers.length} คน
+  </p>
+)}
                 </div>
               )}
 
@@ -793,13 +806,13 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
                   </div>
                 )}
                 {scope === "grade" && gradeLevelSel && (
-                  <div className="mb-2 bg-cyan-50 border border-cyan-200 rounded-xl px-3 py-2 flex items-center gap-2">
-                    <span>{GRADE_META.icon}</span>
-                    <p className="text-cyan-700 text-xs font-bold">
-                      สายชั้น: <strong>{gradeLabel(gradeLevelSel)}</strong> · {sameGradeTeachers.length} คน
-                    </p>
-                  </div>
-                )}
+  <div className="mb-2 bg-cyan-50 border border-cyan-200 rounded-xl px-3 py-2 flex items-center gap-2">
+    <span>{GRADE_META.icon}</span>
+    <p className="text-cyan-700 text-xs font-bold">
+      สายชั้น: <strong>{gradeLabel(gradeLevelSel, gradeLevelMap)}</strong> · {sameGradeTeachers.length} คน
+    </p>
+  </div>
+)}
                 <input type="text" value={search} onChange={e => setSearch(e.target.value)}
                   placeholder="🔍 ค้นหาชื่อครู..." className={`${inp(errors.selected)} mb-2`} />
                 {errors.selected && <p className="text-red-500 text-xs mb-1">กรุณาเลือกผู้เข้าร่วมอย่างน้อย 1 คน</p>}
@@ -817,14 +830,14 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
                         <span className={`font-bold flex-1 ${checked ? "text-blue-700" : "text-slate-700"}`}>{fullName(t)}</span>
                         {t.academic_level && (
                           <span className="text-xs bg-blue-50 border border-blue-200 text-blue-600 px-1.5 py-0.5 rounded-lg shrink-0 font-bold">
-                            {t.academic_level}
+                            {subjectLabel(t.academic_level, subjectMap)}
                           </span>
                         )}
                         {t.grade_level && (
-                          <span className="text-xs bg-cyan-50 border border-cyan-200 text-cyan-600 px-1.5 py-0.5 rounded-lg shrink-0 font-bold">
-                            {gradeLabel(t.grade_level)}
-                          </span>
-                        )}
+  <span className="text-xs bg-cyan-50 border border-cyan-200 text-cyan-600 px-1.5 py-0.5 rounded-lg shrink-0 font-bold">
+    {gradeLabel(t.grade_level, gradeLevelMap)}
+  </span>
+)}
                         {t.position && (
                           <span className="text-slate-400 text-xs hidden sm:inline shrink-0">{t.position}</span>
                         )}
@@ -923,9 +936,9 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
 // [FIX-5] ใช้ร่วมกันทั้งกลุ่มสาระและสายชั้น (key/label/scope แยกความหมาย)
 //         แสดงรายชื่อสมาชิกในกลุ่มเหมือนเดิม ไม่ว่าจะเป็นกลุ่มสาระหรือสายชั้น
 // ══════════════════════════════════════════════════════════
-function DeptGroupPanel({ group, allTeachers, onEdit, onDelete }: {
+function DeptGroupPanel({ group, allTeachers, gradeLevelMap, subjectMap, onEdit, onDelete }: {
   group: DeptGroup;
-  allTeachers: Teacher[];
+  allTeachers: Teacher[]; gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>;
   onEdit: (m: PLCMeeting) => void;
   onDelete: (id: string) => void;
 }) {
@@ -942,6 +955,8 @@ function DeptGroupPanel({ group, allTeachers, onEdit, onDelete }: {
         <ReportDetailModal
           meeting={viewMeeting}
           allTeachers={allTeachers}
+          gradeLevelMap={gradeLevelMap}
+          subjectMap={subjectMap}
           onClose={() => setViewMeeting(null)}
           onEdit={m => { setViewMeeting(null); onEdit(m); }}
           onDelete={id => { onDelete(id); setViewMeeting(null); }}
@@ -1052,9 +1067,9 @@ function DeptGroupPanel({ group, allTeachers, onEdit, onDelete }: {
 // ── All Reports Modal ─────────────────────────────────────────
 // [FIX-1] เพิ่มปุ่มพิมพ์รายงานในตารางทุกแถว
 // ══════════════════════════════════════════════════════════
-function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId, onClose, onEdit, onDelete, canEdit }: {
+function AllReportsModal({ meetings, allTeachers, academicYears, subjectMap, gradeLevelMap, selectedYearId, onClose, onEdit, onDelete, canEdit }: {
   meetings: PLCMeeting[]; allTeachers: Teacher[]; academicYears: AcademicYear[];
-  selectedYearId: string; onClose: () => void; onEdit: (m: PLCMeeting) => void;
+  selectedYearId: string; gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>; onClose: () => void; onEdit: (m: PLCMeeting) => void; 
   onDelete: (id: string) => void; canEdit: boolean;
 }) {
   const [search, setSearch] = useState("");
@@ -1065,9 +1080,9 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
   const selectedYear = academicYears.find(y => y.id === selectedYearId);
   const yearLabel = selectedYear ? `ปีการศึกษา ${selectedYear.year_name} ภาคเรียนที่ ${selectedYear.semester}` : "";
   const filtered = meetings.filter(m => {
-    const ms = m.title.toLowerCase().includes(search.toLowerCase()) || (m.topic ?? "").toLowerCase().includes(search.toLowerCase());
-    const matchesStatus = statusFilter === "all" || m.status === statusFilter;
-    const matchesScope = scopeFilter === "all" || (m.meeting_scope ?? "subject") === scopeFilter;
+  const ms = m.title.toLowerCase().includes(search.toLowerCase()) || (m.topic ?? "").toLowerCase().includes(search.toLowerCase());
+  const matchesStatus = statusFilter === "all" || m.status === statusFilter;
+  const matchesScope = scopeFilter === "all" || (m.meeting_scope ?? "subject") === scopeFilter;
     return ms && matchesStatus && matchesScope;
   });
   const submitted  = meetings.filter(m => m.status === "submitted").length;
@@ -1088,7 +1103,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
   return (
     <>
       {viewMeeting && (
-        <ReportDetailModal meeting={viewMeeting} allTeachers={allTeachers} onClose={() => setViewMeeting(null)}
+        <ReportDetailModal meeting={viewMeeting} allTeachers={allTeachers} onClose={() => setViewMeeting(null)} gradeLevelMap={gradeLevelMap}
           onEdit={m => { setViewMeeting(null); onClose(); onEdit(m); }}
           onDelete={id => { onDelete(id); setViewMeeting(null); }} canEdit={canEdit} />
       )}
@@ -1149,7 +1164,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
                         <td className="py-3 pr-3 text-center"><span className="text-xs font-black text-slate-500 bg-slate-100 rounded-lg px-2 py-0.5">{m.meeting_number ?? "—"}</span></td>
                         <td className="py-3 pr-3">
                           <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border whitespace-nowrap ${isGrade ? `${GRADE_META.bgLight} ${GRADE_META.textColor} ${GRADE_META.borderColor}` : "bg-indigo-50 text-indigo-700 border-indigo-200"}`}>
-                            {isGrade ? `${GRADE_META.icon} ${gradeLabel(m.grade_level ?? "")}` : "📚 กลุ่มสาระ"}
+                            {isGrade ? `${GRADE_META.icon} ${gradeLabel(m.grade_level ?? "", gradeLevelMap)}` : "📚 กลุ่มสาระ"}
                           </span>
                         </td>
                         <td className="py-3 pr-3 text-xs text-slate-600 font-bold whitespace-nowrap">{toThaiDate(m.meeting_date)}</td>
@@ -1185,9 +1200,11 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
 // ── Teacher History Section ────────────────────────────────────
 // [FIX-1][FIX-3] เพิ่มปุ่มพิมพ์รายงาน + แสดง thumbnail รูปจริงหลังส่งแล้ว
 // ══════════════════════════════════════════════════════════
-function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete, onView }: {
-  meetings: PLCMeeting[]; userId: string; allTeachers: Teacher[];
-  onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; onView: (m: PLCMeeting) => void;
+function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete, onView, gradeLevelMap }: {
+  meetings: PLCMeeting[]; userId: string; allTeachers: Teacher[]; gradeLevelMap: Record<string, string>; 
+  onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; 
+  onView: (m: PLCMeeting) => void;
+   // ← เพิ่ม
 }) {
   const [printingId, setPrintingId] = useState<string | null>(null);
   const myMeetings = meetings
@@ -1247,7 +1264,7 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       {m.meeting_number && <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">ครั้งที่ {m.meeting_number}</span>}
                       <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${isGrade ? `${GRADE_META.bgLight} ${GRADE_META.textColor} ${GRADE_META.borderColor}` : "bg-indigo-50 text-indigo-700 border-indigo-200"}`}>
-                        {isGrade ? `${GRADE_META.icon} ${gradeLabel(m.grade_level ?? "")}` : "📚 กลุ่มสาระ"}
+                        {isGrade ? `${GRADE_META.icon} ${gradeLabel(m.grade_level ?? "", gradeLevelMap)}` : "📚 กลุ่มสาระ"}
                       </span>
                       <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${m.status==="submitted"?"bg-emerald-50 text-emerald-700 border-emerald-200":"bg-amber-50 text-amber-700 border-amber-200"}`}>
                         {m.status==="submitted"?"✅ ส่งแล้ว":"📝 ร่าง"}
@@ -1294,12 +1311,20 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
   );
 }
 
+  function subjectLabel(id: string, sMap: Record<string, string>): string {
+  return sMap[id] ?? id; // ถ้าไม่มีใน map ก็แสดง id เดิม
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function PLCHoursPage() {
+
+  
   const router = useRouter();
   const [user,           setUser]           = useState<UserProfile | null>(null);
   const [allTeachers,    setAllTeachers]    = useState<Teacher[]>([]);
   const [academicYears,  setAcademicYears]  = useState<AcademicYear[]>([]);
+  const [gradeLevelMap, setGradeLevelMap] = useState<Record<string, string>>({});
+  const [subjectMap, setSubjectMap] = useState<Record<string, string>>({});
   const [meetings,       setMeetings]       = useState<PLCMeeting[]>([]);
   const [selectedYearId, setSelectedYearId] = useState<string>("");
   const [loading,        setLoading]        = useState(true);
@@ -1338,14 +1363,30 @@ export default function PLCHoursPage() {
       }
 
       // โหลดปีการศึกษา
-      const { data: years } = await supabase.from("academic_years")
-        .select("id, year_name, semester, is_current")
-        .order("year_name", { ascending: false })
-        .order("semester", { ascending: false });
-      const ys = (years as AcademicYear[]) || [];
-      setAcademicYears(ys);
-      const currentYear = ys.find(y => y.is_current) ?? ys[0];
-      if (currentYear) setSelectedYearId(currentYear.id);
+const { data: years } = await supabase.from("academic_years")
+  .select("id, year_name, semester, is_current")
+  .order("year_name", { ascending: false })
+  .order("semester", { ascending: false });
+const ys = (years as AcademicYear[]) || [];
+setAcademicYears(ys);
+const currentYear = ys.find(y => y.is_current) ?? ys[0];
+if (currentYear) setSelectedYearId(currentYear.id);
+
+// ★ ใหม่ — โหลดชื่อสายชั้นจาก grade_levels มาทำ map id → name
+const { data: gradeLevelsData } = await supabase
+  .from("grade_levels")
+  .select("id, name");
+const glMap: Record<string, string> = {};
+(gradeLevelsData || []).forEach((g: any) => { glMap[g.id] = g.name; });
+setGradeLevelMap(glMap);
+
+// โหลดชื่อกลุ่มสาระจาก departments
+const { data: deptData } = await supabase
+  .from("departments")
+  .select("id, name");
+const sMap: Record<string, string> = {};
+(deptData || []).forEach((d: any) => { sMap[d.id] = d.name; });
+setSubjectMap(sMap);
 
       // ✅ โหลด users — กรอง admin roles ออก client-side
       // [NEW] ดึง grade_level เพิ่มสำหรับกลุ่มสายชั้น
@@ -1402,7 +1443,7 @@ export default function PLCHoursPage() {
           m.grade_level === lv || m.participants?.some(pid => teacherIds.has(pid))
         );
         const totalHours = groupMeetings.reduce((s, m) => s + Number(m.duration_hours), 0);
-        return { key: lv, label: gradeLabel(lv), scope: "grade" as MeetingScope, teachers, meetings: groupMeetings, totalHours };
+        return { key: lv, label: gradeLabel(lv, gradeLevelMap), scope: "grade" as MeetingScope, teachers, meetings: groupMeetings, totalHours };
       }).sort((a, b) => a.key.localeCompare(b.key, "th"));
     }
 
@@ -1422,7 +1463,7 @@ export default function PLCHoursPage() {
         m.participants?.some(pid => teacherIds.has(pid))
       );
       const totalHours = groupMeetings.reduce((s, m) => s + Number(m.duration_hours), 0);
-      return { key: lv, label: lv, scope: "subject" as MeetingScope, teachers, meetings: groupMeetings, totalHours };
+      return { key: lv, label: subjectLabel(lv, subjectMap), scope: "subject" as MeetingScope, teachers, meetings: groupMeetings, totalHours };
     }).sort((a, b) => a.key.localeCompare(b.key, "th"));
   }, [allTeachers, meetingsInScope, viewScope]);
 
@@ -1518,8 +1559,7 @@ export default function PLCHoursPage() {
               meetings={meetings} userId={user.id} allTeachers={allTeachers}
               onEdit={m => { setEditMeeting(m); setModalOpen(true); }}
               onDelete={handleDelete}
-              onView={m => setViewMeeting(m)}
-            />
+              onView={m => setViewMeeting(m)} gradeLevelMap={gradeLevelMap} />
           </>
         )}
 
@@ -1606,8 +1646,7 @@ export default function PLCHoursPage() {
                   group={group}
                   allTeachers={allTeachers}
                   onEdit={m => { setEditMeeting(m); setModalOpen(true); }}
-                  onDelete={handleDelete}
-                />
+                  onDelete={handleDelete} gradeLevelMap={gradeLevelMap} subjectMap={subjectMap} />
               ))}
             </div>
 
@@ -1642,7 +1681,9 @@ export default function PLCHoursPage() {
                         <tr key={t.id} className="hover:bg-slate-50">
                           <td className="px-5 py-3 font-bold text-slate-800">{fullName(t)}</td>
                           <td className="px-3 py-3 text-slate-400 text-xs hidden sm:table-cell">
-                            {viewScope === "grade" ? (t.grade_level ? gradeLabel(t.grade_level) : "—") : (t.academic_level || t.position || "—")}
+                            {viewScope === "grade" 
+  ? gradeLabel(t.grade_level ?? "", gradeLevelMap) || "—"
+  : subjectLabel(t.academic_level ?? "", subjectMap) || t.position || "—"}
                           </td>
                           <td className="px-3 py-3 text-center">
                             <span className="font-black text-blue-600 text-base">{t.hours}</span>
@@ -1674,6 +1715,8 @@ export default function PLCHoursPage() {
           academicYears={academicYears}
           currentUserId={user.id}
           currentUser={user}
+          gradeLevelMap={gradeLevelMap}
+          subjectMap={subjectMap}
           onSave={handleSave}
           onClose={() => { setModalOpen(false); setEditMeeting(null); }}
         />
@@ -1683,12 +1726,11 @@ export default function PLCHoursPage() {
           meetings={meetings} allTeachers={allTeachers} academicYears={academicYears}
           selectedYearId={selectedYearId} onClose={() => setShowReports(false)}
           onEdit={m => { setShowReports(false); setEditMeeting(m); setModalOpen(true); }}
-          onDelete={handleDelete} canEdit={isAdmin}
-        />
+          onDelete={handleDelete} canEdit={isAdmin} gradeLevelMap={gradeLevelMap} subjectMap={subjectMap} />
       )}
       {viewMeeting && user && (
         <ReportDetailModal
-          meeting={viewMeeting} allTeachers={allTeachers}
+          meeting={viewMeeting} allTeachers={allTeachers} gradeLevelMap={gradeLevelMap}
           onClose={() => setViewMeeting(null)}
           onEdit={m => { setViewMeeting(null); setEditMeeting(m); setModalOpen(true); }}
           onDelete={id => { handleDelete(id); setViewMeeting(null); }}
