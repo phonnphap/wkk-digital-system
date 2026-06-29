@@ -132,6 +132,10 @@ function gradeLabel(g: string, glMap?: Record<string, string>): string {
   return GRADE_LABEL[g] ?? g;
 }
 
+function subjectLabel(id: string, sMap: Record<string, string>): string {
+  return sMap[id] ?? id;
+}
+
 const LEAVE_TYPE_LIST_UNUSED = null; // (placeholder removed)
 
 const inp = (err?: boolean) =>
@@ -150,7 +154,11 @@ function buildPLCReportHTML(
   facilitator: Teacher | undefined,
   participants: Teacher[],
   resolvedImageUrls: string[],
-  facilitatorSignatureUrl?: string  // ← เพิ่ม
+  facilitatorSignatureUrl?: string,
+  deputySignatureUrl?: string,
+  deputyName?: string,
+  directorSignatureUrl?: string,
+  directorName?: string,
 ): string {
   const isGrade = meeting.meeting_scope === "grade";
   const scopeLabel = isGrade ? `ประชุมสายชั้น ${gradeLabel(meeting.grade_level ?? "")}` : "ประชุมกลุ่มสาระการเรียนรู้ (PLC)";
@@ -185,6 +193,35 @@ function buildPLCReportHTML(
       </div>
     </div>` : "";
 
+const signatureHTML = `
+<div style="margin-top:32px;display:flex;justify-content:space-between;gap:16px">
+  <!-- ผู้บันทึก -->
+  <div style="text-align:center;flex:1">
+    ${facilitatorSignatureUrl
+      ? `<img src="${facilitatorSignatureUrl}" style="max-height:56px;max-width:160px;object-fit:contain;margin:0 auto;display:block"/>`
+      : `<div style="height:56px"></div>`}
+    <div style="font-size:10.5pt;margin-top:6px">(${facilitator ? fullName(facilitator) : "............................"})</div>
+    <div style="font-size:9.5pt;color:#475569">ผู้บันทึก/วิทยากร</div>
+  </div>
+  <!-- รองผอ. -->
+  <div style="text-align:center;flex:1">
+    ${deputySignatureUrl
+      ? `<img src="${deputySignatureUrl}" style="max-height:56px;max-width:160px;object-fit:contain;margin:0 auto;display:block"/>`
+      : `<div style="height:56px"></div>`}
+    <div style="font-size:10.5pt;margin-top:6px">(${deputyName ?? "นางสาวฐิติมา  กาบแก้ว"})</div>
+    <div style="font-size:9.5pt;color:#475569">รองผู้อำนวยการโรงเรียน</div>
+    <div style="font-size:9pt;color:#64748b">กลุ่มบริหารงานบุคคล</div>
+  </div>
+  <!-- ผอ. -->
+  <div style="text-align:center;flex:1">
+    ${directorSignatureUrl
+      ? `<img src="${directorSignatureUrl}" style="max-height:56px;max-width:160px;object-fit:contain;margin:0 auto;display:block"/>`
+      : `<div style="height:56px"></div>`}
+    <div style="font-size:10.5pt;margin-top:6px">(${directorName ?? "นายธนณัฐ  ศิระวงษ์"})</div>
+    <div style="font-size:9.5pt;color:#475569">ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
+  </div>
+</div>`;
+
   return `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
@@ -218,18 +255,6 @@ table.meta td.k{color:#64748b;font-weight:700;white-space:nowrap;width:110px}
 <div style="border-top:1px solid #cbd5e1;padding-top:8px;margin-top:4px">
   ${sectionsHTML || "<p style='color:#94a3b8;font-size:10.5pt'>ไม่มีข้อมูลรายงานเพิ่มเติม</p>"}
 </div>
-
-<div style="margin-top:24px;display:flex;justify-content:flex-end">
-    <div style="text-align:center;width:220px">
-      ${facilitatorSignatureUrl
-        ? `<img src="${facilitatorSignatureUrl}" style="max-height:60px;max-width:180px;object-fit:contain;margin:0 auto;display:block"/>`
-        : `<div style="height:60px"></div>`}
-      <div style="border-bottom:1px solid #000;width:200px;margin:0 auto"></div>
-      <div style="font-size:10.5pt;margin-top:4px">(${facilitator ? fullName(facilitator) : "............................"})</div>
-      <div style="font-size:9.5pt;color:#64748b">ผู้บันทึก/วิทยากร</div>
-    </div>
-  </div>
-
 <div style="margin-top:20px;font-size:9pt;color:#94a3b8;text-align:right">พิมพ์เมื่อ ${printedDate}</div>
 
 </div>${imagesHTML}</body></html>`;
@@ -240,9 +265,17 @@ function printPLCReport(
   facilitator: Teacher | undefined,
   participants: Teacher[],
   resolvedImageUrls: string[],
-  facilitatorSignatureUrl?: string  // ← มี parameter นี้แล้ว
+  facilitatorSignatureUrl?: string,
+  deputySignatureUrl?: string,
+  deputyName?: string,
+  directorSignatureUrl?: string,
+  directorName?: string,
 ) {
-  const html = buildPLCReportHTML(meeting, facilitator, participants, resolvedImageUrls, facilitatorSignatureUrl);
+  const html = buildPLCReportHTML(
+    meeting, facilitator, participants, resolvedImageUrls,
+    facilitatorSignatureUrl, deputySignatureUrl, deputyName,
+    directorSignatureUrl, directorName
+  );
   const win = window.open("", "_blank", "width=900,height=700");
   if (!win) return;
   win.document.open(); win.document.write(html); win.document.close();
@@ -254,15 +287,21 @@ async function printPLCReportAsync(
   meeting: PLCMeeting,
   facilitator: Teacher | undefined,
   participants: Teacher[],
-  facilitatorSignatureUrl?: string  // ← เพิ่ม
+  facilitatorSignatureUrl: string | undefined,
+  deputyUser?: any,
+  directorUser?: any
 ) {
   const freshUrls = await resolveOneDriveUrls(
     meeting.image_paths ?? [],
     meeting.image_urls ?? []
   );
-  printPLCReport(meeting, facilitator, participants, freshUrls, facilitatorSignatureUrl);
+  printPLCReport(
+    meeting, facilitator, participants, freshUrls,
+    facilitatorSignatureUrl,
+    deputyUser?.signature_url, deputyUser ? fullName(deputyUser) : undefined,
+    directorUser?.signature_url, directorUser ? fullName(directorUser) : undefined,
+  );
 }
-
 // ══════════════════════════════════════════════════════════
 // [NEW] ── ResolvedImage — รูปที่ resolve ลิงก์สดเสมอก่อนแสดง ──
 // ══════════════════════════════════════════════════════════
@@ -273,14 +312,19 @@ function ResolvedImage({ url, path, alt, className, onClick }: {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    setFailed(false);
-    (async () => {
-      const fresh = await resolveOneDriveUrl(path, url);
-      if (!cancelled) setLiveUrl(fresh);
-    })();
-    return () => { cancelled = true; };
-  }, [url, path]);
+  let cancelled = false;
+  setFailed(false);
+  if (!path && url) {
+    // ไม่มี path เลย — ใช้ url ตรงๆ
+    setLiveUrl(url);
+    return;
+  }
+  (async () => {
+    const fresh = await resolveOneDriveUrl(path, url);
+    if (!cancelled) setLiveUrl(fresh);
+  })();
+  return () => { cancelled = true; };
+}, [url, path]);
 
   if (!liveUrl || failed) {
     return (
@@ -1204,7 +1248,7 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
   meetings: PLCMeeting[]; userId: string; allTeachers: Teacher[]; gradeLevelMap: Record<string, string>; 
   onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; 
   onView: (m: PLCMeeting) => void;
-   // ← เพิ่ม
+   // ← เพิ่ม   ← ลบ comment นี้ออก
 }) {
   const [printingId, setPrintingId] = useState<string | null>(null);
   const myMeetings = meetings
@@ -1311,10 +1355,6 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
   );
 }
 
-  function subjectLabel(id: string, sMap: Record<string, string>): string {
-  return sMap[id] ?? id; // ถ้าไม่มีใน map ก็แสดง id เดิม
-}
-
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function PLCHoursPage() {
 
@@ -1335,6 +1375,8 @@ export default function PLCHoursPage() {
   const [activeGroupKey, setActiveGroupKey] = useState<string>("all");
   const [showReports,    setShowReports]    = useState(false);
   const [viewMeeting,    setViewMeeting]    = useState<PLCMeeting | null>(null);
+  const [directorUser, setDirectorUser] = useState<any>(null);
+  const [deputyUser, setDeputyUser] = useState<any>(null);
 
   useEffect(() => {
     (async () => {
@@ -1387,6 +1429,17 @@ const { data: deptData } = await supabase
 const sMap: Record<string, string> = {};
 (deptData || []).forEach((d: any) => { sMap[d.id] = d.name; });
 setSubjectMap(sMap);
+
+// ใน init async:
+const { data: signUsers } = await supabase
+  .from("users")
+  .select("id, first_name, last_name, role, position, signature_url")
+  .in("role", ["director", "deputy_director"]);
+
+const dir = signUsers?.find(u => u.role === "director");
+const dep = signUsers?.find(u => u.role === "deputy_director");
+setDirectorUser(dir ?? null);
+setDeputyUser(dep ?? null);
 
       // ✅ โหลด users — กรอง admin roles ออก client-side
       // [NEW] ดึง grade_level เพิ่มสำหรับกลุ่มสายชั้น
