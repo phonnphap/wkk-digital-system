@@ -611,8 +611,8 @@ function ScheduleSettingsModal({ onClose, onApply }: { onClose: () => void; onAp
 }
 
 // ── Personal Timetable Grid ────────────────────────────────────────────────────
-function PersonalTimetableGrid({ myEntries, timeSlots, subjects, classrooms, userId }: {
-  myEntries: TimetableEntry[]; timeSlots: TimeSlot[]; subjects: Subject[]; classrooms: Classroom[]; userId: string;
+function PersonalTimetableGrid({ myEntries, timeSlots, subjects, teachers, classrooms, userId }: {
+  myEntries: TimetableEntry[]; timeSlots: TimeSlot[]; subjects: Subject[]; teachers: Teacher[]; classrooms: Classroom[]; userId: string;
 }) {
   const subjectColorMap: Record<string, typeof SUBJECT_COLORS[0]> = {};
   subjects.forEach((s, i) => { subjectColorMap[s.id] = SUBJECT_COLORS[i % SUBJECT_COLORS.length]; });
@@ -653,21 +653,25 @@ function PersonalTimetableGrid({ myEntries, timeSlots, subjects, classrooms, use
                     </td>
                   );
                   const entry = myEntries.find(e => e.day_of_week === day && e.time_slot_id === slot.id);
-                  if (!entry) return <td key={slot.id} className="p-1 border-r border-slate-100"><div className="rounded-xl border-2 border-dashed border-slate-100" style={{ minHeight: "92px" }} /></td>;
-                  const colors  = subjectColorMap[entry.subject_id] ?? SUBJECT_COLORS[0];
-                  const subject = subjects.find(s => s.id === entry.subject_id) ?? (entry as any).subject;
-                  const room    = classrooms.find(c => c.id === entry.classroom_id);
-                  return (
-                    <td key={slot.id} className="p-1 align-top border-r border-slate-100">
-                      <div className={`rounded-xl border-2 px-2 py-2 ${colors.bg} ${colors.border} ${colors.text} ring-2 ring-offset-1 ring-blue-400`} style={{ minHeight: "92px" }}>
-                        <p className="font-black text-xs leading-tight line-clamp-2 mb-1">{(subject as any)?.name_th ?? "—"}</p>
-                        {room && <p className="text-[10px] font-bold opacity-70">{room.grade_group} {room.room_name}</p>}
-                        <span className="text-[9px] font-black bg-blue-500 text-white px-1.5 py-0.5 rounded mt-1 inline-block">
-                          {entry.teacher_id_2 === userId ? "ครู 2" : "ครู 1"}
-                        </span>
-                      </div>
-                    </td>
-                  );
+if (!entry) return <td key={slot.id} className="p-1 border-r border-slate-100"><div className="rounded-xl border-2 border-dashed border-slate-100" style={{ minHeight: "92px" }} /></td>;
+const colors  = subjectColorMap[entry.subject_id] ?? SUBJECT_COLORS[0];
+const subject = subjects.find(s => s.id === entry.subject_id) ?? (entry as any).subject;
+const room    = classrooms.find(c => c.id === entry.classroom_id);
+// ★ ย้ายมาตรงนี้
+const otherTeacherId = entry.teacher_id === userId ? entry.teacher_id_2 : entry.teacher_id;
+const otherTeacher = otherTeacherId ? teachers.find(t => t.id === otherTeacherId) : null;
+return (
+  <td key={slot.id} className="p-1 align-top border-r border-slate-100">
+    <div className={`rounded-xl border-2 px-2 py-2 ${colors.bg} ${colors.border} ${colors.text} ring-2 ring-offset-1 ring-blue-400`} style={{ minHeight: "92px" }}>
+      <p className="font-black text-xs leading-tight line-clamp-2 mb-1">{(subject as any)?.name_th ?? "—"}</p>
+      {room && <p className="text-[10px] font-bold opacity-70">{room.grade_group} {room.room_name}</p>}
+      {otherTeacher && <p className="text-[10px] font-bold opacity-70">ร่วมกับ {displayName(otherTeacher)}</p>}
+      <span className="text-[9px] font-black bg-blue-500 text-white px-1.5 py-0.5 rounded mt-1 inline-block">
+        {entry.teacher_id_2 === userId ? "ครู 2" : "ครู 1"}
+      </span>
+    </div>
+  </td>
+);
                 })}
               </tr>
             );
@@ -736,7 +740,10 @@ export default function SchedulePage() {
         supabase.from("subjects").select("id,subject_code,name_th,subject_group").order("subject_code"),
         supabase.from("users")
           .select("id,first_name,last_name,full_name,position")
-          .in("role", ["subject_teacher","homeroom_teacher","grade_head","staff","teacher"]),
+          .in("role", [
+            "subject_teacher","homeroom_teacher","grade_head","teacher",
+            "subject_head","dept_head"
+        ]),
         // ★ FIX: ดึงห้องทั้งหมด ไม่ filter
         supabase.from("classrooms")
           .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type")
@@ -983,7 +990,8 @@ export default function SchedulePage() {
 
   const currentScheduleType = SCHEDULE_TEMPLATES.find(t => t.key === selectedClassroom?.schedule_type)?.label ?? "ประถม";
 
-  const myTimeSlots = buildRoomSlots(homeroomClassroom?.schedule_type ?? "primary", timeSlots);
+  const myTimeSlots = [...timeSlots]
+    .sort((a, b) => a.start_time.localeCompare(b.start_time));
 
   return (
     <div className="min-h-screen bg-slate-50 print:bg-white">
@@ -1170,7 +1178,7 @@ export default function SchedulePage() {
               {myEntries.length > 0 ? (
                 <div className="mb-5">
                   <h3 className="font-black text-slate-700 text-sm mb-3">📅 ตารางคาบสอนของฉัน</h3>
-                  <PersonalTimetableGrid myEntries={myEntries} timeSlots={myTimeSlots} subjects={subjects} classrooms={classrooms} userId={user.id} />
+                  <PersonalTimetableGrid myEntries={myEntries} timeSlots={myTimeSlots} subjects={subjects} teachers={teachers} classrooms={classrooms} userId={user.id} />
                 </div>
               ) : (
                 <div className="text-center py-16 text-slate-400 bg-white rounded-2xl border border-slate-200 mb-5">
@@ -1204,15 +1212,18 @@ export default function SchedulePage() {
                                 <div key={day} className="flex gap-2 items-center flex-wrap">
                                   <span className={`text-xs font-black px-2 py-1 rounded-lg ${dc.bg} ${dc.text} border ${dc.border} w-12 text-center shrink-0`}>{DAY_SHORT[day - 1]}</span>
                                   {dayEntries.map(e => {
-                                    const slot    = roomSlots.find(s => s.id === e.time_slot_id);
-                                    const subject = subjects.find(s => s.id === e.subject_id) ?? (e as any).subject;
-                                    const isMe2   = e.teacher_id_2 === user.id;
-                                    return (
+  const slot    = roomSlots.find(s => s.id === e.time_slot_id);
+  const subject = subjects.find(s => s.id === e.subject_id) ?? (e as any).subject;
+  const isMe2   = e.teacher_id_2 === user.id;
+  const otherTeacherId = isMe2 ? e.teacher_id : e.teacher_id_2;
+  const otherTeacher = otherTeacherId ? teachers.find(t => t.id === otherTeacherId) : null;
+  return (
                                       <span key={e.id} className="text-xs font-bold bg-blue-100 border border-blue-300 text-blue-800 px-2 py-1 rounded-lg flex items-center gap-1">
                                         <span className="font-black">{slot?.slot_label}</span>
-                                        <span>{(subject as any)?.name_th ?? "—"}</span>
-                                        {isMe2 && <span className="text-[9px] bg-purple-500 text-white px-1 rounded">ครู 2</span>}
-                                      </span>
+      <span>{(subject as any)?.name_th ?? "—"}</span>
+      {otherTeacher && <span className="opacity-70">+ {displayName(otherTeacher)}</span>}
+      {isMe2 && <span className="text-[9px] bg-purple-500 text-white px-1 rounded">ครู 2</span>}
+    </span>
                                     );
                                   })}
                                 </div>
