@@ -73,17 +73,25 @@ const SCHEDULE_TEMPLATES = [
   },
 ];
 
-const ADMIN_ROLES    = ["admin", "director", "deputy_director", "dept_head"];
+const ADMIN_ROLES    = ["admin", "director", "deputy_director"];
 const APPROVER_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head", "subject_head"];
+const NON_TEACHING_ROLES = ["admin", "director", "deputy_director", "staff"];
+const teachersRes = supabase.from("users")
+  .select("id,title,first_name,last_name,full_name,position,role,grade_level,department_id")
+  .order("first_name");
 
 type UserProfile = {
-  id: string; first_name?: string; last_name?: string; full_name?: string;
+  id: string; title?: string; first_name?: string; last_name?: string; full_name?: string;
   email: string; role: string; position?: string;
   homeroom_classroom_id?: string; grade_level?: string; subject_group?: string;
+  extra_roles?: string[]; department_id?: string; // ← เพิ่ม
 };
 type TimeSlot   = { id: string; slot_number: number; start_time: string; end_time: string; slot_label?: string; is_break: boolean; schedule_type?: string };
 type Subject    = { id: string; subject_code: string; name_th: string; subject_group?: string };
-type Teacher    = { id: string; first_name?: string; last_name?: string; full_name?: string; position?: string };
+type Teacher = {
+  id: string; title?: string; first_name?: string; last_name?: string; full_name?: string; position?: string;
+  role?: string; grade_level?: string; department_id?: string; // ← เพิ่ม
+};
 type Classroom  = { id: string; room_number: number; room_name?: string; grade_group?: string; academic_year_id?: string; schedule_type?: string };
 type TimetableEntry = {
   id: string; classroom_id: string; subject_id: string; teacher_id: string;
@@ -159,18 +167,40 @@ function buildRoomSlots(scheduleType: string | undefined, allDbSlots: TimeSlot[]
 // ── Entry Modal ───────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicYearId,
-  canEditDirect, currentUser, onSave, onRequestChange, onDelete, onClose }: {
+  permission, currentUser, onSave, onRequestChange, onDelete, onClose }: {
   entry?: TimetableEntry; slot: TimeSlot; day: number; classroom: Classroom;
   subjects: Subject[]; teachers: Teacher[]; academicYearId: string;
-  canEditDirect: boolean; currentUser: UserProfile;
+  permission: "direct" | "request"; // ← เปลี่ยนจาก canEditDirect: boolean
+  currentUser: UserProfile;
   onSave: (d: any) => Promise<void>;
   onRequestChange: (d: any) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
   onClose: () => void;
 }) {
+  const canEditDirect = permission === "direct";
+  const extraRoles = currentUser.extra_roles ?? [];
+  const isHomeroomOnly = !["admin","director","deputy_director"].includes(currentUser.role)
+    && !extraRoles.includes("dept_head") && !extraRoles.includes("grade_head");
+
+  // ★ กรองครูที่เลือกได้ ตามสิทธิ์
+  const selectableTeachers = (() => {
+    if (canEditDirect && extraRoles.includes("dept_head")) {
+      return teachers.filter(t => t.department_id === currentUser.department_id);
+    }
+    if (canEditDirect && extraRoles.includes("grade_head")) {
+      return teachers.filter(t => t.grade_level === currentUser.grade_level);
+    }
+    if (isHomeroomOnly) {
+      // homeroom_teacher เพิ่มได้เฉพาะตัวเอง
+      return teachers.filter(t => t.id === currentUser.id);
+    }
+    return teachers; // admin เห็นทั้งหมด
+  })();
+
   const [subjectGroup, setSubjectGroup] = useState("");
   const [subjectId,   setSubjectId]    = useState(entry?.subject_id ?? "");
-  const [teacherId1,  setTeacherId1]   = useState(entry?.teacher_id ?? "");
+  // ★ homeroom_teacher: ล็อก teacher1 เป็นตัวเองอัตโนมัติ
+  const [teacherId1,  setTeacherId1]   = useState(entry?.teacher_id ?? (isHomeroomOnly ? currentUser.id : ""));
   const [teacherId2,  setTeacherId2]   = useState(entry?.teacher_id_2 ?? "");
   const [note,        setNote]         = useState("");
   const [loading,     setLoading]      = useState(false);
@@ -272,19 +302,20 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
 
           <div>
             <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">ครูผู้สอน คนที่ 1 *</label>
-            <select value={teacherId1} onChange={e => setTeacherId1(e.target.value)} className={inp}>
+            <select value={teacherId1} onChange={e => setTeacherId1(e.target.value)} className={inp} disabled={isHomeroomOnly}>
               <option value="">— เลือกครู —</option>
-              {teachers.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
+              {selectableTeachers.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
             </select>
+            {isHomeroomOnly && <p className="text-xs text-amber-600 font-bold mt-1">⚠️ คุณเพิ่มคาบได้เฉพาะชื่อตัวเอง (รออนุมัติ)</p>}
           </div>
 
           <div>
             <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
               ครูผู้สอน คนที่ 2 <span className="text-slate-400 font-normal normal-case">(ถ้ามี)</span>
             </label>
-            <select value={teacherId2} onChange={e => setTeacherId2(e.target.value)} className={inp}>
+            <select value={teacherId2} onChange={e => setTeacherId2(e.target.value)} className={inp} disabled={isHomeroomOnly}>
               <option value="">— ไม่มีครูคนที่ 2 —</option>
-              {teachers.filter(t => t.id !== teacherId1).map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
+              {selectableTeachers.filter(t => t.id !== teacherId1).map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
             </select>
           </div>
 
@@ -444,29 +475,57 @@ function ChangeRequestsPanel({ requests, subjects, teachers, classrooms, timeSlo
 // ── Timetable Grid ────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, academicYearId,
-  canEditDirect, currentUser, onSave, onRequestChange, onDelete }: {
+  currentUser, onSave, onRequestChange, onDelete }: {
   classroom: Classroom; entries: TimetableEntry[]; timeSlots: TimeSlot[];
   subjects: Subject[]; teachers: Teacher[]; academicYearId: string;
-  canEditDirect: boolean; currentUser: UserProfile;
+  currentUser: UserProfile; // ← เอา canEditDirect ออก
   onSave: (d: any) => Promise<void>;
   onRequestChange: (d: any) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
-  const [modal, setModal] = useState<{ slot: TimeSlot; day: number; entry?: TimetableEntry } | null>(null);
-
-  const subjectColorMap: Record<string, typeof SUBJECT_COLORS[0]> = {};
-  subjects.forEach((s, i) => { subjectColorMap[s.id] = SUBJECT_COLORS[i % SUBJECT_COLORS.length]; });
+  const [modal, setModal] = useState<{ slot: TimeSlot; day: number; entry?: TimetableEntry; permission: "direct"|"request" } | null>(null);
 
   function getEntry(day: number, slotId: string) {
     return entries.find(e => e.day_of_week === day && e.time_slot_id === slotId);
   }
 
+  const subjectColorMap: Record<string, typeof SUBJECT_COLORS[0]> = {};
+  subjects.forEach((s, i) => { subjectColorMap[s.id] = SUBJECT_COLORS[i % SUBJECT_COLORS.length]; });
+
+  function getPermissionForEntry(user: UserProfile, entry: { teacher_id?: string; teacher_id_2?: string } | undefined, teachers: Teacher[]): "direct" | "request" | "deny" {
+  const extraRoles = user.extra_roles ?? [];
+
+  // admin/director/deputy_director: แก้ทุกอย่างตรง ไม่ต้องรอ
+  if (["admin", "director", "deputy_director"].includes(user.role)) return "direct";
+
+  // dept_head: แก้/เพิ่มได้เฉพาะครูใน department เดียวกัน ไม่ต้องรอ
+  if (extraRoles.includes("dept_head")) {
+    if (!entry) return "direct"; // เพิ่มคาบใหม่ — อนุญาต (จะกรองรายชื่อครูตอนเลือกแทน)
+    const t1 = teachers.find(t => t.id === entry.teacher_id);
+    const t2 = entry.teacher_id_2 ? teachers.find(t => t.id === entry.teacher_id_2) : null;
+    const sameDept = (t1?.department_id === user.department_id) || (t2?.department_id === user.department_id);
+    return sameDept ? "direct" : "deny";
+  }
+
+  // grade_head: แก้/เพิ่มได้เฉพาะครูใน grade_level เดียวกัน ไม่ต้องรอ
+  if (extraRoles.includes("grade_head")) {
+    if (!entry) return "direct";
+    const t1 = teachers.find(t => t.id === entry.teacher_id);
+    const t2 = entry.teacher_id_2 ? teachers.find(t => t.id === entry.teacher_id_2) : null;
+    const sameGrade = (t1?.grade_level === user.grade_level) || (t2?.grade_level === user.grade_level);
+    return sameGrade ? "direct" : "deny";
+  }
+
+  // homeroom_teacher (หรือครูทั่วไป): ขอเพิ่ม/แก้ได้เฉพาะคาบของตัวเอง — ต้องรออนุมัติ
+  if (!entry) return "request"; // เพิ่มคาบใหม่ — เป็นคำขอ
+  const isMine = entry.teacher_id === user.id || entry.teacher_id_2 === user.id;
+  return isMine ? "request" : "deny";
+}
+
   // ★ FIX: ทุก role คลิกได้ แต่ต่างกันที่ผลลัพธ์
   // admin → แก้ตรง | ครู → ส่งคำขอ (เฉพาะคาบตัวเอง หรือช่องว่าง)
-  function canInteract(entry?: TimetableEntry): boolean {
-    if (canEditDirect) return true; // admin คลิกได้ทั้งหมด
-    if (!entry) return true; // ★ ครูก็เพิ่มคาบใหม่ได้ (ส่งเป็น request)
-    return entry.teacher_id === currentUser.id || entry.teacher_id_2 === currentUser.id;
+  function getCellPermission(entry?: TimetableEntry): "direct" | "request" | "deny" {
+    return getPermissionForEntry(currentUser, entry, teachers);
   }
 
   return (
@@ -475,7 +534,7 @@ function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, acad
         <EntryModal
           entry={modal.entry} slot={modal.slot} day={modal.day} classroom={classroom}
           subjects={subjects} teachers={teachers} academicYearId={academicYearId}
-          canEditDirect={canEditDirect} currentUser={currentUser}
+          permission={modal.permission} currentUser={currentUser}
           onSave={async (d) => { await onSave(d); setModal(null); }}
           onRequestChange={async (d) => { await onRequestChange(d); setModal(null); }}
           onDelete={async (id) => { await onDelete(id); setModal(null); }}
@@ -524,12 +583,13 @@ function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, acad
                     );
 
                     const entry    = getEntry(day, slot.id);
-                    const colors   = entry ? (subjectColorMap[entry.subject_id] ?? SUBJECT_COLORS[0]) : null;
-                    const teacher1 = entry ? (teachers.find(t => t.id === entry.teacher_id) ?? (entry as any).teacher) : null;
-                    const teacher2 = entry?.teacher_id_2 ? (teachers.find(t => t.id === entry.teacher_id_2) ?? (entry as any).teacher2) : null;
-                    const subject  = entry ? (subjects.find(s => s.id === entry.subject_id) ?? (entry as any).subject) : null;
-                    const isMyClass = entry?.teacher_id === currentUser.id || entry?.teacher_id_2 === currentUser.id;
-                    const clickable = canInteract(entry);
+                      const perm     = getCellPermission(entry);
+                      const clickable = perm !== "deny";
+                      const colors   = entry ? (subjectColorMap[entry.subject_id] ?? SUBJECT_COLORS[0]) : null;
+                      const teacher1 = entry ? (teachers.find(t => t.id === entry.teacher_id) ?? (entry as any).teacher) : null;
+                      const teacher2 = entry?.teacher_id_2 ? (teachers.find(t => t.id === entry.teacher_id_2) ?? (entry as any).teacher2) : null;
+                      const subject  = entry ? (subjects.find(s => s.id === entry.subject_id) ?? (entry as any).subject) : null;
+                      const isMyClass = entry?.teacher_id === currentUser.id || entry?.teacher_id_2 === currentUser.id;
 
                     return (
                       <td key={slot.id} className="p-1 align-top border-r border-slate-100">
@@ -540,7 +600,7 @@ function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, acad
                               ${clickable ? "cursor-pointer hover:shadow-md hover:scale-[1.01]" : ""}
                               ${isMyClass ? "ring-2 ring-offset-1 ring-blue-400" : ""}`}
                             style={{ minHeight: "92px" }}
-                            onClick={() => clickable && setModal({ slot, day, entry })}>
+                            onClick={() => clickable && setModal({ slot, day, entry, permission: perm === "direct" ? "direct" : "request" })}>
                             <p className="font-black text-xs leading-tight line-clamp-2 mb-1">{(subject as any)?.name_th ?? "—"}</p>
                             <p className="text-[11px] font-bold opacity-80 leading-tight">{displayName(teacher1)}</p>
                             {teacher2 && <p className="text-[11px] font-bold opacity-80 leading-tight mt-0.5">{displayName(teacher2)}</p>}
@@ -550,7 +610,7 @@ function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, acad
                           clickable ? (
                             <div className="rounded-xl border-2 border-dashed border-slate-200 cursor-pointer hover:border-blue-300 hover:bg-blue-50 transition-all flex items-center justify-center"
                               style={{ minHeight: "92px" }}
-                              onClick={() => setModal({ slot, day })}>
+                              onClick={() => setModal({ slot, day, permission: perm === "direct" ? "direct" : "request" })}>
                               <span className="text-slate-300 text-2xl">+</span>
                             </div>
                           ) : (
@@ -715,13 +775,13 @@ export default function SchedulePage() {
 
       let profileData: any = null;
       const { data: byAuthId } = await supabase.from("users")
-        .select("id,first_name,last_name,full_name,email,role,position,homeroom_classroom_id,grade_level,subject_group")
+        .select("id,first_name,last_name,full_name,email,role,position,homeroom_classroom_id,grade_level,subject_group,extra_roles,department_id")
         .eq("auth_id", authUser.id).maybeSingle();
       profileData = byAuthId;
 
       if (!profileData && email) {
         const { data: byEmail } = await supabase.from("users")
-          .select("id,first_name,last_name,full_name,email,role,position,homeroom_classroom_id,grade_level,subject_group")
+          .select("id,first_name,last_name,full_name,email,role,position,homeroom_classroom_id,grade_level,subject_group,extra_roles,department_id")
           .eq("email", email).maybeSingle();
         profileData = byEmail;
         if (profileData) await (supabase.from("users") as any).update({ auth_id: authUser.id }).eq("id", profileData.id);
@@ -755,9 +815,9 @@ export default function SchedulePage() {
       setAcademicYearsRaw(yearsRaw);
       setTimeSlots(allSlots);
       setSubjects((subjectsRes.data ?? []) as Subject[]);
-      setTeachers(((teachersRes.data ?? []) as any[]).map(t => ({
-        ...t, full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim(),
-      })));
+      setTeachers(((teachersRes.data ?? []) as any[])
+        .filter(t => !NON_TEACHING_ROLES.includes(t.role ?? ""))  // ← กรองตรงนี้
+        .map(t => ({ ...t, full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim() })));
       setAllClassrooms(allRooms);
 
       const uniqueYearMap = new Map<string, string>();
@@ -867,10 +927,16 @@ export default function SchedulePage() {
 
   useEffect(() => { loadEntries(); }, [loadEntries]);
 
+  function isApproverUser(user: UserProfile): boolean {
+  if (["admin","director","deputy_director"].includes(user.role)) return true;
+  const extraRoles = user.extra_roles ?? [];
+  return extraRoles.includes("grade_head") || extraRoles.includes("dept_head");
+}
+
   // ── Load change requests ──────────────────────────────────────────────────
   const loadChangeRequests = useCallback(async () => {
     if (!user) return;
-    const isApprover = APPROVER_ROLES.includes(user.role);
+    const isApprover = isApproverUser(user);
     let query = (supabase.from("timetable_change_requests") as any)
       .select("*, requester:users!timetable_change_requests_requester_id_fkey(id,first_name,last_name,full_name)")
       .order("created_at", { ascending: false });
@@ -1144,11 +1210,11 @@ export default function SchedulePage() {
                 </div>
               </div>
               <TimetableGrid
-                classroom={selectedClassroom} entries={roomEntries} timeSlots={roomTimeSlots}
-                subjects={subjects} teachers={teachers} academicYearId={selectedYear}
-                canEditDirect={canEditDirect} currentUser={user}
-                onSave={handleSaveDirect}
-                onRequestChange={handleRequestChange}
+  classroom={selectedClassroom} entries={roomEntries} timeSlots={roomTimeSlots}
+  subjects={subjects} teachers={teachers} academicYearId={selectedYear}
+  currentUser={user}  // ← ไม่ส่ง canEditDirect แล้ว
+  onSave={handleSaveDirect}
+  onRequestChange={handleRequestChange}
                 onDelete={async (id) => { await supabase.from("timetable_entries").delete().eq("id", id); await loadEntries(); }}
               />
             </div>

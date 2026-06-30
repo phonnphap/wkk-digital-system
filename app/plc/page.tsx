@@ -21,10 +21,12 @@ function toThaiDateLong(iso: string) {
 function fullName(u: any) {
   if (!u) return "—";
   if (u.full_name) return u.full_name;
-  return `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() || u.email || "—";
+  return `${u.title ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() || u.email || "—";
 }
 
-const ADMIN_ROLES_SET = new Set(["admin", "director", "deputy_director", "staff"]);
+const ADMIN_ROLES_SET = new Set(["admin", "director", "deputy_director"]);
+const DEPUTY_EMAIL   = "titima@khienkhet.ac.th";
+const DIRECTOR_EMAIL = "thananut@khienkhet.ac.th";
 
 async function resolveOneDriveUrl(path?: string | null, fallbackUrl?: string | null): Promise<string | null> {
   if (!path) return fallbackUrl ?? null;
@@ -58,7 +60,7 @@ async function resolveOneDriveUrls(paths: (string | null | undefined)[], fallbac
 }
 
 type UserProfile = {
-  id: string; first_name?: string; last_name?: string; full_name?: string;
+  id: string; title?:string; first_name?: string; last_name?: string; full_name?: string;
   email: string; role: string; position?: string; academic_level?: string;
   department_id?: string; grade_level?: string;
 };
@@ -87,14 +89,23 @@ type DeptGroup = {
 const PLC_ONEDRIVE_FOLDER = "Plc";
 
 const GROUP_META: Record<string, { icon: string; color: string; textColor: string; borderColor: string; bgLight: string }> = {
-  "ภาษาไทย":            { icon:"📖", color:"bg-rose-500",    textColor:"text-rose-700",    borderColor:"border-rose-300",    bgLight:"bg-rose-50"    },
-  "คณิตศาสตร์":         { icon:"🔢", color:"bg-blue-500",    textColor:"text-blue-700",    borderColor:"border-blue-300",    bgLight:"bg-blue-50"    },
-  "วิทยาศาสตร์":        { icon:"🔬", color:"bg-emerald-500", textColor:"text-emerald-700", borderColor:"border-emerald-300", bgLight:"bg-emerald-50" },
-  "สังคมศึกษา":         { icon:"🌏", color:"bg-amber-500",   textColor:"text-amber-700",   borderColor:"border-amber-300",   bgLight:"bg-amber-50"   },
-  "ภาษาต่างประเทศ":     { icon:"🌐", color:"bg-sky-500",     textColor:"text-sky-700",     borderColor:"border-sky-300",     bgLight:"bg-sky-50"     },
-  "สุขศึกษาและพลศึกษา": { icon:"⚽", color:"bg-orange-500",  textColor:"text-orange-700",  borderColor:"border-orange-300",  bgLight:"bg-orange-50"  },
+  "ไทย ประถมต้น":            { icon:"📖", color:"bg-rose-500",    textColor:"text-rose-700",    borderColor:"border-rose-300",    bgLight:"bg-rose-50"    },
+  "ไทย ประถมปลาย":            { icon:"📖", color:"bg-rose-500",    textColor:"text-rose-700",    borderColor:"border-rose-300",    bgLight:"bg-rose-50"    },
+  "ไทย มัธยม":            { icon:"📖", color:"bg-rose-500",    textColor:"text-rose-700",    borderColor:"border-rose-300",    bgLight:"bg-rose-50"    },
+  "คณิตฯ ประถมต้น":         { icon:"🔢", color:"bg-blue-500",    textColor:"text-blue-700",    borderColor:"border-blue-300",    bgLight:"bg-blue-50"    },
+  "คณิตฯ ประถมปลาย":         { icon:"🔢", color:"bg-blue-500",    textColor:"text-blue-700",    borderColor:"border-blue-300",    bgLight:"bg-blue-50"    },
+  "คณิตฯ มัธยม":         { icon:"🔢", color:"bg-blue-500",    textColor:"text-blue-700",    borderColor:"border-blue-300",    bgLight:"bg-blue-50"    },
+  "วิทย์ ประถม":        { icon:"🔬", color:"bg-emerald-500", textColor:"text-emerald-700", borderColor:"border-emerald-300", bgLight:"bg-emerald-50" },
+  "วิทย์ ม.ต้น":        { icon:"🔬", color:"bg-emerald-500", textColor:"text-emerald-700", borderColor:"border-emerald-300", bgLight:"bg-emerald-50" },
+  "วิทย์ ม.ปลาย":        { icon:"🔬", color:"bg-emerald-500", textColor:"text-emerald-700", borderColor:"border-emerald-300", bgLight:"bg-emerald-50" },
+  "สังคม ประถม":         { icon:"🌏", color:"bg-amber-500",   textColor:"text-amber-700",   borderColor:"border-amber-300",   bgLight:"bg-amber-50"   },
+  "สังคม มัธยม":         { icon:"🌏", color:"bg-amber-500",   textColor:"text-amber-700",   borderColor:"border-amber-300",   bgLight:"bg-amber-50"   },
+  "อังกฤษ ประถมต้น":     { icon:"🌐", color:"bg-sky-500",     textColor:"text-sky-700",     borderColor:"border-sky-300",     bgLight:"bg-sky-50"     },
+  "อังกฤษ ประถมปลาย":     { icon:"🌐", color:"bg-sky-500",     textColor:"text-sky-700",     borderColor:"border-sky-300",     bgLight:"bg-sky-50"     },
+  "อังกฤษ มัธยม":     { icon:"🌐", color:"bg-sky-500",     textColor:"text-sky-700",     borderColor:"border-sky-300",     bgLight:"bg-sky-50"     },
+  "สุขศึกษา": { icon:"⚽", color:"bg-orange-500",  textColor:"text-orange-700",  borderColor:"border-orange-300",  bgLight:"bg-orange-50"  },
   "ศิลปะ":              { icon:"🎨", color:"bg-purple-500",  textColor:"text-purple-700",  borderColor:"border-purple-300",  bgLight:"bg-purple-50"  },
-  "การงานอาชีพ":        { icon:"🔧", color:"bg-teal-500",    textColor:"text-teal-700",    borderColor:"border-teal-300",    bgLight:"bg-teal-50"    },
+  "การงาน + พัฒนาผู้เรียน":        { icon:"🔧", color:"bg-teal-500",    textColor:"text-teal-700",    borderColor:"border-teal-300",    bgLight:"bg-teal-50"    },
   "คอมพิวเตอร์":        { icon:"💻", color:"bg-indigo-500",  textColor:"text-indigo-700",  borderColor:"border-indigo-300",  bgLight:"bg-indigo-50"  },
 };
 const DEFAULT_META = { icon:"📚", color:"bg-slate-500", textColor:"text-slate-700", borderColor:"border-slate-300", bgLight:"bg-slate-50" };
@@ -148,6 +159,8 @@ function buildPLCReportHTML(
   participants: Teacher[],
   resolvedImageUrls: string[],
   facilitatorSignatureUrl?: string,
+  deputySignatureUrl?: string,   // ← เพิ่ม
+  directorSignatureUrl?: string,  // ← เพิ่ม
   gradeLevelMap?: Record<string, string>,
   subjectMap?: Record<string, string>
 ): string {
@@ -216,12 +229,24 @@ table.meta td.k{color:#64748b;font-weight:700;white-space:nowrap;width:110px}
 <div style="border-top:1px solid #cbd5e1;padding-top:8px;margin-top:4px">
   ${sectionsHTML || "<p style='color:#94a3b8;font-size:10.5pt'>ไม่มีข้อมูลรายงานเพิ่มเติม</p>"}
 </div>
-<div style="margin-top:24px;display:flex;justify-content:flex-end">
-  <div style="text-align:center;width:220px">
-    ${facilitatorSignatureUrl ? `<img src="${facilitatorSignatureUrl}" style="max-height:60px;max-width:180px;object-fit:contain;margin:0 auto;display:block"/>` : `<div style="height:60px"></div>`}
-    <div style="border-bottom:1px solid #000;width:200px;margin:0 auto"></div>
-    <div style="font-size:10.5pt;margin-top:4px">(${facilitator ? fullName(facilitator) : "............................"})</div>
-    <div style="font-size:9.5pt;color:#64748b">ผู้บันทึก/วิทยากร</div>
+<div style="margin-top:28px;display:flex;justify-content:space-between;gap:10px">
+  <div style="text-align:center;flex:1">
+    ${facilitatorSignatureUrl ? `<img src="${facilitatorSignatureUrl}" style="max-height:55px;max-width:150px;object-fit:contain;margin:0 auto;display:block"/>` : `<div style="height:55px"></div>`}
+    <div style="border-bottom:1px solid #000;width:170px;margin:0 auto"></div>
+    <div style="font-size:10pt;margin-top:4px">(${facilitator ? fullName(facilitator) : "............................"})</div>
+    <div style="font-size:9pt;color:#64748b">ผู้บันทึก/วิทยากร</div>
+  </div>
+  <div style="text-align:center;flex:1">
+    ${deputySignatureUrl ? `<img src="${deputySignatureUrl}" style="max-height:55px;max-width:150px;object-fit:contain;margin:0 auto;display:block"/>` : `<div style="height:55px"></div>`}
+    <div style="border-bottom:1px solid #000;width:170px;margin:0 auto"></div>
+    <div style="font-size:10pt;margin-top:4px">(นางสาวฐิติมา กาบแก้ว)</div>
+    <div style="font-size:9pt;color:#64748b">รองผู้อำนวยการโรงเรียนกลุ่มบริหารงานบุคคล</div>
+  </div>
+  <div style="text-align:center;flex:1">
+    ${directorSignatureUrl ? `<img src="${directorSignatureUrl}" style="max-height:55px;max-width:150px;object-fit:contain;margin:0 auto;display:block"/>` : `<div style="height:55px"></div>`}
+    <div style="border-bottom:1px solid #000;width:170px;margin:0 auto"></div>
+    <div style="font-size:10pt;margin-top:4px">(นายธนณัฐ ศิระวงษ์)</div>
+    <div style="font-size:9pt;color:#64748b">ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
   </div>
 </div>
 <div style="margin-top:20px;font-size:9pt;color:#94a3b8;text-align:right">พิมพ์เมื่อ ${printedDate}</div>
@@ -234,10 +259,12 @@ function printPLCReport(
   participants: Teacher[],
   resolvedImageUrls: string[],
   facilitatorSignatureUrl?: string,
+  deputySignatureUrl?: string,
+  directorSignatureUrl?: string,
   gradeLevelMap?: Record<string, string>,
   subjectMap?: Record<string, string>
 ) {
-  const html = buildPLCReportHTML(meeting, facilitator, participants, resolvedImageUrls, facilitatorSignatureUrl, gradeLevelMap, subjectMap);
+  const html = buildPLCReportHTML(meeting, facilitator, participants, resolvedImageUrls, facilitatorSignatureUrl, deputySignatureUrl, directorSignatureUrl, gradeLevelMap, subjectMap);
   const win = window.open("", "_blank", "width=900,height=700");
   if (!win) return;
   win.document.open(); win.document.write(html); win.document.close();
@@ -249,14 +276,13 @@ async function printPLCReportAsync(
   facilitator: Teacher | undefined,
   participants: Teacher[],
   facilitatorSignatureUrl?: string,
+  deputySignatureUrl?: string,
+  directorSignatureUrl?: string,
   gradeLevelMap?: Record<string, string>,
   subjectMap?: Record<string, string>
 ) {
-  const freshUrls = await resolveOneDriveUrls(
-    meeting.image_paths ?? [],
-    meeting.image_urls ?? []
-  );
-  printPLCReport(meeting, facilitator, participants, freshUrls, facilitatorSignatureUrl, gradeLevelMap, subjectMap);
+  const freshUrls = await resolveOneDriveUrls(meeting.image_paths ?? [], meeting.image_urls ?? []);
+  printPLCReport(meeting, facilitator, participants, freshUrls, facilitatorSignatureUrl, deputySignatureUrl, directorSignatureUrl, gradeLevelMap, subjectMap);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -308,10 +334,11 @@ function RingProgress({ pct, size = 56, stroke = 6, color = "#3b82f6" }: { pct: 
 // ══════════════════════════════════════════════════════════
 // Report Detail Modal
 // ══════════════════════════════════════════════════════════
-function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, canEdit, gradeLevelMap, subjectMap }: {
+function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, canEdit, gradeLevelMap, subjectMap, deputySignatureUrl, directorSignatureUrl }: {
   meeting: PLCMeeting; allTeachers: Teacher[]; onClose: () => void;
   onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; canEdit: boolean;
   gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>;
+  deputySignatureUrl?: string; directorSignatureUrl?: string;
 }) {
   const participants = allTeachers.filter(t => meeting.participants?.includes(t.id));
   const facilitator  = allTeachers.find(t => t.id === meeting.facilitator_id);
@@ -331,7 +358,7 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
   async function handlePrint() {
     setPrinting(true);
     try {
-      await printPLCReportAsync(meeting, facilitator, participants, facilitator?.signature_url, gradeLevelMap, subjectMap);
+      await printPLCReportAsync(meeting, facilitator, participants, facilitator?.signature_url, deputySignatureUrl, directorSignatureUrl, gradeLevelMap, subjectMap);
     } finally {
       setPrinting(false);
     }
@@ -890,13 +917,15 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
 // ══════════════════════════════════════════════════════════
 // DeptGroupPanel
 // ══════════════════════════════════════════════════════════
-function DeptGroupPanel({ group, allTeachers, onEdit, onDelete, gradeLevelMap, subjectMap }: {
+function DeptGroupPanel({ group, allTeachers, onEdit, onDelete, gradeLevelMap, subjectMap, deputySignatureUrl, directorSignatureUrl }: {
   group: DeptGroup;
   allTeachers: Teacher[];
   onEdit: (m: PLCMeeting) => void;
   onDelete: (id: string) => void;
   gradeLevelMap: Record<string, string>;
   subjectMap: Record<string, string>;
+  deputySignatureUrl?: string;
+  directorSignatureUrl?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [viewMeeting, setViewMeeting] = useState<PLCMeeting | null>(null);
@@ -915,6 +944,8 @@ function DeptGroupPanel({ group, allTeachers, onEdit, onDelete, gradeLevelMap, s
           canEdit={false}
           gradeLevelMap={gradeLevelMap}
           subjectMap={subjectMap}
+          deputySignatureUrl={deputySignatureUrl}
+          directorSignatureUrl={directorSignatureUrl}
         />
       )}
       <div className={`border-2 ${meta.borderColor} ${meta.bgLight} rounded-2xl overflow-hidden`}>
@@ -1005,11 +1036,12 @@ function DeptGroupPanel({ group, allTeachers, onEdit, onDelete, gradeLevelMap, s
 // ══════════════════════════════════════════════════════════
 // AllReportsModal
 // ══════════════════════════════════════════════════════════
-function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId, onClose, onEdit, onDelete, canEdit, gradeLevelMap, subjectMap }: {
+function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId, onClose, onEdit, onDelete, canEdit, gradeLevelMap, subjectMap, deputySignatureUrl, directorSignatureUrl }: {
   meetings: PLCMeeting[]; allTeachers: Teacher[]; academicYears: AcademicYear[];
   selectedYearId: string; onClose: () => void; onEdit: (m: PLCMeeting) => void;
   onDelete: (id: string) => void; canEdit: boolean;
   gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>;
+  deputySignatureUrl?: string; directorSignatureUrl?: string;
 }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all"|"draft"|"submitted">("all");
@@ -1033,7 +1065,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
     try {
       const facilitator = allTeachers.find(t => t.id === m.facilitator_id);
       const participants = allTeachers.filter(t => m.participants?.includes(t.id));
-      await printPLCReportAsync(m, facilitator, participants, facilitator?.signature_url, gradeLevelMap, subjectMap);
+      await printPLCReportAsync(m, facilitator, participants, facilitator?.signature_url, deputySignatureUrl, directorSignatureUrl, gradeLevelMap, subjectMap);
     } finally {
       setPrintingId(null);
     }
@@ -1143,10 +1175,11 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
 // ══════════════════════════════════════════════════════════
 // TeacherHistorySection
 // ══════════════════════════════════════════════════════════
-function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete, onView, gradeLevelMap, subjectMap }: {
+function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete, onView, gradeLevelMap, subjectMap, deputySignatureUrl, directorSignatureUrl }: {
   meetings: PLCMeeting[]; userId: string; allTeachers: Teacher[];
   onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; onView: (m: PLCMeeting) => void;
   gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>;
+  deputySignatureUrl?: string; directorSignatureUrl?: string;
 }) {
   const [printingId, setPrintingId] = useState<string | null>(null);
   const myMeetings = meetings
@@ -1159,7 +1192,7 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
     try {
       const facilitator = allTeachers.find(t => t.id === m.facilitator_id);
       const participants = allTeachers.filter(t => m.participants?.includes(t.id));
-      await printPLCReportAsync(m, facilitator, participants, facilitator?.signature_url, gradeLevelMap, subjectMap);
+      await printPLCReportAsync(m, facilitator, participants, facilitator?.signature_url, deputySignatureUrl, directorSignatureUrl, gradeLevelMap, subjectMap);
     } finally {
       setPrintingId(null);
     }
@@ -1268,6 +1301,8 @@ export default function PLCHoursPage() {
   const [activeGroupKey, setActiveGroupKey] = useState<string>("all");
   const [showReports,    setShowReports]    = useState(false);
   const [viewMeeting,    setViewMeeting]    = useState<PLCMeeting | null>(null);
+  const [deputySignature, setDeputySignature] = useState<string>("");
+  const [directorSignature, setDirectorSignature] = useState<string>("");
 
   useEffect(() => {
     (async () => {
@@ -1277,12 +1312,12 @@ export default function PLCHoursPage() {
 
       let profileData: any = null;
       const { data: byAuthId } = await supabase.from("users")
-        .select("id, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level")
+        .select("id, title, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level")
         .eq("auth_id", authUser.id).maybeSingle();
       profileData = byAuthId;
       if (!profileData && email) {
         const { data: byEmail } = await supabase.from("users")
-          .select("id, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level")
+          .select("id, title, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level")
           .eq("email", email).maybeSingle();
         profileData = byEmail;
         if (profileData) await (supabase.from("users") as any).update({ auth_id: authUser.id }).eq("id", profileData.id);
@@ -1290,7 +1325,7 @@ export default function PLCHoursPage() {
       if (profileData) {
         setUser({
           ...profileData,
-          full_name: profileData.full_name || `${profileData.first_name ?? ""} ${profileData.last_name ?? ""}`.trim(),
+          full_name: profileData.full_name || `${profileData.title ?? ""}${profileData.first_name ?? ""} ${profileData.last_name ?? ""}`.trim(),
         });
       }
 
@@ -1319,14 +1354,25 @@ export default function PLCHoursPage() {
       // โหลด users (ครู)
       const { data: allUsersData } = await supabase
         .from("users")
-        .select("id, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level, signature_url")
+        .select("id, title, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level, signature_url")
         .order("first_name");
+      
+      // ใน useEffect init หลังโหลด allUsersData เสร็จ เพิ่ม:
+      const { data: approversData } = await supabase
+        .from("users")
+        .select("email, signature_url")
+        .in("email", [DEPUTY_EMAIL, DIRECTOR_EMAIL]);
+
+      const deputy = (approversData || []).find((u: any) => u.email === DEPUTY_EMAIL);
+      const director = (approversData || []).find((u: any) => u.email === DIRECTOR_EMAIL);
+      setDeputySignature(deputy?.signature_url || "");
+      setDirectorSignature(director?.signature_url || "");
 
       const teachers: Teacher[] = (allUsersData || [])
         .filter((t: any) => !ADMIN_ROLES_SET.has(t.role ?? ""))
         .map((t: any) => ({
           ...t,
-          full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim(),
+          full_name: t.full_name || `${t.title ?? ""}${t.first_name ?? ""} ${t.last_name ?? ""}`.trim(),
         }));
 
       setAllTeachers(teachers);
@@ -1485,6 +1531,8 @@ export default function PLCHoursPage() {
               onView={m => setViewMeeting(m)}
               gradeLevelMap={gradeLevelMap}
               subjectMap={subjectMap}
+              deputySignatureUrl={deputySignature}
+              directorSignatureUrl={directorSignature}
             />
           </>
         )}
@@ -1567,6 +1615,8 @@ export default function PLCHoursPage() {
                   onDelete={handleDelete}
                   gradeLevelMap={gradeLevelMap}
                   subjectMap={subjectMap}
+                  deputySignatureUrl={deputySignature}
+                  directorSignatureUrl={directorSignature}
                 />
               ))}
             </div>
@@ -1651,6 +1701,8 @@ export default function PLCHoursPage() {
           onDelete={handleDelete} canEdit={isAdmin}
           gradeLevelMap={gradeLevelMap}
           subjectMap={subjectMap}
+          deputySignatureUrl={deputySignature}
+          directorSignatureUrl={directorSignature}
         />
       )}
       {viewMeeting && user && (
@@ -1662,6 +1714,8 @@ export default function PLCHoursPage() {
           canEdit={true}
           gradeLevelMap={gradeLevelMap}
           subjectMap={subjectMap}
+          deputySignatureUrl={deputySignature}
+          directorSignatureUrl={directorSignature}
         />
       )}
     </div>
