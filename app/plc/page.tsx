@@ -24,21 +24,8 @@ function fullName(u: any) {
   return `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() || u.email || "—";
 }
 
-function fullNameWithTitle(u: any) {
-  if (!u) return "—";
-  const t = u.title ? u.title.trim() : "";
-  const first = u.first_name ?? "";
-  const last = u.last_name ?? "";
-  const combined = `${t}${first} ${last}`.replace(/\s+/g, " ").trim();
-  return combined || u.full_name || u.email || "—";
-}
-
-// ─── roles ที่ถือว่าเป็น admin (ไม่ใช่ครู) ────────────────────────────────────
 const ADMIN_ROLES_SET = new Set(["admin", "director", "deputy_director", "staff"]);
 
-// [FIX-4] resolve เอกสาร/รูปที่อัพขึ้น OneDrive ให้สดทุกครั้ง เพราะ downloadUrl
-// ที่ได้ตอนอัพโหลดเป็นลิงก์ pre-authenticated ชั่วคราว หมดอายุได้ ทำให้รูปไม่แสดง
-// ไม่ว่าใครเปิดดู (ไม่เกี่ยวกับสิทธิ์/role)
 async function resolveOneDriveUrl(path?: string | null, fallbackUrl?: string | null): Promise<string | null> {
   if (!path) return fallbackUrl ?? null;
   try {
@@ -75,7 +62,7 @@ type UserProfile = {
   email: string; role: string; position?: string; academic_level?: string;
   department_id?: string; grade_level?: string;
 };
-type Teacher = UserProfile & { department_id?: string; grade_level?: string; signature_url?: string;};
+type Teacher = UserProfile & { department_id?: string; grade_level?: string; signature_url?: string; };
 type AcademicYear = { id: string; year_name: string; semester: number; is_current?: boolean };
 type MeetingScope = "subject" | "grade";
 type PLCMeeting = {
@@ -88,10 +75,9 @@ type PLCMeeting = {
   meeting_scope?: MeetingScope; grade_level?: string;
 };
 
-// ── Department/Grade group type ─────────────────────────────────────────────────
 type DeptGroup = {
-  key: string;             // academic_level หรือ grade_level
-  label: string;            // ป้ายแสดงผล
+  key: string;
+  label: string;
   scope: MeetingScope;
   teachers: Teacher[];
   meetings: PLCMeeting[];
@@ -100,7 +86,6 @@ type DeptGroup = {
 
 const PLC_ONEDRIVE_FOLDER = "Plc";
 
-// ── ป้ายกำกับ & สีแต่ละกลุ่มสาระ (map จาก academic_level) ──────────────────
 const GROUP_META: Record<string, { icon: string; color: string; textColor: string; borderColor: string; bgLight: string }> = {
   "ภาษาไทย":            { icon:"📖", color:"bg-rose-500",    textColor:"text-rose-700",    borderColor:"border-rose-300",    bgLight:"bg-rose-50"    },
   "คณิตศาสตร์":         { icon:"🔢", color:"bg-blue-500",    textColor:"text-blue-700",    borderColor:"border-blue-300",    bgLight:"bg-blue-50"    },
@@ -113,16 +98,16 @@ const GROUP_META: Record<string, { icon: string; color: string; textColor: strin
   "คอมพิวเตอร์":        { icon:"💻", color:"bg-indigo-500",  textColor:"text-indigo-700",  borderColor:"border-indigo-300",  bgLight:"bg-indigo-50"  },
 };
 const DEFAULT_META = { icon:"📚", color:"bg-slate-500", textColor:"text-slate-700", borderColor:"border-slate-300", bgLight:"bg-slate-50" };
-function getGroupMeta(academic_level: string) {
-  const exact = GROUP_META[academic_level];
+
+function getGroupMeta(label: string) {
+  const exact = GROUP_META[label];
   if (exact) return exact;
   for (const [k, v] of Object.entries(GROUP_META)) {
-    if (academic_level.includes(k) || k.includes(academic_level)) return v;
+    if (label.includes(k) || k.includes(label)) return v;
   }
   return DEFAULT_META;
 }
 
-// [NEW] ป้ายกำกับ & สีของแต่ละสายชั้น (grade_level)
 const GRADE_LABEL: Record<string, string> = {
   "k2":"อ.2","k3":"อ.3",
   "p1":"ป.1","p2":"ป.2","p3":"ป.3","p4":"ป.4","p5":"ป.5","p6":"ป.6",
@@ -133,19 +118,19 @@ const GRADE_LABEL: Record<string, string> = {
 };
 const GRADE_META: { icon: string; textColor: string; borderColor: string; bgLight: string } =
   { icon:"🎓", textColor:"text-cyan-700", borderColor:"border-cyan-300", bgLight:"bg-cyan-50" };
-function gradeLabel(g: string, glMap?: Record<string, string>): string {
-  if (!g) return "—";
-  // เช็ค map จาก DB ก่อน (UUID → ชื่อจริง)
-  if (glMap && glMap[g]) return glMap[g];
-  // fallback: ถ้าเป็น key แบบ p1/k2 ฯลฯ
-  return GRADE_LABEL[g] ?? g;
+
+// ── Resolve label helpers ──────────────────────────────────────────────────────
+function gradeLabel(id: string, glMap?: Record<string, string>): string {
+  if (!id) return "—";
+  if (glMap && glMap[id]) return glMap[id];
+  return GRADE_LABEL[id] ?? id;
 }
 
-function subjectLabel(id: string, sMap: Record<string, string>): string {
-  return sMap[id] ?? id;
+function subjectLabel(id: string, sMap?: Record<string, string>): string {
+  if (!id) return "—";
+  if (sMap && sMap[id]) return sMap[id];
+  return id;
 }
-
-const LEAVE_TYPE_LIST_UNUSED = null; // (placeholder removed)
 
 const inp = (err?: boolean) =>
   `w-full bg-white border-2 ${err ? "border-red-400 animate-pulse" : "border-blue-200"} rounded-xl px-3 py-2.5 text-slate-800 text-sm font-bold focus:border-blue-500 focus:outline-none transition-colors`;
@@ -155,8 +140,7 @@ const labelCls = "block text-xs font-black text-slate-500 mb-1.5 uppercase track
 const reqStar = <span className="text-red-500 ml-0.5">*</span>;
 
 // ══════════════════════════════════════════════════════════
-// [NEW] ── Print Report Builder (A4) ────────────────────────
-// ใช้สำหรับปุ่ม "🖨️ พิมพ์รายงาน" — รองรับทั้งประชุมกลุ่มสาระและสายชั้น
+// Print Report Builder
 // ══════════════════════════════════════════════════════════
 function buildPLCReportHTML(
   meeting: PLCMeeting,
@@ -164,13 +148,13 @@ function buildPLCReportHTML(
   participants: Teacher[],
   resolvedImageUrls: string[],
   facilitatorSignatureUrl?: string,
-  deputySignatureUrl?: string,
-  deputyName?: string,
-  directorSignatureUrl?: string,
-  directorName?: string,
+  gradeLevelMap?: Record<string, string>,
+  subjectMap?: Record<string, string>
 ): string {
   const isGrade = meeting.meeting_scope === "grade";
-  const scopeLabel = isGrade ? `ประชุมสายชั้น ${gradeLabel(meeting.grade_level ?? "")}` : "ประชุมกลุ่มสาระการเรียนรู้ (PLC)";
+  const scopeLabel = isGrade
+    ? `ประชุมสายชั้น ${gradeLabel(meeting.grade_level ?? "", gradeLevelMap)}`
+    : "ประชุมกลุ่มสาระการเรียนรู้ (PLC)";
   const now = new Date();
   const printedDate = now.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Bangkok" });
 
@@ -187,49 +171,20 @@ function buildPLCReportHTML(
   const sectionsHTML = sections.map(s => s.value ? `
     <div style="margin-bottom:9px">
       <div style="font-weight:700;font-size:11pt;margin-bottom:2px">${s.icon} ${s.label}</div>
-      <div style="font-size:10.5pt;line-height:1.6;white-space:pre-wrap;padding-left:4px;border-left:2px solid #cbd5e1;padding-left:8px">${(s.value || "").replace(/</g,"&lt;")}</div>
+      <div style="font-size:10.5pt;line-height:1.6;white-space:pre-wrap;padding-left:8px;border-left:2px solid #cbd5e1">${(s.value || "").replace(/</g,"&lt;")}</div>
     </div>` : "").join("");
 
   const participantsHTML = participants.length
-  ? participants.map(t => `<span style="display:inline-block;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:2px 8px;margin:2px;font-size:9.5pt">${fullNameWithTitle(t)}</span>`).join("")
-  : "<span style='color:#94a3b8'>—</span>";
+    ? participants.map(t => `<span style="display:inline-block;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:2px 8px;margin:2px;font-size:9.5pt">${fullName(t)}</span>`).join("")
+    : "<span style='color:#94a3b8'>—</span>";
 
   const imagesHTML = resolvedImageUrls.length ? `
     <div style="page-break-before:always;padding-top:10mm">
       <div style="font-size:13pt;font-weight:900;margin-bottom:10px;border-bottom:2px solid #000;padding-bottom:6px">📷 ภาพประกอบการประชุม</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        ${resolvedImageUrls.map(url => `<img src="${url}" style="width:100%;height:85mm;object-fit:cover;border-radius:6px;border:1px solid #ccc" onerror="this.outerHTML='<div style=&quot;height:85mm;display:flex;align-items:center;justify-content:center;background:#f1f5f9;color:#94a3b8;border-radius:6px&quot;>ไม่สามารถโหลดรูปได้</div>'"/>`).join("")}
+        ${resolvedImageUrls.map(url => `<img src="${url}" style="width:100%;height:85mm;object-fit:cover;border-radius:6px;border:1px solid #ccc"/>`).join("")}
       </div>
     </div>` : "";
-
-const signatureHTML = `
-<div style="margin-top:32px;display:flex;justify-content:space-between;gap:16px">
-  <!-- ผู้บันทึก -->
-  <div style="text-align:center;flex:1">
-    ${facilitatorSignatureUrl
-      ? `<img src="${facilitatorSignatureUrl}" style="max-height:56px;max-width:160px;object-fit:contain;margin:0 auto;display:block"/>`
-      : `<div style="height:56px"></div>`}
-    <div style="font-size:10.5pt;margin-top:6px">(${facilitator ? fullName(facilitator) : "............................"})</div>
-    <div style="font-size:9.5pt;color:#475569">ผู้บันทึก/วิทยากร</div>
-  </div>
-  <!-- รองผอ. -->
-  <div style="text-align:center;flex:1">
-    ${deputySignatureUrl
-      ? `<img src="${deputySignatureUrl}" style="max-height:56px;max-width:160px;object-fit:contain;margin:0 auto;display:block"/>`
-      : `<div style="height:56px"></div>`}
-    <div style="font-size:10.5pt;margin-top:6px">(${deputyName ?? "นางสาวฐิติมา  กาบแก้ว"})</div>
-    <div style="font-size:9.5pt;color:#475569">รองผู้อำนวยการโรงเรียน</div>
-    <div style="font-size:9pt;color:#64748b">กลุ่มบริหารงานบุคคล</div>
-  </div>
-  <!-- ผอ. -->
-  <div style="text-align:center;flex:1">
-    ${directorSignatureUrl
-      ? `<img src="${directorSignatureUrl}" style="max-height:56px;max-width:160px;object-fit:contain;margin:0 auto;display:block"/>`
-      : `<div style="height:56px"></div>`}
-    <div style="font-size:10.5pt;margin-top:6px">(${directorName ?? "นายธนณัฐ  ศิระวงษ์"})</div>
-    <div style="font-size:9.5pt;color:#475569">ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
-  </div>
-</div>`;
 
   return `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700;900&display=swap" rel="stylesheet">
@@ -242,13 +197,11 @@ table.meta td{padding:3px 6px;vertical-align:top}
 table.meta td.k{color:#64748b;font-weight:700;white-space:nowrap;width:110px}
 @page{size:A4;margin:0}
 </style></head><body><div class="page">
-
 <div style="text-align:center;margin-bottom:6px">
   <img src="/school-logo.png" style="width:54px;height:54px;object-fit:contain" onerror="this.style.display='none'"/>
 </div>
 <div style="font-size:15pt;font-weight:900;text-align:center;margin-bottom:2px">แบบรายงานผลการดำเนินกิจกรรม${isGrade ? "ประชุมสายชั้น" : "ชุมชนแห่งการเรียนรู้ทางวิชาชีพ (PLC)"}</div>
 <div style="text-align:center;font-size:10.5pt;color:#475569;margin-bottom:10px">โรงเรียนวัดเขียนเขต ตำบลบึงยี่โถ อำเภอธัญบุรี จังหวัดปทุมธานี</div>
-
 <table class="meta">
   <tr><td class="k">ประเภทการประชุม</td><td>${scopeLabel}</td></tr>
   <tr><td class="k">ครั้งที่</td><td>${meeting.meeting_number ?? "—"}</td></tr>
@@ -257,15 +210,21 @@ table.meta td.k{color:#64748b;font-weight:700;white-space:nowrap;width:110px}
   <tr><td class="k">วันที่</td><td>${toThaiDateLong(meeting.meeting_date)}</td></tr>
   <tr><td class="k">เวลา</td><td>${meeting.start_time ?? "—"} – ${meeting.end_time ?? "—"} น. (รวม ${meeting.duration_hours} ชั่วโมง)</td></tr>
   <tr><td class="k">สถานที่</td><td>${meeting.location ?? "—"}</td></tr>
-  <tr><td class="k">วิทยากร/ผู้นำ</td><td>${facilitator ? fullNameWithTitle(facilitator) : "—"}</td></tr>
+  <tr><td class="k">วิทยากร/ผู้นำ</td><td>${facilitator ? fullName(facilitator) : "—"}</td></tr>
   <tr><td class="k">ผู้เข้าร่วม (${participants.length} คน)</td><td>${participantsHTML}</td></tr>
 </table>
-
 <div style="border-top:1px solid #cbd5e1;padding-top:8px;margin-top:4px">
   ${sectionsHTML || "<p style='color:#94a3b8;font-size:10.5pt'>ไม่มีข้อมูลรายงานเพิ่มเติม</p>"}
 </div>
+<div style="margin-top:24px;display:flex;justify-content:flex-end">
+  <div style="text-align:center;width:220px">
+    ${facilitatorSignatureUrl ? `<img src="${facilitatorSignatureUrl}" style="max-height:60px;max-width:180px;object-fit:contain;margin:0 auto;display:block"/>` : `<div style="height:60px"></div>`}
+    <div style="border-bottom:1px solid #000;width:200px;margin:0 auto"></div>
+    <div style="font-size:10.5pt;margin-top:4px">(${facilitator ? fullName(facilitator) : "............................"})</div>
+    <div style="font-size:9.5pt;color:#64748b">ผู้บันทึก/วิทยากร</div>
+  </div>
+</div>
 <div style="margin-top:20px;font-size:9pt;color:#94a3b8;text-align:right">พิมพ์เมื่อ ${printedDate}</div>
-
 </div>${imagesHTML}</body></html>`;
 }
 
@@ -275,44 +234,33 @@ function printPLCReport(
   participants: Teacher[],
   resolvedImageUrls: string[],
   facilitatorSignatureUrl?: string,
-  deputySignatureUrl?: string,
-  deputyName?: string,
-  directorSignatureUrl?: string,
-  directorName?: string,
+  gradeLevelMap?: Record<string, string>,
+  subjectMap?: Record<string, string>
 ) {
-  const html = buildPLCReportHTML(
-    meeting, facilitator, participants, resolvedImageUrls,
-    facilitatorSignatureUrl, deputySignatureUrl, deputyName,
-    directorSignatureUrl, directorName
-  );
+  const html = buildPLCReportHTML(meeting, facilitator, participants, resolvedImageUrls, facilitatorSignatureUrl, gradeLevelMap, subjectMap);
   const win = window.open("", "_blank", "width=900,height=700");
   if (!win) return;
   win.document.open(); win.document.write(html); win.document.close();
   win.onload = () => { win.focus(); win.print(); };
 }
 
-// [FIX-4] ดึงรูปสดก่อนพิมพ์ (resolve image_paths ใหม่ ป้องกัน downloadUrl หมดอายุ)
 async function printPLCReportAsync(
   meeting: PLCMeeting,
   facilitator: Teacher | undefined,
   participants: Teacher[],
-  facilitatorSignatureUrl: string | undefined,
-  deputyUser?: any,
-  directorUser?: any
+  facilitatorSignatureUrl?: string,
+  gradeLevelMap?: Record<string, string>,
+  subjectMap?: Record<string, string>
 ) {
   const freshUrls = await resolveOneDriveUrls(
     meeting.image_paths ?? [],
     meeting.image_urls ?? []
   );
-  printPLCReport(
-    meeting, facilitator, participants, freshUrls,
-    facilitatorSignatureUrl,
-    deputyUser?.signature_url, deputyUser ? fullName(deputyUser) : undefined,
-    directorUser?.signature_url, directorUser ? fullName(directorUser) : undefined,
-  );
+  printPLCReport(meeting, facilitator, participants, freshUrls, facilitatorSignatureUrl, gradeLevelMap, subjectMap);
 }
+
 // ══════════════════════════════════════════════════════════
-// [NEW] ── ResolvedImage — รูปที่ resolve ลิงก์สดเสมอก่อนแสดง ──
+// ResolvedImage
 // ══════════════════════════════════════════════════════════
 function ResolvedImage({ url, path, alt, className, onClick }: {
   url?: string | null; path?: string | null; alt: string; className?: string; onClick?: () => void;
@@ -321,19 +269,14 @@ function ResolvedImage({ url, path, alt, className, onClick }: {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-  let cancelled = false;
-  setFailed(false);
-  if (!path && url) {
-    // ไม่มี path เลย — ใช้ url ตรงๆ
-    setLiveUrl(url);
-    return;
-  }
-  (async () => {
-    const fresh = await resolveOneDriveUrl(path, url);
-    if (!cancelled) setLiveUrl(fresh);
-  })();
-  return () => { cancelled = true; };
-}, [url, path]);
+    let cancelled = false;
+    setFailed(false);
+    (async () => {
+      const fresh = await resolveOneDriveUrl(path, url);
+      if (!cancelled) setLiveUrl(fresh);
+    })();
+    return () => { cancelled = true; };
+  }, [url, path]);
 
   if (!liveUrl || failed) {
     return (
@@ -343,13 +286,7 @@ function ResolvedImage({ url, path, alt, className, onClick }: {
     );
   }
   return (
-    <img
-      src={liveUrl}
-      alt={alt}
-      className={className}
-      onClick={onClick}
-      onError={() => setFailed(true)}
-    />
+    <img src={liveUrl} alt={alt} className={className} onClick={onClick} onError={() => setFailed(true)} />
   );
 }
 
@@ -369,17 +306,12 @@ function RingProgress({ pct, size = 56, stroke = 6, color = "#3b82f6" }: { pct: 
 }
 
 // ══════════════════════════════════════════════════════════
-// ── Report Detail Modal ─────────────────────────────────────
-// [FIX-1] เพิ่มปุ่ม "🖨️ พิมพ์รายงาน" (A4) — ใช้ได้ทั้งประชุมกลุ่มสาระและสายชั้น
-// [FIX-2][FIX-3] ใช้ ResolvedImage แทน <img> ตรง ๆ — แก้ภาพไม่แสดงทุก role
-//                และทำหน้าที่เป็น "preview หลังส่งแล้ว" ไปในตัว
+// Report Detail Modal
 // ══════════════════════════════════════════════════════════
 function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, canEdit, gradeLevelMap, subjectMap }: {
   meeting: PLCMeeting; allTeachers: Teacher[]; onClose: () => void;
-  onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; 
-  canEdit: boolean;
-  gradeLevelMap: Record<string, string>;
-  subjectMap?: Record<string, string>;   // ← optional, since not every caller passes it
+  onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; canEdit: boolean;
+  gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>;
 }) {
   const participants = allTeachers.filter(t => meeting.participants?.includes(t.id));
   const facilitator  = allTeachers.find(t => t.id === meeting.facilitator_id);
@@ -399,8 +331,7 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
   async function handlePrint() {
     setPrinting(true);
     try {
-      await printPLCReportAsync(meeting, facilitator, participants, facilitator?.signature_url 
-      );
+      await printPLCReportAsync(meeting, facilitator, participants, facilitator?.signature_url, gradeLevelMap, subjectMap);
     } finally {
       setPrinting(false);
     }
@@ -415,11 +346,8 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
               <span className={`text-xs font-black px-2 py-1 rounded-lg border ${meeting.status === "submitted" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
                 {meeting.status === "submitted" ? "✅ ส่งแล้ว" : "📝 ร่าง"}
               </span>
-              {/* [NEW] badge บอกประเภทประชุม */}
               <span className={`text-xs font-black px-2 py-1 rounded-lg border ${isGrade ? `${GRADE_META.bgLight} ${GRADE_META.textColor} ${GRADE_META.borderColor}` : "bg-indigo-50 text-indigo-700 border-indigo-200"}`}>
-                {isGrade 
-  ? `${GRADE_META.icon} สายชั้น ${gradeLabel(meeting.grade_level ?? "", gradeLevelMap)}` 
-  : "📚 กลุ่มสาระ"}
+                {isGrade ? `${GRADE_META.icon} สายชั้น ${gradeLabel(meeting.grade_level ?? "", gradeLevelMap)}` : "📚 กลุ่มสาระ"}
               </span>
               {meeting.meeting_number && <span className="text-xs font-black text-slate-400 bg-slate-100 px-2 py-1 rounded-lg">ครั้งที่ {meeting.meeting_number}</span>}
             </div>
@@ -436,13 +364,13 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3">
-  <p className="text-xs font-black text-blue-500 mb-1">วิทยากร / ผู้นำ</p>
-  <p className="font-bold text-slate-800 text-sm">{facilitator ? fullNameWithTitle(facilitator) : "—"}</p>
-</div>
-<div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
-  <p className="text-xs font-black text-slate-500 mb-1">ผู้เข้าร่วม ({participants.length} คน)</p>
-  <div className="flex flex-wrap gap-1">
-    {participants.slice(0,5).map(t => <span key={t.id} className="text-xs bg-white border border-slate-200 text-slate-600 font-bold px-1.5 py-0.5 rounded-lg">{fullNameWithTitle(t)}</span>)}
+              <p className="text-xs font-black text-blue-500 mb-1">วิทยากร / ผู้นำ</p>
+              <p className="font-bold text-slate-800 text-sm">{facilitator ? fullName(facilitator) : "—"}</p>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
+              <p className="text-xs font-black text-slate-500 mb-1">ผู้เข้าร่วม ({participants.length} คน)</p>
+              <div className="flex flex-wrap gap-1">
+                {participants.slice(0,5).map(t => <span key={t.id} className="text-xs bg-white border border-slate-200 text-slate-600 font-bold px-1.5 py-0.5 rounded-lg">{fullName(t)}</span>)}
                 {participants.length > 5 && <span className="text-xs text-slate-400">+{participants.length - 5}</span>}
               </div>
             </div>
@@ -453,7 +381,6 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
               <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{s.value}</p>
             </div>
           ) : null)}
-          {/* [FIX-2][FIX-3] แสดงรูปด้วย ResolvedImage — resolve ลิงก์สดเสมอ ใช้เป็น preview หลังส่งด้วย */}
           {((meeting.image_urls && meeting.image_urls.length > 0) || (meeting.image_paths && meeting.image_paths.length > 0)) && (
             <div>
               <p className="text-xs font-black text-slate-500 mb-2">
@@ -467,10 +394,7 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
                     url={meeting.image_urls?.[i]}
                     alt={`meeting-${i+1}`}
                     className="w-full h-24 object-cover rounded-xl border border-slate-200 cursor-pointer hover:opacity-90"
-                    onClick={() => {
-                      const u = meeting.image_urls?.[i];
-                      if (u) window.open(u, "_blank");
-                    }}
+                    onClick={() => { const u = meeting.image_urls?.[i]; if (u) window.open(u, "_blank"); }}
                   />
                 ))}
               </div>
@@ -478,7 +402,6 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
           )}
         </div>
         <div className="border-t border-slate-100 px-6 py-4 flex gap-2 shrink-0 bg-slate-50 rounded-b-3xl">
-          {/* [FIX-1] ปุ่มพิมพ์รายงาน A4 — แสดงให้ทุกคนเห็น (ไม่ผูกกับ canEdit) */}
           <button onClick={handlePrint} disabled={printing}
             className="px-4 py-2.5 rounded-xl border-2 border-slate-300 bg-white text-slate-700 font-black text-sm hover:bg-slate-100 disabled:opacity-50 flex items-center gap-1.5">
             {printing ? <span className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"/> : "🖨️"} พิมพ์รายงาน
@@ -496,10 +419,7 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
 }
 
 // ══════════════════════════════════════════════════════════
-// ── Meeting Modal ────────────────────────────────────────────
-// [FIX-5] เพิ่มตัวเลือก "ประเภทการประชุม" (กลุ่มสาระ / สายชั้น) ตอนบันทึก
-//         เมื่อเลือกสายชั้น จะกรองรายชื่อผู้เข้าร่วมจาก grade_level เดียวกัน
-// [FIX-4] เก็บ image_paths คู่กับ image_urls เพื่อ resolve ลิงก์สดได้ในอนาคต
+// Meeting Modal
 // ══════════════════════════════════════════════════════════
 function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, currentUser, gradeLevelMap, subjectMap, onSave, onClose }: {
   meeting: Partial<PLCMeeting> | null;
@@ -507,7 +427,7 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   academicYears: AcademicYear[];
   currentUserId: string;
   currentUser: UserProfile;
-  gradeLevelMap: Record<string, string>; // ★ เพิ่ม
+  gradeLevelMap: Record<string, string>;
   subjectMap: Record<string, string>;
   onSave: (data: any, isDraft: boolean) => Promise<void>;
   onClose: () => void;
@@ -515,7 +435,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const isEdit = !!meeting?.id;
   const defaultYear = academicYears.find(y => y.is_current) ?? academicYears[0];
 
-  // [NEW] ประเภทการประชุม: กลุ่มสาระ (subject) หรือ สายชั้น (grade)
   const [scope, setScope] = useState<MeetingScope>(meeting?.meeting_scope ?? "subject");
   const [gradeLevelSel, setGradeLevelSel] = useState<string>(meeting?.grade_level ?? currentUser.grade_level ?? "");
 
@@ -523,7 +442,7 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const [date,        setDate]        = useState(meeting?.meeting_date ?? new Date().toISOString().slice(0, 10));
   const [startTime,   setStartTime]   = useState(meeting?.start_time ?? "08:30");
   const [endTime,     setEndTime]     = useState(meeting?.end_time ?? "12:30");
-  const [meetingNo, setMeetingNo] = useState<number | "">("");
+  const [meetingNo,   setMeetingNo]   = useState<number | "">("");
   const [title,       setTitle]       = useState(meeting?.title ?? "");
   const [topic,       setTopic]       = useState(meeting?.topic ?? "");
   const [hours,       setHours]       = useState<number>(meeting?.duration_hours ?? 4);
@@ -535,7 +454,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const [solutions,   setSolutions]   = useState(meeting?.solutions ?? "");
   const [reflections, setReflections] = useState(meeting?.reflections ?? "");
   const [futuredev,   setFuturedev]   = useState(meeting?.future_development ?? "");
-  // [FIX-4] images เก็บทั้ง url (ใช้แสดงทันที) และ path (ใช้ resolve สดในอนาคต)
   const [images,      setImages]      = useState<{ url: string; path: string; preview: string }[]>(
     (meeting?.image_urls ?? []).map((u, i) => ({ url: u, path: meeting?.image_paths?.[i] ?? "", preview: u }))
   );
@@ -547,29 +465,26 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const [submitted,   setSubmitted]   = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // [NEW] รายชื่อ grade_level ที่มีอยู่จริงในระบบ (สำหรับ dropdown เลือกสายชั้น)
-  // ลำดับสายชั้นที่ถูกต้อง
-const GRADE_ORDER = [
-  "k2","k3","p1","p2","p3","p4","p5","p6",
-  "m1","m2","m3","m4","m5","m6",
-  "อ.2","อ.3","ป.1","ป.2","ป.3","ป.4","ป.5","ป.6",
-  "ม.1","ม.2","ม.3","ม.4","ม.5","ม.6",
-];
+  const GRADE_ORDER = [
+    "k2","k3","p1","p2","p3","p4","p5","p6",
+    "m1","m2","m3","m4","m5","m6",
+    "อ.2","อ.3","ป.1","ป.2","ป.3","ป.4","ป.5","ป.6",
+    "ม.1","ม.2","ม.3","ม.4","ม.5","ม.6",
+  ];
 
-const availableGrades = useMemo(() => {
-  const set = new Set<string>();
-  allTeachers.forEach(t => { if (t.grade_level) set.add(t.grade_level); });
-  return Array.from(set).sort((a, b) => {
-    const ai = GRADE_ORDER.indexOf(a);
-    const bi = GRADE_ORDER.indexOf(b);
-    if (ai !== -1 && bi !== -1) return ai - bi;
-    if (ai !== -1) return -1;
-    if (bi !== -1) return 1;
-    return a.localeCompare(b, "th");
-  });
-}, [allTeachers]);
+  const availableGrades = useMemo(() => {
+    const set = new Set<string>();
+    allTeachers.forEach(t => { if (t.grade_level) set.add(t.grade_level); });
+    return Array.from(set).sort((a, b) => {
+      const ai = GRADE_ORDER.indexOf(a);
+      const bi = GRADE_ORDER.indexOf(b);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return a.localeCompare(b, "th");
+    });
+  }, [allTeachers]);
 
-  // กรองครูที่อยู่กลุ่มสาระเดียวกับ currentUser (ตาม department_id) — ใช้เมื่อ scope = subject
   const myDeptId = (currentUser as Teacher).department_id ?? null;
   const sameGroupTeachers = useMemo(() => {
     if (!myDeptId) return allTeachers;
@@ -577,21 +492,18 @@ const availableGrades = useMemo(() => {
     return filtered.length > 0 ? filtered : allTeachers;
   }, [allTeachers, myDeptId]);
 
-  // [NEW] ครูที่อยู่สายชั้นเดียวกัน — ใช้เมื่อ scope = grade
   const sameGradeTeachers = useMemo(() => {
     if (!gradeLevelSel) return allTeachers;
     const filtered = allTeachers.filter(t => t.grade_level === gradeLevelSel);
     return filtered.length > 0 ? filtered : allTeachers;
   }, [allTeachers, gradeLevelSel]);
 
-  // [NEW] รายชื่อที่ใช้แสดง/เลือก ขึ้นกับ scope ปัจจุบัน
   const candidateTeachers = scope === "grade" ? sameGradeTeachers : sameGroupTeachers;
 
   const [selected, setSelected] = useState<string[]>(
     meeting?.participants ?? candidateTeachers.map(t => t.id)
   );
 
-  // เมื่อสลับ scope หรือเปลี่ยนสายชั้นที่เลือก ให้รีเซ็ตรายชื่อผู้เข้าร่วมตามกลุ่มใหม่ (เฉพาะตอนสร้างใหม่ ไม่ทับตอนแก้ไขครั้งแรก)
   const didInitRef = useRef(false);
   useEffect(() => {
     if (!didInitRef.current) { didInitRef.current = true; return; }
@@ -613,8 +525,8 @@ const availableGrades = useMemo(() => {
   const filtered = candidateTeachers.filter(t =>
     fullName(t).toLowerCase().includes(search.toLowerCase()) ||
     (t.position ?? "").toLowerCase().includes(search.toLowerCase()) ||
-    (t.academic_level ?? "").toLowerCase().includes(search.toLowerCase()) ||
-    (t.grade_level ?? "").toLowerCase().includes(search.toLowerCase())
+    subjectLabel(t.academic_level ?? "", subjectMap).toLowerCase().includes(search.toLowerCase()) ||
+    gradeLabel(t.grade_level ?? "", gradeLevelMap).toLowerCase().includes(search.toLowerCase())
   );
 
   function toggleTeacher(id: string) {
@@ -641,7 +553,7 @@ const availableGrades = useMemo(() => {
         const mm = String(now.getMonth()+1).padStart(2,"0");
         const yyyyBE = now.getFullYear()+543;
         const finalFileName = `PLC_${dd}${mm}${yyyyBE}_${Date.now()}.${ext}`;
-        const relPath = `${PLC_ONEDRIVE_FOLDER}/${finalFileName}`; // [FIX-4] เก็บ path ไว้ resolve ใหม่ได้
+        const relPath = `${PLC_ONEDRIVE_FOLDER}/${finalFileName}`;
         const formData = new FormData();
         formData.append("file", file);
         formData.append("path", relPath);
@@ -660,10 +572,10 @@ const availableGrades = useMemo(() => {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  const gradeRequired   = scope === "grade" ? !!gradeLevelSel : true;
+  const gradeRequired = scope === "grade" ? !!gradeLevelSel : true;
   const basicRequired = !!(date && title.trim() && meetingNo !== null) && gradeRequired;
-const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim() 
-  && selected.length > 0 && meetingNo !== null) && gradeRequired;
+  const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim()
+    && selected.length > 0 && meetingNo !== null) && gradeRequired;
   const allReportFilled = !!(problem.trim() && objectives.trim() && methods.trim() && results.trim() && solutions.trim() && reflections.trim() && futuredev.trim() && images.length > 0);
   const canSubmit = allBasicFilled && allReportFilled;
 
@@ -703,7 +615,7 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
       problem_description: problem, objectives, methods, results, solutions,
       reflections, future_development: futuredev,
       image_urls: images.map(i => i.url).filter(Boolean),
-      image_paths: images.map(i => i.path).filter(Boolean), // [FIX-4]
+      image_paths: images.map(i => i.path).filter(Boolean),
       status: isDraft ? "draft" : "submitted",
     }, isDraft);
     setLoading(false);
@@ -736,7 +648,6 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
           {tab === "basic" && (
             <>
-              {/* [NEW] ตัวเลือกประเภทการประชุม */}
               <div>
                 <label className={labelCls}>ประเภทการประชุม {reqStar}</label>
                 <div className="grid grid-cols-2 gap-2.5">
@@ -751,22 +662,21 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
                 </div>
               </div>
 
-              {/* [NEW] เลือกสายชั้น — แสดงเฉพาะตอน scope = grade */}
               {scope === "grade" && (
                 <div>
                   <label className={labelCls}>เลือกสายชั้น {reqStar}</label>
                   <select value={gradeLevelSel} onChange={e => setGradeLevelSel(e.target.value)} className={inp(errors.gradeLevel)}>
                     <option value="">— เลือกสายชั้น —</option>
                     {availableGrades.map(g => (
-  <option key={g} value={g}>{gradeLabel(g, gradeLevelMap)}</option>
-))}
+                      <option key={g} value={g}>{gradeLabel(g, gradeLevelMap)}</option>
+                    ))}
                   </select>
                   {errors.gradeLevel && <p className="text-red-500 text-xs mt-1">กรุณาเลือกสายชั้น</p>}
                   {gradeLevelSel && (
-  <p className="text-cyan-600 text-xs font-bold mt-1.5">
-    🎓 สายชั้น {gradeLabel(gradeLevelSel, gradeLevelMap)} · {sameGradeTeachers.length} คน
-  </p>
-)}
+                    <p className="text-cyan-600 text-xs font-bold mt-1.5">
+                      🎓 สายชั้น {gradeLabel(gradeLevelSel, gradeLevelMap)} · {sameGradeTeachers.length} คน
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -785,14 +695,12 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
                   {errors.date && <p className="text-red-500 text-xs mt-1">กรุณาเลือกวันที่</p>}
                 </div>
                 <div>
-  <label className={labelCls}>ครั้งที่ {reqStar}</label>
-  <input type="number" min="1" value={meetingNo}
-    onChange={e => setMeetingNo(e.target.value === "" ? "" : +e.target.value)}
-  placeholder="1" 
-  className={inp(errors.meetingNo)} 
-/>
-  {errors.meetingNo && <p className="text-red-500 text-xs mt-1">กรุณากรอกครั้งที่</p>}
-</div>
+                  <label className={labelCls}>ครั้งที่ {reqStar}</label>
+                  <input type="number" min="1" value={meetingNo}
+                    onChange={e => setMeetingNo(e.target.value === "" ? "" : +e.target.value)}
+                    placeholder="1" className={inp(errors.meetingNo)} />
+                  {errors.meetingNo && <p className="text-red-500 text-xs mt-1">กรุณากรอกครั้งที่</p>}
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -830,42 +738,37 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
                 <div>
                   <label className={labelCls}>วิทยากร / ผู้นำ</label>
                   <div className="w-full bg-blue-50 border-2 border-blue-200 rounded-xl px-3 py-2.5 text-blue-700 font-black text-sm flex items-center gap-2">
-  <span>👤</span><span>{fullNameWithTitle(currentUser)}</span>
-</div>
+                    <span>👤</span><span>{fullName(currentUser)}</span>
+                  </div>
                 </div>
               </div>
 
-              {/* ผู้เข้าร่วม — กรองจาก department_id หรือ grade_level ตาม scope */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className={labelCls}>ผู้เข้าร่วม ({selected.length} คน) {reqStar}</label>
                   <div className="flex gap-1.5">
                     <button type="button" onClick={() => setSelected(candidateTeachers.map(t => t.id))}
-                      className="text-xs font-black text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50">
-                      เลือกทั้งหมด
-                    </button>
+                      className="text-xs font-black text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50">เลือกทั้งหมด</button>
                     <button type="button" onClick={() => setSelected([])}
-                      className="text-xs font-black text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg hover:bg-slate-100">
-                      ล้าง
-                    </button>
+                      className="text-xs font-black text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg hover:bg-slate-100">ล้าง</button>
                   </div>
                 </div>
                 {scope === "subject" && myDeptId && (
-  <div className="mb-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex items-center gap-2">
-    <span>🏷️</span>
-    <p className="text-blue-700 text-xs font-bold">
-      กลุ่ม: <strong>{subjectLabel(currentUser.academic_level ?? "", subjectMap) || "—"}</strong> · {sameGroupTeachers.length} คน
-    </p>
-  </div>
-)}
+                  <div className="mb-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                    <span>🏷️</span>
+                    <p className="text-blue-700 text-xs font-bold">
+                      กลุ่ม: <strong>{subjectLabel(currentUser.academic_level ?? "", subjectMap) || "—"}</strong> · {sameGroupTeachers.length} คน
+                    </p>
+                  </div>
+                )}
                 {scope === "grade" && gradeLevelSel && (
-  <div className="mb-2 bg-cyan-50 border border-cyan-200 rounded-xl px-3 py-2 flex items-center gap-2">
-    <span>{GRADE_META.icon}</span>
-    <p className="text-cyan-700 text-xs font-bold">
-      สายชั้น: <strong>{gradeLabel(gradeLevelSel, gradeLevelMap)}</strong> · {sameGradeTeachers.length} คน
-    </p>
-  </div>
-)}
+                  <div className="mb-2 bg-cyan-50 border border-cyan-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                    <span>{GRADE_META.icon}</span>
+                    <p className="text-cyan-700 text-xs font-bold">
+                      สายชั้น: <strong>{gradeLabel(gradeLevelSel, gradeLevelMap)}</strong> · {sameGradeTeachers.length} คน
+                    </p>
+                  </div>
+                )}
                 <input type="text" value={search} onChange={e => setSearch(e.target.value)}
                   placeholder="🔍 ค้นหาชื่อครู..." className={`${inp(errors.selected)} mb-2`} />
                 {errors.selected && <p className="text-red-500 text-xs mb-1">กรุณาเลือกผู้เข้าร่วมอย่างน้อย 1 คน</p>}
@@ -880,17 +783,17 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
                         <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${checked ? "bg-blue-500 border-blue-500" : "bg-white border-slate-300"}`}>
                           {checked && <span className="text-white text-xs font-black">✓</span>}
                         </div>
-<span className={`font-bold flex-1 ${checked ? "text-blue-700" : "text-slate-700"}`}>{fullNameWithTitle(t)}</span>
-{t.academic_level && (
-  <span className="text-xs bg-blue-50 border border-blue-200 text-blue-600 px-1.5 py-0.5 rounded-lg shrink-0 font-bold">
-    {subjectLabel(t.academic_level, subjectMap)}
-  </span>
-)}
-{t.grade_level && (
-  <span className="text-xs bg-cyan-50 border border-cyan-200 text-cyan-600 px-1.5 py-0.5 rounded-lg shrink-0 font-bold">
-    {gradeLabel(t.grade_level, gradeLevelMap)}
-  </span>
-)}
+                        <span className={`font-bold flex-1 ${checked ? "text-blue-700" : "text-slate-700"}`}>{fullName(t)}</span>
+                        {t.academic_level && (
+                          <span className="text-xs bg-blue-50 border border-blue-200 text-blue-600 px-1.5 py-0.5 rounded-lg shrink-0 font-bold">
+                            {subjectLabel(t.academic_level, subjectMap)}
+                          </span>
+                        )}
+                        {t.grade_level && (
+                          <span className="text-xs bg-cyan-50 border border-cyan-200 text-cyan-600 px-1.5 py-0.5 rounded-lg shrink-0 font-bold">
+                            {gradeLabel(t.grade_level, gradeLevelMap)}
+                          </span>
+                        )}
                         {t.position && (
                           <span className="text-slate-400 text-xs hidden sm:inline shrink-0">{t.position}</span>
                         )}
@@ -985,22 +888,20 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
 }
 
 // ══════════════════════════════════════════════════════════
-// ── Group Panel (admin view) ─────────────────────────────────
-// [FIX-5] ใช้ร่วมกันทั้งกลุ่มสาระและสายชั้น (key/label/scope แยกความหมาย)
-//         แสดงรายชื่อสมาชิกในกลุ่มเหมือนเดิม ไม่ว่าจะเป็นกลุ่มสาระหรือสายชั้น
+// DeptGroupPanel
 // ══════════════════════════════════════════════════════════
-function DeptGroupPanel({ group, allTeachers, gradeLevelMap, subjectMap, onEdit, onDelete }: {
+function DeptGroupPanel({ group, allTeachers, onEdit, onDelete, gradeLevelMap, subjectMap }: {
   group: DeptGroup;
-  allTeachers: Teacher[]; gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>;
+  allTeachers: Teacher[];
   onEdit: (m: PLCMeeting) => void;
   onDelete: (id: string) => void;
+  gradeLevelMap: Record<string, string>;
+  subjectMap: Record<string, string>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [viewMeeting, setViewMeeting] = useState<PLCMeeting | null>(null);
 
-  const meta = group.scope === "grade"
-    ? GRADE_META
-    : getGroupMeta(group.key);
+  const meta = group.scope === "grade" ? GRADE_META : getGroupMeta(group.label);
 
   return (
     <>
@@ -1008,19 +909,16 @@ function DeptGroupPanel({ group, allTeachers, gradeLevelMap, subjectMap, onEdit,
         <ReportDetailModal
           meeting={viewMeeting}
           allTeachers={allTeachers}
-          gradeLevelMap={gradeLevelMap}
-          subjectMap={subjectMap}
           onClose={() => setViewMeeting(null)}
           onEdit={m => { setViewMeeting(null); onEdit(m); }}
           onDelete={id => { onDelete(id); setViewMeeting(null); }}
           canEdit={false}
+          gradeLevelMap={gradeLevelMap}
+          subjectMap={subjectMap}
         />
       )}
       <div className={`border-2 ${meta.borderColor} ${meta.bgLight} rounded-2xl overflow-hidden`}>
-        <button
-          className="w-full px-5 py-4 flex items-center gap-4 text-left hover:brightness-95 transition-all"
-          onClick={() => setExpanded(!expanded)}
-        >
+        <button className="w-full px-5 py-4 flex items-center gap-4 text-left hover:brightness-95 transition-all" onClick={() => setExpanded(!expanded)}>
           <div className="text-3xl shrink-0">{meta.icon}</div>
           <div className="flex-1 min-w-0">
             <p className={`font-black text-sm ${meta.textColor}`}>{group.label}</p>
@@ -1036,7 +934,6 @@ function DeptGroupPanel({ group, allTeachers, gradeLevelMap, subjectMap, onEdit,
 
         {expanded && (
           <div className="border-t border-white/60">
-            {/* สมาชิกในกลุ่ม — แสดงรายชื่อเสมอ ไม่ว่ากลุ่มสาระหรือสายชั้น */}
             {group.teachers.length > 0 && (
               <div className="px-5 py-3 border-b border-white/50">
                 <p className="text-xs font-black text-slate-500 mb-2">สมาชิกในกลุ่ม ({group.teachers.length} คน)</p>
@@ -1047,18 +944,14 @@ function DeptGroupPanel({ group, allTeachers, gradeLevelMap, subjectMap, onEdit,
                     );
                     return (
                       <div key={t.id} className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-sm">
-                        <span className="text-slate-700 font-bold text-xs">{fullNameWithTitle(t)}</span>
-                        <span className="text-xs font-black px-1.5 py-0.5 rounded-lg border text-blue-600 bg-blue-50 border-blue-200">
-                          {tHours} ชม.
-                        </span>
+                        <span className="text-slate-700 font-bold text-xs">{fullName(t)}</span>
+                        <span className="text-xs font-black px-1.5 py-0.5 rounded-lg border text-blue-600 bg-blue-50 border-blue-200">{tHours} ชม.</span>
                       </div>
                     );
                   })}
                 </div>
               </div>
             )}
-
-            {/* รายงาน PLC */}
             <div className="px-5 py-4">
               {group.meetings.length === 0 ? (
                 <div className="text-center py-6 text-slate-400 text-sm">ยังไม่มีการประชุม</div>
@@ -1086,21 +979,14 @@ function DeptGroupPanel({ group, allTeachers, gradeLevelMap, subjectMap, onEdit,
                             <p className="font-bold text-slate-700 text-xs line-clamp-1">{m.title}</p>
                             {m.topic && <p className="text-slate-400 text-[10px]">{m.topic}</p>}
                           </td>
-                          <td className="py-2.5 pr-3 text-center">
-                            <span className="font-black text-blue-600 text-xs">{m.duration_hours}</span>
-                          </td>
+                          <td className="py-2.5 pr-3 text-center"><span className="font-black text-blue-600 text-xs">{m.duration_hours}</span></td>
                           <td className="py-2.5 pr-3 text-center">
                             <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${m.status === "submitted" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
                               {m.status === "submitted" ? "✅ ส่งแล้ว" : "📝 ร่าง"}
                             </span>
                           </td>
                           <td className="py-2.5 text-center">
-                            <button
-                              onClick={() => setViewMeeting(m)}
-                              className="text-[10px] font-black text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50"
-                            >
-                              👁️ ดูรายงาน
-                            </button>
+                            <button onClick={() => setViewMeeting(m)} className="text-[10px] font-black text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50">👁️ ดูรายงาน</button>
                           </td>
                         </tr>
                       ))}
@@ -1117,13 +1003,13 @@ function DeptGroupPanel({ group, allTeachers, gradeLevelMap, subjectMap, onEdit,
 }
 
 // ══════════════════════════════════════════════════════════
-// ── All Reports Modal ─────────────────────────────────────────
-// [FIX-1] เพิ่มปุ่มพิมพ์รายงานในตารางทุกแถว
+// AllReportsModal
 // ══════════════════════════════════════════════════════════
-function AllReportsModal({ meetings, allTeachers, academicYears, subjectMap, gradeLevelMap, selectedYearId, onClose, onEdit, onDelete, canEdit }: {
+function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId, onClose, onEdit, onDelete, canEdit, gradeLevelMap, subjectMap }: {
   meetings: PLCMeeting[]; allTeachers: Teacher[]; academicYears: AcademicYear[];
-  selectedYearId: string; gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>; onClose: () => void; onEdit: (m: PLCMeeting) => void; 
+  selectedYearId: string; onClose: () => void; onEdit: (m: PLCMeeting) => void;
   onDelete: (id: string) => void; canEdit: boolean;
+  gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>;
 }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all"|"draft"|"submitted">("all");
@@ -1133,9 +1019,9 @@ function AllReportsModal({ meetings, allTeachers, academicYears, subjectMap, gra
   const selectedYear = academicYears.find(y => y.id === selectedYearId);
   const yearLabel = selectedYear ? `ปีการศึกษา ${selectedYear.year_name} ภาคเรียนที่ ${selectedYear.semester}` : "";
   const filtered = meetings.filter(m => {
-  const ms = m.title.toLowerCase().includes(search.toLowerCase()) || (m.topic ?? "").toLowerCase().includes(search.toLowerCase());
-  const matchesStatus = statusFilter === "all" || m.status === statusFilter;
-  const matchesScope = scopeFilter === "all" || (m.meeting_scope ?? "subject") === scopeFilter;
+    const ms = m.title.toLowerCase().includes(search.toLowerCase()) || (m.topic ?? "").toLowerCase().includes(search.toLowerCase());
+    const matchesStatus = statusFilter === "all" || m.status === statusFilter;
+    const matchesScope = scopeFilter === "all" || (m.meeting_scope ?? "subject") === scopeFilter;
     return ms && matchesStatus && matchesScope;
   });
   const submitted  = meetings.filter(m => m.status === "submitted").length;
@@ -1147,7 +1033,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, subjectMap, gra
     try {
       const facilitator = allTeachers.find(t => t.id === m.facilitator_id);
       const participants = allTeachers.filter(t => m.participants?.includes(t.id));
-      await printPLCReportAsync(m, facilitator, participants, facilitator?.signature_url);
+      await printPLCReportAsync(m, facilitator, participants, facilitator?.signature_url, gradeLevelMap, subjectMap);
     } finally {
       setPrintingId(null);
     }
@@ -1156,9 +1042,13 @@ function AllReportsModal({ meetings, allTeachers, academicYears, subjectMap, gra
   return (
     <>
       {viewMeeting && (
-        <ReportDetailModal meeting={viewMeeting} allTeachers={allTeachers} onClose={() => setViewMeeting(null)} gradeLevelMap={gradeLevelMap}
+        <ReportDetailModal meeting={viewMeeting} allTeachers={allTeachers} onClose={() => setViewMeeting(null)}
           onEdit={m => { setViewMeeting(null); onClose(); onEdit(m); }}
-          onDelete={id => { onDelete(id); setViewMeeting(null); }} canEdit={canEdit} />
+          onDelete={id => { onDelete(id); setViewMeeting(null); }}
+          canEdit={canEdit}
+          gradeLevelMap={gradeLevelMap}
+          subjectMap={subjectMap}
+        />
       )}
       <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
         <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -1213,31 +1103,32 @@ function AllReportsModal({ meetings, allTeachers, academicYears, subjectMap, gra
                     {filtered.map(m => {
                       const isGrade = (m.meeting_scope ?? "subject") === "grade";
                       return (
-                      <tr key={m.id} className="hover:bg-slate-50">
-                        <td className="py-3 pr-3 text-center"><span className="text-xs font-black text-slate-500 bg-slate-100 rounded-lg px-2 py-0.5">{m.meeting_number ?? "—"}</span></td>
-                        <td className="py-3 pr-3">
-                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border whitespace-nowrap ${isGrade ? `${GRADE_META.bgLight} ${GRADE_META.textColor} ${GRADE_META.borderColor}` : "bg-indigo-50 text-indigo-700 border-indigo-200"}`}>
-                            {isGrade ? `${GRADE_META.icon} ${gradeLabel(m.grade_level ?? "", gradeLevelMap)}` : "📚 กลุ่มสาระ"}
-                          </span>
-                        </td>
-                        <td className="py-3 pr-3 text-xs text-slate-600 font-bold whitespace-nowrap">{toThaiDate(m.meeting_date)}</td>
-                        <td className="py-3 pr-3"><p className="font-bold text-slate-800 text-sm line-clamp-1">{m.title}</p>{m.topic&&<p className="text-slate-400 text-xs">{m.topic}</p>}</td>
-                        <td className="py-3 pr-3 text-center"><span className="font-black text-blue-600">{m.duration_hours}</span></td>
-                        <td className="py-3 pr-3 text-center"><span className={`text-xs font-black px-2 py-1 rounded-lg border ${m.status==="submitted"?"bg-emerald-50 text-emerald-700 border-emerald-200":"bg-amber-50 text-amber-700 border-amber-200"}`}>{m.status==="submitted"?"✅ ส่งแล้ว":"📝 ร่าง"}</span></td>
-                        <td className="py-3 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <button onClick={() => setViewMeeting(m)} className="text-xs font-black text-blue-500 px-2 py-1.5 rounded-lg hover:bg-blue-50">👁️ ดู</button>
-                            <button onClick={() => handlePrintRow(m)} disabled={printingId === m.id} className="text-xs font-black text-slate-500 px-2 py-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-50">
-                              {printingId === m.id ? "⏳" : "🖨️"}
-                            </button>
-                            {canEdit && <>
-                              <button onClick={() => { onClose(); onEdit(m); }} className="text-xs font-black text-slate-500 px-2 py-1.5 rounded-lg hover:bg-slate-100">✏️</button>
-                              <button onClick={() => { if(confirm("ยืนยันลบ?")) onDelete(m.id); }} className="text-xs font-black text-red-400 px-2 py-1.5 rounded-lg hover:bg-red-50">🗑️</button>
-                            </>}
-                          </div>
-                        </td>
-                      </tr>
-                    );})}
+                        <tr key={m.id} className="hover:bg-slate-50">
+                          <td className="py-3 pr-3 text-center"><span className="text-xs font-black text-slate-500 bg-slate-100 rounded-lg px-2 py-0.5">{m.meeting_number ?? "—"}</span></td>
+                          <td className="py-3 pr-3">
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border whitespace-nowrap ${isGrade ? `${GRADE_META.bgLight} ${GRADE_META.textColor} ${GRADE_META.borderColor}` : "bg-indigo-50 text-indigo-700 border-indigo-200"}`}>
+                              {isGrade ? `${GRADE_META.icon} ${gradeLabel(m.grade_level ?? "", gradeLevelMap)}` : "📚 กลุ่มสาระ"}
+                            </span>
+                          </td>
+                          <td className="py-3 pr-3 text-xs text-slate-600 font-bold whitespace-nowrap">{toThaiDate(m.meeting_date)}</td>
+                          <td className="py-3 pr-3"><p className="font-bold text-slate-800 text-sm line-clamp-1">{m.title}</p>{m.topic&&<p className="text-slate-400 text-xs">{m.topic}</p>}</td>
+                          <td className="py-3 pr-3 text-center"><span className="font-black text-blue-600">{m.duration_hours}</span></td>
+                          <td className="py-3 pr-3 text-center"><span className={`text-xs font-black px-2 py-1 rounded-lg border ${m.status==="submitted"?"bg-emerald-50 text-emerald-700 border-emerald-200":"bg-amber-50 text-amber-700 border-amber-200"}`}>{m.status==="submitted"?"✅ ส่งแล้ว":"📝 ร่าง"}</span></td>
+                          <td className="py-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <button onClick={() => setViewMeeting(m)} className="text-xs font-black text-blue-500 px-2 py-1.5 rounded-lg hover:bg-blue-50">👁️ ดู</button>
+                              <button onClick={() => handlePrintRow(m)} disabled={printingId === m.id} className="text-xs font-black text-slate-500 px-2 py-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-50">
+                                {printingId === m.id ? "⏳" : "🖨️"}
+                              </button>
+                              {canEdit && <>
+                                <button onClick={() => { onClose(); onEdit(m); }} className="text-xs font-black text-slate-500 px-2 py-1.5 rounded-lg hover:bg-slate-100">✏️</button>
+                                <button onClick={() => { if(confirm("ยืนยันลบ?")) onDelete(m.id); }} className="text-xs font-black text-red-400 px-2 py-1.5 rounded-lg hover:bg-red-50">🗑️</button>
+                              </>}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1250,14 +1141,12 @@ function AllReportsModal({ meetings, allTeachers, academicYears, subjectMap, gra
 }
 
 // ══════════════════════════════════════════════════════════
-// ── Teacher History Section ────────────────────────────────────
-// [FIX-1][FIX-3] เพิ่มปุ่มพิมพ์รายงาน + แสดง thumbnail รูปจริงหลังส่งแล้ว
+// TeacherHistorySection
 // ══════════════════════════════════════════════════════════
-function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete, onView, gradeLevelMap }: {
-  meetings: PLCMeeting[]; userId: string; allTeachers: Teacher[]; gradeLevelMap: Record<string, string>; 
-  onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; 
-  onView: (m: PLCMeeting) => void;
-   // ← เพิ่ม   ← ลบ comment นี้ออก
+function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete, onView, gradeLevelMap, subjectMap }: {
+  meetings: PLCMeeting[]; userId: string; allTeachers: Teacher[];
+  onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; onView: (m: PLCMeeting) => void;
+  gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>;
 }) {
   const [printingId, setPrintingId] = useState<string | null>(null);
   const myMeetings = meetings
@@ -1270,7 +1159,7 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
     try {
       const facilitator = allTeachers.find(t => t.id === m.facilitator_id);
       const participants = allTeachers.filter(t => m.participants?.includes(t.id));
-      await printPLCReportAsync(m, facilitator, participants, facilitator?.signature_url);
+      await printPLCReportAsync(m, facilitator, participants, facilitator?.signature_url, gradeLevelMap, subjectMap);
     } finally {
       setPrintingId(null);
     }
@@ -1278,7 +1167,6 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
 
   return (
     <div className="space-y-4">
-      {/* สรุปชั่วโมง */}
       <div className="bg-white rounded-2xl border border-slate-200 px-6 py-5 flex items-center gap-5">
         <div className="w-16 h-16 rounded-2xl bg-blue-50 border-2 border-blue-200 flex flex-col items-center justify-center shrink-0">
           <span className="text-2xl font-black text-blue-600 leading-none">{totalHours}</span>
@@ -1288,12 +1176,9 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
           <p className="font-black text-slate-700 text-base">ชั่วโมง PLC ของฉัน</p>
           <p className="text-slate-400 text-sm">{myMeetings.length} ครั้ง · รวม {totalHours} ชั่วโมง</p>
         </div>
-        <span className="text-xs font-black px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 border border-blue-200">
-          📊 สะสมอยู่
-        </span>
+        <span className="text-xs font-black px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 border border-blue-200">📊 สะสมอยู่</span>
       </div>
 
-      {/* รายการ */}
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <h3 className="font-black text-slate-700 text-sm">📋 ประวัติการบันทึก PLC</h3>
@@ -1311,52 +1196,52 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
               const isGrade = (m.meeting_scope ?? "subject") === "grade";
               const hasImages = (m.image_urls && m.image_urls.length > 0) || (m.image_paths && m.image_paths.length > 0);
               return (
-              <div key={m.id} className="px-5 py-4 hover:bg-slate-50 transition-colors">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      {m.meeting_number && <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">ครั้งที่ {m.meeting_number}</span>}
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${isGrade ? `${GRADE_META.bgLight} ${GRADE_META.textColor} ${GRADE_META.borderColor}` : "bg-indigo-50 text-indigo-700 border-indigo-200"}`}>
-                        {isGrade ? `${GRADE_META.icon} ${gradeLabel(m.grade_level ?? "", gradeLevelMap)}` : "📚 กลุ่มสาระ"}
-                      </span>
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${m.status==="submitted"?"bg-emerald-50 text-emerald-700 border-emerald-200":"bg-amber-50 text-amber-700 border-amber-200"}`}>
-                        {m.status==="submitted"?"✅ ส่งแล้ว":"📝 ร่าง"}
-                      </span>
-                    </div>
-                    <p className="font-bold text-slate-800 text-sm line-clamp-1">{m.title}</p>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
-                      <span>📅 {toThaiDate(m.meeting_date)}</span>
-                      {m.start_time && m.end_time && <span>🕐 {m.start_time}–{m.end_time}</span>}
-                      <span className="font-black text-blue-600">⏱️ {m.duration_hours} ชม.</span>
-                      {m.location && <span>📍 {m.location}</span>}
-                    </div>
-                    {/* [FIX-3] preview รูปจริงหลังส่งแล้ว — resolve ลิงก์สดเสมอ */}
-                    {hasImages && (
-                      <div className="flex gap-1.5 mt-2">
-                        {(m.image_paths && m.image_paths.length > 0 ? m.image_paths : (m.image_urls ?? [])).slice(0,4).map((_, i) => (
-                          <ResolvedImage
-                            key={i}
-                            path={m.image_paths?.[i]}
-                            url={m.image_urls?.[i]}
-                            alt={`thumb-${i}`}
-                            className="w-12 h-12 rounded-lg object-cover border border-slate-200 cursor-pointer"
-                            onClick={() => onView(m)}
-                          />
-                        ))}
+                <div key={m.id} className="px-5 py-4 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        {m.meeting_number && <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">ครั้งที่ {m.meeting_number}</span>}
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${isGrade ? `${GRADE_META.bgLight} ${GRADE_META.textColor} ${GRADE_META.borderColor}` : "bg-indigo-50 text-indigo-700 border-indigo-200"}`}>
+                          {isGrade ? `${GRADE_META.icon} ${gradeLabel(m.grade_level ?? "", gradeLevelMap)}` : "📚 กลุ่มสาระ"}
+                        </span>
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${m.status==="submitted"?"bg-emerald-50 text-emerald-700 border-emerald-200":"bg-amber-50 text-amber-700 border-amber-200"}`}>
+                          {m.status==="submitted"?"✅ ส่งแล้ว":"📝 ร่าง"}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => handlePrint(m)} disabled={printingId === m.id} className="text-xs font-black text-slate-500 px-2 py-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-50">
-                      {printingId === m.id ? "⏳" : "🖨️"}
-                    </button>
-                    <button onClick={() => onView(m)} className="text-xs font-black text-blue-500 px-2 py-1.5 rounded-lg hover:bg-blue-50">👁️</button>
-                    <button onClick={() => onEdit(m)} className="text-xs font-black text-slate-400 px-2 py-1.5 rounded-lg hover:bg-slate-100">✏️</button>
-                    <button onClick={() => { if(confirm("ยืนยันลบ?")) onDelete(m.id); }} className="text-xs font-black text-red-400 px-2 py-1.5 rounded-lg hover:bg-red-50">🗑️</button>
+                      <p className="font-bold text-slate-800 text-sm line-clamp-1">{m.title}</p>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
+                        <span>📅 {toThaiDate(m.meeting_date)}</span>
+                        {m.start_time && m.end_time && <span>🕐 {m.start_time}–{m.end_time}</span>}
+                        <span className="font-black text-blue-600">⏱️ {m.duration_hours} ชม.</span>
+                        {m.location && <span>📍 {m.location}</span>}
+                      </div>
+                      {hasImages && (
+                        <div className="flex gap-1.5 mt-2">
+                          {(m.image_paths && m.image_paths.length > 0 ? m.image_paths : (m.image_urls ?? [])).slice(0,4).map((_, i) => (
+                            <ResolvedImage
+                              key={i}
+                              path={m.image_paths?.[i]}
+                              url={m.image_urls?.[i]}
+                              alt={`thumb-${i}`}
+                              className="w-12 h-12 rounded-lg object-cover border border-slate-200 cursor-pointer"
+                              onClick={() => onView(m)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => handlePrint(m)} disabled={printingId === m.id} className="text-xs font-black text-slate-500 px-2 py-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-50">
+                        {printingId === m.id ? "⏳" : "🖨️"}
+                      </button>
+                      <button onClick={() => onView(m)} className="text-xs font-black text-blue-500 px-2 py-1.5 rounded-lg hover:bg-blue-50">👁️</button>
+                      <button onClick={() => onEdit(m)} className="text-xs font-black text-slate-400 px-2 py-1.5 rounded-lg hover:bg-slate-100">✏️</button>
+                      <button onClick={() => { if(confirm("ยืนยันลบ?")) onDelete(m.id); }} className="text-xs font-black text-red-400 px-2 py-1.5 rounded-lg hover:bg-red-50">🗑️</button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );})}
+              );
+            })}
           </div>
         )}
       </div>
@@ -1364,28 +1249,25 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
   );
 }
 
-// ── Main Page ──────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════
+// Main Page
+// ══════════════════════════════════════════════════════════
 export default function PLCHoursPage() {
-
-  
   const router = useRouter();
   const [user,           setUser]           = useState<UserProfile | null>(null);
   const [allTeachers,    setAllTeachers]    = useState<Teacher[]>([]);
   const [academicYears,  setAcademicYears]  = useState<AcademicYear[]>([]);
-  const [gradeLevelMap, setGradeLevelMap] = useState<Record<string, string>>({});
-  const [subjectMap, setSubjectMap] = useState<Record<string, string>>({});
+  const [gradeLevelMap,  setGradeLevelMap]  = useState<Record<string, string>>({});
+  const [subjectMap,     setSubjectMap]     = useState<Record<string, string>>({});
   const [meetings,       setMeetings]       = useState<PLCMeeting[]>([]);
   const [selectedYearId, setSelectedYearId] = useState<string>("");
   const [loading,        setLoading]        = useState(true);
   const [modalOpen,      setModalOpen]      = useState(false);
   const [editMeeting,    setEditMeeting]    = useState<Partial<PLCMeeting> | null>(null);
-  // [FIX-5] viewScope: เลือกดู "กลุ่มสาระ" หรือ "สายชั้น" แยกกัน
   const [viewScope,      setViewScope]      = useState<MeetingScope>("subject");
   const [activeGroupKey, setActiveGroupKey] = useState<string>("all");
   const [showReports,    setShowReports]    = useState(false);
   const [viewMeeting,    setViewMeeting]    = useState<PLCMeeting | null>(null);
-  const [directorUser, setDirectorUser] = useState<any>(null);
-  const [deputyUser, setDeputyUser] = useState<any>(null);
 
   useEffect(() => {
     (async () => {
@@ -1393,7 +1275,6 @@ export default function PLCHoursPage() {
       if (!authUser) { setLoading(false); return; }
       const email = authUser.email || authUser.user_metadata?.email || "";
 
-      // โหลด profile — [NEW] ดึง grade_level เพิ่ม
       let profileData: any = null;
       const { data: byAuthId } = await supabase.from("users")
         .select("id, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level")
@@ -1414,47 +1295,28 @@ export default function PLCHoursPage() {
       }
 
       // โหลดปีการศึกษา
-const { data: years } = await supabase.from("academic_years")
-  .select("id, year_name, semester, is_current")
-  .order("year_name", { ascending: false })
-  .order("semester", { ascending: false });
-const ys = (years as AcademicYear[]) || [];
-setAcademicYears(ys);
-const currentYear = ys.find(y => y.is_current) ?? ys[0];
-if (currentYear) setSelectedYearId(currentYear.id);
+      const { data: years } = await supabase.from("academic_years")
+        .select("id, year_name, semester, is_current")
+        .order("year_name", { ascending: false })
+        .order("semester", { ascending: false });
+      const ys = (years as AcademicYear[]) || [];
+      setAcademicYears(ys);
+      const currentYear = ys.find(y => y.is_current) ?? ys[0];
+      if (currentYear) setSelectedYearId(currentYear.id);
 
-// ★ ใหม่ — โหลดชื่อสายชั้นจาก grade_levels มาทำ map id → name
-const { data: gradeLevelsData } = await supabase
-  .from("grade_levels")
-  .select("id, name");
+      // โหลด grade_levels map: id → name
+      const { data: gradeLevelsData } = await supabase.from("grade_levels").select("id, name");
+      const glMap: Record<string, string> = {};
+      (gradeLevelsData || []).forEach((g: any) => { glMap[g.id] = g.name; });
+      setGradeLevelMap(glMap);
 
-console.log("gradeLevelsData:", gradeLevelsData); // ← ดูว่ามีข้อมูลไหม
+      // โหลด departments map: id → name (สำหรับ academic_level ที่เป็น UUID)
+      const { data: deptData } = await supabase.from("departments").select("id, name");
+      const sMap: Record<string, string> = {};
+      (deptData || []).forEach((d: any) => { sMap[d.id] = d.name; });
+      setSubjectMap(sMap);
 
-const glMap: Record<string, string> = {};
-(gradeLevelsData || []).forEach((g: any) => { glMap[g.id] = g.name; });
-setGradeLevelMap(glMap);
-
-// โหลดชื่อกลุ่มสาระจาก departments
-const { data: deptData } = await supabase
-  .from("departments")
-  .select("id, name");
-const sMap: Record<string, string> = {};
-(deptData || []).forEach((d: any) => { sMap[d.id] = d.name; });
-setSubjectMap(sMap);
-
-// ใน init async:
-const { data: signUsers } = await supabase
-  .from("users")
-  .select("id, first_name, last_name, role, position, signature_url")
-  .in("role", ["director", "deputy_director"]);
-
-const dir = signUsers?.find(u => u.role === "director");
-const dep = signUsers?.find(u => u.role === "deputy_director");
-setDirectorUser(dir ?? null);
-setDeputyUser(dep ?? null);
-
-      // ✅ โหลด users — กรอง admin roles ออก client-side
-      // [NEW] ดึง grade_level เพิ่มสำหรับกลุ่มสายชั้น
+      // โหลด users (ครู)
       const { data: allUsersData } = await supabase
         .from("users")
         .select("id, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level, signature_url")
@@ -1485,16 +1347,14 @@ setDeputyUser(dep ?? null);
 
   useEffect(() => { loadMeetings(); }, [loadMeetings]);
 
-  // [FIX-5] กรองการประชุมตาม viewScope ก่อนสร้างกลุ่ม
   const meetingsInScope = useMemo(
     () => meetings.filter(m => (m.meeting_scope ?? "subject") === viewScope),
     [meetings, viewScope]
   );
 
-  // ✅ สร้าง deptGroups จาก academic_level (scope=subject) หรือ grade_level (scope=grade)
+  // สร้าง deptGroups — ใช้ label ที่ resolve แล้ว
   const deptGroups = useMemo((): DeptGroup[] => {
     if (viewScope === "grade") {
-      // [NEW] กลุ่มตาม grade_level
       const levelMap = new Map<string, Teacher[]>();
       for (const t of allTeachers) {
         const lv = (t.grade_level ?? "").trim();
@@ -1512,25 +1372,22 @@ setDeputyUser(dep ?? null);
       }).sort((a, b) => a.key.localeCompare(b.key, "th"));
     }
 
-    // กลุ่มตาม academic_level (เดิม)
-    const levelMap = new Map<string, { department_id: string | null; teachers: Teacher[] }>();
+    const levelMap = new Map<string, Teacher[]>();
     for (const t of allTeachers) {
       const lv = (t.academic_level ?? "").trim();
       if (!lv) continue;
-      if (!levelMap.has(lv)) {
-        levelMap.set(lv, { department_id: t.department_id ?? null, teachers: [] });
-      }
-      levelMap.get(lv)!.teachers.push(t);
+      if (!levelMap.has(lv)) levelMap.set(lv, []);
+      levelMap.get(lv)!.push(t);
     }
-    return Array.from(levelMap.entries()).map(([lv, { teachers }]) => {
+    return Array.from(levelMap.entries()).map(([lv, teachers]) => {
       const teacherIds = new Set(teachers.map(t => t.id));
       const groupMeetings = meetingsInScope.filter(m =>
         m.participants?.some(pid => teacherIds.has(pid))
       );
       const totalHours = groupMeetings.reduce((s, m) => s + Number(m.duration_hours), 0);
       return { key: lv, label: subjectLabel(lv, subjectMap), scope: "subject" as MeetingScope, teachers, meetings: groupMeetings, totalHours };
-    }).sort((a, b) => a.key.localeCompare(b.key, "th"));
-  }, [allTeachers, meetingsInScope, viewScope]);
+    }).sort((a, b) => a.label.localeCompare(b.label, "th"));
+  }, [allTeachers, meetingsInScope, viewScope, gradeLevelMap, subjectMap]);
 
   const uniqueGroupKeys = useMemo(() => deptGroups.map(g => g.key), [deptGroups]);
 
@@ -1539,7 +1396,6 @@ setDeputyUser(dep ?? null);
     return deptGroups.filter(g => g.key === activeGroupKey);
   }, [deptGroups, activeGroupKey]);
 
-  // เมื่อสลับ viewScope ให้รีเซ็ต filter กลุ่มย่อยกลับเป็น "ทั้งหมด"
   useEffect(() => { setActiveGroupKey("all"); }, [viewScope]);
 
   const totalHoursAll = meetings.reduce((s, m) => s + Number(m.duration_hours), 0);
@@ -1565,7 +1421,10 @@ setDeputyUser(dep ?? null);
     await loadMeetings();
   }
 
-  function openAdd() { setEditMeeting({ academic_year_id: selectedYearId, meeting_scope: viewScope === "grade" ? "grade" : "subject" }); setModalOpen(true); }
+  function openAdd() {
+    setEditMeeting({ academic_year_id: selectedYearId, meeting_scope: viewScope === "grade" ? "grade" : "subject" });
+    setModalOpen(true);
+  }
 
   const currentYearObj   = academicYears.find(y => y.id === selectedYearId);
   const currentYearLabel = currentYearObj ? `ปีการศึกษา ${currentYearObj.year_name} ภาคเรียนที่ ${currentYearObj.semester}` : "";
@@ -1596,11 +1455,10 @@ setDeputyUser(dep ?? null);
 
       <div className="w-full px-4 sm:px-6 py-6 space-y-6">
 
-        {/* ══ TEACHER VIEW ══ */}
+        {/* TEACHER VIEW */}
         {isTeacher && (
           <>
             <div className="flex flex-col items-center gap-3 py-4">
-              {/* [FIX-5] ปุ่มเลือกประเภทก่อนเพิ่ม — กลุ่มสาระ / สายชั้น */}
               <div className="flex gap-2 bg-white border-2 border-slate-200 rounded-2xl p-1.5">
                 <button onClick={() => setViewScope("subject")}
                   className={`px-4 py-2 rounded-xl text-sm font-black transition-all ${viewScope === "subject" ? "bg-indigo-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>
@@ -1624,14 +1482,16 @@ setDeputyUser(dep ?? null);
               meetings={meetings} userId={user.id} allTeachers={allTeachers}
               onEdit={m => { setEditMeeting(m); setModalOpen(true); }}
               onDelete={handleDelete}
-              onView={m => setViewMeeting(m)} gradeLevelMap={gradeLevelMap} />
+              onView={m => setViewMeeting(m)}
+              gradeLevelMap={gradeLevelMap}
+              subjectMap={subjectMap}
+            />
           </>
         )}
 
-        {/* ══ ADMIN VIEW ══ */}
+        {/* ADMIN VIEW */}
         {isAdmin && (
           <>
-            {/* Summary cards */}
             <div className="grid grid-cols-3 gap-3">
               {[
                 { label:"จำนวนครั้ง", value:totalMeetings, unit:"ครั้ง", color:"text-emerald-600", bg:"bg-emerald-50", border:"border-emerald-200", icon:"📅" },
@@ -1647,7 +1507,6 @@ setDeputyUser(dep ?? null);
               ))}
             </div>
 
-            {/* รายงานทั้งหมด button */}
             <button onClick={() => setShowReports(true)}
               className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-2xl px-6 py-4 flex items-center justify-between transition-all shadow-sm group">
               <div className="flex items-center gap-3">
@@ -1660,7 +1519,6 @@ setDeputyUser(dep ?? null);
               <span className="text-white/60 group-hover:text-white text-xl">→</span>
             </button>
 
-            {/* [FIX-5] ตัวเลือกหลัก: กลุ่มสาระ vs สายชั้น */}
             <div className="flex gap-2 bg-white border-2 border-slate-200 rounded-2xl p-1.5 w-fit">
               <button onClick={() => setViewScope("subject")}
                 className={`px-5 py-2.5 rounded-xl text-sm font-black transition-all flex items-center gap-1.5 ${viewScope === "subject" ? "bg-indigo-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>
@@ -1672,17 +1530,14 @@ setDeputyUser(dep ?? null);
               </button>
             </div>
 
-            {/* Tab filter — sub-group ภายใน scope ที่เลือก */}
             <div className="flex gap-2 overflow-x-auto pb-1">
-              <button
-                onClick={() => setActiveGroupKey("all")}
-                className={`px-4 py-2 rounded-xl text-sm font-black border-2 whitespace-nowrap ${activeGroupKey === "all" ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
-              >
+              <button onClick={() => setActiveGroupKey("all")}
+                className={`px-4 py-2 rounded-xl text-sm font-black border-2 whitespace-nowrap ${activeGroupKey === "all" ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
                 {viewScope === "grade" ? "🏫 ทุกสายชั้น" : "🏫 ทุกกลุ่มสาระ"}
               </button>
               {uniqueGroupKeys.map(key => {
                 const grp = deptGroups.find(g => g.key === key);
-                const meta = viewScope === "grade" ? GRADE_META : getGroupMeta(key);
+                const meta = viewScope === "grade" ? GRADE_META : getGroupMeta(grp?.label ?? key);
                 return (
                   <button key={key} onClick={() => setActiveGroupKey(key)}
                     className={`px-4 py-2 rounded-xl text-sm font-black border-2 whitespace-nowrap flex items-center gap-1.5 ${activeGroupKey === key ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
@@ -1697,13 +1552,11 @@ setDeputyUser(dep ?? null);
               })}
             </div>
 
-            {/* กลุ่ม panels */}
             <div className="space-y-3">
               {filteredGroups.length === 0 ? (
                 <div className="text-center py-12 text-slate-400 bg-white rounded-2xl border border-slate-200">
                   <div className="text-4xl mb-2">📭</div>
                   <p className="text-sm font-bold">{viewScope === "grade" ? "ไม่พบข้อมูลสายชั้น" : "ไม่พบข้อมูลกลุ่มสาระ"}</p>
-                  <p className="text-xs mt-1">กรุณาตรวจสอบ {viewScope === "grade" ? "grade_level" : "academic_level"} ในตาราง users</p>
                 </div>
               ) : filteredGroups.map(group => (
                 <DeptGroupPanel
@@ -1711,11 +1564,14 @@ setDeputyUser(dep ?? null);
                   group={group}
                   allTeachers={allTeachers}
                   onEdit={m => { setEditMeeting(m); setModalOpen(true); }}
-                  onDelete={handleDelete} gradeLevelMap={gradeLevelMap} subjectMap={subjectMap} />
+                  onDelete={handleDelete}
+                  gradeLevelMap={gradeLevelMap}
+                  subjectMap={subjectMap}
+                />
               ))}
             </div>
 
-            {/* ตารางสรุปรายบุคคล — กรองตาม viewScope + activeGroupKey */}
+            {/* ตารางสรุปรายบุคคล */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="bg-slate-50 border-b border-slate-200 px-5 py-3.5 flex items-center justify-between">
                 <h3 className="font-black text-slate-700 text-sm">👩‍🏫 สรุปชั่วโมงรายบุคคล</h3>
@@ -1745,10 +1601,11 @@ setDeputyUser(dep ?? null);
                       .map(t => (
                         <tr key={t.id} className="hover:bg-slate-50">
                           <td className="px-5 py-3 font-bold text-slate-800">{fullName(t)}</td>
-                          <td className="px-3 py-3 text-slate-400 text-xs hidden sm:table-cell">
-                            {viewScope === "grade" 
-  ? gradeLabel(t.grade_level ?? "", gradeLevelMap) || "—"
-  : subjectLabel(t.academic_level ?? "", subjectMap) || t.position || "—"}
+                          <td className="px-3 py-3 text-slate-500 text-xs hidden sm:table-cell">
+                            {viewScope === "grade"
+                              ? gradeLabel(t.grade_level ?? "", gradeLevelMap) || "—"
+                              : subjectLabel(t.academic_level ?? "", subjectMap) || t.position || "—"
+                            }
                           </td>
                           <td className="px-3 py-3 text-center">
                             <span className="font-black text-blue-600 text-base">{t.hours}</span>
@@ -1791,15 +1648,20 @@ setDeputyUser(dep ?? null);
           meetings={meetings} allTeachers={allTeachers} academicYears={academicYears}
           selectedYearId={selectedYearId} onClose={() => setShowReports(false)}
           onEdit={m => { setShowReports(false); setEditMeeting(m); setModalOpen(true); }}
-          onDelete={handleDelete} canEdit={isAdmin} gradeLevelMap={gradeLevelMap} subjectMap={subjectMap} />
+          onDelete={handleDelete} canEdit={isAdmin}
+          gradeLevelMap={gradeLevelMap}
+          subjectMap={subjectMap}
+        />
       )}
       {viewMeeting && user && (
         <ReportDetailModal
-          meeting={viewMeeting} allTeachers={allTeachers} gradeLevelMap={gradeLevelMap}
+          meeting={viewMeeting} allTeachers={allTeachers}
           onClose={() => setViewMeeting(null)}
           onEdit={m => { setViewMeeting(null); setEditMeeting(m); setModalOpen(true); }}
           onDelete={id => { handleDelete(id); setViewMeeting(null); }}
           canEdit={true}
+          gradeLevelMap={gradeLevelMap}
+          subjectMap={subjectMap}
         />
       )}
     </div>
