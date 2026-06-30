@@ -24,6 +24,15 @@ function fullName(u: any) {
   return `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() || u.email || "—";
 }
 
+function fullNameWithTitle(u: any) {
+  if (!u) return "—";
+  const t = u.title ? u.title.trim() : "";
+  const first = u.first_name ?? "";
+  const last = u.last_name ?? "";
+  const combined = `${t}${first} ${last}`.replace(/\s+/g, " ").trim();
+  return combined || u.full_name || u.email || "—";
+}
+
 // ─── roles ที่ถือว่าเป็น admin (ไม่ใช่ครู) ────────────────────────────────────
 const ADMIN_ROLES_SET = new Set(["admin", "director", "deputy_director", "staff"]);
 
@@ -182,8 +191,8 @@ function buildPLCReportHTML(
     </div>` : "").join("");
 
   const participantsHTML = participants.length
-    ? participants.map(t => `<span style="display:inline-block;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:2px 8px;margin:2px;font-size:9.5pt">${fullName(t)}</span>`).join("")
-    : "<span style='color:#94a3b8'>—</span>";
+  ? participants.map(t => `<span style="display:inline-block;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:2px 8px;margin:2px;font-size:9.5pt">${fullNameWithTitle(t)}</span>`).join("")
+  : "<span style='color:#94a3b8'>—</span>";
 
   const imagesHTML = resolvedImageUrls.length ? `
     <div style="page-break-before:always;padding-top:10mm">
@@ -248,7 +257,7 @@ table.meta td.k{color:#64748b;font-weight:700;white-space:nowrap;width:110px}
   <tr><td class="k">วันที่</td><td>${toThaiDateLong(meeting.meeting_date)}</td></tr>
   <tr><td class="k">เวลา</td><td>${meeting.start_time ?? "—"} – ${meeting.end_time ?? "—"} น. (รวม ${meeting.duration_hours} ชั่วโมง)</td></tr>
   <tr><td class="k">สถานที่</td><td>${meeting.location ?? "—"}</td></tr>
-  <tr><td class="k">วิทยากร/ผู้นำ</td><td>${facilitator ? fullName(facilitator) : "—"}</td></tr>
+  <tr><td class="k">วิทยากร/ผู้นำ</td><td>${facilitator ? fullNameWithTitle(facilitator) : "—"}</td></tr>
   <tr><td class="k">ผู้เข้าร่วม (${participants.length} คน)</td><td>${participantsHTML}</td></tr>
 </table>
 
@@ -427,13 +436,13 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3">
-              <p className="text-xs font-black text-blue-500 mb-1">วิทยากร / ผู้นำ</p>
-              <p className="font-bold text-slate-800 text-sm">{facilitator ? fullName(facilitator) : "—"}</p>
-            </div>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
-              <p className="text-xs font-black text-slate-500 mb-1">ผู้เข้าร่วม ({participants.length} คน)</p>
-              <div className="flex flex-wrap gap-1">
-                {participants.slice(0,5).map(t => <span key={t.id} className="text-xs bg-white border border-slate-200 text-slate-600 font-bold px-1.5 py-0.5 rounded-lg">{fullName(t)}</span>)}
+  <p className="text-xs font-black text-blue-500 mb-1">วิทยากร / ผู้นำ</p>
+  <p className="font-bold text-slate-800 text-sm">{facilitator ? fullNameWithTitle(facilitator) : "—"}</p>
+</div>
+<div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
+  <p className="text-xs font-black text-slate-500 mb-1">ผู้เข้าร่วม ({participants.length} คน)</p>
+  <div className="flex flex-wrap gap-1">
+    {participants.slice(0,5).map(t => <span key={t.id} className="text-xs bg-white border border-slate-200 text-slate-600 font-bold px-1.5 py-0.5 rounded-lg">{fullNameWithTitle(t)}</span>)}
                 {participants.length > 5 && <span className="text-xs text-slate-400">+{participants.length - 5}</span>}
               </div>
             </div>
@@ -821,8 +830,8 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
                 <div>
                   <label className={labelCls}>วิทยากร / ผู้นำ</label>
                   <div className="w-full bg-blue-50 border-2 border-blue-200 rounded-xl px-3 py-2.5 text-blue-700 font-black text-sm flex items-center gap-2">
-                    <span>👤</span><span>{fullName(currentUser)}</span>
-                  </div>
+  <span>👤</span><span>{fullNameWithTitle(currentUser)}</span>
+</div>
                 </div>
               </div>
 
@@ -871,13 +880,13 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
                         <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${checked ? "bg-blue-500 border-blue-500" : "bg-white border-slate-300"}`}>
                           {checked && <span className="text-white text-xs font-black">✓</span>}
                         </div>
-                        <span className={`font-bold flex-1 ${checked ? "text-blue-700" : "text-slate-700"}`}>{fullName(t)}</span>
-                        {t.academic_level && (
-                          <span className="text-xs bg-blue-50 border border-blue-200 text-blue-600 px-1.5 py-0.5 rounded-lg shrink-0 font-bold">
-                            {subjectLabel(t.academic_level, subjectMap)}
-                          </span>
-                        )}
-                        {t.grade_level && (
+<span className={`font-bold flex-1 ${checked ? "text-blue-700" : "text-slate-700"}`}>{fullNameWithTitle(t)}</span>
+{t.academic_level && (
+  <span className="text-xs bg-blue-50 border border-blue-200 text-blue-600 px-1.5 py-0.5 rounded-lg shrink-0 font-bold">
+    {subjectLabel(t.academic_level, subjectMap)}
+  </span>
+)}
+{t.grade_level && (
   <span className="text-xs bg-cyan-50 border border-cyan-200 text-cyan-600 px-1.5 py-0.5 rounded-lg shrink-0 font-bold">
     {gradeLabel(t.grade_level, gradeLevelMap)}
   </span>
@@ -1038,7 +1047,7 @@ function DeptGroupPanel({ group, allTeachers, gradeLevelMap, subjectMap, onEdit,
                     );
                     return (
                       <div key={t.id} className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-sm">
-                        <span className="text-slate-700 font-bold text-xs">{fullName(t)}</span>
+                        <span className="text-slate-700 font-bold text-xs">{fullNameWithTitle(t)}</span>
                         <span className="text-xs font-black px-1.5 py-0.5 rounded-lg border text-blue-600 bg-blue-50 border-blue-200">
                           {tHours} ชม.
                         </span>
