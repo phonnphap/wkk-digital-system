@@ -842,13 +842,13 @@ const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim(
                   </div>
                 </div>
                 {scope === "subject" && myDeptId && (
-                  <div className="mb-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex items-center gap-2">
-                    <span>🏷️</span>
-                    <p className="text-blue-700 text-xs font-bold">
-                      กลุ่ม: <strong>{currentUser.academic_level || "—"}</strong> · {sameGroupTeachers.length} คน
-                    </p>
-                  </div>
-                )}
+  <div className="mb-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex items-center gap-2">
+    <span>🏷️</span>
+    <p className="text-blue-700 text-xs font-bold">
+      กลุ่ม: <strong>{subjectLabel(currentUser.academic_level ?? "", subjectMap) || "—"}</strong> · {sameGroupTeachers.length} คน
+    </p>
+  </div>
+)}
                 {scope === "grade" && gradeLevelSel && (
   <div className="mb-2 bg-cyan-50 border border-cyan-200 rounded-xl px-3 py-2 flex items-center gap-2">
     <span>{GRADE_META.icon}</span>
