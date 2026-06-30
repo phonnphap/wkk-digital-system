@@ -730,6 +730,7 @@ export default function SchedulePage() {
 
       setUser({ ...profileData, full_name: profileData.full_name || `${profileData.first_name ?? ""} ${profileData.last_name ?? ""}`.trim() });
 
+      
       // ★ FIX: ดึง time_slots แบบง่าย ไม่ filter schedule_type
       const [yearsRes, slotsRes, subjectsRes, teachersRes, classroomsRes] = await Promise.all([
         supabase.from("academic_years")
@@ -739,11 +740,8 @@ export default function SchedulePage() {
         supabase.from("time_slots").select("*").order("start_time"),
         supabase.from("subjects").select("id,subject_code,name_th,subject_group").order("subject_code"),
         supabase.from("users")
-          .select("id,first_name,last_name,full_name,position")
-          .in("role", [
-            "subject_teacher","homeroom_teacher","grade_head","teacher",
-            "subject_head","dept_head"
-        ]),
+          .select("id,title,first_name,last_name,full_name,position,role")
+          .order("first_name"),
         // ★ FIX: ดึงห้องทั้งหมด ไม่ filter
         supabase.from("classrooms")
           .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type")
@@ -821,6 +819,8 @@ export default function SchedulePage() {
     const yearIds   = selRow
       ? academicYearsRaw.filter(y => y.year_name === selRow.year_name).map(y => y.id)
       : [selectedYear];
+    console.log("user.id:", user?.id);
+    console.log("entries teacher_ids:", entries.map(e => e.teacher_id));
 
     // ★ FIX: ใช้ simple select แล้ว join ใน JS เพื่อหลีกเลี่ยง foreign key alias ผิด
     const { data: entriesData } = await (supabase.from("timetable_entries") as any)
