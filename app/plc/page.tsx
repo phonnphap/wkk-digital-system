@@ -1342,7 +1342,8 @@ export default function PLCHoursPage() {
       if (currentYear) setSelectedYearId(currentYear.id);
 
       // โหลด grade_levels map: id → name
-      const { data: gradeLevelsData } = await supabase.from("grade_levels").select("id, name");
+      const { data: gradeLevelsData, error: glError } = await supabase.from("grade_levels").select("id, name");
+      console.log("grade_levels raw:", gradeLevelsData, "error:", glError);
       const glMap: Record<string, string> = {};
       (gradeLevelsData || []).forEach((g: any) => {
         if (g?.id != null && g?.name) {
