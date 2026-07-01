@@ -8,7 +8,16 @@ const CLIENT_ID  = process.env.MICROSOFT_CLIENT_ID!;
 const CLIENT_SEC = process.env.MICROSOFT_CLIENT_SECRET!;
 const TARGET_UPN = process.env.MICROSOFT_TARGET_EMAIL!;
 
-async function getAccessToken() {
+// ── Cache access token ไว้ในหน่วยความจำ server กันขอใหม่ถี่เกินไปจน Azure AD บล็อก (429) ──
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
+async function getAccessToken(): Promise<string> {
+  const now = Date.now();
+  // เผื่อเวลา 60 วิ ก่อนหมดอายุจริง กันขอบเวลาเฉียดฉิว
+  if (cachedToken && cachedToken.expiresAt - 60_000 > now) {
+    return cachedToken.token;
+  }
+
   const res = await fetch(
     `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
     {
@@ -23,7 +32,19 @@ async function getAccessToken() {
     }
   );
   const json = await res.json();
-  return json.access_token as string;
+
+  if (!res.ok || !json.access_token) {
+    console.error("getAccessToken failed:", res.status, json);
+    cachedToken = null;
+    throw new Error(`ไม่สามารถขอ access token ได้: ${json.error_description ?? res.status}`);
+  }
+
+  // expires_in มีหน่วยเป็นวินาที (ปกติ 3600 = 1 ชม.)
+  cachedToken = {
+    token: json.access_token,
+    expiresAt: now + (json.expires_in ?? 3600) * 1000,
+  };
+  return cachedToken.token;
 }
 
 async function resolveOne(token: string, path: string): Promise<string | null> {
@@ -33,10 +54,15 @@ async function resolveOne(token: string, path: string): Promise<string | null> {
       .map(encodeURIComponent)
       .join("/")}?select=id,name,webUrl,@microsoft.graph.downloadUrl`;
     const res = await fetch(graphUrl, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      console.error(`resolveOne failed [${res.status}] path="${path}":`, errBody);
+      return null;
+    }
     const data = await res.json();
     return data["@microsoft.graph.downloadUrl"] ?? null;
-  } catch {
+  } catch (err) {
+    console.error(`resolveOne exception path="${path}":`, err);
     return null;
   }
 }
@@ -66,6 +92,7 @@ export async function POST(req: NextRequest) {
       const res = await fetch(graphUrl, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
+        console.error("resolve-onedrive itemId failed:", res.status, err);
         return NextResponse.json({ ok: false, error: err }, { status: res.status });
       }
       const data = await res.json();

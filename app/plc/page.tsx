@@ -270,7 +270,19 @@ function printPLCReport(
   const win = window.open("", "_blank", "width=900,height=700");
   if (!win) return;
   win.document.open(); win.document.write(html); win.document.close();
-  win.onload = () => { win.focus(); win.print(); };
+
+  win.onload = () => {
+    const imgs = Array.from(win.document.images);
+    if (imgs.length === 0) { win.focus(); win.print(); return; }
+    let loaded = 0;
+    const tryPrint = () => { loaded++; if (loaded >= imgs.length) { win.focus(); win.print(); } };
+    imgs.forEach(img => {
+      if (img.complete) tryPrint();
+      else { img.addEventListener("load", tryPrint); img.addEventListener("error", tryPrint); }
+    });
+    // กันเหนียว ถ้ารูปโหลดช้ามาก ไม่ให้ค้างรอเกินไป
+    setTimeout(() => { win.focus(); win.print(); }, 5000);
+  };
 }
 
 async function printPLCReportAsync(
@@ -347,6 +359,22 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
   const isGrade = meeting.meeting_scope === "grade";
   const [printing, setPrinting] = useState(false);
 
+  // ── resolve รูปทั้งหมดพร้อมกันครั้งเดียว (batch) แทนที่จะให้แต่ละรูปยิง request แยกกัน ──
+  const [galleryUrls, setGalleryUrls] = useState<string[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setGalleryLoading(true);
+    (async () => {
+      const paths = meeting.image_paths ?? [];
+      const fallbacks = meeting.image_urls ?? [];
+      const urls = await resolveOneDriveUrls(paths.length ? paths : fallbacks, fallbacks);
+      if (!cancelled) { setGalleryUrls(urls); setGalleryLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [meeting.id]);
+
   const sections = [
     { label:"สภาพปัญหา", value:meeting.problem_description, icon:"⚠️" },
     { label:"วัตถุประสงค์", value:meeting.objectives, icon:"🎯" },
@@ -416,17 +444,25 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
                 📷 รูปภาพการประชุม ({Math.max(meeting.image_urls?.length ?? 0, meeting.image_paths?.length ?? 0)} รูป)
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {(meeting.image_paths && meeting.image_paths.length > 0 ? meeting.image_paths : (meeting.image_urls ?? [])).map((_, i) => (
-                  <ResolvedImage
-                    key={i}
-                    path={meeting.image_paths?.[i]}
-                    url={meeting.image_urls?.[i]}
-                    alt={`meeting-${i+1}`}
-                    className="w-full h-24 object-cover rounded-xl border border-slate-200 cursor-pointer hover:opacity-90"
-                    onClick={() => { const u = meeting.image_urls?.[i]; if (u) window.open(u, "_blank"); }}
-                  />
-                ))}
-              </div>
+  {galleryLoading ? (
+    Array.from({ length: Math.max(meeting.image_urls?.length ?? 0, meeting.image_paths?.length ?? 0, 1) }).map((_, i) => (
+      <div key={i} className="w-full h-24 rounded-xl border border-slate-200 bg-slate-100 animate-pulse" />
+    ))
+  ) : galleryUrls.length === 0 ? (
+    <div className="col-span-full text-center py-6 text-slate-400 text-sm">🖼️ ไม่พบรูปภาพ (ลิงก์อาจหมดอายุ)</div>
+  ) : (
+    galleryUrls.map((u, i) => (
+      <img
+        key={i}
+        src={u}
+        alt={`meeting-${i + 1}`}
+        className="w-full h-24 object-cover rounded-xl border border-slate-200 cursor-pointer hover:opacity-90"
+        onClick={() => window.open(u, "_blank")}
+        onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0.3"; }}
+      />
+    ))
+  )}
+</div>
             </div>
           )}
         </div>
