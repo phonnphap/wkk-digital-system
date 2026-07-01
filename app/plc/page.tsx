@@ -538,8 +538,19 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   ];
 
   function gradeSortIndex(label: string): number {
-  const idx = GRADE_ORDER.indexOf(label);
-  return idx === -1 ? 999 : idx;
+  if (!label) return 999;
+  const clean = label.trim();
+
+  // ตัวเลขในชื่อ เช่น "อ.2" → 2, "ป.1" → 1
+  const numMatch = clean.match(/\d+/);
+  const num = numMatch ? parseInt(numMatch[0], 10) : 0;
+
+  // จัดกลุ่มตามตัวอักษรนำหน้า: อนุบาล → ประถม → มัธยม
+  if (clean.includes("อ")) return 0 * 100 + num;   // อ.2, อ.3 → 2, 3
+  if (clean.includes("ป")) return 1 * 100 + num;   // ป.1 - ป.6 → 101-106
+  if (clean.includes("ม")) return 2 * 100 + num;   // ม.1 - ม.6 → 201-206
+
+  return 999; // เผื่อสายชั้นแปลกๆ ที่ไม่เข้าพวก ให้ไปอยู่ท้ายสุด
 }
 
   const availableGrades = useMemo(() => {

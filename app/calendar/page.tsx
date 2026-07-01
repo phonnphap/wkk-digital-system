@@ -35,6 +35,7 @@ interface CalEvent {
   target_roles: string[];
   color_override?: string;
   attachment_urls: string[];
+  attachment_mimes?: string[];
   created_at: string;
   creator?: { first_name: string; last_name: string };
 }
@@ -169,19 +170,22 @@ function CatBadges({ cats }: { cats: string[] }) {
 // ══════════════════════════════════════════════════════
 // FilePreview
 // ══════════════════════════════════════════════════════
-function FilePreview({ url, previewUrl, mimeHint }: { 
-  url: string; 
-  previewUrl?: string;
-  mimeHint?: string 
+function FilePreview({ url, previewUrl, mimeHint }: {
+  url: string; previewUrl?: string; mimeHint?: string;
 }) {
   const name = url.split("?")[0].split("/").pop() ?? "ไฟล์";
-  const ext  = name.split(".").pop()?.toLowerCase() ?? "";
+  const ext  = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
 
-  const isImg = ["jpg","jpeg","png","gif","webp"].includes(ext)
+  const knownImg = ["jpg","jpeg","png","gif","webp"].includes(ext)
     || (mimeHint?.startsWith("image/") ?? false);
-  const isPdf = ext === "pdf" || mimeHint === "application/pdf";
+  const knownPdf = ext === "pdf" || mimeHint === "application/pdf";
+  const knownOther = !!mimeHint && !mimeHint.startsWith("image/") && mimeHint !== "application/pdf";
 
-  // ✅ ใช้ previewUrl (local blob) ก่อน ถ้าไม่มีค่อยใช้ url
+  // ★ ถ้าไม่รู้ type แน่ชัด (ไม่มี mimeHint, ไม่มีนามสกุล) ให้ "ลองแสดงเป็นรูปก่อน"
+  // แล้วค่อย fallback ด้วย onError ที่มีอยู่แล้ว
+  const isImg = knownImg || (!mimeHint && !ext);
+  const isPdf = knownPdf;
+
   const displaySrc = previewUrl || url;
 
   return (
@@ -278,7 +282,11 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
   mime: string; 
   path?: string
 }[]>(
-  (event?.attachment_urls ?? []).map(url => ({ url, previewUrl: url, mime: "" }))
+  (event?.attachment_urls ?? []).map((url, i) => ({
+    url,
+    previewUrl: url,
+    mime: event?.attachment_mimes?.[i] ?? "", // ★ ใช้ mime เดิมถ้ามี
+  }))
 );
 
   const [colorOvr,     setColorOvr]    = useState(event?.color_override ?? "");
@@ -373,6 +381,7 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
       is_public: true,
       target_roles: audiences,
       attachment_urls: attachments.map(a => a.url),
+      attachment_mimes: attachments.map(a => a.mime || ""), 
       attachment_paths: attachments.map(a => a.path ?? null), // ★ใหม่
     });
     setLoading(false);
@@ -481,8 +490,12 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
                 <div>
                   <p className="text-xs font-bold text-slate-400 mb-2">เอกสารแนบ</p>
                   {event!.attachment_urls!.map((url,i)=>(
-                    <FilePreview key={i} url={url} />
-                  ))}
+                    <FilePreview
+    key={i}
+    url={url}
+    mimeHint={event?.attachment_mimes?.[i]}   // ★ เพิ่ม
+  />
+))}
                 </div>
               )}
             </div>
