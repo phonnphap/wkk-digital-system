@@ -131,7 +131,7 @@ function StatusBadge({ status }: { status: ItemStatus }) {
   const cfg = {
     live: { label: "ใช้งานได้", cls: "bg-emerald-100 text-emerald-700 border-emerald-300", dot: "bg-emerald-500" },
     beta: { label: "ทดลองใช้",  cls: "bg-amber-100 text-amber-700 border-amber-300",   dot: "bg-amber-400"  },
-    wip:  { label: "กำลังทำ",   cls: "bg-slate-100 text-slate-500 border-slate-300",   dot: "bg-slate-400"  },
+    wip:  { label: "กำลังพัฒนา",   cls: "bg-slate-100 text-slate-500 border-slate-300",   dot: "bg-slate-400"  },
   }[status];
   return (
     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-black border ${cfg.cls}`}>
@@ -368,12 +368,19 @@ return (
               <h4 className="text-sm font-extrabold text-slate-800 border-b border-slate-100 pb-2.5">{group.title}</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {group.items.map((item, iIdx) => (
-                  <button key={iIdx} onClick={() => router.push(item.path)}
-                    className="flex items-center gap-4 p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-white hover:border-blue-400 hover:shadow-md transition-all group text-left">
-                    <div className={`w-11 h-11 rounded-xl ${item.color} text-white flex items-center justify-center shadow-sm transition-transform group-hover:scale-105 shrink-0`}>{item.icon}</div>
-                    <span className="block text-sm font-extrabold text-slate-700 group-hover:text-blue-600 transition-colors truncate">{item.name}</span>
-                  </button>
-                ))}
+  <button key={iIdx} onClick={() => router.push(item.path)}
+    className="flex items-center gap-4 p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-white hover:border-blue-400 hover:shadow-md transition-all group text-left">
+    <div className={`w-11 h-11 rounded-xl ${item.color} text-white flex items-center justify-center shadow-sm transition-transform group-hover:scale-105 shrink-0`}>
+      {item.icon}
+    </div>
+    <div className="flex-1 min-w-0">
+      <span className="block text-sm font-extrabold text-slate-700 group-hover:text-blue-600 transition-colors truncate">
+        {item.name}
+      </span>
+      <StatusBadge status={item.status} />
+    </div>
+  </button>
+))}
               </div>
             </div>
           ))}
