@@ -501,6 +501,11 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
     "ม.1","ม.2","ม.3","ม.4","ม.5","ม.6",
   ];
 
+  function gradeSortIndex(label: string): number {
+  const idx = GRADE_ORDER.indexOf(label);
+  return idx === -1 ? 999 : idx;
+}
+
   const availableGrades = useMemo(() => {
     const set = new Set<string>();
     allTeachers.forEach(t => { if (t.grade_level) set.add(t.grade_level); });
@@ -1342,17 +1347,11 @@ export default function PLCHoursPage() {
       if (currentYear) setSelectedYearId(currentYear.id);
 
       // โหลด grade_levels map: id → name
-      const { data, error: glError } = await supabase.from("grade_levels").select("id, name");
-
-console.log("🔍 grade_levels data:", data);
-console.log("🔍 grade_levels error:", glError);
-
+      const { data, error } = await supabase.from("grade_levels").select("id, name");
 const glMap = (data ?? []).reduce((acc, cur) => {
   acc[String(cur.id)] = cur.name;
   return acc;
 }, {} as Record<string, string>);
-
-console.log("🔍 glMap:", glMap);
 setGradeLevelMap(glMap);
 
       // โหลด departments map: id → name (สำหรับ academic_level ที่เป็น UUID)

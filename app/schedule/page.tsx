@@ -76,14 +76,11 @@ const SCHEDULE_TEMPLATES = [
 const ADMIN_ROLES    = ["admin", "director", "deputy_director"];
 const APPROVER_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head", "subject_head"];
 const NON_TEACHING_ROLES = ["admin", "director", "deputy_director", "staff"];
-const teachersRes = supabase.from("users")
-  .select("id,title,first_name,last_name,full_name,position,role,grade_level,department_id")
-  .order("first_name");
 
 type UserProfile = {
   id: string; title?: string; first_name?: string; last_name?: string; full_name?: string;
   email: string; role: string; position?: string;
-  homeroom_classroom_id?: string; grade_level?: string; subject_group?: string;
+  grade_level?: string;
   extra_roles?: string[]; department_id?: string; // ← เพิ่ม
 };
 type TimeSlot   = { id: string; slot_number: number; start_time: string; end_time: string; slot_label?: string; is_break: boolean; schedule_type?: string };
@@ -92,7 +89,7 @@ type Teacher = {
   id: string; title?: string; first_name?: string; last_name?: string; full_name?: string; position?: string;
   role?: string; grade_level?: string; department_id?: string; // ← เพิ่ม
 };
-type Classroom  = { id: string; room_number: number; room_name?: string; grade_group?: string; academic_year_id?: string; schedule_type?: string };
+type Classroom  = { id: string; room_number: number; room_name?: string; grade_group?: string; academic_year_id?: string; schedule_type?: string; homeroom_teacher_id?: string; homeroom_teacher_2_id?: string };
 type TimetableEntry = {
   id: string; classroom_id: string; subject_id: string; teacher_id: string;
   teacher_id_2?: string; day_of_week: number; time_slot_id: string; academic_year_id: string;
@@ -306,7 +303,11 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
               <option value="">— เลือกครู —</option>
               {selectableTeachers.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
             </select>
-            {isHomeroomOnly && <p className="text-xs text-amber-600 font-bold mt-1">⚠️ คุณเพิ่มคาบได้เฉพาะชื่อตัวเอง (รออนุมัติ)</p>}
+            {isHomeroomOnly && (
+              <p className="text-xs text-amber-600 font-bold mt-1">
+                ⚠️ คุณเพิ่มคาบได้เฉพาะชื่อตัวเอง{!canEditDirect ? " (รออนุมัติ)" : " (บันทึกได้ทันที)"}
+              </p>
+            )}
           </div>
 
           <div>
@@ -516,7 +517,14 @@ function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, acad
     return sameGrade ? "direct" : "deny";
   }
 
-  // homeroom_teacher (หรือครูทั่วไป): ขอเพิ่ม/แก้ได้เฉพาะคาบของตัวเอง — ต้องรออนุมัติ
+  // homeroom_teacher: เพิ่ม/แก้คาบของตัวเองได้ทันที ไม่ต้องรออนุมัติ (จำกัดให้เลือกได้เฉพาะชื่อตัวเอง)
+  if (user.role === "homeroom_teacher") {
+    if (!entry) return "direct"; // เพิ่มคาบใหม่ — ล็อกชื่อครูเป็นตัวเองใน EntryModal
+    const isMine = entry.teacher_id === user.id || entry.teacher_id_2 === user.id;
+    return isMine ? "direct" : "deny";
+  }
+
+  // ครูทั่วไป (subject_teacher ฯลฯ): ขอเพิ่ม/แก้ได้เฉพาะคาบของตัวเอง — ต้องรออนุมัติ
   if (!entry) return "request"; // เพิ่มคาบใหม่ — เป็นคำขอ
   const isMine = entry.teacher_id === user.id || entry.teacher_id_2 === user.id;
   return isMine ? "request" : "deny";
@@ -775,13 +783,13 @@ export default function SchedulePage() {
 
       let profileData: any = null;
       const { data: byAuthId } = await supabase.from("users")
-        .select("id,first_name,last_name,full_name,email,role,position,homeroom_classroom_id,grade_level,subject_group,extra_roles,department_id")
+        .select("id,first_name,last_name,full_name,email,role,position,grade_level,extra_roles,department_id")
         .eq("auth_id", authUser.id).maybeSingle();
       profileData = byAuthId;
 
       if (!profileData && email) {
         const { data: byEmail } = await supabase.from("users")
-          .select("id,first_name,last_name,full_name,email,role,position,homeroom_classroom_id,grade_level,subject_group,extra_roles,department_id")
+          .select("id,first_name,last_name,full_name,email,role,position,grade_level,extra_roles,department_id")
           .eq("email", email).maybeSingle();
         profileData = byEmail;
         if (profileData) await (supabase.from("users") as any).update({ auth_id: authUser.id }).eq("id", profileData.id);
@@ -800,11 +808,11 @@ export default function SchedulePage() {
         supabase.from("time_slots").select("*").order("start_time"),
         supabase.from("subjects").select("id,subject_code,name_th,subject_group").order("subject_code"),
         supabase.from("users")
-          .select("id,title,first_name,last_name,full_name,position,role")
+          .select("id,title,first_name,last_name,full_name,position,role,grade_level,department_id")
           .order("first_name"),
         // ★ FIX: ดึงห้องทั้งหมด ไม่ filter
         supabase.from("classrooms")
-          .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type")
+          .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type,homeroom_teacher_id,homeroom_teacher_2_id")
           .order("grade_group").order("room_number"),
       ]);
 
@@ -838,9 +846,10 @@ export default function SchedulePage() {
 
         setClassrooms(roomList);
 
-        const homeroomId = profileData?.homeroom_classroom_id;
-        const initRoom   = (homeroomId && roomList.find((r: Classroom) => r.id === homeroomId))
-          ? homeroomId : (roomList[0]?.id ?? "");
+        const myHomeroomRoom = profileData?.id
+          ? roomList.find((r: Classroom) => r.homeroom_teacher_id === profileData.id || r.homeroom_teacher_2_id === profileData.id)
+          : null;
+        const initRoom = myHomeroomRoom?.id ?? (roomList[0]?.id ?? "");
         setSelectedRoom(initRoom);
 
       } else {
@@ -879,8 +888,6 @@ export default function SchedulePage() {
     const yearIds   = selRow
       ? academicYearsRaw.filter(y => y.year_name === selRow.year_name).map(y => y.id)
       : [selectedYear];
-    console.log("user.id:", user?.id);
-    console.log("entries teacher_ids:", entries.map(e => e.teacher_id));
 
     // ★ FIX: ใช้ simple select แล้ว join ใน JS เพื่อหลีกเลี่ยง foreign key alias ผิด
     const { data: entriesData } = await (supabase.from("timetable_entries") as any)
@@ -951,7 +958,7 @@ export default function SchedulePage() {
   async function applyScheduleType(type: string) {
     await (supabase.from("classrooms") as any).update({ schedule_type: type }).eq("id", selectedRoom);
     const { data } = await supabase.from("classrooms")
-      .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type").order("grade_group").order("room_number");
+      .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type,homeroom_teacher_id,homeroom_teacher_2_id").order("grade_group").order("room_number");
     const allRooms = (data ?? []) as Classroom[];
     setAllClassrooms(allRooms);
     const selRow  = academicYearsRaw.find(y => y.id === selectedYear);
@@ -1044,7 +1051,7 @@ export default function SchedulePage() {
   const myEntries         = entries.filter(e => e.teacher_id === user.id || e.teacher_id_2 === user.id);
   const myClassroomIds    = [...new Set(myEntries.map(e => e.classroom_id))];
   const myClassrooms      = classrooms.filter(c => myClassroomIds.includes(c.id));
-  const homeroomClassroom = user.homeroom_classroom_id ? classrooms.find(c => c.id === user.homeroom_classroom_id) : null;
+  const homeroomClassroom = classrooms.find(c => c.homeroom_teacher_id === user.id || c.homeroom_teacher_2_id === user.id) ?? null;
   const pendingCount      = changeRequests.filter(r => r.status === "pending").length;
 
   const subjectColorMap: Record<string, typeof SUBJECT_COLORS[0]> = {};
@@ -1127,10 +1134,10 @@ export default function SchedulePage() {
             )}
 
             {/* ★ ห้องที่ครูสอน */}
-            {!isAdmin && myClassrooms.filter(c => c.id !== user.homeroom_classroom_id).length > 0 && (
+            {!isAdmin && myClassrooms.filter(c => c.id !== homeroomClassroom?.id).length > 0 && (
               <div className="mb-3">
                 <p className="text-[10px] font-black text-slate-400 uppercase px-2 mb-1">ห้องที่ฉันสอน</p>
-                {myClassrooms.filter(c => c.id !== user.homeroom_classroom_id).map(room => (
+                {myClassrooms.filter(c => c.id !== homeroomClassroom?.id).map(room => (
                   <button key={room.id} onClick={() => { setSelectedRoom(room.id); setViewMode("room"); }}
                     className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-all mb-0.5 flex items-center justify-between
                       ${selectedRoom === room.id && viewMode === "room" ? "bg-blue-600 text-white" : "hover:bg-slate-50 text-slate-700"}`}>
