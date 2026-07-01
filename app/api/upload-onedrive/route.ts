@@ -94,6 +94,19 @@ export async function POST(req: NextRequest) {
 
     const fileData = await upRes.json();
 
+    // ★ สร้าง URL ผ่าน proxy ของเราเอง แทน anonymous sharing link
+    //    ข้อดี: ใช้ใน <img src> ได้ตรงๆ, ไม่มีวันหมดอายุ, ไม่ต้องเปิด public sharing
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "";
+const proxyUrl = `${baseUrl}/api/onedrive-file?account=${encodeURIComponent(TARGET_UPN)}&itemId=${encodeURIComponent(fileData.id)}`;
+
+return NextResponse.json({
+  ok: true,
+  url: proxyUrl,
+  webUrl: fileData.webUrl,
+  itemId: fileData.id,
+  account: TARGET_UPN,
+});
+
     // พยายามสร้าง sharing link (ไม่บังคับ)
     let publicUrl: string = fileData.webUrl;
     try {

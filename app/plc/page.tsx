@@ -130,6 +130,17 @@ const GRADE_LABEL: Record<string, string> = {
 const GRADE_META: { icon: string; textColor: string; borderColor: string; bgLight: string } =
   { icon:"🎓", textColor:"text-cyan-700", borderColor:"border-cyan-300", bgLight:"bg-cyan-50" };
 
+function gradeSortIndex(label: string): number {
+  if (!label) return 999;
+  const clean = label.trim();
+  const numMatch = clean.match(/\d+/);
+  const num = numMatch ? parseInt(numMatch[0], 10) : 0;
+  if (clean.includes("อ")) return 0 * 100 + num;
+  if (clean.includes("ป")) return 1 * 100 + num;
+  if (clean.includes("ม")) return 2 * 100 + num;
+  return 999;
+}
+
 // ── Resolve label helpers ──────────────────────────────────────────────────────
 function gradeLabel(id: string, glMap?: Record<string, string>): string {
   if (!id) return "—";
@@ -529,42 +540,13 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const [tab,         setTab]         = useState<"basic" | "report">("basic");
   const [submitted,   setSubmitted]   = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const GRADE_ORDER = [
-    "k2","k3","p1","p2","p3","p4","p5","p6",
-    "m1","m2","m3","m4","m5","m6",
-    "อ.2","อ.3","ป.1","ป.2","ป.3","ป.4","ป.5","ป.6",
-    "ม.1","ม.2","ม.3","ม.4","ม.5","ม.6",
-  ];
-
-  function gradeSortIndex(label: string): number {
-  if (!label) return 999;
-  const clean = label.trim();
-
-  // ตัวเลขในชื่อ เช่น "อ.2" → 2, "ป.1" → 1
-  const numMatch = clean.match(/\d+/);
-  const num = numMatch ? parseInt(numMatch[0], 10) : 0;
-
-  // จัดกลุ่มตามตัวอักษรนำหน้า: อนุบาล → ประถม → มัธยม
-  if (clean.includes("อ")) return 0 * 100 + num;   // อ.2, อ.3 → 2, 3
-  if (clean.includes("ป")) return 1 * 100 + num;   // ป.1 - ป.6 → 101-106
-  if (clean.includes("ม")) return 2 * 100 + num;   // ม.1 - ม.6 → 201-206
-
-  return 999; // เผื่อสายชั้นแปลกๆ ที่ไม่เข้าพวก ให้ไปอยู่ท้ายสุด
-}
-
   const availableGrades = useMemo(() => {
-    const set = new Set<string>();
-    allTeachers.forEach(t => { if (t.grade_level) set.add(t.grade_level); });
-    return Array.from(set).sort((a, b) => {
-      const ai = GRADE_ORDER.indexOf(a);
-      const bi = GRADE_ORDER.indexOf(b);
-      if (ai !== -1 && bi !== -1) return ai - bi;
-      if (ai !== -1) return -1;
-      if (bi !== -1) return 1;
-      return a.localeCompare(b, "th");
-    });
-  }, [allTeachers]);
+  const set = new Set<string>();
+  allTeachers.forEach(t => { if (t.grade_level) set.add(t.grade_level); });
+  return Array.from(set).sort((a, b) =>
+    gradeSortIndex(gradeLabel(a, gradeLevelMap)) - gradeSortIndex(gradeLabel(b, gradeLevelMap))
+  );
+}, [allTeachers, gradeLevelMap]);
 
   const myDeptId = (currentUser as Teacher).department_id ?? null;
   const sameGroupTeachers = useMemo(() => {
@@ -1471,7 +1453,7 @@ setGradeLevelMap(glMap);
         );
         const totalHours = groupMeetings.reduce((s, m) => s + Number(m.duration_hours), 0);
         return { key: lv, label: gradeLabel(lv, gradeLevelMap), scope: "grade" as MeetingScope, teachers, meetings: groupMeetings, totalHours };
-      }).sort((a, b) => a.key.localeCompare(b.key, "th"));
+      }).sort((a, b) => gradeSortIndex(a.label) - gradeSortIndex(b.label));
     }
 
     const levelMap = new Map<string, Teacher[]>();

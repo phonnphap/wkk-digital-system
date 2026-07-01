@@ -171,20 +171,21 @@ function CatBadges({ cats }: { cats: string[] }) {
 // FilePreview
 // ══════════════════════════════════════════════════════
 function FilePreview({ url, previewUrl, mimeHint }: {
-  url: string; previewUrl?: string; mimeHint?: string;
+  url: string;
+  previewUrl?: string;
+  mimeHint?: string;
 }) {
   const name = url.split("?")[0].split("/").pop() ?? "ไฟล์";
   const ext  = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
 
-  const knownImg = ["jpg","jpeg","png","gif","webp"].includes(ext)
-    || (mimeHint?.startsWith("image/") ?? false);
-  const knownPdf = ext === "pdf" || mimeHint === "application/pdf";
-  const knownOther = !!mimeHint && !mimeHint.startsWith("image/") && mimeHint !== "application/pdf";
-
-  // ★ ถ้าไม่รู้ type แน่ชัด (ไม่มี mimeHint, ไม่มีนามสกุล) ให้ "ลองแสดงเป็นรูปก่อน"
-  // แล้วค่อย fallback ด้วย onError ที่มีอยู่แล้ว
-  const isImg = knownImg || (!mimeHint && !ext);
-  const isPdf = knownPdf;
+  // ★ ให้ mimeHint (จากตอนอัปโหลดจริง) เป็นตัวตัดสินหลัก
+  //    ใช้ ext เป็น fallback สำหรับข้อมูลเก่าที่ไม่มี mime บันทึกไว้
+  const isImg = mimeHint
+    ? mimeHint.startsWith("image/")
+    : ["jpg","jpeg","png","gif","webp"].includes(ext);
+  const isPdf = mimeHint
+    ? mimeHint === "application/pdf"
+    : ext === "pdf";
 
   const displaySrc = previewUrl || url;
 
@@ -277,15 +278,15 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
 
   // ★ FIX 1: attachments เป็น array ของ {url, mime} ตั้งแต่ initial state — ไม่ยัด JSX เข้า useState
   const [attachments, setAttachments] = useState<{
-  url: string; 
-  previewUrl?: string;  // ← เพิ่ม
-  mime: string; 
-  path?: string
+  url: string;
+  previewUrl?: string;
+  mime: string;
+  path?: string;
 }[]>(
   (event?.attachment_urls ?? []).map((url, i) => ({
     url,
     previewUrl: url,
-    mime: event?.attachment_mimes?.[i] ?? "", // ★ ใช้ mime เดิมถ้ามี
+    mime: event?.attachment_mimes?.[i] ?? "", // ★ ใช้ mime ที่เคยบันทึกไว้
   }))
 );
 
@@ -322,19 +323,16 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
       continue;
     }
 
-    // ✅ สร้าง local preview ทันที ก่อน upload เสร็จ
     const localPreview = URL.createObjectURL(file);
 
     try {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("path", `WKK_Event_System/${Date.now()}_${file.name}`);
-      // ไม่ต้องส่ง account — ใช้ default hr หรือส่งถ้าต้องการ account อื่น
+      formData.append("account", "academic@khienkhet.ac.th"); // ★ ย้ายมาบันทึกที่ account นี้
 
       const res  = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
       const json = await res.json().catch(() => null);
-
-      console.log("Upload response:", json); // ✅ debug
 
       if (!res.ok || !json?.ok) {
         const msg = json?.error
@@ -345,13 +343,12 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
         continue;
       }
 
-      // ✅ ใช้ url (anonymous sharing link) เป็นหลัก
-      const savedUrl = json.url || json.downloadUrl || json.webUrl;
+      const savedUrl = json.url; // ★ ตอนนี้คือ proxy URL ที่แสดงรูปได้ตรงๆ
 
       if (savedUrl) {
-        setAttachments(prev => [...prev, { 
-          url: savedUrl,          // เก็บใน DB
-          previewUrl: localPreview, // แสดงใน browser ได้ทันที
+        setAttachments(prev => [...prev, {
+          url: savedUrl,
+          previewUrl: localPreview,
           mime: file.type,
         }]);
       }
@@ -370,20 +367,20 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
     if (cats.length === 0) { alert("กรุณาเลือกหมวดหมู่อย่างน้อย 1 หมวด"); return; }
     setLoading(true);
     await onSave({
-      title, description: desc, schedule, categories: cats, location,
-      start_date: startDate, end_date: endDate || startDate,
-      start_time: isAllDay ? null : startTime+":00",
-      end_time:   isAllDay||!hasEndTime ? null : endTime+":00",
-      is_all_day: isAllDay,
-      color_override: colorOvr || null,
-      status: asDraft ? "draft" : "pending",
-      created_by: user.id,
-      is_public: true,
-      target_roles: audiences,
-      attachment_urls: attachments.map(a => a.url),
-      attachment_mimes: attachments.map(a => a.mime || ""), 
-      attachment_paths: attachments.map(a => a.path ?? null), // ★ใหม่
-    });
+  title, description: desc, schedule, categories: cats, location,
+  start_date: startDate, end_date: endDate || startDate,
+  start_time: isAllDay ? null : startTime+":00",
+  end_time:   isAllDay||!hasEndTime ? null : endTime+":00",
+  is_all_day: isAllDay,
+  color_override: colorOvr || null,
+  status: asDraft ? "draft" : "pending",
+  created_by: user.id,
+  is_public: true,
+  target_roles: audiences,
+  attachment_urls: attachments.map(a => a.url),
+  attachment_mimes: attachments.map(a => a.mime || ""), // ★ เพิ่ม
+  attachment_paths: attachments.map(a => a.path ?? null),
+});
     setLoading(false);
   }
 
@@ -487,17 +484,13 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
                 {event?.schedule && <div className="bg-blue-50 rounded-xl p-3 mt-2 text-slate-700 whitespace-pre-wrap text-sm">{event.schedule}</div>}
               </div>
               {(event?.attachment_urls??[]).length > 0 && (
-                <div>
-                  <p className="text-xs font-bold text-slate-400 mb-2">เอกสารแนบ</p>
-                  {event!.attachment_urls!.map((url,i)=>(
-                    <FilePreview
-    key={i}
-    url={url}
-    mimeHint={event?.attachment_mimes?.[i]}   // ★ เพิ่ม
-  />
-))}
-                </div>
-              )}
+  <div>
+    <p className="text-xs font-bold text-slate-400 mb-2">เอกสารแนบ</p>
+    {event!.attachment_urls!.map((url,i)=>(
+      <FilePreview key={i} url={url} mimeHint={event?.attachment_mimes?.[i]} /> 
+    ))}
+  </div>
+)}
             </div>
           )}
 
