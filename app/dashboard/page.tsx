@@ -150,7 +150,7 @@ function StatusBadge({ status }: { status: ItemStatus }) {
         { name: "ขอออกนอกโรงเรียน", icon: <LogOut className="w-6 h-6" />, color: "bg-amber-500", path: "/gate-pass" },
         { name: "เลขเกียรติบัตร/คำสั่ง/บันทึก", icon: <FileText className="w-6 h-6" />, color: "bg-indigo-500", path: "/document-reg" },
         { name: "รายงานการอบรมรายบุคคล", icon: <FolderOpen className="w-6 h-6" />, color: "bg-violet-500", path: "/training-report" },
-        { name: "คลังเกียรติยศและผลงาน", icon: <Trophy className="w-6 h-6" />, color: "bg-yellow-500", path: "/honor/awards", status: "beta" as ItemStatus },
+        { name: "คลังเกียรติยศและผลงาน", icon: <Trophy className="w-6 h-6" />, color: "bg-yellow-500", path: "/honor/awards", status: "wip" as ItemStatus },
       ]
     },
     {
@@ -168,8 +168,8 @@ function StatusBadge({ status }: { status: ItemStatus }) {
     {
       title: "🛠️ ระบบสนับสนุนและยานพาหนะ",
       items: [
-        { name: "รายงานเวรประจำวัน", icon: <Calendar className="w-6 h-6" />, color: "bg-orange-500", path: "/duty-report", status: "live" as ItemStatus },
-        { name: "ประเมินโภชนาการนักเรียน", icon: <UserCheck className="w-6 h-6" />, color: "bg-emerald-600", path: "/nutrition" },
+        { name: "รายงานเวรประจำวัน", icon: <Calendar className="w-6 h-6" />, color: "bg-orange-500", path: "/duty-report" },
+        { name: "ประเมินโภชนาการนักเรียน", icon: <UserCheck className="w-6 h-6" />, color: "bg-emerald-600", path: "/nutrition", status: "live" as ItemStatus },
         { name: "จองรถ & ห้องประชุม", icon: <Car className="w-6 h-6" />, color: "bg-blue-600", path: "/booking" },
         { name: "ยืม-คืน อุปกรณ์ ICT", icon: <Monitor className="w-6 h-6" />, color: "bg-sky-600", path: "/ict-borrow" },
         { name: "แจ้งซ่อม (Helpdesk)", icon: <Wrench className="w-6 h-6" />, color: "bg-rose-600", path: "/repair", status: "wip"  as ItemStatus },
@@ -178,13 +178,27 @@ function StatusBadge({ status }: { status: ItemStatus }) {
   ];
 
   const shortcuts = [
-    { name: "ลงเวลาปฏิบัติงาน", icon: "📸", bg: "bg-blue-50 border-blue-100 text-blue-700", path: "/face-scan" },
-    { name: "ปฏิทินงาน", icon: "🗓️", bg: "bg-indigo-50 border-indigo-100 text-indigo-700", path: "/calendar" },
+    { name: "ลงเวลาปฏิบัติงาน", icon: "📸", bg: "bg-blue-50 border-blue-100 text-blue-700", path: "/face-scan", status: "beta"  as ItemStatus },
+    { name: "ปฏิทินงาน", icon: "🗓️", bg: "bg-indigo-50 border-indigo-100 text-indigo-700", path: "/calendar", status: "live" as ItemStatus },
     { name: "เช็คชื่อนักเรียน", icon: "📋", bg: "bg-emerald-50 border-emerald-100 text-emerald-700", path: "/attendance" },
     { name: "ยื่นใบลา", icon: "📅", bg: "bg-amber-50 border-amber-100 text-amber-700", path: "/leave" },
     { name: "แจ้งซ่อม", icon: "🔧", bg: "bg-rose-50 border-rose-100 text-rose-700", path: "/repair" },
     { name: "จองรถ / ห้องประชุม", icon: "🚌", bg: "bg-cyan-50 border-cyan-100 text-cyan-700", path: "/booking" },
   ];
+
+  {/* Legend */}
+<div className="flex items-center gap-4 flex-wrap">
+  {[
+    { status: "live" as ItemStatus, desc: "ใช้งานได้แล้ว" },
+    { status: "beta" as ItemStatus, desc: "ช่วงทดลองใช้" },
+    { status: "wip"  as ItemStatus, desc: "กำลังพัฒนา" },
+  ].map(({ status, desc }) => (
+    <div key={status} className="flex items-center gap-1.5 text-xs text-slate-500">
+      <StatusBadge status={status} />
+      <span>{desc}</span>
+    </div>
+  ))}
+</div>
 
   const [schoolEvents, setSchoolEvents] = useState<{date: string; title: string; color: string; colorHex: string | null}[]>([]);
 
