@@ -142,6 +142,7 @@ async function uploadAttachment(file: File, teacherFirstName: string): Promise<{
 }
 
 /** หาชื่อไฟล์ที่ยังไม่ถูกใช้ใน Documents/ใบลา/ — ถ้าซ้ำจะเติม (1),(2)... */
+/** หาชื่อไฟล์ที่ยังไม่ถูกใช้ใน Documents/ใบลา/ — ถ้าซ้ำจะเติม (1),(2)... */
 async function findAvailableLeavePath(fileNameBase: string, ext: string): Promise<string> {
   const MAX_TRIES = 20;
   let candidate = `${OD_LEAVE_FOLDER}/${fileNameBase}.${ext}`;
@@ -155,26 +156,30 @@ async function findAvailableLeavePath(fileNameBase: string, ext: string): Promis
       });
       const json = await res.json().catch(() => null);
       if (!json?.ok || !json?.downloadUrl) {
-        // ไม่พบไฟล์นี้อยู่แล้ว → ใช้ชื่อนี้ได้เลย
-        return candidate;
+        return candidate; // ไม่มีไฟล์นี้อยู่ → ใช้ได้เลย
       }
     } catch {
-      // เรียก API ไม่สำเร็จ → ถือว่าไม่ชนกัน ใช้ชื่อนี้ไปก่อน
-      return candidate;
+      return candidate; // เรียก API ไม่สำเร็จ → ใช้ชื่อนี้ไปก่อน
     }
-    // มีไฟล์ชื่อนี้แล้ว → ลองชื่อถัดไปที่เติม (n)
     candidate = `${OD_LEAVE_FOLDER}/${fileNameBase} (${i + 1}).${ext}`;
   }
-  // กันชนแน่ๆ ถ้าซ้ำเกิน MAX_TRIES ครั้ง (ไม่ควรเกิดในทางปฏิบัติ)
   return `${OD_LEAVE_FOLDER}/${fileNameBase}_${Date.now()}.${ext}`;
 }
 
-/** อัพโหลด PDF ใบลาที่อนุมัติครบ → Documents/ใบลา/ */
-async function uploadApprovedLeavePDF(html: string, teacherInfo: { first_name?: string; last_name?: string }): Promise<void> {
-  const now = new Date();
-  const dd = String(now.getDate()).padStart(2,"0");
-  const mm = String(now.getMonth()+1).padStart(2,"0");
-  const yyyyBE = now.getFullYear()+543;
+/** อัพโหลด PDF ใบลาที่อนุมัติครบ → Documents/ใบลา/
+ *  ⚠️ ใช้ "วันที่เริ่มลา" (leaveStartDate) ตั้งชื่อไฟล์ ไม่ใช่วันที่อนุมัติ
+ *  เพื่อไม่ให้ครูคนเดียวกันที่ลาคนละวัน แต่ถูกอนุมัติวันเดียวกัน ไฟล์ชนกัน
+ */
+async function uploadApprovedLeavePDF(
+  html: string,
+  teacherInfo: { first_name?: string; last_name?: string },
+  leaveStartDate?: string
+): Promise<void> {
+  // ✅ ใช้วันที่ลาจริง ถ้าไม่มีค่อย fallback เป็นวันนี้
+  const dateForFile = leaveStartDate ? new Date(leaveStartDate) : new Date();
+  const dd = String(dateForFile.getDate()).padStart(2, "0");
+  const mm = String(dateForFile.getMonth() + 1).padStart(2, "0");
+  const yyyyBE = dateForFile.getFullYear() + 543;
   const firstName = (teacherInfo.first_name || "").trim();
   const lastName  = (teacherInfo.last_name  || "").trim();
   const fileNameBase = `${dd}${mm}${yyyyBE}_${firstName}_${lastName}`;
@@ -201,12 +206,11 @@ async function uploadApprovedLeavePDF(html: string, teacherInfo: { first_name?: 
 
     const errJson = await pdfRes.json().catch(() => ({ fallback: true }));
     if (!errJson.fallback) throw new Error(errJson.error);
-    // fallback → ใช้ HTML แทน
   } catch (e) {
     console.warn("[uploadApprovedLeavePDF] PDF API failed, uploading HTML:", e);
   }
 
-  // 2. Fallback: อัพ HTML แทน (เปิดใน browser ได้ + OneDrive preview พอใช้)
+  // 2. Fallback: อัพ HTML แทน
   const uniquePath = await findAvailableLeavePath(fileNameBase, "html");
   const uniqueName = uniquePath.split("/").pop()!;
   const htmlBlob = new Blob([html], { type: "text/html;charset=utf-8" });
@@ -1555,50 +1559,52 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
     } else {
       const allApproved=s1==="approved"&&s2==="approved"&&s3==="approved";
       if(allApproved){
-        updates.status="approved";
+  updates.status="approved";
 
-        // ✅ อัพโหลด PDF ใบลาอนุมัติไปยัง OneDrive ของ hr@khienkhet.ac.th / Documents/ใบลา/
-        try {
-          const reqUser = (req as any).user;
-          const leaveData = {
-            fullName: fullName(reqUser), position: reqUser?.position,
-            leaveType: req.leave_type, leaveTypeName: LEAVE_TYPE_CONFIG[req.leave_type]?.label??"",
-            otherLeaveName: (req as any).other_leave_name,
-            startDate: req.start_date, endDate: req.end_date,
-            days: req.days_count, halfDay: (req as any).half_day,
-            reason: req.reason, phone: reqUser?.phone, contactInfo: (req as any).contact_info,
-          };
-          // ใช้ลายเซ็น approver 3 ที่เพิ่งอัพเดต
-          const approverSigs = [
-            { name:"นางสาวพรรษา แก้วใหญ่", position:"ครู ตรวจสอบสถิติการลา",
-              signature_url:(req as any).approver_1_signature, approved_at:(req as any).approver_1_approved_at },
-            { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
-              signature_url:(req as any).approver_2_signature, approved_at:(req as any).approver_2_approved_at },
-            { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต",
-              signature_url: updates.approver_3_signature ?? (req as any).approver_3_signature,
-              approved_at:   updates.approver_3_approved_at ?? (req as any).approver_3_approved_at },
-          ];
+  // ✅ อัพโหลด PDF ใบลาอนุมัติไปยัง OneDrive ของ hr@khienkhet.ac.th / Documents/ใบลา/
+  try {
+    const reqUser = (req as any).user;
+    const leaveData = {
+      fullName: fullName(reqUser), position: reqUser?.position,
+      leaveType: req.leave_type, leaveTypeName: LEAVE_TYPE_CONFIG[req.leave_type]?.label??"",
+      otherLeaveName: (req as any).other_leave_name,
+      startDate: req.start_date, endDate: req.end_date,
+      days: req.days_count, halfDay: (req as any).half_day,
+      reason: req.reason, phone: reqUser?.phone, contactInfo: (req as any).contact_info,
+    };
+    const approverSigs = [
+      { name:"นางสาวพรรษา แก้วใหญ่", position:"ครู ตรวจสอบสถิติการลา",
+        signature_url:(req as any).approver_1_signature, approved_at:(req as any).approver_1_approved_at },
+      { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
+        signature_url:(req as any).approver_2_signature, approved_at:(req as any).approver_2_approved_at },
+      { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต",
+        signature_url: updates.approver_3_signature ?? (req as any).approver_3_signature,
+        approved_at:   updates.approver_3_approved_at ?? (req as any).approver_3_approved_at },
+    ];
 
-          // ดึงสถิติของครูคนนี้
-          const stats = await loadLeaveStats(req.user_id, req.id);
-          const html = buildLeaveHTML(leaveData, reqUser?.signature_url||"", approverSigs, (req as any).document_url, stats);
+    // ดึงสถิติของครูคนนี้
+    const stats = await loadLeaveStats(req.user_id, req.id);
+    const html = buildLeaveHTML(leaveData, reqUser?.signature_url||"", approverSigs, (req as any).document_url, stats);
 
-          // อัพโหลด (async, ไม่บล็อก)
-          uploadApprovedLeavePDF(html, { first_name: reqUser?.first_name, last_name: reqUser?.last_name })
-            .catch(e => console.warn("[upload approved PDF] failed:", e));
-        } catch(e) {
-          console.warn("[handleApprove] PDF build error:", e);
-        }
+    // อัพโหลด (async, ไม่บล็อก) — ✅ ใช้วันที่ลาจริง ไม่ใช่วันที่อนุมัติ ป้องกันไฟล์ชนกัน
+    uploadApprovedLeavePDF(
+      html,
+      { first_name: reqUser?.first_name, last_name: reqUser?.last_name },
+      req.start_date
+    ).catch(e => console.warn("[upload approved PDF] failed:", e));
+  } catch(e) {
+    console.warn("[handleApprove] PDF build error:", e);
+  }
 
-        // ✅ ส่งเมล (เปลี่ยนกลับ — แทนที่จะลบออก ยังคงส่งเมลอยู่)
-        fetch("/api/send-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:[teacherEmail,HR_EMAIL,ADMIN_EMAIL].filter(Boolean),subject:`[อนุมัติแล้ว] ใบลา ${teacherName} · ${typeCfg?.label} · ${req.days_count} วัน`,html:`<div style="font-family:Sarabun,Arial,sans-serif;max-width:600px;margin:0 auto"><div style="background:linear-gradient(135deg,#10b981,#059669);padding:24px;border-radius:12px 12px 0 0;color:white"><h2 style="margin:0">✅ ใบลาได้รับการอนุมัติครบแล้ว</h2></div><div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px"><table style="width:100%;border-collapse:collapse;font-size:14px"><tr><td style="padding:8px 0;color:#64748b;width:120px">ผู้ลา</td><td style="font-weight:700">${teacherName}</td></tr><tr><td style="padding:8px 0;color:#64748b">ประเภท</td><td>${typeCfg?.icon} ${typeCfg?.label}</td></tr><tr><td style="padding:8px 0;color:#64748b">วันที่</td><td>${toThaiDate(req.start_date)} – ${toThaiDate(req.end_date)}</td></tr><tr><td style="padding:8px 0;color:#64748b">จำนวน</td><td><strong>${req.days_count} วัน</strong></td></tr></table><p style="margin-top:16px;font-size:12px;color:#94a3b8">อีเมลนี้ส่งโดยอัตโนมัติ · ${new Date().toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})}</p></div></div>`})}).catch(console.warn);
-      } else {
-        const nextSlot=slotNum+1 as 2|3;
-        const nextEmail=nextSlot===2?APPROVER_2_EMAIL:nextSlot===3?APPROVER_3_EMAIL:null;
-        if(nextEmail&&nextSlot<=3){
-          fetch("/api/send-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:[nextEmail],subject:`[รออนุมัติ] ใบลา ${teacherName} · ${typeCfg?.label} · ${req.days_count} วัน`,html:`<div style="font-family:Sarabun,Arial,sans-serif;max-width:600px;margin:0 auto"><div style="background:linear-gradient(135deg,#6366f1,#4f46e5);padding:24px;border-radius:12px 12px 0 0;color:white"><h2 style="margin:0">⏳ มีใบลารอการอนุมัติจากคุณ</h2><p style="margin:4px 0 0;opacity:0.85;font-size:13px">ผู้อนุมัติลำดับที่ ${nextSlot}</p></div><div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px"><table style="width:100%;border-collapse:collapse;font-size:14px"><tr><td style="padding:8px 0;color:#64748b;width:120px">ผู้ลา</td><td style="font-weight:700">${teacherName}</td></tr><tr><td style="padding:8px 0;color:#64748b">ประเภท</td><td>${typeCfg?.icon} ${typeCfg?.label}</td></tr><tr><td style="padding:8px 0;color:#64748b">วันที่</td><td>${toThaiDate(req.start_date)} – ${toThaiDate(req.end_date)}</td></tr><tr><td style="padding:8px 0;color:#64748b">จำนวน</td><td><strong>${req.days_count} วัน</strong></td></tr><tr><td style="padding:8px 0;color:#64748b">เหตุผล</td><td>${req.reason}</td></tr></table><p style="margin-top:16px;font-size:13px;color:#4f46e5;font-weight:700">กรุณาเข้าสู่ระบบเพื่ออนุมัติ: <a href="https://system.khienkhet.ac.th/leave">คลิกที่นี่</a></p></div></div>`})}).catch(console.warn);
-        }
-      }
+  // ✅ ส่งเมล (เปลี่ยนกลับ — แทนที่จะลบออก ยังคงส่งเมลอยู่)
+  fetch("/api/send-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:[teacherEmail,HR_EMAIL,ADMIN_EMAIL].filter(Boolean),subject:`[อนุมัติแล้ว] ใบลา ${teacherName} · ${typeCfg?.label} · ${req.days_count} วัน`,html:`<div style="font-family:Sarabun,Arial,sans-serif;max-width:600px;margin:0 auto"><div style="background:linear-gradient(135deg,#10b981,#059669);padding:24px;border-radius:12px 12px 0 0;color:white"><h2 style="margin:0">✅ ใบลาได้รับการอนุมัติครบแล้ว</h2></div><div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px"><table style="width:100%;border-collapse:collapse;font-size:14px"><tr><td style="padding:8px 0;color:#64748b;width:120px">ผู้ลา</td><td style="font-weight:700">${teacherName}</td></tr><tr><td style="padding:8px 0;color:#64748b">ประเภท</td><td>${typeCfg?.icon} ${typeCfg?.label}</td></tr><tr><td style="padding:8px 0;color:#64748b">วันที่</td><td>${toThaiDate(req.start_date)} – ${toThaiDate(req.end_date)}</td></tr><tr><td style="padding:8px 0;color:#64748b">จำนวน</td><td><strong>${req.days_count} วัน</strong></td></tr></table><p style="margin-top:16px;font-size:12px;color:#94a3b8">อีเมลนี้ส่งโดยอัตโนมัติ · ${new Date().toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})}</p></div></div>`})}).catch(console.warn);
+} else {
+  const nextSlot=slotNum+1 as 2|3;
+  const nextEmail=nextSlot===2?APPROVER_2_EMAIL:nextSlot===3?APPROVER_3_EMAIL:null;
+  if(nextEmail&&nextSlot<=3){
+    fetch("/api/send-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:[nextEmail],subject:`[รออนุมัติ] ใบลา ${teacherName} · ${typeCfg?.label} · ${req.days_count} วัน`,html:`<div style="font-family:Sarabun,Arial,sans-serif;max-width:600px;margin:0 auto"><div style="background:linear-gradient(135deg,#6366f1,#4f46e5);padding:24px;border-radius:12px 12px 0 0;color:white"><h2 style="margin:0">⏳ มีใบลารอการอนุมัติจากคุณ</h2><p style="margin:4px 0 0;opacity:0.85;font-size:13px">ผู้อนุมัติลำดับที่ ${nextSlot}</p></div><div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px"><table style="width:100%;border-collapse:collapse;font-size:14px"><tr><td style="padding:8px 0;color:#64748b;width:120px">ผู้ลา</td><td style="font-weight:700">${teacherName}</td></tr><tr><td style="padding:8px 0;color:#64748b">ประเภท</td><td>${typeCfg?.icon} ${typeCfg?.label}</td></tr><tr><td style="padding:8px 0;color:#64748b">วันที่</td><td>${toThaiDate(req.start_date)} – ${toThaiDate(req.end_date)}</td></tr><tr><td style="padding:8px 0;color:#64748b">จำนวน</td><td><strong>${req.days_count} วัน</strong></td></tr><tr><td style="padding:8px 0;color:#64748b">เหตุผล</td><td>${req.reason}</td></tr></table><p style="margin-top:16px;font-size:13px;color:#4f46e5;font-weight:700">กรุณาเข้าสู่ระบบเพื่ออนุมัติ: <a href="https://system.khienkhet.ac.th/leave">คลิกที่นี่</a></p></div></div>`})}).catch(console.warn);
+  }
+}
     }
 
     const {error}=await (supabase.from("leave_requests") as any).update(updates).eq("id",id);
