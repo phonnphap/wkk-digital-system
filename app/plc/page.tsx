@@ -133,13 +133,15 @@ const GRADE_META: { icon: string; textColor: string; borderColor: string; bgLigh
 // ── Resolve label helpers ──────────────────────────────────────────────────────
 function gradeLabel(id: string, glMap?: Record<string, string>): string {
   if (!id) return "—";
-  if (glMap && glMap[id]) return glMap[id];
-  return GRADE_LABEL[id] ?? id;
+  const key = String(id).trim();
+  if (glMap && glMap[key]) return glMap[key];
+  return GRADE_LABEL[key] ?? id;
 }
 
 function subjectLabel(id: string, sMap?: Record<string, string>): string {
   if (!id) return "—";
-  if (sMap && sMap[id]) return sMap[id];
+  const key = String(id).trim();
+  if (sMap && sMap[key]) return sMap[key];
   return id;
 }
 
@@ -1342,7 +1344,11 @@ export default function PLCHoursPage() {
       // โหลด grade_levels map: id → name
       const { data: gradeLevelsData } = await supabase.from("grade_levels").select("id, name");
       const glMap: Record<string, string> = {};
-      (gradeLevelsData || []).forEach((g: any) => { glMap[g.id] = g.name; });
+      (gradeLevelsData || []).forEach((g: any) => {
+        if (g?.id != null && g?.name) {
+          glMap[String(g.id)] = String(g.name);
+        }
+      });
       setGradeLevelMap(glMap);
 
       // โหลด departments map: id → name (สำหรับ academic_level ที่เป็น UUID)
