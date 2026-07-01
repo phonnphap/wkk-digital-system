@@ -44,7 +44,7 @@ const SCHEDULE_TEMPLATES = [
     ],
   },
   {
-    key: "junior", label: "มัธยมต้น (ม.1–ม.3)",
+    key: "junior", label: "มัธยมต้น (ม.1–ม.2)",
     slots: [
       { slot_number: 1, start_time: "08:30", end_time: "09:20", slot_label: "คาบ 1", is_break: false },
       { slot_number: 2, start_time: "09:20", end_time: "10:10", slot_label: "คาบ 2", is_break: false },
@@ -58,7 +58,7 @@ const SCHEDULE_TEMPLATES = [
     ],
   },
   {
-    key: "senior", label: "มัธยมปลาย (ม.4–ม.6)",
+    key: "senior", label: "ม.3 และ ม.ปลาย (ม.3–ม.6)",
     slots: [
       { slot_number: 1, start_time: "08:30", end_time: "09:20", slot_label: "คาบ 1", is_break: false },
       { slot_number: 2, start_time: "09:20", end_time: "10:10", slot_label: "คาบ 2", is_break: false },
@@ -1050,7 +1050,14 @@ export default function SchedulePage() {
   const roomEntries       = entries.filter(e => e.classroom_id === selectedRoom);
   const myEntries         = entries.filter(e => e.teacher_id === user.id || e.teacher_id_2 === user.id);
   const myClassroomIds    = [...new Set(myEntries.map(e => e.classroom_id))];
-  const myClassrooms      = classrooms.filter(c => myClassroomIds.includes(c.id));
+  const myClassrooms      = classrooms
+  .filter(c => myClassroomIds.includes(c.id))
+  .sort((a, b) => {
+    const ga = gradeGroupSortKey(a.grade_group);
+    const gb = gradeGroupSortKey(b.grade_group);
+    if (ga !== gb) return ga - gb;
+    return (a.room_name ?? "").localeCompare(b.room_name ?? "", "th", { numeric: true });
+  });
   const homeroomClassroom = classrooms.find(c => c.homeroom_teacher_id === user.id || c.homeroom_teacher_2_id === user.id) ?? null;
   const pendingCount      = changeRequests.filter(r => r.status === "pending").length;
 
@@ -1062,9 +1069,6 @@ export default function SchedulePage() {
     .sort((a, b) => gradeGroupSortKey(a as string) - gradeGroupSortKey(b as string)) as string[];
 
   const currentScheduleType = SCHEDULE_TEMPLATES.find(t => t.key === selectedClassroom?.schedule_type)?.label ?? "ประถม";
-
-  const myTimeSlots = [...timeSlots]
-    .sort((a, b) => a.start_time.localeCompare(b.start_time));
 
   return (
     <div className="min-h-screen bg-slate-50 print:bg-white">
@@ -1249,11 +1253,30 @@ export default function SchedulePage() {
                 })}
               </div>
               {myEntries.length > 0 ? (
-                <div className="mb-5">
-                  <h3 className="font-black text-slate-700 text-sm mb-3">📅 ตารางคาบสอนของฉัน</h3>
-                  <PersonalTimetableGrid myEntries={myEntries} timeSlots={myTimeSlots} subjects={subjects} teachers={teachers} classrooms={classrooms} userId={user.id} />
-                </div>
-              ) : (
+  <div className="mb-5 space-y-6">
+    {(["primary", "junior", "senior"] as const).map(type => {
+      const roomsOfType = myClassrooms.filter(c => (c.schedule_type ?? "primary") === type);
+      if (roomsOfType.length === 0) return null;
+
+      const roomIds       = roomsOfType.map(r => r.id);
+      const entriesOfType = myEntries.filter(e => roomIds.includes(e.classroom_id));
+      if (entriesOfType.length === 0) return null;
+
+      const slots = buildRoomSlots(type, timeSlots);
+      const label = SCHEDULE_TEMPLATES.find(t => t.key === type)?.label ?? type;
+
+      return (
+        <div key={type}>
+          <h3 className="font-black text-slate-700 text-sm mb-3">📅 ตารางคาบสอนของฉัน · {label}</h3>
+          <PersonalTimetableGrid
+            myEntries={entriesOfType} timeSlots={slots}
+            subjects={subjects} teachers={teachers} classrooms={classrooms} userId={user.id}
+          />
+        </div>
+      );
+    })}
+  </div>
+) : (
                 <div className="text-center py-16 text-slate-400 bg-white rounded-2xl border border-slate-200 mb-5">
                   <p className="text-4xl mb-3">📅</p>
                   <p className="font-bold">ยังไม่มีตารางสอน</p>
