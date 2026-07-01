@@ -141,6 +141,34 @@ async function uploadAttachment(file: File, teacherFirstName: string): Promise<{
   return json.downloadUrl || json.url || json.webUrl || null;
 }
 
+/** หาชื่อไฟล์ที่ยังไม่ถูกใช้ใน Documents/ใบลา/ — ถ้าซ้ำจะเติม (1),(2)... */
+async function findAvailableLeavePath(fileNameBase: string, ext: string): Promise<string> {
+  const MAX_TRIES = 20;
+  let candidate = `${OD_LEAVE_FOLDER}/${fileNameBase}.${ext}`;
+
+  for (let i = 0; i < MAX_TRIES; i++) {
+    try {
+      const res = await fetch("/api/resolve-onedrive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: candidate }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!json?.ok || !json?.downloadUrl) {
+        // ไม่พบไฟล์นี้อยู่แล้ว → ใช้ชื่อนี้ได้เลย
+        return candidate;
+      }
+    } catch {
+      // เรียก API ไม่สำเร็จ → ถือว่าไม่ชนกัน ใช้ชื่อนี้ไปก่อน
+      return candidate;
+    }
+    // มีไฟล์ชื่อนี้แล้ว → ลองชื่อถัดไปที่เติม (n)
+    candidate = `${OD_LEAVE_FOLDER}/${fileNameBase} (${i + 1}).${ext}`;
+  }
+  // กันชนแน่ๆ ถ้าซ้ำเกิน MAX_TRIES ครั้ง (ไม่ควรเกิดในทางปฏิบัติ)
+  return `${OD_LEAVE_FOLDER}/${fileNameBase}_${Date.now()}.${ext}`;
+}
+
 /** อัพโหลด PDF ใบลาที่อนุมัติครบ → Documents/ใบลา/ */
 async function uploadApprovedLeavePDF(html: string, teacherInfo: { first_name?: string; last_name?: string }): Promise<void> {
   const now = new Date();
@@ -161,11 +189,13 @@ async function uploadApprovedLeavePDF(html: string, teacherInfo: { first_name?: 
 
     if (pdfRes.ok) {
       const pdfBlob = await pdfRes.blob();
+      const uniquePath = await findAvailableLeavePath(fileNameBase, "pdf");
+      const uniqueName = uniquePath.split("/").pop()!;
       const formData = new FormData();
-      formData.append("file", pdfBlob, `${fileNameBase}.pdf`);
-      formData.append("path", `${OD_LEAVE_FOLDER}/${fileNameBase}.pdf`);
+      formData.append("file", pdfBlob, uniqueName);
+      formData.append("path", uniquePath);
       await fetch("/api/upload-onedrive", { method: "POST", body: formData });
-      console.log("[uploadApprovedLeavePDF] PDF uploaded successfully");
+      console.log("[uploadApprovedLeavePDF] PDF uploaded successfully:", uniquePath);
       return;
     }
 
@@ -177,12 +207,14 @@ async function uploadApprovedLeavePDF(html: string, teacherInfo: { first_name?: 
   }
 
   // 2. Fallback: อัพ HTML แทน (เปิดใน browser ได้ + OneDrive preview พอใช้)
+  const uniquePath = await findAvailableLeavePath(fileNameBase, "html");
+  const uniqueName = uniquePath.split("/").pop()!;
   const htmlBlob = new Blob([html], { type: "text/html;charset=utf-8" });
   const formData = new FormData();
-  formData.append("file", htmlBlob, `${fileNameBase}.html`);
-  formData.append("path", `${OD_LEAVE_FOLDER}/${fileNameBase}.html`);
+  formData.append("file", htmlBlob, uniqueName);
+  formData.append("path", uniquePath);
   await fetch("/api/upload-onedrive", { method: "POST", body: formData });
-  console.log("[uploadApprovedLeavePDF] HTML fallback uploaded");
+  console.log("[uploadApprovedLeavePDF] HTML fallback uploaded:", uniquePath);
 }
 
 // ══════════════════════════════════════════════════════════
