@@ -122,16 +122,35 @@ export default function DashboardPage() {
     }
   };
 
+  // เพิ่ม type สถานะ
+type ItemStatus = "live" | "beta" | "wip" | undefined;
+
+// เพิ่ม badge component
+function StatusBadge({ status }: { status: ItemStatus }) {
+  if (!status) return null;
+  const cfg = {
+    live: { label: "ใช้งานได้", cls: "bg-emerald-100 text-emerald-700 border-emerald-300", dot: "bg-emerald-500" },
+    beta: { label: "ทดลองใช้",  cls: "bg-amber-100 text-amber-700 border-amber-300",   dot: "bg-amber-400"  },
+    wip:  { label: "กำลังทำ",   cls: "bg-slate-100 text-slate-500 border-slate-300",   dot: "bg-slate-400"  },
+  }[status];
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-black border ${cfg.cls}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} ${status === "live" ? "animate-pulse" : ""}`} />
+      {cfg.label}
+    </span>
+  );
+}
+
   // โครงสร้างกลุ่มเมนูหลัก
   const menuGroups = [
     {
       title: "📅 ระบบลางานและสารบรรณ",
       items: [
-        { name: "ใบลา / ไปราชการ", icon: <CalendarDays className="w-6 h-6" />, color: "bg-blue-500", path: "/leave" },
+        { name: "ใบลา/ ไปราชการ", icon: <CalendarDays className="w-6 h-6" />, color: "bg-blue-500", path: "/leave", status: "live" as ItemStatus },
         { name: "ขอออกนอกโรงเรียน", icon: <LogOut className="w-6 h-6" />, color: "bg-amber-500", path: "/gate-pass" },
         { name: "เลขเกียรติบัตร/คำสั่ง/บันทึก", icon: <FileText className="w-6 h-6" />, color: "bg-indigo-500", path: "/document-reg" },
         { name: "รายงานการอบรมรายบุคคล", icon: <FolderOpen className="w-6 h-6" />, color: "bg-violet-500", path: "/training-report" },
-        { name: "คลังเกียรติยศและผลงาน", icon: <Trophy className="w-6 h-6" />, color: "bg-yellow-500", path: "/honor/awards" },
+        { name: "คลังเกียรติยศและผลงาน", icon: <Trophy className="w-6 h-6" />, color: "bg-yellow-500", path: "/honor/awards", status: "beta" as ItemStatus },
       ]
     },
     {
@@ -139,9 +158,9 @@ export default function DashboardPage() {
       items: [
         { name: "เช็คชื่อนักเรียน-ครูประจำวิชา", icon: <UserCheck className="w-6 h-6" />, color: "bg-emerald-500", path: "/attendance" },
         { name: "ครูประจำชั้น", icon: <Users className="w-6 h-6" />, color: "bg-teal-500", path: "/homeroom" },
-        { name: "ตารางสอน", icon: <Calendar className="w-6 h-6" />, color: "bg-purple-500", path: "/schedule" },
+        { name: "ตารางสอน", icon: <Calendar className="w-6 h-6" />, color: "bg-purple-500", path: "/schedule", status: "wip"  as ItemStatus },
         { name: "แลกคาบ & สอนแทน", icon: <RefreshCw className="w-6 h-6" />, color: "bg-pink-500", path: "/substitution" },
-        { name: "ระบบบันทึกชั่วโมง PLC", icon: <Users className="w-6 h-6" />, color: "bg-teal-500", path: "/plc" },
+        { name: "ระบบบันทึกชั่วโมง PLC", icon: <Users className="w-6 h-6" />, color: "bg-teal-500", path: "/plc", status: "live" as ItemStatus },
         { name: "นิเทศการสอน", icon: <Settings className="w-6 h-6" />, color: "bg-rose-500", path: "/supervision" },
         { name: "คลังสื่อการสอน", icon: <FolderOpen className="w-6 h-6" />, color: "bg-cyan-500", path: "/media-lib" },
       ]
@@ -149,11 +168,11 @@ export default function DashboardPage() {
     {
       title: "🛠️ ระบบสนับสนุนและยานพาหนะ",
       items: [
-        { name: "รายงานเวรประจำวัน", icon: <Calendar className="w-6 h-6" />, color: "bg-orange-500", path: "/duty-report" },
+        { name: "รายงานเวรประจำวัน", icon: <Calendar className="w-6 h-6" />, color: "bg-orange-500", path: "/duty-report", status: "live" as ItemStatus },
         { name: "ประเมินโภชนาการนักเรียน", icon: <UserCheck className="w-6 h-6" />, color: "bg-emerald-600", path: "/nutrition" },
         { name: "จองรถ & ห้องประชุม", icon: <Car className="w-6 h-6" />, color: "bg-blue-600", path: "/booking" },
         { name: "ยืม-คืน อุปกรณ์ ICT", icon: <Monitor className="w-6 h-6" />, color: "bg-sky-600", path: "/ict-borrow" },
-        { name: "แจ้งซ่อม (Helpdesk)", icon: <Wrench className="w-6 h-6" />, color: "bg-rose-600", path: "/repair" },
+        { name: "แจ้งซ่อม (Helpdesk)", icon: <Wrench className="w-6 h-6" />, color: "bg-rose-600", path: "/repair", status: "wip"  as ItemStatus },
       ]
     }
   ];
