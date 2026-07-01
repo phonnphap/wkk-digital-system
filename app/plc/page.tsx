@@ -1419,9 +1419,10 @@ setGradeLevelMap(glMap);
     })();
   }, []);
 
-  const isRealAdmin = !!(user?.role && ADMIN_ROLES_SET.has(user.role));  // admin ตัวจริง แก้ไข/ลบ/มอบสิทธิ์ได้
-const isAdmin   = isRealAdmin || !!user?.is_plc_coordinator;            // มองเห็นมุมผู้บริหารได้ (รวมผู้ดูแลโครงการ)
-const isTeacher = !isAdmin;
+  const isRealAdmin  = !!(user?.role && ADMIN_ROLES_SET.has(user.role));
+const isCoordinator = !isRealAdmin && !!user?.is_plc_coordinator;
+const isAdmin   = isRealAdmin || isCoordinator;   // มองเห็นมุมผู้บริหารได้
+const isTeacher = !isRealAdmin;                    // มองเห็นมุมครู (บันทึกของตัวเอง) ได้ — รวมผู้ดูแลโครงการด้วยin;
 
   const loadMeetings = useCallback(async () => {
     if (!selectedYearId) return;
@@ -1527,7 +1528,7 @@ const isTeacher = !isAdmin;
           <div className="flex-1 min-w-0">
             <h1 className="text-base font-black text-slate-800 leading-none">บันทึกชั่วโมง PLC</h1>
             <p className="text-blue-600 text-xs font-bold truncate">
-  {isTeacher ? fullName(user) + " · " : isRealAdmin ? "ผู้บริหาร · " : "🎓 ผู้ดูแลโครงการ · "}{currentYearLabel}
+  {isRealAdmin ? "ผู้บริหาร · " : isCoordinator ? `${fullName(user)} · 🎓 ผู้ดูแลโครงการ · ` : fullName(user) + " · "}{currentYearLabel}
 </p>
           </div>
           {academicYears.length > 1 && (
