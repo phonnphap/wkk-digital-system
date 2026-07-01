@@ -63,6 +63,7 @@ type UserProfile = {
   id: string; title?:string; first_name?: string; last_name?: string; full_name?: string;
   email: string; role: string; position?: string; academic_level?: string;
   department_id?: string; grade_level?: string;
+  is_plc_coordinator?: boolean;   // ← เพิ่มบรรทัดนี้
 };
 type Teacher = UserProfile & { department_id?: string; grade_level?: string; signature_url?: string; };
 type AcademicYear = { id: string; year_name: string; semester: number; is_current?: boolean };
@@ -1348,8 +1349,8 @@ export default function PLCHoursPage() {
 
       let profileData: any = null;
       const { data: byAuthId } = await supabase.from("users")
-        .select("id, title, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level")
-        .eq("auth_id", authUser.id).maybeSingle();
+  .select("id, title, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level, is_plc_coordinator")
+  .eq("auth_id", authUser.id).maybeSingle();
       profileData = byAuthId;
       if (!profileData && email) {
         const { data: byEmail } = await supabase.from("users")
@@ -1418,8 +1419,9 @@ setGradeLevelMap(glMap);
     })();
   }, []);
 
-  const isAdmin   = !!(user?.role && ADMIN_ROLES_SET.has(user.role));
-  const isTeacher = !isAdmin;
+  const isRealAdmin = !!(user?.role && ADMIN_ROLES_SET.has(user.role));  // admin ตัวจริง แก้ไข/ลบ/มอบสิทธิ์ได้
+const isAdmin   = isRealAdmin || !!user?.is_plc_coordinator;            // มองเห็นมุมผู้บริหารได้ (รวมผู้ดูแลโครงการ)
+const isTeacher = !isAdmin;
 
   const loadMeetings = useCallback(async () => {
     if (!selectedYearId) return;
@@ -1525,8 +1527,8 @@ setGradeLevelMap(glMap);
           <div className="flex-1 min-w-0">
             <h1 className="text-base font-black text-slate-800 leading-none">บันทึกชั่วโมง PLC</h1>
             <p className="text-blue-600 text-xs font-bold truncate">
-              {isTeacher ? fullName(user) + " · " : "ผู้บริหาร · "}{currentYearLabel}
-            </p>
+  {isTeacher ? fullName(user) + " · " : isRealAdmin ? "ผู้บริหาร · " : "🎓 ผู้ดูแลโครงการ · "}{currentYearLabel}
+</p>
           </div>
           {academicYears.length > 1 && (
             <select value={selectedYearId} onChange={e => setSelectedYearId(e.target.value)}
@@ -1604,6 +1606,20 @@ setGradeLevelMap(glMap);
               </div>
               <span className="text-white/60 group-hover:text-white text-xl">→</span>
             </button>
+
+            {isRealAdmin && (
+  <button onClick={() => router.push("/plc/manage-users")}
+    className="w-full bg-white border-2 border-slate-200 hover:border-slate-300 text-slate-700 rounded-2xl px-6 py-4 flex items-center justify-between transition-all shadow-sm group">
+    <div className="flex items-center gap-3">
+      <span className="text-3xl">🛡️</span>
+      <div className="text-left">
+        <p className="font-black text-base">จัดการสิทธิ์ผู้ดูแลโครงการ</p>
+        <p className="text-slate-400 text-xs">มอบสิทธิ์ให้ครูดูข้อมูลแบบผู้บริหาร (ดูอย่างเดียว)</p>
+      </div>
+    </div>
+    <span className="text-slate-300 group-hover:text-slate-500 text-xl">→</span>
+  </button>
+)}
 
             <div className="flex gap-2 bg-white border-2 border-slate-200 rounded-2xl p-1.5 w-fit">
               <button onClick={() => setViewScope("subject")}
@@ -1733,10 +1749,10 @@ setGradeLevelMap(glMap);
       )}
       {showReports && (
         <AllReportsModal
-          meetings={meetings} allTeachers={allTeachers} academicYears={academicYears}
-          selectedYearId={selectedYearId} onClose={() => setShowReports(false)}
-          onEdit={m => { setShowReports(false); setEditMeeting(m); setModalOpen(true); }}
-          onDelete={handleDelete} canEdit={isAdmin}
+  meetings={meetings} allTeachers={allTeachers} academicYears={academicYears}
+  selectedYearId={selectedYearId} onClose={() => setShowReports(false)}
+  onEdit={m => { setShowReports(false); setEditMeeting(m); setModalOpen(true); }}
+  onDelete={handleDelete} canEdit={isAdmin}
           gradeLevelMap={gradeLevelMap}
           subjectMap={subjectMap}
           deputySignatureUrl={deputySignature}
