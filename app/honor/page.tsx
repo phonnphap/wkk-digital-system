@@ -62,7 +62,7 @@ export default function DashboardPage() {
         <div className="card-honor p-10 text-center">
           <p className="text-muted">ยังไม่มีรางวัลในระบบ</p>
           <Link
-            href="/awards/new"
+            href="/honor/awards/new"
             className="inline-block mt-4 rounded-md bg-navy text-white px-4 py-2 text-sm font-semibold hover:bg-navy-light"
           >
             + บันทึกรางวัลแรก

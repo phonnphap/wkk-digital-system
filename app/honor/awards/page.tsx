@@ -69,7 +69,7 @@ export default function AwardsListPage() {
           <div className="flex items-center gap-3">
             <ExportButton awards={awards} />
             <Link
-              href="/awards/new"
+              href="/honor/awards/new"
               className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-gold to-gold-light text-navy-dark px-5 py-2.5 text-sm font-bold shadow-sm hover:shadow-md hover:brightness-105 transition-all"
             >
               🏆 บันทึกรางวัลใหม่

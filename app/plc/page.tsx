@@ -34,7 +34,10 @@ async function resolveOneDriveUrl(path?: string | null, fallbackUrl?: string | n
     const res = await fetch("/api/resolve-onedrive", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
+      body: JSON.stringify({ 
+        path,
+        account: "hr@khienkhet.ac.th"  // ✅ ระบุ account ที่อัพไว้
+      }),
     });
     const json = await res.json();
     if (json.ok && json.downloadUrl) return json.downloadUrl as string;
@@ -49,7 +52,10 @@ async function resolveOneDriveUrls(paths: (string | null | undefined)[], fallbac
     const res = await fetch("/api/resolve-onedrive", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paths: cleanPaths }),
+      body: JSON.stringify({ 
+        paths: cleanPaths,
+        account: "hr@khienkhet.ac.th"  // ✅ ระบุ account
+      }),
     });
     const json = await res.json();
     if (json.ok && Array.isArray(json.downloadUrls)) {

@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 const TENANT_ID  = process.env.MICROSOFT_TENANT_ID!;
 const CLIENT_ID  = process.env.MICROSOFT_CLIENT_ID!;
 const CLIENT_SEC = process.env.MICROSOFT_CLIENT_SECRET!;
-const TARGET_UPN = process.env.MICROSOFT_TARGET_EMAIL!;
+const TARGET_UPN = process.env.MICROSOFT_HR_EMAIL || "hr@khienkhet.ac.th";
 
 // ── Cache access token ไว้ในหน่วยความจำ server กันขอใหม่ถี่เกินไปจน Azure AD บล็อก (429) ──
 let cachedToken: { token: string; expiresAt: number } | null = null;
@@ -69,7 +69,10 @@ async function resolveOne(token: string, path: string): Promise<string | null> {
 
 export async function POST(req: NextRequest) {
   try {
-    const { path, paths, itemId } = await req.json();
+    const { path, paths, itemId, account } = await req.json();
+    
+    // ✅ ใช้ account ที่ส่งมา หรือ fallback เป็น hr
+    const TARGET_UPN = account || process.env.MICROSOFT_HR_EMAIL || "hr@khienkhet.ac.th";
 
     // ── โหมด batch: resolve หลาย path พร้อมกัน (ใช้กับรูป PLC สูงสุด 4 รูป) ──
     if (Array.isArray(paths)) {
