@@ -1342,15 +1342,18 @@ export default function PLCHoursPage() {
       if (currentYear) setSelectedYearId(currentYear.id);
 
       // โหลด grade_levels map: id → name
-      const { data: gradeLevelsData, error: glError } = await supabase.from("grade_levels").select("id, name");
-      console.log("grade_levels raw:", gradeLevelsData, "error:", glError);
-      const glMap: Record<string, string> = {};
-      (gradeLevelsData || []).forEach((g: any) => {
-        if (g?.id != null && g?.name) {
-          glMap[String(g.id)] = String(g.name);
-        }
-      });
-      setGradeLevelMap(glMap);
+      const { data, error: glError } = await supabase.from("grade_levels").select("id, name");
+
+console.log("🔍 grade_levels data:", data);
+console.log("🔍 grade_levels error:", glError);
+
+const glMap = (data ?? []).reduce((acc, cur) => {
+  acc[String(cur.id)] = cur.name;
+  return acc;
+}, {} as Record<string, string>);
+
+console.log("🔍 glMap:", glMap);
+setGradeLevelMap(glMap);
 
       // โหลด departments map: id → name (สำหรับ academic_level ที่เป็น UUID)
       const { data: deptData } = await supabase.from("departments").select("id, name");
