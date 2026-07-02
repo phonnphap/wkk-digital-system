@@ -620,39 +620,50 @@ function LeavePDFPreview({ data, signatureUrl, onConfirm, onCancel, onUpdateSign
     doc.open(); doc.write(html); doc.close();
     setTimeout(()=>setReady(true),700);
   },[html]);
+
   return (
-    <div className="fixed inset-0 z-[9998] bg-black/70 flex flex-col overflow-auto">
-      <div className="flex-1 flex flex-col items-center p-4 pb-20">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col" style={{minHeight:"90vh"}}>
-          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
-            <div><h3 className="font-black text-slate-800 text-lg">📄 ตรวจสอบใบลาก่อนส่ง</h3><p className="text-xs text-slate-400">กรุณาตรวจสอบก่อนยืนยัน</p></div>
-            <div className="flex gap-2">
-              <button onClick={()=>printLeave(data,signatureUrl,undefined,undefined,leaveStats)} className="px-4 py-2 rounded-xl border-2 border-slate-200 bg-white text-slate-600 text-sm font-bold hover:bg-slate-50">🖨️ พิมพ์</button>
-              <button onClick={onCancel} className="w-9 h-9 rounded-xl bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg">✕</button>
+    <div className="fixed inset-0 z-[9998] bg-black/70 flex items-center justify-center sm:p-4">
+      <div className="bg-white w-full h-full sm:h-auto sm:max-h-[92vh] sm:rounded-2xl sm:max-w-4xl shadow-2xl overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
+          <div>
+            <h3 className="font-black text-slate-800 text-base sm:text-lg">📄 ตรวจสอบใบลาก่อนส่ง</h3>
+            <p className="text-[11px] sm:text-xs text-slate-400">กรุณาตรวจสอบก่อนยืนยัน</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={()=>printLeave(data,signatureUrl,undefined,undefined,leaveStats)} className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl border-2 border-slate-200 bg-white text-slate-600 text-xs sm:text-sm font-bold hover:bg-slate-50">🖨️ พิมพ์</button>
+            <button onClick={onCancel} className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg shrink-0">✕</button>
+          </div>
+        </div>
+
+        {/* พื้นที่พรีวิว — เลื่อนได้เฉพาะส่วนนี้ ไม่ดันปุ่มด้านล่างหลุดจอ */}
+        <div className="flex-1 bg-slate-200 p-2 sm:p-4 overflow-y-auto min-h-0">
+          {!ready&&<div className="flex items-center justify-center h-full text-slate-500 font-bold animate-pulse">⏳ กำลังสร้างใบลา...</div>}
+          <iframe
+            ref={iframeRef}
+            title="ใบลา"
+            className={`w-full border-none rounded-lg bg-white shadow-[0_2px_20px_rgba(0,0,0,0.2)] h-[52vh] sm:h-[65vh] ${ready ? "block" : "hidden"}`}
+          />
+        </div>
+
+        {/* ปุ่ม — อยู่ใน flex column แยกจากพื้นที่เลื่อน จึงมองเห็นเสมอ */}
+        <div className="px-4 sm:px-5 py-3 sm:py-4 border-t border-slate-100 bg-white shrink-0">
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
+            <div>
+              <p className="font-bold text-slate-700 text-xs sm:text-sm">✍️ ลายเซ็น</p>
+              <p className={`text-[11px] sm:text-xs font-semibold ${signatureUrl?"text-slate-400":"text-amber-500 animate-pulse"}`}>{signatureUrl?"พร้อมแล้ว":"⚠️ ยังไม่มีลายเซ็น"}</p>
+            </div>
+            <div className="flex items-center gap-2 sm:gap-3">
+              {signatureUrl&&<img src={signatureUrl} alt="sig" className="h-8 sm:h-10 max-w-[90px] sm:max-w-[120px] object-contain border border-slate-200 rounded-lg"/>}
+              <button onClick={onUpdateSignature} className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl border-2 border-blue-200 bg-blue-50 text-blue-600 text-xs sm:text-sm font-bold hover:bg-blue-100">{signatureUrl?"✏️ เซ็นใหม่":"✍️ เพิ่มลายเซ็น"}</button>
             </div>
           </div>
-          <div className="flex-1 bg-slate-200 p-4" style={{minHeight:0}}>
-            {!ready&&<div className="flex items-center justify-center h-full text-slate-500 font-bold animate-pulse">⏳ กำลังสร้างใบลา...</div>}
-            <iframe ref={iframeRef} title="ใบลา" style={{width:"100%",height:"100%",minHeight:700,border:"none",borderRadius:8,background:"white",display:ready?"block":"none",boxShadow:"0 2px 20px rgba(0,0,0,.2)"}}/>
-          </div>
-          <div className="px-5 py-4 border-t border-slate-100 bg-white shrink-0">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <p className="font-bold text-slate-700 text-sm">✍️ ลายเซ็น</p>
-                <p className={`text-xs font-semibold ${signatureUrl?"text-slate-400":"text-amber-500 animate-pulse"}`}>{signatureUrl?"พร้อมแล้ว":"⚠️ ยังไม่มีลายเซ็น"}</p>
-              </div>
-              <div className="flex items-center gap-3">
-                {signatureUrl&&<img src={signatureUrl} alt="sig" className="h-10 max-w-[120px] object-contain border border-slate-200 rounded-lg"/>}
-                <button onClick={onUpdateSignature} className="px-4 py-2 rounded-xl border-2 border-blue-200 bg-blue-50 text-blue-600 text-sm font-bold hover:bg-blue-100">{signatureUrl?"✏️ เซ็นใหม่":"✍️ เพิ่มลายเซ็น"}</button>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={onCancel} className="flex-1 py-3.5 rounded-2xl border-2 border-slate-200 bg-white text-slate-600 font-black text-base hover:bg-slate-50">← แก้ไข</button>
-              <button onClick={()=>{if(!signatureUrl){alert("กรุณาเพิ่มลายเซ็นก่อน");return;}onConfirm(signatureUrl);}} disabled={!signatureUrl}
-                className={`flex-[2] py-3.5 rounded-2xl font-black text-base flex items-center justify-center gap-2 ${signatureUrl?"bg-blue-600 hover:bg-blue-700 text-white":"bg-slate-200 text-slate-400 cursor-not-allowed"}`}>
-                📤 ยืนยันส่งใบลา
-              </button>
-            </div>
+          <div className="flex gap-2 sm:gap-3">
+            <button onClick={onCancel} className="flex-1 py-3 sm:py-3.5 rounded-2xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm sm:text-base hover:bg-slate-50">← แก้ไข</button>
+            <button onClick={()=>{if(!signatureUrl){alert("กรุณาเพิ่มลายเซ็นก่อน");return;}onConfirm(signatureUrl);}} disabled={!signatureUrl}
+              className={`flex-[2] py-3 sm:py-3.5 rounded-2xl font-black text-sm sm:text-base flex items-center justify-center gap-2 ${signatureUrl?"bg-blue-600 hover:bg-blue-700 text-white":"bg-slate-200 text-slate-400 cursor-not-allowed"}`}>
+              📤 ยืนยันส่งใบลา
+            </button>
           </div>
         </div>
       </div>
@@ -689,10 +700,9 @@ function DutyOfficerAlert({officer,isOwnDuty}:{officer:DutyOfficer|null;isOwnDut
 // ── loadLeaveStats — ✅ แก้ query ให้ถูกต้อง ──────────────
 // ดึงสถิติ + ข้อมูลการลาล่าสุด (ยกเว้น official, draft, rejected, cancelled)
 // ══════════════════════════════════════════════════════════
-async function loadLeaveStats(userId: string, excludeId?: string): Promise<LeaveStats> {
+async function loadLeaveStats(userId: string, excludeId?: string, beforeDate?: string): Promise<LeaveStats> {
   const fy = getCurrentFiscalYear();
 
-  // ✅ ดึงเฉพาะ status = pending หรือ approved (ไม่เอา draft/rejected/cancelled)
   const { data } = await supabase
     .from("leave_requests")
     .select("id, leave_type, days_count, start_date, end_date, status")
@@ -701,16 +711,19 @@ async function loadLeaveStats(userId: string, excludeId?: string): Promise<Leave
 
   if (!data) return { sick: 0, personal: 0, maternity: 0, lastLeave: null };
 
-  // กรองปีงบประมาณ
   const fyData = data.filter(r => isInFiscalYear(r.start_date, fy));
-  // ยกเว้นตัวเอง (กรณีแก้ไข)
-  const filtered = excludeId ? fyData.filter(r => r.id !== excludeId) : fyData;
+  let filtered = excludeId ? fyData.filter(r => r.id !== excludeId) : fyData;
+
+  // ✅ นับเฉพาะใบลาที่ "วันที่ลาเกิดก่อน" ใบนี้เท่านั้น (ป้องกันสถิตินับซ้ำ/ทับกัน
+  //    เวลาใบลาหลายใบถูกอนุมัติวันเดียวกันแต่วันลาจริงต่างกัน)
+  if (beforeDate) {
+    filtered = filtered.filter(r => r.start_date < beforeDate);
+  }
 
   const sick     = filtered.filter(r => r.leave_type === "sick").reduce((s,r) => s + Number(r.days_count), 0);
   const personal = filtered.filter(r => ["personal","other","ordination"].includes(r.leave_type)).reduce((s,r) => s + Number(r.days_count), 0);
   const maternity= filtered.filter(r => r.leave_type === "maternity").reduce((s,r) => s + Number(r.days_count), 0);
 
-  // ✅ lastLeave = การลาล่าสุด ยกเว้น official (เรียงตาม start_date ล่าสุด)
   const nonOfficial = filtered
     .filter(r => r.leave_type !== "official")
     .sort((a,b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime());
@@ -769,10 +782,10 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
 
   const sickMaxDate = leaveType==="sick" ? (() => { const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().split("T")[0]; })() : undefined;
 
-  // ✅ โหลดสถิติผ่าน helper ใหม่
-  useEffect(()=>{
-    loadLeaveStats(user.id, editData?.id).then(setLeaveStats);
-  }, [user.id, editData?.id]);
+  // ✅ โหลดสถิติผ่าน helper ใหม่ — นับเฉพาะใบลาที่เกิดก่อนวันที่เลือกลาในฟอร์มนี้
+useEffect(()=>{
+  loadLeaveStats(user.id, editData?.id, startDate || undefined).then(setLeaveStats);
+}, [user.id, editData?.id, startDate]);
 
   useEffect(()=>{
     if(!startDate){setDutyOfficer(null);setIsOwnDuty(false);return;}
@@ -1054,7 +1067,7 @@ if (docFile) {
 // ── helper: print with stats for any request ──────────────
 // ══════════════════════════════════════════════════════════
 async function printFullLeave(r: any, userForPrint: UserProfile, savedSignature: string) {
-  const stats = await loadLeaveStats(r.user_id ?? userForPrint.id, r.id);
+  const stats = await loadLeaveStats(r.user_id ?? userForPrint.id, r.id, r.start_date);
   printLeave(
     {
       fullName: fullName(r.user ?? userForPrint),
@@ -1583,7 +1596,7 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
     ];
 
     // ดึงสถิติของครูคนนี้
-    const stats = await loadLeaveStats(req.user_id, req.id);
+    const stats = await loadLeaveStats(req.user_id, req.id, req.start_date);
     const html = buildLeaveHTML(leaveData, reqUser?.signature_url||"", approverSigs, (req as any).document_url, stats);
 
     // อัพโหลด (async, ไม่บล็อก) — ✅ ใช้วันที่ลาจริง ไม่ใช่วันที่อนุมัติ ป้องกันไฟล์ชนกัน
