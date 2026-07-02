@@ -1,6 +1,6 @@
 export type AwardCategory = 'School' | 'Executive' | 'Teacher' | 'Student';
 
-export type AwardLevel = 'International' | 'National' | 'Regional' | 'Provincial' | 'Local';
+export type AwardLevel = 'International' | 'National' | 'Regional' | 'Provincial' | 'Local'| 'SchoolLevel';
 
 export type AwardType =
   | 'Academic'
@@ -25,6 +25,7 @@ export const AWARD_LEVEL_LABELS: Record<AwardLevel, string> = {
   Regional: 'ระดับภาค',
   Provincial: 'ระดับจังหวัด',
   Local: 'ระดับท้องถิ่น/เขตพื้นที่',
+  SchoolLevel: 'ระดับโรงเรียน', 
 };
 
 export const AWARD_TYPE_LABELS: Record<AwardType, string> = {
@@ -67,6 +68,7 @@ export interface Award {
   award_type: AwardType;
   image_cover: string | null;
   certificate_file: string | null;
+  award_images: string[] | null;  
   pr_link: string | null;
   tags: string[];
   kpi_standard: string | null;
@@ -91,6 +93,7 @@ export interface AwardFormInput {
   award_type: AwardType;
   image_cover: string;
   certificate_file: string;
+  award_images?: string[]; 
   pr_link: string;
   tags: string[];
   kpi_standard: string;
