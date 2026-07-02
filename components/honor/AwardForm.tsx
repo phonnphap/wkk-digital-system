@@ -36,6 +36,11 @@ function emptyForm(): AwardFormInput {
   };
 }
 
+// ── สไตล์ input ใช้ร่วมกันทั้งฟอร์ม (สีมาตรฐาน Tailwind ล้วน กันปัญหา custom token หาย) ──
+const inputCls =
+  'rounded-xl border-2 border-blue-100 bg-white px-3.5 py-2.5 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-100 transition-all';
+const labelCls = 'text-xs text-slate-500 font-bold uppercase tracking-wide';
+
 export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
   const router = useRouter();
   const [form, setForm] = useState<AwardFormInput>(initial ?? emptyForm());
@@ -51,7 +56,6 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
     setForm((f) => ({
       ...f,
       category,
-      // ล้างผู้รับรางวัลใหม่เมื่อสลับกลุ่ม เพื่อไม่ให้ฟิลด์เฉพาะกลุ่มเดิมค้าง
       recipients: [{ recipient_name: '' }],
       kpi_standard: category === 'School' || category === 'Executive' ? f.kpi_standard : '',
     }));
@@ -81,27 +85,29 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       {error && (
-        <div className="rounded-md border border-clay/30 bg-clay/5 px-4 py-3 text-sm text-clay">
-          {error}
+        <div className="rounded-xl border-2 border-red-300 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 flex items-center gap-2">
+          <span className="text-lg">⚠️</span>{error}
         </div>
       )}
 
       {/* หมวดข้อมูลพื้นฐาน */}
-      <section className="card-honor p-5 space-y-4">
-        <h2 className="font-display font-semibold text-navy">ข้อมูลรางวัล</h2>
+      <section className="rounded-2xl border border-blue-100 bg-white shadow-sm p-6 space-y-5">
+        <h2 className="font-bold text-blue-900 text-lg flex items-center gap-2">
+          <span className="text-orange-500">📋</span> ข้อมูลรางวัล
+        </h2>
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-muted font-medium">กลุ่มเป้าหมาย *</span>
+        <label className="flex flex-col gap-1.5">
+          <span className={labelCls}>กลุ่มเป้าหมาย *</span>
           <div className="flex flex-wrap gap-2">
             {CATEGORY_OPTIONS.map((c) => (
               <button
                 key={c}
                 type="button"
                 onClick={() => handleCategoryChange(c)}
-                className={`px-4 py-2 rounded-md text-sm font-semibold border transition-colors ${
+                className={`px-4 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${
                   form.category === c
-                    ? 'bg-navy text-white border-navy'
-                    : 'bg-white text-navy border-navy/15 hover:border-navy/40'
+                    ? 'bg-blue-900 text-white border-blue-900 shadow-md scale-[1.02]'
+                    : 'bg-white text-blue-900 border-blue-200 hover:border-blue-400 hover:bg-blue-50'
                 }`}
               >
                 {CATEGORY_LABELS[c]}
@@ -110,58 +116,58 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
           </div>
         </label>
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-muted font-medium">ชื่อรางวัล *</span>
+        <label className="flex flex-col gap-1.5">
+          <span className={labelCls}>ชื่อรางวัล *</span>
           <input
             required
             type="text"
             value={form.title}
             onChange={(e) => set('title', e.target.value)}
-            className="rounded-md border border-navy/15 bg-white px-3 py-2 text-sm focus-gold focus:outline-none"
+            className={inputCls}
           />
         </label>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted font-medium">วันที่ได้รับรางวัล *</span>
+          <label className="flex flex-col gap-1.5">
+            <span className={labelCls}>วันที่ได้รับรางวัล *</span>
             <input
               required
               type="date"
               value={form.date_received}
               onChange={(e) => set('date_received', e.target.value)}
-              className="rounded-md border border-navy/15 bg-white px-3 py-2 text-sm focus-gold focus:outline-none"
+              className={inputCls}
             />
           </label>
 
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted font-medium">ปีการศึกษา (พ.ศ.) *</span>
+          <label className="flex flex-col gap-1.5">
+            <span className={labelCls}>ปีการศึกษา (พ.ศ.) *</span>
             <input
               required
               type="number"
               value={form.academic_year}
               onChange={(e) => set('academic_year', Number(e.target.value))}
-              className="rounded-md border border-navy/15 bg-white px-3 py-2 text-sm focus-gold focus:outline-none"
+              className={inputCls}
             />
           </label>
 
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted font-medium">หน่วยงานที่จัด</span>
+          <label className="flex flex-col gap-1.5">
+            <span className={labelCls}>หน่วยงานที่จัด</span>
             <input
               type="text"
               value={form.organizer}
               onChange={(e) => set('organizer', e.target.value)}
-              className="rounded-md border border-navy/15 bg-white px-3 py-2 text-sm focus-gold focus:outline-none"
+              className={inputCls}
             />
           </label>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted font-medium">ระดับของรางวัล *</span>
+          <label className="flex flex-col gap-1.5">
+            <span className={labelCls}>ระดับของรางวัล *</span>
             <select
               value={form.award_level}
               onChange={(e) => set('award_level', e.target.value as AwardFormInput['award_level'])}
-              className="rounded-md border border-navy/15 bg-white px-3 py-2 text-sm focus-gold focus:outline-none"
+              className={inputCls}
             >
               {AWARD_LEVEL_OPTIONS.map((l) => (
                 <option key={l} value={l}>{AWARD_LEVEL_LABELS[l]}</option>
@@ -169,12 +175,12 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
             </select>
           </label>
 
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted font-medium">ประเภทรางวัล *</span>
+          <label className="flex flex-col gap-1.5">
+            <span className={labelCls}>ประเภทรางวัล *</span>
             <select
               value={form.award_type}
               onChange={(e) => set('award_type', e.target.value as AwardFormInput['award_type'])}
-              className="rounded-md border border-navy/15 bg-white px-3 py-2 text-sm focus-gold focus:outline-none"
+              className={inputCls}
             >
               {AWARD_TYPE_OPTIONS.map((t) => (
                 <option key={t} value={t}>{AWARD_TYPE_LABELS[t]}</option>
@@ -184,27 +190,25 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
         </div>
 
         {showKpi && (
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted font-medium">
-              มาตรฐาน/ตัวชี้วัดที่เกี่ยวข้อง (สำหรับ SAR)
-            </span>
+          <label className="flex flex-col gap-1.5">
+            <span className={labelCls}>มาตรฐาน/ตัวชี้วัดที่เกี่ยวข้อง (สำหรับ SAR)</span>
             <textarea
               value={form.kpi_standard}
               onChange={(e) => set('kpi_standard', e.target.value)}
               rows={2}
-              className="rounded-md border border-navy/15 bg-white px-3 py-2 text-sm focus-gold focus:outline-none"
+              className={`${inputCls} resize-none`}
             />
           </label>
         )}
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-muted font-medium">แท็ก</span>
+        <label className="flex flex-col gap-1.5">
+          <span className={labelCls}>แท็ก</span>
           <TagInput tags={form.tags} onChange={(tags) => set('tags', tags)} />
         </label>
       </section>
 
       {/* ผู้รับรางวัล */}
-      <section className="card-honor p-5">
+      <section className="rounded-2xl border border-blue-100 bg-white shadow-sm p-6">
         <RecipientsEditor
           category={form.category}
           recipients={form.recipients}
@@ -213,8 +217,10 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
       </section>
 
       {/* ไฟล์แนบ */}
-      <section className="card-honor p-5 space-y-4">
-        <h2 className="font-display font-semibold text-navy">ไฟล์แนบและลิงก์</h2>
+      <section className="rounded-2xl border border-blue-100 bg-white shadow-sm p-6 space-y-4">
+        <h2 className="font-bold text-blue-900 text-lg flex items-center gap-2">
+          <span className="text-orange-500">📎</span> ไฟล์แนบและลิงก์
+        </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FileUploadField
             label="ภาพถ่ายรับรางวัล / ภาพปก"
@@ -231,30 +237,38 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
             accept="application/pdf"
           />
         </div>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-muted font-medium">ลิงก์ข่าวประชาสัมพันธ์</span>
+        <label className="flex flex-col gap-1.5">
+          <span className={labelCls}>ลิงก์ข่าวประชาสัมพันธ์</span>
           <input
             type="url"
             placeholder="https://..."
             value={form.pr_link}
             onChange={(e) => set('pr_link', e.target.value)}
-            className="rounded-md border border-navy/15 bg-white px-3 py-2 text-sm focus-gold focus:outline-none"
+            className={inputCls}
           />
         </label>
       </section>
 
-      <div className="flex items-center gap-3">
+      {/* ── ปุ่มบันทึก / ยกเลิก — ทำให้เห็นชัดเจนแน่นอน ไม่พึ่ง custom token ── */}
+      <div className="sticky bottom-0 -mx-6 md:-mx-10 px-6 md:px-10 py-4 bg-white/95 backdrop-blur border-t border-blue-100 flex items-center gap-3 rounded-t-2xl shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
         <button
           type="submit"
           disabled={saving}
-          className="rounded-md bg-navy text-white px-6 py-2.5 text-sm font-semibold hover:bg-navy-light disabled:opacity-50 transition-colors"
+          className="flex-1 sm:flex-none sm:min-w-[200px] rounded-xl bg-orange-500 text-white px-8 py-3.5 text-base font-black shadow-lg shadow-orange-200 hover:bg-orange-600 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none transition-all flex items-center justify-center gap-2"
         >
-          {saving ? 'กำลังบันทึก...' : isEdit ? 'บันทึกการแก้ไข' : 'บันทึกรางวัล'}
+          {saving ? (
+            <>
+              <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              กำลังบันทึก...
+            </>
+          ) : (
+            <>💾 {isEdit ? 'บันทึกการแก้ไข' : 'บันทึกรางวัล'}</>
+          )}
         </button>
         <button
           type="button"
           onClick={() => router.back()}
-          className="rounded-md border border-navy/15 px-6 py-2.5 text-sm font-semibold text-navy hover:bg-navy/5 transition-colors"
+          className="rounded-xl border-2 border-blue-200 bg-white px-6 py-3.5 text-base font-bold text-blue-900 hover:bg-blue-50 hover:border-blue-300 active:scale-[0.98] transition-all"
         >
           ยกเลิก
         </button>
