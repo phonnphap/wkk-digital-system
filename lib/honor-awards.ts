@@ -94,8 +94,9 @@ export async function saveAward(input: AwardFormInput): Promise<string> {
     p_tags: input.tags,
     p_kpi_standard: input.kpi_standard || null,
     p_recipients: input.recipients,
+    p_award_images: input.award_images ?? [],
   });
-
+  
   if (error) throw error;
   return data as string;
 }

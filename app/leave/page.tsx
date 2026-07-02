@@ -42,7 +42,7 @@ function daysBetween(s: string, e: string) { return Math.max(Math.round((new Dat
 function fullName(u: any) {
   if (!u) return "";
   if (u.full_name) return u.full_name;
-  return `${u.title??""} ${u.first_name??""} ${u.last_name??""}`.replace(/\s+/g," ").trim();
+  return `${u.title??""}${u.first_name??""} ${u.last_name??""}`.replace(/\s+/g," ").trim();
 }
 function displayName(u: any) {
   if (!u) return "";
