@@ -158,7 +158,7 @@ function StatusBadge({ status }: { status: ItemStatus }) {
       items: [
         { name: "เช็คชื่อนักเรียน-ครูประจำวิชา", icon: <UserCheck className="w-6 h-6" />, color: "bg-emerald-500", path: "/attendance" },
         { name: "ครูประจำชั้น", icon: <Users className="w-6 h-6" />, color: "bg-teal-500", path: "/homeroom" },
-        { name: "ตารางสอน", icon: <Calendar className="w-6 h-6" />, color: "bg-purple-500", path: "/schedule", status: "wip"  as ItemStatus },
+        { name: "ตารางสอน", icon: <Calendar className="w-6 h-6" />, color: "bg-purple-500", path: "/schedule", status: "beta"  as ItemStatus },
         { name: "แลกคาบ & สอนแทน", icon: <RefreshCw className="w-6 h-6" />, color: "bg-pink-500", path: "/substitution" },
         { name: "ระบบบันทึกชั่วโมง PLC", icon: <Users className="w-6 h-6" />, color: "bg-teal-500", path: "/plc", status: "live" as ItemStatus },
         { name: "นิเทศการสอน", icon: <Settings className="w-6 h-6" />, color: "bg-rose-500", path: "/supervision" },
@@ -310,13 +310,20 @@ return (
         </div>
       </div>
 
-      {/* Shortcuts */}
+{/* Shortcuts */}
       <div className="space-y-3">
         <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">ทางลัดเมนูด่วน</h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
           {shortcuts.map((shortcut, idx) => (
             <button key={idx} onClick={() => router.push(shortcut.path)}
-              className={`flex flex-col items-center justify-center p-4 rounded-xl border text-center transition-all hover:-translate-y-0.5 hover:shadow-md ${shortcut.bg}`}>
+              // 1. เพิ่มคำว่า relative เข้าไปใน className
+              className={`relative flex flex-col items-center justify-center p-4 rounded-xl border text-center transition-all hover:-translate-y-0.5 hover:shadow-md ${shortcut.bg}`}>
+              
+              {/* 2. เพิ่ม StatusBadge พร้อมจัดตำแหน่งให้อยู่มุมบนขวา */}
+              <div className="absolute top-1.5 right-1.5">
+                <StatusBadge status={shortcut.status} />
+              </div>
+
               <span className="text-2xl mb-1.5">{shortcut.icon}</span>
               <span className="text-xs font-extrabold leading-snug">{shortcut.name}</span>
             </button>
