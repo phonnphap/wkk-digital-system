@@ -63,7 +63,7 @@ export async function loadTeacherSchedule(teacherId: string, academicYearId: str
   if (!teacherId || !academicYearId) return [];
   const { data, error } = await supabase
     .from("timetable_entries")
-    .select(`*, time_slot:time_slots(*), classroom:classrooms(id,room_name,room_number,grade_level_id), subject:subjects(id,name)`)
+    .select(`*, time_slot:time_slots(*), classroom:classrooms(id,room_name,room_number,grade_level_id), subject:subjects(id,name:name_th)`)
     .eq("academic_year_id", academicYearId)
     .or(`teacher_id.eq.${teacherId},teacher_id_2.eq.${teacherId}`);
   if (error) { console.warn("[loadTeacherSchedule]", error.message); return []; }

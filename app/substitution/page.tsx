@@ -1,5 +1,20 @@
 "use client";
 
+/**
+ * SubstitutionSystem.tsx  (v2 — ผูกกับตารางสอนจริง)
+ * ระบบแลกคาบ & สอนแทน โดยอ้างอิงจาก timetable_entries / timetable_change_requests จริง
+ * (เดิมโค้ดนี้ใช้ตาราง swap_requests / sub_records ซึ่งไม่มีจริงในระบบ — เอาออกแล้ว)
+ *
+ * ก่อนใช้ไฟล์นี้:
+ *   1) รัน migration_substitution_system.sql
+ *   2) วาง lib/timetable-substitution.ts ในโปรเจกต์
+ *
+ * ข้อสมมติ (แก้ได้ถ้าไม่ตรงกับจริง):
+ *   - academic_years มี is_current boolean (ไม่มีก็ fallback ปีล่าสุด)
+ *   - grade_levels มีคอลัมน์ name, subjects มีคอลัมน์ name
+ *   - day_of_week: 1=จันทร์ ... 5=ศุกร์
+ */
+
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -143,7 +158,7 @@ export default function SubstitutionSystem({ teachers: teachersProp, teacherMap 
     if (!me?.id) return;
     const { data } = await supabase
       .from("timetable_change_requests")
-      .select(`*, classroom:classrooms(id,room_name,room_number,grade_level_id), time_slot:time_slots(*), subject:subjects(id,name)`)
+      .select(`*, classroom:classrooms(id,room_name,room_number,grade_level_id), time_slot:time_slots(*), subject:subjects(id,name:name_th)`)
       .or(`requester_id.eq.${me.id},old_teacher_id.eq.${me.id},new_teacher_id.eq.${me.id}`)
       .order("created_at", { ascending: false });
     setRequests((data as unknown as ChangeRequest[]) ?? []);
