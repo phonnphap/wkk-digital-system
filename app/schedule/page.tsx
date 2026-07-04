@@ -75,7 +75,7 @@ const SCHEDULE_TEMPLATES = [
 
 const ADMIN_ROLES    = ["admin", "director", "deputy_director"];
 const APPROVER_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head", "subject_head"];
-const NON_TEACHING_ROLES = ["admin", "director", "deputy_director", "staff"];
+const NON_TEACHING_ROLES = ["admin", "director", "deputy_director", "staff", "subject_teacher"];
 
 type UserProfile = {
   id: string; title?: string; first_name?: string; last_name?: string; full_name?: string;
@@ -750,6 +750,55 @@ return (
   );
 }
 
+function DayDetailModal({ day, entries, timeSlots, subjects, teachers, classrooms, userId, onClose }: {
+  day: number; entries: TimetableEntry[]; timeSlots: TimeSlot[]; subjects: Subject[];
+  teachers: Teacher[]; classrooms: Classroom[]; userId: string; onClose: () => void;
+}) {
+  const dc = DAY_COLORS[day - 1];
+  const dayEntries = entries
+    .filter(e => e.day_of_week === day)
+    .map(e => ({ ...e, slot: timeSlots.find(s => s.id === e.time_slot_id) }))
+    .sort((a, b) => (a.slot?.start_time ?? "").localeCompare(b.slot?.start_time ?? ""));
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className={`${dc.header} px-6 py-4 shrink-0`}>
+          <h3 className="text-lg font-black text-white">📅 วัน{DAYS[day - 1]} · {dayEntries.length} คาบ</h3>
+        </div>
+        <div className="p-5 overflow-y-auto space-y-2">
+          {dayEntries.length === 0 ? (
+            <p className="text-center text-slate-400 py-8 font-bold">ไม่มีคาบสอนในวันนี้</p>
+          ) : dayEntries.map(e => {
+            const subject = subjects.find(s => s.id === e.subject_id) ?? (e as any).subject;
+            const room = classrooms.find(c => c.id === e.classroom_id);
+            const isMe2 = e.teacher_id_2 === userId;
+            const otherTeacherId = isMe2 ? e.teacher_id : e.teacher_id_2;
+            const otherTeacher = otherTeacherId ? teachers.find(t => t.id === otherTeacherId) : null;
+            return (
+              <div key={e.id} className="rounded-xl border-2 border-slate-100 bg-slate-50 px-4 py-3 flex items-center gap-3">
+                <div className="shrink-0 text-center w-16">
+                  <p className="text-xs font-black text-slate-500">{e.slot?.slot_label ?? "—"}</p>
+                  <p className="text-[10px] text-slate-400">{formatTime(e.slot?.start_time ?? "")}</p>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-black text-slate-800 text-sm truncate">{(subject as any)?.name_th ?? "—"}</p>
+                  <p className="text-slate-500 text-xs">{room?.grade_group} {room?.room_name}</p>
+                </div>
+                {otherTeacher && <span className="text-[10px] font-bold text-slate-400 shrink-0">+ {displayName(otherTeacher)}</span>}
+                {isMe2 && <span className="text-[9px] font-black bg-purple-500 text-white px-1.5 py-0.5 rounded shrink-0">ครู 2</span>}
+              </div>
+            );
+          })}
+        </div>
+        <div className="px-5 pb-5 pt-2 border-t border-slate-100 shrink-0">
+          <button onClick={onClose} className="w-full py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">ปิด</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Main Page ─────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
@@ -768,7 +817,8 @@ export default function SchedulePage() {
   const [academicYears,    setAcademicYears]    = useState<{ id: string; year_name: string }[]>([]);
   const [selectedYear,     setSelectedYear]     = useState("");
   const [selectedRoom,     setSelectedRoom]     = useState("");
-  const [viewMode,         setViewMode]         = useState<"room" | "teacher" | "requests">("room");
+  const [viewMode,         setViewMode]         = useState<"room" | "teacher" | "requests" | "duplicates" | "dashboard">("room");
+  const [selectedDayDetail, setSelectedDayDetail] = useState<number | null>(null);
   const [showSettings,     setShowSettings]     = useState(false);
   const [roomTimeSlots,    setRoomTimeSlots]    = useState<TimeSlot[]>([]);
 
@@ -952,6 +1002,7 @@ export default function SchedulePage() {
     setChangeRequests((data ?? []) as ChangeRequest[]);
   }, [user]);
 
+
   useEffect(() => { loadChangeRequests(); }, [loadChangeRequests]);
 
   // ── applyScheduleType ─────────────────────────────────────────────────────
@@ -1068,6 +1119,57 @@ export default function SchedulePage() {
   const gradeGroups = [...new Set(classrooms.map(c => c.grade_group).filter(Boolean))]
     .sort((a, b) => gradeGroupSortKey(a as string) - gradeGroupSortKey(b as string)) as string[];
 
+  // ── ตรวจหาคาบซ้ำ (ห้อง+วัน+คาบเวลาเดียวกัน มากกว่า 1 แถว) ──
+const duplicateGroups = (() => {
+  const map = new Map<string, TimetableEntry[]>();
+  entries.forEach(e => {
+    const key = `${e.classroom_id}|${e.day_of_week}|${e.time_slot_id}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(e);
+  });
+  return Array.from(map.values()).filter(group => group.length > 1);
+})();
+
+// ── สถิติสำหรับแดชบอร์ด ──
+const teacherHoursMap = (() => {
+  const map = new Map<string, number>();
+  entries.forEach(e => {
+    map.set(e.teacher_id, (map.get(e.teacher_id) ?? 0) + 1);
+    if (e.teacher_id_2) map.set(e.teacher_id_2, (map.get(e.teacher_id_2) ?? 0) + 1);
+  });
+  return map;
+})();
+const teacherHoursList = teachers
+  .map(t => ({ teacher: t, hours: teacherHoursMap.get(t.id) ?? 0 }))
+  .sort((a, b) => b.hours - a.hours);
+const maxTeacherHours = Math.max(1, ...teacherHoursList.map(t => t.hours));
+
+const subjectGroupHoursMap = (() => {
+  const map = new Map<string, number>();
+  entries.forEach(e => {
+    const subj = subjects.find(s => s.id === e.subject_id);
+    const group = subj?.subject_group ?? "ไม่ระบุ";
+    map.set(group, (map.get(group) ?? 0) + 1);
+  });
+  return map;
+})();
+const subjectGroupList = Array.from(subjectGroupHoursMap.entries()).sort((a, b) => b[1] - a[1]);
+const maxSubjectGroupHours = Math.max(1, ...subjectGroupList.map(([, v]) => v));
+
+const gradeHoursMap = (() => {
+  const map = new Map<string, number>();
+  entries.forEach(e => {
+    const room = classrooms.find(c => c.id === e.classroom_id) ?? allClassrooms.find(c => c.id === e.classroom_id);
+    const grade = room?.grade_group ?? "ไม่ระบุ";
+    map.set(grade, (map.get(grade) ?? 0) + 1);
+  });
+  return map;
+})();
+const gradeHoursList = Array.from(gradeHoursMap.entries())
+  .sort((a, b) => gradeGroupSortKey(a[0]) - gradeGroupSortKey(b[0]));
+const maxGradeHours = Math.max(1, ...gradeHoursList.map(([, v]) => v));
+const totalScheduledPeriods = entries.length;
+
   const currentScheduleType = SCHEDULE_TEMPLATES.find(t => t.key === selectedClassroom?.schedule_type)?.label ?? "ประถม";
 
   return (
@@ -1075,6 +1177,14 @@ export default function SchedulePage() {
       {showSettings && selectedClassroom && (
         <ScheduleSettingsModal onClose={() => setShowSettings(false)} onApply={applyScheduleType} />
       )}
+
+      {selectedDayDetail !== null && (
+  <DayDetailModal
+    day={selectedDayDetail} entries={myEntries} timeSlots={timeSlots}
+    subjects={subjects} teachers={teachers} classrooms={classrooms} userId={user.id}
+    onClose={() => setSelectedDayDetail(null)}
+  />
+)}
 
       {/* Top bar */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3 print:hidden">
@@ -1108,6 +1218,21 @@ export default function SchedulePage() {
                   <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">{pendingCount}</span>
                 )}
               </button>
+              {isAdmin && (
+                <button onClick={() => setViewMode("dashboard")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${viewMode === "dashboard" ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
+                  📊 แดชบอร์ด
+                </button>
+              )}
+              {isAdmin && (
+                <button onClick={() => setViewMode("duplicates")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all relative ${viewMode === "duplicates" ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
+                  🧹 คาบซ้ำ
+                  {duplicateGroups.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">{duplicateGroups.length}</span>
+                  )}
+                </button>
+              )}
             </div>
             {isAdmin && selectedClassroom && viewMode === "room" && (
               <button onClick={() => setShowSettings(true)}
@@ -1240,18 +1365,19 @@ export default function SchedulePage() {
                 {homeroomClassroom && <p className="text-blue-600 text-sm font-bold mt-1">⭐ ครูประจำชั้น: {homeroomClassroom.grade_group} {homeroomClassroom.room_name}</p>}
               </div>
               <div className="grid grid-cols-5 gap-3 mb-5">
-                {DAYS.map((day, i) => {
-                  const count = myEntries.filter(e => e.day_of_week === i + 1).length;
-                  const dc = DAY_COLORS[i];
-                  return (
-                    <div key={day} className={`${dc.bg} border-2 ${dc.border} rounded-2xl p-3 text-center`}>
-                      <p className={`text-xs font-black ${dc.text}`}>{day}</p>
-                      <p className={`text-2xl font-black ${dc.text}`}>{count}</p>
-                      <p className="text-slate-400 text-[10px] font-bold">คาบ</p>
-                    </div>
-                  );
-                })}
-              </div>
+  {DAYS.map((day, i) => {
+    const count = myEntries.filter(e => e.day_of_week === i + 1).length;
+    const dc = DAY_COLORS[i];
+    return (
+      <button key={day} onClick={() => setSelectedDayDetail(i + 1)}
+        className={`${dc.bg} border-2 ${dc.border} rounded-2xl p-3 text-center hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer`}>
+        <p className={`text-xs font-black ${dc.text}`}>{day}</p>
+        <p className={`text-2xl font-black ${dc.text}`}>{count}</p>
+        <p className="text-slate-400 text-[10px] font-bold">คาบ</p>
+      </button>
+    );
+  })}
+</div>
               {myEntries.length > 0 ? (
   <div className="mb-5 space-y-6">
     {(["primary", "junior", "senior"] as const).map(type => {
@@ -1280,56 +1406,6 @@ export default function SchedulePage() {
                 <div className="text-center py-16 text-slate-400 bg-white rounded-2xl border border-slate-200 mb-5">
                   <p className="text-4xl mb-3">📅</p>
                   <p className="font-bold">ยังไม่มีตารางสอน</p>
-                </div>
-              )}
-              {myClassrooms.length > 0 && (
-                <div>
-                  <h3 className="font-black text-slate-700 text-sm mb-3">🏫 ห้องเรียนที่ฉันสอน ({myClassrooms.length} ห้อง)</h3>
-                  <div className="space-y-3">
-                    {myClassrooms.map(room => {
-                      const roomMyEntries = myEntries.filter(e => e.classroom_id === room.id);
-                      const roomSlots     = buildRoomSlots(room.schedule_type, timeSlots);
-                      return (
-                        <div key={room.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                          <div className="bg-slate-50 border-b px-5 py-3 flex items-center justify-between">
-                            <div>
-                              <h4 className="font-black text-slate-700">{room.grade_group} {room.room_name}</h4>
-                              <p className="text-slate-400 text-xs">{roomMyEntries.length} คาบ</p>
-                            </div>
-                            <button onClick={() => { setSelectedRoom(room.id); setViewMode("room"); }}
-                              className="text-xs font-black text-blue-600 px-3 py-1.5 rounded-xl border-2 border-blue-200 bg-blue-50 hover:bg-blue-100">👁️ ดูตาราง</button>
-                          </div>
-                          <div className="p-4 space-y-2">
-                            {[1, 2, 3, 4, 5].map(day => {
-                              const dayEntries = roomMyEntries.filter(e => e.day_of_week === day);
-                              if (!dayEntries.length) return null;
-                              const dc = DAY_COLORS[day - 1];
-                              return (
-                                <div key={day} className="flex gap-2 items-center flex-wrap">
-                                  <span className={`text-xs font-black px-2 py-1 rounded-lg ${dc.bg} ${dc.text} border ${dc.border} w-12 text-center shrink-0`}>{DAY_SHORT[day - 1]}</span>
-                                  {dayEntries.map(e => {
-  const slot    = roomSlots.find(s => s.id === e.time_slot_id);
-  const subject = subjects.find(s => s.id === e.subject_id) ?? (e as any).subject;
-  const isMe2   = e.teacher_id_2 === user.id;
-  const otherTeacherId = isMe2 ? e.teacher_id : e.teacher_id_2;
-  const otherTeacher = otherTeacherId ? teachers.find(t => t.id === otherTeacherId) : null;
-  return (
-                                      <span key={e.id} className="text-xs font-bold bg-blue-100 border border-blue-300 text-blue-800 px-2 py-1 rounded-lg flex items-center gap-1">
-                                        <span className="font-black">{slot?.slot_label}</span>
-      <span>{(subject as any)?.name_th ?? "—"}</span>
-      {otherTeacher && <span className="opacity-70">+ {displayName(otherTeacher)}</span>}
-      {isMe2 && <span className="text-[9px] bg-purple-500 text-white px-1 rounded">ครู 2</span>}
-    </span>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
               )}
             </div>
@@ -1366,6 +1442,135 @@ export default function SchedulePage() {
               <div className="text-center"><p className="text-4xl mb-3">🏫</p><p className="font-bold">เลือกห้องเรียนจากเมนูซ้าย</p></div>
             </div>
           )}
+
+          {viewMode === "duplicates" && isAdmin && (
+  <div>
+    <div className="mb-4">
+      <h2 className="text-xl font-black text-slate-800">🧹 ตรวจสอบคาบซ้ำ</h2>
+      <p className="text-slate-400 text-sm">คาบที่ลงห้อง/วัน/เวลาเดียวกันซ้ำกันมากกว่า 1 รายการ — ตารางหลักจะแสดงแค่รายการแรกเท่านั้น ทำให้ลบตัวซ้ำจากตารางไม่ได้ ต้องลบจากหน้านี้</p>
+    </div>
+    {duplicateGroups.length === 0 ? (
+      <div className="text-center py-16 text-slate-400 bg-white rounded-2xl border border-slate-200">
+        <p className="text-4xl mb-3">✅</p>
+        <p className="font-bold">ไม่พบคาบซ้ำ ข้อมูลถูกต้องดีแล้ว</p>
+      </div>
+    ) : (
+      <div className="space-y-4">
+        {duplicateGroups.map((group, gi) => {
+          const room = classrooms.find(c => c.id === group[0].classroom_id) ?? allClassrooms.find(c => c.id === group[0].classroom_id);
+          const slot = timeSlots.find(s => s.id === group[0].time_slot_id);
+          return (
+            <div key={gi} className="bg-white rounded-2xl border-2 border-amber-200 shadow-sm overflow-hidden">
+              <div className="bg-amber-50 border-b border-amber-200 px-5 py-3">
+                <p className="font-black text-amber-700 text-sm">
+                  ⚠️ ห้อง {room?.grade_group} {room?.room_name} · {DAYS[(group[0].day_of_week ?? 1) - 1]} · {slot?.slot_label ?? "—"} ({formatTime(slot?.start_time ?? "")}–{formatTime(slot?.end_time ?? "")})
+                </p>
+                <p className="text-amber-600 text-xs font-bold">พบ {group.length} รายการซ้ำในช่องเดียวกัน</p>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {group.map(e => {
+                  const subject  = subjects.find(s => s.id === e.subject_id) ?? (e as any).subject;
+                  const teacher1 = teachers.find(t => t.id === e.teacher_id) ?? (e as any).teacher;
+                  const teacher2 = e.teacher_id_2 ? (teachers.find(t => t.id === e.teacher_id_2) ?? (e as any).teacher2) : null;
+                  return (
+                    <div key={e.id} className="px-5 py-3 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-slate-800 text-sm">{(subject as any)?.name_th ?? "—"}</p>
+                        <p className="text-slate-500 text-xs">{displayName(teacher1)}{teacher2 ? ` + ${displayName(teacher2)}` : ""}</p>
+                      </div>
+                      <button
+                        onClick={async () => { if (confirm("ลบรายการนี้?")) { await supabase.from("timetable_entries").delete().eq("id", e.id); await loadEntries(); } }}
+                        className="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-xs shrink-0">
+                        🗑️ ลบรายการนี้
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </div>
+)}
+
+{viewMode === "dashboard" && isAdmin && (
+  <div className="space-y-6">
+    <div>
+      <h2 className="text-xl font-black text-slate-800">📊 แดชบอร์ดสรุปตารางสอน</h2>
+      <p className="text-slate-400 text-sm">ภาพรวมชั่วโมงสอนและการจัดตารางทั้งโรงเรียน</p>
+    </div>
+
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {[
+        { label: "คาบที่จัดแล้ว", value: totalScheduledPeriods, unit: "คาบ", color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200" },
+        { label: "ครูทั้งหมด", value: teachers.length, unit: "คน", color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-200" },
+        { label: "ห้องเรียน", value: classrooms.length, unit: "ห้อง", color: "text-amber-600", bg: "bg-amber-50", border: "border-amber-200" },
+        { label: "คำขอรออนุมัติ", value: pendingCount, unit: "รายการ", color: "text-rose-600", bg: "bg-rose-50", border: "border-rose-200" },
+      ].map(c => (
+        <div key={c.label} className={`${c.bg} border-2 ${c.border} rounded-2xl p-4 text-center`}>
+          <div className={`text-3xl font-black ${c.color}`}>{c.value}</div>
+          <div className="text-slate-500 text-xs font-bold mt-1">{c.unit}</div>
+          <div className="text-slate-400 text-[10px] font-bold">{c.label}</div>
+        </div>
+      ))}
+    </div>
+
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+      <h3 className="font-black text-slate-700 text-sm mb-4">👩‍🏫 ชั่วโมงสอนรายบุคคล (คาบ/สัปดาห์)</h3>
+      <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+        {teacherHoursList.map(({ teacher, hours }) => (
+          <div key={teacher.id} className="flex items-center gap-3">
+            <span className="w-32 shrink-0 text-xs font-bold text-slate-600 truncate">{displayName(teacher)}</span>
+            <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
+              <div className="bg-blue-500 h-full rounded-full flex items-center justify-end pr-2 transition-all"
+                style={{ width: `${Math.max(4, (hours / maxTeacherHours) * 100)}%` }}>
+                {hours > 0 && <span className="text-white text-[10px] font-black">{hours}</span>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <h3 className="font-black text-slate-700 text-sm mb-4">📚 คาบสอนตามกลุ่มสาระ</h3>
+        <div className="space-y-2">
+          {subjectGroupList.map(([group, hours]) => (
+            <div key={group} className="flex items-center gap-3">
+              <span className="w-28 shrink-0 text-xs font-bold text-slate-600 truncate">{group}</span>
+              <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
+                <div className="bg-emerald-500 h-full rounded-full flex items-center justify-end pr-2"
+                  style={{ width: `${Math.max(4, (hours / maxSubjectGroupHours) * 100)}%` }}>
+                  <span className="text-white text-[10px] font-black">{hours}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <h3 className="font-black text-slate-700 text-sm mb-4">🏫 คาบสอนตามระดับชั้น</h3>
+        <div className="space-y-2">
+          {gradeHoursList.map(([grade, hours]) => (
+            <div key={grade} className="flex items-center gap-3">
+              <span className="w-28 shrink-0 text-xs font-bold text-slate-600 truncate">{grade}</span>
+              <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
+                <div className="bg-amber-500 h-full rounded-full flex items-center justify-end pr-2"
+                  style={{ width: `${Math.max(4, (hours / maxGradeHours) * 100)}%` }}>
+                  <span className="text-white text-[10px] font-black">{hours}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </div>
+)}
         </main>
       </div>
 
