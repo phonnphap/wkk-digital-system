@@ -32,6 +32,19 @@ const SUBJECT_COLORS = [
 
 const SCHEDULE_TEMPLATES = [
   {
+    key: "kindergarten", label: "อนุบาล (อ.2–อ.3)",
+    slots: [
+      { slot_number: 1, start_time: "08:30", end_time: "09:30", slot_label: "กิจกรรมเคลื่อนไหวและจังหวะ", is_break: false },
+      { slot_number: 2, start_time: "09:30", end_time: "09:50", slot_label: "กิจกรรมเสริมประสบการณ์", is_break: false },
+      { slot_number: 3, start_time: "09:50", end_time: "11:00", slot_label: "กิจกรรมสร้างสรรค์/เล่นตามมุม", is_break: false },
+      { slot_number: 4, start_time: "11:00", end_time: "11:40", slot_label: "กิจกรรมกลางแจ้ง", is_break: false },
+      { slot_number: 0, start_time: "11:40", end_time: "12:30", slot_label: "รับประทานอาหาร/ล้างหน้าแปรงฟัน", is_break: true },
+      { slot_number: 0, start_time: "12:30", end_time: "14:00", slot_label: "นอนกลางวัน", is_break: true },
+      { slot_number: 5, start_time: "14:00", end_time: "14:30", slot_label: "กิจกรรมเกมการศึกษา", is_break: false },
+      { slot_number: 0, start_time: "14:30", end_time: "15:00", slot_label: "ดื่มนม/เตรียมตัวกลับบ้าน", is_break: true },
+    ],
+  },
+  {
     key: "primary", label: "ประถม (ป.1–ป.6)",
     slots: [
       { slot_number: 1, start_time: "08:30", end_time: "09:30", slot_label: "คาบ 1", is_break: false },
@@ -1130,6 +1143,26 @@ const duplicateGroups = (() => {
   return Array.from(map.values()).filter(group => group.length > 1);
 })();
 
+const teacherConflictGroups = (() => {
+  const map = new Map<string, { teacherId: string; entry: TimetableEntry }[]>();
+  entries.forEach(e => {
+    // เช็คทั้งครู 1 และครู 2 แยกกัน เพราะทั้งคู่ผูกกับคาบเดียวกันได้
+    const ids = [e.teacher_id, e.teacher_id_2].filter(Boolean) as string[];
+    ids.forEach(tid => {
+      const key = `${tid}|${e.day_of_week}|${e.time_slot_id}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push({ teacherId: tid, entry: e });
+    });
+  });
+  // ครูซ้อนคาบจริง ต้องเป็นคนละ classroom_id กัน (ถ้าเป็นห้องเดียวกันคือเคสของ duplicateGroups ด้านบนไปแล้ว)
+  return Array.from(map.entries())
+    .map(([key, list]) => {
+      const uniqueRooms = new Set(list.map(l => l.entry.classroom_id));
+      return { key, list, isConflict: uniqueRooms.size > 1 };
+    })
+    .filter(g => g.isConflict);
+})();
+
 // ── สถิติสำหรับแดชบอร์ด ──
 const teacherHoursMap = (() => {
   const map = new Map<string, number>();
@@ -1225,14 +1258,16 @@ const totalScheduledPeriods = entries.length;
                 </button>
               )}
               {isAdmin && (
-                <button onClick={() => setViewMode("duplicates")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all relative ${viewMode === "duplicates" ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
-                  🧹 คาบซ้ำ
-                  {duplicateGroups.length > 0 && (
-                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">{duplicateGroups.length}</span>
-                  )}
-                </button>
-              )}
+  <button onClick={() => setViewMode("duplicates")}
+    className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all relative ${viewMode === "duplicates" ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
+    🧹 คาบซ้ำ
+    {(duplicateGroups.length + teacherConflictGroups.length) > 0 && (
+      <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">
+        {duplicateGroups.length + teacherConflictGroups.length}
+      </span>
+    )}
+  </button>
+)}
             </div>
             {isAdmin && selectedClassroom && viewMode === "room" && (
               <button onClick={() => setShowSettings(true)}
@@ -1299,7 +1334,9 @@ const totalScheduledPeriods = entries.length;
                       <p className="text-[10px] font-black text-slate-400 uppercase px-2 mb-1">{grade}</p>
                       {gradeRooms.map(room => {
                         const tKey   = room.schedule_type ?? "primary";
-                        const tLabel = tKey === "primary" ? "ป." : tKey === "junior" ? "ม.ต้น" : "ม.ปลาย";
+                        const tLabel = tKey === "kindergarten" ? "อนุบาล"
+  : tKey === "primary" ? "ป."
+  : tKey === "junior" ? "ม.ต้น" : "ม.ปลาย";
                         const active = selectedRoom === room.id && viewMode === "room";
                         return (
                           <button key={room.id} onClick={() => { setSelectedRoom(room.id); setViewMode("room"); }}
@@ -1380,7 +1417,7 @@ const totalScheduledPeriods = entries.length;
 </div>
               {myEntries.length > 0 ? (
   <div className="mb-5 space-y-6">
-    {(["primary", "junior", "senior"] as const).map(type => {
+    {(["kindergarten", "primary", "junior", "senior"] as const).map(type => {
       const roomsOfType = myClassrooms.filter(c => (c.schedule_type ?? "primary") === type);
       if (roomsOfType.length === 0) return null;
 
@@ -1444,54 +1481,108 @@ const totalScheduledPeriods = entries.length;
           )}
 
           {viewMode === "duplicates" && isAdmin && (
-  <div>
-    <div className="mb-4">
-      <h2 className="text-xl font-black text-slate-800">🧹 ตรวจสอบคาบซ้ำ</h2>
-      <p className="text-slate-400 text-sm">คาบที่ลงห้อง/วัน/เวลาเดียวกันซ้ำกันมากกว่า 1 รายการ — ตารางหลักจะแสดงแค่รายการแรกเท่านั้น ทำให้ลบตัวซ้ำจากตารางไม่ได้ ต้องลบจากหน้านี้</p>
-    </div>
-    {duplicateGroups.length === 0 ? (
-      <div className="text-center py-16 text-slate-400 bg-white rounded-2xl border border-slate-200">
-        <p className="text-4xl mb-3">✅</p>
-        <p className="font-bold">ไม่พบคาบซ้ำ ข้อมูลถูกต้องดีแล้ว</p>
+  <div className="space-y-8">
+    {/* ── ส่วนเดิม: คาบซ้ำในห้องเดียวกัน ── */}
+    <div>
+      <div className="mb-4">
+        <h2 className="text-xl font-black text-slate-800">🧹 ตรวจสอบคาบซ้ำในห้องเดียวกัน</h2>
+        <p className="text-slate-400 text-sm">คาบที่ลงห้อง/วัน/เวลาเดียวกันซ้ำกันมากกว่า 1 รายการ</p>
       </div>
-    ) : (
-      <div className="space-y-4">
-        {duplicateGroups.map((group, gi) => {
-          const room = classrooms.find(c => c.id === group[0].classroom_id) ?? allClassrooms.find(c => c.id === group[0].classroom_id);
-          const slot = timeSlots.find(s => s.id === group[0].time_slot_id);
-          return (
-            <div key={gi} className="bg-white rounded-2xl border-2 border-amber-200 shadow-sm overflow-hidden">
-              <div className="bg-amber-50 border-b border-amber-200 px-5 py-3">
-                <p className="font-black text-amber-700 text-sm">
-                  ⚠️ ห้อง {room?.grade_group} {room?.room_name} · {DAYS[(group[0].day_of_week ?? 1) - 1]} · {slot?.slot_label ?? "—"} ({formatTime(slot?.start_time ?? "")}–{formatTime(slot?.end_time ?? "")})
-                </p>
-                <p className="text-amber-600 text-xs font-bold">พบ {group.length} รายการซ้ำในช่องเดียวกัน</p>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {group.map(e => {
-                  const subject  = subjects.find(s => s.id === e.subject_id) ?? (e as any).subject;
-                  const teacher1 = teachers.find(t => t.id === e.teacher_id) ?? (e as any).teacher;
-                  const teacher2 = e.teacher_id_2 ? (teachers.find(t => t.id === e.teacher_id_2) ?? (e as any).teacher2) : null;
-                  return (
-                    <div key={e.id} className="px-5 py-3 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="font-bold text-slate-800 text-sm">{(subject as any)?.name_th ?? "—"}</p>
-                        <p className="text-slate-500 text-xs">{displayName(teacher1)}{teacher2 ? ` + ${displayName(teacher2)}` : ""}</p>
+      {duplicateGroups.length === 0 ? (
+        <div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">
+          <p className="text-3xl mb-2">✅</p>
+          <p className="font-bold text-sm">ไม่พบคาบซ้ำในห้องเดียวกัน</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {duplicateGroups.map((group, gi) => {
+            const room = classrooms.find(c => c.id === group[0].classroom_id) ?? allClassrooms.find(c => c.id === group[0].classroom_id);
+            const slot = timeSlots.find(s => s.id === group[0].time_slot_id);
+            return (
+              <div key={gi} className="bg-white rounded-2xl border-2 border-amber-200 shadow-sm overflow-hidden">
+                <div className="bg-amber-50 border-b border-amber-200 px-5 py-3">
+                  <p className="font-black text-amber-700 text-sm">
+                    ⚠️ ห้อง {room?.grade_group} {room?.room_name} · {DAYS[(group[0].day_of_week ?? 1) - 1]} · {slot?.slot_label ?? "—"} ({formatTime(slot?.start_time ?? "")}–{formatTime(slot?.end_time ?? "")})
+                  </p>
+                  <p className="text-amber-600 text-xs font-bold">พบ {group.length} รายการซ้ำในช่องเดียวกัน</p>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {group.map(e => {
+                    const subject  = subjects.find(s => s.id === e.subject_id) ?? (e as any).subject;
+                    const teacher1 = teachers.find(t => t.id === e.teacher_id) ?? (e as any).teacher;
+                    const teacher2 = e.teacher_id_2 ? (teachers.find(t => t.id === e.teacher_id_2) ?? (e as any).teacher2) : null;
+                    return (
+                      <div key={e.id} className="px-5 py-3 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-bold text-slate-800 text-sm">{(subject as any)?.name_th ?? "—"}</p>
+                          <p className="text-slate-500 text-xs">{displayName(teacher1)}{teacher2 ? ` + ${displayName(teacher2)}` : ""}</p>
+                        </div>
+                        <button
+                          onClick={async () => { if (confirm("ลบรายการนี้?")) { await supabase.from("timetable_entries").delete().eq("id", e.id); await loadEntries(); } }}
+                          className="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-xs shrink-0">
+                          🗑️ ลบรายการนี้
+                        </button>
                       </div>
-                      <button
-                        onClick={async () => { if (confirm("ลบรายการนี้?")) { await supabase.from("timetable_entries").delete().eq("id", e.id); await loadEntries(); } }}
-                        className="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-xs shrink-0">
-                        🗑️ ลบรายการนี้
-                      </button>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+      )}
+    </div>
+
+    {/* ── ★ ใหม่: ครูสอนซ้อนคาบ (คนละห้อง) ── */}
+    <div>
+      <div className="mb-4">
+        <h2 className="text-xl font-black text-slate-800">👤 ตรวจสอบครูสอนซ้อนคาบ</h2>
+        <p className="text-slate-400 text-sm">ครูคนเดียวกันถูกจัดให้สอนคนละห้องในวัน/เวลาเดียวกัน (สอนพร้อมกัน 2 ที่ไม่ได้)</p>
       </div>
-    )}
+      {teacherConflictGroups.length === 0 ? (
+        <div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">
+          <p className="text-3xl mb-2">✅</p>
+          <p className="font-bold text-sm">ไม่พบครูสอนซ้อนคาบ</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {teacherConflictGroups.map(({ key, list }) => {
+            const teacher = teachers.find(t => t.id === list[0].teacherId);
+            const dayOfWeek = list[0].entry.day_of_week;
+            const slot = timeSlots.find(s => s.id === list[0].entry.time_slot_id);
+            return (
+              <div key={key} className="bg-white rounded-2xl border-2 border-rose-200 shadow-sm overflow-hidden">
+                <div className="bg-rose-50 border-b border-rose-200 px-5 py-3">
+                  <p className="font-black text-rose-700 text-sm">
+                    ⚠️ {displayName(teacher)} · {DAYS[(dayOfWeek ?? 1) - 1]} · {slot?.slot_label ?? "—"} ({formatTime(slot?.start_time ?? "")}–{formatTime(slot?.end_time ?? "")})
+                  </p>
+                  <p className="text-rose-600 text-xs font-bold">ถูกจัดสอนพร้อมกัน {list.length} ห้อง</p>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {list.map(({ entry: e }) => {
+                    const room = classrooms.find(c => c.id === e.classroom_id) ?? allClassrooms.find(c => c.id === e.classroom_id);
+                    const subject = subjects.find(s => s.id === e.subject_id) ?? (e as any).subject;
+                    return (
+                      <div key={e.id} className="px-5 py-3 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-bold text-slate-800 text-sm">ห้อง {room?.grade_group} {room?.room_name}</p>
+                          <p className="text-slate-500 text-xs">{(subject as any)?.name_th ?? "—"}</p>
+                        </div>
+                        <button
+                          onClick={async () => { if (confirm(`ลบคาบนี้ออกจากห้อง ${room?.room_name}?`)) { await supabase.from("timetable_entries").delete().eq("id", e.id); await loadEntries(); } }}
+                          className="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-xs shrink-0">
+                          🗑️ ลบคาบนี้
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   </div>
 )}
 
