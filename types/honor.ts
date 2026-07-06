@@ -74,6 +74,9 @@ export interface Award {
   kpi_standard: string | null;
   created_at: string;
   updated_at: string;
+  // ★ เพิ่ม — สำหรับแสดงชื่อผู้บันทึกและเช็คสิทธิ์ลบ
+  created_by?: string | null;
+  created_by_name?: string | null;
 }
 
 // แถวที่อ่านจาก view awards_with_recipients

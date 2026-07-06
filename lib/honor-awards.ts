@@ -37,6 +37,29 @@ export async function fetchAwards(filters: AwardFilters = {}): Promise<AwardWith
   return (data ?? []) as AwardWithRecipients[];
 }
 
+/**
+ * ★ เติมชื่อผู้บันทึก (created_by_name) ให้ award
+ * - ถ้า view คืน created_by_name มาให้แล้ว ใช้เลย
+ * - ถ้ายังไม่มี (view ยังไม่ได้แก้) แต่มี created_by (user id) → query ตาราง users แยกต่างหาก
+ * ทำแบบนี้เพื่อให้ใช้งานได้ทันทีไม่ต้องรอแก้ SQL view ก่อน
+ */
+async function withCreatorName(row: any): Promise<AwardWithRecipients> {
+  if (row.created_by_name || !row.created_by) {
+    return row as AwardWithRecipients;
+  }
+  const { data: creator } = await supabase
+    .from('users')
+    .select('first_name,last_name,full_name')
+    .eq('id', row.created_by)
+    .maybeSingle();
+
+  const created_by_name = creator
+    ? creator.full_name || `${creator.first_name ?? ''} ${creator.last_name ?? ''}`.trim()
+    : null;
+
+  return { ...row, created_by_name } as AwardWithRecipients;
+}
+
 export async function fetchAwardById(id: string): Promise<AwardWithRecipients | null> {
   const { data, error } = await supabase
     .from('awards_with_recipients')
@@ -44,7 +67,8 @@ export async function fetchAwardById(id: string): Promise<AwardWithRecipients | 
     .eq('id', id)
     .maybeSingle();
   if (error) throw error;
-  return data as AwardWithRecipients | null;
+  if (!data) return null;
+  return withCreatorName(data);
 }
 
 /**
