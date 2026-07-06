@@ -17,10 +17,10 @@ const config: Config = {
         foreground: "var(--foreground)",
       },
       fontFamily: {
-        sans: ['"TH Saraban New"', 'sans-serif'],
-        display: ['"TH Saraban New"', 'sans-serif'], // ★ เพิ่ม — กัน font-display ไม่มีผล
-        mono: ['"TH Saraban New"', 'monospace'],       // ★ เพิ่ม — เผื่อมี font-mono ใช้อยู่ (เช่นวันที่ใน AwardCard)
-      },
+  sans: ['"TH Sarabun New"', 'sans-serif'],
+  display: ['"TH Sarabun New"', 'sans-serif'],
+  mono: ['"TH Sarabun New"', 'monospace'],
+},
     },
   },
   plugins: [],

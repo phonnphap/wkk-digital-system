@@ -5,9 +5,9 @@
 @font-face {
   font-family: 'TH Saraban New';
   src: url('/fonts/THSarabunNew.ttf') format('truetype');
-  font-weight: 400; /* ปกติ */
+  font-weight: 100 900; /* ครอบคลุมทุกความหนา ด้วยไฟล์เดียว */
   font-style: normal;
-  font-display: swap; /* ช่วยให้โหลดฟอนต์เร็วขึ้นและไม่ทำให้ข้อความหายขณะรอโหลด */
+  font-display: swap;
 }
 
 body {
