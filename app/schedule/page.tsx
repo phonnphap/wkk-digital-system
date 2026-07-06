@@ -833,6 +833,8 @@ export default function SchedulePage() {
   const [viewMode,         setViewMode]         = useState<"room" | "teacher" | "requests" | "duplicates" | "dashboard">("room");
   const [selectedDayDetail, setSelectedDayDetail] = useState<number | null>(null);
   const [showSettings,     setShowSettings]     = useState(false);
+  const [allEntriesForCheck, setAllEntriesForCheck] = useState<TimetableEntry[]>([]);
+  const [checkingAllYears,   setCheckingAllYears]   = useState(false);
   const [roomTimeSlots,    setRoomTimeSlots]    = useState<TimeSlot[]>([]);
 
   // ── Init ──────────────────────────────────────────────────────────────────
@@ -995,6 +997,47 @@ export default function SchedulePage() {
     setEntries(enriched);
   }, [selectedYear, academicYearsRaw]);
 
+  // ★ โหลด entries ของ "ทุกปีการศึกษา" แบบไม่กรอง เพื่อใช้ตรวจคาบซ้ำ/ครูซ้อนคาบ
+// ป้องกันเคสที่คาบซ้ำถูกสร้างข้าม academic_year_id คนละค่ากัน แล้วมองไม่เห็นตอนดูเฉพาะปีที่เลือก
+const loadAllEntriesForCheck = useCallback(async () => {
+  setCheckingAllYears(true);
+  const { data: allData } = await (supabase.from("timetable_entries") as any).select("*");
+  const allEntries = (allData ?? []) as TimetableEntry[];
+
+  const subjectIds = [...new Set(allEntries.map(e => e.subject_id))];
+  const teacherIds = [...new Set([
+    ...allEntries.map(e => e.teacher_id),
+    ...allEntries.map(e => e.teacher_id_2).filter(Boolean),
+  ])];
+
+  const { data: subjectData } = await supabase.from("subjects")
+    .select("id,subject_code,name_th,subject_group").in("id", subjectIds.length ? subjectIds : ["_none_"]);
+  const { data: teacherData } = await supabase.from("users")
+    .select("id,first_name,last_name,full_name").in("id", teacherIds.length ? teacherIds : ["_none_"]);
+
+  const subjectMap: Record<string, Subject> = {};
+  (subjectData ?? []).forEach((s: any) => { subjectMap[s.id] = s; });
+  const teacherMap: Record<string, Teacher> = {};
+  (teacherData ?? []).forEach((t: any) => {
+    teacherMap[t.id] = { ...t, full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim() };
+  });
+
+  const enriched = allEntries.map(e => ({
+    ...e,
+    subject: subjectMap[e.subject_id],
+    teacher: teacherMap[e.teacher_id],
+    teacher2: e.teacher_id_2 ? teacherMap[e.teacher_id_2] : undefined,
+  }));
+
+  setAllEntriesForCheck(enriched);
+  setCheckingAllYears(false);
+}, []);
+
+// โหลดเฉพาะตอนเข้าแท็บ "duplicates" (ไม่ต้องโหลดทุกครั้งที่เปลี่ยนปี)
+useEffect(() => {
+  if (viewMode === "duplicates") loadAllEntriesForCheck();
+}, [viewMode, loadAllEntriesForCheck]);
+
   useEffect(() => { loadEntries(); }, [loadEntries]);
 
   function isApproverUser(user: UserProfile): boolean {
@@ -1133,9 +1176,10 @@ export default function SchedulePage() {
     .sort((a, b) => gradeGroupSortKey(a as string) - gradeGroupSortKey(b as string)) as string[];
 
   // ── ตรวจหาคาบซ้ำ (ห้อง+วัน+คาบเวลาเดียวกัน มากกว่า 1 แถว) ──
+// ★ FIX: ใช้ allEntriesForCheck (ทุกปีการศึกษา, ไม่ผูกกับ selectedYear) เพื่อไม่ตกหล่นคาบซ้ำ
 const duplicateGroups = (() => {
   const map = new Map<string, TimetableEntry[]>();
-  entries.forEach(e => {
+  allEntriesForCheck.forEach(e => {
     const key = `${e.classroom_id}|${e.day_of_week}|${e.time_slot_id}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(e);
@@ -1145,8 +1189,7 @@ const duplicateGroups = (() => {
 
 const teacherConflictGroups = (() => {
   const map = new Map<string, { teacherId: string; entry: TimetableEntry }[]>();
-  entries.forEach(e => {
-    // เช็คทั้งครู 1 และครู 2 แยกกัน เพราะทั้งคู่ผูกกับคาบเดียวกันได้
+  allEntriesForCheck.forEach(e => {
     const ids = [e.teacher_id, e.teacher_id_2].filter(Boolean) as string[];
     ids.forEach(tid => {
       const key = `${tid}|${e.day_of_week}|${e.time_slot_id}`;
@@ -1154,13 +1197,24 @@ const teacherConflictGroups = (() => {
       map.get(key)!.push({ teacherId: tid, entry: e });
     });
   });
-  // ครูซ้อนคาบจริง ต้องเป็นคนละ classroom_id กัน (ถ้าเป็นห้องเดียวกันคือเคสของ duplicateGroups ด้านบนไปแล้ว)
   return Array.from(map.entries())
     .map(([key, list]) => {
       const uniqueRooms = new Set(list.map(l => l.entry.classroom_id));
       return { key, list, isConflict: uniqueRooms.size > 1 };
     })
     .filter(g => g.isConflict);
+})();
+
+// ★ ใหม่: ตรวจ "ห้องเรียนชื่อซ้ำ" (คนละ id แต่ชื่อ/สายชั้นเดียวกัน)
+// นี่คือสาเหตุที่พบบ่อยที่สุดที่ทำให้คาบซ้ำ "มองไม่เห็น" ใน duplicateGroups เพราะ classroom_id ต่างกัน
+const duplicateClassroomGroups = (() => {
+  const map = new Map<string, Classroom[]>();
+  allClassrooms.forEach(c => {
+    const key = `${c.grade_group ?? ""}|${(c.room_name ?? "").trim()}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(c);
+  });
+  return Array.from(map.values()).filter(group => group.length > 1);
 })();
 
 // ── สถิติสำหรับแดชบอร์ด ──
@@ -1261,9 +1315,9 @@ const totalScheduledPeriods = entries.length;
   <button onClick={() => setViewMode("duplicates")}
     className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all relative ${viewMode === "duplicates" ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
     🧹 คาบซ้ำ
-    {(duplicateGroups.length + teacherConflictGroups.length) > 0 && (
+    {(duplicateGroups.length + teacherConflictGroups.length + duplicateClassroomGroups.length) > 0 && (
       <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">
-        {duplicateGroups.length + teacherConflictGroups.length}
+        {duplicateGroups.length + teacherConflictGroups.length + duplicateClassroomGroups.length}
       </span>
     )}
   </button>
@@ -1482,11 +1536,74 @@ const totalScheduledPeriods = entries.length;
 
           {viewMode === "duplicates" && isAdmin && (
   <div className="space-y-8">
+
+    {checkingAllYears && (
+      <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl px-4 py-3 text-blue-700 text-sm font-bold animate-pulse">
+        ⏳ กำลังโหลดข้อมูลทุกปีการศึกษาเพื่อตรวจสอบ...
+      </div>
+    )}
+
+    {/* ★ ใหม่: ห้องเรียนชื่อซ้ำ — สาเหตุหลักที่ทำให้คาบซ้ำ "มองไม่เห็น" */}
+    <div>
+      <div className="mb-4">
+        <h2 className="text-xl font-black text-slate-800">🏫 ตรวจสอบห้องเรียนชื่อซ้ำ</h2>
+        <p className="text-slate-400 text-sm">
+          ห้องที่มีสายชั้น+ชื่อห้องเหมือนกัน แต่เป็นคนละ record — ถ้ามี มักทำให้คาบซ้ำที่แท้จริงตรวจไม่เจอ เพราะระบบผูกด้วย ID คนละตัว
+        </p>
+      </div>
+      {duplicateClassroomGroups.length === 0 ? (
+        <div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">
+          <p className="text-3xl mb-2">✅</p>
+          <p className="font-bold text-sm">ไม่พบห้องเรียนชื่อซ้ำ</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {duplicateClassroomGroups.map((group, gi) => (
+            <div key={gi} className="bg-white rounded-2xl border-2 border-purple-200 shadow-sm overflow-hidden">
+              <div className="bg-purple-50 border-b border-purple-200 px-5 py-3">
+                <p className="font-black text-purple-700 text-sm">
+                  ⚠️ {group[0].grade_group} {group[0].room_name} — พบ {group.length} record ที่ชื่อซ้ำกัน
+                </p>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {group.map(room => {
+                  const entryCount = allEntriesForCheck.filter(e => e.classroom_id === room.id).length;
+                  return (
+                    <div key={room.id} className="px-5 py-3 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-slate-800 text-sm">ID: <span className="font-mono text-xs text-slate-400">{room.id}</span></p>
+                        <p className="text-slate-500 text-xs">มีคาบสอนผูกอยู่ {entryCount} คาบ · ประเภทตาราง: {room.schedule_type ?? "primary"}</p>
+                      </div>
+                      {entryCount === 0 && (
+                        <button
+                          onClick={async () => {
+                            if (confirm(`ห้องนี้ไม่มีคาบสอนผูกอยู่เลย ลบ record ที่ซ้ำนี้ทิ้ง?`)) {
+                              await supabase.from("classrooms").delete().eq("id", room.id);
+                              const { data } = await supabase.from("classrooms")
+                                .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type,homeroom_teacher_id,homeroom_teacher_2_id")
+                                .order("grade_group").order("room_number");
+                              setAllClassrooms((data ?? []) as Classroom[]);
+                            }
+                          }}
+                          className="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-xs shrink-0">
+                          🗑️ ลบ record ว่างนี้
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+
     {/* ── ส่วนเดิม: คาบซ้ำในห้องเดียวกัน ── */}
     <div>
       <div className="mb-4">
         <h2 className="text-xl font-black text-slate-800">🧹 ตรวจสอบคาบซ้ำในห้องเดียวกัน</h2>
-        <p className="text-slate-400 text-sm">คาบที่ลงห้อง/วัน/เวลาเดียวกันซ้ำกันมากกว่า 1 รายการ</p>
+        <p className="text-slate-400 text-sm">คาบที่ลงห้อง/วัน/เวลาเดียวกันซ้ำกันมากกว่า 1 รายการ (ทุกปีการศึกษา)</p>
       </div>
       {duplicateGroups.length === 0 ? (
         <div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">
@@ -1518,7 +1635,7 @@ const totalScheduledPeriods = entries.length;
                           <p className="text-slate-500 text-xs">{displayName(teacher1)}{teacher2 ? ` + ${displayName(teacher2)}` : ""}</p>
                         </div>
                         <button
-                          onClick={async () => { if (confirm("ลบรายการนี้?")) { await supabase.from("timetable_entries").delete().eq("id", e.id); await loadEntries(); } }}
+                          onClick={async () => { if (confirm("ลบรายการนี้?")) { await supabase.from("timetable_entries").delete().eq("id", e.id); await Promise.all([loadEntries(), loadAllEntriesForCheck()]); } }}
                           className="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-xs shrink-0">
                           🗑️ ลบรายการนี้
                         </button>
@@ -1569,7 +1686,7 @@ const totalScheduledPeriods = entries.length;
                           <p className="text-slate-500 text-xs">{(subject as any)?.name_th ?? "—"}</p>
                         </div>
                         <button
-                          onClick={async () => { if (confirm(`ลบคาบนี้ออกจากห้อง ${room?.room_name}?`)) { await supabase.from("timetable_entries").delete().eq("id", e.id); await loadEntries(); } }}
+                          onClick={async () => { if (confirm(`ลบคาบนี้ออกจากห้อง ${room?.room_name}?`)) { await supabase.from("timetable_entries").delete().eq("id", e.id); await Promise.all([loadEntries(), loadAllEntriesForCheck()]); } }}
                           className="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-xs shrink-0">
                           🗑️ ลบคาบนี้
                         </button>
