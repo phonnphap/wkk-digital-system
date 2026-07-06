@@ -490,9 +490,10 @@ function toThaiDateTime(isoString: string): string {
   // ── UI ────────────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-blue-50 text-slate-800" style={{ fontFamily: "'Sarabun','TH Sarabun New',sans-serif" }}>
-      <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap');
-      `}</style>
+      <link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap"
+/>
 
       {/* ── Header บนสุด — ปุ่มกลับหน้าหลัก ย้ายมาไว้ด้านบนเหมือนระบบอื่น ───────── */}
       <div className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-blue-100 shadow-sm px-4 py-3 flex items-center gap-3">
