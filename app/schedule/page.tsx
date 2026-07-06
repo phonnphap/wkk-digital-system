@@ -1177,10 +1177,20 @@ useEffect(() => {
 
   // ── ตรวจหาคาบซ้ำ (ห้อง+วัน+คาบเวลาเดียวกัน มากกว่า 1 แถว) ──
 // ★ FIX: ใช้ allEntriesForCheck (ทุกปีการศึกษา, ไม่ผูกกับ selectedYear) เพื่อไม่ตกหล่นคาบซ้ำ
+// ★ ROOT CAUSE: time_slots มีหลาย record ที่เวลาเดียวกันได้ (คนละ id)
+// ระบบเดิม group ด้วย time_slot_id ดิบๆ เลยมองไม่เห็นคาบซ้ำที่จริงๆ เป็น "เวลาเดียวกัน"
+// แต่ผูกกับ time_slot_id คนละตัว → ต้อง normalize เป็น start_time ก่อน group เสมอ
+const timeSlotStartMap: Record<string, string> = {};
+timeSlots.forEach(s => { timeSlotStartMap[s.id] = (s.start_time ?? "").slice(0, 5); });
+function normalizedSlotKey(e: TimetableEntry): string {
+  // ถ้าหา start_time ไม่เจอใน timeSlots (เช่น virtual slot จาก template) ให้ fallback ไปใช้ time_slot_id ดิบ
+  return timeSlotStartMap[e.time_slot_id] || e.time_slot_id;
+}
+
 const duplicateGroups = (() => {
   const map = new Map<string, TimetableEntry[]>();
   allEntriesForCheck.forEach(e => {
-    const key = `${e.classroom_id}|${e.day_of_week}|${e.time_slot_id}`;
+    const key = `${e.classroom_id}|${e.day_of_week}|${normalizedSlotKey(e)}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(e);
   });
@@ -1191,22 +1201,21 @@ const teacherConflictGroups = (() => {
   const map = new Map<string, { teacherId: string; entry: TimetableEntry }[]>();
   allEntriesForCheck.forEach(e => {
     const ids = [e.teacher_id, e.teacher_id_2].filter(Boolean) as string[];
+    const slotKey = normalizedSlotKey(e);
     ids.forEach(tid => {
-      const key = `${tid}|${e.day_of_week}|${e.time_slot_id}`;
+      const key = `${tid}|${e.day_of_week}|${slotKey}`;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push({ teacherId: tid, entry: e });
     });
   });
+  // ★ เปลี่ยนเงื่อนไข: ตอนนี้นับเป็น conflict ทันทีถ้าครูคนเดียวกันมี entry มากกว่า 1
+  // ในวัน+เวลาเดียวกัน ไม่ว่าจะห้องเดียวกันหรือคนละห้อง (ถ้าห้องเดียวกันก็ซ้ำอยู่แล้วใน duplicateGroups
+  // แต่ยังอยากเห็นในนี้ด้วยเผื่อกรณี classroom_id ต่างกันแต่จริงๆ คือห้องเดียวกันที่ถูกสร้างซ้ำ)
   return Array.from(map.entries())
-    .map(([key, list]) => {
-      const uniqueRooms = new Set(list.map(l => l.entry.classroom_id));
-      return { key, list, isConflict: uniqueRooms.size > 1 };
-    })
+    .map(([key, list]) => ({ key, list, isConflict: list.length > 1 }))
     .filter(g => g.isConflict);
 })();
 
-// ★ ใหม่: ตรวจ "ห้องเรียนชื่อซ้ำ" (คนละ id แต่ชื่อ/สายชั้นเดียวกัน)
-// นี่คือสาเหตุที่พบบ่อยที่สุดที่ทำให้คาบซ้ำ "มองไม่เห็น" ใน duplicateGroups เพราะ classroom_id ต่างกัน
 const duplicateClassroomGroups = (() => {
   const map = new Map<string, Classroom[]>();
   allClassrooms.forEach(c => {
