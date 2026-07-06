@@ -86,6 +86,13 @@ function toThaiDateTime(isoString: string): string {
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null); // ค่าความคลาดเคลื่อนของ GPS ที่เครื่องรายงานมา (เมตร)
   const isDetectingRef = useRef(false); // กันไม่ให้ยิง detectSingleFace ซ้อนกันตอนเครื่องช้า
 
+  // ── เพิ่มใหม่: ตรวจใบลาไปราชการก่อนอนุญาตสแกนนอกพื้นที่ ─────────────────────
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [officialLeaveOk, setOfficialLeaveOk] = useState<boolean | null>(null); // null=ยังไม่ตรวจ, true/false=ผลตรวจ
+  const [checkingLeave, setCheckingLeave] = useState(false);
+
+  const canOffsiteScan = allowOffsiteScan && officialLeaveOk === true;
+
   // ── 1. นาฬิกา + GPS ──────────────────────────────────────────────────────────
   useEffect(() => {
     const timer = setInterval(() => {
@@ -131,6 +138,7 @@ function toThaiDateTime(isoString: string): string {
           .maybeSingle();
 
         if (foundUser) {
+          setCurrentUserId((foundUser as any).id);
           await refreshStats((foundUser as any).id);
         }
       } catch (err) {
@@ -260,6 +268,47 @@ function toThaiDateTime(isoString: string): string {
     }
   };
 
+  // ── 4.5 ตรวจสอบใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้ ───────────────────────
+  async function checkOfficialLeaveToday(userId: string): Promise<boolean> {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .from('leave_requests')
+        .select('id, start_date, end_date, status, leave_type')
+        .eq('user_id', userId)
+        .eq('leave_type', 'official')
+        .eq('status', 'approved')
+        .lte('start_date', today)
+        .gte('end_date', today)
+        .maybeSingle();
+      if (error) { console.error('checkOfficialLeaveToday error:', error); return false; }
+      return !!data;
+    } catch (err) {
+      console.error('checkOfficialLeaveToday error:', err);
+      return false;
+    }
+  }
+
+  async function handleOffsiteToggle(checked: boolean) {
+    if (!checked) {
+      setAllowOffsiteScan(false);
+      setOfficialLeaveOk(null);
+      return;
+    }
+    if (!currentUserId) {
+      window.alert("⚠️ ไม่พบข้อมูลผู้ใช้ กรุณาเข้าสู่ระบบใหม่แล้วลองอีกครั้ง");
+      return;
+    }
+    setCheckingLeave(true);
+    const ok = await checkOfficialLeaveToday(currentUserId);
+    setCheckingLeave(false);
+    setOfficialLeaveOk(ok);
+    setAllowOffsiteScan(ok);
+    if (!ok) {
+      window.alert("⚠️ ไม่พบใบลาไปราชการที่ได้รับอนุมัติสำหรับวันนี้\nกรุณายื่นและรอการอนุมัติใบลาไปราชการก่อนจึงจะสแกนนอกพื้นที่ได้");
+    }
+  }
+
   // ── 5. กล้อง ──────────────────────────────────────────────────────────────────
   const stopVideo = () => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
@@ -270,8 +319,8 @@ function toThaiDateTime(isoString: string): string {
 
   const startVideo = async () => {
     // ── gate ตำแหน่ง GPS ก่อนเปิดกล้อง (แนวทางจาก scan.html ที่เช็ค GPS ก่อนเริ่มสแกนเสมอ) ──
-    if (!isInsideSchool && !allowOffsiteScan) {
-      setStatus("⛔ อยู่นอกพื้นที่โรงเรียน กรุณาเข้าใกล้จุดเช็คอิน หรือติ๊กยืนยันปฏิบัติราชการนอกสถานที่ก่อน");
+    if (!isInsideSchool && !canOffsiteScan) {
+      setStatus("⛔ อยู่นอกพื้นที่โรงเรียน กรุณาเข้าใกล้จุดเช็คอิน หรือติ๊กยืนยันปฏิบัติราชการนอกสถานที่ (ต้องมีใบลาไปราชการที่อนุมัติแล้ว)");
       return;
     }
     try {
@@ -355,8 +404,8 @@ function toThaiDateTime(isoString: string): string {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { window.alert("❌ กรุณาเข้าสู่ระบบก่อน"); return; }
 
-    if (!isInsideSchool && !allowOffsiteScan) {
-      window.alert("❌ คุณอยู่นอกพื้นที่โรงเรียน\nกรุณาติ๊กยืนยันการปฏิบัติราชการนอกสถานที่");
+    if (!isInsideSchool && !canOffsiteScan) {
+      window.alert("❌ คุณอยู่นอกพื้นที่โรงเรียน\nกรุณาติ๊กยืนยันการปฏิบัติราชการนอกสถานที่ (ต้องมีใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้)");
       stopVideo();
       return;
     }
@@ -409,6 +458,19 @@ function toThaiDateTime(isoString: string): string {
       }
 
     } else {
+      // ✅ กันซ้ำเช่นเดียวกับ check_in — เช็คว่าเช็คเอาท์วันนี้ไปแล้วหรือยัง
+      const { data: existingOut } = await supabase
+        .from('teacher_attendance').select('id, check_time')
+        .eq('user_id', finalUserId).eq('attendance_date', today).eq('type', 'check_out')
+        .maybeSingle();
+
+      if (existingOut) {
+        const existTime = toThaiTime((existingOut as any).check_time);
+        window.alert(`⚠️ บันทึกเวลาออกงานวันนี้ไปแล้ว\n🕐 เวลา: ${existTime} น.`);
+        stopVideo();
+        return;
+      }
+
       const { error } = await supabase.from('teacher_attendance').insert([{
         user_id: finalUserId, attendance_date: today, check_time: nowISO,
         type: 'check_out', is_onsite: isInsideSchool, status: statusText, distance: distanceFromSchool
@@ -427,200 +489,230 @@ function toThaiDateTime(isoString: string): string {
 
   // ── UI ────────────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col items-center justify-start min-h-screen bg-[#0b1329] text-slate-100 p-6 font-sans">
+    <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-blue-50 text-slate-800" style={{ fontFamily: "'Sarabun','TH Sarabun New',sans-serif" }}>
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap');
+      `}</style>
 
-      {/* หัวเวลา */}
-      <div className="text-center mt-6 mb-8 w-full max-w-xl">
-        <div className="text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 tracking-tight drop-shadow-lg font-mono">
-          {currentDateTime.time || "00:00:00"}
-        </div>
-        <div className="text-slate-400 mt-2 font-bold text-xl">วัน{currentDateTime.date || "กำลังโหลด..."}</div>
-        <h1 className="text-2xl font-black mt-4 text-white tracking-widest border-b-2 border-cyan-500/30 pb-3">
-          ระบบลงเวลาปฏิบัติงาน โรงเรียนวัดเขียนเขต
-        </h1>
-      </div>
-
-      {/* แผงสแกน */}
-      <div className="bg-slate-900/80 backdrop-blur-2xl border-2 border-white/10 rounded-[2.5rem] p-8 w-full max-w-xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.7)]">
-
-        {/* GPS Badge */}
-        <div className="flex justify-center mb-6">
-          <div className={`px-6 py-2.5 rounded-full text-sm font-extrabold flex items-center gap-3 border-2 ${isInsideSchool ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}`}>
-            <div className={`w-3 h-3 rounded-full animate-pulse ${isInsideSchool ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-            {isInsideSchool ? "📍 คุณอยู่ในพื้นที่โรงเรียน" : `⚠️ อยู่นอกพื้นที่ (${distanceFromSchool} ม.${gpsAccuracy ? ` ±${gpsAccuracy} ม.` : ''})`}
-          </div>
-        </div>
-        {/* คำอธิบายเมื่อ GPS ฟันธงว่านอกพื้นที่ทั้งที่ยืนอยู่ในโรงเรียนจริง — ช่วยให้เข้าใจว่าเป็นความคลาดเคลื่อนของ GPS
-            หรือพิกัดที่ตั้งไว้ (SCHOOL_LAT/SCHOOL_LNG) อาจไม่ตรงกับตำแหน่งจริง ควรตรวจสอบถ้าค่านี้เกิน ~150 ม. บ่อยๆ */}
-        {!isInsideSchool && gpsAccuracy !== null && (
-          <p className="text-center text-[11px] text-slate-500 -mt-4 mb-4">
-            ค่า GPS มีความคลาดเคลื่อนได้เอง โดยเฉพาะในอาคาร ลองออกไปที่โล่งแจ้งแล้วรอ 10-15 วินาทีให้ค่านิ่งก่อน
-          </p>
-        )}
-
-        {/* กล้อง */}
-        <div className="relative w-72 h-72 mx-auto mb-8">
-          <div className="absolute inset-0 rounded-full border-[8px] border-slate-800 shadow-inner" />
-          {/* วงแหวนกำลังสแกน — เพิ่มจากแนวคิด scan-line ของ scan.html แต่ปรับให้เข้ากับทรงวงกลมเดิม */}
-          {isCameraActive && !pendingMatch && (
-            <div className="absolute -inset-2 rounded-full border-2 border-cyan-400/40 animate-ping pointer-events-none" />
-          )}
-          <div className="w-full h-full rounded-full overflow-hidden border-4 border-cyan-400 shadow-[0_0_60px_-10px_rgba(6,182,212,0.6)] bg-slate-950">
-            <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
-            {/* เส้นสแกนวิ่งขึ้น-ลงในกรอบวงกลม — ตามตัวอย่าง scan.html ที่แนบมา (ปรับจากกรอบสี่เหลี่ยมให้เข้ากับทรงวงกลมของระบบนี้) */}
-            {isCameraActive && !pendingMatch && (
-              <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none">
-                <div className="scan-sweep-line" />
-              </div>
-            )}
-            {!isCameraActive && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 bg-slate-900/95">
-                <span className="text-5xl mb-3">📷</span>
-                <span className="text-xs uppercase tracking-widest font-black text-slate-400">กล้องปิดการทำงาน</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <style jsx>{`
-          .scan-sweep-line {
-            position: absolute;
-            left: 6%;
-            right: 6%;
-            height: 3px;
-            background: linear-gradient(90deg, transparent, #22d3ee, transparent);
-            box-shadow: 0 0 10px 2px rgba(34, 211, 238, 0.8);
-            animation: scanSweep 2s ease-in-out infinite;
-          }
-          @keyframes scanSweep {
-            0%   { top: 8%; }
-            50%  { top: 88%; }
-            100% { top: 8%; }
-          }
-        `}</style>
-
-        <div className="space-y-5">
-          {/* Toggle check_in / check_out */}
-          <div className="grid grid-cols-2 gap-4 bg-black/40 p-2 rounded-2xl border border-white/10">
-            <button type="button" onClick={() => setAttendanceType('check_in')}
-              className={`py-4 rounded-xl font-black text-base transition-all ${attendanceType === 'check_in' ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>
-              เข้างาน (Check In)
-            </button>
-            <button type="button" onClick={() => setAttendanceType('check_out')}
-              className={`py-4 rounded-xl font-black text-base transition-all ${attendanceType === 'check_out' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>
-              ออกงาน (Check Out)
-            </button>
-          </div>
-
-          {/* ปุ่มเปิด/ปิดกล้อง — ล็อกไว้จนกว่าโมเดลจะพร้อม และต้องอยู่ในพื้นที่ (หรือติ๊กนอกสถานที่) ก่อน */}
-          <button type="button" onClick={isCameraActive ? stopVideo : startVideo}
-            disabled={!modelsReady || (!isInsideSchool && !allowOffsiteScan)}
-            className={`w-full py-4 rounded-2xl font-black text-base tracking-wider transition-all active:scale-[0.98] shadow-2xl disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 ${isCameraActive ? 'bg-gradient-to-r from-rose-500 to-red-600 text-white' : 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white'}`}>
-            {isCameraActive ? "❌ ยกเลิกและปิดกล้องสแกน" : "📷 เปิดกล้องเพื่อสแกนใบหน้า"}
-          </button>
-
-          {!modelsReady && (
-            <p className="text-center text-xs text-slate-500 -mt-2">⏳ กำลังเตรียมระบบ กรุณารอสักครู่...</p>
-          )}
-          {modelsReady && !isInsideSchool && !allowOffsiteScan && (
-            <p className="text-center text-xs text-amber-400 -mt-2">⛔ ต้องอยู่ในพื้นที่โรงเรียนจึงจะสแกนได้ หรือติ๊กยืนยันปฏิบัติราชการนอกสถานที่ด้านล่าง</p>
-          )}
-
-          {/* Offsite checkbox */}
-          {!isInsideSchool && (
-            <label className="flex items-center gap-4 bg-amber-500/10 p-4 rounded-2xl border-2 border-amber-500/20 cursor-pointer hover:bg-amber-500/20 transition-all">
-              <input type="checkbox" checked={allowOffsiteScan} onChange={e => setAllowOffsiteScan(e.target.checked)}
-                className="w-6 h-6 rounded accent-amber-500" />
-              <span className="text-sm text-amber-300 font-bold leading-tight">ยืนยันว่ากำลังปฏิบัติราชการนอกสถานที่ / ไปราชการ</span>
-            </label>
-          )}
-
-          {/* Status bar */}
-          <p className="text-center text-sm text-cyan-400 font-bold bg-slate-950/40 py-2 rounded-xl border border-white/5 tracking-wide">
-            {status}
-          </p>
+      {/* ── Header บนสุด — ปุ่มกลับหน้าหลัก ย้ายมาไว้ด้านบนเหมือนระบบอื่น ───────── */}
+      <div className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-blue-100 shadow-sm px-4 py-3 flex items-center gap-3">
+        <button type="button" onClick={() => router.push('/')}
+          className="w-10 h-10 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 flex items-center justify-center text-lg transition-colors">
+          🏠
+        </button>
+        <div>
+          <h1 className="text-sm sm:text-base font-bold text-slate-800 leading-none">ระบบลงเวลาปฏิบัติงาน</h1>
+          <p className="text-slate-400 text-xs">โรงเรียนวัดเขียนเขต</p>
         </div>
       </div>
 
-      {/* สถิติ */}
-      <div className="mt-8 grid grid-cols-2 gap-4 w-full max-w-xl">
-        {[
-          { label: 'สถิติประจำเดือนนี้', data: summary.monthly },
-          { label: 'สถิติภาคเรียนที่ 1/2569', data: summary.term }
-        ].map((item, i) => (
-          <div key={i} className="bg-slate-900/60 border-2 border-white/5 p-5 rounded-3xl shadow-xl">
-            <p className="text-cyan-400 font-black text-xs uppercase mb-4 tracking-wider border-b border-white/5 pb-1">📊 {item.label}</p>
-            <div className="space-y-2.5">
-              <div className="flex justify-between text-sm font-bold"><span className="text-slate-400">ปกติ:</span><span className="text-emerald-400">{item.data.normal} ครั้ง</span></div>
-              <div className="flex justify-between text-sm font-bold"><span className="text-slate-400">สาย:</span><span className="text-rose-400">{item.data.late} ครั้ง</span></div>
-              <div className="flex justify-between text-sm font-bold"><span className="text-slate-400">ไปราชการ:</span><span className="text-amber-400">{item.data.mission} ครั้ง</span></div>
+      <div className="flex flex-col items-center justify-start p-4 sm:p-6">
+
+        {/* หัวเวลา */}
+        <div className="text-center mt-4 mb-8 w-full max-w-xl">
+          <div className="text-6xl sm:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-500 to-blue-600 tracking-tight font-mono">
+            {currentDateTime.time || "00:00:00"}
+          </div>
+          <div className="text-slate-500 mt-2 font-semibold text-lg sm:text-xl">วัน{currentDateTime.date || "กำลังโหลด..."}</div>
+        </div>
+
+        {/* แผงสแกน */}
+        <div className="bg-white border border-blue-100 rounded-[2.5rem] p-6 sm:p-8 w-full max-w-xl shadow-[0_15px_40px_-15px_rgba(59,130,246,0.25)]">
+
+          {/* GPS Badge */}
+          <div className="flex justify-center mb-6">
+            <div className={`px-6 py-2.5 rounded-full text-sm font-bold flex items-center gap-3 border-2 ${isInsideSchool ? 'bg-emerald-50 text-emerald-600 border-emerald-300' : 'bg-amber-50 text-amber-600 border-amber-300'}`}>
+              <div className={`w-3 h-3 rounded-full animate-pulse ${isInsideSchool ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+              {isInsideSchool ? "📍 คุณอยู่ในพื้นที่โรงเรียน" : `⚠️ อยู่นอกพื้นที่ (${distanceFromSchool} ม.${gpsAccuracy ? ` ±${gpsAccuracy} ม.` : ''})`}
             </div>
           </div>
-        ))}
-      </div>
+          {/* คำอธิบายเมื่อ GPS ฟันธงว่านอกพื้นที่ทั้งที่ยืนอยู่ในโรงเรียนจริง */}
+          {!isInsideSchool && gpsAccuracy !== null && (
+            <p className="text-center text-[11px] text-slate-400 -mt-4 mb-4">
+              ค่า GPS มีความคลาดเคลื่อนได้เอง โดยเฉพาะในอาคาร ลองออกไปที่โล่งแจ้งแล้วรอ 10-15 วินาทีให้ค่านิ่งก่อน
+            </p>
+          )}
 
-      {/* ประวัติย้อนหลัง */}
-      <div className="mt-8 w-full max-w-xl mb-12">
-        <div className="bg-slate-900/60 border-2 border-white/5 rounded-3xl p-6 shadow-xl">
-          <h3 className="text-base font-black text-slate-300 uppercase tracking-wider mb-4">🕒 รายการบันทึกย้อนหลัง</h3>
-          <div className="space-y-3">
-            {historyData.length > 0 ? historyData.map((log: any) => (
-              <div key={log.id} className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 hover:bg-white/10 transition-all">
-                <div className="flex flex-col">
-                  <span className="text-base font-black text-white">
-                    {toThaiTime(log.check_time)} น.
-                  </span>
-                  <span className="text-xs text-slate-400">
-                    {toThaiDateTime(log.check_time)}
-                  </span>
-                </div>
-                <div className={`px-3 py-1 rounded-xl text-xs font-black ${
-                  log.type === 'check_out'
-                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                    : log.status?.includes('สาย')
-                      ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                      : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                }`}>
-                  {log.type === 'check_out' ? '🔒 ออกงาน' : `🔓 ${log.status}`}
-                </div>
-                <div className="text-xs text-slate-300 font-bold">
-                  {log.is_onsite ? "🏫 ใน รร." : "💼 นอกพื้นที่"}
-                </div>
-              </div>
-            )) : (
-              <div className="text-center py-8 text-slate-500 text-sm font-bold italic bg-black/20 rounded-2xl border border-white/5">
-                ยังไม่มีข้อมูลรายการบันทึกเวลาล่าสุด
+          {/* กล้อง */}
+          <div className="relative w-72 h-72 mx-auto mb-8">
+            <div className="absolute inset-0 rounded-full border-[8px] border-blue-50 shadow-inner" />
+
+            {/* วงแหวนสแกนหมุนรอบวงกลม แบบ Apple Face ID — เพิ่มใหม่ตามที่ขอ */}
+            {isCameraActive && !pendingMatch && (
+              <div className="absolute -inset-3 rounded-full pointer-events-none overflow-hidden">
+                <div className="face-scan-ring" />
               </div>
             )}
+            {isCameraActive && !pendingMatch && (
+              <div className="absolute -inset-1 rounded-full border-2 border-cyan-300/50 animate-ping pointer-events-none" />
+            )}
+
+            <div className="w-full h-full rounded-full overflow-hidden border-4 border-cyan-400 shadow-[0_0_50px_-8px_rgba(6,182,212,0.5)] bg-slate-50">
+              <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+              {!isCameraActive && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-50">
+                  <span className="text-5xl mb-3">📷</span>
+                  <span className="text-xs uppercase tracking-widest font-bold text-slate-400">กล้องปิดการทำงาน</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <style jsx>{`
+            /* วงแหวนไล่สีหมุนรอบวงกลม (mask ให้เหลือแต่ขอบ) คล้ายแอนิเมชัน Face ID ของ Apple */
+            .face-scan-ring {
+              width: 100%;
+              height: 100%;
+              border-radius: 9999px;
+              background: conic-gradient(
+                from 0deg,
+                transparent 0deg,
+                rgba(34, 211, 238, 0.05) 40deg,
+                #22d3ee 90deg,
+                #a5f3fc 110deg,
+                rgba(34, 211, 238, 0.05) 150deg,
+                transparent 200deg,
+                transparent 360deg
+              );
+              -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
+              mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
+              animation: faceScanSpin 1.6s linear infinite;
+            }
+            @keyframes faceScanSpin {
+              to { transform: rotate(360deg); }
+            }
+          `}</style>
+
+          <div className="space-y-5">
+            {/* Toggle check_in / check_out */}
+            <div className="grid grid-cols-2 gap-3 bg-blue-50/60 p-2 rounded-2xl border border-blue-100">
+              <button type="button" onClick={() => setAttendanceType('check_in')}
+                className={`py-4 rounded-xl font-bold text-base transition-all ${attendanceType === 'check_in' ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}>
+                เข้างาน (Check In)
+              </button>
+              <button type="button" onClick={() => setAttendanceType('check_out')}
+                className={`py-4 rounded-xl font-bold text-base transition-all ${attendanceType === 'check_out' ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}>
+                ออกงาน (Check Out)
+              </button>
+            </div>
+
+            {/* ปุ่มเปิด/ปิดกล้อง — ล็อกไว้จนกว่าโมเดลจะพร้อม และต้องอยู่ในพื้นที่ (หรือมีใบลาไปราชการที่อนุมัติแล้ว) ก่อน */}
+            <button type="button" onClick={isCameraActive ? stopVideo : startVideo}
+              disabled={!modelsReady || (!isInsideSchool && !canOffsiteScan)}
+              className={`w-full py-4 rounded-2xl font-bold text-base tracking-wide transition-all active:scale-[0.98] shadow-lg disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 ${isCameraActive ? 'bg-gradient-to-r from-rose-500 to-red-500 text-white' : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white'}`}>
+              {isCameraActive ? "❌ ยกเลิกและปิดกล้องสแกน" : "📷 เปิดกล้องเพื่อสแกนใบหน้า"}
+            </button>
+
+            {!modelsReady && (
+              <p className="text-center text-xs text-slate-400 -mt-2">⏳ กำลังเตรียมระบบ กรุณารอสักครู่...</p>
+            )}
+            {modelsReady && !isInsideSchool && !canOffsiteScan && (
+              <p className="text-center text-xs text-amber-500 -mt-2">⛔ ต้องอยู่ในพื้นที่โรงเรียนจึงจะสแกนได้ หรือติ๊กยืนยันปฏิบัติราชการนอกสถานที่ด้านล่าง (ต้องมีใบลาไปราชการที่อนุมัติแล้ว)</p>
+            )}
+
+            {/* Offsite checkbox — ตรวจใบลาไปราชการก่อนอนุญาต */}
+            {!isInsideSchool && (
+              <div>
+                <label className="flex items-center gap-4 bg-amber-50 p-4 rounded-2xl border-2 border-amber-200 cursor-pointer hover:bg-amber-100 transition-all">
+                  <input type="checkbox" checked={allowOffsiteScan} disabled={checkingLeave}
+                    onChange={e => handleOffsiteToggle(e.target.checked)}
+                    className="w-6 h-6 rounded accent-amber-500" />
+                  <span className="text-sm text-amber-700 font-bold leading-tight">ยืนยันว่ากำลังปฏิบัติราชการนอกสถานที่ / ไปราชการ</span>
+                </label>
+                {checkingLeave && (
+                  <p className="text-xs text-amber-500 mt-1.5 text-center animate-pulse">⏳ กำลังตรวจสอบใบลาไปราชการ...</p>
+                )}
+                {!checkingLeave && officialLeaveOk === true && (
+                  <p className="text-xs text-emerald-600 mt-1.5 text-center font-bold">✅ พบใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้ สามารถสแกนได้</p>
+                )}
+                {!checkingLeave && officialLeaveOk === false && (
+                  <p className="text-xs text-red-500 mt-1.5 text-center font-bold">❌ ไม่พบใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้</p>
+                )}
+              </div>
+            )}
+
+            {/* Status bar */}
+            <p className="text-center text-sm text-blue-600 font-bold bg-blue-50/60 py-2 rounded-xl border border-blue-100 tracking-wide">
+              {status}
+            </p>
+          </div>
+        </div>
+
+        {/* สถิติ */}
+        <div className="mt-8 grid grid-cols-2 gap-4 w-full max-w-xl">
+          {[
+            { label: 'สถิติประจำเดือนนี้', data: summary.monthly },
+            { label: 'สถิติภาคเรียนที่ 1/2569', data: summary.term }
+          ].map((item, i) => (
+            <div key={i} className="bg-white border border-blue-100 p-5 rounded-3xl shadow-sm">
+              <p className="text-blue-500 font-bold text-xs uppercase mb-4 tracking-wider border-b border-blue-50 pb-1">📊 {item.label}</p>
+              <div className="space-y-2.5">
+                <div className="flex justify-between text-sm font-bold"><span className="text-slate-400">ปกติ:</span><span className="text-emerald-500">{item.data.normal} ครั้ง</span></div>
+                <div className="flex justify-between text-sm font-bold"><span className="text-slate-400">สาย:</span><span className="text-rose-500">{item.data.late} ครั้ง</span></div>
+                <div className="flex justify-between text-sm font-bold"><span className="text-slate-400">ไปราชการ:</span><span className="text-amber-500">{item.data.mission} ครั้ง</span></div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* ประวัติย้อนหลัง */}
+        <div className="mt-8 w-full max-w-xl mb-12">
+          <div className="bg-white border border-blue-100 rounded-3xl p-6 shadow-sm">
+            <h3 className="text-base font-bold text-slate-600 uppercase tracking-wider mb-4">🕒 รายการบันทึกย้อนหลัง</h3>
+            <div className="space-y-3">
+              {historyData.length > 0 ? historyData.map((log: any) => (
+                <div key={log.id} className="flex items-center justify-between p-4 bg-blue-50/40 rounded-2xl border border-blue-50 hover:bg-blue-50 transition-all">
+                  <div className="flex flex-col">
+                    <span className="text-base font-bold text-slate-800">
+                      {toThaiTime(log.check_time)} น.
+                    </span>
+                    <span className="text-xs text-slate-400">
+                      {toThaiDateTime(log.check_time)}
+                    </span>
+                  </div>
+                  <div className={`px-3 py-1 rounded-xl text-xs font-bold ${
+                    log.type === 'check_out'
+                      ? 'bg-blue-100 text-blue-600 border border-blue-200'
+                      : log.status?.includes('สาย')
+                        ? 'bg-rose-100 text-rose-600 border border-rose-200'
+                        : 'bg-emerald-100 text-emerald-600 border border-emerald-200'
+                  }`}>
+                    {log.type === 'check_out' ? '🔒 ออกงาน' : `🔓 ${log.status}`}
+                  </div>
+                  <div className="text-xs text-slate-500 font-bold">
+                    {log.is_onsite ? "🏫 ใน รร." : "💼 นอกพื้นที่"}
+                  </div>
+                </div>
+              )) : (
+                <div className="text-center py-8 text-slate-400 text-sm font-bold italic bg-blue-50/30 rounded-2xl border border-blue-50">
+                  ยังไม่มีข้อมูลรายการบันทึกเวลาล่าสุด
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
-
-      <button type="button" onClick={() => router.push('/')}
-        className="mb-8 text-slate-500 hover:text-cyan-400 transition-colors text-xs font-black tracking-widest uppercase flex items-center gap-2">
-        🏠 กลับสู่หน้าหลัก
-      </button>
 
       {/* ── Modal ยืนยันตัวตน — เพิ่มใหม่ตามแนวคิดจาก confirmModal ใน scan.html ──── */}
       {pendingMatch && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm bg-gradient-to-b from-slate-800 to-slate-900 border border-white/15 rounded-3xl p-8 text-center shadow-2xl">
-            <div className="mx-auto mb-4 w-20 h-20 rounded-full bg-cyan-500/15 border-2 border-cyan-500/30 flex items-center justify-center text-4xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm bg-white border border-blue-100 rounded-3xl p-8 text-center shadow-2xl">
+            <div className="mx-auto mb-4 w-20 h-20 rounded-full bg-cyan-50 border-2 border-cyan-200 flex items-center justify-center text-4xl">
               🙋
             </div>
             <p className="text-xs text-slate-400 mb-1">ตรวจพบใบหน้า</p>
-            <p className="text-2xl font-black text-cyan-300 mb-4 break-words">{pendingMatch.name}</p>
-            <div className="inline-block bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-5 py-2 rounded-full font-bold text-sm mb-2">
+            <p className="text-2xl font-bold text-blue-600 mb-4 break-words">{pendingMatch.name}</p>
+            <div className="inline-block bg-emerald-50 border border-emerald-200 text-emerald-600 px-5 py-2 rounded-full font-bold text-sm mb-2">
               {attendanceType === 'check_in' ? 'พร้อมยืนยันเข้างาน' : 'พร้อมยืนยันออกงาน'}
             </div>
-            <p className="text-xs text-slate-500 mb-6">ความเหมือน: {pendingMatch.similarity}%</p>
+            <p className="text-xs text-slate-400 mb-6">ความเหมือน: {pendingMatch.similarity}%</p>
 
             <button type="button" onClick={confirmMatch} disabled={isConfirming}
-              className="w-full py-4 rounded-2xl font-black text-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-xl mb-3 disabled:opacity-50 transition-all">
+              className="w-full py-4 rounded-2xl font-bold text-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg mb-3 disabled:opacity-50 transition-all">
               {isConfirming ? '⏳ กำลังบันทึก...' : (attendanceType === 'check_in' ? '✅ ยืนยันเข้างาน' : '✅ ยืนยันออกงาน')}
             </button>
             <button type="button" onClick={cancelMatch} disabled={isConfirming}
-              className="w-full py-3 rounded-2xl font-bold text-sm bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 transition-all disabled:opacity-50">
+              className="w-full py-3 rounded-2xl font-bold text-sm bg-rose-50 border border-rose-200 text-rose-500 hover:bg-rose-100 transition-all disabled:opacity-50">
               ❌ ไม่ใช่ฉัน / สแกนใหม่
             </button>
           </div>
