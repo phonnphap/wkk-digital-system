@@ -34,14 +34,14 @@ const SCHEDULE_TEMPLATES = [
   {
     key: "kindergarten", label: "อนุบาล (อ.2–อ.3)",
     slots: [
-      { slot_number: 1, start_time: "08:30", end_time: "09:30", slot_label: "กิจกรรมเคลื่อนไหวและจังหวะ", is_break: false },
-      { slot_number: 2, start_time: "09:30", end_time: "09:50", slot_label: "กิจกรรมเสริมประสบการณ์", is_break: false },
-      { slot_number: 3, start_time: "09:50", end_time: "11:00", slot_label: "กิจกรรมสร้างสรรค์/เล่นตามมุม", is_break: false },
-      { slot_number: 4, start_time: "11:00", end_time: "11:40", slot_label: "กิจกรรมกลางแจ้ง", is_break: false },
-      { slot_number: 0, start_time: "11:40", end_time: "12:30", slot_label: "รับประทานอาหาร/ล้างหน้าแปรงฟัน", is_break: true },
+      { slot_number: 1, start_time: "08:30", end_time: "09:30", slot_label: "คาบ 1", is_break: false },
+      { slot_number: 2, start_time: "09:30", end_time: "09:50", slot_label: "คาบ 2", is_break: false },
+      { slot_number: 3, start_time: "09:50", end_time: "11:00", slot_label: "คาบ 3", is_break: false },
+      { slot_number: 4, start_time: "11:00", end_time: "11:40", slot_label: "คาบ 4", is_break: false },
+      { slot_number: 0, start_time: "11:40", end_time: "12:30", slot_label: "พักกลางวัน", is_break: true },
       { slot_number: 0, start_time: "12:30", end_time: "14:00", slot_label: "นอนกลางวัน", is_break: true },
-      { slot_number: 5, start_time: "14:00", end_time: "14:30", slot_label: "กิจกรรมเกมการศึกษา", is_break: false },
-      { slot_number: 0, start_time: "14:30", end_time: "15:00", slot_label: "ดื่มนม/เตรียมตัวกลับบ้าน", is_break: true },
+      { slot_number: 5, start_time: "14:00", end_time: "14:30", slot_label: "คาบ 5", is_break: false },
+      { slot_number: 0, start_time: "14:30", end_time: "15:00", slot_label: "คาบ 6", is_break: true },
     ],
   },
   {
