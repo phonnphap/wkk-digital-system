@@ -69,6 +69,9 @@ export default function AdminFaceRegisterPage() {
   const workDepartments = ["กลุ่มบริหารวิชาการ", "กลุ่มบริหารงบประมาณ", "กลุ่มบริหารงานบุคคล", "กลุ่มบริหารทั่วไป"];
   const executivePositions = ["ผู้อำนวยการโรงเรียน", "รองผู้อำนวยการกลุ่มบริหารวิชาการ", "รองผู้อำนวยการกลุ่มบริหารงบประมาณ", "รองผู้อำนวยการกลุ่มบริหารงานบุคคล", "รองผู้อำนวยการกลุ่มบริหารทั่วไป"];
 
+  // ── สถานะการโหลดที่ละเอียดขึ้น (แนวคิดจาก spinner + สถานะ 3 มุมของ register.html) ──
+  const anglesCaptured = [descriptorFront, descriptorLeft, descriptorRight].filter(Boolean).length;
+
   useEffect(() => {
     async function initializeSystem() {
       try {
@@ -112,7 +115,8 @@ export default function AdminFaceRegisterPage() {
             setAllSubjects(subjectData);
           }
         }
-        
+
+        setStatus("กำลังโหลดโมเดล AI สำหรับจดจำใบหน้า...");
         const fa = await import('face-api.js');
         setFaceapi(fa);  // เก็บไว้ใช้ในฟังก์ชันอื่น
 
@@ -341,8 +345,12 @@ export default function AdminFaceRegisterPage() {
         <h1 className="text-base font-bold text-cyan-400 mb-1 flex items-center gap-2">
           ⚙️ ระบบจัดการสิทธิ์บุคลากรและลงทะเบียนใบหน้าแบบความแม่นยำสูง
         </h1>
-        <p className="text-xs text-slate-400 mb-6 border-b border-slate-800 pb-3">
+        <p className="text-xs text-slate-400 mb-1 border-b border-slate-800 pb-3">
           สแกนจัดเก็บอัตลักษณ์ใบหน้าด้วยตนเองทีละมุมมอง พร้อมระบบจัดการภาระงานสอนรายชั้นเรียนสัมพันธ์รายวิชาในระบบ
+        </p>
+        {/* เพิ่มคำแนะนำสั้นๆ ตามแนวทาง register.html: ย้ำว่าควรบันทึกให้ครบ 3 มุมเพื่อความแม่นยำสูงสุด */}
+        <p className="text-[11px] text-slate-500 mb-6">
+          💡 แนะนำให้บันทึกให้ครบทั้ง 3 มุม (ตรง / ซ้าย / ขวา) เพื่อความแม่นยำสูงสุดตอนสแกนเข้างานจริง
         </p>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -350,7 +358,16 @@ export default function AdminFaceRegisterPage() {
           {/* ส่วนซ้าย: กล้อง */}
           <div className="lg:col-span-4 flex flex-col items-center justify-center bg-slate-950 rounded-xl p-4 border border-slate-800 sticky top-4">
             <div className="mb-3 w-full flex flex-col gap-1.5 text-xs">
-              <span className="text-[10px] text-slate-400 font-bold block mb-0.5">เลือกมุมที่ต้องการเปิดกล้องสแกน:</span>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[10px] text-slate-400 font-bold">เลือกมุมที่ต้องการเปิดกล้องสแกน:</span>
+                <span className="text-[10px] text-cyan-400 font-bold">{anglesCaptured}/3 มุม</span>
+              </div>
+              {/* แถบความคืบหน้าแบบจุด — เสริมความชัดเจนของ progress ตามแนวคิด step-dots ของ register.html */}
+              <div className="flex gap-1.5 mb-1">
+                {[descriptorFront, descriptorLeft, descriptorRight].map((d, i) => (
+                  <div key={i} className={`h-1.5 flex-1 rounded-full transition-all ${d ? 'bg-emerald-500' : 'bg-slate-800'}`} />
+                ))}
+              </div>
               <div className="flex justify-between gap-1 text-[10px] text-center">
                 <button type="button" onClick={() => startVideo("front")} disabled={!selectedTeacher} className={`flex-1 p-2 rounded border transition-all ${descriptorFront ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300 font-bold' : activeScanAngle === 'front' ? 'bg-cyan-950 border-cyan-400 text-cyan-300 font-bold ring-1 ring-cyan-400' : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-850'}`}>
                   1. มุมหน้าตรง {descriptorFront ? "✓" : ""}
@@ -368,7 +385,14 @@ export default function AdminFaceRegisterPage() {
               <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
               {!isCameraActive && (
                 <div className="absolute inset-0 bg-slate-950/90 flex items-center justify-center text-slate-400 text-xs text-center p-4">
-                  เลือกปุ่มมุมใบหน้าด้านบน<br />เพื่อเปิดกล้องบันทึกข้อมูลทีละด้าน
+                  {!modelsLoaded ? (
+                    <span className="flex flex-col items-center gap-2">
+                      <span className="w-6 h-6 border-2 border-cyan-500/30 border-t-cyan-400 rounded-full animate-spin" />
+                      กำลังโหลดโมเดล AI...
+                    </span>
+                  ) : (
+                    <>เลือกปุ่มมุมใบหน้าด้านบน<br />เพื่อเปิดกล้องบันทึกข้อมูลทีละด้าน</>
+                  )}
                 </div>
               )}
             </div>
@@ -483,7 +507,7 @@ export default function AdminFaceRegisterPage() {
                       </div>
                       
                       <button type="button" onClick={addTeachingAssignment} className="w-full bg-cyan-600 hover:bg-cyan-500 text-white text-xs py-2 rounded-lg font-bold shadow-md transition-all">
-                        import_contacts_with_check ✔️ บันทึก (เพิ่มรายการภาระงานสอนนี้)
+                        ✔️ บันทึก (เพิ่มรายการภาระงานสอนนี้)
                       </button>
                     </div>
 
