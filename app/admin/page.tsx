@@ -4,12 +4,15 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useRef } from "react";
 
-import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
+// เดิมสร้าง client แยกด้วย anon key ตรงๆ ผ่าน '@supabase/supabase-js' ซึ่งไม่ได้พ่วง
+// session ของผู้ใช้ที่ล็อกอินอยู่ (auth.uid() จะเป็น null) — ถ้า RLS ของตาราง users
+// อนุญาตให้แก้ไขได้เฉพาะแถวของตัวเอง การอัปเดตแถวของ "คนอื่น" (ครูที่แอดมินลงทะเบียนให้)
+// จะถูกบล็อกเงียบๆ โดยไม่มี error ใดๆ เปลี่ยนมาใช้ client ตัวเดียวกับหน้าอื่นในระบบแทน
+// เพื่อให้ request แนบ session/token ของแอดมินไปด้วยเสมอ
+import { createClient } from "@/lib/supabase/client";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = createClient();
 
 interface TeacherUser {
   id: string;
@@ -318,12 +321,24 @@ export default function AdminFaceRegisterPage() {
         updatePayload.face_features = faceFeaturesPayload;
       }
 
-      const { error } = await supabase
+      // เพิ่ม .select() เพื่อให้ Supabase คืนแถวที่ถูกแก้ไขจริงกลับมา
+      // ถ้า RLS บล็อกการเขียน (หรือ id ไม่ตรงกับแถวไหนเลย) error จะยังเป็น null
+      // แต่ data จะเป็น array ว่าง — ต้องเช็คตรงนี้เอง ไม่งั้นจะขึ้น "สำเร็จ" ทั้งที่ไม่มีอะไรถูกบันทึก
+      const { data: updatedRows, error } = await supabase
         .from('users')
         .update(updatePayload)
-        .eq('id', selectedTeacher.id);
+        .eq('id', selectedTeacher.id)
+        .select('id');
 
       if (error) throw error;
+
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new Error(
+          'ไม่มีแถวไหนถูกแก้ไขเลย (0 rows) — มักเกิดจาก RLS Policy ของตาราง users ' +
+          'ไม่อนุญาตให้บัญชีแอดมินที่ล็อกอินอยู่แก้ไขข้อมูลของผู้ใช้คนอื่น กรุณาตรวจสอบ ' +
+          'Policy สำหรับคำสั่ง UPDATE บนตาราง users ใน Supabase Dashboard'
+        );
+      }
 
       setStatus("✅ บันทึกโครงสร้างบทบาทและใบหน้า 3 มุมสำเร็จ!");
       alert("จัดเก็บพิกัดโครงสร้างใบหน้าครบ 3 มิติ และสิทธิ์งานสอนเรียบร้อย");

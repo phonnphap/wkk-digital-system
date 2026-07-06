@@ -83,6 +83,8 @@ function toThaiDateTime(isoString: string): string {
   const [userNames, setUserNames] = useState<Record<string, string>>({}); // map id -> ชื่อ-สกุล สำหรับแสดงใน modal
   const [pendingMatch, setPendingMatch] = useState<{ id: string; name: string; similarity: string } | null>(null); // รอยืนยันก่อนบันทึกจริง
   const [isConfirming, setIsConfirming] = useState(false);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null); // ค่าความคลาดเคลื่อนของ GPS ที่เครื่องรายงานมา (เมตร)
+  const isDetectingRef = useRef(false); // กันไม่ให้ยิง detectSingleFace ซ้อนกันตอนเครื่องช้า
 
   // ── 1. นาฬิกา + GPS ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -97,13 +99,19 @@ function toThaiDateTime(isoString: string): string {
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(
         (pos) => {
-          const { latitude, longitude } = pos.coords;
+          const { latitude, longitude, accuracy } = pos.coords;
           const dist = calculateDistance(latitude, longitude, SCHOOL_LAT, SCHOOL_LNG);
           setDistanceFromSchool(dist);
-          setIsInsideSchool(dist <= ALLOWED_RADIUS);
+          setGpsAccuracy(Math.round(accuracy));
+
+          // ── ผ่อนปรนตามค่าความแม่นยำของ GPS เอง (accuracy) ──────────────────
+          // GPS มือถือ (โดยเฉพาะในอาคาร) มีค่าคลาดเคลื่อนได้หลักสิบถึงหลักร้อยเมตร
+          // ถ้าหักลบ accuracy ออกแล้วยังอยู่ในรัศมีที่กำหนด ให้ถือว่า "อยู่ในพื้นที่"
+          const effectiveDist = Math.max(0, dist - accuracy);
+          setIsInsideSchool(effectiveDist <= ALLOWED_RADIUS);
         },
         (err) => console.error(err),
-        { enableHighAccuracy: true }
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
       );
     }
     return () => clearInterval(timer);
@@ -141,8 +149,11 @@ function toThaiDateTime(isoString: string): string {
         const fa = await import('face-api.js');
         setFaceapi(fa);
         faceApiRef.current = fa;
+        // ใช้ TinyFaceDetector แทน SsdMobilenetv1 สำหรับหน้าสแกน — เบากว่ามาก
+        // เหมาะกับ loop ตรวจจับต่อเนื่องทุกวินาที ลดอาการหน่วง/ช้าบนมือถือ
+        // (ต้องมีไฟล์ tiny_face_detector_model-weights_manifest.json + shard อยู่ใน /public/models ด้วย)
         await Promise.all([
-          fa.nets.ssdMobilenetv1.loadFromUri('/models'),
+          fa.nets.tinyFaceDetector.loadFromUri('/models'),
           fa.nets.faceLandmark68Net.loadFromUri('/models'),
           fa.nets.faceRecognitionNet.loadFromUri('/models')
         ]);
@@ -281,34 +292,43 @@ function toThaiDateTime(isoString: string): string {
   // ── 6. Loop ตรวจจับใบหน้า ─────────────────────────────────────────────────────
   const detectFaceLoop = () => {
     intervalRef.current = setInterval(async () => {
+      // กันยิงซ้อน: ถ้ารอบก่อนหน้ายังประมวลผลไม่เสร็จ (เครื่องช้า/สัญญาณกล้องหน่วง) ให้ข้ามรอบนี้ไปก่อน
+      if (isDetectingRef.current) return;
       if (!videoRef.current || !streamRef.current || !faceMatcher || !faceApiRef.current) return;
+
+      isDetectingRef.current = true;
       const fa = faceApiRef.current;
 
-      const detection = await fa
-        .detectSingleFace(videoRef.current, new fa.SsdMobilenetv1Options())
-        .withFaceLandmarks()
-        .withFaceDescriptor();
+      try {
+        // TinyFaceDetector เร็วกว่า SsdMobilenetv1 มาก เหมาะกับ loop ต่อเนื่องแบบนี้
+        const detection = await fa
+          .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+          .withFaceLandmarks()
+          .withFaceDescriptor();
 
-      if (detection && detection.descriptor.length === 128) {
-        const match = faceMatcher.findBestMatch(detection.descriptor);
-        const similarity = ((1 - match.distance) * 100).toFixed(1);
+        if (detection && detection.descriptor.length === 128) {
+          const match = faceMatcher.findBestMatch(detection.descriptor);
+          const similarity = ((1 - match.distance) * 100).toFixed(1);
 
-        if (match.label !== 'unknown' && match.distance < MATCH_THRESHOLD) {
-          // เจอใบหน้าตรงกันชัดเจน — หยุดสแกนแล้วให้ผู้ใช้ "ยืนยัน" เองก่อนค่อยเขียนลงฐานข้อมูล
-          // (เดิมระบบจะบันทึกทันที ปรับตามตัวอย่าง scan.html ที่มี modal ยืนยันก่อนเสมอ)
-          if (intervalRef.current) clearInterval(intervalRef.current);
-          const name = userNames[match.label] || match.label;
-          setStatus(`✅ พบใบหน้า (${similarity}% ตรงกัน) กรุณายืนยันตัวตน`);
-          setPendingMatch({ id: match.label, name, similarity });
-        } else if (match.label !== 'unknown') {
-          setStatus(`🔍 พบใบหน้า แต่ยังไม่ชัด (${similarity}%) ขยับเข้าใกล้กล้องอีกนิด`);
+          if (match.label !== 'unknown' && match.distance < MATCH_THRESHOLD) {
+            // เจอใบหน้าตรงกันชัดเจน — หยุดสแกนแล้วให้ผู้ใช้ "ยืนยัน" เองก่อนค่อยเขียนลงฐานข้อมูล
+            // (เดิมระบบจะบันทึกทันที ปรับตามตัวอย่าง scan.html ที่มี modal ยืนยันก่อนเสมอ)
+            if (intervalRef.current) clearInterval(intervalRef.current);
+            const name = userNames[match.label] || match.label;
+            setStatus(`✅ พบใบหน้า (${similarity}% ตรงกัน) กรุณายืนยันตัวตน`);
+            setPendingMatch({ id: match.label, name, similarity });
+          } else if (match.label !== 'unknown') {
+            setStatus(`🔍 พบใบหน้า แต่ยังไม่ชัด (${similarity}%) ขยับเข้าใกล้กล้องอีกนิด`);
+          } else {
+            setStatus(`📷 กำลังสแกน... (ไม่พบข้อมูล ${similarity}%)`);
+          }
         } else {
-          setStatus(`📷 กำลังสแกน... (ไม่พบข้อมูล ${similarity}%)`);
+          setStatus("📷 กรุณาขยับหน้าให้อยู่ในกรอบสแกน");
         }
-      } else {
-        setStatus("📷 กรุณาขยับหน้าให้อยู่ในกรอบสแกน");
+      } finally {
+        isDetectingRef.current = false;
       }
-    }, 1000);
+    }, 800);
   };
 
   // ── 7. ยืนยัน / ยกเลิก การจับคู่ใบหน้า ────────────────────────────────────────
@@ -427,9 +447,16 @@ function toThaiDateTime(isoString: string): string {
         <div className="flex justify-center mb-6">
           <div className={`px-6 py-2.5 rounded-full text-sm font-extrabold flex items-center gap-3 border-2 ${isInsideSchool ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}`}>
             <div className={`w-3 h-3 rounded-full animate-pulse ${isInsideSchool ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-            {isInsideSchool ? "📍 คุณอยู่ในพื้นที่โรงเรียน" : `⚠️ อยู่นอกพื้นที่ (${distanceFromSchool} เมตร)`}
+            {isInsideSchool ? "📍 คุณอยู่ในพื้นที่โรงเรียน" : `⚠️ อยู่นอกพื้นที่ (${distanceFromSchool} ม.${gpsAccuracy ? ` ±${gpsAccuracy} ม.` : ''})`}
           </div>
         </div>
+        {/* คำอธิบายเมื่อ GPS ฟันธงว่านอกพื้นที่ทั้งที่ยืนอยู่ในโรงเรียนจริง — ช่วยให้เข้าใจว่าเป็นความคลาดเคลื่อนของ GPS
+            หรือพิกัดที่ตั้งไว้ (SCHOOL_LAT/SCHOOL_LNG) อาจไม่ตรงกับตำแหน่งจริง ควรตรวจสอบถ้าค่านี้เกิน ~150 ม. บ่อยๆ */}
+        {!isInsideSchool && gpsAccuracy !== null && (
+          <p className="text-center text-[11px] text-slate-500 -mt-4 mb-4">
+            ค่า GPS มีความคลาดเคลื่อนได้เอง โดยเฉพาะในอาคาร ลองออกไปที่โล่งแจ้งแล้วรอ 10-15 วินาทีให้ค่านิ่งก่อน
+          </p>
+        )}
 
         {/* กล้อง */}
         <div className="relative w-72 h-72 mx-auto mb-8">
@@ -440,6 +467,12 @@ function toThaiDateTime(isoString: string): string {
           )}
           <div className="w-full h-full rounded-full overflow-hidden border-4 border-cyan-400 shadow-[0_0_60px_-10px_rgba(6,182,212,0.6)] bg-slate-950">
             <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+            {/* เส้นสแกนวิ่งขึ้น-ลงในกรอบวงกลม — ตามตัวอย่าง scan.html ที่แนบมา (ปรับจากกรอบสี่เหลี่ยมให้เข้ากับทรงวงกลมของระบบนี้) */}
+            {isCameraActive && !pendingMatch && (
+              <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none">
+                <div className="scan-sweep-line" />
+              </div>
+            )}
             {!isCameraActive && (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 bg-slate-900/95">
                 <span className="text-5xl mb-3">📷</span>
@@ -448,6 +481,23 @@ function toThaiDateTime(isoString: string): string {
             )}
           </div>
         </div>
+
+        <style jsx>{`
+          .scan-sweep-line {
+            position: absolute;
+            left: 6%;
+            right: 6%;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, #22d3ee, transparent);
+            box-shadow: 0 0 10px 2px rgba(34, 211, 238, 0.8);
+            animation: scanSweep 2s ease-in-out infinite;
+          }
+          @keyframes scanSweep {
+            0%   { top: 8%; }
+            50%  { top: 88%; }
+            100% { top: 8%; }
+          }
+        `}</style>
 
         <div className="space-y-5">
           {/* Toggle check_in / check_out */}
