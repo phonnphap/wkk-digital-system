@@ -3,13 +3,7 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useRef } from "react";
-
 import { useRouter } from 'next/navigation';
-// เดิมสร้าง client แยกด้วย anon key ตรงๆ ผ่าน '@supabase/supabase-js' ซึ่งไม่ได้พ่วง
-// session ของผู้ใช้ที่ล็อกอินอยู่ (auth.uid() จะเป็น null) — ถ้า RLS ของตาราง users
-// อนุญาตให้แก้ไขได้เฉพาะแถวของตัวเอง การอัปเดตแถวของ "คนอื่น" (ครูที่แอดมินลงทะเบียนให้)
-// จะถูกบล็อกเงียบๆ โดยไม่มี error ใดๆ เปลี่ยนมาใช้ client ตัวเดียวกับหน้าอื่นในระบบแทน
-// เพื่อให้ request แนบ session/token ของแอดมินไปด้วยเสมอ
 import { createClient } from "@/lib/supabase/client";
 
 const supabase = createClient();
@@ -23,18 +17,17 @@ interface TeacherUser {
   face_features?: any;
 }
 
-interface TeachingAssignment {
-  subjectGroup: string;
-  subjectName: string;
-  level: string;
-  rooms: string[];
-}
+const REQUIRED_STABLE_FRAMES = 6; // ต้องตรวจพบหน้านิ่งต่อเนื่องกี่เฟรมถึงจะถ่ายอัตโนมัติ
+const SCAN_INTERVAL_MS = 250;
 
 export default function AdminFaceRegisterPage() {
   const [faceapi, setFaceapi] = useState<any>(null);
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const scanActiveRef = useRef(false);
+  const scanTimeoutRef = useRef<number | null>(null);
+  const stableFrameCountRef = useRef(0);
 
   const [teachers, setTeachers] = useState<TeacherUser[]>([]);
   const [selectedTeacher, setSelectedTeacher] = useState<TeacherUser | null>(null);
@@ -48,17 +41,12 @@ export default function AdminFaceRegisterPage() {
   const [descriptorLeft, setDescriptorLeft] = useState<Float32Array | null>(null);
   const [descriptorRight, setDescriptorRight] = useState<Float32Array | null>(null);
 
+  // ── ฟีดแบ็กระหว่างสแกน (แทนที่การกดปุ่มถ่ายเอง) ──
+  const [scanFeedback, setScanFeedback] = useState("");
+  const [justCaptured, setJustCaptured] = useState(false);
+
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [isAdminRole, setIsAdminRole] = useState<boolean>(false);
-
-  const [allSubjects, setAllSubjects] = useState<any[]>([]);
-  const [filteredSubjects, setFilteredSubjects] = useState<any[]>([]);
-  const [subjectName, setSubjectName] = useState("");
-  const [subjectGroup, setSubjectGroup] = useState("");
-
-  const [currentSelectedLevel, setCurrentSelectedLevel] = useState("");
-  const [currentSelectedRooms, setCurrentSelectedRooms] = useState<string[]>([]);
-  const [teachingAssignments, setTeachingAssignments] = useState<TeachingAssignment[]>([]);
 
   const [advisorClass, setAdvisorClass] = useState("");
   const [advisorRoom, setAdvisorRoom] = useState("");
@@ -72,13 +60,12 @@ export default function AdminFaceRegisterPage() {
   const workDepartments = ["กลุ่มบริหารวิชาการ", "กลุ่มบริหารงบประมาณ", "กลุ่มบริหารงานบุคคล", "กลุ่มบริหารทั่วไป"];
   const executivePositions = ["ผู้อำนวยการโรงเรียน", "รองผู้อำนวยการกลุ่มบริหารวิชาการ", "รองผู้อำนวยการกลุ่มบริหารงบประมาณ", "รองผู้อำนวยการกลุ่มบริหารงานบุคคล", "รองผู้อำนวยการกลุ่มบริหารทั่วไป"];
 
-  // ── สถานะการโหลดที่ละเอียดขึ้น (แนวคิดจาก spinner + สถานะ 3 มุมของ register.html) ──
   const anglesCaptured = [descriptorFront, descriptorLeft, descriptorRight].filter(Boolean).length;
 
   useEffect(() => {
     async function initializeSystem() {
       try {
-        setStatus("กำลังดึงข้อมูลรายชื่อบุคลากรและรายวิชา...");
+        setStatus("กำลังดึงข้อมูลรายชื่อบุคลากร...");
 
         const { data: teacherData, error: teacherError } = await supabase
           .from('users')
@@ -97,40 +84,18 @@ export default function AdminFaceRegisterPage() {
           setTeachers(teacherData);
         }
 
-        try {
-          const res = await fetch('/api/subjects');
-          if (res.ok) {
-            const subjectData = await res.json();
-            setAllSubjects(subjectData);
-          } else {
-            const { data: subjectData, error: subjectError } = await supabase
-              .from('subjects')
-              .select('id, subject_code, name_th, subject_group');
-            if (!subjectError && subjectData) {
-              setAllSubjects(subjectData);
-            }
-          }
-        } catch {
-          const { data: subjectData, error: subjectError } = await supabase
-            .from('subjects')
-            .select('id, subject_code, name_th, subject_group');
-          if (!subjectError && subjectData) {
-            setAllSubjects(subjectData);
-          }
-        }
-
         setStatus("กำลังโหลดโมเดล AI สำหรับจดจำใบหน้า...");
         const fa = await import('face-api.js');
-        setFaceapi(fa);  // เก็บไว้ใช้ในฟังก์ชันอื่น
+        setFaceapi(fa);
 
-        if (!fa.nets.ssdMobilenetv1.isLoaded) {  // ✅ ใช้ fa โดยตรง
+        if (!fa.nets.ssdMobilenetv1.isLoaded) {
           await fa.nets.ssdMobilenetv1.loadFromUri('/models');
           await fa.nets.faceLandmark68Net.loadFromUri('/models');
           await fa.nets.faceRecognitionNet.loadFromUri('/models');
         }
 
         setModelsLoaded(true);
-        setStatus("🟢 ระบบ AI และฐานข้อมูลสัมพันธ์พร้อมทำงาน 100%");
+        setStatus("🟢 ระบบ AI พร้อมใช้งาน 100%");
       } catch (err: any) {
         setStatus("❌ ข้อผิดพลาด: " + err.message);
       }
@@ -139,52 +104,11 @@ export default function AdminFaceRegisterPage() {
     return () => stopVideo();
   }, []);
 
-  // 🔄 ระบบกรองรายวิชาอัจฉริยะตาม กลุ่มสาระ + ระดับชั้น (อ้างอิงหลักการรหัสวิชา)
-  useEffect(() => {
-    if (!subjectGroup) {
-      setFilteredSubjects([]);
-      return;
-    }
-
-    const filtered = allSubjects.filter(sub => {
-      // 1. ตรวจสอบกลุ่มสาระก่อน
-      if (!sub.subject_group) return false;
-      const dbGroup = String(sub.subject_group).trim().toLowerCase();
-      const selectedGroup = String(subjectGroup).trim().toLowerCase();
-      if (dbGroup !== selectedGroup) return false;
-
-      // 2. ถ้ายังไม่ได้เลือกชั้นเรียน ให้แสดงรายวิชาทั้งหมดในหมวดนั้นรอก่อน
-      if (!currentSelectedLevel) return true;
-
-      // 3. เริ่มวิเคราะห์รหัสวิชาตามเงื่อนไข (เช่น ว11282)
-      const code = String(sub.subject_code || "").trim();
-      // ค้นหาตำแหน่งที่เป็นตัวเลขตัวแรกในรหัสวิชา
-      const numMatch = code.match(/\d/);
-      if (!numMatch || numMatch.index === undefined) return true; // ถ้ารหัสไม่มีตัวเลข ให้หลุดไปให้เลือกก่อน
-
-      const startIdx = numMatch.index;
-      const digit1 = code.charAt(startIdx);     // เลขหลักที่ 1 หลังตัวอักษร (ช่วงชั้น)
-      const digit2 = code.charAt(startIdx + 1); // เลขหลักที่ 2 หลังตัวอักษร (ชั้นเรียนย่อย)
-
-      // ตรวจสอบความสอดคล้องกับชั้นเรียนที่เลือกไว้ด้านบน
-      if (currentSelectedLevel.startsWith("ป.")) {
-        const targetClassNum = currentSelectedLevel.replace("ป.", ""); // ดึงเลขชั้น เช่น "1"
-        return digit1 === "1" && digit2 === targetClassNum;
-      } 
-      
-      if (currentSelectedLevel.startsWith("ม.")) {
-        const targetClassNum = currentSelectedLevel.replace("ม.", ""); // ดึงเลขชั้น เช่น "3"
-        return digit1 === "2" && digit2 === targetClassNum;
-      }
-
-      // ถ้าเป็นระดับชั้นอนุบาล (อ.1 - อ.3) ให้ผ่านไปแสดงได้เลย
-      return true;
-    });
-
-    setFilteredSubjects(filtered);
-  }, [subjectGroup, currentSelectedLevel, allSubjects]);
-
   const stopVideo = () => {
+    scanActiveRef.current = false;
+    if (scanTimeoutRef.current) { window.clearTimeout(scanTimeoutRef.current); scanTimeoutRef.current = null; }
+    stableFrameCountRef.current = 0;
+    setScanFeedback("");
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
@@ -194,11 +118,12 @@ export default function AdminFaceRegisterPage() {
     setActiveScanAngle(null);
   };
 
+  function angleLabel(angle: "front" | "left" | "right") {
+    return angle === "front" ? "หน้าตรง" : angle === "left" ? "เอียงซ้าย" : "เอียงขวา";
+  }
+
   const startVideo = async (angle: "front" | "left" | "right") => {
-    if (!selectedTeacher) {
-      alert("กรุณาเลือกรายชื่อคุณครูในระบบก่อน");
-      return;
-    }
+    if (!selectedTeacher) { alert("กรุณาเลือกรายชื่อคุณครูในระบบก่อน"); return; }
     stopVideo();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -211,81 +136,59 @@ export default function AdminFaceRegisterPage() {
         await videoRef.current.play();
         setIsCameraActive(true);
         setActiveScanAngle(angle);
-        if (angle === "front") setStatus("📸 กรุณามองตรงนิ่งๆ แล้วกดปุ่ม 'บันทึกภาพหน้าตรง'");
-        if (angle === "left") setStatus("📸 กรุณาเบือนหน้าเอียงซ้ายเล็กน้อย แล้วกดปุ่ม 'บันทึกภาพมุมซ้าย'");
-        if (angle === "right") setStatus("📸 กรุณาเบือนหน้าเอียงขวาเล็กน้อย แล้วกดปุ่ม 'บันทึกภาพมุมขวา'");
+        setStatus(`📸 กำลังสแกนมุม${angleLabel(angle)}อัตโนมัติ — กรุณาอยู่นิ่งๆ ในกรอบวงกลม`);
+        setScanFeedback("กำลังเตรียมกล้อง...");
+        stableFrameCountRef.current = 0;
+        scanActiveRef.current = true;
+        // หน่วงเล็กน้อยให้กล้องเสถียรก่อนเริ่มสแกน
+        window.setTimeout(() => scanLoop(angle), 500);
       }
     } catch (err: any) {
       setStatus("❌ สัญญาณกล้องขัดข้อง: " + err.message);
     }
   };
 
-  const captureAngleData = async () => {
-    if (!videoRef.current || !isCameraActive || !activeScanAngle) return;
-    setStatus("⏳ AI กำลังสกัดจุดพิกัดใบหน้า...");
+  // ★ ระบบสแกนอัตโนมัติต่อเนื่อง (เหมือน Face ID) — ตรวจจับหน้าทุก ~250ms
+  // พอเจอหน้านิ่งครบ REQUIRED_STABLE_FRAMES เฟรมติดกัน จะถ่ายให้เองโดยไม่ต้องกดปุ่ม
+  async function scanLoop(angle: "front" | "left" | "right") {
+    if (!scanActiveRef.current || !videoRef.current || !faceapi) return;
     try {
-      if (!faceapi) return;  // เพิ่ม guard
-      const detection = await faceapi.detectSingleFace(
-        videoRef.current,
-        new faceapi.SsdMobilenetv1Options()
-      ).withFaceLandmarks().withFaceDescriptor();
+      const detection = await faceapi
+        .detectSingleFace(videoRef.current, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6 }))
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!scanActiveRef.current) return;
 
       if (detection) {
-        const descriptorArray = detection.descriptor;
-        if (activeScanAngle === "front") { setDescriptorFront(descriptorArray); setStatus("🎯 บันทึกพิกัดใบหน้า 'ตรง' สำเร็จ!"); }
-        else if (activeScanAngle === "left") { setDescriptorLeft(descriptorArray); setStatus("🎯 บันทึกพิกัดใบหน้า 'เอียงซ้าย' สำเร็จ!"); }
-        else if (activeScanAngle === "right") { setDescriptorRight(descriptorArray); setStatus("🎯 บันทึกพิกัดใบหน้า 'เอียงขวา' สำเร็จ!"); }
-        alert("จับจุดใบหน้ามุมนี้เรียบร้อย");
-        stopVideo();
-      } else {
-        setStatus("❌ AI ตรวจไม่พบใบหน้าในมุมนี้ กรุณาจัดหน้าให้อยู่ในกรอบวงกลมแล้วลองอีกครั้ง");
-        alert("ตรวจไม่พบใบหน้า กรุณาปรับมุมใบหน้าให้ชัดเจน");
-      }
-    } catch (e: any) {
-      setStatus("❌ เกิดข้อผิดพลาดขณะสแกน: " + e.message);
-    }
-  };
-
-  const handleRoomToggle = (room: string) => {
-    if (currentSelectedRooms.includes(room)) {
-      setCurrentSelectedRooms(currentSelectedRooms.filter(r => r !== room));
-    } else {
-      setCurrentSelectedRooms([...currentSelectedRooms, room]);
-    }
-  };
-
-  const addTeachingAssignment = () => {
-    if (!subjectGroup) { alert("กรุณาเลือกกลุ่มสาระการเรียนรู้ก่อน"); return; }
-    if (!currentSelectedLevel) { alert("กรุณาเลือกระดับชั้นเรียนก่อน"); return; }
-    if (!subjectName) { alert("กรุณาเลือกรายวิชาที่ทำการสอนก่อน"); return; }
-    if (currentSelectedRooms.length === 0) { alert("กรุณาเลือกห้องเรียนอย่างน้อย 1 ห้อง"); return; }
-
-    const existingIndex = teachingAssignments.findIndex(
-      a => a.subjectGroup === subjectGroup && a.subjectName === subjectName && a.level === currentSelectedLevel
-    );
-
-    if (existingIndex > -1) {
-      const updated = [...teachingAssignments];
-      const mergedRooms = Array.from(new Set([...updated[existingIndex].rooms, ...currentSelectedRooms]));
-      updated[existingIndex].rooms = mergedRooms.sort();
-      setTeachingAssignments(updated);
-    } else {
-      setTeachingAssignments([
-        ...teachingAssignments, 
-        { 
-          subjectGroup,
-          subjectName,
-          level: currentSelectedLevel, 
-          rooms: [...currentSelectedRooms].sort() 
+        stableFrameCountRef.current += 1;
+        setScanFeedback(`✅ ตรวจพบใบหน้า กำลังยืนยัน (${stableFrameCountRef.current}/${REQUIRED_STABLE_FRAMES})`);
+        if (stableFrameCountRef.current >= REQUIRED_STABLE_FRAMES) {
+          scanActiveRef.current = false;
+          await finalizeCapture(angle, detection.descriptor);
+          return;
         }
-      ]);
+      } else {
+        stableFrameCountRef.current = 0;
+        setScanFeedback("🔍 กรุณาจัดใบหน้าให้อยู่กึ่งกลางวงกลม");
+      }
+    } catch {
+      // ข้าม error ชั่วคราวระหว่างสแกน ไม่ต้องหยุด loop
     }
-    setCurrentSelectedRooms([]);
-  };
+    scanTimeoutRef.current = window.setTimeout(() => scanLoop(angle), SCAN_INTERVAL_MS);
+  }
 
-  const removeAssignment = (index: number) => {
-    setTeachingAssignments(teachingAssignments.filter((_, i) => i !== index));
-  };
+  async function finalizeCapture(angle: "front" | "left" | "right", descriptor: Float32Array) {
+    if (angle === "front") setDescriptorFront(descriptor);
+    else if (angle === "left") setDescriptorLeft(descriptor);
+    else setDescriptorRight(descriptor);
+
+    setJustCaptured(true);
+    setScanFeedback("🎯 บันทึกใบหน้าสำเร็จ!");
+    setStatus(`🎯 บันทึกพิกัดใบหน้ามุม${angleLabel(angle)}สำเร็จ!`);
+    // ค้างภาพ success สั้นๆ ก่อนปิดกล้อง ให้ผู้ใช้เห็นว่าสำเร็จแล้ว
+    window.setTimeout(() => { setJustCaptured(false); stopVideo(); }, 700);
+  }
 
   const handleRoleCheckboxChange = (role: string) => {
     if (selectedRoles.includes(role)) {
@@ -298,12 +201,11 @@ export default function AdminFaceRegisterPage() {
   const handleSaveAllData = async () => {
     if (!selectedTeacher) return;
     setIsSaving(true);
-    setStatus("💾 กำลังจัดโครงสร้างข้อมูลและนำส่งสิทธิ์เข้าฐานข้อมูล...");
+    setStatus("💾 กำลังบันทึกสิทธิ์เข้าฐานข้อมูล...");
     try {
       const roleDetailsPayload = {
         roles: selectedRoles,
         is_admin: isAdminRole,
-        teaching_assignments: selectedRoles.includes("subject_teacher") ? { matrix: teachingAssignments } : null,
         advisor_details: selectedRoles.includes("advisor_teacher") ? { class: advisorClass, room: advisorRoom } : null,
         head_of_subject: selectedRoles.includes("head_of_subject") ? headOfSubject : null,
         head_of_department: selectedRoles.includes("head_of_department") ? headOfDepartment : null,
@@ -321,9 +223,6 @@ export default function AdminFaceRegisterPage() {
         updatePayload.face_features = faceFeaturesPayload;
       }
 
-      // เพิ่ม .select() เพื่อให้ Supabase คืนแถวที่ถูกแก้ไขจริงกลับมา
-      // ถ้า RLS บล็อกการเขียน (หรือ id ไม่ตรงกับแถวไหนเลย) error จะยังเป็น null
-      // แต่ data จะเป็น array ว่าง — ต้องเช็คตรงนี้เอง ไม่งั้นจะขึ้น "สำเร็จ" ทั้งที่ไม่มีอะไรถูกบันทึก
       const { data: updatedRows, error } = await supabase
         .from('users')
         .update(updatePayload)
@@ -335,349 +234,278 @@ export default function AdminFaceRegisterPage() {
       if (!updatedRows || updatedRows.length === 0) {
         throw new Error(
           'ไม่มีแถวไหนถูกแก้ไขเลย (0 rows) — มักเกิดจาก RLS Policy ของตาราง users ' +
-          'ไม่อนุญาตให้บัญชีแอดมินที่ล็อกอินอยู่แก้ไขข้อมูลของผู้ใช้คนอื่น กรุณาตรวจสอบ ' +
-          'Policy สำหรับคำสั่ง UPDATE บนตาราง users ใน Supabase Dashboard'
+          'ไม่อนุญาตให้บัญชีแอดมินแก้ไขข้อมูลของผู้ใช้คนอื่น กรุณาตรวจสอบ Policy UPDATE'
         );
       }
 
-      // ── ข้อความสรุปผลต้องตรงกับที่ถ่ายจริง ห้ามขึ้น "ครบ 3 มิติ" ตายตัว ──────────
-      // เดิม hardcode ข้อความว่า "ครบ 3 มิติ" เสมอ ไม่ว่าจะถ่ายไปกี่มุม (แม้แต่ 0 มุม)
-      // ทำให้ดูเหมือนบันทึกใบหน้าสำเร็จทั้งที่ยังไม่ได้ถ่ายเลย
       if (anglesCaptured === 0) {
-        setStatus("⚠️ บันทึกสิทธิ์งานสอนสำเร็จ แต่ยังไม่มีข้อมูลใบหน้าถูกบันทึกเลย (0/3 มุม)");
-        alert("⚠️ บันทึกสิทธิ์/บทบาทสำเร็จ\nแต่ยังไม่ได้ถ่ายภาพใบหน้าแม้แต่มุมเดียว\nกรุณากดปุ่มเลือกมุม แล้วถ่ายภาพก่อนกดบันทึกอีกครั้ง ถ้าต้องการบันทึกข้อมูลใบหน้าด้วย");
+        setStatus("⚠️ บันทึกสิทธิ์สำเร็จ แต่ยังไม่มีข้อมูลใบหน้าถูกบันทึกเลย (0/3 มุม)");
+        alert("⚠️ บันทึกสิทธิ์/บทบาทสำเร็จ\nแต่ยังไม่ได้ถ่ายภาพใบหน้าแม้แต่มุมเดียว");
       } else if (anglesCaptured < 3) {
         setStatus(`⚠️ บันทึกสำเร็จ แต่ถ่ายใบหน้าได้ ${anglesCaptured}/3 มุม (ยังไม่ครบ)`);
-        alert(`⚠️ บันทึกสำเร็จ\nแต่ถ่ายใบหน้าได้เพียง ${anglesCaptured}/3 มุม\nแนะนำให้ถ่ายให้ครบ 3 มุมเพื่อความแม่นยำตอนสแกนเข้างานจริง`);
+        alert(`⚠️ บันทึกสำเร็จ\nแต่ถ่ายใบหน้าได้เพียง ${anglesCaptured}/3 มุม\nแนะนำให้ถ่ายให้ครบ 3 มุม`);
       } else {
         setStatus("✅ บันทึกโครงสร้างบทบาทและใบหน้าครบ 3 มุมสำเร็จ!");
-        alert("✅ จัดเก็บพิกัดโครงสร้างใบหน้าครบ 3 มิติ และสิทธิ์งานสอนเรียบร้อย");
+        alert("✅ จัดเก็บพิกัดใบหน้าครบ 3 มุม และสิทธิ์เรียบร้อย");
       }
-      // ล้างค่าเฉพาะตอนบันทึกครบจริงๆ เท่านั้น — ถ้ายังถ่ายไม่ครบ 3 มุม ไม่ควรล้างข้อมูล
-      // ที่ถ่ายไปแล้วทิ้ง เพราะข้อมูลนั้นถูกบันทึกลงฐานข้อมูลไปแล้วเช่นกัน แค่ยังไม่ครบ
-      // (แก้จากเดิมที่ล้างทั้ง 3 ค่าทิ้งทุกครั้งหลังกดบันทึก ไม่ว่าจะถ่ายครบหรือไม่)
       if (anglesCaptured === 3) {
         setDescriptorFront(null);
         setDescriptorLeft(null);
         setDescriptorRight(null);
       }
-      setTeachingAssignments([]);
       setIsAdminRole(false);
     } catch (err: any) {
-      setStatus("❌ ข้อผิดพลาด RLS/Write: " + err.message);
+      setStatus("❌ ข้อผิดพลาด: " + err.message);
     } finally {
       setIsSaving(false);
     }
   };
 
+  const inputCls = "bg-white border-2 border-blue-100 rounded-xl px-3 py-2.5 text-sm text-slate-800 w-full focus:border-blue-400 focus:outline-none transition-colors";
+  const boxCls = "border border-slate-200 rounded-2xl p-4 bg-slate-50/60";
+
   return (
-    <div className="flex flex-col items-center justify-start min-h-screen bg-slate-950 text-white p-4 md:p-6">
-      <div className="w-full max-w-5xl bg-slate-900/90 rounded-2xl border border-slate-800 p-6 shadow-2xl mt-2">
-        <h1 className="text-base font-bold text-cyan-400 mb-1 flex items-center gap-2">
-          ⚙️ ระบบจัดการสิทธิ์บุคลากรและลงทะเบียนใบหน้าแบบความแม่นยำสูง
-        </h1>
-        <p className="text-xs text-slate-400 mb-1 border-b border-slate-800 pb-3">
-          สแกนจัดเก็บอัตลักษณ์ใบหน้าด้วยตนเองทีละมุมมอง พร้อมระบบจัดการภาระงานสอนรายชั้นเรียนสัมพันธ์รายวิชาในระบบ
-        </p>
-        {/* เพิ่มคำแนะนำสั้นๆ ตามแนวทาง register.html: ย้ำว่าควรบันทึกให้ครบ 3 มุมเพื่อความแม่นยำสูงสุด */}
-        <p className="text-[11px] text-slate-500 mb-6">
-          💡 แนะนำให้บันทึกให้ครบทั้ง 3 มุม (ตรง / ซ้าย / ขวา) เพื่อความแม่นยำสูงสุดตอนสแกนเข้างานจริง
-        </p>
+    <div className="min-h-screen bg-slate-50" style={{ fontFamily: "'TH Sarabun New','Sarabun',sans-serif" }}>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      {/* ── Top bar (เหมือนระบบอื่น) ── */}
+      <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3">
+        <div className="flex items-center gap-3">
+          <button onClick={() => router.push("/dashboard")}
+            className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 text-lg shrink-0">
+            🏠
+          </button>
+          <div>
+            <h1 className="text-base font-black text-slate-800 leading-none">⚙️ จัดการสิทธิ์บุคลากร & ลงทะเบียนใบหน้า</h1>
+            <p className="text-slate-400 text-xs mt-0.5">สแกนใบหน้าอัตโนมัติ + กำหนดบทบาทหน้าที่</p>
+          </div>
+        </div>
+      </div>
 
-          {/* ส่วนซ้าย: กล้อง */}
-          <div className="lg:col-span-4 flex flex-col items-center justify-center bg-slate-950 rounded-xl p-4 border border-slate-800 sticky top-4">
-            <div className="mb-3 w-full flex flex-col gap-1.5 text-xs">
-              <div className="flex items-center justify-between mb-0.5">
-                <span className="text-[10px] text-slate-400 font-bold">เลือกมุมที่ต้องการเปิดกล้องสแกน:</span>
-                <span className="text-[10px] text-cyan-400 font-bold">{anglesCaptured}/3 มุม</span>
-              </div>
-              {/* แถบความคืบหน้าแบบจุด — เสริมความชัดเจนของ progress ตามแนวคิด step-dots ของ register.html */}
-              <div className="flex gap-1.5 mb-1">
-                {[descriptorFront, descriptorLeft, descriptorRight].map((d, i) => (
-                  <div key={i} className={`h-1.5 flex-1 rounded-full transition-all ${d ? 'bg-emerald-500' : 'bg-slate-800'}`} />
-                ))}
-              </div>
-              <div className="flex justify-between gap-1 text-[10px] text-center">
-                <button type="button" onClick={() => startVideo("front")} disabled={!selectedTeacher} className={`flex-1 p-2 rounded border transition-all ${descriptorFront ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300 font-bold' : activeScanAngle === 'front' ? 'bg-cyan-950 border-cyan-400 text-cyan-300 font-bold ring-1 ring-cyan-400' : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-850'}`}>
-                  1. มุมหน้าตรง {descriptorFront ? "✓" : ""}
-                </button>
-                <button type="button" onClick={() => startVideo("left")} disabled={!selectedTeacher} className={`flex-1 p-2 rounded border transition-all ${descriptorLeft ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300 font-bold' : activeScanAngle === 'left' ? 'bg-cyan-950 border-cyan-400 text-cyan-300 font-bold ring-1 ring-cyan-400' : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-850'}`}>
-                  2. มุมเอียงซ้าย {descriptorLeft ? "✓" : ""}
-                </button>
-                <button type="button" onClick={() => startVideo("right")} disabled={!selectedTeacher} className={`flex-1 p-2 rounded border transition-all ${descriptorRight ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300 font-bold' : activeScanAngle === 'right' ? 'bg-cyan-950 border-cyan-400 text-cyan-300 font-bold ring-1 ring-cyan-400' : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-850'}`}>
-                  3. มุมเอียงขวา {descriptorRight ? "✓" : ""}
-                </button>
-              </div>
-            </div>
+      <div className="max-w-5xl mx-auto p-4 md:p-6">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
 
-            <div className="relative w-[220px] h-[220px] rounded-full overflow-hidden border-4 border-slate-700 bg-slate-900 flex items-center justify-center shadow-2xl">
-              <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
-              {!isCameraActive && (
-                <div className="absolute inset-0 bg-slate-950/90 flex items-center justify-center text-slate-400 text-xs text-center p-4">
-                  {!modelsLoaded ? (
-                    <span className="flex flex-col items-center gap-2">
-                      <span className="w-6 h-6 border-2 border-cyan-500/30 border-t-cyan-400 rounded-full animate-spin" />
-                      กำลังโหลดโมเดล AI...
-                    </span>
-                  ) : (
-                    <>เลือกปุ่มมุมใบหน้าด้านบน<br />เพื่อเปิดกล้องบันทึกข้อมูลทีละด้าน</>
+          <p className="text-xs text-slate-400 mb-1 border-b border-slate-100 pb-3">
+            สแกนจัดเก็บอัตลักษณ์ใบหน้าอัตโนมัติทีละมุม พร้อมกำหนดบทบาทหน้าที่ในระบบ
+          </p>
+          <p className="text-[13px] text-blue-500 mb-6 font-bold">
+            💡 กล้องจะสแกนและถ่ายภาพให้อัตโนมัติเมื่อจัดใบหน้าตรงกรอบนิ่งๆ ไม่ต้องกดปุ่มถ่ายเอง
+          </p>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+            {/* ส่วนซ้าย: กล้อง */}
+            <div className="lg:col-span-4 flex flex-col items-center justify-center bg-slate-50 rounded-2xl p-4 border border-slate-200 sticky top-20">
+              <div className="mb-3 w-full flex flex-col gap-1.5 text-xs">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-slate-500 font-bold">เลือกมุมที่ต้องการสแกน:</span>
+                  <span className="text-blue-500 font-black">{anglesCaptured}/3 มุม</span>
+                </div>
+                <div className="flex gap-1.5 mb-1">
+                  {[descriptorFront, descriptorLeft, descriptorRight].map((d, i) => (
+                    <div key={i} className={`h-1.5 flex-1 rounded-full transition-all ${d ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+                  ))}
+                </div>
+                <div className="flex justify-between gap-1 text-[11px] text-center">
+                  <button type="button" onClick={() => startVideo("front")} disabled={!selectedTeacher}
+                    className={`flex-1 p-2 rounded-xl border-2 font-bold transition-all ${descriptorFront ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : activeScanAngle === 'front' ? 'bg-blue-50 border-blue-400 text-blue-600 ring-2 ring-blue-200' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                    1. หน้าตรง {descriptorFront ? "✓" : ""}
+                  </button>
+                  <button type="button" onClick={() => startVideo("left")} disabled={!selectedTeacher}
+                    className={`flex-1 p-2 rounded-xl border-2 font-bold transition-all ${descriptorLeft ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : activeScanAngle === 'left' ? 'bg-blue-50 border-blue-400 text-blue-600 ring-2 ring-blue-200' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                    2. เอียงซ้าย {descriptorLeft ? "✓" : ""}
+                  </button>
+                  <button type="button" onClick={() => startVideo("right")} disabled={!selectedTeacher}
+                    className={`flex-1 p-2 rounded-xl border-2 font-bold transition-all ${descriptorRight ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : activeScanAngle === 'right' ? 'bg-blue-50 border-blue-400 text-blue-600 ring-2 ring-blue-200' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                    3. เอียงขวา {descriptorRight ? "✓" : ""}
+                  </button>
+                </div>
+              </div>
+
+              {/* วงกลมกล้อง + วงแหวนสแกนหมุน (สไตล์ Face ID) */}
+              <div className="relative w-[220px] h-[220px]">
+                <div className="absolute inset-0 rounded-full overflow-hidden border-4 border-white shadow-xl bg-slate-100 flex items-center justify-center">
+                  <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+                  {!isCameraActive && (
+                    <div className="absolute inset-0 bg-white/95 flex items-center justify-center text-slate-400 text-xs text-center p-4">
+                      {!modelsLoaded ? (
+                        <span className="flex flex-col items-center gap-2">
+                          <span className="w-6 h-6 border-2 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
+                          กำลังโหลดโมเดล AI...
+                        </span>
+                      ) : (
+                        <>เลือกปุ่มมุมใบหน้าด้านบน<br />กล้องจะสแกนอัตโนมัติ</>
+                      )}
+                    </div>
                   )}
+                </div>
+
+                {/* วงแหวนหมุนขณะสแกน */}
+                {isCameraActive && !justCaptured && (
+                  <div
+                    className="absolute inset-[-4px] rounded-full pointer-events-none scan-ring"
+                    style={{
+                      background: 'conic-gradient(from 0deg, transparent 0%, transparent 55%, #3b82f6 85%, #60a5fa 100%)',
+                      WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px))',
+                      mask: 'radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px))',
+                    }}
+                  />
+                )}
+                {/* วงแหวนเขียวตอนถ่ายสำเร็จ */}
+                {justCaptured && (
+                  <div className="absolute inset-[-4px] rounded-full pointer-events-none ring-4 ring-emerald-400 animate-pulse" />
+                )}
+              </div>
+
+              {/* ฟีดแบ็กสถานะสแกนสด */}
+              {isCameraActive && (
+                <div className="mt-3 w-full max-w-[240px] text-center">
+                  <p className={`text-xs font-bold rounded-xl px-3 py-2 ${justCaptured ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'}`}>
+                    {scanFeedback}
+                  </p>
+                  <button type="button" onClick={stopVideo}
+                    className="mt-2 w-full bg-white hover:bg-slate-50 text-slate-500 font-bold py-1.5 px-4 rounded-full text-[11px] border border-slate-200">
+                    ✕ ยกเลิกการสแกน
+                  </button>
                 </div>
               )}
             </div>
 
-            <div className="mt-4 w-full max-w-[220px] flex flex-col gap-2">
-              {isCameraActive && (
-                <>
-                  <button type="button" onClick={captureAngleData} className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-bold py-2.5 px-4 rounded-full text-xs shadow-md transition-all">
-                    📸 บันทึกภาพมุม {activeScanAngle === 'front' ? 'หน้าตรง' : activeScanAngle === 'left' ? 'เอียงซ้าย' : 'เอียงขวา'}
-                  </button>
-                  <button type="button" onClick={stopVideo} className="w-full bg-slate-900 hover:bg-slate-850 text-slate-400 font-medium py-1.5 px-4 rounded-full text-[11px] border border-slate-800">
-                    ⏹️ ปิดกล้องหน้าต่างนี้
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
+            {/* ส่วนขวา: ฟอร์ม */}
+            <div className="lg:col-span-8 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">รายชื่อบุคลากรที่ต้องการตั้งค่า:</label>
+                <select
+                  onChange={(e) => {
+                    setSelectedTeacher(teachers.find(t => t.id === e.target.value) || null);
+                    stopVideo();
+                  }}
+                  className={inputCls}
+                >
+                  <option value="">-- เลือกครูผู้ลงทะเบียน --</option>
+                  {teachers.map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.first_name} {t.last_name || ""} {t.face_features ? "🟢" : "🔴"}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {/* ส่วนขวา: ฟอร์ม */}
-          <div className="lg:col-span-8 space-y-4 bg-slate-950/40 p-4 rounded-xl border border-slate-800/80">
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1">รายชื่อบุคลากรที่ต้องการตั้งค่า:</label>
-              <select
-                onChange={(e) => {
-                  setSelectedTeacher(teachers.find(t => t.id === e.target.value) || null);
-                  stopVideo();
-                }}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white"
-              >
-                <option value="">-- เลือกครูผู้ลงทะเบียน --</option>
-                {teachers.map(t => (
-                  <option key={t.id} value={t.id}>
-                    {t.first_name} {t.last_name || ""} {t.face_features ? "🟢" : "🔴"}
-                  </option>
-                ))}
-              </select>
-            </div>
+              <div className="space-y-3 pt-2">
+                <label className="block text-sm font-black text-blue-600">บทบาทหน้าที่และสิทธิ์:</label>
 
-            <div className="space-y-3 pt-2">
-              <label className="block text-xs font-bold text-cyan-400">บทบาทหน้าที่และสิทธิ์ภาระงานสอน:</label>
-
-              {/* 1. ครูผู้สอนประจำวิชา */}
-              <div className="border border-slate-800 rounded-xl p-3 bg-slate-900/40">
-                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
-                  <input type="checkbox" checked={selectedRoles.includes("subject_teacher")} onChange={() => handleRoleCheckboxChange("subject_teacher")} disabled={!selectedTeacher} className="rounded bg-slate-950 border-slate-800 text-cyan-500" />
-                  <span>ครูผู้สอนประจำวิชา</span>
-                </label>
-
-                {selectedRoles.includes("subject_teacher") && (
-                  <div className="mt-3 pl-6 space-y-3 border-l-2 border-slate-800 animate-fadeIn">
-                    
-                    {/* 1. เลือกหมวด & 2. เลือกชั้นเรียน */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* ครูที่ปรึกษาประจำชั้น */}
+                <div className={boxCls}>
+                  <label className="flex items-center gap-2 text-sm font-bold cursor-pointer text-slate-700">
+                    <input type="checkbox" checked={selectedRoles.includes("advisor_teacher")} onChange={() => handleRoleCheckboxChange("advisor_teacher")} disabled={!selectedTeacher} className="rounded border-slate-300 text-blue-500 w-4 h-4" />
+                    <span>ครูที่ปรึกษาประจำชั้น</span>
+                  </label>
+                  {selectedRoles.includes("advisor_teacher") && (
+                    <div className="mt-3 pl-6 grid grid-cols-2 gap-3 border-l-2 border-blue-100">
                       <div>
-                        <span className="block text-[11px] text-slate-400 mb-1">1. เลือกหมวด (กลุ่มสาระการเรียนรู้):</span>
-                        <select value={subjectGroup} onChange={(e) => { setSubjectGroup(e.target.value); setSubjectName(""); }}
-                          className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white w-full"
-                        >
-                          <option value="">-- เลือกกลุ่มสาระ --</option>
-                          {subjectGroups.map(g => <option key={g} value={g}>{g}</option>)}
-                        </select>
-                      </div>
-
-                      <div>
-                        <span className="block text-[11px] text-slate-400 mb-1">2. เลือกระดับชั้นเรียน:</span>
-                        <select value={currentSelectedLevel} onChange={(e) => { setCurrentSelectedLevel(e.target.value); setSubjectName(""); }} className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white w-full">
+                        <span className="block text-xs text-slate-500 mb-1">ระดับชั้นเรียน:</span>
+                        <select value={advisorClass} onChange={(e) => setAdvisorClass(e.target.value)} className={inputCls}>
                           <option value="">-- เลือกชั้น --</option>
-                          {classOptions.map(cls => <option key={cls} value={cls}>{cls}</option>)}
+                          {classOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <span className="block text-xs text-slate-500 mb-1">ห้องเรียนประจำการ:</span>
+                        <select value={advisorRoom} onChange={(e) => setAdvisorRoom(e.target.value)} className={inputCls}>
+                          <option value="">-- เลือกห้อง --</option>
+                          {roomOptions.map(r => <option key={r} value={r}>/{r}</option>)}
                         </select>
                       </div>
                     </div>
+                  )}
+                </div>
 
-                    {/* 3. เลือกวิชา (ที่ผ่านการคัดกรองตามหมวดและระดับชั้นแล้ว) */}
-                    <div>
-                      <span className="block text-[11px] text-slate-400 mb-1">
-                        3. เลือกรายวิชา (สัมพันธ์ตามชั้นเรียนที่เลือก):
-                      </span>
-                      <select
-                        value={subjectName}
-                        onChange={(e) => setSubjectName(e.target.value)}
-                        disabled={!subjectGroup || !currentSelectedLevel || filteredSubjects.length === 0}
-                        className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white w-full disabled:bg-slate-900 disabled:text-slate-600"
-                      >
-                        <option value="">
-                          {!subjectGroup
-                            ? "-- เลือกกลุ่มสาระก่อน --"
-                            : !currentSelectedLevel
-                              ? "-- เลือกระดับชั้นเรียนก่อน --"
-                              : filteredSubjects.length === 0
-                                ? "-- ไม่มีรายวิชาที่ตรงกับรหัสชั้นเรียนนี้ --"
-                                : "-- เลือกรายวิชาในระบบ --"}
-                        </option>
-                        {filteredSubjects.map((sub) => (
-                          <option key={sub.id} value={sub.name_th}>
-                            {sub.name_th} {sub.subject_code ? `[${sub.subject_code}]` : ''}
-                          </option>
-                        ))}
+                {/* หัวหน้ากลุ่มสาระ */}
+                <div className={boxCls}>
+                  <label className="flex items-center gap-2 text-sm font-bold cursor-pointer text-slate-700">
+                    <input type="checkbox" checked={selectedRoles.includes("head_of_subject")} onChange={() => handleRoleCheckboxChange("head_of_subject")} disabled={!selectedTeacher} className="rounded border-slate-300 text-blue-500 w-4 h-4" />
+                    <span>หัวหน้ากลุ่มสาระการเรียนรู้</span>
+                  </label>
+                  {selectedRoles.includes("head_of_subject") && (
+                    <div className="mt-3 pl-6 border-l-2 border-blue-100">
+                      <select value={headOfSubject} onChange={(e) => setHeadOfSubject(e.target.value)} className={inputCls}>
+                        <option value="">-- กลุ่มสาระการเรียนรู้ --</option>
+                        {subjectGroups.map(g => <option key={g} value={g}>{g}</option>)}
                       </select>
                     </div>
+                  )}
+                </div>
 
-                    {/* 4. เลือกห้องเรียน & ปุ่มบันทึกรายการสอน */}
-                    <div className="p-3 bg-slate-950 rounded-lg border border-slate-800/80 space-y-3">
-                      <div>
-                        <span className="block text-[11px] font-semibold text-cyan-400 mb-1.5">4. เลือกห้องเรียนที่ทำการสอน:</span>
-                        <div className="flex flex-wrap gap-1 items-center bg-slate-900 p-2 rounded border border-slate-800">
-                          {roomOptions.map(rm => (
-                            <button type="button" key={rm} onClick={() => handleRoomToggle(rm)} className={`px-2.5 py-1 rounded text-[11px] font-medium border transition-all ${currentSelectedRooms.includes(rm) ? 'bg-cyan-600 border-cyan-400 text-white' : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'}`}>
-                              ห้อง {rm}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      
-                      <button type="button" onClick={addTeachingAssignment} className="w-full bg-cyan-600 hover:bg-cyan-500 text-white text-xs py-2 rounded-lg font-bold shadow-md transition-all">
-                        ✔️ บันทึก (เพิ่มรายการภาระงานสอนนี้)
-                      </button>
-                    </div>
-
-                    {/* รายการแสดงผลผลลัพธ์ */}
-                    <div>
-                      <span className="block text-[11px] text-slate-400 mb-1 font-semibold">📋 รายการภาระงานสอนที่บันทึกเรียบร้อยแล้ว:</span>
-                      {teachingAssignments.length === 0 ? (
-                        <p className="text-[10px] text-slate-600 italic bg-slate-950 p-2 rounded text-center border border-dashed border-slate-800">ยังไม่มีรายชื่อห้องเรียนที่ผูกกับรายวิชาในแผงนี้</p>
-                      ) : (
-                        <div className="space-y-1">
-                          {teachingAssignments.map((assign, idx) => (
-                            <div key={idx} className="flex justify-between items-start bg-slate-950 px-3 py-2 rounded border border-slate-800 text-xs gap-4">
-                              <span className="leading-relaxed">
-                                📚 หมวด: <strong className="text-cyan-400">{assign.subjectGroup}</strong> | 
-                                ชั้น: <strong className="text-purple-400">{assign.level}</strong> | 
-                                วิชา: <strong className="text-amber-400">{assign.subjectName}</strong> <br />
-                                <span className="text-slate-400 text-[11px]">🚪 ห้องเรียน: {assign.rooms.map(r => `ห้อง ${r}`).join(", ")}</span>
-                              </span>
-                              <button type="button" onClick={() => removeAssignment(idx)} className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold pt-0.5 shrink-0">ลบออก</button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 2. ครูที่ปรึกษาประจำชั้น */}
-              <div className="border border-slate-800 rounded-xl p-3 bg-slate-900/40">
-                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
-                  <input type="checkbox" checked={selectedRoles.includes("advisor_teacher")} onChange={() => handleRoleCheckboxChange("advisor_teacher")} disabled={!selectedTeacher} className="rounded bg-slate-950 border-slate-800 text-cyan-500" />
-                  <span>ครูที่ปรึกษาประจำชั้น</span>
-                </label>
-                {selectedRoles.includes("advisor_teacher") && (
-                  <div className="mt-3 pl-6 grid grid-cols-2 gap-3 border-l-2 border-slate-800 animate-fadeIn">
-                    <div>
-                      <span className="block text-[11px] text-slate-400 mb-1">ระดับชั้นเรียน:</span>
-                      <select value={advisorClass} onChange={(e) => setAdvisorClass(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white w-full">
-                        <option value="">-- เลือกชั้น --</option>
-                        {classOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                {/* หัวหน้ากลุ่มงาน */}
+                <div className={boxCls}>
+                  <label className="flex items-center gap-2 text-sm font-bold cursor-pointer text-slate-700">
+                    <input type="checkbox" checked={selectedRoles.includes("head_of_department")} onChange={() => handleRoleCheckboxChange("head_of_department")} disabled={!selectedTeacher} className="rounded border-slate-300 text-blue-500 w-4 h-4" />
+                    <span>หัวหน้ากลุ่มงาน</span>
+                  </label>
+                  {selectedRoles.includes("head_of_department") && (
+                    <div className="mt-3 pl-6 border-l-2 border-blue-100">
+                      <select value={headOfDepartment} onChange={(e) => setHeadOfDepartment(e.target.value)} className={inputCls}>
+                        <option value="">-- เลือกกลุ่มงานบริหาร --</option>
+                        {workDepartments.map(d => <option key={d} value={d}>{d}</option>)}
                       </select>
                     </div>
-                    <div>
-                      <span className="block text-[11px] text-slate-400 mb-1">ห้องเรียนประจำการ:</span>
-                      <select value={advisorRoom} onChange={(e) => setAdvisorRoom(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white w-full">
-                        <option value="">-- เลือกห้อง --</option>
-                        {roomOptions.map(r => <option key={r} value={r}>/{r}</option>)}
+                  )}
+                </div>
+
+                {/* ฝ่ายบริหาร */}
+                <div className={boxCls}>
+                  <label className="flex items-center gap-2 text-sm font-bold cursor-pointer text-slate-700">
+                    <input type="checkbox" checked={selectedRoles.includes("executive")} onChange={() => handleRoleCheckboxChange("executive")} disabled={!selectedTeacher} className="rounded border-slate-300 text-blue-500 w-4 h-4" />
+                    <span>ฝ่ายบริหาร (ผู้บริหารสถานศึกษา)</span>
+                  </label>
+                  {selectedRoles.includes("executive") && (
+                    <div className="mt-3 pl-6 border-l-2 border-blue-100">
+                      <select value={executiveRole} onChange={(e) => setExecutiveRole(e.target.value)} className={inputCls}>
+                        <option value="">-- เลือกตำแหน่งผู้บริหาร --</option>
+                        {executivePositions.map(p => <option key={p} value={p}>{p}</option>)}
                       </select>
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
 
-              {/* 3. หัวหน้ากลุ่มสาระ */}
-              <div className="border border-slate-800 rounded-xl p-3 bg-slate-900/40">
-                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
-                  <input type="checkbox" checked={selectedRoles.includes("head_of_subject")} onChange={() => handleRoleCheckboxChange("head_of_subject")} disabled={!selectedTeacher} className="rounded bg-slate-950 border-slate-800 text-cyan-500" />
-                  <span>หัวหน้ากลุ่มสาระการเรียนรู้</span>
-                </label>
-                {selectedRoles.includes("head_of_subject") && (
-                  <div className="mt-3 pl-6 border-l-2 border-slate-800 animate-fadeIn">
-                    <select value={headOfSubject} onChange={(e) => setHeadOfSubject(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white w-full">
-                      <option value="">-- กลุ่มสาระการเรียนรู้ --</option>
-                      {subjectGroups.map(g => <option key={g} value={g}>{g}</option>)}
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              {/* 4. หัวหน้ากลุ่มงาน */}
-              <div className="border border-slate-800 rounded-xl p-3 bg-slate-900/40">
-                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
-                  <input type="checkbox" checked={selectedRoles.includes("head_of_department")} onChange={() => handleRoleCheckboxChange("head_of_department")} disabled={!selectedTeacher} className="rounded bg-slate-950 border-slate-800 text-cyan-500" />
-                  <span>หัวหน้ากลุ่มงาน</span>
-                </label>
-                {selectedRoles.includes("head_of_department") && (
-                  <div className="mt-3 pl-6 border-l-2 border-slate-800 animate-fadeIn">
-                    <select value={headOfDepartment} onChange={(e) => setHeadOfDepartment(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white w-full">
-                      <option value="">-- เลือกกลุ่มงานบริหาร --</option>
-                      {workDepartments.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              {/* 5. ฝ่ายบริหาร */}
-              <div className="border border-slate-800 rounded-xl p-3 bg-slate-900/40">
-                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
-                  <input type="checkbox" checked={selectedRoles.includes("executive")} onChange={() => handleRoleCheckboxChange("executive")} disabled={!selectedTeacher} className="rounded bg-slate-950 border-slate-800 text-cyan-500" />
-                  <span>ฝ่ายบริหาร (ผู้บริหารสถานศึกษา)</span>
-                </label>
-                {selectedRoles.includes("executive") && (
-                  <div className="mt-3 pl-6 border-l-2 border-slate-800 animate-fadeIn">
-                    <select value={executiveRole} onChange={(e) => setExecutiveRole(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white w-full">
-                      <option value="">-- เลือกตำแหน่งผู้บริหาร --</option>
-                      {executivePositions.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              {/* 6. Admin */}
-              <div className="border border-slate-800 rounded-xl p-3 bg-slate-900/40 mt-4">
-                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer text-amber-400">
-                  <input type="checkbox" checked={isAdminRole} onChange={(e) => setIsAdminRole(e.target.checked)} disabled={!selectedTeacher} className="rounded bg-slate-950 border-slate-800 text-amber-500" />
-                  <span>เปิดสิทธิ์ผู้ดูแลระบบดิจิทัลประจำโรงเรียน (Admin Account)</span>
-                </label>
+                {/* Admin */}
+                <div className="border-2 border-amber-200 rounded-2xl p-4 bg-amber-50/60 mt-4">
+                  <label className="flex items-center gap-2 text-sm font-bold cursor-pointer text-amber-700">
+                    <input type="checkbox" checked={isAdminRole} onChange={(e) => setIsAdminRole(e.target.checked)} disabled={!selectedTeacher} className="rounded border-amber-300 text-amber-500 w-4 h-4" />
+                    <span>เปิดสิทธิ์ผู้ดูแลระบบดิจิทัลประจำโรงเรียน (Admin)</span>
+                  </label>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div className="mt-6 text-center">
-          <div className="inline-block text-xs font-medium text-amber-300 bg-slate-950 px-5 py-2.5 rounded-xl border border-slate-800 max-w-full break-words">
-            คำแนะนำระบบ: {status}
+          <div className="mt-6 text-center">
+            <div className="inline-block text-sm font-bold text-blue-600 bg-blue-50 px-5 py-2.5 rounded-xl border border-blue-100 max-w-full break-words">
+              {status}
+            </div>
           </div>
-        </div>
 
-        {/* ปุ่มบันทึกหลักลงฐานข้อมูล */}
-        <div className="mt-5 pt-4 border-t border-slate-800 flex flex-col sm:flex-row gap-3">
-          <button
-            type="button"
-            onClick={()=>router.push("/dashboard")}
-            className="w-full sm:w-1/4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 px-4 rounded-xl shadow-md transition-all text-xs border border-slate-700"
-          >
-            🏠 กลับสู่หน้าหลัก
-          </button>
-          
-          <button
-            type="button"
-            onClick={handleSaveAllData}
-            disabled={!selectedTeacher || isSaving}
-            className="w-full sm:w-3/4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-all text-xs"
-          >
-            {isSaving ? "⏳ กำลังบันทึกภาระสิทธิ์งานสอนและสแกนเนอร์..." : "💾 บันทึกสิทธิ์และชุดพิกัดโครงสร้างใบหน้า 3 มุมมองลงฐานข้อมูล"}
-          </button>
+          <div className="mt-5 pt-4 border-t border-slate-100 flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              onClick={handleSaveAllData}
+              disabled={!selectedTeacher || isSaving}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black py-3.5 px-4 rounded-2xl shadow-lg transition-all text-sm"
+            >
+              {isSaving ? "⏳ กำลังบันทึก..." : "💾 บันทึกสิทธิ์และข้อมูลใบหน้าลงฐานข้อมูล"}
+            </button>
+          </div>
         </div>
       </div>
+
+      <style jsx global>{`
+        .scan-ring {
+          animation: scan-spin 1.4s linear infinite;
+        }
+        @keyframes scan-spin {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }

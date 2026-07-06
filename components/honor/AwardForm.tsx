@@ -85,6 +85,7 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
     ].join('/');
   }, [form.category, form.award_level, form.award_type]);
 
+  // ✅ บังคับกรอก: กรอบจะขึ้นแดงก็ต่อเมื่อกด submit แล้วช่องนั้นยังว่างอยู่
   const errors = {
     title: submitted && !form.title.trim(),
     date_received: submitted && !form.date_received,
@@ -132,26 +133,26 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-6" noValidate>
       {error && (
-        <div className="rounded-md border border-clay/30 bg-clay/5 px-4 py-3 text-sm text-clay">
+        <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 font-medium">
           {error}
         </div>
       )}
 
       <section className="card-honor p-5 space-y-4">
-        <h2 className="font-display font-semibold text-navy">ข้อมูลรางวัล</h2>
+        <h2 className="font-display font-semibold text-slate-800">ข้อมูลรางวัล</h2>
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-muted font-medium">กลุ่มเป้าหมาย *</span>
+          <span className="text-xs text-slate-500 font-medium">กลุ่มเป้าหมาย *</span>
           <div className="flex flex-wrap gap-2">
             {CATEGORY_OPTIONS.map((c) => (
               <button
                 key={c}
                 type="button"
                 onClick={() => handleCategoryChange(c)}
-                className={`px-4 py-2 rounded-md text-sm font-semibold border transition-colors ${
+                className={`px-4 py-2 rounded-md text-sm font-bold border-2 transition-colors ${
                   form.category === c
-                    ? 'bg-navy text-white border-navy'
-                    : 'bg-white text-navy border-sky-300 hover:border-navy/40'
+                    ? 'bg-blue-900 text-white border-blue-900 shadow-sm'
+                    : 'bg-white text-blue-900 border-sky-300 hover:border-blue-500 hover:bg-sky-50'
                 }`}
               >
                 {CATEGORY_LABELS[c]}
@@ -161,41 +162,41 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-muted font-medium">ชื่อรางวัล *</span>
+          <span className="text-xs text-slate-500 font-medium">ชื่อรางวัล *</span>
           <input
             type="text"
             value={form.title}
             onChange={(e) => set('title', e.target.value)}
             className={fieldCls(errors.title)}
           />
-          {errors.title && <p className="text-xs text-red-500">กรุณากรอกชื่อรางวัล</p>}
+          {errors.title && <p className="text-xs text-red-500 font-bold">กรุณากรอกชื่อรางวัล</p>}
         </label>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted font-medium">วันที่ได้รับรางวัล *</span>
+            <span className="text-xs text-slate-500 font-medium">วันที่ได้รับรางวัล *</span>
             <input
               type="date"
               value={form.date_received}
               onChange={(e) => set('date_received', e.target.value)}
               className={fieldCls(errors.date_received)}
             />
-            {errors.date_received && <p className="text-xs text-red-500">กรุณาเลือกวันที่</p>}
+            {errors.date_received && <p className="text-xs text-red-500 font-bold">กรุณาเลือกวันที่</p>}
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted font-medium">ปีการศึกษา (พ.ศ.) *</span>
+            <span className="text-xs text-slate-500 font-medium">ปีการศึกษา (พ.ศ.) *</span>
             <input
               type="number"
               value={form.academic_year}
               onChange={(e) => set('academic_year', Number(e.target.value))}
               className={fieldCls(errors.academic_year)}
             />
-            {errors.academic_year && <p className="text-xs text-red-500">กรุณากรอกปีการศึกษา</p>}
+            {errors.academic_year && <p className="text-xs text-red-500 font-bold">กรุณากรอกปีการศึกษา</p>}
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted font-medium">หน่วยงานที่จัด</span>
+            <span className="text-xs text-slate-500 font-medium">หน่วยงานที่จัด</span>
             <input
               type="text"
               value={form.organizer}
@@ -207,7 +208,7 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted font-medium">ระดับของรางวัล *</span>
+            <span className="text-xs text-slate-500 font-medium">ระดับของรางวัล *</span>
             <select
               value={form.award_level}
               onChange={(e) => set('award_level', e.target.value as AwardFormInput['award_level'])}
@@ -220,7 +221,7 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted font-medium">ประเภทรางวัล *</span>
+            <span className="text-xs text-slate-500 font-medium">ประเภทรางวัล *</span>
             <select
               value={form.award_type}
               onChange={(e) => set('award_type', e.target.value as AwardFormInput['award_type'])}
@@ -235,7 +236,7 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
 
         {showKpi && (
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted font-medium">
+            <span className="text-xs text-slate-500 font-medium">
               มาตรฐาน/ตัวชี้วัดที่เกี่ยวข้อง (สำหรับ SAR)
             </span>
             <textarea
@@ -248,7 +249,7 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
         )}
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-muted font-medium">แท็ก</span>
+          <span className="text-xs text-slate-500 font-medium">แท็ก</span>
           <TagInput tags={form.tags} onChange={(tags) => set('tags', tags)} />
         </label>
       </section>
@@ -263,8 +264,8 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
       </section>
 
       <section className="card-honor p-5 space-y-5">
-        <h2 className="font-display font-semibold text-navy">ไฟล์แนบและลิงก์</h2>
-        <p className="text-xs text-muted -mt-3">
+        <h2 className="font-display font-semibold text-slate-800">ไฟล์แนบและลิงก์</h2>
+        <p className="text-xs text-slate-500 -mt-3">
           อัปโหลดขึ้น OneDrive ({ONEDRIVE_ACCOUNT}) แยกโฟลเดอร์ตามกลุ่มเป้าหมาย/ระดับรางวัล/ประเภทรางวัลอัตโนมัติ
         </p>
 
@@ -287,7 +288,7 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
         />
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-muted font-medium">ลิงก์ข่าวประชาสัมพันธ์</span>
+          <span className="text-xs text-slate-500 font-medium">ลิงก์ข่าวประชาสัมพันธ์</span>
           <input
             type="url"
             placeholder="https://..."
@@ -302,14 +303,14 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
         <button
           type="submit"
           disabled={saving}
-          className="rounded-md bg-navy text-white px-6 py-2.5 text-sm font-semibold hover:bg-navy-light disabled:opacity-50 transition-colors"
+          className="rounded-md bg-blue-900 text-white px-6 py-2.5 text-sm font-bold shadow-sm hover:bg-blue-800 disabled:opacity-50 transition-colors"
         >
           {saving ? 'กำลังบันทึก...' : isEdit ? 'บันทึกการแก้ไข' : 'บันทึกรางวัล'}
         </button>
         <button
           type="button"
           onClick={() => router.back()}
-          className="rounded-md border border-navy/15 px-6 py-2.5 text-sm font-semibold text-navy hover:bg-navy/5 transition-colors"
+          className="rounded-md border-2 border-slate-300 px-6 py-2.5 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 transition-colors"
         >
           ยกเลิก
         </button>
