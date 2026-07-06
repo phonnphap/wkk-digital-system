@@ -51,7 +51,7 @@ export default function DashboardPage() {
 
       <div className="flex items-center justify-between mt-10 mb-4">
         <h2 className="font-display text-xl font-semibold text-navy">รางวัลล่าสุด</h2>
-        <Link href="/awards" className="text-sm font-semibold text-gold-dark hover:underline">
+        <Link href="/honor/awards" className="text-sm font-semibold text-gold-dark hover:underline">
           ดูทั้งหมด →
         </Link>
       </div>

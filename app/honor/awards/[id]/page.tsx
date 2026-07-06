@@ -42,14 +42,14 @@ export default function AwardDetailPage() {
     return (
       <div className="px-6 md:px-10 py-8 max-w-4xl mx-auto">
         <p className="text-clay text-sm">{error ?? 'ไม่พบรางวัลนี้'}</p>
-        <Link href="/awards" className="text-sm text-gold-dark hover:underline">← กลับไปหน้ารายการ</Link>
+        <Link href="/honor/awards" className="text-sm text-gold-dark hover:underline">← กลับไปหน้ารายการ</Link>
       </div>
     );
   }
 
   return (
     <div className="px-6 md:px-10 py-8 max-w-4xl mx-auto">
-      <Link href="/awards" className="text-sm text-muted hover:text-navy">← กลับไปหน้ารายการ</Link>
+      <Link href="/honor/awards" className="text-sm text-muted hover:text-navy">← กลับไปหน้ารายการ</Link>
 
       <div className="card-honor overflow-hidden mt-4">
         <div className="relative aspect-[21/9] bg-parchment2">
@@ -128,7 +128,7 @@ export default function AwardDetailPage() {
 
           <div className="flex items-center justify-between pt-4 border-t border-navy/10">
             <Link
-              href={`/awards/${award.id}/edit`}
+              href={`/honor/awards/${award.id}/edit`}
               className="rounded-md bg-navy text-white px-4 py-2 text-sm font-semibold hover:bg-navy-light transition-colors"
             >
               แก้ไขรางวัลนี้

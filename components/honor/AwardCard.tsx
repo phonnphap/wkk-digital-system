@@ -20,7 +20,7 @@ export default function AwardCard({ award }: { award: AwardWithRecipients }) {
 
   return (
     <Link
-      href={`/awards/${award.id}`}
+      href={`/honor/awards/${award.id}`}
       className="card-honor group flex flex-col overflow-hidden focus-gold"
     >
       <div className="relative aspect-[16/10] bg-parchment2 overflow-hidden">

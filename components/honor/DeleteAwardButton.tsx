@@ -28,7 +28,7 @@ export default function DeleteAwardButton({ id }: { id: string }) {
         onClick={async () => {
           setDeleting(true);
           await deleteAward(id);
-          router.push('/awards');
+          router.push('/honor/awards');
           router.refresh();
         }}
         className="rounded-md bg-clay text-white px-3 py-1.5 text-xs font-semibold hover:bg-clay/90 disabled:opacity-50"
