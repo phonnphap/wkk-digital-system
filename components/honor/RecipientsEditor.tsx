@@ -3,6 +3,7 @@
 import type { AwardCategory, Recipient } from '@/types/honor';
 import { RECIPIENT_ROLE_LABELS, RECIPIENT_ROLE_OPTIONS } from '@/types/honor';
 import { fieldCls } from '@/lib/form-styles';
+import { SCHOOL_NAME } from '@/lib/school-info';
 
 interface Props {
   category: AwardCategory;
@@ -21,7 +22,9 @@ const emptyRecipient: Recipient = {
 };
 
 export default function RecipientsEditor({ category, recipients, submitted, onChange }: Props) {
-  const supportsTeam = category === 'Teacher' || category === 'Student';
+  const isSchool = category === 'School';
+  // ★ เปิดให้เพิ่มผู้รับรางวัลได้หลายคน สำหรับ ครู/นักเรียน/ผู้บริหาร
+  const supportsTeam = category === 'Teacher' || category === 'Student' || category === 'Executive';
 
   const update = (index: number, patch: Partial<Recipient>) => {
     const next = recipients.map((r, i) => (i === index ? { ...r, ...patch } : r));
@@ -53,7 +56,7 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
 
       <div className="space-y-3">
         {recipients.map((r, i) => {
-          const nameInvalid = submitted && !r.recipient_name.trim();
+          const nameInvalid = submitted && !isSchool && !r.recipient_name.trim();
           return (
             <div key={i} className="rounded-md border border-navy/10 bg-parchment2/40 p-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -63,11 +66,18 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                   </span>
                   <input
                     type="text"
-                    value={r.recipient_name}
-                    onChange={(e) => update(i, { recipient_name: e.target.value })}
-                    className={fieldCls(nameInvalid)}
+                    value={isSchool ? SCHOOL_NAME : r.recipient_name}
+                    readOnly={isSchool}
+                    onChange={(e) => {
+                      if (isSchool) return;
+                      update(i, { recipient_name: e.target.value });
+                    }}
+                    className={fieldCls(nameInvalid, isSchool ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : undefined)}
                   />
                   {nameInvalid && <p className="text-xs text-red-500">กรุณากรอกชื่อผู้รับรางวัล</p>}
+                  {isSchool && (
+                    <p className="text-xs text-muted">ชื่อโรงเรียนถูกกำหนดอัตโนมัติ ไม่สามารถแก้ไขได้</p>
+                  )}
                 </label>
 
                 {category === 'Student' && (
