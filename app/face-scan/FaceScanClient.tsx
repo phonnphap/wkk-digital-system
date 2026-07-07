@@ -490,8 +490,35 @@ function toThaiDateTime(isoString: string): string {
   // ── UI ────────────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-blue-50 text-slate-800" style={{ fontFamily: "'Sarabun','TH Sarabun New',sans-serif" }}>
+      
+      {/* ย้ายมารวมกันตรงนี้ทั้งหมดเพื่อป้องกัน Nested Tags */}
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap');
+      `}</style>
+
+      <style jsx>{`
+        /* วงแหวนไล่สีหมุนรอบวงกลม (mask ให้เหลือแต่ขอบ) คล้ายแอนิเมชัน Face ID ของ Apple */
+        .face-scan-ring {
+          width: 100%;
+          height: 100%;
+          border-radius: 9999px;
+          background: conic-gradient(
+            from 0deg,
+            transparent 0deg,
+            rgba(34, 211, 238, 0.05) 40deg,
+            #22d3ee 90deg,
+            #a5f3fc 110deg,
+            rgba(34, 211, 238, 0.05) 150deg,
+            transparent 200deg,
+            transparent 360deg
+          );
+          -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
+          animation: faceScanSpin 1.6s linear infinite;
+        }
+        @keyframes faceScanSpin {
+          to { transform: rotate(360deg); }
+        }
       `}</style>
 
       {/* ── Header บนสุด — ปุ่มกลับหน้าหลัก ย้ายมาไว้ด้านบนเหมือนระบบอื่น ───────── */}
@@ -558,30 +585,7 @@ function toThaiDateTime(isoString: string): string {
             </div>
           </div>
 
-          <style jsx>{`
-            /* วงแหวนไล่สีหมุนรอบวงกลม (mask ให้เหลือแต่ขอบ) คล้ายแอนิเมชัน Face ID ของ Apple */
-            .face-scan-ring {
-              width: 100%;
-              height: 100%;
-              border-radius: 9999px;
-              background: conic-gradient(
-                from 0deg,
-                transparent 0deg,
-                rgba(34, 211, 238, 0.05) 40deg,
-                #22d3ee 90deg,
-                #a5f3fc 110deg,
-                rgba(34, 211, 238, 0.05) 150deg,
-                transparent 200deg,
-                transparent 360deg
-              );
-              -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
-              mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
-              animation: faceScanSpin 1.6s linear infinite;
-            }
-            @keyframes faceScanSpin {
-              to { transform: rotate(360deg); }
-            }
-          `}</style>
+          {/* (ลบแท็ก style jsx เดิมที่อยู่ตรงนี้ออกแล้ว) */}
 
           <div className="space-y-5">
             {/* Toggle check_in / check_out */}
@@ -720,4 +724,4 @@ function toThaiDateTime(isoString: string): string {
       )}
     </div>
   );
-}
+  }
