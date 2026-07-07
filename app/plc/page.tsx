@@ -36,7 +36,7 @@ async function resolveOneDriveUrl(path?: string | null, fallbackUrl?: string | n
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ 
         path,
-        account: "hr@khienkhet.ac.th"  // ✅ ระบุ account ที่อัพไว้
+        account: "hr@khienkhet.ac.th"
       }),
     });
     const json = await res.json();
@@ -54,7 +54,7 @@ async function resolveOneDriveUrls(paths: (string | null | undefined)[], fallbac
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ 
         paths: cleanPaths,
-        account: "hr@khienkhet.ac.th"  // ✅ ระบุ account
+        account: "hr@khienkhet.ac.th"
       }),
     });
     const json = await res.json();
@@ -69,7 +69,7 @@ type UserProfile = {
   id: string; title?:string; first_name?: string; last_name?: string; full_name?: string;
   email: string; role: string; position?: string; academic_level?: string;
   department_id?: string; grade_level?: string;
-  is_plc_coordinator?: boolean;   // ← เพิ่มบรรทัดนี้
+  is_plc_coordinator?: boolean;
 };
 type Teacher = UserProfile & { department_id?: string; grade_level?: string; signature_url?: string; };
 type AcademicYear = { id: string; year_name: string; semester: number; is_current?: boolean };
@@ -148,7 +148,6 @@ function gradeSortIndex(label: string): number {
   return 999;
 }
 
-// ── Resolve label helpers ──────────────────────────────────────────────────────
 function gradeLabel(id: string, glMap?: Record<string, string>): string {
   if (!id) return "—";
   const key = String(id).trim();
@@ -170,17 +169,14 @@ const textareaCls = (err?: boolean) =>
 const labelCls = "block text-xs font-black text-slate-500 mb-1.5 uppercase tracking-wider";
 const reqStar = <span className="text-red-500 ml-0.5">*</span>;
 
-// ══════════════════════════════════════════════════════════
-// Print Report Builder
-// ══════════════════════════════════════════════════════════
 function buildPLCReportHTML(
   meeting: PLCMeeting,
   facilitator: Teacher | undefined,
   participants: Teacher[],
   resolvedImageUrls: string[],
   facilitatorSignatureUrl?: string,
-  deputySignatureUrl?: string,   // ← เพิ่ม
-  directorSignatureUrl?: string,  // ← เพิ่ม
+  deputySignatureUrl?: string,
+  directorSignatureUrl?: string,
   gradeLevelMap?: Record<string, string>,
   subjectMap?: Record<string, string>
 ): string {
@@ -298,7 +294,6 @@ function printPLCReport(
       if (img.complete) tryPrint();
       else { img.addEventListener("load", tryPrint); img.addEventListener("error", tryPrint); }
     });
-    // กันเหนียว ถ้ารูปโหลดช้ามาก ไม่ให้ค้างรอเกินไป
     setTimeout(() => { win.focus(); win.print(); }, 5000);
   };
 }
@@ -317,9 +312,6 @@ async function printPLCReportAsync(
   printPLCReport(meeting, facilitator, participants, freshUrls, facilitatorSignatureUrl, deputySignatureUrl, directorSignatureUrl, gradeLevelMap, subjectMap);
 }
 
-// ══════════════════════════════════════════════════════════
-// ResolvedImage
-// ══════════════════════════════════════════════════════════
 function ResolvedImage({ url, path, alt, className, onClick }: {
   url?: string | null; path?: string | null; alt: string; className?: string; onClick?: () => void;
 }) {
@@ -348,7 +340,6 @@ function ResolvedImage({ url, path, alt, className, onClick }: {
   );
 }
 
-// ── Progress ring ──────────────────────────────────────────────────────────────
 function RingProgress({ pct, size = 56, stroke = 6, color = "#3b82f6" }: { pct: number; size?: number; stroke?: number; color?: string }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
@@ -363,9 +354,6 @@ function RingProgress({ pct, size = 56, stroke = 6, color = "#3b82f6" }: { pct: 
   );
 }
 
-// ══════════════════════════════════════════════════════════
-// Report Detail Modal
-// ══════════════════════════════════════════════════════════
 function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, canEdit, gradeLevelMap, subjectMap, deputySignatureUrl, directorSignatureUrl }: {
   meeting: PLCMeeting; allTeachers: Teacher[]; onClose: () => void;
   onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; canEdit: boolean;
@@ -377,7 +365,6 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
   const isGrade = meeting.meeting_scope === "grade";
   const [printing, setPrinting] = useState(false);
 
-  // ── resolve รูปทั้งหมดพร้อมกันครั้งเดียว (batch) แทนที่จะให้แต่ละรูปยิง request แยกกัน ──
   const [galleryUrls, setGalleryUrls] = useState<string[]>([]);
   const [galleryLoading, setGalleryLoading] = useState(true);
 
@@ -489,11 +476,13 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
             className="px-4 py-2.5 rounded-xl border-2 border-slate-300 bg-white text-slate-700 font-black text-sm hover:bg-slate-100 disabled:opacity-50 flex items-center gap-1.5">
             {printing ? <span className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"/> : "🖨️"} พิมพ์รายงาน
           </button>
-          {canEdit && (
+          {canEdit ? (
             <>
               <button onClick={() => { onClose(); onEdit(meeting); }} className="px-4 py-2.5 rounded-xl border-2 border-blue-200 bg-blue-50 text-blue-700 font-black text-sm hover:bg-blue-100">✏️ แก้ไข</button>
               <button onClick={() => { if (confirm("ยืนยันการลบ?")) { onDelete(meeting.id); onClose(); } }} className="px-4 py-2.5 rounded-xl border-2 border-red-200 bg-red-50 text-red-600 font-black text-sm hover:bg-red-100">🗑️ ลบ</button>
             </>
+          ) : (
+            <span className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-400 font-bold text-xs flex items-center gap-1.5">🔒 แก้ไขได้เฉพาะผู้บันทึกรายงานนี้เท่านั้น</span>
           )}
         </div>
       </div>
@@ -501,9 +490,6 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
   );
 }
 
-// ══════════════════════════════════════════════════════════
-// Meeting Modal
-// ══════════════════════════════════════════════════════════
 function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, currentUser, gradeLevelMap, subjectMap, onSave, onClose }: {
   meeting: Partial<PLCMeeting> | null;
   allTeachers: Teacher[];
@@ -957,9 +943,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   );
 }
 
-// ══════════════════════════════════════════════════════════
-// DeptGroupPanel
-// ══════════════════════════════════════════════════════════
 function DeptGroupPanel({ group, allTeachers, onEdit, onDelete, gradeLevelMap, subjectMap, deputySignatureUrl, directorSignatureUrl }: {
   group: DeptGroup;
   allTeachers: Teacher[];
@@ -1076,13 +1059,10 @@ function DeptGroupPanel({ group, allTeachers, onEdit, onDelete, gradeLevelMap, s
   );
 }
 
-// ══════════════════════════════════════════════════════════
-// AllReportsModal
-// ══════════════════════════════════════════════════════════
-function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId, onClose, onEdit, onDelete, canEdit, gradeLevelMap, subjectMap, deputySignatureUrl, directorSignatureUrl }: {
+function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId, onClose, onEdit, onDelete, canEdit, currentUserId, isRealAdmin, gradeLevelMap, subjectMap, deputySignatureUrl, directorSignatureUrl }: {
   meetings: PLCMeeting[]; allTeachers: Teacher[]; academicYears: AcademicYear[];
   selectedYearId: string; onClose: () => void; onEdit: (m: PLCMeeting) => void;
-  onDelete: (id: string) => void; canEdit: boolean;
+  onDelete: (id: string) => void; canEdit: boolean; currentUserId: string; isRealAdmin: boolean;
   gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>;
   deputySignatureUrl?: string; directorSignatureUrl?: string;
 }) {
@@ -1103,6 +1083,12 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
   const draft      = meetings.filter(m => m.status === "draft").length;
   const totalHours = meetings.reduce((s,m) => s + Number(m.duration_hours), 0);
 
+  // ✅ สิทธิ์แก้ไขต่อรายการ: ผู้ดูแลระบบจริงแก้ได้ทุกรายการ ส่วนคนอื่น (เช่นผู้ดูแลโครงการที่ดูอย่างเดียว) แก้ได้เฉพาะรายการที่ตนเป็นผู้บันทึก
+  function rowCanEdit(m: PLCMeeting): boolean {
+    if (isRealAdmin) return true;
+    return canEdit && m.facilitator_id === currentUserId;
+  }
+
   async function handlePrintRow(m: PLCMeeting) {
     setPrintingId(m.id);
     try {
@@ -1120,7 +1106,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
         <ReportDetailModal meeting={viewMeeting} allTeachers={allTeachers} onClose={() => setViewMeeting(null)}
           onEdit={m => { setViewMeeting(null); onClose(); onEdit(m); }}
           onDelete={id => { onDelete(id); setViewMeeting(null); }}
-          canEdit={canEdit}
+          canEdit={rowCanEdit(viewMeeting)}
           gradeLevelMap={gradeLevelMap}
           subjectMap={subjectMap}
         />
@@ -1177,6 +1163,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
                   <tbody className="divide-y divide-slate-50">
                     {filtered.map(m => {
                       const isGrade = (m.meeting_scope ?? "subject") === "grade";
+                      const canEditRow = rowCanEdit(m);
                       return (
                         <tr key={m.id} className="hover:bg-slate-50">
                           <td className="py-3 pr-3 text-center"><span className="text-xs font-black text-slate-500 bg-slate-100 rounded-lg px-2 py-0.5">{m.meeting_number ?? "—"}</span></td>
@@ -1195,7 +1182,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
                               <button onClick={() => handlePrintRow(m)} disabled={printingId === m.id} className="text-xs font-black text-slate-500 px-2 py-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-50">
                                 {printingId === m.id ? "⏳" : "🖨️"}
                               </button>
-                              {canEdit && <>
+                              {canEditRow && <>
                                 <button onClick={() => { onClose(); onEdit(m); }} className="text-xs font-black text-slate-500 px-2 py-1.5 rounded-lg hover:bg-slate-100">✏️</button>
                                 <button onClick={() => { if(confirm("ยืนยันลบ?")) onDelete(m.id); }} className="text-xs font-black text-red-400 px-2 py-1.5 rounded-lg hover:bg-red-50">🗑️</button>
                               </>}
@@ -1215,9 +1202,6 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
   );
 }
 
-// ══════════════════════════════════════════════════════════
-// TeacherHistorySection
-// ══════════════════════════════════════════════════════════
 function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete, onView, gradeLevelMap, subjectMap, deputySignatureUrl, directorSignatureUrl }: {
   meetings: PLCMeeting[]; userId: string; allTeachers: Teacher[];
   onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; onView: (m: PLCMeeting) => void;
@@ -1271,6 +1255,8 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
             {myMeetings.map(m => {
               const isGrade = (m.meeting_scope ?? "subject") === "grade";
               const hasImages = (m.image_urls && m.image_urls.length > 0) || (m.image_paths && m.image_paths.length > 0);
+              // ✅ ล็อกสิทธิ์แก้ไข/ลบ ให้เฉพาะผู้บันทึก (วิทยากร) ของการประชุมนั้นๆ เท่านั้น — สมาชิกคนอื่นที่แค่เข้าร่วมจะดูได้อย่างเดียว
+              const isOwner = m.facilitator_id === userId;
               return (
                 <div key={m.id} className="px-5 py-4 hover:bg-slate-50 transition-colors">
                   <div className="flex items-start justify-between gap-3">
@@ -1283,6 +1269,9 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
                         <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${m.status==="submitted"?"bg-emerald-50 text-emerald-700 border-emerald-200":"bg-amber-50 text-amber-700 border-amber-200"}`}>
                           {m.status==="submitted"?"✅ ส่งแล้ว":"📝 ร่าง"}
                         </span>
+                        {!isOwner && (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-lg border bg-slate-100 text-slate-400 border-slate-200">👁️ ดูอย่างเดียว</span>
+                        )}
                       </div>
                       <p className="font-bold text-slate-800 text-sm line-clamp-1">{m.title}</p>
                       <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
@@ -1311,8 +1300,12 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
                         {printingId === m.id ? "⏳" : "🖨️"}
                       </button>
                       <button onClick={() => onView(m)} className="text-xs font-black text-blue-500 px-2 py-1.5 rounded-lg hover:bg-blue-50">👁️</button>
-                      <button onClick={() => onEdit(m)} className="text-xs font-black text-slate-400 px-2 py-1.5 rounded-lg hover:bg-slate-100">✏️</button>
-                      <button onClick={() => { if(confirm("ยืนยันลบ?")) onDelete(m.id); }} className="text-xs font-black text-red-400 px-2 py-1.5 rounded-lg hover:bg-red-50">🗑️</button>
+                      {isOwner && (
+                        <>
+                          <button onClick={() => onEdit(m)} className="text-xs font-black text-slate-400 px-2 py-1.5 rounded-lg hover:bg-slate-100">✏️</button>
+                          <button onClick={() => { if(confirm("ยืนยันลบ?")) onDelete(m.id); }} className="text-xs font-black text-red-400 px-2 py-1.5 rounded-lg hover:bg-red-50">🗑️</button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1325,9 +1318,6 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
   );
 }
 
-// ══════════════════════════════════════════════════════════
-// Main Page
-// ══════════════════════════════════════════════════════════
 export default function PLCHoursPage() {
   const router = useRouter();
   const [user,           setUser]           = useState<UserProfile | null>(null);
@@ -1372,7 +1362,6 @@ export default function PLCHoursPage() {
         });
       }
 
-      // โหลดปีการศึกษา
       const { data: years } = await supabase.from("academic_years")
         .select("id, year_name, semester, is_current")
         .order("year_name", { ascending: false })
@@ -1382,7 +1371,6 @@ export default function PLCHoursPage() {
       const currentYear = ys.find(y => y.is_current) ?? ys[0];
       if (currentYear) setSelectedYearId(currentYear.id);
 
-      // โหลด grade_levels map: id → name
       const { data, error } = await supabase.from("grade_levels").select("id, name");
 const glMap = (data ?? []).reduce((acc, cur) => {
   acc[String(cur.id)] = cur.name;
@@ -1390,19 +1378,16 @@ const glMap = (data ?? []).reduce((acc, cur) => {
 }, {} as Record<string, string>);
 setGradeLevelMap(glMap);
 
-      // โหลด departments map: id → name (สำหรับ academic_level ที่เป็น UUID)
       const { data: deptData } = await supabase.from("departments").select("id, name");
       const sMap: Record<string, string> = {};
       (deptData || []).forEach((d: any) => { sMap[d.id] = d.name; });
       setSubjectMap(sMap);
 
-      // โหลด users (ครู)
       const { data: allUsersData } = await supabase
         .from("users")
         .select("id, title, first_name, last_name, full_name, email, role, position, academic_level, department_id, grade_level, signature_url")
         .order("first_name");
       
-      // ใน useEffect init หลังโหลด allUsersData เสร็จ เพิ่ม:
       const { data: approversData } = await supabase
         .from("users")
         .select("email, signature_url")
@@ -1426,9 +1411,9 @@ setGradeLevelMap(glMap);
   }, []);
 
   const isRealAdmin  = !!(user?.role && ADMIN_ROLES_SET.has(user.role));
-const isCoordinator = !isRealAdmin && !!user?.is_plc_coordinator;
-const isAdmin   = isRealAdmin || isCoordinator;   // มองเห็นมุมผู้บริหารได้
-const isTeacher = !isRealAdmin;                    // มองเห็นมุมครู (บันทึกของตัวเอง) ได้ — รวมผู้ดูแลโครงการด้วยin;
+  const isCoordinator = !isRealAdmin && !!user?.is_plc_coordinator;
+  const isAdmin   = isRealAdmin || isCoordinator;
+  const isTeacher = !isRealAdmin;
 
   const loadMeetings = useCallback(async () => {
     if (!selectedYearId) return;
@@ -1445,7 +1430,6 @@ const isTeacher = !isRealAdmin;                    // มองเห็นม�
     [meetings, viewScope]
   );
 
-  // สร้าง deptGroups — ใช้ label ที่ resolve แล้ว
   const deptGroups = useMemo((): DeptGroup[] => {
     if (viewScope === "grade") {
       const levelMap = new Map<string, Teacher[]>();
@@ -1519,6 +1503,13 @@ const isTeacher = !isRealAdmin;                    // มองเห็นม�
     setModalOpen(true);
   }
 
+  // ✅ helper กลาง — ตรวจสิทธิ์แก้ไข: ต้องเป็นผู้บันทึก (facilitator) เท่านั้น (ผู้ดูแลระบบจริงยกเว้นให้แก้ไขได้เสมอ)
+  function canEditMeeting(m: PLCMeeting | null | undefined): boolean {
+    if (!m || !user) return false;
+    if (isRealAdmin) return true;
+    return m.facilitator_id === user.id;
+  }
+
   const currentYearObj   = academicYears.find(y => y.id === selectedYearId);
   const currentYearLabel = currentYearObj ? `ปีการศึกษา ${currentYearObj.year_name} ภาคเรียนที่ ${currentYearObj.semester}` : "";
 
@@ -1527,7 +1518,6 @@ const isTeacher = !isRealAdmin;                    // มองเห็นม�
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3">
         <div className="flex items-center gap-3">
           <button onClick={() => router.push("/dashboard")} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 text-lg shrink-0">🏠</button>
@@ -1548,7 +1538,6 @@ const isTeacher = !isRealAdmin;                    // มองเห็นม�
 
       <div className="w-full px-4 sm:px-6 py-6 space-y-6">
 
-        {/* TEACHER VIEW */}
         {isTeacher && (
           <>
             <div className="flex flex-col items-center gap-3 py-4">
@@ -1584,7 +1573,6 @@ const isTeacher = !isRealAdmin;                    // มองเห็นม�
           </>
         )}
 
-        {/* ADMIN VIEW */}
         {isAdmin && (
           <>
             <div className="grid grid-cols-3 gap-3">
@@ -1682,7 +1670,6 @@ const isTeacher = !isRealAdmin;                    // มองเห็นม�
               ))}
             </div>
 
-            {/* ตารางสรุปรายบุคคล */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="bg-slate-50 border-b border-slate-200 px-5 py-3.5 flex items-center justify-between">
                 <h3 className="font-black text-slate-700 text-sm">👩‍🏫 สรุปชั่วโมงรายบุคคล</h3>
@@ -1740,7 +1727,6 @@ const isTeacher = !isRealAdmin;                    // มองเห็นม�
         )}
       </div>
 
-      {/* Modals */}
       {modalOpen && user && (
         <MeetingModal
           meeting={editMeeting}
@@ -1754,12 +1740,12 @@ const isTeacher = !isRealAdmin;                    // มองเห็นม�
           onClose={() => { setModalOpen(false); setEditMeeting(null); }}
         />
       )}
-      {showReports && (
+      {showReports && user && (
         <AllReportsModal
   meetings={meetings} allTeachers={allTeachers} academicYears={academicYears}
   selectedYearId={selectedYearId} onClose={() => setShowReports(false)}
   onEdit={m => { setShowReports(false); setEditMeeting(m); setModalOpen(true); }}
-  onDelete={handleDelete} canEdit={isAdmin}
+  onDelete={handleDelete} canEdit={isAdmin} currentUserId={user.id} isRealAdmin={isRealAdmin}
           gradeLevelMap={gradeLevelMap}
           subjectMap={subjectMap}
           deputySignatureUrl={deputySignature}
@@ -1772,7 +1758,7 @@ const isTeacher = !isRealAdmin;                    // มองเห็นม�
           onClose={() => setViewMeeting(null)}
           onEdit={m => { setViewMeeting(null); setEditMeeting(m); setModalOpen(true); }}
           onDelete={id => { handleDelete(id); setViewMeeting(null); }}
-          canEdit={true}
+          canEdit={canEditMeeting(viewMeeting)}
           gradeLevelMap={gradeLevelMap}
           subjectMap={subjectMap}
           deputySignatureUrl={deputySignature}
