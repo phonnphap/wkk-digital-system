@@ -1,9 +1,13 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import type { AwardCategory, Recipient } from '@/types/honor';
 import { RECIPIENT_ROLE_LABELS, RECIPIENT_ROLE_OPTIONS } from '@/types/honor';
 import { fieldCls } from '@/lib/form-styles';
 import { SCHOOL_NAME } from '@/lib/school-info';
+import { createClient } from '@/lib/supabase/client';
+
+const supabase = createClient();
 
 interface Props {
   category: AwardCategory;
@@ -21,10 +25,223 @@ const emptyRecipient: Recipient = {
   role: null,
 };
 
+// ══════════════════════════════════════════════════════════
+// ค้นหาครู/บุคลากร — ดึงจากตาราง users
+// หมายเหตุ: ถ้าชื่อตาราง/คอลัมน์ในฐานข้อมูลจริงต่างจากนี้ (เช่น department_id ไม่ได้ผูกกับตาราง
+// departments) ปรับได้เฉพาะในฟังก์ชันนี้จุดเดียว ส่วน UI ด้านล่างไม่ต้องแก้
+// ══════════════════════════════════════════════════════════
+type TeacherHit = { id: string; displayName: string; department: string };
+
+async function searchTeachers(query: string, deptMap: Record<string, string>): Promise<TeacherHit[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, title, first_name, last_name, full_name, department_id, academic_level')
+    .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,full_name.ilike.%${q}%`)
+    .limit(10);
+  if (error || !data) return [];
+  return (data as any[]).map((u) => {
+    const assembled = `${u.title ?? ''}${u.first_name ?? ''} ${u.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
+    const department = deptMap[u.department_id] ?? u.academic_level ?? '';
+    return { id: u.id, displayName: assembled || u.full_name || '', department };
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// ค้นหานักเรียน — ตาราง students จริง:
+//   id, student_code, first_name, last_name, birth_date, gender ('male'|'female'), classroom_id
+//   classroom_id ผูกกับตาราง classrooms(room_name) — ใช้ room_name เป็น "ระดับชั้น" ได้เลย ไม่ต้องมีช่องห้องแยก
+// คำนำหน้าไม่ได้เก็บในตาราง คำนวณเอง:
+//   อายุ < 15 ปี  -> เด็กชาย / เด็กหญิง
+//   อายุ >= 15 ปี -> นาย / นางสาว
+// ══════════════════════════════════════════════════════════
+type StudentHit = { id: string; displayName: string; student_id: string; grade_level: string };
+
+function computeThaiTitle(gender: string | null | undefined, birthDate: string | null | undefined): string {
+  const isMale = gender === 'male';
+  let age: number | null = null;
+  if (birthDate) {
+    const b = new Date(birthDate);
+    const now = new Date();
+    age = now.getFullYear() - b.getFullYear();
+    const monthDiff = now.getMonth() - b.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < b.getDate())) age--;
+  }
+  if (age !== null && age >= 15) {
+    return isMale ? 'นาย' : 'นางสาว';
+  }
+  return isMale ? 'เด็กชาย' : 'เด็กหญิง';
+}
+
+async function searchStudents(query: string): Promise<StudentHit[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const { data, error } = await supabase
+    .from('students')
+    .select('id, student_code, first_name, last_name, birth_date, gender, classroom_id, classroom:classrooms!classroom_id(room_name)')
+    .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,student_code.ilike.%${q}%`)
+    .limit(10);
+  if (error || !data) return [];
+  return (data as any[]).map((s) => {
+    const title = computeThaiTitle(s.gender, s.birth_date);
+    const displayName = `${title}${s.first_name ?? ''} ${s.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
+    const grade_level = s.classroom?.room_name ?? '';
+    return {
+      id: s.id,
+      displayName,
+      student_id: s.student_code ?? '',
+      grade_level,
+    };
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// ช่องค้นหาชื่อครู แบบพิมพ์แล้วแสดงรายชื่อ+กลุ่มสาระให้เลือก
+// ══════════════════════════════════════════════════════════
+function TeacherNameField({
+  value, deptMap, invalid, onTextChange, onSelect,
+}: {
+  value: string;
+  deptMap: Record<string, string>;
+  invalid: boolean;
+  onTextChange: (v: string) => void;
+  onSelect: (hit: TeacherHit) => void;
+}) {
+  const [results, setResults] = useState<TeacherHit[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleChange(v: string) {
+    onTextChange(v);
+    setOpen(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!v.trim()) { setResults([]); return; }
+    timerRef.current = setTimeout(async () => {
+      setLoading(true);
+      const hits = await searchTeachers(v, deptMap);
+      setResults(hits);
+      setLoading(false);
+    }, 300);
+  }
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => handleChange(e.target.value)}
+        onFocus={() => value.trim() && setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="พิมพ์ชื่อ/นามสกุลเพื่อค้นหาในระบบ..."
+        className={fieldCls(invalid)}
+      />
+      {open && (loading || results.length > 0) && (
+        <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border-2 border-blue-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
+          {loading ? (
+            <div className="px-3 py-2.5 text-xs text-slate-400">🔍 กำลังค้นหา...</div>
+          ) : (
+            results.map((hit) => (
+              <button
+                type="button"
+                key={hit.id}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { onSelect(hit); setOpen(false); }}
+                className="w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 flex flex-col border-b border-slate-50 last:border-0"
+              >
+                <span className="font-bold text-slate-800">{hit.displayName}</span>
+                {hit.department && <span className="text-xs text-slate-400">{hit.department}</span>}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+// ช่องค้นหาชื่อนักเรียน แบบพิมพ์แล้วแสดงรายชื่อ+รหัส+ระดับชั้นให้เลือก
+// ══════════════════════════════════════════════════════════
+function StudentNameField({
+  value, invalid, onTextChange, onSelect,
+}: {
+  value: string;
+  invalid: boolean;
+  onTextChange: (v: string) => void;
+  onSelect: (hit: StudentHit) => void;
+}) {
+  const [results, setResults] = useState<StudentHit[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleChange(v: string) {
+    onTextChange(v);
+    setOpen(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!v.trim()) { setResults([]); return; }
+    timerRef.current = setTimeout(async () => {
+      setLoading(true);
+      const hits = await searchStudents(v);
+      setResults(hits);
+      setLoading(false);
+    }, 300);
+  }
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => handleChange(e.target.value)}
+        onFocus={() => value.trim() && setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="พิมพ์ชื่อ/นามสกุล/รหัสนักเรียนเพื่อค้นหา..."
+        className={fieldCls(invalid)}
+      />
+      {open && (loading || results.length > 0) && (
+        <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border-2 border-blue-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
+          {loading ? (
+            <div className="px-3 py-2.5 text-xs text-slate-400">🔍 กำลังค้นหา...</div>
+          ) : (
+            results.map((hit) => (
+              <button
+                type="button"
+                key={hit.id}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { onSelect(hit); setOpen(false); }}
+                className="w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 flex flex-col border-b border-slate-50 last:border-0"
+              >
+                <span className="font-bold text-slate-800">{hit.displayName}</span>
+                <span className="text-xs text-slate-400">
+                  {[hit.student_id, hit.grade_level].filter(Boolean).join(' · ')}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function RecipientsEditor({ category, recipients, submitted, onChange }: Props) {
   const isSchool = category === 'School';
   // ★ เปิดให้เพิ่มผู้รับรางวัลได้หลายคน สำหรับ ครู/นักเรียน/ผู้บริหาร
   const supportsTeam = category === 'Teacher' || category === 'Student' || category === 'Executive';
+
+  // ★ แผนที่ department_id → ชื่อกลุ่มสาระ ใช้ตอนค้นหาครู (โหลดครั้งเดียวตอน mount)
+  const [deptMap, setDeptMap] = useState<Record<string, string>>({});
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from('departments').select('id, name');
+      const map: Record<string, string> = {};
+      (data || []).forEach((d: any) => { map[d.id] = d.name; });
+      setDeptMap(map);
+    })();
+  }, []);
 
   const update = (index: number, patch: Partial<Recipient>) => {
     const next = recipients.map((r, i) => (i === index ? { ...r, ...patch } : r));
@@ -64,16 +281,46 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                   <span className="text-xs text-muted font-medium">
                     {category === 'School' ? 'ชื่อโรงเรียน *' : category === 'Executive' ? 'ชื่อผู้บริหาร *' : 'ชื่อ-สกุล *'}
                   </span>
-                  <input
-                    type="text"
-                    value={isSchool ? SCHOOL_NAME : r.recipient_name}
-                    readOnly={isSchool}
-                    onChange={(e) => {
-                      if (isSchool) return;
-                      update(i, { recipient_name: e.target.value });
-                    }}
-                    className={fieldCls(nameInvalid, isSchool ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : undefined)}
-                  />
+
+                  {isSchool ? (
+                    <input
+                      type="text"
+                      value={SCHOOL_NAME}
+                      readOnly
+                      className={fieldCls(false, 'bg-slate-100 text-slate-600 cursor-not-allowed')}
+                    />
+                  ) : category === 'Teacher' ? (
+                    // ✅ ครู/บุคลากร: พิมพ์ค้นหาแล้วเลือกชื่อจากระบบ (คำนำหน้า+ชื่อ+สกุลครบ พร้อมกลุ่มสาระ)
+                    <TeacherNameField
+                      value={r.recipient_name}
+                      deptMap={deptMap}
+                      invalid={nameInvalid}
+                      onTextChange={(v) => update(i, { recipient_name: v })}
+                      onSelect={(hit) => update(i, { recipient_name: hit.displayName, department: hit.department })}
+                    />
+                  ) : category === 'Student' ? (
+                    // ✅ นักเรียน: พิมพ์ค้นหาแล้วเลือกชื่อจากระบบ (คำนำหน้าคำนวณจากเพศ+อายุ, รหัส, ระดับชั้นจาก classrooms.room_name)
+                    <StudentNameField
+                      value={r.recipient_name}
+                      invalid={nameInvalid}
+                      onTextChange={(v) => update(i, { recipient_name: v })}
+                      onSelect={(hit) =>
+                        update(i, {
+                          recipient_name: hit.displayName,
+                          student_id: hit.student_id,
+                          grade_level: hit.grade_level,
+                        })
+                      }
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={r.recipient_name}
+                      onChange={(e) => update(i, { recipient_name: e.target.value })}
+                      className={fieldCls(nameInvalid)}
+                    />
+                  )}
+
                   {nameInvalid && <p className="text-xs text-red-500">กรุณากรอกชื่อผู้รับรางวัล</p>}
                   {isSchool && (
                     <p className="text-xs text-muted">ชื่อโรงเรียนถูกกำหนดอัตโนมัติ ไม่สามารถแก้ไขได้</p>
@@ -95,22 +342,13 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                       <span className="text-xs text-muted font-medium">ระดับชั้น</span>
                       <input
                         type="text"
-                        placeholder="เช่น ม.3"
+                        placeholder="เช่น ม.3/1"
                         value={r.grade_level ?? ''}
                         onChange={(e) => update(i, { grade_level: e.target.value })}
                         className={fieldCls(false)}
                       />
                     </label>
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="text-xs text-muted font-medium">ห้องเรียน</span>
-                      <input
-                        type="text"
-                        placeholder="เช่น ห้อง 1"
-                        value={r.classroom ?? ''}
-                        onChange={(e) => update(i, { classroom: e.target.value })}
-                        className={fieldCls(false)}
-                      />
-                    </label>
+                    {/* ★ ตัดช่อง "ห้องเรียน" ออก เพราะ classrooms.room_name ครอบคลุมทั้งชั้น+ห้องแล้ว */}
                   </>
                 )}
 

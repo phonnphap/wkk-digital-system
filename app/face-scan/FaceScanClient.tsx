@@ -405,7 +405,7 @@ function toThaiDateTime(isoString: string): string {
     if (!user) { window.alert("❌ กรุณาเข้าสู่ระบบก่อน"); return; }
 
     if (!isInsideSchool && !canOffsiteScan) {
-      window.alert("❌ คุณอยู่นอกพื้นที่โรงเรียน\nกรุณากดยืนยันการปฏิบัติราชการนอกสถานที่ (ต้องมีใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้)");
+      window.alert("❌ คุณอยู่นอกพื้นที่โรงเรียน\nกรุณาติ๊กยืนยันการปฏิบัติราชการนอกสถานที่ (ต้องมีใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้)");
       stopVideo();
       return;
     }
@@ -489,11 +489,14 @@ function toThaiDateTime(isoString: string): string {
 
   // ── UI ────────────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-blue-50 text-slate-800" >
+    <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-blue-50 text-slate-800" style={{ fontFamily: "'Sarabun','TH Sarabun New',sans-serif" }}>
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap');
+      `}</style>
 
       {/* ── Header บนสุด — ปุ่มกลับหน้าหลัก ย้ายมาไว้ด้านบนเหมือนระบบอื่น ───────── */}
       <div className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-blue-100 shadow-sm px-4 py-3 flex items-center gap-3">
-        <button type="button" onClick={() => router.push('/dashboard')}
+        <button type="button" onClick={() => router.push('/')}
           className="w-10 h-10 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 flex items-center justify-center text-lg transition-colors">
           🏠
         </button>

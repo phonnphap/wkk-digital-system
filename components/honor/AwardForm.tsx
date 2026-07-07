@@ -58,7 +58,7 @@ function sanitizeFolderSegment(s: string) {
 async function fetchExecutiveRecipients(): Promise<Recipient[]> {
   const { data, error } = await supabase
     .from('users')
-    .select('id,first_name,last_name,full_name,role')
+    .select('id,title,first_name,last_name,full_name,role')
     .in('role', ['director', 'deputy_director'])
     .order('role', { ascending: true });
 
@@ -66,9 +66,14 @@ async function fetchExecutiveRecipients(): Promise<Recipient[]> {
     return [{ recipient_name: '' }];
   }
 
-  return data.map((u: any) => ({
-    recipient_name: u.full_name || `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim(),
-  }));
+  return data.map((u: any) => {
+    // ✅ ประกอบชื่อจาก title + first_name + last_name ก่อนเสมอ เพราะ full_name ในฐานข้อมูล
+    // มักไม่ได้ใส่คำนำหน้าไว้ (เช่น นาย/นาง/นางสาว/ดร.) — ถ้าประกอบไม่ได้จริงๆ ค่อย fallback ไปใช้ full_name เดิม
+    const assembled = `${u.title ?? ''}${u.first_name ?? ''} ${u.last_name ?? ''}`
+      .replace(/\s+/g, ' ')
+      .trim();
+    return { recipient_name: assembled || u.full_name || '' };
+  });
 }
 
 type FormErrors = Partial<Record<'title' | 'date_received' | 'academic_year' | 'recipients', string>>;
