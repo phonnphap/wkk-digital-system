@@ -742,9 +742,9 @@ async function loadLeaveStats(userId: string, excludeId?: string, beforeDate?: s
 // ══════════════════════════════════════════════════════════
 // ── LeaveForm ──────────────────────────────────────════════
 // ══════════════════════════════════════════════════════════
-function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onCancel, editData }: {
+function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onCancel, editData, timetableEntries, allTimeSlots, academicYearId, loadingTimetable}: {
   user:UserProfile; approvers:ApproverInfo[]; allTeachers:UserProfile[];
-  savedSignature:string; onSubmit:(d:any)=>Promise<void>; onCancel:()=>void; editData?:any;
+  savedSignature:string; onSubmit:(d:any)=>Promise<void>; onCancel:()=>void; editData?:any; timetableEntries: any[]; allTimeSlots: any[]; academicYearId: string | null; loadingTimetable: boolean;
 }) {
   const [leaveType,    setLeaveType]    = useState<LeaveType>(editData?.leave_type??"sick");
   const [startDate,    setStartDate]    = useState(editData?.start_date??"");
@@ -1105,14 +1105,14 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
   const [filterEval, setFilterEval] = useState<"all"|"1"|"2">("all");
   const [loading, setLoading] = useState(true);
   const [viewId, setViewId] = useState<string|null>(null);
-  const [showWholeDaySwap, setShowWholeDaySwap] = useState(false);
+
+  // ✅ ข้อมูลตารางสอน — ใช้ตอนจัดสอนแทนในฟอร์ม (ย้ายมาจาก WholeDaySwapModal เดิม)
   const [timetableEntries, setTimetableEntries] = useState<any[]>([]);
   const [allTimeSlots, setAllTimeSlots] = useState<any[]>([]);
-  const [subRecords, setSubRecords] = useState<any[]>([]);
   const [currentAcademicYearId, setCurrentAcademicYearId] = useState<string|null>(null);
   const [loadingTimetable, setLoadingTimetable] = useState(true);
 
-  const loadRequests = useCallback(async()=>{
+    const loadRequests = useCallback(async()=>{
     setLoading(true);
     const {data}=await supabase.from("leave_requests").select("*").eq("user_id",user.id).order("created_at",{ascending:false});
     setRequests((data as LeaveRequest[])||[]);
@@ -1123,70 +1123,95 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
   const loadTimetableData = useCallback(async () => {
     setLoadingTimetable(true);
     try {
-      // 1. หาปีการศึกษาปัจจุบัน (ปรับชื่อตาราง/คอลัมน์ตามจริงถ้าต่างจากนี้)
-      const { data: ay } = await supabase
-        .from("academic_years")
-        .select("id")
-        .eq("is_current", true)
-        .maybeSingle();
+      const { data: ay } = await supabase.from("academic_years").select("id").eq("is_current", true).maybeSingle();
       const ayId = (ay as any)?.id ?? null;
       setCurrentAcademicYearId(ayId);
 
-      // 2. ตารางสอนของครูคนนี้ (เป็นได้ทั้งครูหลัก teacher_id หรือครูคนที่สอง teacher_id_2)
-      let entriesQuery = supabase
-        .from("timetable_entries")
-        .select("id,academic_year_id,classroom_id,subject_id,teacher_id,day_of_week,time_slot_id,teacher_id_2,created_at")
-        .or(`teacher_id.eq.${user.id},teacher_id_2.eq.${user.id}`);
-      if (ayId) entriesQuery = entriesQuery.eq("academic_year_id", ayId);
-      const { data: entries, error: entriesErr } = await entriesQuery;
-      if (entriesErr) console.warn("[loadTimetableData] timetable_entries error:", entriesErr.message);
+      let q = supabase.from("timetable_entries")
+        .select("id,academic_year_id,classroom_id,subject_id,teacher_id,day_of_week,time_slot_id,teacher_id_2,created_at");
+      if (ayId) q = q.eq("academic_year_id", ayId);
+      const { data: entries } = await q;
       setTimetableEntries(entries || []);
 
-      // 3. คาบเวลาทั้งหมด (ใช้ร่วมกันทุกครู ไม่ filter)
-      const { data: slots, error: slotsErr } = await supabase
-        .from("time_slots")
+      const { data: slots } = await supabase.from("time_slots")
         .select("id,slot_number,start_time,end_time,slot_label,is_break,schedule_type")
         .order("slot_number", { ascending: true });
-      if (slotsErr) console.warn("[loadTimetableData] time_slots error:", slotsErr.message);
       setAllTimeSlots(slots || []);
-
-      // 4. ประวัติการสอนแทน — ⚠️ ชื่อตาราง "substitution_records" เป็นการเดา
-      //    ถ้าตารางจริงชื่ออื่น (เช่น sub_records) ให้แก้ตรงนี้จุดเดียว
-      const { data: subs, error: subsErr } = await supabase
-        .from("substitution_records")
-        .select("*")
-        .or(`original_teacher_id.eq.${user.id},substitute_teacher_id.eq.${user.id}`);
-      if (subsErr) console.warn("[loadTimetableData] substitution_records error:", subsErr.message);
-      setSubRecords(subs || []);
     } catch (err) {
-      console.error("[loadTimetableData] unexpected error:", err);
+      console.error("[loadTimetableData] error:", err);
     }
     setLoadingTimetable(false);
-  }, [user.id]);
+  }, []);
+  useEffect(()=>{loadTimetableData();},[loadTimetableData]);
 
-  useEffect(() => { loadTimetableData(); }, [loadTimetableData]);
-
+    // ✅ แก้ submitLeave ให้บันทึก substitute_assignments ต่อจาก insert/update leave_requests
   async function submitLeave(payload:any){
+    const { substitute_assignments, ...leavePayload } = payload;
+
+    let leaveId = editRequest?.id;
     if(editRequest?.id){
-      const {error}=await (supabase.from("leave_requests") as any).update(payload).eq("id",editRequest.id);
+      const {error}=await (supabase.from("leave_requests") as any).update(leavePayload).eq("id",editRequest.id);
       if(error){alert("❌ "+error.message);return;}
-      alert("✅ แก้ไขคำขอลาเรียบร้อย");
     } else {
-      const {error}=await (supabase.from("leave_requests") as any).insert([{...payload,user_id:user.id}]);
+      const {data,error}=await (supabase.from("leave_requests") as any)
+        .insert([{...leavePayload,user_id:user.id}]).select("id").single();
       if(error){alert("❌ "+error.message);return;}
-      alert("✅ ส่งคำขอลาสำเร็จ");
+      leaveId = data.id;
     }
+
+    // ลบของเดิม (กรณีแก้ไข) แล้วบันทึกใหม่
+    if(leaveId){
+      await supabase.from("substitution_records").delete().eq("leave_request_id", leaveId);
+      if(substitute_assignments?.length){
+        const rows = substitute_assignments
+          .filter((a:any)=>a.substitute_teacher_id)
+          .map((a:any)=>({
+            timetable_entry_id: a.timetable_entry_id,
+            substitute_date: a.substitute_date,
+            original_teacher_id: user.id,
+            absent_teacher_id: user.id,
+            substitute_teacher_id: a.substitute_teacher_id,
+            leave_request_id: leaveId,
+            time_slot_id: a.time_slot_id,
+            classroom_id: a.classroom_id,
+            subject_id: a.subject_id,
+            hours_count: a.hours_count,
+            academic_year_id: a.academic_year_id ?? currentAcademicYearId,
+            assigned_by: user.id,
+            status: "assigned",
+            note: null,
+          }));
+        if(rows.length){
+          const {error:subErr} = await (supabase.from("substitution_records") as any).insert(rows);
+          if(subErr) console.warn("[submitLeave] substitution_records insert error:", subErr.message);
+        }
+      }
+    }
+
+    alert(editRequest?.id ? "✅ แก้ไขคำขอลาเรียบร้อย" : "✅ ส่งคำขอลาสำเร็จ");
     setShowForm(false); setEditRequest(null);
     await loadRequests();
   }
 
   async function deleteRequest(id:string){
     if(!confirm("ยืนยันการลบคำขอลานี้?"))return;
+    await supabase.from("substitution_records").delete().eq("leave_request_id", id); // ✅ ลบ assignment ที่ผูกไว้ด้วย
     await supabase.from("leave_requests").delete().eq("id",id);
     await loadRequests();
   }
 
-  if(showForm||editRequest) return <LeaveForm user={user} approvers={approvers} allTeachers={allTeachers} savedSignature={savedSignature} onSubmit={submitLeave} onCancel={()=>{setShowForm(false);setEditRequest(null);}} editData={editRequest}/>;
+  if(showForm||editRequest) return (
+    <LeaveForm
+      user={user} approvers={approvers} allTeachers={allTeachers} savedSignature={savedSignature}
+      onSubmit={submitLeave}
+      onCancel={()=>{setShowForm(false);setEditRequest(null);}}
+      editData={editRequest}
+      timetableEntries={timetableEntries}
+      allTimeSlots={allTimeSlots}
+      academicYearId={currentAcademicYearId}
+      loadingTimetable={loadingTimetable}
+    />
+  );
 
   const fyReqs=requests.filter(r=>isInFiscalYear(r.start_date,filterFY)&&r.status!=="rejected"&&r.status!=="cancelled");
   const usedByType=Object.fromEntries((Object.keys(LEAVE_TYPE_CONFIG) as LeaveType[]).map(t=>[t,fyReqs.filter(r=>r.leave_type===t).reduce((s,r)=>s+Number(r.days_count),0)])) as Record<LeaveType,number>;
@@ -1208,30 +1233,6 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
         <button onClick={()=>setShowForm(true)} className="shrink-0 px-6 py-4 bg-white text-blue-700 rounded-2xl font-black shadow-xl hover:bg-blue-50 active:scale-95 flex items-center gap-3 min-w-[200px]">
           <span className="text-3xl">✍️</span><span className="text-lg leading-tight">ยื่นใบลา<br/><span className="text-sm opacity-70">/ ไปราชการ</span></span>
         </button>
-        <button onClick={()=>setShowWholeDaySwap(true)}
-          disabled={loadingTimetable}
-          className="shrink-0 px-6 py-4 bg-indigo-500 text-white rounded-2xl font-black shadow-xl hover:bg-indigo-600 disabled:opacity-50">
-          {loadingTimetable ? "⏳ กำลังโหลด..." : "🗓️ จัดสอนแทน"}
-        </button>
-
-        {/* ── ✅ แก้ props ให้ตรงกับ state ที่ประกาศจริง ── */}
-        {showWholeDaySwap && (
-          <WholeDaySwapModal
-            user={user}
-            teachers={allTeachers}
-            allEntries={timetableEntries}
-            timeSlots={allTimeSlots}
-            leaveRequests={requests}              // ← ใช้ requests ที่มีอยู่แล้ว แทน leaveRequestsList ที่ไม่มีจริง
-            subRecords={subRecords}
-            academicYearId={currentAcademicYearId}
-            onSave={()=>{
-              setShowWholeDaySwap(false);
-              loadTimetableData();                // รีเฟรชตารางสอน/สอนแทนหลังบันทึก
-              loadRequests();                      // รีเฟรชใบลาด้วย เผื่อมีผลกระทบ
-            }}
-            onClose={()=>setShowWholeDaySwap(false)}
-          />
-        )}
       </div>
       <div className="px-4 py-5 space-y-5 max-w-5xl mx-auto">
         <div className="flex gap-2 flex-wrap">
