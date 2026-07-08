@@ -27,8 +27,7 @@ const emptyRecipient: Recipient = {
 
 // ══════════════════════════════════════════════════════════
 // ค้นหาครู/บุคลากร — ดึงจากตาราง users
-// หมายเหตุ: ถ้าชื่อตาราง/คอลัมน์ในฐานข้อมูลจริงต่างจากนี้ (เช่น department_id ไม่ได้ผูกกับตาราง
-// departments) ปรับได้เฉพาะในฟังก์ชันนี้จุดเดียว ส่วน UI ด้านล่างไม่ต้องแก้
+// กลุ่มสาระ: department_id -> เชื่อมกับตาราง departments คอลัมน์ name เท่านั้น (ไม่ fallback ไปที่อื่นแล้ว)
 // ══════════════════════════════════════════════════════════
 type TeacherHit = { id: string; displayName: string; department: string };
 
@@ -37,13 +36,13 @@ async function searchTeachers(query: string, deptMap: Record<string, string>): P
   if (!q) return [];
   const { data, error } = await supabase
     .from('users')
-    .select('id, title, first_name, last_name, full_name, department_id, academic_level')
+    .select('id, title, first_name, last_name, full_name, department_id')
     .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,full_name.ilike.%${q}%`)
     .limit(10);
   if (error || !data) return [];
   return (data as any[]).map((u) => {
     const assembled = `${u.title ?? ''}${u.first_name ?? ''} ${u.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
-    const department = deptMap[u.department_id] ?? u.academic_level ?? '';
+    const department = deptMap[u.department_id] ?? '';
     return { id: u.id, displayName: assembled || u.full_name || '', department };
   });
 }
@@ -53,8 +52,8 @@ async function searchTeachers(query: string, deptMap: Record<string, string>): P
 //   id, student_code, first_name, last_name, birth_date, gender ('male'|'female'), classroom_id
 //   classroom_id ผูกกับตาราง classrooms(room_name) — ใช้ room_name เป็น "ระดับชั้น" ได้เลย ไม่ต้องมีช่องห้องแยก
 // คำนำหน้าไม่ได้เก็บในตาราง คำนวณเอง:
-//   อายุ < 15 ปี  -> เด็กชาย / เด็กหญิง
-//   อายุ >= 15 ปี -> นาย / นางสาว
+//   อายุ < 15 ปี  -> male: เด็กชาย / female: เด็กหญิง
+//   อายุ >= 15 ปี -> male: นาย     / female: นางสาว
 // ══════════════════════════════════════════════════════════
 type StudentHit = { id: string; displayName: string; student_id: string; grade_level: string };
 
@@ -290,7 +289,7 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                       className={fieldCls(false, 'bg-slate-100 text-slate-600 cursor-not-allowed')}
                     />
                   ) : category === 'Teacher' ? (
-                    // ✅ ครู/บุคลากร: พิมพ์ค้นหาแล้วเลือกชื่อจากระบบ (คำนำหน้า+ชื่อ+สกุลครบ พร้อมกลุ่มสาระ)
+                    // ✅ ครู/บุคลากร: พิมพ์ค้นหาแล้วเลือกชื่อจากระบบ (คำนำหน้า+ชื่อ+สกุลครบ พร้อมกลุ่มสาระจาก department_id)
                     <TeacherNameField
                       value={r.recipient_name}
                       deptMap={deptMap}
@@ -348,7 +347,7 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                         className={fieldCls(false)}
                       />
                     </label>
-                    {/* ★ ตัดช่อง "ห้องเรียน" ออก เพราะ classrooms.room_name ครอบคลุมทั้งชั้น+ห้องแล้ว */}
+                    {/* ★ ตัดช่อง "ห้องเรียน" แยกออก เพราะ classrooms.room_name ครอบคลุมทั้งชั้น+ห้องแล้ว */}
                   </>
                 )}
 
@@ -377,6 +376,20 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                       </select>
                     </label>
                   </>
+                )}
+
+                {category === 'Executive' && (
+                  // ★ ตำแหน่งผู้บริหาร ดึงมาจากตาราง academic_level อัตโนมัติตอนเลือกกลุ่มเป้าหมาย
+                  // (ดู fetchExecutiveRecipients ใน AwardForm.tsx) — แก้ไขเพิ่มเติมได้ที่นี่ถ้าจำเป็น
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-xs text-muted font-medium">ตำแหน่ง</span>
+                    <input
+                      type="text"
+                      value={r.department ?? ''}
+                      onChange={(e) => update(i, { department: e.target.value })}
+                      className={fieldCls(false)}
+                    />
+                  </label>
                 )}
               </div>
 

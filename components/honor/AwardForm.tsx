@@ -55,24 +55,54 @@ function sanitizeFolderSegment(s: string) {
 }
 
 // ★ ดึงรายชื่อผู้บริหาร (director, deputy_director) จากตาราง users มาเป็นค่าเริ่มต้น
+//   พร้อม "ตำแหน่ง" ที่ดึงจากตาราง academic_level (ผูกผ่านคอลัมน์ academic_level บน users)
+//   ลองใช้ relationship embed ก่อน ถ้า DB ยังไม่ได้ตั้ง FK ไว้ให้ query แยกสองรอบแทน (กันพัง)
 async function fetchExecutiveRecipients(): Promise<Recipient[]> {
-  const { data, error } = await supabase
+  const embedRes = await supabase
     .from('users')
-    .select('id,title,first_name,last_name,full_name,role')
+    .select('id,title,first_name,last_name,full_name,role,academic_level_ref:academic_level(name)')
     .in('role', ['director', 'deputy_director'])
     .order('role', { ascending: true });
 
-  if (error || !data || data.length === 0) {
+  if (!embedRes.error && embedRes.data && embedRes.data.length > 0) {
+    return (embedRes.data as any[]).map((u) => {
+      const assembled = `${u.title ?? ''}${u.first_name ?? ''} ${u.last_name ?? ''}`
+        .replace(/\s+/g, ' ')
+        .trim();
+      const position = u.academic_level_ref?.name ?? '';
+      return {
+        recipient_name: assembled || u.full_name || '',
+        department: position, // ★ ใช้ช่อง department (เดิม) เป็นที่เก็บ "ตำแหน่ง" สำหรับผู้บริหาร
+      };
+    });
+  }
+
+  // ── fallback: relationship embed ใช้ไม่ได้ (เช่นยังไม่มี FK ใน DB) ── query แยก 2 รอบ
+  const { data: users, error: usersErr } = await supabase
+    .from('users')
+    .select('id,title,first_name,last_name,full_name,role,academic_level')
+    .in('role', ['director', 'deputy_director'])
+    .order('role', { ascending: true });
+
+  if (usersErr || !users || users.length === 0) {
     return [{ recipient_name: '' }];
   }
 
-  return data.map((u: any) => {
-    // ✅ ประกอบชื่อจาก title + first_name + last_name ก่อนเสมอ เพราะ full_name ในฐานข้อมูล
-    // มักไม่ได้ใส่คำนำหน้าไว้ (เช่น นาย/นาง/นางสาว/ดร.) — ถ้าประกอบไม่ได้จริงๆ ค่อย fallback ไปใช้ full_name เดิม
+  const levelIds = [...new Set(users.map((u: any) => u.academic_level).filter(Boolean))];
+  let levelMap: Record<string, string> = {};
+  if (levelIds.length > 0) {
+    const { data: levels } = await supabase.from('academic_level').select('id,name').in('id', levelIds);
+    levelMap = Object.fromEntries((levels || []).map((l: any) => [l.id, l.name]));
+  }
+
+  return users.map((u: any) => {
     const assembled = `${u.title ?? ''}${u.first_name ?? ''} ${u.last_name ?? ''}`
       .replace(/\s+/g, ' ')
       .trim();
-    return { recipient_name: assembled || u.full_name || '' };
+    return {
+      recipient_name: assembled || u.full_name || '',
+      department: levelMap[u.academic_level] ?? '',
+    };
   });
 }
 
