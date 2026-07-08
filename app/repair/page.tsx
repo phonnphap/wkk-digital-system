@@ -347,9 +347,9 @@ const res = await fetch("/api/upload-onedrive", {
   body: formData,
 });
       if (!res.ok) {
-        const err = await res.json().catch(()=>({}));
-        alert("อัปโหลดไม่สำเร็จ: " + (err.error ?? res.statusText));
-        // ลบ preview ที่เพิ่งเพิ่ม
+  const err = await res.json().catch(()=>({}));
+  console.error("upload-onedrive error:", err);   // ← บรรทัดนี้ต้องมี
+  alert("อัปโหลดไม่สำเร็จ: " + JSON.stringify(err.error ?? err ?? res.statusText));
         setImagePreviews(prev => prev.slice(0, -1));
         continue;
       }
