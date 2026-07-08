@@ -57,30 +57,9 @@ function sanitizeFolderSegment(s: string) {
 // ★ ดึงรายชื่อผู้บริหาร (director, deputy_director) จากตาราง users มาเป็นค่าเริ่มต้น
 //   พร้อม "ตำแหน่ง" ที่ดึงจากตาราง academic_levels (พหูพจน์ — แก้จาก academic_level เอกพจน์)
 //   ลองใช้ relationship embed ก่อน ถ้า DB ยังไม่ได้ตั้ง FK ไว้ให้ query แยกสองรอบแทน (กันพัง)
+// ★ ดึงรายชื่อผู้บริหาร (director, deputy_director) จากตาราง users มาเป็นค่าเริ่มต้น
+//   ตำแหน่งเก็บเป็นข้อความตรงๆ ในคอลัมน์ users.academic_level ไม่มีตารางแยก ไม่ต้อง join
 async function fetchExecutiveRecipients(): Promise<Recipient[]> {
-  const embedRes = await supabase
-    .from('users')
-    .select('id,title,first_name,last_name,full_name,role,academic_level_ref:academic_levels(name)')
-    .in('role', ['director', 'deputy_director'])
-    .order('role', { ascending: true });
-
-  if (!embedRes.error && embedRes.data && embedRes.data.length > 0) {
-    return (embedRes.data as any[]).map((u) => {
-      const assembled = `${u.title ?? ''}${u.first_name ?? ''} ${u.last_name ?? ''}`
-        .replace(/\s+/g, ' ')
-        .trim();
-      const position = u.academic_level_ref?.name ?? '';
-      return {
-        recipient_name: assembled || u.full_name || '',
-        department: position, // ★ ใช้ช่อง department (เดิม) เป็นที่เก็บ "ตำแหน่ง" สำหรับผู้บริหาร
-      };
-    });
-  }
-
-  if (embedRes.error) {
-    console.error('[fetchExecutiveRecipients] embed query failed:', embedRes.error.message);
-  }
-
   // ── fallback: relationship embed ใช้ไม่ได้ (เช่นยังไม่มี FK ใน DB) ── query แยก 2 รอบ
   const { data: users, error: usersErr } = await supabase
     .from('users')
@@ -89,16 +68,25 @@ async function fetchExecutiveRecipients(): Promise<Recipient[]> {
     .order('role', { ascending: true });
 
   if (usersErr || !users || users.length === 0) {
-    if (usersErr) console.error('[fetchExecutiveRecipients] fallback users query failed:', usersErr.message);
+    if (usersErr) {
+      console.error('[fetchExecutiveRecipients] fallback users query failed:', usersErr.message);
+    }
     return [{ recipient_name: '' }];
   }
 
   const levelIds = [...new Set(users.map((u: any) => u.academic_level).filter(Boolean))];
   let levelMap: Record<string, string> = {};
+  
   if (levelIds.length > 0) {
     // ★ แก้: 'academic_level' -> 'academic_levels' (พหูพจน์)
-    const { data: levels, error: levelsErr } = await supabase.from('academic_levels').select('id,name').in('id', levelIds);
-    if (levelsErr) console.error('[fetchExecutiveRecipients] academic_levels query failed:', levelsErr.message);
+    const { data: levels, error: levelsErr } = await supabase
+      .from('academic_levels')
+      .select('id,name')
+      .in('id', levelIds);
+      
+    if (levelsErr) {
+      console.error('[fetchExecutiveRecipients] academic_levels query failed:', levelsErr.message);
+    }
     levelMap = Object.fromEntries((levels || []).map((l: any) => [l.id, l.name]));
   }
 

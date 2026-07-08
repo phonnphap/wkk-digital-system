@@ -24,7 +24,7 @@ interface RepairRequest {
   id: string; title: string; description?: string;
   building_id?: string; room?: string; category?: string;
   status: string; priority?: string; image_urls?: string[];
-  reported_by: string; assigned_to?: string;
+  reporter_id: string; assigned_to?: string;
   created_at: string; updated_at?: string;
   resolved_at?: string; memo_pdf_url?: string;
   memo_items?: any[]; memo_created_by?: string; memo_created_at?: string;
@@ -337,15 +337,15 @@ const handleUpload = async (ev: React.ChangeEvent<HTMLInputElement>) => {
     // Upload ไป OneDrive
     try {
       const formData = new FormData();
-      formData.append("file", file);
-      formData.append("account", "general@khienkhet.ac.th");
-      formData.append("folder", "WKK_Repair_System");
-      formData.append("filename", `repair-${Date.now()}-${Math.random().toString(36).slice(2)}.${file.name.split(".").pop()}`);
+formData.append("file", file);
+formData.append("account", "general@khienkhet.ac.th");
+formData.append("folder", "WKK_Repair_System");
+formData.append("fileName", `repair-${Date.now()}-${Math.random().toString(36).slice(2)}.${file.name.split(".").pop()}`);
 
-      const res = await fetch("/api/onedrive-upload", {
-        method: "POST",
-        body: formData,
-      });
+const res = await fetch("/api/upload-onedrive", {
+  method: "POST",
+  body: formData,
+});
       if (!res.ok) {
         const err = await res.json().catch(()=>({}));
         alert("อัปโหลดไม่สำเร็จ: " + (err.error ?? res.statusText));
@@ -375,10 +375,10 @@ function removeImage(i: number) {
     if (!validate()) return;
     setSaving(true);
     const payload = {
-      title: title.trim(), description: desc.trim(), building_id: buildingId,
-      room: room.trim(), category, priority, image_urls: imageUrls,
-      reported_by: currentUser.id, status: existing?.status ?? "pending",
-    };
+  title: title.trim(), description: desc.trim(), building_id: buildingId,
+  room: room.trim(), category, priority, image_urls: imageUrls,
+  reporter_id: currentUser.id, status: existing?.status ?? "pending",
+};
     if (existing?.id) {
       await supabase.from("repair_requests").update(payload).eq("id", existing.id);
     } else {
@@ -748,8 +748,8 @@ export default function Page() {
     setManagers((mgrs??[]) as ProjectManager[]);
     // Repair requests
     const {data:rqs}=await supabase.from("repair_requests")
-      .select(`*,reporter:users!reported_by(id,first_name,last_name,title),
-        building:buildings(id,name)`)
+  .select(`*,reporter:users!reporter_id(id,first_name,last_name,title),
+    building:buildings(id,name)`)
       .order("created_at",{ascending:false}).limit(300);
     setRequests((rqs??[]) as unknown as RepairRequest[]);
   },[user]);
@@ -762,13 +762,12 @@ export default function Page() {
     if (!canSeeAll && isBuildingManager)
       list = list.filter(r => myBuildingIds.has(r.building_id ?? ""));
     else if (!canSeeAll)
-      list = list.filter(r => r.reported_by === user?.id);
-    if (filterStatus) list = list.filter(r => r.status === filterStatus);
+  list = list.filter(r => r.reporter_id === user?.id);
     if (filterBldg)   list = list.filter(r => r.building_id === filterBldg);
     return list;
   },[requests,canSeeAll,isBuildingManager,myBuildingIds,user,filterStatus,filterBldg]);
 
-  const myRequests = useMemo(()=>requests.filter(r=>r.reported_by===user?.id),[requests,user]);
+  const myRequests = useMemo(()=>requests.filter(r=>r.reporter_id===user?.id),[requests,user]);
 
   // ── Stats ──────────────────────────────────────────────────────────────────
   const stats = useMemo(()=>{
