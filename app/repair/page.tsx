@@ -1,660 +1,995 @@
 "use client";
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { format } from "date-fns";
+import { th } from "date-fns/locale";
 
 const supabase = createClient();
 
-type RepairStatus = "pending"|"in_progress"|"completed"|"cancelled";
+const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head"];
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface User {
+  id: string; first_name: string; last_name: string;
+  title?: string; role: string; position?: string; signature_url?: string;
+}
 interface Building {
-  id: string; name: string;
-  repair_user_ids?: string[];
-  inspector_user_ids?: string[];
-  repairUsers?: { id:string; first_name:string; last_name:string; email?:string }[];
-  inspectorUsers?: { id:string; first_name:string; last_name:string; email?:string }[];
+  id: string; name: string; description?: string;
+  repair_user_ids?: string[]; inspector_user_ids?: string[];
 }
 interface RepairRequest {
-  id: string; ticket_no: string; reporter_id: string; category: string;
-  building_id?: string; location: string; description: string;
-  photo_urls: string[]|null; status: RepairStatus;
-  assigned_to: string|null; assigned_at: string|null;
-  progress_notes: {note:string;by:string;at:string}[]|null;
-  completed_at: string|null; created_at: string; updated_at: string;
-  reporter?: {first_name:string;last_name:string;position?:string;email?:string};
-  assignee?: {first_name:string;last_name:string};
-  building?: Building;
+  id: string; title: string; description?: string;
+  building_id?: string; room?: string; category?: string;
+  status: string; priority?: string; image_urls?: string[];
+  reported_by: string; assigned_to?: string;
+  created_at: string; updated_at?: string;
+  resolved_at?: string; memo_pdf_url?: string;
+  memo_items?: any[]; memo_created_by?: string; memo_created_at?: string;
+  reporter?: User; assignee?: User; building?: Building;
 }
-interface UserProfile {
-  id:string; first_name:string; last_name:string; email:string; role:string; position?:string; title?:string;
+interface ProjectManager { id: string; user_id: string; user?: User; added_by?: string; created_at: string; }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fullName(u?: User | null) {
+  if (!u) return "—";
+  return `${u.title ?? ""} ${u.first_name} ${u.last_name}`.trim();
+}
+function thaiDate(s?: string) {
+  if (!s) return "—";
+  const d = new Date(s);
+  return `${d.getDate()} ${["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."][d.getMonth()]} ${d.getFullYear()+543}`;
+}
+function thaiDateFull(s?: string) {
+  if (!s) return "—";
+  const d = new Date(s);
+  const months = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()+543}`;
 }
 
-function fullName(u:any){
-  if(!u)return"-";
-  const fn=u.first_name??""; const ln=u.last_name??"";
-  if(!fn&&!ln)return"-";
-  return `${fn} ${ln}`.trim();
-}
-function toThaiDateTime(iso:string){return new Date(iso).toLocaleString("th-TH",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Bangkok"});}
-function toThaiDate(iso:string){return new Date(iso).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Bangkok"});}
-function genTicketNo(){const y=new Date().getFullYear()+543;const r=Math.floor(Math.random()*9000)+1000;return`REP-${y}-${r}`;}
-
-const CATEGORIES=[
-  {key:"computer",  label:"คอมพิวเตอร์ / IT",       icon:"💻",color:"#3b82f6",bg:"#eff6ff",border:"#bfdbfe"},
-  {key:"electrical",label:"ไฟฟ้า / แอร์",            icon:"⚡",color:"#f59e0b",bg:"#fffbeb",border:"#fde68a"},
-  {key:"plumbing",  label:"ประปา / ห้องน้ำ",          icon:"🔧",color:"#06b6d4",bg:"#ecfeff",border:"#a5f3fc"},
-  {key:"building",  label:"อาคาร / สถานที่",          icon:"🏫",color:"#8b5cf6",bg:"#f5f3ff",border:"#ddd6fe"},
-  {key:"furniture", label:"เฟอร์นิเจอร์",             icon:"🪑",color:"#10b981",bg:"#ecfdf5",border:"#a7f3d0"},
-  {key:"projector", label:"โปรเจกเตอร์ / จอ",        icon:"📽️",color:"#ec4899",bg:"#fdf2f8",border:"#fbcfe8"},
-  {key:"network",   label:"เครือข่าย / อินเทอร์เน็ต", icon:"📡",color:"#14b8a6",bg:"#f0fdfa",border:"#99f6e4"},
-  {key:"other",     label:"อื่นๆ",                    icon:"🔨",color:"#6b7280",bg:"#f9fafb",border:"#e5e7eb"},
-];
-
-// อีเมลพิเศษตามประเภท
-const CATEGORY_SPECIAL_EMAILS: Record<string, string[]> = {
-  network:  ["sirilack@khienkhet.ac.th"],
-  computer: ["saruda@khienkhet.ac.th"],
+const STATUS_CFG: Record<string,{label:string;color:string;bg:string;border:string}> = {
+  pending:     { label:"รอดำเนินการ", color:"#92400e", bg:"#fef3c7", border:"#fcd34d" },
+  in_progress: { label:"กำลังซ่อม",  color:"#1e40af", bg:"#dbeafe", border:"#93c5fd" },
+  resolved:    { label:"เสร็จแล้ว",  color:"#065f46", bg:"#d1fae5", border:"#6ee7b7" },
+  cancelled:   { label:"ยกเลิก",     color:"#6b7280", bg:"#f3f4f6", border:"#d1d5db" },
 };
-const COMPLETED_NOTIFY_EMAIL = "general@khienkhet.ac.th";
-
-const STATUS_CONFIG:Record<RepairStatus,{label:string;color:string;bg:string;border:string;dot:string}>={
-  pending:    {label:"รอดำเนินการ",    color:"#92400e",bg:"#fffbeb",border:"#fcd34d",dot:"#f59e0b"},
-  in_progress:{label:"กำลังดำเนินการ",color:"#1e40af",bg:"#eff6ff",border:"#93c5fd",dot:"#3b82f6"},
-  completed:  {label:"เสร็จสิ้น",     color:"#065f46",bg:"#ecfdf5",border:"#6ee7b7",dot:"#10b981"},
-  cancelled:  {label:"ยกเลิก",        color:"#6b7280",bg:"#f9fafb",border:"#d1d5db",dot:"#9ca3af"},
+const PRIORITY_CFG: Record<string,{label:string;color:string}> = {
+  low:    { label:"ต่ำ",    color:"#6b7280" },
+  medium: { label:"ปานกลาง",color:"#d97706" },
+  high:   { label:"เร่งด่วน",color:"#dc2626" },
 };
+const CATEGORIES = ["ระบบไฟฟ้า","ระบบประปา","ประตู/หน้าต่าง","พื้น/ฝ้า/ผนัง","เฟอร์นิเจอร์","คอมพิวเตอร์/อุปกรณ์","ห้องน้ำ","อื่นๆ"];
 
-const ADMIN_ROLES      = ["admin","director","deputy_director","dept_head","staff"];
-const SUPER_ADMIN_ROLES = ["admin","director"];
+// ── PDF Generator ─────────────────────────────────────────────────────────────
+function generateMemoHTML(
+  items: {no:number;title:string;building:string;room:string;detail:string;checked:boolean}[],
+  creatorName: string,
+  directorName: string,
+  directorSignUrl: string,
+  creatorSignUrl: string,
+  dateStr: string,
+  memoNo: string,
+) {
+  const checkedItems = items.filter(i => i.checked);
+  const rows = checkedItems.map((it, i) => `
+    <tr>
+      <td style="text-align:center;padding:6px 8px;border:1px solid #cbd5e1">${i+1}</td>
+      <td style="padding:6px 8px;border:1px solid #cbd5e1">${it.title}</td>
+      <td style="padding:6px 8px;border:1px solid #cbd5e1">${it.building}</td>
+      <td style="padding:6px 8px;border:1px solid #cbd5e1">${it.room || "—"}</td>
+      <td style="padding:6px 8px;border:1px solid #cbd5e1">${it.detail || "—"}</td>
+    </tr>`).join("");
 
-async function uploadToOneDrive(file:File,ticketNo:string):Promise<string|null>{
-  try{
-    const fd=new FormData();fd.append("file",file);fd.append("folder",`WKK_Repair_System/${ticketNo}`);fd.append("fileName",`${Date.now()}_${file.name}`);
-    const res=await fetch("/api/upload-onedrive",{method:"POST",body:fd});if(!res.ok)return null;
-    const {url}=await res.json();return url??null;
-  }catch{return null;}
-}
+  return `<!DOCTYPE html><html><head>
+  <meta charset="UTF-8">
+  <style>
+    @page { size: A4; margin: 20mm 25mm; }
+    body { font-family:'Sarabun','TH SarabunNew',sans-serif; font-size:14pt; color:#111; line-height:1.6; }
+    .header { text-align:center; margin-bottom:8px; }
+    .header img { height:70px; }
+    h2 { text-align:center; font-size:18pt; font-weight:bold; margin:8px 0 2px; letter-spacing:2px; }
+    h3 { text-align:center; font-size:14pt; margin:0 0 16px; }
+    .meta-table { width:100%; margin-bottom:16px; font-size:13pt; }
+    .meta-table td { padding:2px 0; vertical-align:top; }
+    table.items { width:100%; border-collapse:collapse; font-size:12pt; margin:12px 0; }
+    table.items th { background:#1e3a8a; color:#fff; padding:7px 8px; border:1px solid #1e3a8a; }
+    table.items td { padding:6px 8px; border:1px solid #cbd5e1; }
+    table.items tr:nth-child(even) td { background:#f8faff; }
+    .sign-section { display:flex; justify-content:space-between; margin-top:48px; gap:24px; }
+    .sign-box { text-align:center; flex:1; }
+    .sign-img { height:64px; display:block; margin:0 auto; object-fit:contain; }
+    .sign-name { font-size:13pt; margin-top:4px; }
+    .sign-pos { font-size:11pt; color:#475569; }
+    .body-text { font-size:13pt; margin:8px 0 16px; text-indent:2em; }
+    @media print { button{display:none} }
+  </style></head>
+  <body>
+    <div class="header">
+      <h2>บันทึกข้อความ</h2>
+      <h3>โรงเรียนวัดเขียนเขต</h3>
+    </div>
+    <table class="meta-table">
+      <tr>
+        <td width="15%"><b>ส่วนราชการ</b></td>
+        <td>โรงเรียนวัดเขียนเขต สำนักงานเขตพื้นที่การศึกษาประถมศึกษาปทุมธานี เขต 2</td>
+      </tr>
+      <tr>
+        <td><b>ที่</b></td>
+        <td>${memoNo || "ศธ …………………………"}&nbsp;&nbsp;&nbsp;&nbsp;<b>วันที่</b> ${dateStr}</td>
+      </tr>
+      <tr>
+        <td><b>เรื่อง</b></td>
+        <td>รายการแจ้งซ่อมบำรุงอาคารสถานที่และสิ่งอำนวยความสะดวก</td>
+      </tr>
+      <tr>
+        <td><b>เรียน</b></td>
+        <td>ผู้อำนวยการโรงเรียนวัดเขียนเขต</td>
+      </tr>
+    </table>
 
-async function sendRepairNotification(req:RepairRequest,building?:Building,extraEmails:string[]=[],isCompleted=false){
-  const catLabel=CATEGORIES.find(c=>c.key===req.category)?.label??req.category;
-  const subject=isCompleted
-    ?`[ซ่อมเสร็จ] ${req.ticket_no} - ${catLabel} - ${building?.name??""} ${req.location}`
-    :`[แจ้งซ่อม] ${req.ticket_no} - ${catLabel} - ${building?.name??""} ${req.location}`;
-  const body=`${isCompleted?"✅ งานซ่อมเสร็จสิ้นแล้ว":"มีการแจ้งซ่อมใหม่"}\nเลขที่: ${req.ticket_no}\nประเภท: ${catLabel}\nอาคาร: ${building?.name??"-"}\nสถานที่: ${req.location}\nรายละเอียด: ${req.description}\nผู้แจ้ง: ${fullName(req.reporter)}\n\nhttps://system.khienkhet.ac.th/repair`;
-  try{await fetch("/api/send-repair-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({subject,body,ticketNo:req.ticket_no,extraEmails,isCompleted})});}catch(e){console.error(e);}
-}
+    <p class="body-text">
+      ด้วยมีรายการแจ้งซ่อมบำรุงอาคารสถานที่และสิ่งอำนวยความสะดวกของโรงเรียนวัดเขียนเขต
+      จำนวน <b>${checkedItems.length} รายการ</b> ตามรายละเอียดในตารางแนบท้าย
+      จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติดำเนินการต่อไป
+    </p>
 
-function StatusBadge({status}:{status:RepairStatus}){
-  const cfg=STATUS_CONFIG[status];
-  return(<span style={{display:"inline-flex",alignItems:"center",gap:6,padding:"4px 12px",borderRadius:20,fontSize:13,fontWeight:600,color:cfg.color,background:cfg.bg,border:`1.5px solid ${cfg.border}`}}><span style={{width:7,height:7,borderRadius:"50%",background:cfg.dot,display:"inline-block"}}/>{cfg.label}</span>);
-}
+    <table class="items">
+      <thead>
+        <tr>
+          <th style="width:36px">ที่</th>
+          <th>รายการ</th>
+          <th>อาคาร</th>
+          <th>ห้อง/บริเวณ</th>
+          <th>รายละเอียด</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
 
-// ── BuildingAdmin — Dropdown แทนปุ่ม ─────────────────────────────────────────
-function BuildingAdmin({allUsers,onClose}:{allUsers:UserProfile[];onClose:()=>void}){
-  const [buildings,setBuildings]=useState<Building[]>([]);
-  const [loading,setLoading]=useState(true);
-  const [newName,setNewName]=useState("");
-  const [saving,setSaving]=useState(false);
+    <p class="body-text">
+      จึงเรียนมาเพื่อโปรดพิจารณา
+    </p>
 
-  useEffect(()=>{load();},[]);
-  async function load(){
-    setLoading(true);
-    const {data}=await (supabase.from("buildings") as any).select("id,name,repair_user_ids,inspector_user_ids").order("name");
-    setBuildings(data||[]);setLoading(false);
-  }
-  async function addBuilding(){
-    if(!newName.trim())return;setSaving(true);
-    await (supabase.from("buildings") as any).insert([{name:newName.trim(),repair_user_ids:[],inspector_user_ids:[]}]);
-    setNewName("");await load();setSaving(false);
-  }
-  async function addUser(b:Building,field:"repair_user_ids"|"inspector_user_ids",uid:string){
-    if(!uid)return;
-    const cur=(b[field] as string[])||[];
-    if(cur.includes(uid))return;
-    await (supabase.from("buildings") as any).update({[field]:[...cur,uid]}).eq("id",b.id);await load();
-  }
-  async function removeUser(b:Building,field:"repair_user_ids"|"inspector_user_ids",uid:string){
-    const cur=(b[field] as string[])||[];
-    await (supabase.from("buildings") as any).update({[field]:cur.filter(x=>x!==uid)}).eq("id",b.id);await load();
-  }
-  async function del(id:string){if(!confirm("ลบอาคารนี้?"))return;await (supabase.from("buildings") as any).delete().eq("id",id);await load();}
-
-  const uMap=Object.fromEntries(allUsers.map(u=>[u.id,u]));
-
-  function UserTags({b,field,color}:{b:Building;field:"repair_user_ids"|"inspector_user_ids";color:string}){
-    const ids=(b[field] as string[])||[];
-    const remaining=allUsers.filter(u=>!ids.includes(u.id));
-    return(
-      <div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
-          {ids.map(uid=>uMap[uid]&&(
-            <span key={uid} style={{display:"inline-flex",alignItems:"center",gap:6,padding:"4px 10px",borderRadius:20,background:color+"22",border:`1.5px solid ${color}`,fontSize:13,color}}>
-              {fullName(uMap[uid])}
-              <button onClick={()=>removeUser(b,field,uid)} style={{background:"none",border:"none",cursor:"pointer",color:"#ef4444",fontSize:15,lineHeight:1,padding:0}}>×</button>
-            </span>
-          ))}
-          {ids.length===0&&<span style={{fontSize:13,color:"#9ca3af"}}>ยังไม่ได้เลือก</span>}
-        </div>
-        {remaining.length>0&&(
-          <select defaultValue="" onChange={e=>{addUser(b,field,e.target.value);e.target.value=""}}
-            style={{fontSize:14,padding:"8px 12px",borderRadius:10,border:`2px solid ${color}44`,fontFamily:"inherit",background:"white",color:"#374151",cursor:"pointer"}}>
-            <option value="">+ เพิ่มครู...</option>
-            {remaining.map(u=><option key={u.id} value={u.id}>{fullName(u)}</option>)}
-          </select>
-        )}
+    <div class="sign-section">
+      <div class="sign-box">
+        ${creatorSignUrl ? `<img class="sign-img" src="${creatorSignUrl}" />` : `<div style="height:64px"></div>`}
+        <div class="sign-name">(${creatorName})</div>
+        <div class="sign-pos">ผู้เสนอ / ผู้ดูแลโครงการ</div>
       </div>
+      <div class="sign-box">
+        ${directorSignUrl ? `<img class="sign-img" src="${directorSignUrl}" />` : `<div style="height:64px"></div>`}
+        <div class="sign-name">(${directorName || "นายธนณัฐ  ศิระวงษ์"})</div>
+        <div class="sign-pos">ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
+        <div class="sign-pos">ผู้อนุมัติ</div>
+      </div>
+    </div>
+    <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+}
+
+// ── MemoModal ─────────────────────────────────────────────────────────────────
+function MemoModal({ requests, buildings, currentUser, director, onClose }: {
+  requests: RepairRequest[]; buildings: Building[];
+  currentUser: User; director?: User; onClose: () => void;
+}) {
+  const [memoNo, setMemoNo] = useState("");
+  const [memoDate, setMemoDate] = useState(format(new Date(),"yyyy-MM-dd"));
+  const [selected, setSelected] = useState<Record<string,boolean>>(
+    () => Object.fromEntries(requests.map(r => [r.id, true]))
+  );
+
+  const checkedCount = Object.values(selected).filter(Boolean).length;
+
+  const handlePrint = () => {
+    const items = requests
+      .filter(r => selected[r.id])
+      .map((r,i) => ({
+        no: i+1,
+        title: r.title,
+        building: r.building?.name ?? "—",
+        room: r.room ?? "",
+        detail: r.description ?? "",
+        checked: true,
+      }));
+    if (items.length === 0) { alert("กรุณาเลือกรายการอย่างน้อย 1 รายการ"); return; }
+    const html = generateMemoHTML(
+      items,
+      fullName(currentUser),
+      fullName(director),
+      director?.signature_url ?? "",
+      currentUser.signature_url ?? "",
+      thaiDateFull(memoDate),
+      memoNo,
     );
-  }
+    const w = window.open("","_blank","width=900,height=780");
+    if (!w) return;
+    w.document.write(html);
+    w.document.close();
+  };
 
-  return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-      <div style={{background:"white",borderRadius:24,width:"100%",maxWidth:640,maxHeight:"88vh",overflow:"hidden",display:"flex",flexDirection:"column"}}>
-        <div style={{padding:"20px 24px",borderBottom:"2px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <h3 style={{margin:0,fontSize:18,fontWeight:700}}>🏫 จัดการอาคาร</h3>
-          <button onClick={onClose} style={{width:36,height:36,borderRadius:10,border:"2px solid #e5e7eb",background:"white",cursor:"pointer",fontSize:18}}>✕</button>
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh]"
+        onClick={e=>e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+          <h3 className="font-bold text-slate-800 text-base">📄 สร้างบันทึกข้อความแจ้งซ่อม</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">✕</button>
         </div>
-        <div style={{flex:1,overflowY:"auto",padding:24}}>
-          <div style={{display:"flex",gap:10,marginBottom:20}}>
-            <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="ชื่ออาคารใหม่..."
-              style={{flex:1,padding:"10px 14px",fontSize:14,borderRadius:12,border:"2px solid #e5e7eb",outline:"none",fontFamily:"inherit"}}
-              onKeyDown={e=>e.key==="Enter"&&addBuilding()}/>
-            <button onClick={addBuilding} disabled={!newName.trim()||saving}
-              style={{padding:"10px 20px",borderRadius:12,border:"none",background:"#3b82f6",color:"white",fontWeight:700,fontSize:14,cursor:"pointer"}}>+ เพิ่ม</button>
-          </div>
-          {loading?<p style={{color:"#9ca3af",textAlign:"center"}}>กำลังโหลด...</p>:(
-            <div style={{display:"flex",flexDirection:"column",gap:16}}>
-              {buildings.map(b=>(
-                <div key={b.id} style={{background:"#f9fafb",borderRadius:16,padding:"16px 18px",border:"2px solid #f3f4f6"}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-                    <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>🏫 {b.name}</span>
-                    <button onClick={()=>del(b.id)} style={{padding:"4px 12px",borderRadius:8,border:"1.5px solid #fecaca",background:"#fef2f2",color:"#dc2626",fontSize:13,cursor:"pointer"}}>ลบ</button>
-                  </div>
-                  <p style={{fontSize:13,fontWeight:700,color:"#1e40af",margin:"0 0 8px"}}>🔧 ผู้ดูแลซ่อม</p>
-                  <UserTags b={b} field="repair_user_ids" color="#3b82f6"/>
-                  <p style={{fontSize:13,fontWeight:700,color:"#065f46",margin:"14px 0 8px"}}>📋 ผู้ตรวจสอบประจำเดือน</p>
-                  <UserTags b={b} field="inspector_user_ids" color="#10b981"/>
-                </div>
-              ))}
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
+          {/* เลขที่ / วันที่ */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">เลขที่หนังสือ</label>
+              <input type="text" value={memoNo} onChange={e=>setMemoNo(e.target.value)}
+                placeholder="เช่น ศธ 04002/2569-001"
+                className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
             </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── RepairForm ────────────────────────────────────────────────────────────────
-function RepairForm({user,buildings,onSubmit,onCancel}:{
-  user:UserProfile;buildings:Building[];onSubmit:(d:any)=>Promise<void>;onCancel:()=>void;
-}){
-  const [category,setCategory]=useState("");
-  const [buildingId,setBuildingId]=useState("");
-  const [location,setLocation]=useState("");
-  const [description,setDescription]=useState("");
-  const [photoFiles,setPhotoFiles]=useState<File[]>([]);
-  const [loading,setLoading]=useState(false);
-  const [touched,setTouched]=useState(false); // สำหรับแสดงกรอบแดง
-  const fileRef=useRef<HTMLInputElement>(null);
-  const canSubmit=category&&buildingId&&location&&description;
-  const selBuilding=buildings.find(b=>b.id===buildingId);
-
-  async function handleSubmit(){
-    setTouched(true);
-    if(!canSubmit)return;
-    setLoading(true);
-    const ticketNo=genTicketNo();
-    const photoUrls:string[]=[];
-    for(const f of photoFiles){const url=await uploadToOneDrive(f,ticketNo);if(url)photoUrls.push(url);}
-    await onSubmit({ticket_no:ticketNo,reporter_id:user.id,category,building_id:buildingId,location,description,photo_urls:photoUrls.length>0?photoUrls:null,status:"pending",progress_notes:[]});
-    setLoading(false);
-  }
-
-  // Input styles
-  function inp(hasErr:boolean){return{width:"100%",padding:"12px 16px",fontSize:15,borderRadius:12,border:`2px solid ${hasErr?"#ef4444":"#93c5fd"}`,background:"white",outline:"none",boxSizing:"border-box" as const,fontFamily:"inherit",transition:"border-color 0.15s"};}
-  const lbl={display:"block" as const,fontSize:14,fontWeight:600 as const,color:"#374151",marginBottom:8};
-  const step=(n:number,c:string)=>(<span style={{background:c,color:"white",width:24,height:24,borderRadius:"50%",fontSize:12,display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:700,flexShrink:0}}>{n}</span>);
-  const errMsg=(msg:string)=>(<p style={{fontSize:12,color:"#ef4444",margin:"4px 0 0",fontWeight:600}}>⚠️ {msg}</p>);
-
-  return(
-    <div style={{maxWidth:720,margin:"0 auto",padding:"0 1rem 3rem"}}>
-      <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:28,paddingTop:20}}>
-        <button onClick={onCancel} style={{width:42,height:42,borderRadius:12,border:"2px solid #e5e7eb",background:"white",cursor:"pointer",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
-        <div><h2 style={{fontSize:22,fontWeight:700,margin:0}}>📝 แจ้งซ่อม</h2><p style={{fontSize:14,color:"#6b7280",margin:0}}>{fullName(user)}</p></div>
-      </div>
-
-      {/* 1: Category */}
-      <div style={{background:"white",borderRadius:20,border:`2px solid ${touched&&!category?"#ef4444":"#f3f4f6"}`,padding:24,marginBottom:16,boxShadow:"0 2px 8px rgba(0,0,0,0.05)"}}>
-        <p style={{fontSize:14,fontWeight:700,color:"#374151",marginBottom:14,display:"flex",alignItems:"center",gap:8}}>{step(1,"#3b82f6")} หมวดหมู่ <span style={{color:"#ef4444"}}>*</span></p>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:10}}>
-          {CATEGORIES.map(c=>(
-            <button key={c.key} type="button" onClick={()=>setCategory(c.key)} style={{padding:"12px 8px",borderRadius:14,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:6,fontSize:13,fontWeight:600,textAlign:"center",lineHeight:1.3,background:category===c.key?c.bg:"#f9fafb",border:`2px solid ${category===c.key?c.color:"#e5e7eb"}`,color:category===c.key?c.color:"#6b7280",transform:category===c.key?"scale(1.03)":"scale(1)",transition:"all 0.15s"}}>
-              <span style={{fontSize:24}}>{c.icon}</span>{c.label}
-            </button>
-          ))}
-        </div>
-        {touched&&!category&&errMsg("กรุณาเลือกหมวดหมู่")}
-        {/* แจ้งอีเมลพิเศษ */}
-        {category&&CATEGORY_SPECIAL_EMAILS[category]&&(
-          <div style={{marginTop:12,padding:"8px 14px",background:"#fef3c7",borderRadius:10,border:"1.5px solid #fcd34d",fontSize:13,color:"#92400e"}}>
-            📧 ระบบจะแจ้ง: <strong>{CATEGORY_SPECIAL_EMAILS[category].join(", ")}</strong>
-          </div>
-        )}
-      </div>
-
-      {/* 2: Building + Location */}
-      <div style={{background:"white",borderRadius:20,border:"1.5px solid #f3f4f6",padding:24,marginBottom:16,boxShadow:"0 2px 8px rgba(0,0,0,0.05)"}}>
-        <p style={{fontSize:14,fontWeight:700,color:"#374151",marginBottom:18,display:"flex",alignItems:"center",gap:8}}>{step(2,"#10b981")} สถานที่ <span style={{color:"#ef4444"}}>*</span></p>
-        <div style={{marginBottom:16}}>
-          <label style={lbl}>🏫 อาคาร <span style={{color:"#ef4444"}}>*</span></label>
-          <select value={buildingId} onChange={e=>setBuildingId(e.target.value)}
-            style={{...inp(touched&&!buildingId),appearance:"auto",cursor:"pointer"}}>
-            <option value="">— เลือกอาคาร —</option>
-            {buildings.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-          {touched&&!buildingId&&errMsg("กรุณาเลือกอาคาร")}
-          {selBuilding?.repairUsers&&selBuilding.repairUsers.length>0&&(
-            <div style={{marginTop:10,padding:"10px 14px",background:"#eff6ff",borderRadius:12,border:"1.5px solid #bfdbfe",fontSize:13}}>
-              <span style={{fontWeight:700,color:"#1e40af"}}>🔧 ผู้ดูแลตึก: </span>
-              <span>{selBuilding.repairUsers.map(u=>fullName(u)).join(", ")}</span>
-              <p style={{margin:"4px 0 0",color:"#6b7280",fontSize:12}}>ระบบจะแจ้งเตือนผู้ดูแลตึกอัตโนมัติ</p>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">วันที่</label>
+              <input type="date" value={memoDate} onChange={e=>setMemoDate(e.target.value)}
+                className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
             </div>
-          )}
-        </div>
-        <div>
-          <label style={lbl}>📍 ห้อง / จุดที่แจ้งซ่อม <span style={{color:"#ef4444"}}>*</span></label>
-          <input type="text" value={location} onChange={e=>setLocation(e.target.value)}
-            placeholder="เช่น ห้อง 214, ห้องน้ำชาย ชั้น 1"
-            style={inp(touched&&!location)}/>
-          {touched&&!location&&errMsg("กรุณาระบุสถานที่")}
-        </div>
-      </div>
+          </div>
 
-      {/* 3: Description */}
-      <div style={{background:"white",borderRadius:20,border:"1.5px solid #f3f4f6",padding:24,marginBottom:16,boxShadow:"0 2px 8px rgba(0,0,0,0.05)"}}>
-        <p style={{fontSize:14,fontWeight:700,color:"#374151",marginBottom:18,display:"flex",alignItems:"center",gap:8}}>{step(3,"#8b5cf6")} รายละเอียดปัญหา <span style={{color:"#ef4444"}}>*</span></p>
-        <textarea value={description} onChange={e=>setDescription(e.target.value)} rows={5}
-          placeholder="อธิบายอาการเสียหาย..."
-          style={{...inp(touched&&!description),resize:"vertical",lineHeight:1.7}}/>
-        {touched&&!description&&errMsg("กรุณาระบุรายละเอียดปัญหา")}
-      </div>
-
-      {/* 4: Photo */}
-      <div style={{background:"white",borderRadius:20,border:"1.5px solid #f3f4f6",padding:24,marginBottom:24,boxShadow:"0 2px 8px rgba(0,0,0,0.05)"}}>
-        <p style={{fontSize:14,fontWeight:700,color:"#374151",marginBottom:14,display:"flex",alignItems:"center",gap:8}}>{step(4,"#f59e0b")} แนบรูปภาพ (ไม่บังคับ) — บันทึกใน OneDrive</p>
-        <button type="button" onClick={()=>fileRef.current?.click()} style={{width:"100%",padding:20,borderRadius:14,border:"2.5px dashed #d1d5db",background:"#f9fafb",cursor:"pointer",fontSize:14,color:"#6b7280",fontWeight:500}}>
-          📸 คลิกเพื่อเลือกรูป
-        </button>
-        <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={e=>setPhotoFiles(prev=>[...prev,...Array.from(e.target.files??[])])}/>
-        {photoFiles.length>0&&(
-          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:12}}>
-            {photoFiles.map((f,i)=>(
-              <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 12px",borderRadius:10,background:"#eff6ff",border:"1.5px solid #bfdbfe",fontSize:13,color:"#1e40af"}}>
-                📎 <span style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.name}</span>
-                <button type="button" onClick={()=>setPhotoFiles(p=>p.filter((_,idx)=>idx!==i))} style={{background:"none",border:"none",cursor:"pointer",color:"#ef4444",fontSize:16,padding:0}}>×</button>
+          {/* เลือกรายการ */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                เลือกรายการที่ต้องการรวม ({checkedCount}/{requests.length})
+              </label>
+              <div className="flex gap-2">
+                <button onClick={()=>setSelected(Object.fromEntries(requests.map(r=>[r.id,true])))}
+                  className="text-xs text-blue-500 font-bold hover:underline">เลือกทั้งหมด</button>
+                <button onClick={()=>setSelected(Object.fromEntries(requests.map(r=>[r.id,false])))}
+                  className="text-xs text-slate-400 font-bold hover:underline">ล้าง</button>
               </div>
-            ))}
+            </div>
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {requests.map((r,i) => (
+                <label key={r.id} className={`flex items-start gap-3 cursor-pointer p-3 rounded-xl border-2 transition-all
+                  ${selected[r.id] ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}>
+                  <input type="checkbox" checked={!!selected[r.id]}
+                    onChange={e=>setSelected(prev=>({...prev,[r.id]:e.target.checked}))}
+                    className="mt-0.5 w-4 h-4 accent-blue-600 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-slate-800 text-sm">{i+1}. {r.title}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">
+                      {r.building?.name ?? "—"}{r.room ? ` · ${r.room}` : ""}
+                      {r.description && <span className="ml-2 text-slate-300">— {r.description.slice(0,40)}{r.description.length>40?"...":""}</span>}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
-        )}
-      </div>
 
-      {canSubmit&&(
-        <div style={{background:"#f0fdf4",border:"2px solid #86efac",borderRadius:20,padding:20,marginBottom:20}}>
-          <p style={{fontWeight:700,fontSize:14,color:"#166534",marginBottom:10}}>✅ สรุปรายการแจ้งซ่อม</p>
-          <div style={{fontSize:14,color:"#374151",lineHeight:2}}>
-            <div>🔧 ประเภท: <strong>{CATEGORIES.find(c=>c.key===category)?.label}</strong></div>
-            <div>🏫 อาคาร: <strong>{buildings.find(b=>b.id===buildingId)?.name}</strong></div>
-            <div>📍 สถานที่: <strong>{location}</strong></div>
-            <div>📋 รายละเอียด: <strong>{description}</strong></div>
-            {photoFiles.length>0&&<div>🖼️ รูปภาพ: <strong>{photoFiles.length} ไฟล์</strong></div>}
+          {/* Preview info */}
+          <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-700">
+            <p className="font-bold mb-1">ข้อมูลในเอกสาร</p>
+            <p>ผู้เสนอ: {fullName(currentUser)}</p>
+            <p>ผู้อนุมัติ: {fullName(director) || "นายธนณัฐ  ศิระวงษ์"} (ผอ.)</p>
           </div>
         </div>
-      )}
-
-      <div style={{display:"flex",gap:12}}>
-        <button type="button" onClick={onCancel} style={{flex:1,padding:14,borderRadius:14,border:"2px solid #e5e7eb",background:"white",fontSize:15,fontWeight:600,cursor:"pointer"}}>ยกเลิก</button>
-        <button type="button" onClick={handleSubmit} disabled={loading} style={{flex:2,padding:14,borderRadius:14,border:"none",fontSize:15,fontWeight:700,cursor:!loading?"pointer":"not-allowed",background:!loading?"linear-gradient(135deg,#3b82f6,#6366f1)":"#e5e7eb",color:!loading?"white":"#9ca3af",boxShadow:!loading?"0 4px 14px rgba(99,102,241,0.4)":"none"}}>
-          {loading?"⏳ กำลังส่ง...":"📤 ส่งคำขอแจ้งซ่อม"}
-        </button>
+        <div className="px-6 py-4 border-t border-slate-100 flex gap-2 justify-end shrink-0 bg-slate-50 rounded-b-2xl">
+          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 text-sm">ยกเลิก</button>
+          <button onClick={handlePrint} disabled={checkedCount===0}
+            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold disabled:opacity-50 flex items-center gap-2">
+            🖨️ พิมพ์บันทึกข้อความ ({checkedCount} รายการ)
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── RepairCard ────────────────────────────────────────────────────────────────
-function RepairCard({req,currentUser,staff,onUpdate}:{req:RepairRequest;currentUser:UserProfile;staff:UserProfile[];onUpdate:()=>void;}){
-  const [expanded,setExpanded]=useState(false);
-  const [addingNote,setAddingNote]=useState(false);
-  const [noteText,setNoteText]=useState("");
-  const [loading,setLoading]=useState(false);
-  const isAdmin=ADMIN_ROLES.includes(currentUser.role);
-  const isOwner=req.reporter_id===currentUser.id;
-  const isAssignee=req.assigned_to===currentUser.id;
-  const repairUids=req.building?.repair_user_ids??[];
-  const isBuildingRepair=repairUids.includes(currentUser.id);
-  const isAssigned=!!req.assigned_to; // มีการมอบหมายแล้ว
+// ── RepairFormModal ───────────────────────────────────────────────────────────
+function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: {
+  existing?: RepairRequest|null; buildings: Building[];
+  currentUser: User; onSave: () => void; onClose: () => void;
+}) {
+  const [title,       setTitle]      = useState(existing?.title ?? "");
+  const [desc,        setDesc]       = useState(existing?.description ?? "");
+  const [buildingId,  setBuildingId] = useState(existing?.building_id ?? "");
+  const [room,        setRoom]       = useState(existing?.room ?? "");
+  const [category,    setCategory]   = useState(existing?.category ?? "");
+  const [priority,    setPriority]   = useState(existing?.priority ?? "medium");
+  const [imageUrls,   setImageUrls]  = useState<string[]>(existing?.image_urls ?? []);
+  const [uploading,   setUploading]  = useState(false);
+  const [saving,      setSaving]     = useState(false);
+  const [errors,      setErrors]     = useState<Record<string,boolean>>({});
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  // ผู้แจ้งแก้ไขได้เมื่อยังไม่มอบหมาย, ห้ามแก้ไข/ลบหลังมอบหมาย
-  const canEdit=(isAdmin||isAssignee||isBuildingRepair)&&req.status!=="cancelled"&&req.status!=="completed";
-  const ownerCanEdit=isOwner&&!isAssigned&&req.status==="pending"; // แก้ไขได้เมื่อยังไม่มอบหมาย
-  const cat=CATEGORIES.find(c=>c.key===req.category)??CATEGORIES[7];
+  const validate = () => {
+    const e: Record<string,boolean> = {};
+    if (!title.trim()) e.title = true;
+    if (!buildingId) e.buildingId = true;
+    if (!category) e.category = true;
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
 
-  async function updateStatus(s:RepairStatus){
-    setLoading(true);
-    const u:any={status:s,updated_at:new Date().toISOString()};
-    if(s==="completed"){
-      u.completed_at=new Date().toISOString();
-      // ส่งเมลแจ้งเสร็จไปที่ general@khienkhet.ac.th
-      await sendRepairNotification(req,req.building,[COMPLETED_NOTIFY_EMAIL],true);
+  const handleUpload = async (ev: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(ev.target.files ?? []);
+    if (!files.length) return;
+    setUploading(true);
+    for (const file of files) {
+      if (file.size > 10*1024*1024) { alert(`${file.name} ขนาดเกิน 10MB`); continue; }
+      const ext = file.name.split(".").pop();
+      const path = `repair/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error } = await supabase.storage.from("repair-images").upload(path, file, { upsert: false });
+      if (error) { alert("อัปโหลดไม่สำเร็จ: "+error.message); continue; }
+      const { data } = supabase.storage.from("repair-images").getPublicUrl(path);
+      if (data?.publicUrl) setImageUrls(prev => [...prev, data.publicUrl]);
     }
-    await (supabase.from("repair_requests") as any).update(u).eq("id",req.id);
-    setLoading(false);onUpdate();
-  }
-  async function assignTo(uid:string){
-    setLoading(true);
-    await (supabase.from("repair_requests") as any).update({assigned_to:uid||null,assigned_at:uid?new Date().toISOString():null,status:uid?"in_progress":"pending",updated_at:new Date().toISOString()}).eq("id",req.id);
-    setLoading(false);onUpdate();
-  }
-  async function addNote(){
-    if(!noteText.trim())return;setLoading(true);
-    const notes=[...(req.progress_notes??[]),{note:noteText.trim(),by:fullName(currentUser),at:new Date().toISOString()}];
-    await (supabase.from("repair_requests") as any).update({progress_notes:notes,updated_at:new Date().toISOString()}).eq("id",req.id);
-    setNoteText("");setAddingNote(false);setLoading(false);onUpdate();
-  }
-  async function cancelReq(){
-    if(!confirm("ยืนยันการยกเลิก?"))return;setLoading(true);
-    await (supabase.from("repair_requests") as any).update({status:"cancelled",updated_at:new Date().toISOString()}).eq("id",req.id);
-    setLoading(false);onUpdate();
-  }
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+  };
 
-  return(
-    <div style={{background:"white",borderRadius:20,overflow:"hidden",border:`2px solid ${expanded?cat.border:"#f3f4f6"}`,boxShadow:expanded?`0 4px 20px ${cat.color}20`:"0 2px 8px rgba(0,0,0,0.05)",opacity:req.status==="cancelled"?0.65:1,transition:"all 0.2s ease"}}>
-      <div style={{height:4,background:`linear-gradient(90deg,${cat.color},${cat.color}88)`}}/>
-      <div style={{padding:"16px 20px",display:"flex",alignItems:"flex-start",gap:14,cursor:"pointer"}} onClick={()=>setExpanded(e=>!e)}>
-        <div style={{width:48,height:48,borderRadius:14,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:cat.bg,border:`1.5px solid ${cat.border}`,fontSize:22}}>{cat.icon}</div>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
-            <span style={{fontSize:12,color:"#9ca3af",fontWeight:600,fontFamily:"monospace"}}>{req.ticket_no}</span>
-            <StatusBadge status={req.status}/>
-            {req.building&&<span style={{fontSize:12,background:"#f3f4f6",color:"#374151",padding:"2px 10px",borderRadius:10,fontWeight:600}}>🏫 {req.building.name}</span>}
-            {isBuildingRepair&&!isAdmin&&<span style={{fontSize:12,background:"#ecfdf5",color:"#065f46",padding:"2px 10px",borderRadius:10,fontWeight:600,border:"1px solid #6ee7b7"}}>🔧 ผู้ดูแลตึก</span>}
-          </div>
-          <p style={{fontSize:16,fontWeight:700,margin:"0 0 3px",color:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cat.label} — {req.location}</p>
-          <p style={{fontSize:14,color:"#6b7280",margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{req.description}</p>
+  const handleSave = async () => {
+    if (!validate()) return;
+    setSaving(true);
+    const payload = {
+      title: title.trim(), description: desc.trim(), building_id: buildingId,
+      room: room.trim(), category, priority, image_urls: imageUrls,
+      reported_by: currentUser.id, status: existing?.status ?? "pending",
+    };
+    if (existing?.id) {
+      await supabase.from("repair_requests").update(payload).eq("id", existing.id);
+    } else {
+      await supabase.from("repair_requests").insert([payload]);
+    }
+    setSaving(false);
+    onSave();
+  };
+
+  const iCls = (err?: boolean) =>
+    `w-full border-2 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none bg-white transition-colors
+    ${err ? "border-red-400 bg-red-50" : "border-blue-200 focus:border-blue-500 text-slate-800"}`;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[92vh]"
+        onClick={e=>e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+          <h3 className="font-bold text-slate-800 text-base">{existing ? "✏️ แก้ไขรายการ" : "🔧 แจ้งซ่อม"}</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">✕</button>
         </div>
-        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
-          <span style={{fontSize:12,color:"#9ca3af"}}>{toThaiDate(req.created_at)}</span>
-          <span style={{fontSize:18,color:"#9ca3af"}}>{expanded?"▲":"▼"}</span>
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">หัวข้อ <span className="text-red-400">*</span></label>
+            <input type="text" value={title} onChange={e=>setTitle(e.target.value)}
+              placeholder="เช่น ไฟฟ้าดับห้อง 101" className={iCls(errors.title)} />
+            {errors.title && <p className="text-xs text-red-500 mt-1">กรุณากรอกหัวข้อ</p>}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">อาคาร <span className="text-red-400">*</span></label>
+              <select value={buildingId} onChange={e=>setBuildingId(e.target.value)} className={iCls(errors.buildingId)}>
+                <option value="">— เลือกอาคาร —</option>
+                {buildings.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              {errors.buildingId && <p className="text-xs text-red-500 mt-1">กรุณาเลือกอาคาร</p>}
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ห้อง/บริเวณ</label>
+              <input type="text" value={room} onChange={e=>setRoom(e.target.value)}
+                placeholder="เช่น ห้อง 101" className={iCls()} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">หมวดหมู่ <span className="text-red-400">*</span></label>
+              <select value={category} onChange={e=>setCategory(e.target.value)} className={iCls(errors.category)}>
+                <option value="">— เลือก —</option>
+                {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+              {errors.category && <p className="text-xs text-red-500 mt-1">กรุณาเลือกหมวดหมู่</p>}
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ความเร่งด่วน</label>
+              <select value={priority} onChange={e=>setPriority(e.target.value)} className={iCls()}>
+                <option value="low">🟢 ต่ำ</option>
+                <option value="medium">🟡 ปานกลาง</option>
+                <option value="high">🔴 เร่งด่วน</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">รายละเอียด</label>
+            <textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={3}
+              placeholder="อธิบายปัญหาเพิ่มเติม..." className={iCls()+" resize-none"} />
+          </div>
+          {/* รูปภาพ */}
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">รูปภาพประกอบ</label>
+            <label className={`flex items-center gap-3 cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl px-4 py-3 transition-colors ${uploading?"opacity-60":""} hover:border-blue-400`}>
+              <span className="text-2xl">{uploading?"⏳":"📷"}</span>
+              <div>
+                <p className="font-bold text-slate-600 text-sm">{uploading?"กำลังอัปโหลด...":"คลิกเพื่อแนบรูป"}</p>
+                <p className="text-slate-400 text-xs">ไม่เกิน 10MB</p>
+              </div>
+              <input ref={fileRef} type="file" multiple accept="image/*" disabled={uploading}
+                onChange={handleUpload} className="hidden" />
+            </label>
+            {imageUrls.length > 0 && (
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                {imageUrls.map((url,i)=>(
+                  <div key={i} className="relative group">
+                    <img src={url} alt="" className="w-full h-20 object-cover rounded-xl border border-slate-200" />
+                    <button onClick={()=>setImageUrls(prev=>prev.filter((_,j)=>j!==i))}
+                      className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full text-[10px] hidden group-hover:flex items-center justify-center font-bold shadow">×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-slate-100 flex gap-2 justify-end shrink-0 bg-slate-50 rounded-b-2xl">
+          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 text-sm">ยกเลิก</button>
+          <button onClick={handleSave} disabled={saving}
+            className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold disabled:opacity-50">
+            {saving ? "กำลังบันทึก..." : (existing ? "💾 บันทึก" : "📤 แจ้งซ่อม")}
+          </button>
         </div>
       </div>
-
-      {expanded&&(
-        <div style={{borderTop:`2px solid ${cat.border}`,padding:"18px 20px",background:cat.bg}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px 20px",marginBottom:16,fontSize:14}}>
-            <div><span style={{color:"#6b7280"}}>👤 ผู้แจ้ง: </span><strong>{fullName(req.reporter)}</strong></div>
-            <div><span style={{color:"#6b7280"}}>🕐 แจ้งเมื่อ: </span><strong>{toThaiDateTime(req.created_at)}</strong></div>
-            {req.building&&<div><span style={{color:"#6b7280"}}>🏫 อาคาร: </span><strong>{req.building.name}</strong></div>}
-            {req.assigned_to&&<div><span style={{color:"#6b7280"}}>🔧 ช่างที่รับงาน: </span><strong>{fullName(req.assignee)}</strong></div>}
-            {req.completed_at&&<div className="col-span-2"><span style={{color:"#6b7280"}}>✅ เสร็จเมื่อ: </span><strong>{toThaiDateTime(req.completed_at)}</strong></div>}
-          </div>
-          {req.building?.repairUsers&&req.building.repairUsers.length>0&&(
-            <div style={{padding:"10px 14px",background:"#eff6ff",borderRadius:12,border:"1.5px solid #bfdbfe",fontSize:13,marginBottom:12}}>
-              <span style={{fontWeight:700,color:"#1e40af"}}>🔧 ผู้ดูแลตึก: </span>
-              <span>{req.building.repairUsers.map(u=>fullName(u)).join(", ")}</span>
-            </div>
-          )}
-          <div style={{padding:"14px 16px",background:"white",borderRadius:14,fontSize:15,marginBottom:16,lineHeight:1.7,color:"#374151",border:`1.5px solid ${cat.border}`}}>{req.description}</div>
-          {req.photo_urls&&req.photo_urls.length>0&&(
-            <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
-              {req.photo_urls.map((url,i)=>(
-                <a key={i} href={url} target="_blank" rel="noopener noreferrer">
-                  <img src={url} alt="" style={{width:90,height:90,objectFit:"cover",borderRadius:12,border:`2px solid ${cat.border}`}}/>
-                </a>
-              ))}
-            </div>
-          )}
-          {req.progress_notes&&req.progress_notes.length>0&&(
-            <div style={{marginBottom:16}}>
-              <p style={{fontSize:13,fontWeight:700,color:"#374151",marginBottom:10}}>📝 บันทึกความคืบหน้า</p>
-              {req.progress_notes.map((n,i)=>(
-                <div key={i} style={{padding:"10px 14px",borderRadius:12,background:"white",fontSize:14,borderLeft:`4px solid ${cat.color}`,marginBottom:6}}>
-                  <p style={{margin:"0 0 4px",color:"#111827"}}>{n.note}</p>
-                  <p style={{margin:0,fontSize:12,color:"#9ca3af"}}>{n.by} · {toThaiDateTime(n.at)}</p>
-                </div>
-              ))}
-            </div>
-          )}
-          {/* เพิ่มบันทึก — เฉพาะ admin/assignee/repair user */}
-          {canEdit&&(
-            <div style={{marginBottom:14}}>
-              {!addingNote?(
-                <button type="button" onClick={()=>setAddingNote(true)} style={{fontSize:14,padding:"8px 16px",borderRadius:10,border:`1.5px dashed ${cat.color}`,background:"white",cursor:"pointer",color:cat.color,fontWeight:600}}>+ เพิ่มบันทึกความคืบหน้า</button>
-              ):(
-                <div style={{display:"flex",gap:8}}>
-                  <input type="text" value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="บันทึก..." autoFocus
-                    style={{flex:1,padding:"10px 14px",fontSize:14,borderRadius:10,border:`2px solid ${cat.color}`,outline:"none",fontFamily:"inherit"}}
-                    onKeyDown={e=>e.key==="Enter"&&addNote()}/>
-                  <button type="button" onClick={addNote} disabled={!noteText.trim()||loading} style={{padding:"10px 16px",borderRadius:10,border:"none",background:cat.color,color:"white",fontWeight:700,cursor:"pointer",fontSize:14}}>บันทึก</button>
-                  <button type="button" onClick={()=>{setAddingNote(false);setNoteText("");}} style={{padding:"10px 14px",borderRadius:10,border:"1.5px solid #e5e7eb",background:"white",cursor:"pointer",fontSize:14}}>ยกเลิก</button>
-                </div>
-              )}
-            </div>
-          )}
-          {/* Admin actions */}
-          {(isAdmin||isBuildingRepair)&&req.status!=="cancelled"&&req.status!=="completed"&&(
-            <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}>
-              {(req.status==="pending"||req.status==="in_progress")&&isAdmin&&(
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:14,color:"#374151",fontWeight:600}}>มอบหมาย:</span>
-                  <select value={req.assigned_to??""} onChange={e=>assignTo(e.target.value)} style={{fontSize:14,padding:"8px 12px",borderRadius:10,border:"2px solid #e5e7eb",fontFamily:"inherit"}}>
-                    <option value="">— ยังไม่ได้มอบหมาย —</option>
-                    {staff.map(s=><option key={s.id} value={s.id}>{fullName(s)}</option>)}
-                  </select>
-                </div>
-              )}
-              {req.status==="in_progress"&&(
-                <button type="button" disabled={loading} onClick={()=>updateStatus("completed")} style={{padding:"10px 18px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#10b981,#059669)",color:"white",fontWeight:700,fontSize:14,cursor:"pointer"}}>✅ ปิดงาน — เสร็จสิ้น</button>
-              )}
-              {req.status==="pending"&&isBuildingRepair&&!isAdmin&&(
-                <button type="button" disabled={loading} onClick={()=>updateStatus("in_progress")} style={{padding:"10px 18px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#3b82f6,#6366f1)",color:"white",fontWeight:700,fontSize:14,cursor:"pointer"}}>🔧 รับงานซ่อม</button>
-              )}
-            </div>
-          )}
-          {/* ผู้แจ้งยกเลิกได้เมื่อยังไม่มอบหมาย */}
-          {ownerCanEdit&&(
-            <div style={{marginTop:12}}>
-              <button type="button" onClick={cancelReq} disabled={loading} style={{padding:"10px 18px",borderRadius:10,border:"2px solid #fecaca",background:"#fef2f2",color:"#dc2626",fontWeight:600,fontSize:14,cursor:"pointer"}}>🗑️ ยกเลิกคำขอ</button>
-            </div>
-          )}
-          {/* แจ้งเตือน: ถ้ามอบหมายแล้ว ห้ามแก้ไข/ลบ */}
-          {isOwner&&isAssigned&&req.status!=="completed"&&req.status!=="cancelled"&&(
-            <div style={{marginTop:10,padding:"8px 14px",background:"#fef3c7",borderRadius:10,border:"1.5px solid #fcd34d",fontSize:13,color:"#92400e"}}>
-              🔒 งานนี้ถูกมอบหมายแล้ว ไม่สามารถแก้ไขหรือยกเลิกได้
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ─── Main Page ────────────────────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
-export default function RepairPage(){
-  const router=useRouter();
-  const [user,setUser]=useState<UserProfile|null>(null);
-  const [requests,setRequests]=useState<RepairRequest[]>([]);
-  const [buildings,setBuildings]=useState<Building[]>([]);
-  const [staff,setStaff]=useState<UserProfile[]>([]);
-  const [allUsers,setAllUsers]=useState<UserProfile[]>([]);
-  const [loading,setLoading]=useState(true);
-  const [showForm,setShowForm]=useState(false);
-  const [showBuildingAdmin,setShowBuildingAdmin]=useState(false);
-  const [filterStatus,setFilterStatus]=useState<RepairStatus|"all">("all");
-  const [filterCat,setFilterCat]=useState("all");
-  const [filterBuilding,setFilterBuilding]=useState("all");
-  const [search,setSearch]=useState("");
+// ── ManagersModal ─────────────────────────────────────────────────────────────
+function ManagersModal({ currentUser, allUsers, managers, onClose, onRefresh }: {
+  currentUser: User; allUsers: User[]; managers: ProjectManager[];
+  onClose: () => void; onRefresh: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [adding, setAdding] = useState(false);
+  const managerIds = useMemo(() => new Set(managers.map(m => m.user_id)), [managers]);
 
+  const filtered = useMemo(() => {
+    if (!search.trim()) return [];
+    const q = search.toLowerCase();
+    return allUsers.filter(u =>
+      !managerIds.has(u.id) &&
+      `${u.first_name} ${u.last_name}`.toLowerCase().includes(q)
+    ).slice(0, 8);
+  }, [allUsers, search, managerIds]);
+
+  const handleAdd = async (u: User) => {
+    setAdding(true);
+    await supabase.from("repair_project_managers").insert([{ user_id: u.id, added_by: currentUser.id }]);
+    setSearch(""); onRefresh(); setAdding(false);
+  };
+  const handleRemove = async (id: string) => {
+    if (!confirm("ยืนยันการลบผู้ดูแลโครงการ?")) return;
+    await supabase.from("repair_project_managers").delete().eq("id", id);
+    onRefresh();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[88vh]"
+        onClick={e=>e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+          <h3 className="font-bold text-slate-800 text-base">⚙️ ผู้ดูแลโครงการแจ้งซ่อม</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">✕</button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
+            ผู้ดูแลโครงการสามารถดูรายงานทั้งหมด สร้างบันทึกข้อความ และพิมพ์รายงานได้
+          </div>
+          {/* ค้นหา */}
+          <div className="relative">
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">เพิ่มผู้ดูแล</label>
+            <input type="text" value={search} onChange={e=>setSearch(e.target.value)}
+              placeholder="🔍 พิมพ์ชื่อครู..."
+              className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm focus:border-blue-500 focus:outline-none bg-white" />
+            {filtered.length > 0 && (
+              <div className="absolute top-full left-0 right-0 bg-white border-2 border-blue-200 rounded-xl shadow-lg z-10 overflow-hidden mt-1">
+                {filtered.map(u=>(
+                  <button key={u.id} onClick={()=>handleAdd(u)} disabled={adding}
+                    className="w-full px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-blue-50 border-b border-slate-100 last:border-0 flex items-center justify-between">
+                    <span>{fullName(u)} <span className="text-slate-400 text-xs">{u.role}</span></span>
+                    <span className="text-blue-500 font-bold text-xs">+ เพิ่ม</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {/* รายชื่อ */}
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">ผู้ดูแลปัจจุบัน ({managers.length} คน)</p>
+            {managers.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-sm bg-slate-50 rounded-xl border border-dashed border-slate-200">ยังไม่มีผู้ดูแลโครงการ</div>
+            ) : (
+              <div className="space-y-2">
+                {managers.map(m=>(
+                  <div key={m.id} className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-3 border border-slate-200">
+                    <div>
+                      <p className="font-bold text-slate-800 text-sm">{fullName(m.user)}</p>
+                      <p className="text-xs text-slate-400">{m.user?.role}</p>
+                    </div>
+                    <button onClick={()=>handleRemove(m.id)}
+                      className="px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">🗑️ ลบ</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── DetailModal ───────────────────────────────────────────────────────────────
+function DetailModal({ request, canManage, allUsers, onUpdate, onClose }: {
+  request: RepairRequest; canManage: boolean; allUsers: User[];
+  onUpdate: () => void; onClose: () => void;
+}) {
+  const [status, setStatus] = useState(request.status);
+  const [assignedTo, setAssignedTo] = useState(request.assigned_to ?? "");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleUpdate = async () => {
+    setSaving(true);
+    await supabase.from("repair_requests").update({
+      status, assigned_to: assignedTo || null,
+      updated_at: new Date().toISOString(),
+      ...(status === "resolved" ? { resolved_at: new Date().toISOString() } : {}),
+    }).eq("id", request.id);
+    setSaving(false);
+    onUpdate();
+  };
+
+  const cfg = STATUS_CFG[status] ?? STATUS_CFG.pending;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[92vh]"
+        onClick={e=>e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+          <h3 className="font-bold text-slate-800 text-base">🔍 รายละเอียดการแจ้งซ่อม</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">✕</button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
+          <div>
+            <h2 className="font-bold text-slate-800 text-lg">{request.title}</h2>
+            <div className="flex flex-wrap gap-2 mt-1">
+              <span style={{background:cfg.bg,color:cfg.color,borderColor:cfg.border}}
+                className="text-xs font-bold px-2.5 py-1 rounded-lg border">{cfg.label}</span>
+              {request.priority && (
+                <span className="text-xs font-bold px-2.5 py-1 rounded-lg border border-slate-200"
+                  style={{color:PRIORITY_CFG[request.priority]?.color}}>
+                  {PRIORITY_CFG[request.priority]?.label}
+                </span>
+              )}
+              {request.category && <span className="text-xs px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg border border-slate-200 font-medium">{request.category}</span>}
+            </div>
+          </div>
+          <div className="text-sm text-slate-500 space-y-1">
+            <p>🏢 {request.building?.name ?? "—"}{request.room ? ` · ${request.room}` : ""}</p>
+            <p>👤 {fullName(request.reporter)}</p>
+            <p>📅 {thaiDate(request.created_at)}</p>
+          </div>
+          {request.description && <p className="text-sm text-slate-600 bg-slate-50 rounded-xl px-4 py-3">{request.description}</p>}
+          {(request.image_urls??[]).length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">รูปภาพ</p>
+              <div className="grid grid-cols-3 gap-2">
+                {request.image_urls!.map((url,i)=>(
+                  <img key={i} src={url} alt="" onClick={()=>window.open(url,"_blank")}
+                    className="w-full h-24 object-cover rounded-xl border border-slate-200 cursor-pointer hover:brightness-90 transition-all" />
+                ))}
+              </div>
+            </div>
+          )}
+          {canManage && (
+            <div className="space-y-3 pt-2 border-t border-slate-100">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">จัดการ</p>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">สถานะ</label>
+                <select value={status} onChange={e=>setStatus(e.target.value)}
+                  className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none">
+                  {Object.entries(STATUS_CFG).map(([k,v])=>(
+                    <option key={k} value={k}>{v.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">มอบหมายให้</label>
+                <select value={assignedTo} onChange={e=>setAssignedTo(e.target.value)}
+                  className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none">
+                  <option value="">— ยังไม่ได้มอบหมาย —</option>
+                  {allUsers.map(u=><option key={u.id} value={u.id}>{fullName(u)}</option>)}
+                </select>
+              </div>
+              <button onClick={handleUpdate} disabled={saving}
+                className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold disabled:opacity-50">
+                {saving ? "กำลังบันทึก..." : "💾 บันทึกการเปลี่ยนแปลง"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+export default function Page() {
+  const router = useRouter();
+  const [user,         setUser]        = useState<User|null>(null);
+  const [loading,      setLoading]     = useState(true);
+  const [buildings,    setBuildings]   = useState<Building[]>([]);
+  const [requests,     setRequests]    = useState<RepairRequest[]>([]);
+  const [managers,     setManagers]    = useState<ProjectManager[]>([]);
+  const [allUsers,     setAllUsers]    = useState<User[]>([]);
+  const [director,     setDirector]    = useState<User|undefined>();
+  const [tab,          setTab]         = useState<"dashboard"|"list"|"mine">("list");
+  const [filterStatus, setFilterStatus]= useState("");
+  const [filterBldg,   setFilterBldg]  = useState("");
+  const [showForm,     setShowForm]    = useState(false);
+  const [showManagers, setShowManagers]= useState(false);
+  const [showMemo,     setShowMemo]    = useState(false);
+  const [detailReq,    setDetailReq]   = useState<RepairRequest|null>(null);
+
+  // ── Roles ──────────────────────────────────────────────────────────────────
+  const isAdmin       = useMemo(()=>ADMIN_ROLES.includes(user?.role??""),[user]);
+  const isProjManager = useMemo(()=>managers.some(m=>m.user_id===user?.id),[managers,user]);
+  const myBuildingIds = useMemo(()=>{
+    if (!user) return new Set<string>();
+    return new Set(buildings.filter(b=>(b.repair_user_ids??[]).includes(user.id)).map(b=>b.id));
+  },[buildings,user]);
+  const isBuildingManager = myBuildingIds.size > 0;
+  const canSeeAll = isAdmin || isProjManager;
+  const canManage = isAdmin || isProjManager || isBuildingManager;
+
+  // ── Load user ──────────────────────────────────────────────────────────────
   useEffect(()=>{
     const init=async()=>{
       const {data:{user:au}}=await supabase.auth.getUser();
-      if(!au){setLoading(false);return;}
-      const meta=au.user_metadata??{};const claims=meta.custom_claims??{};
-      const email=au.email||meta.email||meta.preferred_username||meta.upn||claims.email||"";
-      let ud:any=null;
-      const byId=await supabase.from("users").select("id,first_name,last_name,email,role,position,title").eq("auth_id",au.id).maybeSingle();
-      if(byId.data){ud=byId.data;}else if(email){const byE=await supabase.from("users").select("id,first_name,last_name,email,role,position,title").eq("email",email).maybeSingle();ud=byE.data;if(ud)await (supabase.from("users") as any).update({auth_id:au.id}).eq("id",ud.id);}
-      if(ud){
-        setUser(ud as UserProfile);
-        const {data:sd}=await supabase.from("users").select("id,first_name,last_name,email,role,position").in("role",ADMIN_ROLES);setStaff((sd as UserProfile[])||[]);
-        const {data:aU}=await supabase.from("users").select("id,first_name,last_name,email,role,position,title").order("first_name");setAllUsers((aU as UserProfile[])||[]);
+      if (!au){setLoading(false);return;}
+      let {data}=await supabase.from("users")
+        .select("id,first_name,last_name,title,role,position,signature_url")
+        .eq("auth_id",au.id).maybeSingle();
+      if (!data&&au.email){
+        const r=await supabase.from("users")
+          .select("id,first_name,last_name,title,role,position,signature_url")
+          .eq("email",au.email).maybeSingle();
+        data=r.data;
+        if (data) await supabase.from("users").update({auth_id:au.id}).eq("id",(data as any).id);
       }
-      const {data:bd}=await (supabase.from("buildings") as any).select("id,name,repair_user_ids,inspector_user_ids").order("name");
-      const {data:aU2}=await supabase.from("users").select("id,first_name,last_name,email");
-      const uMap:Record<string,any>={};(aU2||[]).forEach((u:any)=>{uMap[u.id]=u;});
-      setBuildings((bd||[]).map((b:any)=>({...b,repairUsers:(b.repair_user_ids||[]).map((id:string)=>uMap[id]).filter(Boolean),inspectorUsers:(b.inspector_user_ids||[]).map((id:string)=>uMap[id]).filter(Boolean)})));
+      if (data) setUser(data as User);
       setLoading(false);
     };
     init();
   },[]);
 
-  const loadRequests=useCallback(async()=>{
-    if(!user)return;
-    const isAdm=ADMIN_ROLES.includes(user.role);
-    const {data:myB}=await (supabase.from("buildings") as any).select("id").contains("repair_user_ids",[user.id]);
-    const myBids=(myB||[]).map((b:any)=>b.id);
-    let q=(supabase.from("repair_requests") as any)
-      .select("*, reporter:users!reporter_id(first_name,last_name,position,email), assignee:users!assigned_to(first_name,last_name), building:buildings!building_id(id,name,repair_user_ids,inspector_user_ids)")
-      .order("created_at",{ascending:false});
-    if(!isAdm&&myBids.length>0) q=q.or(`reporter_id.eq.${user.id},building_id.in.(${myBids.join(",")})`);
-    else if(!isAdm) q=q.eq("reporter_id",user.id);
-    const {data}=await q;
-    const {data:aU}=await supabase.from("users").select("id,first_name,last_name,email");
-    const uMap:Record<string,any>={};(aU||[]).forEach((u:any)=>{uMap[u.id]=u;});
-    setRequests(((data||[]).map((r:any)=>({...r,building:r.building?{...r.building,repairUsers:(r.building.repair_user_ids||[]).map((id:string)=>uMap[id]).filter(Boolean),inspectorUsers:(r.building.inspector_user_ids||[]).map((id:string)=>uMap[id]).filter(Boolean)}:null}))) as RepairRequest[]);
+  // ── Load data ──────────────────────────────────────────────────────────────
+  const loadData=useCallback(async()=>{
+    if (!user) return;
+    // Buildings
+    const {data:blds}=await supabase.from("buildings").select("*").order("name");
+    setBuildings((blds??[]) as Building[]);
+    // All users
+    const {data:usrs}=await supabase.from("users")
+      .select("id,first_name,last_name,title,role,position,signature_url").order("first_name");
+    setAllUsers((usrs??[]) as User[]);
+    // Director
+    const dir=(usrs??[]).find((u:any)=>u.role==="director") as User|undefined;
+    setDirector(dir);
+    // Project managers
+    const {data:mgrs}=await supabase.from("repair_project_managers")
+      .select("*,user:users(id,first_name,last_name,title,role)");
+    setManagers((mgrs??[]) as ProjectManager[]);
+    // Repair requests
+    const {data:rqs}=await supabase.from("repair_requests")
+      .select(`*,reporter:users!reported_by(id,first_name,last_name,title),
+        building:buildings(id,name)`)
+      .order("created_at",{ascending:false}).limit(300);
+    setRequests((rqs??[]) as unknown as RepairRequest[]);
   },[user]);
 
-  useEffect(()=>{if(user)loadRequests();},[user,loadRequests]);
+  useEffect(()=>{if(!loading&&user) loadData();},[loading,user,loadData]);
 
-  async function submitRepair(payload:any){
-    const {data,error}=await (supabase.from("repair_requests") as any).insert([payload]).select("*, reporter:users!reporter_id(first_name,last_name,email), building:buildings!building_id(id,name,repair_user_ids)").single();
-    if(error){alert("❌ "+error.message);return;}
-    // อีเมลพิเศษตามประเภท
-    const specialEmails=CATEGORY_SPECIAL_EMAILS[payload.category]??[];
-    await sendRepairNotification(data,data.building,specialEmails);
-    alert("✅ ส่งคำขอแจ้งซ่อมเรียบร้อยแล้ว\n📧 ระบบแจ้งเตือนผู้ดูแลแล้ว");
-    setShowForm(false);await loadRequests();
-  }
+  // ── Filtered ───────────────────────────────────────────────────────────────
+  const visibleRequests = useMemo(()=>{
+    let list = requests;
+    if (!canSeeAll && isBuildingManager)
+      list = list.filter(r => myBuildingIds.has(r.building_id ?? ""));
+    else if (!canSeeAll)
+      list = list.filter(r => r.reported_by === user?.id);
+    if (filterStatus) list = list.filter(r => r.status === filterStatus);
+    if (filterBldg)   list = list.filter(r => r.building_id === filterBldg);
+    return list;
+  },[requests,canSeeAll,isBuildingManager,myBuildingIds,user,filterStatus,filterBldg]);
 
-  const isAdm=user?ADMIN_ROLES.includes(user.role):false;
-  const isSuperAdm=user?SUPER_ADMIN_ROLES.includes(user.role):false;
+  const myRequests = useMemo(()=>requests.filter(r=>r.reported_by===user?.id),[requests,user]);
 
-  // ── filter รวมทั้งหมด รวม location ────────────────────────────────────────
-  const filtered=requests.filter(r=>{
-    if(filterStatus!=="all"&&r.status!==filterStatus)return false;
-    if(filterCat!=="all"&&r.category!==filterCat)return false;
-    if(filterBuilding!=="all"&&r.building_id!==filterBuilding)return false;
-    if(search){
-      const q=search.toLowerCase();
-      const inTicket=r.ticket_no.toLowerCase().includes(q);
-      const inLocation=r.location.toLowerCase().includes(q); // แก้ค้นหาสถานที่
-      const inDesc=r.description.toLowerCase().includes(q);
-      const inBuilding=(r.building?.name??"").toLowerCase().includes(q);
-      if(!inTicket&&!inLocation&&!inDesc&&!inBuilding)return false;
-    }
-    return true;
-  });
+  // ── Stats ──────────────────────────────────────────────────────────────────
+  const stats = useMemo(()=>{
+    const base = canSeeAll ? requests : myRequests;
+    return {
+      total:       base.length,
+      pending:     base.filter(r=>r.status==="pending").length,
+      in_progress: base.filter(r=>r.status==="in_progress").length,
+      resolved:    base.filter(r=>r.status==="resolved").length,
+    };
+  },[requests,myRequests,canSeeAll]);
 
-  const stats={
-    total:    requests.length,
-    pending:  requests.filter(r=>r.status==="pending").length,
-    in_progress:requests.filter(r=>r.status==="in_progress").length,
-    completed:requests.filter(r=>r.status==="completed").length,
-    cancelled:requests.filter(r=>r.status==="cancelled").length,
-  };
+  // ── Render ─────────────────────────────────────────────────────────────────
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <p className="text-slate-400 animate-pulse text-lg">กำลังโหลด...</p>
+    </div>
+  );
+  if (!user) return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <p className="text-slate-400 text-lg">กรุณาเข้าสู่ระบบ</p>
+    </div>
+  );
 
-  if(loading)return(<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f9fafb"}}><div style={{textAlign:"center"}}><div style={{fontSize:40,marginBottom:12}}>🔧</div><p style={{color:"#6b7280",fontSize:16}}>กำลังโหลด...</p></div></div>);
-  if(!user)return(<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:"#ef4444",fontSize:16,fontWeight:600}}>❌ กรุณาเข้าสู่ระบบก่อน</p></div>);
-  if(showForm)return(<div style={{minHeight:"100vh",background:"#f9fafb"}}><RepairForm user={user} buildings={buildings} onSubmit={submitRepair} onCancel={()=>setShowForm(false)}/></div>);
-
-  return(
-    <div style={{minHeight:"100vh",background:"#f9fafb",fontFamily:"'Sarabun','Noto Sans Thai',sans-serif"}}>
-      {showBuildingAdmin&&<BuildingAdmin allUsers={allUsers} onClose={()=>setShowBuildingAdmin(false)}/>}
-      {/* Top bar */}
-      <div style={{position:"sticky",top:0,zIndex:40,background:"white",borderBottom:"2px solid #f3f4f6",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,boxShadow:"0 2px 12px rgba(0,0,0,0.06)"}}>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <button onClick={()=>router.push("/dashboard")} style={{width:40,height:40,borderRadius:12,border:"2px solid #e5e7eb",background:"white",cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>🏠</button>
-          <div><h1 style={{fontSize:18,fontWeight:700,margin:0}}>🔧 แจ้งซ่อม (Helpdesk)</h1><p style={{fontSize:12,color:"#9ca3af",margin:0}}>โรงเรียนวัดเขียนเขต</p></div>
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col" style={{fontFamily:"'Sarabun','Noto Sans Thai',sans-serif"}}>
+      {/* Header */}
+      <div className="bg-gradient-to-r from-orange-500 via-orange-400 to-amber-400 px-5 py-4 flex items-center gap-3 shadow-lg shrink-0">
+        <button onClick={()=>router.push("/dashboard")}
+          className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white font-bold text-lg shrink-0">←</button>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-white font-bold text-lg leading-tight">🔧 ระบบแจ้งซ่อม</h1>
+          <p className="text-orange-100 text-sm">{fullName(user)}{isBuildingManager&&!canSeeAll?" · ผู้ดูแลอาคาร":""}{isProjManager?" · ผู้ดูแลโครงการ":""}</p>
         </div>
-        <div style={{display:"flex",gap:10}}>
-          {isSuperAdm&&(<button onClick={()=>setShowBuildingAdmin(true)} style={{padding:"10px 16px",borderRadius:14,border:"2px solid #e5e7eb",background:"white",color:"#374151",fontWeight:600,fontSize:14,cursor:"pointer"}}>🏫 จัดการอาคาร</button>)}
-          <button type="button" onClick={()=>setShowForm(true)} style={{padding:"10px 20px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#3b82f6,#6366f1)",color:"white",fontWeight:700,fontSize:15,cursor:"pointer",boxShadow:"0 4px 14px rgba(99,102,241,0.4)",display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:18}}>➕</span> แจ้งซ่อม
+        <div className="flex gap-2 flex-wrap justify-end">
+          {isAdmin && (
+            <button onClick={()=>setShowManagers(true)}
+              className="px-3 py-2 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-xl border border-white/30">
+              ⚙️ ผู้ดูแล
+            </button>
+          )}
+          {(canSeeAll) && (
+            <button onClick={()=>setShowMemo(true)}
+              className="px-3 py-2 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-xl border border-white/30">
+              📄 บันทึกข้อความ
+            </button>
+          )}
+          <button onClick={()=>setShowForm(true)}
+            className="px-4 py-2 bg-white text-orange-600 text-xs font-bold rounded-xl shadow-sm hover:bg-orange-50">
+            + แจ้งซ่อม
           </button>
         </div>
       </div>
 
-      <div style={{padding:"20px",width:"100%",boxSizing:"border-box"}}>
-        {/* Stats — 5 การ์ด (total + pending + in_progress + completed + cancelled) */}
-        {isAdm&&(
-          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:20}}>
-            {[
-              {key:"all",      label:"ทั้งหมด",        val:stats.total,      emoji:"📋",color:"#6366f1",bg:"#eef2ff",border:"#c7d2fe"},
-              {key:"pending",  label:"รอดำเนินการ",    val:stats.pending,    emoji:"⏳",color:"#f59e0b",bg:"#fffbeb",border:"#fcd34d"},
-              {key:"in_progress",label:"กำลังดำเนินการ",val:stats.in_progress,emoji:"⚙️",color:"#3b82f6",bg:"#eff6ff",border:"#93c5fd"},
-              {key:"completed",label:"เสร็จสิ้น",      val:stats.completed,  emoji:"✅",color:"#10b981",bg:"#ecfdf5",border:"#6ee7b7"},
-              {key:"cancelled",label:"ยกเลิก",         val:stats.cancelled,  emoji:"🚫",color:"#6b7280",bg:"#f9fafb",border:"#d1d5db"},
-            ].map(s=>{
-              const active=filterStatus===(s.key==="all"?"all":s.key);
-              return(
-                <div key={s.key} onClick={()=>setFilterStatus(s.key==="all"?"all":s.key as RepairStatus)}
-                  style={{padding:"16px 14px",borderRadius:18,cursor:"pointer",background:active?s.bg:"white",border:`2px solid ${active?s.color:"#f3f4f6"}`,boxShadow:active?`0 4px 16px ${s.color}30`:"0 2px 8px rgba(0,0,0,0.04)",transition:"all 0.2s ease"}}>
-                  <p style={{fontSize:12,color:"#6b7280",margin:"0 0 6px",fontWeight:600,display:"flex",alignItems:"center",gap:5}}><span>{s.emoji}</span>{s.label}</p>
-                  <p style={{fontSize:28,fontWeight:800,margin:0,color:active?s.color:"#111827"}}>{s.val}</p>
+      {/* Tabs */}
+      <div className="bg-white border-b border-slate-200 flex shrink-0">
+        {([
+          ["list",      "📋 รายการทั้งหมด"],
+          ...(canSeeAll ? [["dashboard","📊 แดชบอร์ด"]] as const : []),
+          ["mine",      "📌 ของฉัน"],
+        ] as const).map(([k,l])=>(
+          <button key={k} onClick={()=>setTab(k as any)}
+            className={`px-5 py-3.5 text-sm font-bold border-b-2 whitespace-nowrap transition-all
+              ${tab===k?"border-orange-500 text-orange-600":"border-transparent text-slate-400 hover:text-slate-600"}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {/* ── Dashboard ── */}
+        {tab==="dashboard" && canSeeAll && (
+          <div className="max-w-5xl mx-auto p-5 space-y-6">
+            {/* Stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {[
+                {label:"ทั้งหมด",     value:stats.total,       color:"#3b82f6", icon:"📋"},
+                {label:"รอดำเนินการ", value:stats.pending,     color:"#d97706", icon:"⏳"},
+                {label:"กำลังซ่อม",  value:stats.in_progress, color:"#2563eb", icon:"🔧"},
+                {label:"เสร็จแล้ว",  value:stats.resolved,    color:"#16a34a", icon:"✅"},
+              ].map(s=>(
+                <div key={s.label} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center gap-3">
+                  <span className="text-3xl">{s.icon}</span>
+                  <div>
+                    <div className="text-2xl font-black" style={{color:s.color}}>{s.value}</div>
+                    <div className="text-xs text-slate-400 font-medium">{s.label}</div>
+                  </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
+              ))}
+            </div>
 
-        {/* Filters */}
-        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:20}}>
-          <div style={{flex:1,minWidth:200,position:"relative"}}>
-            <span style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",fontSize:16}}>🔍</span>
-            <input type="text" value={search} onChange={e=>setSearch(e.target.value)} placeholder="ค้นหา ticket / สถานที่ / อาคาร..."
-              style={{width:"100%",paddingLeft:44,paddingRight:16,paddingTop:12,paddingBottom:12,fontSize:14,borderRadius:14,border:"2px solid #e5e7eb",outline:"none",fontFamily:"inherit",boxSizing:"border-box",background:"white"}}/>
-          </div>
-          <select value={filterBuilding} onChange={e=>setFilterBuilding(e.target.value)} style={{fontSize:14,padding:"12px 16px",borderRadius:14,border:"2px solid #e5e7eb",fontFamily:"inherit",background:"white"}}>
-            <option value="all">🏫 ทุกอาคาร</option>
-            {buildings.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-          <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={{fontSize:14,padding:"12px 16px",borderRadius:14,border:"2px solid #e5e7eb",fontFamily:"inherit",background:"white"}}>
-            <option value="all">📦 ทุกหมวดหมู่</option>
-            {CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.icon} {c.label}</option>)}
-          </select>
-          <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value as any)} style={{fontSize:14,padding:"12px 16px",borderRadius:14,border:"2px solid #e5e7eb",fontFamily:"inherit",background:"white"}}>
-            <option value="all">📋 ทุกสถานะ</option>
-            {Object.entries(STATUS_CONFIG).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-          </select>
-        </div>
+            {/* By building */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100">
+                <h3 className="font-bold text-slate-700 text-sm">สรุปรายอาคาร</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gradient-to-r from-orange-500 to-amber-400 text-white text-xs">
+                      {["อาคาร","รอดำเนินการ","กำลังซ่อม","เสร็จแล้ว","รวม"].map(h=>(
+                        <th key={h} className="px-4 py-3 text-left font-bold">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {buildings.map((b,i)=>{
+                      const bReqs=requests.filter(r=>r.building_id===b.id);
+                      return (
+                        <tr key={b.id} className={i%2===0?"bg-slate-50":"bg-white"}>
+                          <td className="px-4 py-3 font-bold text-slate-700">{b.name}</td>
+                          <td className="px-4 py-3 text-amber-600 font-bold">{bReqs.filter(r=>r.status==="pending").length}</td>
+                          <td className="px-4 py-3 text-blue-600 font-bold">{bReqs.filter(r=>r.status==="in_progress").length}</td>
+                          <td className="px-4 py-3 text-emerald-600 font-bold">{bReqs.filter(r=>r.status==="resolved").length}</td>
+                          <td className="px-4 py-3 text-slate-600 font-bold">{bReqs.length}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-        {filtered.length===0?(
-          <div style={{textAlign:"center",padding:"4rem 2rem",background:"white",borderRadius:24,border:"2px dashed #e5e7eb"}}>
-            <div style={{fontSize:56,marginBottom:16}}>🔧</div>
-            <p style={{color:"#374151",fontSize:18,fontWeight:700,margin:"0 0 8px"}}>{requests.length===0?"ยังไม่มีรายการแจ้งซ่อม":"ไม่พบรายการที่ตรงกับการค้นหา"}</p>
-            {requests.length===0&&(<><p style={{color:"#9ca3af",fontSize:14,marginBottom:20}}>เริ่มแจ้งซ่อมรายการแรกได้เลย</p><button type="button" onClick={()=>setShowForm(true)} style={{padding:"12px 28px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#3b82f6,#6366f1)",color:"white",fontWeight:700,fontSize:15,cursor:"pointer"}}>➕ แจ้งซ่อมรายการแรก</button></>)}
-          </div>
-        ):(
-          <div>
-            <p style={{fontSize:13,color:"#9ca3af",marginBottom:12,fontWeight:500}}>แสดง {filtered.length} จาก {requests.length} รายการ</p>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(480px,1fr))",gap:12}}>
-              {filtered.map(r=><RepairCard key={r.id} req={r} currentUser={user} staff={staff} onUpdate={loadRequests}/>)}
+            {/* Recent pending */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="font-bold text-slate-700 text-sm">⏳ รอดำเนินการ ({stats.pending})</h3>
+                <button onClick={()=>setTab("list")} className="text-xs text-orange-500 font-bold hover:underline">ดูทั้งหมด</button>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {requests.filter(r=>r.status==="pending").slice(0,5).map(r=>(
+                  <div key={r.id} onClick={()=>setDetailReq(r)}
+                    className="px-5 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-slate-800 text-sm truncate">{r.title}</p>
+                      <p className="text-xs text-slate-400">{r.building?.name} · {thaiDate(r.created_at)}</p>
+                    </div>
+                    {r.priority && (
+                      <span className="text-xs font-bold shrink-0" style={{color:PRIORITY_CFG[r.priority]?.color}}>
+                        {PRIORITY_CFG[r.priority]?.label}
+                      </span>
+                    )}
+                  </div>
+                ))}
+                {stats.pending===0&&<div className="px-5 py-8 text-center text-slate-400 text-sm">ไม่มีรายการรอดำเนินการ 🎉</div>}
+              </div>
             </div>
           </div>
         )}
+
+        {/* ── List ── */}
+        {tab==="list" && (
+          <div className="max-w-4xl mx-auto p-5 space-y-4">
+            {/* Filter */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap gap-3 items-end">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">สถานะ</label>
+                <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}
+                  className="border-2 border-blue-200 rounded-xl px-3 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none">
+                  <option value="">ทั้งหมด</option>
+                  {Object.entries(STATUS_CFG).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
+              {canSeeAll && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">อาคาร</label>
+                  <select value={filterBldg} onChange={e=>setFilterBldg(e.target.value)}
+                    className="border-2 border-blue-200 rounded-xl px-3 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none">
+                    <option value="">ทั้งหมด</option>
+                    {buildings.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+              )}
+              {(filterStatus||filterBldg)&&(
+                <button onClick={()=>{setFilterStatus("");setFilterBldg("");}}
+                  className="px-3 py-2 text-xs text-slate-400 hover:text-slate-600 underline self-end">ล้าง</button>
+              )}
+              <div className="flex-1"/>
+              <span className="text-xs text-slate-400 self-end">{visibleRequests.length} รายการ</span>
+            </div>
+
+            {visibleRequests.length===0 ? (
+              <div className="text-center py-16 bg-white rounded-2xl border border-slate-200 text-slate-400">
+                <p className="text-4xl mb-2">🔧</p>
+                <p className="text-sm">ไม่มีรายการแจ้งซ่อม</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {visibleRequests.map(r=>{
+                  const cfg=STATUS_CFG[r.status]??STATUS_CFG.pending;
+                  return (
+                    <div key={r.id} onClick={()=>setDetailReq(r)}
+                      className="bg-white rounded-2xl border border-slate-200 p-4 cursor-pointer hover:border-orange-300 hover:shadow-sm transition-all">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className="font-bold text-slate-800 text-sm">{r.title}</span>
+                            {r.priority&&<span className="text-xs font-bold" style={{color:PRIORITY_CFG[r.priority]?.color}}>{PRIORITY_CFG[r.priority]?.label}</span>}
+                          </div>
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-400">
+                            <span>🏢 {r.building?.name ?? "—"}{r.room?` · ${r.room}`:""}</span>
+                            {r.category&&<span>🏷️ {r.category}</span>}
+                            <span>📅 {thaiDate(r.created_at)}</span>
+                            <span>👤 {fullName(r.reporter)}</span>
+                          </div>
+                        </div>
+                        <span style={{background:cfg.bg,color:cfg.color,borderColor:cfg.border}}
+                          className="text-xs font-bold px-2.5 py-1 rounded-lg border shrink-0">{cfg.label}</span>
+                      </div>
+                      {(r.image_urls??[]).length>0&&(
+                        <div className="flex gap-1.5 mt-2">
+                          {r.image_urls!.slice(0,3).map((url,i)=>(
+                            <img key={i} src={url} alt="" className="w-12 h-12 object-cover rounded-lg border border-slate-200"/>
+                          ))}
+                          {r.image_urls!.length>3&&<div className="w-12 h-12 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center text-xs text-slate-400 font-bold">+{r.image_urls!.length-3}</div>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Mine ── */}
+        {tab==="mine" && (
+          <div className="max-w-3xl mx-auto p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-slate-700">รายการแจ้งซ่อมของฉัน ({myRequests.length})</h2>
+              <button onClick={()=>setShowForm(true)}
+                className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold rounded-xl">+ แจ้งซ่อม</button>
+            </div>
+            {myRequests.length===0 ? (
+              <div className="text-center py-16 bg-white rounded-2xl border border-slate-200 text-slate-400">
+                <p className="text-4xl mb-2">✅</p>
+                <p className="text-sm">ยังไม่มีรายการแจ้งซ่อม</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {myRequests.map(r=>{
+                  const cfg=STATUS_CFG[r.status]??STATUS_CFG.pending;
+                  return (
+                    <div key={r.id} onClick={()=>setDetailReq(r)}
+                      className="bg-white rounded-2xl border border-slate-200 p-4 cursor-pointer hover:border-orange-300 transition-all">
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-slate-800 text-sm">{r.title}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">🏢 {r.building?.name ?? "—"} · 📅 {thaiDate(r.created_at)}</p>
+                        </div>
+                        <span style={{background:cfg.bg,color:cfg.color,borderColor:cfg.border}}
+                          className="text-xs font-bold px-2.5 py-1 rounded-lg border shrink-0">{cfg.label}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Modals */}
+      {showForm && (
+        <RepairFormModal buildings={buildings} currentUser={user}
+          onSave={async()=>{setShowForm(false);await loadData();}}
+          onClose={()=>setShowForm(false)} />
+      )}
+      {showManagers && (
+        <ManagersModal currentUser={user} allUsers={allUsers} managers={managers}
+          onClose={()=>setShowManagers(false)} onRefresh={loadData} />
+      )}
+      {showMemo && (
+        <MemoModal requests={visibleRequests.filter(r=>r.status!=="resolved")}
+          buildings={buildings} currentUser={user} director={director}
+          onClose={()=>setShowMemo(false)} />
+      )}
+      {detailReq && (
+        <DetailModal request={detailReq} canManage={canManage} allUsers={allUsers}
+          onUpdate={async()=>{setDetailReq(null);await loadData();}}
+          onClose={()=>setDetailReq(null)} />
+      )}
     </div>
   );
 }
