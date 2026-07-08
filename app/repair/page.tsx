@@ -310,22 +310,66 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
     return Object.keys(e).length === 0;
   };
 
-  const handleUpload = async (ev: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(ev.target.files ?? []);
-    if (!files.length) return;
-    setUploading(true);
-    for (const file of files) {
-      if (file.size > 10*1024*1024) { alert(`${file.name} ขนาดเกิน 10MB`); continue; }
-      const ext = file.name.split(".").pop();
-      const path = `repair/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error } = await supabase.storage.from("repair-images").upload(path, file, { upsert: false });
-      if (error) { alert("อัปโหลดไม่สำเร็จ: "+error.message); continue; }
-      const { data } = supabase.storage.from("repair-images").getPublicUrl(path);
-      if (data?.publicUrl) setImageUrls(prev => [...prev, data.publicUrl]);
+  // ใหม่ — ใช้ OneDrive + preview + จำกัด 4 รูป
+const [imagePreviews, setImagePreviews] = useState<string[]>([]); // base64 preview
+const MAX_IMAGES = 4;
+
+const handleUpload = async (ev: React.ChangeEvent<HTMLInputElement>) => {
+  const files = Array.from(ev.target.files ?? []);
+  if (!files.length) return;
+
+  const remaining = MAX_IMAGES - imageUrls.length;
+  if (remaining <= 0) { alert(`อัปโหลดได้สูงสุด ${MAX_IMAGES} รูป`); return; }
+  const toUpload = files.slice(0, remaining);
+  if (files.length > remaining) alert(`เลือกได้อีก ${remaining} รูป (ใช้แค่ ${remaining} รูปแรก)`);
+
+  setUploading(true);
+  for (const file of toUpload) {
+    if (file.size > 10*1024*1024) { alert(`${file.name} ขนาดเกิน 10MB`); continue; }
+
+    // แสดง preview ก่อน (base64)
+    const reader = new FileReader();
+    reader.onload = e => {
+      if (e.target?.result) setImagePreviews(prev => [...prev, e.target!.result as string]);
+    };
+    reader.readAsDataURL(file);
+
+    // Upload ไป OneDrive
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("account", "general@khienkhet.ac.th");
+      formData.append("folder", "WKK_Repair_System");
+      formData.append("filename", `repair-${Date.now()}-${Math.random().toString(36).slice(2)}.${file.name.split(".").pop()}`);
+
+      const res = await fetch("/api/onedrive-upload", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(()=>({}));
+        alert("อัปโหลดไม่สำเร็จ: " + (err.error ?? res.statusText));
+        // ลบ preview ที่เพิ่งเพิ่ม
+        setImagePreviews(prev => prev.slice(0, -1));
+        continue;
+      }
+      const { url, itemId } = await res.json();
+      // เก็บ URL จาก OneDrive
+      setImageUrls(prev => [...prev, url ?? itemId]);
+    } catch (e: any) {
+      alert("อัปโหลดไม่สำเร็จ: " + e.message);
+      setImagePreviews(prev => prev.slice(0, -1));
     }
-    setUploading(false);
-    if (fileRef.current) fileRef.current.value = "";
-  };
+  }
+  setUploading(false);
+  if (fileRef.current) fileRef.current.value = "";
+};
+
+// ฟังก์ชันลบรูป
+function removeImage(i: number) {
+  setImageUrls(prev => prev.filter((_,j) => j !== i));
+  setImagePreviews(prev => prev.filter((_,j) => j !== i));
+}
 
   const handleSave = async () => {
     if (!validate()) return;
@@ -404,26 +448,43 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
           {/* รูปภาพ */}
           <div>
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">รูปภาพประกอบ</label>
-            <label className={`flex items-center gap-3 cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl px-4 py-3 transition-colors ${uploading?"opacity-60":""} hover:border-blue-400`}>
-              <span className="text-2xl">{uploading?"⏳":"📷"}</span>
-              <div>
-                <p className="font-bold text-slate-600 text-sm">{uploading?"กำลังอัปโหลด...":"คลิกเพื่อแนบรูป"}</p>
-                <p className="text-slate-400 text-xs">ไม่เกิน 10MB</p>
-              </div>
-              <input ref={fileRef} type="file" multiple accept="image/*" disabled={uploading}
-                onChange={handleUpload} className="hidden" />
-            </label>
-            {imageUrls.length > 0 && (
-              <div className="grid grid-cols-3 gap-2 mt-2">
-                {imageUrls.map((url,i)=>(
-                  <div key={i} className="relative group">
-                    <img src={url} alt="" className="w-full h-20 object-cover rounded-xl border border-slate-200" />
-                    <button onClick={()=>setImageUrls(prev=>prev.filter((_,j)=>j!==i))}
-                      className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full text-[10px] hidden group-hover:flex items-center justify-center font-bold shadow">×</button>
-                  </div>
-                ))}
-              </div>
-            )}
+            {imageUrls.length < MAX_IMAGES && (
+  <label className={`flex items-center gap-3 cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl px-4 py-3 transition-colors ${uploading?"opacity-60":""} hover:border-blue-400`}>
+    <span className="text-2xl">{uploading?"⏳":"📷"}</span>
+    <div>
+      <p className="font-bold text-slate-600 text-sm">{uploading?"กำลังอัปโหลด...":"คลิกเพื่อแนบรูป"}</p>
+      <p className="text-slate-400 text-xs">ไม่เกิน 10MB · สูงสุด {MAX_IMAGES} รูป (เพิ่มได้อีก {MAX_IMAGES-imageUrls.length} รูป)</p>
+    </div>
+    <input ref={fileRef} type="file" multiple accept="image/*" disabled={uploading||imageUrls.length>=MAX_IMAGES}
+      onChange={handleUpload} className="hidden" />
+  </label>
+)}
+            {(imagePreviews.length > 0 || imageUrls.length > 0) && (
+  <div className="grid grid-cols-4 gap-2 mt-2">
+    {(imagePreviews.length > 0 ? imagePreviews : imageUrls).map((src,i)=>(
+      <div key={i} className="relative group aspect-square">
+        <img src={src} alt=""
+          className="w-full h-full object-cover rounded-xl border border-slate-200"
+          onClick={()=>window.open(imageUrls[i]??src,"_blank")} style={{cursor:"pointer"}}/>
+        <button onClick={()=>removeImage(i)}
+          className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full text-[10px] hidden group-hover:flex items-center justify-center font-bold shadow">×</button>
+        {uploading && i===imagePreviews.length-1 && (
+          <div className="absolute inset-0 bg-black/40 rounded-xl flex items-center justify-center">
+            <span className="text-white text-xs font-bold">⏳</span>
+          </div>
+        )}
+      </div>
+    ))}
+    {imageUrls.length < MAX_IMAGES && (
+      <label className="aspect-square border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition-colors bg-slate-50">
+        <span className="text-2xl">📷</span>
+        <span className="text-xs text-slate-400 mt-1">{MAX_IMAGES - imageUrls.length} เพิ่มได้</span>
+        <input ref={fileRef} type="file" multiple accept="image/*" disabled={uploading}
+          onChange={handleUpload} className="hidden" />
+      </label>
+    )}
+  </div>
+)}
           </div>
         </div>
         <div className="px-6 py-4 border-t border-slate-100 flex gap-2 justify-end shrink-0 bg-slate-50 rounded-b-2xl">
