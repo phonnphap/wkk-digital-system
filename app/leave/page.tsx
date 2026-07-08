@@ -65,6 +65,93 @@ function approverSlotByEmail(email: string): 1|2|3|null {
   return null;
 }
 
+// ══════════════════════════════════════════════════════════
+// ── Swap / Substitute helpers ──────────────────────────────
+// ══════════════════════════════════════════════════════════
+type SwapAssignment = {
+  timetable_entry_id: string;
+  substitute_date: string;
+  substitute_teacher_id: string;
+  time_slot_id: string;
+  classroom_id: string;
+  subject_id: string;
+  hours_count: number;
+  academic_year_id: string | null;
+  mode: "specific" | "auto";
+};
+
+const DAY_NAME_TH = ["อาทิตย์","จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์"];
+
+function eachDateInRange(start: string, end: string): string[] {
+  if (!start || !end) return [];
+  const out: string[] = [];
+  let cur = new Date(start + "T00:00:00");
+  const last = new Date(end + "T00:00:00");
+  while (cur <= last) { out.push(cur.toISOString().split("T")[0]); cur.setDate(cur.getDate() + 1); }
+  return out;
+}
+function dowOf(dateStr: string): number { return new Date(dateStr + "T00:00:00").getDay(); }
+function computeSlotHours(slot: any): number {
+  if (!slot?.start_time || !slot?.end_time) return 1;
+  const [sh, sm] = slot.start_time.split(":").map(Number);
+  const [eh, em] = slot.end_time.split(":").map(Number);
+  const diffMin = (eh * 60 + em) - (sh * 60 + sm);
+  return diffMin > 0 ? Math.round((diffMin / 60) * 100) / 100 : 1;
+}
+
+/** แจ้งเตือนครูที่ถูกจัดสอนแทน + หัวหน้าสายชั้นของผู้ยื่นลา (ลิงก์กับระบบลา) */
+async function notifySwapAssignments(requester: UserProfile, assignments: SwapAssignment[], allTeachers: UserProfile[]) {
+  if (assignments.length === 0) return;
+  const teacherMap = Object.fromEntries(allTeachers.map(t => [t.id, t]));
+
+  const bySubstitute = new Map<string, SwapAssignment[]>();
+  assignments.forEach(a => {
+    const list = bySubstitute.get(a.substitute_teacher_id) ?? [];
+    list.push(a);
+    bySubstitute.set(a.substitute_teacher_id, list);
+  });
+
+  for (const [subId, list] of bySubstitute.entries()) {
+    const sub = teacherMap[subId];
+    if (!sub?.email) continue;
+    const rows = list.map(a => `<tr><td style="padding:6px 10px;border:1px solid #e2e8f0">${toThaiDate(a.substitute_date)}</td><td style="padding:6px 10px;border:1px solid #e2e8f0">${a.hours_count} ชม.</td></tr>`).join("");
+    fetch("/api/send-email", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: [sub.email],
+        subject: `[ขอแลกคาบ/สอนแทน] ${fullName(requester)} ขอให้คุณช่วยสอนแทน`,
+        html: `<div style="font-family:Sarabun,Arial,sans-serif;max-width:600px;margin:0 auto">
+          <div style="background:linear-gradient(135deg,#6366f1,#4f46e5);padding:24px;border-radius:12px 12px 0 0;color:white"><h2 style="margin:0">🔄 คำขอสอนแทน</h2></div>
+          <div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px">
+            <p style="font-size:14px">คุณ <strong>${fullName(requester)}</strong> ได้ยื่นคำขอลา และระบบได้จัด/ขอให้คุณสอนแทนในคาบดังนี้</p>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:10px">
+              <tr><th style="padding:6px 10px;border:1px solid #e2e8f0;background:#f8fafc">วันที่</th><th style="padding:6px 10px;border:1px solid #e2e8f0;background:#f8fafc">ชั่วโมง</th></tr>${rows}
+            </table>
+            <p style="margin-top:16px;font-size:12px;color:#94a3b8">กรุณาเข้าสู่ระบบลา/ตารางสอนเพื่อตรวจสอบรายละเอียด</p>
+          </div></div>`,
+      }),
+    }).catch(e => console.warn("[notifySwapAssignments] substitute email failed:", e));
+  }
+
+  const gradeHeads = allTeachers.filter(t => (t.extra_roles ?? []).includes("grade_head") && t.grade_level === requester.grade_level);
+  const headEmails = gradeHeads.map(t => t.email).filter(Boolean);
+  const finalHeadEmails = headEmails.length > 0 ? headEmails : [ADMIN_EMAIL];
+
+  fetch("/api/send-email", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      to: finalHeadEmails,
+      subject: `[แจ้งจัดสอนแทน] ${fullName(requester)} ได้จัดครูสอนแทนระหว่างลา`,
+      html: `<div style="font-family:Sarabun,Arial,sans-serif;max-width:600px;margin:0 auto">
+        <div style="background:linear-gradient(135deg,#10b981,#059669);padding:24px;border-radius:12px 12px 0 0;color:white"><h2 style="margin:0">📋 สรุปการจัดสอนแทน</h2></div>
+        <div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px">
+          <p style="font-size:14px"><strong>${fullName(requester)}</strong> ยื่นใบลาและจัดครูสอนแทนแล้วทั้งหมด ${assignments.length} คาบ</p>
+          <p style="font-size:12px;color:#94a3b8">กรุณาเข้าสู่ระบบเพื่อตรวจสอบความเหมาะสมของการจัดครูสอนแทน</p>
+        </div></div>`,
+    }),
+  }).catch(e => console.warn("[notifySwapAssignments] grade head email failed:", e));
+}
+
 async function resolveAttachmentUrl(documentPath?: string | null, fallbackUrl?: string | null): Promise<string | null> {
   if (!documentPath) return fallbackUrl ?? null;
   try {
@@ -80,7 +167,7 @@ async function resolveAttachmentUrl(documentPath?: string | null, fallbackUrl?: 
 }
 
 // ─── Types ────────────────────────────────────────────────
-type UserProfile = { id:string; title?:string; first_name?:string; last_name?:string; full_name?:string; email:string; role:string; position?:string; signature_url?:string; grade_level?:string; phone?:string; };
+type UserProfile = { id:string; title?:string; first_name?:string; last_name?:string; full_name?:string; email:string; role:string; position?:string; signature_url?:string; grade_level?:string; phone?:string; extra_roles?:string[]; };
 type ApproverInfo = { id:string; full_name:string; position?:string; email?:string };
 type DutyOfficer  = { id:string; full_name:string; position?:string; email?:string };
 type LeaveStats = {
@@ -740,6 +827,291 @@ async function loadLeaveStats(userId: string, excludeId?: string, beforeDate?: s
 }
 
 // ══════════════════════════════════════════════════════════
+// ── SpecificSwapModal — แลกคาบแบบเจาะจง ──────────────────
+// ══════════════════════════════════════════════════════════
+function SpecificSwapModal({ user, dates, timetableEntries, allTimeSlots, allTeachers, academicYearId, existingAssignments, onAdd, onClose }: {
+  user: UserProfile; dates: string[]; timetableEntries: any[]; allTimeSlots: any[];
+  allTeachers: UserProfile[]; academicYearId: string | null; existingAssignments: SwapAssignment[];
+  onAdd: (a: SwapAssignment) => void; onClose: () => void;
+}) {
+  const [selectedDate, setSelectedDate] = useState(dates[0] ?? "");
+  const [selectedEntry, setSelectedEntry] = useState<any>(null);
+  const [freeTeachers, setFreeTeachers] = useState<UserProfile[]>([]);
+  const [pickedTeacherId, setPickedTeacherId] = useState("");
+  const [onLeaveIds, setOnLeaveIds] = useState<Set<string>>(new Set());
+  const [loadingFree, setLoadingFree] = useState(false);
+
+  const dow = selectedDate ? dowOf(selectedDate) : null;
+  const slotMap = Object.fromEntries(allTimeSlots.map((s: any) => [s.id, s]));
+
+  const myEntries = (dow === null ? [] : timetableEntries.filter(e =>
+    (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow
+  )).filter(e => !slotMap[e.time_slot_id]?.is_break)
+    .sort((a, b) => (slotMap[a.time_slot_id]?.slot_number ?? 0) - (slotMap[b.time_slot_id]?.slot_number ?? 0));
+
+  useEffect(() => {
+    setSelectedEntry(null); setFreeTeachers([]); setPickedTeacherId("");
+    if (!selectedDate) return;
+    (async () => {
+      const { data } = await supabase.from("leave_requests").select("user_id,start_date,end_date,status").in("status", ["pending","approved"]);
+      const ids = new Set<string>();
+      (data || []).forEach((l: any) => { if (l.start_date <= selectedDate && l.end_date >= selectedDate) ids.add(l.user_id); });
+      setOnLeaveIds(ids);
+    })();
+  }, [selectedDate]);
+
+  function pickEntry(entry: any) {
+    setSelectedEntry(entry); setPickedTeacherId(""); setLoadingFree(true);
+    const busyIds = new Set(
+      timetableEntries.filter(e => e.day_of_week === dow && e.time_slot_id === entry.time_slot_id)
+        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+    );
+    const alreadyAssigned = new Set(
+      existingAssignments.filter(a => a.substitute_date === selectedDate && a.time_slot_id === entry.time_slot_id)
+        .map(a => a.substitute_teacher_id)
+    );
+    setFreeTeachers(allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id) && !onLeaveIds.has(t.id) && !alreadyAssigned.has(t.id)));
+    setLoadingFree(false);
+  }
+
+  function confirmAdd() {
+    if (!selectedEntry || !pickedTeacherId) return;
+    const slot = slotMap[selectedEntry.time_slot_id];
+    onAdd({
+      timetable_entry_id: selectedEntry.id, substitute_date: selectedDate, substitute_teacher_id: pickedTeacherId,
+      time_slot_id: selectedEntry.time_slot_id, classroom_id: selectedEntry.classroom_id, subject_id: selectedEntry.subject_id,
+      hours_count: computeSlotHours(slot), academic_year_id: selectedEntry.academic_year_id ?? academicYearId, mode: "specific",
+    });
+    setSelectedEntry(null); setPickedTeacherId(""); setFreeTeachers([]);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+          <div><h3 className="font-black text-slate-800">🎯 แลกคาบแบบเจาะจง</h3><p className="text-xs text-slate-400">เลือกคาบของคุณ แล้วเลือกครูที่ว่างมาสอนแทน</p></div>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 font-bold">✕</button>
+        </div>
+        <div className="p-5 space-y-4 overflow-y-auto flex-1">
+          <div>
+            <label className="block text-sm font-bold text-slate-600 mb-1.5">เลือกวันที่</label>
+            <div className="flex gap-1.5 flex-wrap">
+              {dates.map(d => (
+                <button key={d} onClick={() => setSelectedDate(d)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${selectedDate===d?"bg-indigo-500 border-indigo-500 text-white":"bg-white border-slate-200 text-slate-600"}`}>
+                  {toThaiDate(d)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {selectedDate && (myEntries.length === 0 ? (
+            <div className="text-center py-8 text-slate-400 text-sm bg-slate-50 rounded-xl border border-slate-200">ไม่พบคาบสอนของคุณในวัน{DAY_NAME_TH[dow!]}</div>
+          ) : (
+            <div>
+              <label className="block text-sm font-bold text-slate-600 mb-1.5">เลือกคาบที่ต้องการขอแลก</label>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {myEntries.map(e => {
+                  const slot = slotMap[e.time_slot_id]; const active = selectedEntry?.id === e.id;
+                  return (
+                    <button key={e.id} onClick={() => pickEntry(e)}
+                      className={`p-2 rounded-lg border-2 text-[11px] font-bold text-center ${active?"bg-indigo-500 border-indigo-500 text-white":"bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                      <div>คาบ {slot?.slot_number ?? "-"}</div>
+                      <div className="opacity-70">{slot?.start_time?.slice(0,5)}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          {selectedEntry && (
+            <div>
+              <label className="block text-sm font-bold text-slate-600 mb-1.5">ครูที่ว่างในคาบนี้ {loadingFree ? "" : `(${freeTeachers.length} คน)`}</label>
+              {loadingFree ? <p className="text-xs text-slate-400">⏳ กำลังตรวจสอบ...</p>
+                : freeTeachers.length === 0 ? <p className="text-xs text-red-500 font-bold">ไม่พบครูที่ว่างในคาบนี้</p>
+                : (
+                <select value={pickedTeacherId} onChange={e => setPickedTeacherId(e.target.value)} className={sel()}>
+                  <option value="">— เลือกครู —</option>
+                  {freeTeachers.map(t => <option key={t.id} value={t.id}>{displayName(t)}{t.position?` · ${t.position}`:""}</option>)}
+                </select>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-4 border-t border-slate-100 flex gap-3 shrink-0">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm">ปิด</button>
+          <button onClick={confirmAdd} disabled={!selectedEntry || !pickedTeacherId}
+            className="flex-[2] py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm disabled:opacity-50">+ เพิ่มรายการนี้</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+// ── AutoSwapModal — จัดสอนแทนอัตโนมัติ (แฟร์ตามสถิติ) ──────
+// ══════════════════════════════════════════════════════════
+function AutoSwapModal({ user, dates, timetableEntries, allTimeSlots, allTeachers, academicYearId, existingAssignments, onConfirm, onClose }: {
+  user: UserProfile; dates: string[]; timetableEntries: any[]; allTimeSlots: any[];
+  allTeachers: UserProfile[]; academicYearId: string | null; existingAssignments: SwapAssignment[];
+  onConfirm: (assignments: SwapAssignment[]) => void; onClose: () => void;
+}) {
+  const [selectedDates, setSelectedDates] = useState<string[]>(dates);
+  const [computing, setComputing] = useState(false);
+  const [preview, setPreview] = useState<SwapAssignment[]>([]);
+  const [computed, setComputed] = useState(false);
+  const slotMap = Object.fromEntries(allTimeSlots.map((s: any) => [s.id, s]));
+
+  function toggleDate(d: string) {
+    setSelectedDates(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
+    setComputed(false); setPreview([]);
+  }
+
+  async function computeAssignments() {
+    setComputing(true);
+    try {
+      const { data: leaves } = await supabase.from("leave_requests").select("user_id,start_date,end_date,status").in("status", ["pending","approved"]);
+      const onLeaveByDate: Record<string, Set<string>> = {};
+      selectedDates.forEach(d => { onLeaveByDate[d] = new Set(); });
+      (leaves || []).forEach((l: any) => { selectedDates.forEach(d => { if (l.start_date <= d && l.end_date >= d) onLeaveByDate[d].add(l.user_id); }); });
+
+      // ✅ ความเป็นธรรม: นับจำนวนครั้งที่เคยสอนแทน (ยิ่งเคยมาก ยิ่งมีสิทธิ์ถูกเลือกน้อยลง)
+      const { data: subHistory } = await supabase.from("substitution_records").select("substitute_teacher_id");
+      const counts: Record<string, number> = {};
+      (subHistory || []).forEach((r: any) => { counts[r.substitute_teacher_id] = (counts[r.substitute_teacher_id] ?? 0) + 1; });
+      existingAssignments.forEach(a => { counts[a.substitute_teacher_id] = (counts[a.substitute_teacher_id] ?? 0) + 1; });
+
+      const usedThisRun: Record<string, Set<string>> = {};
+      const result: SwapAssignment[] = [];
+
+      for (const date of selectedDates) {
+        const dow = dowOf(date);
+        const myEntries = timetableEntries
+          .filter(e => (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow)
+          .filter(e => !slotMap[e.time_slot_id]?.is_break);
+
+        for (const entry of myEntries) {
+          const key = `${date}|${entry.time_slot_id}`;
+          const busyIds = new Set(
+            timetableEntries.filter(e => e.day_of_week === dow && e.time_slot_id === entry.time_slot_id)
+              .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+          );
+          const alreadyPicked = new Set(
+            existingAssignments.filter(a => a.substitute_date === date && a.time_slot_id === entry.time_slot_id).map(a => a.substitute_teacher_id)
+          );
+          const usedNow = usedThisRun[key] ?? new Set<string>();
+          const onLeave = onLeaveByDate[date] ?? new Set<string>();
+
+          const candidatesAll = allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id) && !onLeave.has(t.id) && !usedNow.has(t.id) && !alreadyPicked.has(t.id));
+          // ✅ ให้ครูสายชั้นเดียวกันก่อนเสมอ ไม่มีจริงๆ ค่อย fallback เป็นครูว่างทั่วไป
+          const sameGrade = candidatesAll.filter(t => user.grade_level && t.grade_level === user.grade_level);
+          const pool = sameGrade.length > 0 ? sameGrade : candidatesAll;
+          pool.sort((a, b) => (counts[a.id] ?? 0) - (counts[b.id] ?? 0));
+          const chosen = pool[0];
+
+          if (chosen) {
+            usedNow.add(chosen.id); usedThisRun[key] = usedNow;
+            counts[chosen.id] = (counts[chosen.id] ?? 0) + 1;
+            result.push({
+              timetable_entry_id: entry.id, substitute_date: date, substitute_teacher_id: chosen.id,
+              time_slot_id: entry.time_slot_id, classroom_id: entry.classroom_id, subject_id: entry.subject_id,
+              hours_count: computeSlotHours(slotMap[entry.time_slot_id]), academic_year_id: entry.academic_year_id ?? academicYearId, mode: "auto",
+            });
+          } else {
+            result.push({
+              timetable_entry_id: entry.id, substitute_date: date, substitute_teacher_id: "",
+              time_slot_id: entry.time_slot_id, classroom_id: entry.classroom_id, subject_id: entry.subject_id,
+              hours_count: computeSlotHours(slotMap[entry.time_slot_id]), academic_year_id: entry.academic_year_id ?? academicYearId, mode: "auto",
+            });
+          }
+        }
+      }
+      setPreview(result); setComputed(true);
+    } catch (err: any) { alert("❌ คำนวณไม่สำเร็จ: " + err.message); }
+    setComputing(false);
+  }
+
+  function updatePreviewTeacher(idx: number, teacherId: string) {
+    setPreview(prev => prev.map((p, i) => i === idx ? { ...p, substitute_teacher_id: teacherId } : p));
+  }
+  const missingCount = preview.filter(p => !p.substitute_teacher_id).length;
+
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+          <div><h3 className="font-black text-slate-800">🤖 จัดสอนแทนอัตโนมัติ</h3><p className="text-xs text-slate-400">เลือกครูสายชั้นเดียวกันที่ว่าง โดยให้ความสำคัญกับคนที่เคยสอนแทนน้อยที่สุดก่อน</p></div>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 font-bold">✕</button>
+        </div>
+        <div className="p-5 space-y-4 overflow-y-auto flex-1">
+          {dates.length > 1 && (
+            <div>
+              <label className="block text-sm font-bold text-slate-600 mb-1.5">เลือกวันที่ต้องการให้จัดอัตโนมัติ</label>
+              <div className="flex gap-1.5 flex-wrap">
+                {dates.map(d => (
+                  <button key={d} onClick={() => toggleDate(d)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${selectedDates.includes(d)?"bg-indigo-500 border-indigo-500 text-white":"bg-white border-slate-200 text-slate-600"}`}>
+                    {toThaiDate(d)}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-slate-400 mt-1">เลือกได้หลายวัน หรือใช้ "แลกคาบแบบเจาะจง" กับวันอื่นแทนก็ได้</p>
+            </div>
+          )}
+
+          {!computed ? (
+            <button onClick={computeAssignments} disabled={computing || selectedDates.length===0}
+              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm disabled:opacity-50">
+              {computing ? "⏳ กำลังคำนวณ..." : "⚡ คำนวณการจัดสอนแทน"}
+            </button>
+          ) : (
+            <>
+              {missingCount > 0 && (
+                <div className="bg-amber-50 border-2 border-amber-200 rounded-xl px-4 py-2.5 text-amber-700 text-xs font-bold">
+                  ⚠️ มี {missingCount} คาบที่ไม่พบครูว่างมาสอนแทน กรุณาเลือกด้วยตนเอง
+                </div>
+              )}
+              <div className="space-y-2">
+                {preview.map((p, i) => {
+                  const slot = slotMap[p.time_slot_id];
+                  const busyIds = new Set(
+                    timetableEntries.filter(e => e.day_of_week === dowOf(p.substitute_date) && e.time_slot_id === p.time_slot_id)
+                      .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+                  );
+                  const options = allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id));
+                  return (
+                    <div key={i} className="border-2 border-slate-100 rounded-xl p-3 flex items-center gap-3 flex-wrap">
+                      <div className="w-24 shrink-0 text-xs">
+                        <p className="font-black text-slate-700">{toThaiDate(p.substitute_date)}</p>
+                        <p className="text-slate-400">คาบ {slot?.slot_number ?? "-"}</p>
+                      </div>
+                      <select value={p.substitute_teacher_id} onChange={e => updatePreviewTeacher(i, e.target.value)}
+                        className="flex-1 min-w-[160px] bg-white border-2 border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold">
+                        <option value="">— ไม่พบครูว่าง / เลือกเอง —</option>
+                        {options.map(t => <option key={t.id} value={t.id}>{displayName(t)}{t.grade_level===user.grade_level?" ★สายชั้นเดียวกัน":""}</option>)}
+                      </select>
+                    </div>
+                  );
+                })}
+                {preview.length === 0 && <p className="text-center text-slate-400 text-sm py-6">ไม่พบคาบสอนของคุณในวันที่เลือก</p>}
+              </div>
+            </>
+          )}
+        </div>
+        <div className="px-5 py-4 border-t border-slate-100 flex gap-3 shrink-0">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm">ยกเลิก</button>
+          <button onClick={() => onConfirm(preview.filter(p => p.substitute_teacher_id))} disabled={!computed || preview.filter(p=>p.substitute_teacher_id).length===0}
+            className="flex-[2] py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm disabled:opacity-50">
+            ✅ ยืนยันใช้ผลลัพธ์นี้ ({preview.filter(p=>p.substitute_teacher_id).length} คาบ)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
 // ── LeaveForm ──────────────────────────────────────════════
 // ══════════════════════════════════════════════════════════
 function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onCancel, editData, timetableEntries, allTimeSlots, academicYearId, loadingTimetable}: {
@@ -755,8 +1127,9 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
   const [tripDest,     setTripDest]     = useState("");
   const [vehicle,      setVehicle]      = useState<"school"|"personal">("school");
   const [companionIds, setCompanionIds] = useState<string[]>([]);
-  const [missedPeriods,setMissedPeriods]= useState<string[]>([]);
-  const [substitute,   setSubstitute]   = useState("");
+  const [swapAssignments, setSwapAssignments] = useState<SwapAssignment[]>([]);
+  const [showSpecificSwap, setShowSpecificSwap] = useState(false);
+  const [showAutoSwap, setShowAutoSwap] = useState(false);
   const [dutyOfficer,  setDutyOfficer]  = useState<DutyOfficer|null>(null);
   const [isOwnDuty,    setIsOwnDuty]    = useState(false);
   const [loading,      setLoading]      = useState(false);
@@ -811,7 +1184,6 @@ useEffect(()=>{
     }
   },[leaveType]);
 
-  const togglePeriod=(p:string)=>setMissedPeriods(prev=>prev.includes(p)?prev.filter(x=>x!==p):[...prev,p]);
   const touch=(f:string)=>setTouched(t=>({...t,[f]:true}));
 
   const errors = {
@@ -861,7 +1233,8 @@ if (docFile) {
       document_url: docUrl,
       document_path: docPath,
       status:isDraft?"draft":"pending",
-      missed_periods:missedPeriods.join(","), substitute_id:substitute||null,
+      missed_periods: "", substitute_id: null,
+      substitute_assignments: swapAssignments.map(({ mode, ...rest }) => rest),
       duty_officer_id:dutyOfficer?.id??null,
       approver_1_id:approvers[0]?.id??null, approver_2_id:approvers[1]?.id??null, approver_3_id:approvers[2]?.id??null,
       approver_1_status:approvers[0]?"pending":null, approver_2_status:approvers[1]?"pending":null, approver_3_status:approvers[2]?"pending":null,
@@ -1007,23 +1380,73 @@ if (docFile) {
         )}
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-          <h3 className="font-black text-slate-700">📚 ข้อมูลภาระงาน (ถ้ามี)</h3>
-          <div>
-            <label className="block text-sm font-bold text-slate-600 mb-2">คาบสอนที่จะขาด</label>
-            <div className="flex flex-wrap gap-2">
-              {["1","2","3","4","5","6","7","8"].map(p=>(
-                <button key={p} type="button" onClick={()=>togglePeriod(p)} className={`w-12 h-12 rounded-xl font-black text-sm border-2 transition-all ${missedPeriods.includes(p)?"bg-blue-500 border-blue-500 text-white":"bg-white border-blue-100 text-slate-600 hover:bg-blue-50"}`}>{p}</button>
-              ))}
-            </div>
+  <h3 className="font-black text-slate-700">🔄 ขอแลกคาบสอน / จัดสอนแทน</h3>
+  {loadingTimetable ? (
+    <p className="text-sm text-slate-400">⏳ กำลังโหลดตารางสอน...</p>
+  ) : !startDate || !endDate ? (
+    <p className="text-sm text-slate-400">กรุณาเลือกวันที่ลาก่อน ระบบจะแสดงคาบสอนของคุณให้จัดสอนแทน</p>
+  ) : (
+    <>
+      <div className="flex gap-3 flex-wrap">
+        <button type="button" onClick={()=>setShowSpecificSwap(true)}
+          className="flex-1 min-w-[160px] py-3 rounded-xl border-2 border-indigo-200 bg-indigo-50 text-indigo-700 font-black text-sm hover:bg-indigo-100">
+          🎯 แลกคาบแบบเจาะจง
+        </button>
+        <button type="button" onClick={()=>setShowAutoSwap(true)}
+          className="flex-1 min-w-[160px] py-3 rounded-xl border-2 border-emerald-200 bg-emerald-50 text-emerald-700 font-black text-sm hover:bg-emerald-100">
+          🤖 จัดสอนแทนอัตโนมัติทั้งวัน
+        </button>
+      </div>
+
+      {swapAssignments.length > 0 ? (
+        <div className="border-2 border-slate-100 rounded-xl overflow-hidden">
+          <div className="bg-slate-50 px-4 py-2 flex items-center justify-between">
+            <span className="text-xs font-black text-slate-600">📋 รายการที่จัดไว้ ({swapAssignments.length} คาบ)</span>
+            <button type="button" onClick={()=>setSwapAssignments([])} className="text-xs text-red-500 font-bold">ล้างทั้งหมด</button>
           </div>
-          <div>
-            <label className="block text-sm font-bold text-slate-600 mb-1">ครูสอนแทน</label>
-            <select value={substitute} onChange={e=>setSubstitute(e.target.value)} className={sel()}>
-              <option value="">— เลือกครูสอนแทน —</option>
-              {allTeachers.filter(t=>t.id!==user.id).map(t=><option key={t.id} value={t.id}>{displayName(t)}{t.position?` · ${t.position}`:""}</option>)}
-            </select>
+          <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto">
+            {swapAssignments.map((a, i) => {
+              const teacher = allTeachers.find(t=>t.id===a.substitute_teacher_id);
+              return (
+                <div key={i} className="px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
+                  <div>
+                    <span className="font-bold text-slate-700">{toThaiDate(a.substitute_date)}</span>
+                    <span className="text-slate-400 text-xs ml-2">{a.mode==="auto"?"🤖 อัตโนมัติ":"🎯 เจาะจง"}</span>
+                    <p className="text-slate-500 text-xs">ครูสอนแทน: {teacher?displayName(teacher):"—"}</p>
+                  </div>
+                  <button type="button" onClick={()=>setSwapAssignments(prev=>prev.filter((_,idx)=>idx!==i))} className="text-red-500 text-xs font-bold shrink-0">ลบ</button>
+                </div>
+              );
+            })}
           </div>
         </div>
+      ) : (
+        <p className="text-xs text-amber-600 font-bold">⚠️ ยังไม่ได้จัดสอนแทน หากไม่มีคาบสอนสามารถข้ามส่วนนี้ได้</p>
+      )}
+    </>
+  )}
+</div>
+
+{showSpecificSwap && (
+  <SpecificSwapModal
+    user={user} dates={eachDateInRange(startDate, endDate)}
+    timetableEntries={timetableEntries} allTimeSlots={allTimeSlots}
+    allTeachers={allTeachers} academicYearId={academicYearId}
+    existingAssignments={swapAssignments}
+    onAdd={(a)=>setSwapAssignments(prev=>[...prev, a])}
+    onClose={()=>setShowSpecificSwap(false)}
+  />
+)}
+{showAutoSwap && (
+  <AutoSwapModal
+    user={user} dates={eachDateInRange(startDate, endDate)}
+    timetableEntries={timetableEntries} allTimeSlots={allTimeSlots}
+    allTeachers={allTeachers} academicYearId={academicYearId}
+    existingAssignments={swapAssignments}
+    onConfirm={(assignments)=>{setSwapAssignments(prev=>[...prev, ...assignments]); setShowAutoSwap(false);}}
+    onClose={()=>setShowAutoSwap(false)}
+  />
+)}
 
         {approvers.length>0&&(
           <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5">
@@ -1182,9 +1605,10 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
             note: null,
           }));
         if(rows.length){
-          const {error:subErr} = await (supabase.from("substitution_records") as any).insert(rows);
-          if(subErr) console.warn("[submitLeave] substitution_records insert error:", subErr.message);
-        }
+  const {error:subErr} = await (supabase.from("substitution_records") as any).insert(rows);
+  if(subErr) console.warn("[submitLeave] substitution_records insert error:", subErr.message);
+  else await notifySwapAssignments(user, substitute_assignments, allTeachers);
+}
       }
     }
 
@@ -1573,230 +1997,6 @@ function RejectModal({ onConfirm, onClose }: {
 }
 
 // ══════════════════════════════════════════════════════════
-// ── WholeDaySwapModal ───────────────────────────────────────
-// จัดสอนแทนทั้งวัน: เลือกวันที่ (มักจะเป็นวันที่ลา) แล้วระบบจะ
-// ดึงคาบสอนของครูคนนี้ในวันนั้น (ตาม day_of_week) มาให้จัดครูสอนแทนทีละคาบ
-// ══════════════════════════════════════════════════════════
-function WholeDaySwapModal({
-  user, teachers, allEntries, timeSlots, leaveRequests, subRecords, academicYearId, onSave, onClose,
-}: {
-  user: UserProfile;
-  teachers: UserProfile[];
-  allEntries: any[];
-  timeSlots: any[];
-  leaveRequests: LeaveRequest[];
-  subRecords: any[];
-  academicYearId: string | null;
-  onSave: () => void;
-  onClose: () => void;
-}) {
-  // ── เลือกวันที่: default เป็นวันที่ลาที่ใกล้ที่สุด (pending/approved) ถ้ามี ──
-  const upcomingLeaveDates = leaveRequests
-    .filter(r => ["pending", "approved"].includes(r.status))
-    .map(r => r.start_date)
-    .filter(Boolean)
-    .sort();
-  const [selectedDate, setSelectedDate] = useState<string>(upcomingLeaveDates[0] ?? "");
-  const [saving, setSaving] = useState(false);
-  // { [timetable_entry_id]: substitute_teacher_id }
-  const [assignments, setAssignments] = useState<Record<string, string>>({});
-
-  const dayOfWeek = selectedDate ? new Date(selectedDate + "T00:00:00").getDay() : null; // 0=อาทิตย์...6=เสาร์
-  const DAY_LABEL = ["อาทิตย์","จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์"];
-
-  const slotMap = Object.fromEntries(timeSlots.map(s => [s.id, s]));
-
-  // คาบสอนของครูคนนี้ในวันดังกล่าว (เป็นได้ทั้ง teacher_id หลัก หรือ teacher_id_2)
-  const dayEntries = (dayOfWeek === null ? [] : allEntries.filter(e =>
-    e.day_of_week === dayOfWeek &&
-    (e.teacher_id === user.id || e.teacher_id_2 === user.id) &&
-    (!academicYearId || e.academic_year_id === academicYearId)
-  )).sort((a, b) => {
-    const sa = slotMap[a.time_slot_id]?.slot_number ?? 0;
-    const sb = slotMap[b.time_slot_id]?.slot_number ?? 0;
-    return sa - sb;
-  }).filter(e => !slotMap[e.time_slot_id]?.is_break);
-
-  // preload assignment เดิม (ถ้ามีบันทึกไว้แล้วสำหรับวันที่นี้)
-  // preload assignment เดิม (ถ้ามีบันทึกไว้แล้วสำหรับวันที่นี้)
-  useEffect(() => {
-    if (!selectedDate) { setAssignments({}); return; }
-    const preset: Record<string, string> = {};
-    subRecords.forEach((s: any) => {
-      if (s.substitute_date === selectedDate && s.timetable_entry_id) {
-        preset[s.timetable_entry_id] = s.substitute_teacher_id ?? "";
-      }
-    });
-    setAssignments(preset);
-  }, [selectedDate, subRecords]);
-
-  function setSub(entryId: string, teacherId: string) {
-    setAssignments(prev => ({ ...prev, [entryId]: teacherId }));
-  }
-
-  const filledCount = dayEntries.filter(e => assignments[e.id]).length;
-
-  async function handleSave() {
-    if (!selectedDate) { alert("กรุณาเลือกวันที่"); return; }
-    if (dayEntries.length === 0) { alert("ไม่พบคาบสอนของคุณในวันนี้"); return; }
-    const missing = dayEntries.filter(e => !assignments[e.id]);
-    if (missing.length > 0) {
-      const go = confirm(`ยังไม่ได้จัดครูสอนแทน ${missing.length} คาบ ต้องการบันทึกเท่าที่จัดแล้วหรือไม่?`);
-      if (!go) return;
-    }
-    setSaving(true);
-    try {
-      // ✅ หาใบลาที่ตรงกับวันนี้ ของครูคนนี้ (pending/approved) เพื่อผูก leave_request_id
-      const matchingLeave = leaveRequests.find(r =>
-        ["pending", "approved"].includes(r.status) &&
-        r.start_date <= selectedDate && r.end_date >= selectedDate
-      );
-
-      const rows = dayEntries
-        .filter(e => assignments[e.id])
-        .map(e => {
-          const slot = slotMap[e.time_slot_id];
-          // คำนวณชั่วโมงคร่าวๆ จากเวลาเริ่ม-จบของคาบ (ถ้าไม่มีเวลาให้ default 1)
-          let hours = 1;
-          if (slot?.start_time && slot?.end_time) {
-            const [sh, sm] = slot.start_time.split(":").map(Number);
-            const [eh, em] = slot.end_time.split(":").map(Number);
-            const diffMin = (eh * 60 + em) - (sh * 60 + sm);
-            if (diffMin > 0) hours = Math.round((diffMin / 60) * 100) / 100;
-          }
-
-          return {
-            timetable_entry_id: e.id,
-            substitute_date: selectedDate,
-            original_teacher_id: user.id,
-            absent_teacher_id: user.id,
-            substitute_teacher_id: assignments[e.id],
-            leave_request_id: matchingLeave?.id ?? null,
-            time_slot_id: e.time_slot_id,
-            classroom_id: e.classroom_id,
-            subject_id: e.subject_id,
-            hours_count: hours,
-            academic_year_id: e.academic_year_id ?? academicYearId,
-            assigned_by: user.id,
-            status: "assigned",
-            note: null,
-          };
-        });
-
-      // ลบของเดิมสำหรับวันนี้ก่อน แล้วค่อย insert ใหม่ (กันข้อมูลซ้ำ)
-      await supabase
-        .from("substitution_records")
-        .delete()
-        .eq("substitute_date", selectedDate)
-        .eq("original_teacher_id", user.id);
-
-      if (rows.length > 0) {
-        const { error } = await (supabase.from("substitution_records") as any).insert(rows);
-        if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); setSaving(false); return; }
-      }
-      alert("✅ บันทึกการจัดสอนแทนเรียบร้อย");
-      onSave();
-    } catch (err: any) {
-      alert("❌ เกิดข้อผิดพลาด: " + err.message);
-    }
-    setSaving(false);
-  }
-
-  return (
-    <div className="fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-          <div>
-            <h3 className="font-black text-slate-800">🗓️ จัดสอนแทนทั้งวัน</h3>
-            <p className="text-xs text-slate-400">{fullName(user)}</p>
-          </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 font-bold">✕</button>
-        </div>
-
-        <div className="p-5 space-y-4 overflow-y-auto flex-1">
-          <div>
-            <label className="block text-sm font-bold text-slate-600 mb-1.5">เลือกวันที่ลา</label>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={e => setSelectedDate(e.target.value)}
-              className={inp()}
-            />
-            {upcomingLeaveDates.length > 0 && (
-              <div className="flex gap-1.5 mt-2 flex-wrap">
-                {upcomingLeaveDates.map(d => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setSelectedDate(d)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${selectedDate === d ? "bg-indigo-500 border-indigo-500 text-white" : "bg-white border-slate-200 text-slate-600"}`}
-                  >
-                    {toThaiDate(d)}
-                  </button>
-                ))}
-              </div>
-            )}
-            {selectedDate && dayOfWeek !== null && (
-              <p className="text-xs text-blue-600 font-bold mt-1.5">
-                วัน{DAY_LABEL[dayOfWeek]} · พบ {dayEntries.length} คาบสอน · จัดแล้ว {filledCount}/{dayEntries.length}
-              </p>
-            )}
-          </div>
-
-          {!selectedDate ? (
-            <div className="text-center py-10 text-slate-400 text-sm">กรุณาเลือกวันที่เพื่อดูคาบสอน</div>
-          ) : dayEntries.length === 0 ? (
-            <div className="text-center py-10 text-slate-400 text-sm bg-slate-50 rounded-xl border border-slate-200">
-              ไม่พบคาบสอนของคุณในวัน{DAY_LABEL[dayOfWeek!]}
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {dayEntries.map(e => {
-                const slot = slotMap[e.time_slot_id];
-                const currentSub = assignments[e.id] || "";
-                return (
-                  <div key={e.id} className="border-2 border-slate-100 rounded-xl p-3 flex items-center gap-3">
-                    <div className="w-16 shrink-0 text-center">
-                      <div className="text-xs font-black text-slate-700">คาบ {slot?.slot_number ?? "-"}</div>
-                      <div className="text-[10px] text-slate-400">{slot?.start_time?.slice(0,5)}-{slot?.end_time?.slice(0,5)}</div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <select
-                        value={currentSub}
-                        onChange={ev => setSub(e.id, ev.target.value)}
-                        className={sel()}
-                      >
-                        <option value="">— เลือกครูสอนแทน —</option>
-                        {teachers.filter(t => t.id !== user.id).map(t => (
-                          <option key={t.id} value={t.id}>{displayName(t)}{t.position ? ` · ${t.position}` : ""}</option>
-                        ))}
-                      </select>
-                    </div>
-                    {currentSub && <span className="text-green-500 text-lg shrink-0">✓</span>}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="px-5 py-4 border-t border-slate-100 flex gap-3 shrink-0">
-          <button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm">ยกเลิก</button>
-          <button
-            onClick={handleSave}
-            disabled={saving || !selectedDate || dayEntries.length === 0}
-            className="flex-[2] py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm disabled:opacity-50"
-          >
-            {saving ? "⏳ กำลังบันทึก..." : "💾 บันทึกการจัดสอนแทน"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-// ══════════════════════════════════════════════════════════
 // ── AdminDashboard ─────────────────────────────────────────
 // ══════════════════════════════════════════════════════════
 function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boolean }) {
@@ -2150,7 +2350,7 @@ export default function LeavePage(){
         if(email){const res=await supabase.from("users").select("id,title,first_name,last_name,email,role,position,signature_url,grade_level,phone").eq("email",email).maybeSingle();data=res.data;if(data)await supabase.from("users").update({auth_id:authUser.id}).eq("id",data.id);}
       }
       if(data){const profile:UserProfile={...data,full_name:(data as any).full_name||`${data.title??""} ${data.first_name??""} ${data.last_name??""}`.replace(/\s+/g," ").trim()};setUser(profile);if(data.signature_url)setSavedSignature(data.signature_url);}
-      const {data:teachers}=await supabase.from("users").select("id,title,first_name,last_name,position,email,role").order("first_name");
+      const {data:teachers}=await supabase.from("users").select("id,title,first_name,last_name,position,email,role,grade_level,extra_roles").order("first_name");
       setAllTeachers((teachers as UserProfile[])||[]);
       const approverEmails=[APPROVER_1_EMAIL,APPROVER_2_EMAIL,APPROVER_3_EMAIL];
       const approverList:ApproverInfo[]=[];
