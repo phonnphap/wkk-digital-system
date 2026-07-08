@@ -27,9 +27,7 @@ const emptyRecipient: Recipient = {
 
 // ══════════════════════════════════════════════════════════
 // ค้นหาครู/บุคลากร — ดึงจากตาราง users
-// กลุ่มสาระ: users.department_id -> ตาราง "departments" (พหูพจน์) คอลัมน์ name
-// ★ แก้จาก 'department' (เอกพจน์) เป็น 'departments' (พหูพจน์) ให้ตรงกับ convention
-//   ของระบบอื่นในโปรเจกต์เดียวกัน (classrooms, academic_years, leave_requests ฯลฯ)
+// กลุ่มสาระ: users.department_id -> ตาราง "departments" คอลัมน์ name
 // ══════════════════════════════════════════════════════════
 type TeacherHit = { id: string; displayName: string; department: string };
 
@@ -58,14 +56,43 @@ async function searchTeachers(
 }
 
 // ══════════════════════════════════════════════════════════
+// ★ ค้นหาผู้บริหาร — ดึงจากตาราง users เหมือนครู
+// ตำแหน่ง: users.academic_level เป็นข้อความอยู่แล้ว (ไม่มีตาราง academic_level แยก)
+//   ดึงมาโชว์ตรงๆ ไม่ต้อง join
+// ══════════════════════════════════════════════════════════
+type ExecutiveHit = { id: string; displayName: string; position: string };
+
+async function searchExecutives(
+  query: string
+): Promise<{ hits: ExecutiveHit[]; errorMessage?: string }> {
+  const q = query.trim();
+  if (!q) return { hits: [] };
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, title, first_name, last_name, full_name, academic_level')
+    .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,full_name.ilike.%${q}%`)
+    .limit(10);
+  if (error) {
+    console.error('[searchExecutives] query failed:', error.message, error);
+    return { hits: [], errorMessage: error.message };
+  }
+  if (!data) return { hits: [] };
+  const hits = (data as any[]).map((u) => {
+    const assembled = `${u.title ?? ''}${u.first_name ?? ''} ${u.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
+    return { id: u.id, displayName: assembled || u.full_name || '', position: u.academic_level ?? '' };
+  });
+  return { hits };
+}
+
+// ══════════════════════════════════════════════════════════
 // ค้นหานักเรียน — ตาราง students:
-//   id, student_code, first_name, last_name, birth_date, gender ('male'|'female'), classroom_id
-//   classroom_id -> ตาราง "classrooms" (พหูพจน์) คอลัมน์ room_name
-// คำนำหน้าไม่ได้เก็บในตาราง คำนวณเอง:
+//   id, student_code, first_name, last_name, birth_date, gender, classroom_id
+//   classroom_id -> ตาราง "classrooms" คอลัมน์ grade_group (ระดับชั้น) + room_name (ห้อง) แยกกัน
+// คำนำหน้าคำนวณเอง:
 //   อายุ < 15 ปี  -> male: เด็กชาย / female: เด็กหญิง
 //   อายุ >= 15 ปี -> male: นาย     / female: นางสาว
 // ══════════════════════════════════════════════════════════
-type StudentHit = { id: string; displayName: string; student_id: string; grade_level: string };
+type StudentHit = { id: string; displayName: string; student_id: string; grade_level: string; classroom: string };
 
 function computeThaiTitle(gender: string | null | undefined, birthDate: string | null | undefined): string {
   const isMale = gender === 'male';
@@ -83,9 +110,12 @@ function computeThaiTitle(gender: string | null | undefined, birthDate: string |
   return isMale ? 'เด็กชาย' : 'เด็กหญิง';
 }
 
+// ★ classroomMap เก็บทั้ง grade_level (grade_group) และ classroom (room_name) แยกกัน
+type ClassroomInfo = { grade_level: string; classroom: string };
+
 async function searchStudents(
   query: string,
-  classroomMap: Record<string, string>
+  classroomMap: Record<string, ClassroomInfo>
 ): Promise<{ hits: StudentHit[]; errorMessage?: string }> {
   const q = query.trim();
   if (!q) return { hits: [] };
@@ -102,19 +132,20 @@ async function searchStudents(
   const hits = (data as any[]).map((s) => {
     const title = computeThaiTitle(s.gender, s.birth_date);
     const displayName = `${title}${s.first_name ?? ''} ${s.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
-    const grade_level = classroomMap[s.classroom_id] ?? '';
+    const info = classroomMap[s.classroom_id] ?? { grade_level: '', classroom: '' };
     return {
       id: s.id,
       displayName,
       student_id: s.student_code ?? '',
-      grade_level,
+      grade_level: info.grade_level,
+      classroom: info.classroom,
     };
   });
   return { hits };
 }
 
 // ══════════════════════════════════════════════════════════
-// ช่องค้นหาชื่อครู แบบพิมพ์แล้วแสดงรายชื่อ+กลุ่มสาระให้เลือก
+// ช่องค้นหาชื่อครู
 // ══════════════════════════════════════════════════════════
 function TeacherNameField({
   value, deptMap, invalid, onTextChange, onSelect,
@@ -183,13 +214,81 @@ function TeacherNameField({
 }
 
 // ══════════════════════════════════════════════════════════
-// ช่องค้นหาชื่อนักเรียน แบบพิมพ์แล้วแสดงรายชื่อ+รหัส+ระดับชั้นให้เลือก
+// ★ ช่องค้นหาชื่อผู้บริหาร แบบพิมพ์แล้วแสดงรายชื่อ+ตำแหน่งให้เลือก
+// ══════════════════════════════════════════════════════════
+function ExecutiveNameField({
+  value, invalid, onTextChange, onSelect,
+}: {
+  value: string;
+  invalid: boolean;
+  onTextChange: (v: string) => void;
+  onSelect: (hit: ExecutiveHit) => void;
+}) {
+  const [results, setResults] = useState<ExecutiveHit[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleChange(v: string) {
+    onTextChange(v);
+    setOpen(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!v.trim()) { setResults([]); setErrorMsg(null); return; }
+    timerRef.current = setTimeout(async () => {
+      setLoading(true);
+      const { hits, errorMessage } = await searchExecutives(v);
+      setResults(hits);
+      setErrorMsg(errorMessage ?? null);
+      setLoading(false);
+    }, 300);
+  }
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => handleChange(e.target.value)}
+        onFocus={() => value.trim() && setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="พิมพ์ชื่อ/นามสกุลเพื่อค้นหาในระบบ..."
+        className={fieldCls(invalid)}
+      />
+      {open && (loading || results.length > 0 || errorMsg) && (
+        <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border-2 border-blue-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
+          {loading ? (
+            <div className="px-3 py-2.5 text-xs text-slate-400">🔍 กำลังค้นหา...</div>
+          ) : errorMsg ? (
+            <div className="px-3 py-2.5 text-xs text-red-600 font-bold">⚠️ ค้นหาไม่สำเร็จ: {errorMsg}</div>
+          ) : (
+            results.map((hit) => (
+              <button
+                type="button"
+                key={hit.id}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { onSelect(hit); setOpen(false); }}
+                className="w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 flex flex-col border-b border-slate-50 last:border-0"
+              >
+                <span className="font-bold text-slate-800">{hit.displayName}</span>
+                {hit.position && <span className="text-xs text-slate-400">{hit.position}</span>}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+// ช่องค้นหาชื่อนักเรียน — โชว์ทั้งระดับชั้นและห้องเรียนแยกกัน
 // ══════════════════════════════════════════════════════════
 function StudentNameField({
   value, classroomMap, invalid, onTextChange, onSelect,
 }: {
   value: string;
-  classroomMap: Record<string, string>;
+  classroomMap: Record<string, ClassroomInfo>;
   invalid: boolean;
   onTextChange: (v: string) => void;
   onSelect: (hit: StudentHit) => void;
@@ -242,7 +341,7 @@ function StudentNameField({
               >
                 <span className="font-bold text-slate-800">{hit.displayName}</span>
                 <span className="text-xs text-slate-400">
-                  {[hit.student_id, hit.grade_level].filter(Boolean).join(' · ')}
+                  {[hit.student_id, hit.grade_level, hit.classroom].filter(Boolean).join(' · ')}
                 </span>
               </button>
             ))
@@ -258,12 +357,11 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
   const supportsTeam = category === 'Teacher' || category === 'Student' || category === 'Executive';
 
   const [deptMap, setDeptMap] = useState<Record<string, string>>({});
-  const [classroomMap, setClassroomMap] = useState<Record<string, string>>({});
+  const [classroomMap, setClassroomMap] = useState<Record<string, ClassroomInfo>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      // ★ แก้: 'department' -> 'departments' (พหูพจน์)
       const { data, error } = await supabase.from('departments').select('id, name');
       if (error) {
         console.error('[RecipientsEditor] โหลดตาราง departments ไม่สำเร็จ:', error.message, error);
@@ -276,15 +374,17 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
     })();
 
     (async () => {
-      // ★ แก้: 'classroom' -> 'classrooms' (พหูพจน์)
-      const { data, error } = await supabase.from('classrooms').select('id, room_name');
+      // ★ ดึงทั้ง grade_group (ระดับชั้น) และ room_name (ห้องเรียน) แยกกัน
+      const { data, error } = await supabase.from('classrooms').select('id, room_name, grade_group');
       if (error) {
         console.error('[RecipientsEditor] โหลดตาราง classrooms ไม่สำเร็จ:', error.message, error);
         setLoadError((prev) => prev ?? `โหลดตารางห้องเรียน (classrooms) ไม่สำเร็จ: ${error.message}`);
         return;
       }
-      const map: Record<string, string> = {};
-      (data || []).forEach((c: any) => { map[c.id] = c.room_name; });
+      const map: Record<string, ClassroomInfo> = {};
+      (data || []).forEach((c: any) => {
+        map[c.id] = { grade_level: c.grade_group ?? '', classroom: c.room_name ?? '' };
+      });
       setClassroomMap(map);
     })();
   }, []);
@@ -305,10 +405,6 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
       {loadError && (
         <div className="rounded-xl border-2 border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
           ⚠️ {loadError}
-          <br />
-          <span className="font-normal">
-            ถ้าชื่อตารางจริงในระบบไม่ใช่ชื่อพหูพจน์ (เช่นยังเป็น "department"/"classroom" เอกพจน์) แจ้งกลับมาได้เลย
-          </span>
         </div>
       )}
 
@@ -353,6 +449,14 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                       onTextChange={(v) => update(i, { recipient_name: v })}
                       onSelect={(hit) => update(i, { recipient_name: hit.displayName, department: hit.department })}
                     />
+                  ) : category === 'Executive' ? (
+                    // ★ ค้นหาจาก users เหมือนครู แล้วดึงตำแหน่งจาก academic_level มา autofill ช่องตำแหน่ง
+                    <ExecutiveNameField
+                      value={r.recipient_name}
+                      invalid={nameInvalid}
+                      onTextChange={(v) => update(i, { recipient_name: v })}
+                      onSelect={(hit) => update(i, { recipient_name: hit.displayName, department: hit.position })}
+                    />
                   ) : category === 'Student' ? (
                     <StudentNameField
                       value={r.recipient_name}
@@ -364,6 +468,7 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                           recipient_name: hit.displayName,
                           student_id: hit.student_id,
                           grade_level: hit.grade_level,
+                          classroom: hit.classroom, // ★ เพิ่ม — ตอนก่อนหน้าไม่เคย set ค่านี้เลย
                         })
                       }
                     />
@@ -397,9 +502,20 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                       <span className="text-xs text-muted font-medium">ระดับชั้น</span>
                       <input
                         type="text"
-                        placeholder="เช่น ม.3/1"
+                        placeholder="เช่น มัธยมศึกษาตอนต้น"
                         value={r.grade_level ?? ''}
                         onChange={(e) => update(i, { grade_level: e.target.value })}
+                        className={fieldCls(false)}
+                      />
+                    </label>
+                    {/* ★ เพิ่มช่องห้องเรียน — เดิมไม่มีเลยแม้ type จะรองรับ */}
+                    <label className="flex flex-col gap-1 text-sm">
+                      <span className="text-xs text-muted font-medium">ห้องเรียน</span>
+                      <input
+                        type="text"
+                        placeholder="เช่น ม.3/1"
+                        value={r.classroom ?? ''}
+                        onChange={(e) => update(i, { classroom: e.target.value })}
                         className={fieldCls(false)}
                       />
                     </label>
