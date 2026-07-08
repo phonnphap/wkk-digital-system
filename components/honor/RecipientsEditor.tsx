@@ -27,15 +27,18 @@ const emptyRecipient: Recipient = {
 
 // ══════════════════════════════════════════════════════════
 // ค้นหาครู/บุคลากร — ดึงจากตาราง users
-// กลุ่มสาระ: users.department_id -> เชื่อมกับตาราง "department" (เอกพจน์) คอลัมน์ name
-// ไม่ใช้ relationship embed ของ Supabase (ต้องมี FK constraint จริงใน DB ถึงจะทำงาน)
-// ใช้วิธี preload ตาราง department ทั้งหมดเป็น map แล้วจับคู่เองฝั่ง frontend แทน — ชัวร์กว่า
+// กลุ่มสาระ: users.department_id -> ตาราง "departments" (พหูพจน์) คอลัมน์ name
+// ★ แก้จาก 'department' (เอกพจน์) เป็น 'departments' (พหูพจน์) ให้ตรงกับ convention
+//   ของระบบอื่นในโปรเจกต์เดียวกัน (classrooms, academic_years, leave_requests ฯลฯ)
 // ══════════════════════════════════════════════════════════
 type TeacherHit = { id: string; displayName: string; department: string };
 
-async function searchTeachers(query: string, deptMap: Record<string, string>): Promise<TeacherHit[]> {
+async function searchTeachers(
+  query: string,
+  deptMap: Record<string, string>
+): Promise<{ hits: TeacherHit[]; errorMessage?: string }> {
   const q = query.trim();
-  if (!q) return [];
+  if (!q) return { hits: [] };
   const { data, error } = await supabase
     .from('users')
     .select('id, title, first_name, last_name, full_name, department_id')
@@ -43,21 +46,21 @@ async function searchTeachers(query: string, deptMap: Record<string, string>): P
     .limit(10);
   if (error) {
     console.error('[searchTeachers] query failed:', error.message, error);
-    return [];
+    return { hits: [], errorMessage: error.message };
   }
-  if (!data) return [];
-  return (data as any[]).map((u) => {
+  if (!data) return { hits: [] };
+  const hits = (data as any[]).map((u) => {
     const assembled = `${u.title ?? ''}${u.first_name ?? ''} ${u.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
     const department = deptMap[u.department_id] ?? '';
     return { id: u.id, displayName: assembled || u.full_name || '', department };
   });
+  return { hits };
 }
 
 // ══════════════════════════════════════════════════════════
 // ค้นหานักเรียน — ตาราง students:
 //   id, student_code, first_name, last_name, birth_date, gender ('male'|'female'), classroom_id
-//   classroom_id -> เชื่อมกับตาราง "classroom" (เอกพจน์) คอลัมน์ room_name
-//   (preload classroom ทั้งหมดเป็น map เหมือน department ด้านบน แทนการใช้ embed)
+//   classroom_id -> ตาราง "classrooms" (พหูพจน์) คอลัมน์ room_name
 // คำนำหน้าไม่ได้เก็บในตาราง คำนวณเอง:
 //   อายุ < 15 ปี  -> male: เด็กชาย / female: เด็กหญิง
 //   อายุ >= 15 ปี -> male: นาย     / female: นางสาว
@@ -80,9 +83,12 @@ function computeThaiTitle(gender: string | null | undefined, birthDate: string |
   return isMale ? 'เด็กชาย' : 'เด็กหญิง';
 }
 
-async function searchStudents(query: string, classroomMap: Record<string, string>): Promise<StudentHit[]> {
+async function searchStudents(
+  query: string,
+  classroomMap: Record<string, string>
+): Promise<{ hits: StudentHit[]; errorMessage?: string }> {
   const q = query.trim();
-  if (!q) return [];
+  if (!q) return { hits: [] };
   const { data, error } = await supabase
     .from('students')
     .select('id, student_code, first_name, last_name, birth_date, gender, classroom_id')
@@ -90,10 +96,10 @@ async function searchStudents(query: string, classroomMap: Record<string, string
     .limit(10);
   if (error) {
     console.error('[searchStudents] query failed:', error.message, error);
-    return [];
+    return { hits: [], errorMessage: error.message };
   }
-  if (!data) return [];
-  return (data as any[]).map((s) => {
+  if (!data) return { hits: [] };
+  const hits = (data as any[]).map((s) => {
     const title = computeThaiTitle(s.gender, s.birth_date);
     const displayName = `${title}${s.first_name ?? ''} ${s.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
     const grade_level = classroomMap[s.classroom_id] ?? '';
@@ -104,6 +110,7 @@ async function searchStudents(query: string, classroomMap: Record<string, string
       grade_level,
     };
   });
+  return { hits };
 }
 
 // ══════════════════════════════════════════════════════════
@@ -121,17 +128,19 @@ function TeacherNameField({
   const [results, setResults] = useState<TeacherHit[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function handleChange(v: string) {
     onTextChange(v);
     setOpen(true);
     if (timerRef.current) clearTimeout(timerRef.current);
-    if (!v.trim()) { setResults([]); return; }
+    if (!v.trim()) { setResults([]); setErrorMsg(null); return; }
     timerRef.current = setTimeout(async () => {
       setLoading(true);
-      const hits = await searchTeachers(v, deptMap);
+      const { hits, errorMessage } = await searchTeachers(v, deptMap);
       setResults(hits);
+      setErrorMsg(errorMessage ?? null);
       setLoading(false);
     }, 300);
   }
@@ -147,10 +156,12 @@ function TeacherNameField({
         placeholder="พิมพ์ชื่อ/นามสกุลเพื่อค้นหาในระบบ..."
         className={fieldCls(invalid)}
       />
-      {open && (loading || results.length > 0) && (
+      {open && (loading || results.length > 0 || errorMsg) && (
         <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border-2 border-blue-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
           {loading ? (
             <div className="px-3 py-2.5 text-xs text-slate-400">🔍 กำลังค้นหา...</div>
+          ) : errorMsg ? (
+            <div className="px-3 py-2.5 text-xs text-red-600 font-bold">⚠️ ค้นหาไม่สำเร็จ: {errorMsg}</div>
           ) : (
             results.map((hit) => (
               <button
@@ -186,17 +197,19 @@ function StudentNameField({
   const [results, setResults] = useState<StudentHit[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function handleChange(v: string) {
     onTextChange(v);
     setOpen(true);
     if (timerRef.current) clearTimeout(timerRef.current);
-    if (!v.trim()) { setResults([]); return; }
+    if (!v.trim()) { setResults([]); setErrorMsg(null); return; }
     timerRef.current = setTimeout(async () => {
       setLoading(true);
-      const hits = await searchStudents(v, classroomMap);
+      const { hits, errorMessage } = await searchStudents(v, classroomMap);
       setResults(hits);
+      setErrorMsg(errorMessage ?? null);
       setLoading(false);
     }, 300);
   }
@@ -212,10 +225,12 @@ function StudentNameField({
         placeholder="พิมพ์ชื่อ/นามสกุล/รหัสนักเรียนเพื่อค้นหา..."
         className={fieldCls(invalid)}
       />
-      {open && (loading || results.length > 0) && (
+      {open && (loading || results.length > 0 || errorMsg) && (
         <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border-2 border-blue-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
           {loading ? (
             <div className="px-3 py-2.5 text-xs text-slate-400">🔍 กำลังค้นหา...</div>
+          ) : errorMsg ? (
+            <div className="px-3 py-2.5 text-xs text-red-600 font-bold">⚠️ ค้นหาไม่สำเร็จ: {errorMsg}</div>
           ) : (
             results.map((hit) => (
               <button
@@ -240,19 +255,19 @@ function StudentNameField({
 
 export default function RecipientsEditor({ category, recipients, submitted, onChange }: Props) {
   const isSchool = category === 'School';
-  // ★ เปิดให้เพิ่มผู้รับรางวัลได้หลายคน สำหรับ ครู/นักเรียน/ผู้บริหาร
   const supportsTeam = category === 'Teacher' || category === 'Student' || category === 'Executive';
 
-  // ★ แผนที่ department_id → ชื่อกลุ่มสาระ (ตาราง "department" เอกพจน์) โหลดครั้งเดียวตอน mount
   const [deptMap, setDeptMap] = useState<Record<string, string>>({});
-  // ★ แผนที่ classroom_id → room_name (ตาราง "classroom" เอกพจน์) โหลดครั้งเดียวตอน mount
   const [classroomMap, setClassroomMap] = useState<Record<string, string>>({});
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      const { data, error } = await supabase.from('department').select('id, name');
+      // ★ แก้: 'department' -> 'departments' (พหูพจน์)
+      const { data, error } = await supabase.from('departments').select('id, name');
       if (error) {
-        console.error('[RecipientsEditor] โหลดตาราง department ไม่สำเร็จ:', error.message, error);
+        console.error('[RecipientsEditor] โหลดตาราง departments ไม่สำเร็จ:', error.message, error);
+        setLoadError((prev) => prev ?? `โหลดตารางกลุ่มสาระ (departments) ไม่สำเร็จ: ${error.message}`);
         return;
       }
       const map: Record<string, string> = {};
@@ -261,9 +276,11 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
     })();
 
     (async () => {
-      const { data, error } = await supabase.from('classroom').select('id, room_name');
+      // ★ แก้: 'classroom' -> 'classrooms' (พหูพจน์)
+      const { data, error } = await supabase.from('classrooms').select('id, room_name');
       if (error) {
-        console.error('[RecipientsEditor] โหลดตาราง classroom ไม่สำเร็จ:', error.message, error);
+        console.error('[RecipientsEditor] โหลดตาราง classrooms ไม่สำเร็จ:', error.message, error);
+        setLoadError((prev) => prev ?? `โหลดตารางห้องเรียน (classrooms) ไม่สำเร็จ: ${error.message}`);
         return;
       }
       const map: Record<string, string> = {};
@@ -285,6 +302,16 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
 
   return (
     <div className="space-y-3">
+      {loadError && (
+        <div className="rounded-xl border-2 border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
+          ⚠️ {loadError}
+          <br />
+          <span className="font-normal">
+            ถ้าชื่อตารางจริงในระบบไม่ใช่ชื่อพหูพจน์ (เช่นยังเป็น "department"/"classroom" เอกพจน์) แจ้งกลับมาได้เลย
+          </span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-sm text-ink">
           ผู้รับรางวัล {supportsTeam && <span className="text-muted font-normal">(รองรับรางวัลประเภททีม)</span>}
@@ -319,7 +346,6 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                       className={fieldCls(false, 'bg-slate-100 text-slate-600 cursor-not-allowed')}
                     />
                   ) : category === 'Teacher' ? (
-                    // ✅ ครู/บุคลากร: พิมพ์ค้นหาแล้วเลือกชื่อจากระบบ (คำนำหน้า+ชื่อ+สกุลครบ พร้อมกลุ่มสาระจาก department_id)
                     <TeacherNameField
                       value={r.recipient_name}
                       deptMap={deptMap}
@@ -328,7 +354,6 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                       onSelect={(hit) => update(i, { recipient_name: hit.displayName, department: hit.department })}
                     />
                   ) : category === 'Student' ? (
-                    // ✅ นักเรียน: พิมพ์ค้นหาแล้วเลือกชื่อจากระบบ (คำนำหน้าคำนวณจากเพศ+อายุ, รหัส, ระดับชั้นจาก classroom.room_name)
                     <StudentNameField
                       value={r.recipient_name}
                       classroomMap={classroomMap}
@@ -409,8 +434,6 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                 )}
 
                 {category === 'Executive' && (
-                  // ★ ตำแหน่งผู้บริหาร ดึงมาจากตาราง academic_level อัตโนมัติตอนเลือกกลุ่มเป้าหมาย
-                  // (ดู fetchExecutiveRecipients ใน AwardForm.tsx)
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="text-xs text-muted font-medium">ตำแหน่ง</span>
                     <input

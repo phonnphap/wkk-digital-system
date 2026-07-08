@@ -55,12 +55,12 @@ function sanitizeFolderSegment(s: string) {
 }
 
 // ★ ดึงรายชื่อผู้บริหาร (director, deputy_director) จากตาราง users มาเป็นค่าเริ่มต้น
-//   พร้อม "ตำแหน่ง" ที่ดึงจากตาราง academic_level (ผูกผ่านคอลัมน์ academic_level บน users)
+//   พร้อม "ตำแหน่ง" ที่ดึงจากตาราง academic_levels (พหูพจน์ — แก้จาก academic_level เอกพจน์)
 //   ลองใช้ relationship embed ก่อน ถ้า DB ยังไม่ได้ตั้ง FK ไว้ให้ query แยกสองรอบแทน (กันพัง)
 async function fetchExecutiveRecipients(): Promise<Recipient[]> {
   const embedRes = await supabase
     .from('users')
-    .select('id,title,first_name,last_name,full_name,role,academic_level_ref:academic_level(name)')
+    .select('id,title,first_name,last_name,full_name,role,academic_level_ref:academic_levels(name)')
     .in('role', ['director', 'deputy_director'])
     .order('role', { ascending: true });
 
@@ -77,6 +77,10 @@ async function fetchExecutiveRecipients(): Promise<Recipient[]> {
     });
   }
 
+  if (embedRes.error) {
+    console.error('[fetchExecutiveRecipients] embed query failed:', embedRes.error.message);
+  }
+
   // ── fallback: relationship embed ใช้ไม่ได้ (เช่นยังไม่มี FK ใน DB) ── query แยก 2 รอบ
   const { data: users, error: usersErr } = await supabase
     .from('users')
@@ -85,13 +89,16 @@ async function fetchExecutiveRecipients(): Promise<Recipient[]> {
     .order('role', { ascending: true });
 
   if (usersErr || !users || users.length === 0) {
+    if (usersErr) console.error('[fetchExecutiveRecipients] fallback users query failed:', usersErr.message);
     return [{ recipient_name: '' }];
   }
 
   const levelIds = [...new Set(users.map((u: any) => u.academic_level).filter(Boolean))];
   let levelMap: Record<string, string> = {};
   if (levelIds.length > 0) {
-    const { data: levels } = await supabase.from('academic_level').select('id,name').in('id', levelIds);
+    // ★ แก้: 'academic_level' -> 'academic_levels' (พหูพจน์)
+    const { data: levels, error: levelsErr } = await supabase.from('academic_levels').select('id,name').in('id', levelIds);
+    if (levelsErr) console.error('[fetchExecutiveRecipients] academic_levels query failed:', levelsErr.message);
     levelMap = Object.fromEntries((levels || []).map((l: any) => [l.id, l.name]));
   }
 
