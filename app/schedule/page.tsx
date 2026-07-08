@@ -192,7 +192,8 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
   const isHomeroomOnly = !["admin","director","deputy_director"].includes(currentUser.role)
     && !extraRoles.includes("dept_head") && !extraRoles.includes("grade_head");
 
-  // ★ กรองครูที่เลือกได้ ตามสิทธิ์
+  // ★ ครูคนที่ 1 (ผู้สอนหลัก): ครูทั่วไป/ครูประจำชั้น ล็อกเป็นตัวเองเสมอ
+  // dept_head/grade_head เลือกได้เฉพาะในหมวด/สายเดียวกัน, admin เลือกได้ทั้งหมด
   const selectableTeachers = (() => {
     if (canEditDirect && extraRoles.includes("dept_head")) {
       return teachers.filter(t => t.department_id === currentUser.department_id);
@@ -201,7 +202,6 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
       return teachers.filter(t => t.grade_level === currentUser.grade_level);
     }
     if (isHomeroomOnly) {
-      // homeroom_teacher เพิ่มได้เฉพาะตัวเอง
       return teachers.filter(t => t.id === currentUser.id);
     }
     return teachers; // admin เห็นทั้งหมด
@@ -209,11 +209,17 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
 
   const [subjectGroup, setSubjectGroup] = useState("");
   const [subjectId,   setSubjectId]    = useState(entry?.subject_id ?? "");
-  // ★ homeroom_teacher: ล็อก teacher1 เป็นตัวเองอัตโนมัติ
+  // ★ homeroom_teacher/ครูทั่วไป: ล็อก teacher1 เป็นตัวเองอัตโนมัติ
   const [teacherId1,  setTeacherId1]   = useState(entry?.teacher_id ?? (isHomeroomOnly ? currentUser.id : ""));
   const [teacherId2,  setTeacherId2]   = useState(entry?.teacher_id_2 ?? "");
   const [note,        setNote]         = useState("");
   const [loading,     setLoading]      = useState(false);
+
+  // ★ ครูคนที่ 2 (ผู้ร่วมสอน): เปิดให้ครูทุกระดับเลือกได้จากรายชื่อครูทั้งหมด (ยกเว้นคนที่เลือกเป็นครู 1 แล้ว)
+  const selectableTeacher2Options = teachers.filter(t => t.id !== teacherId1);
+  // ★ สิทธิ์ระดับผู้บริหาร/หัวหน้า ที่บันทึกได้ทันทีไม่ต้องรออนุมัติ
+  const isFullAdminLevel = ["admin","director","deputy_director"].includes(currentUser.role)
+    || extraRoles.includes("dept_head") || extraRoles.includes("grade_head");
   const dc = DAY_COLORS[day - 1];
 
   function getGradeDigit(code: string) {
@@ -254,7 +260,14 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
       old_subject_id: entry?.subject_id, old_teacher_id: entry?.teacher_id, old_teacher_id_2: entry?.teacher_id_2,
       note,
     };
-    if (canEditDirect) await onSave(data);
+
+    // ★ ถ้าเป็นครูทั่วไป/ครูประจำชั้น (ไม่ใช่ admin/dept_head/grade_head) และมีการเพิ่ม/เปลี่ยนครูคนที่ 2
+    // ต้องส่งเป็นคำขอให้แอดมิน/ฝ่ายบริหารอนุมัติเสมอ แม้ว่าปกติจะแก้คาบของตัวเองได้ทันที (permission="direct")
+    const teacher2Changed = (teacherId2 || null) !== (entry?.teacher_id_2 ?? null);
+    const mustRequestApproval = !isFullAdminLevel && teacher2Changed;
+    const effectiveDirect = canEditDirect && !mustRequestApproval;
+
+    if (effectiveDirect) await onSave(data);
     else await onRequestChange(data);
     setLoading(false);
   }
@@ -267,7 +280,11 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
         <div className={`${dc.header} px-6 py-4`}>
           <p className="text-sm text-white/80">{DAYS[day-1]} · {slot.slot_label} · {formatTime(slot.start_time)}–{formatTime(slot.end_time)}</p>
           <h3 className="text-lg font-black text-white mt-0.5">
-            {canEditDirect ? (entry ? "✏️ แก้ไขคาบเรียน" : "➕ เพิ่มคาบเรียน") : "📝 เสนอขอแก้ไขคาบเรียน"}
+            {canEditDirect
+              ? ((teacherId2 || null) !== (entry?.teacher_id_2 ?? null) && !isFullAdminLevel
+                  ? "📝 เสนอขอเพิ่ม/เปลี่ยนครูร่วมสอน (รออนุมัติ)"
+                  : (entry ? "✏️ แก้ไขคาบเรียน" : "➕ เพิ่มคาบเรียน"))
+              : "📝 เสนอขอแก้ไขคาบเรียน"}
           </h3>
           <p className="text-sm text-white/70">ห้อง {classroom.grade_group} {classroom.room_name}</p>
         </div>
@@ -325,12 +342,17 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
 
           <div>
             <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
-              ครูผู้สอน คนที่ 2 <span className="text-slate-400 font-normal normal-case">(ถ้ามี)</span>
+              ครูผู้สอน คนที่ 2 <span className="text-slate-400 font-normal normal-case">(ถ้ามี — ผู้ร่วมสอน)</span>
             </label>
-            <select value={teacherId2} onChange={e => setTeacherId2(e.target.value)} className={inp} disabled={isHomeroomOnly}>
+            <select value={teacherId2} onChange={e => setTeacherId2(e.target.value)} className={inp}>
               <option value="">— ไม่มีครูคนที่ 2 —</option>
-              {selectableTeachers.filter(t => t.id !== teacherId1).map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
+              {selectableTeacher2Options.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
             </select>
+            {!isFullAdminLevel && (
+              <p className="text-xs text-amber-600 font-bold mt-1">
+                ⚠️ การเพิ่ม/เปลี่ยนครูคนที่ 2 ต้องได้รับการอนุมัติจากแอดมินหรือฝ่ายบริหารก่อนจึงจะมีผล
+              </p>
+            )}
           </div>
 
           {!canEditDirect && (
@@ -351,7 +373,11 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm">ยกเลิก</button>
           <button onClick={handleSubmit} disabled={loading}
             className="flex-[2] py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm disabled:opacity-50">
-            {loading ? "⏳..." : canEditDirect ? "💾 บันทึก" : "📤 ส่งคำขอ"}
+            {loading ? "⏳..." : (
+              canEditDirect && ((teacherId2 || null) === (entry?.teacher_id_2 ?? null) || isFullAdminLevel)
+                ? "💾 บันทึก"
+                : "📤 ส่งคำขออนุมัติ"
+            )}
           </button>
         </div>
       </div>
