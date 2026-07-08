@@ -27,7 +27,9 @@ const emptyRecipient: Recipient = {
 
 // ══════════════════════════════════════════════════════════
 // ค้นหาครู/บุคลากร — ดึงจากตาราง users
-// กลุ่มสาระ: department_id -> เชื่อมกับตาราง departments คอลัมน์ name เท่านั้น (ไม่ fallback ไปที่อื่นแล้ว)
+// กลุ่มสาระ: users.department_id -> เชื่อมกับตาราง "department" (เอกพจน์) คอลัมน์ name
+// ไม่ใช้ relationship embed ของ Supabase (ต้องมี FK constraint จริงใน DB ถึงจะทำงาน)
+// ใช้วิธี preload ตาราง department ทั้งหมดเป็น map แล้วจับคู่เองฝั่ง frontend แทน — ชัวร์กว่า
 // ══════════════════════════════════════════════════════════
 type TeacherHit = { id: string; displayName: string; department: string };
 
@@ -39,7 +41,11 @@ async function searchTeachers(query: string, deptMap: Record<string, string>): P
     .select('id, title, first_name, last_name, full_name, department_id')
     .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,full_name.ilike.%${q}%`)
     .limit(10);
-  if (error || !data) return [];
+  if (error) {
+    console.error('[searchTeachers] query failed:', error.message, error);
+    return [];
+  }
+  if (!data) return [];
   return (data as any[]).map((u) => {
     const assembled = `${u.title ?? ''}${u.first_name ?? ''} ${u.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
     const department = deptMap[u.department_id] ?? '';
@@ -48,9 +54,10 @@ async function searchTeachers(query: string, deptMap: Record<string, string>): P
 }
 
 // ══════════════════════════════════════════════════════════
-// ค้นหานักเรียน — ตาราง students จริง:
+// ค้นหานักเรียน — ตาราง students:
 //   id, student_code, first_name, last_name, birth_date, gender ('male'|'female'), classroom_id
-//   classroom_id ผูกกับตาราง classrooms(room_name) — ใช้ room_name เป็น "ระดับชั้น" ได้เลย ไม่ต้องมีช่องห้องแยก
+//   classroom_id -> เชื่อมกับตาราง "classroom" (เอกพจน์) คอลัมน์ room_name
+//   (preload classroom ทั้งหมดเป็น map เหมือน department ด้านบน แทนการใช้ embed)
 // คำนำหน้าไม่ได้เก็บในตาราง คำนวณเอง:
 //   อายุ < 15 ปี  -> male: เด็กชาย / female: เด็กหญิง
 //   อายุ >= 15 ปี -> male: นาย     / female: นางสาว
@@ -73,19 +80,23 @@ function computeThaiTitle(gender: string | null | undefined, birthDate: string |
   return isMale ? 'เด็กชาย' : 'เด็กหญิง';
 }
 
-async function searchStudents(query: string): Promise<StudentHit[]> {
+async function searchStudents(query: string, classroomMap: Record<string, string>): Promise<StudentHit[]> {
   const q = query.trim();
   if (!q) return [];
   const { data, error } = await supabase
     .from('students')
-    .select('id, student_code, first_name, last_name, birth_date, gender, classroom_id, classroom:classrooms!classroom_id(room_name)')
+    .select('id, student_code, first_name, last_name, birth_date, gender, classroom_id')
     .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,student_code.ilike.%${q}%`)
     .limit(10);
-  if (error || !data) return [];
+  if (error) {
+    console.error('[searchStudents] query failed:', error.message, error);
+    return [];
+  }
+  if (!data) return [];
   return (data as any[]).map((s) => {
     const title = computeThaiTitle(s.gender, s.birth_date);
     const displayName = `${title}${s.first_name ?? ''} ${s.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
-    const grade_level = s.classroom?.room_name ?? '';
+    const grade_level = classroomMap[s.classroom_id] ?? '';
     return {
       id: s.id,
       displayName,
@@ -164,9 +175,10 @@ function TeacherNameField({
 // ช่องค้นหาชื่อนักเรียน แบบพิมพ์แล้วแสดงรายชื่อ+รหัส+ระดับชั้นให้เลือก
 // ══════════════════════════════════════════════════════════
 function StudentNameField({
-  value, invalid, onTextChange, onSelect,
+  value, classroomMap, invalid, onTextChange, onSelect,
 }: {
   value: string;
+  classroomMap: Record<string, string>;
   invalid: boolean;
   onTextChange: (v: string) => void;
   onSelect: (hit: StudentHit) => void;
@@ -183,7 +195,7 @@ function StudentNameField({
     if (!v.trim()) { setResults([]); return; }
     timerRef.current = setTimeout(async () => {
       setLoading(true);
-      const hits = await searchStudents(v);
+      const hits = await searchStudents(v, classroomMap);
       setResults(hits);
       setLoading(false);
     }, 300);
@@ -231,14 +243,32 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
   // ★ เปิดให้เพิ่มผู้รับรางวัลได้หลายคน สำหรับ ครู/นักเรียน/ผู้บริหาร
   const supportsTeam = category === 'Teacher' || category === 'Student' || category === 'Executive';
 
-  // ★ แผนที่ department_id → ชื่อกลุ่มสาระ ใช้ตอนค้นหาครู (โหลดครั้งเดียวตอน mount)
+  // ★ แผนที่ department_id → ชื่อกลุ่มสาระ (ตาราง "department" เอกพจน์) โหลดครั้งเดียวตอน mount
   const [deptMap, setDeptMap] = useState<Record<string, string>>({});
+  // ★ แผนที่ classroom_id → room_name (ตาราง "classroom" เอกพจน์) โหลดครั้งเดียวตอน mount
+  const [classroomMap, setClassroomMap] = useState<Record<string, string>>({});
+
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from('departments').select('id, name');
+      const { data, error } = await supabase.from('department').select('id, name');
+      if (error) {
+        console.error('[RecipientsEditor] โหลดตาราง department ไม่สำเร็จ:', error.message, error);
+        return;
+      }
       const map: Record<string, string> = {};
       (data || []).forEach((d: any) => { map[d.id] = d.name; });
       setDeptMap(map);
+    })();
+
+    (async () => {
+      const { data, error } = await supabase.from('classroom').select('id, room_name');
+      if (error) {
+        console.error('[RecipientsEditor] โหลดตาราง classroom ไม่สำเร็จ:', error.message, error);
+        return;
+      }
+      const map: Record<string, string> = {};
+      (data || []).forEach((c: any) => { map[c.id] = c.room_name; });
+      setClassroomMap(map);
     })();
   }, []);
 
@@ -298,9 +328,10 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                       onSelect={(hit) => update(i, { recipient_name: hit.displayName, department: hit.department })}
                     />
                   ) : category === 'Student' ? (
-                    // ✅ นักเรียน: พิมพ์ค้นหาแล้วเลือกชื่อจากระบบ (คำนำหน้าคำนวณจากเพศ+อายุ, รหัส, ระดับชั้นจาก classrooms.room_name)
+                    // ✅ นักเรียน: พิมพ์ค้นหาแล้วเลือกชื่อจากระบบ (คำนำหน้าคำนวณจากเพศ+อายุ, รหัส, ระดับชั้นจาก classroom.room_name)
                     <StudentNameField
                       value={r.recipient_name}
+                      classroomMap={classroomMap}
                       invalid={nameInvalid}
                       onTextChange={(v) => update(i, { recipient_name: v })}
                       onSelect={(hit) =>
@@ -347,7 +378,6 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
                         className={fieldCls(false)}
                       />
                     </label>
-                    {/* ★ ตัดช่อง "ห้องเรียน" แยกออก เพราะ classrooms.room_name ครอบคลุมทั้งชั้น+ห้องแล้ว */}
                   </>
                 )}
 
@@ -380,7 +410,7 @@ export default function RecipientsEditor({ category, recipients, submitted, onCh
 
                 {category === 'Executive' && (
                   // ★ ตำแหน่งผู้บริหาร ดึงมาจากตาราง academic_level อัตโนมัติตอนเลือกกลุ่มเป้าหมาย
-                  // (ดู fetchExecutiveRecipients ใน AwardForm.tsx) — แก้ไขเพิ่มเติมได้ที่นี่ถ้าจำเป็น
+                  // (ดู fetchExecutiveRecipients ใน AwardForm.tsx)
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="text-xs text-muted font-medium">ตำแหน่ง</span>
                     <input
