@@ -2,17 +2,51 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client"; 
-import { 
+import { createClient } from "@/lib/supabase/client";
+import {
   LayoutDashboard, UserCheck, CalendarDays, FileText,
-  Wrench, Car, Monitor, FolderOpen, Trophy, Calendar, RefreshCw, Users, LogOut, Bell, Settings 
+  Wrench, Car, Monitor, FolderOpen, Trophy, Calendar, RefreshCw, Users, LogOut, Bell, Settings
 } from "lucide-react";
+
+// ══════════════════════════════════════════════════════════
+// ── การแจ้งเตือน — ค่าคงที่ที่ใช้ระบุ "ผู้อนุมัติ" ตรงกับหน้าใบลา/ตารางสอน ──
+// (ถ้าอีเมลผู้อนุมัติเปลี่ยน แก้ตรงนี้จุดเดียว)
+// ══════════════════════════════════════════════════════════
+const LEAVE_APPROVER_1_EMAIL = "phansa@khienkhet.ac.th";
+const LEAVE_APPROVER_2_EMAIL = "titima@khienkhet.ac.th";
+const LEAVE_APPROVER_3_EMAIL = "thananut@khienkhet.ac.th";
+
+function leaveApproverSlotByEmail(email: string): 1 | 2 | 3 | null {
+  const e = (email || "").toLowerCase().trim();
+  if (e === LEAVE_APPROVER_1_EMAIL) return 1;
+  if (e === LEAVE_APPROVER_2_EMAIL) return 2;
+  if (e === LEAVE_APPROVER_3_EMAIL) return 3;
+  return null;
+}
+
+function toThaiDateShort(iso: string) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", timeZone: "Asia/Bangkok" });
+  } catch { return ""; }
+}
+
+type NotifSource = "leave_approval" | "leave_status" | "timetable_request";
+type NotifItem = {
+  id: string;
+  source: NotifSource;
+  title: string;
+  detail: string;
+  date: string;   // ISO date ใช้เรียงลำดับ + แสดงผล
+  path: string;    // หน้าไปเมื่อคลิก
+  urgent?: boolean; // นับรวมใน badge สีแดง (แปลว่า "ต้องดำเนินการ")
+};
 
 export default function DashboardPage() {
   const router = useRouter();
-  const supabase = createClient(); 
+  const supabase = createClient();
 
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
@@ -20,6 +54,12 @@ export default function DashboardPage() {
   const [userName, setUserName] = useState<string>("");
 
   const [isMounted, setIsMounted] = useState<boolean>(false);
+
+  // ── การแจ้งเตือน ──────────────────────────────────────────
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [notifications, setNotifications] = useState<NotifItem[]>([]);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
   async function checkUserRole() {
@@ -32,11 +72,12 @@ export default function DashboardPage() {
       }
 
       // 1. ดึง first_name และ last_name เพิ่มเติมจากตาราง users
+      // ✅ เพิ่ม id, extra_roles, grade_level เข้ามาด้วย — ใช้ตอนดึงการแจ้งเตือนที่เกี่ยวกับผู้ใช้คนนี้
       let profile: any = null;
 
       const { data: byAuthId } = await supabase
         .from("users")
-        .select("first_name, last_name, role")
+        .select("id, first_name, last_name, role, extra_roles, grade_level")
         .eq("auth_id", user.id)
         .maybeSingle();
 
@@ -47,7 +88,7 @@ export default function DashboardPage() {
         if (email) {
           const { data: byEmail } = await supabase
             .from("users")
-            .select("first_name, last_name, role")
+            .select("id, first_name, last_name, role, extra_roles, grade_level")
             .eq("email", email)
             .maybeSingle();
           profile = byEmail;
@@ -93,6 +134,14 @@ export default function DashboardPage() {
         setUserPrefix(prefix);
         setUserName(finalName);
         setIsAdmin(profile.role === "admin");
+
+        // ✅ โหลดการแจ้งเตือนหลังรู้ตัวตนผู้ใช้ครบแล้ว
+        loadNotifications({
+          profileId: profile.id,
+          email: user.email || user.user_metadata?.email || "",
+          role: profile.role || "",
+          extraRoles: profile.extra_roles || [],
+        });
       }
 
     } catch (err) {
@@ -102,6 +151,119 @@ export default function DashboardPage() {
   checkUserRole();
   setIsMounted(true);
 }, [supabase, router]);
+
+  // ── ปิด dropdown แจ้งเตือนเมื่อคลิกนอกกล่อง ──────────────────
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // ══════════════════════════════════════════════════════════
+  // ── โหลดการแจ้งเตือน — รวมจากหลายระบบที่มีตารางข้อมูลรองรับแล้ว
+  // ปัจจุบันเชื่อมกับ: ใบลา/ไปราชการ (leave_requests) และ คำขอแก้ไขตารางสอน
+  // (timetable_change_requests) เพราะเป็น 2 ระบบที่มีสถานะ pending/approved
+  // ชัดเจนอยู่แล้ว ระบบอื่น (แจ้งซ่อม/จองรถ/ขอออกนอกโรงเรียน ฯลฯ) ยังไม่มีให้ดูโครงสร้าง
+  // ตาราง — เพิ่มเป็นบล็อกใหม่ในฟังก์ชันนี้ได้เลยเมื่อพร้อม (ดูคอมเมนต์ท้ายฟังก์ชัน)
+  // ══════════════════════════════════════════════════════════
+  async function loadNotifications(opts: { profileId: string; email: string; role: string; extraRoles: string[] }) {
+    setNotifLoading(true);
+    const items: NotifItem[] = [];
+    try {
+      const leaveSlot = leaveApproverSlotByEmail(opts.email);
+      const isTimetableApprover =
+        ["admin", "director", "deputy_director"].includes(opts.role) ||
+        opts.extraRoles.includes("dept_head") ||
+        opts.extraRoles.includes("grade_head");
+
+      // 1) ใบลาที่ "รอฉันอนุมัติ" ในลำดับปัจจุบัน
+      if (leaveSlot) {
+        const { data: leaveReqs, error } = await supabase
+          .from("leave_requests")
+          .select("id, days_count, start_date, status, approver_1_status, approver_2_status, approver_3_status, user:users!leave_requests_user_id_fkey(first_name,last_name,full_name)")
+          .eq("status", "pending");
+        if (error) console.warn("[loadNotifications] leave approval query error:", error.message);
+        (leaveReqs || []).forEach((r: any) => {
+          const myStatus = leaveSlot === 1 ? r.approver_1_status : leaveSlot === 2 ? r.approver_2_status : r.approver_3_status;
+          const readyForMe =
+            leaveSlot === 1 ||
+            (leaveSlot === 2 && r.approver_1_status === "approved") ||
+            (leaveSlot === 3 && r.approver_2_status === "approved");
+          if (myStatus === "pending" && readyForMe) {
+            const u = r.user;
+            const name = u?.full_name || `${u?.first_name ?? ""} ${u?.last_name ?? ""}`.trim() || "—";
+            items.push({
+              id: `leave-${r.id}`,
+              source: "leave_approval",
+              title: "📅 ใบลารออนุมัติ",
+              detail: `${name} · ${r.days_count} วัน`,
+              date: r.start_date,
+              path: "/leave",
+              urgent: true,
+            });
+          }
+        });
+      }
+
+      // 2) คำขอแก้ไขตารางสอนที่ "รอฉันอนุมัติ" (แอดมิน/หัวหน้าสาย/หัวหน้าหมวด)
+      if (isTimetableApprover) {
+        const { data: ttReqs, error } = await supabase
+          .from("timetable_change_requests")
+          .select("id, created_at, requester:users!timetable_change_requests_requester_id_fkey(first_name,last_name,full_name)")
+          .eq("status", "pending");
+        if (error) console.warn("[loadNotifications] timetable request query error:", error.message);
+        (ttReqs || []).forEach((r: any) => {
+          const u = r.requester;
+          const name = u?.full_name || `${u?.first_name ?? ""} ${u?.last_name ?? ""}`.trim() || "—";
+          items.push({
+            id: `tt-${r.id}`,
+            source: "timetable_request",
+            title: "🗓️ คำขอแก้ไขตารางสอน",
+            detail: `${name} ยื่นคำขอแก้ไขคาบเรียน`,
+            date: r.created_at,
+            path: "/schedule",
+            urgent: true,
+          });
+        });
+      }
+
+      // 3) สถานะใบลาของฉันเอง — อนุมัติ/ไม่อนุมัติล่าสุด (แจ้งผลให้เจ้าตัวรู้)
+      if (opts.profileId) {
+        const { data: myLeaves, error } = await supabase
+          .from("leave_requests")
+          .select("id, status, start_date, reject_reason")
+          .eq("user_id", opts.profileId)
+          .in("status", ["approved", "rejected"])
+          .order("start_date", { ascending: false })
+          .limit(3);
+        if (error) console.warn("[loadNotifications] my leave status query error:", error.message);
+        (myLeaves || []).forEach((r: any) => {
+          items.push({
+            id: `myleave-${r.id}`,
+            source: "leave_status",
+            title: r.status === "approved" ? "✅ ใบลาของคุณได้รับการอนุมัติ" : "❌ ใบลาของคุณไม่ได้รับการอนุมัติ",
+            detail: r.status === "rejected" && r.reject_reason ? r.reject_reason : `วันที่ลา ${toThaiDateShort(r.start_date)}`,
+            date: r.start_date,
+            path: "/leave",
+          });
+        });
+      }
+
+      // ── ตัวอย่างจุดที่จะเพิ่มระบบอื่นในอนาคต (แจ้งซ่อม/จองรถ/ขอออกนอกโรงเรียน) ──
+      // เมื่อทราบชื่อตาราง+คอลัมน์สถานะแล้ว เพิ่ม query แบบเดียวกับด้านบน แล้ว push
+      // เข้า items ได้เลย โครงสร้าง NotifItem รองรับ source ใหม่ได้ทันที (แค่เพิ่ม type)
+
+      items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setNotifications(items);
+    } catch (err) {
+      console.error("[loadNotifications] unexpected error:", err);
+    }
+    setNotifLoading(false);
+  }
+
+  const urgentCount = notifications.filter(n => n.urgent).length;
 
   // ✅ ฟังก์ชันเหล่านี้ต้องอยู่นอก useEffect
   const handleAdminMenuClick = (targetPath: string) => {
@@ -283,10 +445,58 @@ return (
           <span className="text-slate-300">/</span>
           <span className="text-slate-800 font-extrabold">แดชบอร์ด</span>
         </div>
-        <button className="p-2.5 text-slate-400 hover:text-slate-600 bg-white rounded-xl border border-slate-200 shadow-sm relative transition-all">
-          <Bell className="w-5 h-5" />
-          <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-500 rounded-full"></span>
-        </button>
+
+        {/* ✅ ศูนย์การแจ้งเตือน — เชื่อมกับใบลา/คำขอแก้ไขตารางสอน */}
+        <div className="relative" ref={notifRef}>
+          <button
+            onClick={() => setNotifOpen(v => !v)}
+            className="p-2.5 text-slate-400 hover:text-slate-600 bg-white rounded-xl border border-slate-200 shadow-sm relative transition-all"
+          >
+            <Bell className="w-5 h-5" />
+            {urgentCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-rose-500 rounded-full text-[10px] text-white font-black flex items-center justify-center border-2 border-white">
+                {urgentCount > 9 ? "9+" : urgentCount}
+              </span>
+            )}
+          </button>
+
+          {notifOpen && (
+            <div className="absolute right-0 mt-2 w-80 sm:w-96 max-h-[26rem] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-xl z-50">
+              <div className="sticky top-0 bg-white px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                <p className="font-black text-slate-800 text-sm">🔔 การแจ้งเตือน</p>
+                <button
+                  onClick={() => loadNotifications({
+                    profileId: "", email: "", role: "", extraRoles: [],
+                  })}
+                  className="hidden"
+                />
+                {notifLoading && <span className="text-xs text-slate-400 animate-pulse">กำลังโหลด...</span>}
+              </div>
+              {notifications.length === 0 ? (
+                <div className="px-4 py-10 text-center text-slate-400 text-sm">
+                  {notifLoading ? "⏳ กำลังตรวจสอบ..." : "✅ ไม่มีการแจ้งเตือนใหม่"}
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-50">
+                  {notifications.map(n => (
+                    <button
+                      key={n.id}
+                      onClick={() => { setNotifOpen(false); router.push(n.path); }}
+                      className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors flex flex-col gap-0.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-bold text-slate-800">{n.title}</span>
+                        {n.urgent && <span className="shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-600 border border-rose-200">ต้องดำเนินการ</span>}
+                      </div>
+                      <span className="text-xs text-slate-500 line-clamp-1">{n.detail}</span>
+                      <span className="text-[10px] text-slate-400">{toThaiDateShort(n.date)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Hero */}
@@ -337,7 +547,7 @@ return (
           { icon:"✓", bg:"bg-emerald-100", color:"text-emerald-600", label:"นักเรียนมาวันนี้", value:"847", sub:"/ 920 คน", subColor:"text-slate-400" },
           { icon:"✕", bg:"bg-rose-100",    color:"text-rose-600",    label:"ขาดเรียนวันนี้",  value:"28",  sub:"(3.0%)",  subColor:"text-rose-400"  },
           { icon:"📅", bg:"bg-blue-100",   color:"text-blue-600",   label:"ครูลางาน",         value:"4",   sub:"มีสอนแทน 3", subColor:"text-slate-400" },
-          { icon:"📌", bg:"bg-purple-100", color:"text-purple-600", label:"รอดำเนินการ",      value:"12",  sub:"รายการ",  subColor:"text-slate-400" },
+          { icon:"📌", bg:"bg-purple-100", color:"text-purple-600", label:"รอดำเนินการ",      value:String(urgentCount),  sub:"รายการ",  subColor:"text-slate-400" },
         ].map((s, i) => (
           <div key={i} className="bg-white border border-slate-200 rounded-2xl p-5 flex items-center gap-4 shadow-sm">
             <div className={`w-12 h-12 rounded-xl ${s.bg} ${s.color} flex items-center justify-center text-xl font-bold`}>{s.icon}</div>
