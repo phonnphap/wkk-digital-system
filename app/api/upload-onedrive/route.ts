@@ -5,13 +5,13 @@
 // ตัวอย่างการใช้งานปัจจุบันในระบบ:
 // - ระบบลา (เอกสารแนบ + PDF อนุมัติ) → hr@khienkhet.ac.th (ไม่ต้องส่ง account, ใช้ default)
 // - ระบบ Event/Calendar (รูปภาพกิจกรรม) → academic@khienkhet.ac.th (ส่ง account มาตรงๆ)
+// - ระบบคลังสื่อการสอน → academic@khienkhet.ac.th + ★ teacherFolder mode (โฟลเดอร์ต่อครู + เลขรันต่อเนื่อง)
 
 import { NextRequest, NextResponse } from "next/server";
 
 const TENANT_ID  = process.env.MICROSOFT_TENANT_ID!;
 const CLIENT_ID  = process.env.MICROSOFT_CLIENT_ID!;
 const CLIENT_SEC = process.env.MICROSOFT_CLIENT_SECRET!;
-// ★ ค่า default เมื่อไม่มีการส่ง account มา — คงไว้ที่ hr ตามระบบลาเดิม
 const DEFAULT_TARGET_UPN = process.env.MICROSOFT_HR_EMAIL || "hr@khienkhet.ac.th";
 
 async function getAccessToken(): Promise<string> {
@@ -35,6 +35,33 @@ async function getAccessToken(): Promise<string> {
   return json.access_token as string;
 }
 
+// ★ นับจำนวนไฟล์ที่มีอยู่แล้วในโฟลเดอร์ เพื่อคำนวณเลขรันถัดไป
+// ถ้าโฟลเดอร์ยังไม่เคยถูกสร้าง (404) ถือว่ามี 0 ไฟล์ ไม่ใช่ error
+async function countFilesInFolder(token: string, account: string, folderPath: string): Promise<number> {
+  const encodedPath = folderPath.split("/").map(encodeURIComponent).join("/");
+  const url = `https://graph.microsoft.com/v1.0/users/${account}/drive/root:/${encodedPath}:/children?$select=name`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (res.status === 404) return 0; // โฟลเดอร์ยังไม่มี = ยังไม่เคยอัปโหลด
+  if (!res.ok) {
+    console.warn("[upload-onedrive] countFilesInFolder failed:", res.status);
+    return 0; // เผื่อพลาด ให้เริ่มจาก 0 (ดีกว่า block การอัปโหลด)
+  }
+  const json = await res.json();
+  return Array.isArray(json.value) ? json.value.length : 0;
+}
+
+function sanitizeSegment(s: string) {
+  return s.replace(/[\\/:*?"<>|]/g, "-").trim();
+}
+
+function thaiDateStamp(): string {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyyBE = d.getFullYear() + 543;
+  return `${dd}-${mm}-${yyyyBE}`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -48,15 +75,27 @@ export async function POST(req: NextRequest) {
     const folder    = formData.get("folder") as string | null;
     const fileName  = formData.get("fileName") as string | null;
 
-    // ★ อ่าน account ที่ frontend ส่งมา — ถ้าไม่มีให้ fallback เป็น hr (ค่า default เดิม)
     const accountFromForm = formData.get("account") as string | null;
     const TARGET_UPN = accountFromForm?.trim() || DEFAULT_TARGET_UPN;
 
-    // ── สร้าง path ──────────────────────────────────────────────────
-    // ถ้าส่ง path มาตรงๆ → ใช้เลย (encode แต่ละ segment)
-    // ถ้าไม่มี → ใช้ folder + fileName
+    // ★ โหมดใหม่: โฟลเดอร์ต่อครู + เลขรันต่อเนื่องอัตโนมัติ
+    const teacherFolderBase = formData.get("teacherFolderBase") as string | null; // เช่น "คลังสื่อการสอน"
+    const teacherName       = formData.get("teacherName") as string | null;       // ชื่อครูที่อัปโหลด
+
+    const token  = await getAccessToken();
+    const buffer = await file.arrayBuffer();
+
     let finalPath: string;
-    if (fixedPath) {
+
+    if (teacherFolderBase && teacherName) {
+      const folderPath = `${sanitizeSegment(teacherFolderBase)}/${sanitizeSegment(teacherName)}`;
+      const existingCount = await countFilesInFolder(token, TARGET_UPN, folderPath);
+      const seq = String(existingCount + 1).padStart(2, "0");
+      const ext = file.name.includes(".") ? file.name.split(".").pop() : "";
+      const newFileName = `${thaiDateStamp()}_${seq}${ext ? "." + ext : ""}`;
+      finalPath = `${folderPath}/${newFileName}`.split("/").map(encodeURIComponent).join("/");
+      console.log("[upload-onedrive] teacherFolder mode → seq:", seq, "path:", finalPath);
+    } else if (fixedPath) {
       finalPath = fixedPath.split("/").map(encodeURIComponent).join("/");
     } else {
       const targetFolder = folder || "ใบลา_เอกสารแนบ";
@@ -68,10 +107,6 @@ export async function POST(req: NextRequest) {
     console.log("[upload-onedrive] finalPath:", finalPath);
     console.log("[upload-onedrive] file size:", file.size, "bytes");
 
-    const token  = await getAccessToken();
-    const buffer = await file.arrayBuffer();
-
-    // Graph API simple upload (≤4MB)
     const uploadUrl = `https://graph.microsoft.com/v1.0/users/${TARGET_UPN}/drive/root:/${finalPath}:/content`;
     console.log("[upload-onedrive] uploadUrl:", uploadUrl);
 
@@ -94,7 +129,6 @@ export async function POST(req: NextRequest) {
 
     const fileData = await upRes.json();
 
-    // ★ trim() กันช่องว่างเกิน + ตัด "/" ท้ายกันซ้ำ slash
     const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "").trim().replace(/\/+$/, "");
     const proxyUrl = `${baseUrl}/api/onedrive-file?account=${encodeURIComponent(TARGET_UPN)}&itemId=${encodeURIComponent(fileData.id)}`;
 
@@ -104,38 +138,8 @@ export async function POST(req: NextRequest) {
       webUrl: fileData.webUrl,
       itemId: fileData.id,
       account: TARGET_UPN,
+      fileName: fileData.name, // ★ เผื่อ frontend อยากโชว์ชื่อไฟล์จริงที่ตั้งให้ (เช่น "14-07-2569_01.png")
     });
-
-    // พยายามสร้าง sharing link (ไม่บังคับ)
-    let publicUrl: string = fileData.webUrl;
-    try {
-      const shareRes = await fetch(
-        `https://graph.microsoft.com/v1.0/users/${TARGET_UPN}/drive/items/${fileData.id}/createLink`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ type: "view", scope: "anonymous" }),
-        }
-      );
-      if (shareRes.ok) {
-        const shareData = await shareRes.json();
-        publicUrl = shareData.link?.webUrl ?? fileData.webUrl;
-      }
-    } catch {
-      console.warn("[upload-onedrive] createLink failed, using webUrl");
-    }
-
-    return NextResponse.json({
-  ok: true,
-  url: publicUrl,           // sharing link (anonymous view)
-  webUrl: fileData.webUrl,  // SharePoint page
-  downloadUrl: fileData["@microsoft.graph.downloadUrl"] ?? publicUrl,
-  itemId: fileData.id,
-  account: TARGET_UPN,
-});
   } catch (e: any) {
     console.error("[upload-onedrive] EXCEPTION:", e);
     return NextResponse.json({ ok: false, error: e.message }, { status: 500 });
