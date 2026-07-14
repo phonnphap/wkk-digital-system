@@ -23,10 +23,10 @@ interface Building {
 interface RepairRequest {
   id: string; title: string; description?: string;
   building_id?: string; room?: string; category?: string;
-  status: string; priority?: string; image_urls?: string[];
+  status: string; priority?: string; photo_urls?: string[];
   reporter_id: string; assigned_to?: string;
   created_at: string; updated_at?: string;
-  resolved_at?: string; memo_pdf_url?: string;
+  completed_at?: string; memo_pdf_url?: string;
   memo_items?: any[]; memo_created_by?: string; memo_created_at?: string;
   reporter?: User; assignee?: User; building?: Building;
 }
@@ -49,10 +49,11 @@ function thaiDateFull(s?: string) {
   return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()+543}`;
 }
 
+// ★ แก้: 'resolved' -> 'completed' ให้ตรงกับ enum ค่าจริงใน DB (pending, in_progress, completed, cancelled)
 const STATUS_CFG: Record<string,{label:string;color:string;bg:string;border:string}> = {
   pending:     { label:"รอดำเนินการ", color:"#92400e", bg:"#fef3c7", border:"#fcd34d" },
   in_progress: { label:"กำลังซ่อม",  color:"#1e40af", bg:"#dbeafe", border:"#93c5fd" },
-  resolved:    { label:"เสร็จแล้ว",  color:"#065f46", bg:"#d1fae5", border:"#6ee7b7" },
+  completed:   { label:"เสร็จแล้ว",  color:"#065f46", bg:"#d1fae5", border:"#6ee7b7" },
   cancelled:   { label:"ยกเลิก",     color:"#6b7280", bg:"#f3f4f6", border:"#d1d5db" },
 };
 const PRIORITY_CFG: Record<string,{label:string;color:string}> = {
@@ -218,7 +219,6 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">✕</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
-          {/* เลขที่ / วันที่ */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">เลขที่หนังสือ</label>
@@ -233,7 +233,6 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
             </div>
           </div>
 
-          {/* เลือกรายการ */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">
@@ -265,7 +264,6 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
             </div>
           </div>
 
-          {/* Preview info */}
           <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-700">
             <p className="font-bold mb-1">ข้อมูลในเอกสาร</p>
             <p>ผู้เสนอ: {fullName(currentUser)}</p>
@@ -295,7 +293,7 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
   const [room,        setRoom]       = useState(existing?.room ?? "");
   const [category,    setCategory]   = useState(existing?.category ?? "");
   const [priority,    setPriority]   = useState(existing?.priority ?? "medium");
-  const [imageUrls,   setImageUrls]  = useState<string[]>(existing?.image_urls ?? []);
+  const [imageUrls,   setImageUrls]  = useState<string[]>(existing?.photo_urls ?? []);
   const [uploading,   setUploading]  = useState(false);
   const [saving,      setSaving]     = useState(false);
   const [errors,      setErrors]     = useState<Record<string,boolean>>({});
@@ -310,79 +308,79 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
     return Object.keys(e).length === 0;
   };
 
-  // ใหม่ — ใช้ OneDrive + preview + จำกัด 4 รูป
-const [imagePreviews, setImagePreviews] = useState<string[]>([]); // base64 preview
-const MAX_IMAGES = 4;
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const MAX_IMAGES = 4;
 
-const handleUpload = async (ev: React.ChangeEvent<HTMLInputElement>) => {
-  const files = Array.from(ev.target.files ?? []);
-  if (!files.length) return;
+  const handleUpload = async (ev: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(ev.target.files ?? []);
+    if (!files.length) return;
 
-  const remaining = MAX_IMAGES - imageUrls.length;
-  if (remaining <= 0) { alert(`อัปโหลดได้สูงสุด ${MAX_IMAGES} รูป`); return; }
-  const toUpload = files.slice(0, remaining);
-  if (files.length > remaining) alert(`เลือกได้อีก ${remaining} รูป (ใช้แค่ ${remaining} รูปแรก)`);
+    const remaining = MAX_IMAGES - imageUrls.length;
+    if (remaining <= 0) { alert(`อัปโหลดได้สูงสุด ${MAX_IMAGES} รูป`); return; }
+    const toUpload = files.slice(0, remaining);
+    if (files.length > remaining) alert(`เลือกได้อีก ${remaining} รูป (ใช้แค่ ${remaining} รูปแรก)`);
 
-  setUploading(true);
-  for (const file of toUpload) {
-    if (file.size > 10*1024*1024) { alert(`${file.name} ขนาดเกิน 10MB`); continue; }
+    setUploading(true);
+    for (const file of toUpload) {
+      if (file.size > 10*1024*1024) { alert(`${file.name} ขนาดเกิน 10MB`); continue; }
 
-    // แสดง preview ก่อน (base64)
-    const reader = new FileReader();
-    reader.onload = e => {
-      if (e.target?.result) setImagePreviews(prev => [...prev, e.target!.result as string]);
-    };
-    reader.readAsDataURL(file);
+      const reader = new FileReader();
+      reader.onload = e => {
+        if (e.target?.result) setImagePreviews(prev => [...prev, e.target!.result as string]);
+      };
+      reader.readAsDataURL(file);
 
-    // Upload ไป OneDrive
-    try {
-      const formData = new FormData();
-formData.append("file", file);
-formData.append("account", "general@khienkhet.ac.th");
-formData.append("folder", "WKK_Repair_System");
-formData.append("fileName", `repair-${Date.now()}-${Math.random().toString(36).slice(2)}.${file.name.split(".").pop()}`);
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("account", "general@khienkhet.ac.th");
+        formData.append("folder", "WKK_Repair_System");
+        formData.append("fileName", `repair-${Date.now()}-${Math.random().toString(36).slice(2)}.${file.name.split(".").pop()}`);
 
-const res = await fetch("/api/upload-onedrive", {
-  method: "POST",
-  body: formData,
-});
-      if (!res.ok) {
-  const err = await res.json().catch(()=>({}));
-  console.error("upload-onedrive error:", err);   // ← บรรทัดนี้ต้องมี
-  alert("อัปโหลดไม่สำเร็จ: " + JSON.stringify(err.error ?? err ?? res.statusText));
+        const res = await fetch("/api/upload-onedrive", {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(()=>({}));
+          console.error("upload-onedrive error:", err);
+          alert("อัปโหลดไม่สำเร็จ: " + JSON.stringify(err.error ?? err ?? res.statusText));
+          setImagePreviews(prev => prev.slice(0, -1));
+          continue;
+        }
+        const { url, itemId } = await res.json();
+        setImageUrls(prev => [...prev, url ?? itemId]);
+      } catch (e: any) {
+        alert("อัปโหลดไม่สำเร็จ: " + e.message);
         setImagePreviews(prev => prev.slice(0, -1));
-        continue;
       }
-      const { url, itemId } = await res.json();
-      // เก็บ URL จาก OneDrive
-      setImageUrls(prev => [...prev, url ?? itemId]);
-    } catch (e: any) {
-      alert("อัปโหลดไม่สำเร็จ: " + e.message);
-      setImagePreviews(prev => prev.slice(0, -1));
     }
-  }
-  setUploading(false);
-  if (fileRef.current) fileRef.current.value = "";
-};
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+  };
 
-// ฟังก์ชันลบรูป
-function removeImage(i: number) {
-  setImageUrls(prev => prev.filter((_,j) => j !== i));
-  setImagePreviews(prev => prev.filter((_,j) => j !== i));
-}
+  function removeImage(i: number) {
+    setImageUrls(prev => prev.filter((_,j) => j !== i));
+    setImagePreviews(prev => prev.filter((_,j) => j !== i));
+  }
 
   const handleSave = async () => {
     if (!validate()) return;
     setSaving(true);
+    // ★ แก้: payload ตรงกับสคีมาจริงของ repair_requests แล้ว
+    //   - photo_urls (jsonb) แทน image_urls (คอลัมน์เดิมถูกลบไปแล้ว)
+    //   - ไม่ส่ง ticket_no / location เพราะมี default ให้แล้วที่ฝั่ง DB
     const payload = {
-  title: title.trim(), description: desc.trim(), building_id: buildingId,
-  room: room.trim(), category, priority, image_urls: imageUrls,
-  reporter_id: currentUser.id, status: existing?.status ?? "pending",
-};
+      title: title.trim(), description: desc.trim(), building_id: buildingId,
+      room: room.trim(), category, priority, photo_urls: imageUrls,
+      reporter_id: currentUser.id, status: existing?.status ?? "pending",
+    };
     if (existing?.id) {
-      await supabase.from("repair_requests").update(payload).eq("id", existing.id);
+      const { error } = await supabase.from("repair_requests").update(payload).eq("id", existing.id);
+      if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); setSaving(false); return; }
     } else {
-      await supabase.from("repair_requests").insert([payload]);
+      const { error } = await supabase.from("repair_requests").insert([payload]);
+      if (error) { alert("❌ แจ้งซ่อมไม่สำเร็จ: " + error.message); setSaving(false); return; }
     }
     setSaving(false);
     onSave();
@@ -445,46 +443,45 @@ function removeImage(i: number) {
             <textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={3}
               placeholder="อธิบายปัญหาเพิ่มเติม..." className={iCls()+" resize-none"} />
           </div>
-          {/* รูปภาพ */}
           <div>
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">รูปภาพประกอบ</label>
             {imageUrls.length < MAX_IMAGES && (
-  <label className={`flex items-center gap-3 cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl px-4 py-3 transition-colors ${uploading?"opacity-60":""} hover:border-blue-400`}>
-    <span className="text-2xl">{uploading?"⏳":"📷"}</span>
-    <div>
-      <p className="font-bold text-slate-600 text-sm">{uploading?"กำลังอัปโหลด...":"คลิกเพื่อแนบรูป"}</p>
-      <p className="text-slate-400 text-xs">ไม่เกิน 10MB · สูงสุด {MAX_IMAGES} รูป (เพิ่มได้อีก {MAX_IMAGES-imageUrls.length} รูป)</p>
-    </div>
-    <input ref={fileRef} type="file" multiple accept="image/*" disabled={uploading||imageUrls.length>=MAX_IMAGES}
-      onChange={handleUpload} className="hidden" />
-  </label>
-)}
+              <label className={`flex items-center gap-3 cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl px-4 py-3 transition-colors ${uploading?"opacity-60":""} hover:border-blue-400`}>
+                <span className="text-2xl">{uploading?"⏳":"📷"}</span>
+                <div>
+                  <p className="font-bold text-slate-600 text-sm">{uploading?"กำลังอัปโหลด...":"คลิกเพื่อแนบรูป"}</p>
+                  <p className="text-slate-400 text-xs">ไม่เกิน 10MB · สูงสุด {MAX_IMAGES} รูป (เพิ่มได้อีก {MAX_IMAGES-imageUrls.length} รูป)</p>
+                </div>
+                <input ref={fileRef} type="file" multiple accept="image/*" disabled={uploading||imageUrls.length>=MAX_IMAGES}
+                  onChange={handleUpload} className="hidden" />
+              </label>
+            )}
             {(imagePreviews.length > 0 || imageUrls.length > 0) && (
-  <div className="grid grid-cols-4 gap-2 mt-2">
-    {(imagePreviews.length > 0 ? imagePreviews : imageUrls).map((src,i)=>(
-      <div key={i} className="relative group aspect-square">
-        <img src={src} alt=""
-          className="w-full h-full object-cover rounded-xl border border-slate-200"
-          onClick={()=>window.open(imageUrls[i]??src,"_blank")} style={{cursor:"pointer"}}/>
-        <button onClick={()=>removeImage(i)}
-          className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full text-[10px] hidden group-hover:flex items-center justify-center font-bold shadow">×</button>
-        {uploading && i===imagePreviews.length-1 && (
-          <div className="absolute inset-0 bg-black/40 rounded-xl flex items-center justify-center">
-            <span className="text-white text-xs font-bold">⏳</span>
-          </div>
-        )}
-      </div>
-    ))}
-    {imageUrls.length < MAX_IMAGES && (
-      <label className="aspect-square border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition-colors bg-slate-50">
-        <span className="text-2xl">📷</span>
-        <span className="text-xs text-slate-400 mt-1">{MAX_IMAGES - imageUrls.length} เพิ่มได้</span>
-        <input ref={fileRef} type="file" multiple accept="image/*" disabled={uploading}
-          onChange={handleUpload} className="hidden" />
-      </label>
-    )}
-  </div>
-)}
+              <div className="grid grid-cols-4 gap-2 mt-2">
+                {(imagePreviews.length > 0 ? imagePreviews : imageUrls).map((src,i)=>(
+                  <div key={i} className="relative group aspect-square">
+                    <img src={src} alt=""
+                      className="w-full h-full object-cover rounded-xl border border-slate-200"
+                      onClick={()=>window.open(imageUrls[i]??src,"_blank")} style={{cursor:"pointer"}}/>
+                    <button onClick={()=>removeImage(i)}
+                      className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full text-[10px] hidden group-hover:flex items-center justify-center font-bold shadow">×</button>
+                    {uploading && i===imagePreviews.length-1 && (
+                      <div className="absolute inset-0 bg-black/40 rounded-xl flex items-center justify-center">
+                        <span className="text-white text-xs font-bold">⏳</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {imageUrls.length < MAX_IMAGES && (
+                  <label className="aspect-square border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition-colors bg-slate-50">
+                    <span className="text-2xl">📷</span>
+                    <span className="text-xs text-slate-400 mt-1">{MAX_IMAGES - imageUrls.length} เพิ่มได้</span>
+                    <input ref={fileRef} type="file" multiple accept="image/*" disabled={uploading}
+                      onChange={handleUpload} className="hidden" />
+                  </label>
+                )}
+              </div>
+            )}
           </div>
         </div>
         <div className="px-6 py-4 border-t border-slate-100 flex gap-2 justify-end shrink-0 bg-slate-50 rounded-b-2xl">
@@ -540,7 +537,6 @@ function ManagersModal({ currentUser, allUsers, managers, onClose, onRefresh }: 
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
             ผู้ดูแลโครงการสามารถดูรายงานทั้งหมด สร้างบันทึกข้อความ และพิมพ์รายงานได้
           </div>
-          {/* ค้นหา */}
           <div className="relative">
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">เพิ่มผู้ดูแล</label>
             <input type="text" value={search} onChange={e=>setSearch(e.target.value)}
@@ -558,7 +554,6 @@ function ManagersModal({ currentUser, allUsers, managers, onClose, onRefresh }: 
               </div>
             )}
           </div>
-          {/* รายชื่อ */}
           <div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">ผู้ดูแลปัจจุบัน ({managers.length} คน)</p>
             {managers.length === 0 ? (
@@ -596,12 +591,15 @@ function DetailModal({ request, canManage, allUsers, onUpdate, onClose }: {
 
   const handleUpdate = async () => {
     setSaving(true);
-    await supabase.from("repair_requests").update({
+    // ★ แก้: ใช้ completed_at (คอลัมน์จริงในตาราง) แทน resolved_at
+    //   และเช็คสถานะ 'completed' (ตรงกับ enum) แทน 'resolved'
+    const { error } = await supabase.from("repair_requests").update({
       status, assigned_to: assignedTo || null,
       updated_at: new Date().toISOString(),
-      ...(status === "resolved" ? { resolved_at: new Date().toISOString() } : {}),
+      ...(status === "completed" ? { completed_at: new Date().toISOString() } : {}),
     }).eq("id", request.id);
     setSaving(false);
+    if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); return; }
     onUpdate();
   };
 
@@ -636,11 +634,11 @@ function DetailModal({ request, canManage, allUsers, onUpdate, onClose }: {
             <p>📅 {thaiDate(request.created_at)}</p>
           </div>
           {request.description && <p className="text-sm text-slate-600 bg-slate-50 rounded-xl px-4 py-3">{request.description}</p>}
-          {(request.image_urls??[]).length > 0 && (
+          {(request.photo_urls??[]).length > 0 && (
             <div>
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">รูปภาพ</p>
               <div className="grid grid-cols-3 gap-2">
-                {request.image_urls!.map((url,i)=>(
+                {request.photo_urls!.map((url,i)=>(
                   <img key={i} src={url} alt="" onClick={()=>window.open(url,"_blank")}
                     className="w-full h-24 object-cover rounded-xl border border-slate-200 cursor-pointer hover:brightness-90 transition-all" />
                 ))}
@@ -697,7 +695,6 @@ export default function Page() {
   const [showMemo,     setShowMemo]    = useState(false);
   const [detailReq,    setDetailReq]   = useState<RepairRequest|null>(null);
 
-  // ── Roles ──────────────────────────────────────────────────────────────────
   const isAdmin       = useMemo(()=>ADMIN_ROLES.includes(user?.role??""),[user]);
   const isProjManager = useMemo(()=>managers.some(m=>m.user_id===user?.id),[managers,user]);
   const myBuildingIds = useMemo(()=>{
@@ -708,7 +705,6 @@ export default function Page() {
   const canSeeAll = isAdmin || isProjManager;
   const canManage = isAdmin || isProjManager || isBuildingManager;
 
-  // ── Load user ──────────────────────────────────────────────────────────────
   useEffect(()=>{
     const init=async()=>{
       const {data:{user:au}}=await supabase.auth.getUser();
@@ -729,24 +725,18 @@ export default function Page() {
     init();
   },[]);
 
-  // ── Load data ──────────────────────────────────────────────────────────────
   const loadData=useCallback(async()=>{
     if (!user) return;
-    // Buildings
     const {data:blds}=await supabase.from("buildings").select("*").order("name");
     setBuildings((blds??[]) as Building[]);
-    // All users
     const {data:usrs}=await supabase.from("users")
       .select("id,first_name,last_name,title,role,position,signature_url").order("first_name");
     setAllUsers((usrs??[]) as User[]);
-    // Director
     const dir=(usrs??[]).find((u:any)=>u.role==="director") as User|undefined;
     setDirector(dir);
-    // Project managers
     const {data:mgrs}=await supabase.from("repair_project_managers")
       .select("*,user:users(id,first_name,last_name,title,role)");
     setManagers((mgrs??[]) as ProjectManager[]);
-    // Repair requests
     const {data:rqs}=await supabase.from("repair_requests")
   .select(`*,reporter:users!reporter_id(id,first_name,last_name,title),
     building:buildings(id,name)`)
@@ -756,7 +746,6 @@ export default function Page() {
 
   useEffect(()=>{if(!loading&&user) loadData();},[loading,user,loadData]);
 
-  // ── Filtered ───────────────────────────────────────────────────────────────
   const visibleRequests = useMemo(()=>{
     let list = requests;
     if (!canSeeAll && isBuildingManager)
@@ -764,23 +753,22 @@ export default function Page() {
     else if (!canSeeAll)
   list = list.filter(r => r.reporter_id === user?.id);
     if (filterBldg)   list = list.filter(r => r.building_id === filterBldg);
+    if (filterStatus) list = list.filter(r => r.status === filterStatus);
     return list;
   },[requests,canSeeAll,isBuildingManager,myBuildingIds,user,filterStatus,filterBldg]);
 
   const myRequests = useMemo(()=>requests.filter(r=>r.reporter_id===user?.id),[requests,user]);
 
-  // ── Stats ──────────────────────────────────────────────────────────────────
   const stats = useMemo(()=>{
     const base = canSeeAll ? requests : myRequests;
     return {
       total:       base.length,
       pending:     base.filter(r=>r.status==="pending").length,
       in_progress: base.filter(r=>r.status==="in_progress").length,
-      resolved:    base.filter(r=>r.status==="resolved").length,
+      completed:   base.filter(r=>r.status==="completed").length,
     };
   },[requests,myRequests,canSeeAll]);
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
       <p className="text-slate-400 animate-pulse text-lg">กำลังโหลด...</p>
@@ -794,7 +782,6 @@ export default function Page() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col" style={{fontFamily:"'Sarabun','Noto Sans Thai',sans-serif"}}>
-      {/* Header */}
       <div className="bg-gradient-to-r from-orange-500 via-orange-400 to-amber-400 px-5 py-4 flex items-center gap-3 shadow-lg shrink-0">
         <button onClick={()=>router.push("/dashboard")}
           className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white font-bold text-lg shrink-0">←</button>
@@ -822,7 +809,6 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="bg-white border-b border-slate-200 flex shrink-0">
         {([
           ["list",      "📋 รายการทั้งหมด"],
@@ -838,16 +824,14 @@ export default function Page() {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* ── Dashboard ── */}
         {tab==="dashboard" && canSeeAll && (
           <div className="max-w-5xl mx-auto p-5 space-y-6">
-            {/* Stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
                 {label:"ทั้งหมด",     value:stats.total,       color:"#3b82f6", icon:"📋"},
                 {label:"รอดำเนินการ", value:stats.pending,     color:"#d97706", icon:"⏳"},
                 {label:"กำลังซ่อม",  value:stats.in_progress, color:"#2563eb", icon:"🔧"},
-                {label:"เสร็จแล้ว",  value:stats.resolved,    color:"#16a34a", icon:"✅"},
+                {label:"เสร็จแล้ว",  value:stats.completed,   color:"#16a34a", icon:"✅"},
               ].map(s=>(
                 <div key={s.label} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center gap-3">
                   <span className="text-3xl">{s.icon}</span>
@@ -859,7 +843,6 @@ export default function Page() {
               ))}
             </div>
 
-            {/* By building */}
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-slate-100">
                 <h3 className="font-bold text-slate-700 text-sm">สรุปรายอาคาร</h3>
@@ -881,7 +864,7 @@ export default function Page() {
                           <td className="px-4 py-3 font-bold text-slate-700">{b.name}</td>
                           <td className="px-4 py-3 text-amber-600 font-bold">{bReqs.filter(r=>r.status==="pending").length}</td>
                           <td className="px-4 py-3 text-blue-600 font-bold">{bReqs.filter(r=>r.status==="in_progress").length}</td>
-                          <td className="px-4 py-3 text-emerald-600 font-bold">{bReqs.filter(r=>r.status==="resolved").length}</td>
+                          <td className="px-4 py-3 text-emerald-600 font-bold">{bReqs.filter(r=>r.status==="completed").length}</td>
                           <td className="px-4 py-3 text-slate-600 font-bold">{bReqs.length}</td>
                         </tr>
                       );
@@ -891,7 +874,6 @@ export default function Page() {
               </div>
             </div>
 
-            {/* Recent pending */}
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
                 <h3 className="font-bold text-slate-700 text-sm">⏳ รอดำเนินการ ({stats.pending})</h3>
@@ -918,10 +900,8 @@ export default function Page() {
           </div>
         )}
 
-        {/* ── List ── */}
         {tab==="list" && (
           <div className="max-w-4xl mx-auto p-5 space-y-4">
-            {/* Filter */}
             <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap gap-3 items-end">
               <div>
                 <label className="block text-xs font-bold text-slate-400 mb-1">สถานะ</label>
@@ -977,12 +957,12 @@ export default function Page() {
                         <span style={{background:cfg.bg,color:cfg.color,borderColor:cfg.border}}
                           className="text-xs font-bold px-2.5 py-1 rounded-lg border shrink-0">{cfg.label}</span>
                       </div>
-                      {(r.image_urls??[]).length>0&&(
+                      {(r.photo_urls??[]).length>0&&(
                         <div className="flex gap-1.5 mt-2">
-                          {r.image_urls!.slice(0,3).map((url,i)=>(
+                          {r.photo_urls!.slice(0,3).map((url,i)=>(
                             <img key={i} src={url} alt="" className="w-12 h-12 object-cover rounded-lg border border-slate-200"/>
                           ))}
-                          {r.image_urls!.length>3&&<div className="w-12 h-12 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center text-xs text-slate-400 font-bold">+{r.image_urls!.length-3}</div>}
+                          {r.photo_urls!.length>3&&<div className="w-12 h-12 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center text-xs text-slate-400 font-bold">+{r.photo_urls!.length-3}</div>}
                         </div>
                       )}
                     </div>
@@ -993,7 +973,6 @@ export default function Page() {
           </div>
         )}
 
-        {/* ── Mine ── */}
         {tab==="mine" && (
           <div className="max-w-3xl mx-auto p-5 space-y-4">
             <div className="flex items-center justify-between">
@@ -1030,7 +1009,6 @@ export default function Page() {
         )}
       </div>
 
-      {/* Modals */}
       {showForm && (
         <RepairFormModal buildings={buildings} currentUser={user}
           onSave={async()=>{setShowForm(false);await loadData();}}
@@ -1041,7 +1019,7 @@ export default function Page() {
           onClose={()=>setShowManagers(false)} onRefresh={loadData} />
       )}
       {showMemo && (
-        <MemoModal requests={visibleRequests.filter(r=>r.status!=="resolved")}
+        <MemoModal requests={visibleRequests.filter(r=>r.status!=="completed")}
           buildings={buildings} currentUser={user} director={director}
           onClose={()=>setShowMemo(false)} />
       )}

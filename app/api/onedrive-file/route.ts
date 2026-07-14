@@ -4,6 +4,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+
 const TENANT_ID  = process.env.MICROSOFT_TENANT_ID!;
 const CLIENT_ID  = process.env.MICROSOFT_CLIENT_ID!;
 const CLIENT_SEC = process.env.MICROSOFT_CLIENT_SECRET!;

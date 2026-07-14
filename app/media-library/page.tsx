@@ -42,28 +42,31 @@ const SUBJECT_GROUP_COLORS = [
   "bg-indigo-100 text-indigo-700", "bg-orange-100 text-orange-700", "bg-teal-100 text-teal-700",
 ];
 
-const STORAGE_BUCKET = "media-library";
-
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Types ─────────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 type UserProfile = {
-  id: string; first_name?: string; last_name?: string; full_name?: string;
+  id: string; title?: string; first_name?: string; last_name?: string; full_name?: string;
   email: string; role: string; position?: string; department_id?: string;
 };
 type MediaItem = {
   id: string;
-  registered_date: string;      // วันที่ลงทะเบียน
-  media_type: string;           // ประเภทสื่อ/อุปกรณ์
-  title: string;                // ชื่อสื่อ/รายละเอียด
-  subject?: string;             // วิชา
-  grade_level?: string;         // ระดับชั้น
-  image_url?: string;           // รูปภาพ
-  source?: string;              // แหล่งที่มา/ผู้ผลิต
-  storage_location?: string;    // สถานที่จัดเก็บ
-  owner_id?: string;            // ผู้รับผิดชอบ
-  status: string;               // สถานะการใช้งาน
-  note?: string;                // หมายเหตุ
+  registered_date: string;        // วันที่ลงทะเบียน
+  media_type: string;             // ประเภทสื่อ/อุปกรณ์
+  title: string;                  // ชื่อสื่อ/รายละเอียด
+  subject?: string;                // วิชา
+  grade_level?: string;            // ระดับชั้น
+  image_item_id?: string;          // OneDrive item id ของรูปภาพ
+  image_name?: string;
+  attachment_item_id?: string;     // OneDrive item id ของไฟล์สื่อแนบ
+  attachment_name?: string;
+  attachment_web_url?: string;
+  attachment_size?: number;
+  source?: string;                 // แหล่งที่มา/ผู้ผลิต
+  storage_location?: string;       // สถานที่จัดเก็บ
+  owner_id?: string;               // ผู้รับผิดชอบ
+  status: string;                  // สถานะการใช้งาน
+  note?: string;                   // หมายเหตุ
   created_at?: string;
   owner?: UserProfile;
 };
@@ -71,18 +74,24 @@ type MediaItem = {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Helpers ───────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
+// ★ เพิ่มคำนำหน้า (title) ต่อท้ายชื่อเสมอ เช่น "นางสาววรัญญา ยอดมณี"
 function displayName(u?: any) {
   if (!u) return "—";
+  const title = (u.title ?? "").trim();
   const fn = (u.first_name ?? "").trim();
   const ln = (u.last_name ?? "").trim();
-  if (fn || ln) return `${fn} ${ln}`.trim();
+  if (fn || ln) return `${title}${fn} ${ln}`.trim();
   return u.full_name ?? u.email ?? "—";
 }
 function formatDate(d?: string) {
   if (!d) return "—";
-  try {
-    return new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
-  } catch { return d; }
+  try { return new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }); }
+  catch { return d; }
+}
+function formatFileSize(bytes?: number) {
+  if (!bytes) return "";
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 function subjectColor(subject?: string) {
   if (!subject) return SUBJECT_GROUP_COLORS[0];
@@ -90,13 +99,79 @@ function subjectColor(subject?: string) {
   for (let i = 0; i < subject.length; i++) hash = (hash + subject.charCodeAt(i)) % SUBJECT_GROUP_COLORS.length;
   return SUBJECT_GROUP_COLORS[hash];
 }
+// บัญชี OneDrive ปลายทาง — ต้องตรงกับ MICROSOFT_TARGET_EMAIL ฝั่งเซิร์ฟเวอร์ (lib/onedrive.ts) เสมอ
+const ONEDRIVE_ACCOUNT = "academic@khienkhet.ac.th";
+
+// รูปภาพ/ไฟล์ที่อัปโหลดขึ้น OneDrive แสดงผ่าน endpoint นี้เสมอ
+// (proxy สตรีมเนื้อไฟล์จริงกลับมา ไม่ใช่ redirect ไปลิงก์ชั่วคราว จึงไม่มีวันหมดอายุ)
+function onedriveSrc(itemId?: string) {
+  return itemId ? `/api/onedrive-file?account=${encodeURIComponent(ONEDRIVE_ACCOUNT)}&itemId=${encodeURIComponent(itemId)}` : "";
+}
+
+// ★ ดึง "วิชา → ชุดระดับชั้น" ที่ครูคนนี้สอนอยู่จริงจากตารางสอน (timetable_entries)
+// เพื่อให้เลือกชื่อวิชาได้เฉพาะวิชาที่ครูผู้ล็อกอิน (หรือผู้รับผิดชอบที่เลือก) สอนอยู่ และผูกระดับชั้นอัตโนมัติ
+async function loadTeacherSubjectGradeMap(teacherId: string): Promise<Map<string, Set<string>>> {
+  const map = new Map<string, Set<string>>();
+  if (!teacherId) return map;
+  const { data: rows } = await (supabase.from("timetable_entries") as any)
+    .select("subject_id, classroom_id, teacher_id, teacher_id_2")
+    .or(`teacher_id.eq.${teacherId},teacher_id_2.eq.${teacherId}`);
+  const entries = (rows ?? []) as any[];
+  if (entries.length === 0) return map;
+
+  const subjectIds   = [...new Set(entries.map(e => e.subject_id))];
+  const classroomIds = [...new Set(entries.map(e => e.classroom_id))];
+  const [{ data: subjectsData }, { data: classroomsData }] = await Promise.all([
+    supabase.from("subjects").select("id,name_th").in("id", subjectIds.length ? subjectIds : ["_none_"]),
+    supabase.from("classrooms").select("id,grade_group").in("id", classroomIds.length ? classroomIds : ["_none_"]),
+  ]);
+  const subjectNameMap: Record<string, string> = {};
+  (subjectsData ?? []).forEach((s: any) => { subjectNameMap[s.id] = s.name_th; });
+  const classroomGradeMap: Record<string, string> = {};
+  (classroomsData ?? []).forEach((c: any) => { classroomGradeMap[c.id] = c.grade_group; });
+
+  entries.forEach(e => {
+    const name  = subjectNameMap[e.subject_id];
+    const grade = classroomGradeMap[e.classroom_id];
+    if (!name) return;
+    if (!map.has(name)) map.set(name, new Set());
+    if (grade) map.get(name)!.add(grade);
+  });
+  return map;
+}
+
+// อัปโหลดไฟล์ไปยัง OneDrive ผ่าน endpoint กลางของโรงเรียน (ใช้ร่วมกับระบบลา/ปฏิทินกิจกรรม)
+// ★ ใช้ field "path" (ไม่ใช่ "folder") เพราะ endpoint นี้ encode "folder" เป็น segment เดียว
+// ถ้ามี "/" ใน folder จะถูก escape เป็น %2F แทนที่จะสร้างโฟลเดอร์ย่อยจริงๆ
+// "path" จะ split ด้วย "/" แล้ว encode ทีละ segment ให้ถูกต้อง จึงใช้สร้างโครงสร้างโฟลเดอร์ซ้อนได้
+async function uploadFileToOneDrive(file: File, kind: "images" | "files"): Promise<{
+  itemId: string; name: string; webUrl: string; size: number; account: string;
+}> {
+  const subFolder = kind === "images" ? "รูปภาพ" : "ไฟล์สื่อแนบ";
+  const safeName = file.name.replace(/[\\/:*?"<>|]/g, "_");
+  const path = `คลังสื่อการสอน/${subFolder}/${Date.now()}_${safeName}`;
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("account", ONEDRIVE_ACCOUNT);
+  formData.append("path", path);
+
+  const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
+  const data = await res.json();
+  if (!data.ok) {
+    const msg = typeof data.error === "string" ? data.error : (data.error?.message ?? "อัปโหลดไม่สำเร็จ");
+    throw new Error(msg);
+  }
+  // ★ ชื่อไฟล์และขนาดรู้อยู่แล้วจากฝั่ง client ก่อนอัปโหลด ไม่ต้องรอ endpoint ส่งกลับ
+  return { itemId: data.itemId, name: file.name, webUrl: data.webUrl, size: file.size, account: data.account };
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Media Form Modal (Add / Edit) ────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 function MediaFormModal({ item, currentUser, isAdmin, teachers, onSave, onClose }: {
   item?: MediaItem; currentUser: UserProfile; isAdmin: boolean; teachers: UserProfile[];
-  onSave: (d: Partial<MediaItem>, file: File | null) => Promise<void>;
+  onSave: (d: Partial<MediaItem>) => Promise<void>;
   onClose: () => void;
 }) {
   const [registeredDate, setRegisteredDate] = useState(item?.registered_date ?? new Date().toISOString().slice(0, 10));
@@ -109,22 +184,87 @@ function MediaFormModal({ item, currentUser, isAdmin, teachers, onSave, onClose 
   const [ownerId, setOwnerId]         = useState(item?.owner_id ?? currentUser.id);
   const [status, setStatus]           = useState(item?.status ?? STATUS_OPTIONS[0].value);
   const [note, setNote]               = useState(item?.note ?? "");
-  const [imagePreview, setImagePreview] = useState(item?.image_url ?? "");
-  const [imageFile, setImageFile]     = useState<File | null>(null);
-  const [loading, setLoading]         = useState(false);
+
+  // ── รูปภาพ: preview ทันทีแบบ local ก่อน แล้วอัปขึ้น OneDrive เบื้องหลัง ──
+  const [imagePreview, setImagePreview] = useState(onedriveSrc(item?.image_item_id) || "");
+  const [imageItemId, setImageItemId]   = useState(item?.image_item_id ?? "");
+  const [imageName, setImageName]       = useState(item?.image_name ?? "");
+  const [imageUploading, setImageUploading] = useState(false);
+
+  // ── ไฟล์สื่อแนบ (เอกสาร/วิดีโอ/ไฟล์อื่นๆ) → OneDrive เช่นกัน ──
+  const [attachmentItemId, setAttachmentItemId] = useState(item?.attachment_item_id ?? "");
+  const [attachmentName, setAttachmentName]     = useState(item?.attachment_name ?? "");
+  const [attachmentWebUrl, setAttachmentWebUrl] = useState(item?.attachment_web_url ?? "");
+  const [attachmentSize, setAttachmentSize]     = useState(item?.attachment_size ?? 0);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+
+  const [loading, setLoading] = useState(false);
+
+  // ── วิชาที่ผู้รับผิดชอบสอนอยู่จริง (ผูกจากตารางสอน) → ใช้กรองช่องวิชา + ผูกระดับชั้นอัตโนมัติ ──
+  const [subjectGradeMap, setSubjectGradeMap] = useState<Map<string, Set<string>>>(new Map());
+  const [loadingSubjects, setLoadingSubjects] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingSubjects(true);
+    loadTeacherSubjectGradeMap(ownerId).then(map => { if (!cancelled) { setSubjectGradeMap(map); setLoadingSubjects(false); } });
+    return () => { cancelled = true; };
+  }, [ownerId]);
+
+  const availableSubjects = [...subjectGradeMap.keys()].sort();
+  const availableGradesForSubject = subject && subjectGradeMap.has(subject)
+    ? [...subjectGradeMap.get(subject)!].sort((a, b) => GRADE_LEVELS.indexOf(a) - GRADE_LEVELS.indexOf(b))
+    : GRADE_LEVELS;
+
+  // ★ เลือกวิชา → ผูกระดับชั้นอัตโนมัติ (ถ้าครูสอนวิชานี้ระดับเดียว เลือกให้ทันที)
+  function handleSubjectChange(v: string) {
+    setSubject(v);
+    const grades = v && subjectGradeMap.has(v) ? [...subjectGradeMap.get(v)!] : [];
+    if (grades.length === 1) setGradeLevel(grades[0]);
+    else if (grades.length > 0 && !grades.includes(gradeLevel)) setGradeLevel("");
+  }
 
   const inp = "w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm font-bold focus:border-blue-400 focus:outline-none";
-  const canPickOwner = isAdmin; // ครูทั่วไปเป็นผู้รับผิดชอบของตัวเองเสมอ
+  const canPickOwner = isAdmin;
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    setImageFile(f);
-    setImagePreview(URL.createObjectURL(f));
+    setImagePreview(URL.createObjectURL(f)); // ★ แสดงตัวอย่างภาพทันที ไม่ต้องรออัปโหลดเสร็จ
+    setImageUploading(true);
+    try {
+      const result = await uploadFileToOneDrive(f, "images");
+      setImageItemId(result.itemId);
+      setImageName(result.name);
+    } catch (err: any) {
+      alert("⚠️ อัปโหลดรูปไป OneDrive ไม่สำเร็จ: " + err.message);
+    } finally {
+      setImageUploading(false);
+    }
+  }
+
+  async function handleAttachmentFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setAttachmentName(f.name);
+    setAttachmentSize(f.size);
+    setAttachmentUploading(true);
+    try {
+      const result = await uploadFileToOneDrive(f, "files");
+      setAttachmentItemId(result.itemId);
+      setAttachmentName(result.name);
+      setAttachmentWebUrl(result.webUrl);
+      setAttachmentSize(result.size);
+    } catch (err: any) {
+      alert("⚠️ อัปโหลดไฟล์สื่อไป OneDrive ไม่สำเร็จ: " + err.message);
+    } finally {
+      setAttachmentUploading(false);
+    }
   }
 
   async function handleSubmit() {
     if (!title.trim() || !mediaType) { alert("กรุณากรอกชื่อสื่อ/รายละเอียด และเลือกประเภท"); return; }
+    if (imageUploading || attachmentUploading) { alert("กรุณารอให้อัปโหลดไฟล์ขึ้น OneDrive เสร็จก่อนบันทึก"); return; }
     setLoading(true);
     await onSave({
       id: item?.id,
@@ -132,8 +272,10 @@ function MediaFormModal({ item, currentUser, isAdmin, teachers, onSave, onClose 
       subject: subject.trim() || undefined, grade_level: gradeLevel || undefined,
       source: source.trim() || undefined, storage_location: storageLocation.trim() || undefined,
       owner_id: ownerId, status, note: note.trim() || undefined,
-      image_url: item?.image_url,
-    }, imageFile);
+      image_item_id: imageItemId || undefined, image_name: imageName || undefined,
+      attachment_item_id: attachmentItemId || undefined, attachment_name: attachmentName || undefined,
+      attachment_web_url: attachmentWebUrl || undefined, attachment_size: attachmentSize || undefined,
+    });
     setLoading(false);
   }
 
@@ -145,13 +287,26 @@ function MediaFormModal({ item, currentUser, isAdmin, teachers, onSave, onClose 
         </div>
         <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
 
+          {/* รูปภาพ */}
           <div>
-            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">รูปภาพ</label>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">รูปภาพ (อัปโหลดขึ้น OneDrive)</label>
             <div className="flex items-center gap-3">
-              <div className="w-20 h-20 rounded-xl bg-slate-100 border-2 border-dashed border-slate-300 overflow-hidden flex items-center justify-center shrink-0">
-                {imagePreview ? <img src={imagePreview} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-2xl">🖼️</span>}
+              <div className="w-20 h-20 rounded-xl bg-slate-100 border-2 border-dashed border-slate-300 overflow-hidden flex items-center justify-center shrink-0 relative">
+                {imagePreview
+                  ? <img src={imagePreview} alt="" className="w-full h-full object-cover" />
+                  : <span className="text-slate-300 text-2xl">🖼️</span>}
+                {imageUploading && (
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                    <span className="text-white text-[10px] font-black animate-pulse">⏳</span>
+                  </div>
+                )}
               </div>
-              <input type="file" accept="image/*" onChange={handleFile} className="text-xs" />
+              <div>
+                <input type="file" accept="image/*" onChange={handleImageFile} className="text-xs" />
+                <p className={`text-[11px] font-bold mt-1 ${imageUploading ? "text-amber-500" : "text-emerald-600"}`}>
+                  {imageUploading ? "⏳ กำลังอัปโหลดขึ้น OneDrive..." : imageItemId ? "✅ อัปโหลดขึ้น OneDrive แล้ว" : ""}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -175,14 +330,30 @@ function MediaFormModal({ item, currentUser, isAdmin, teachers, onSave, onClose 
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">วิชา</label>
-              <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="เช่น การสร้างสื่ออิเล็กทรอนิกส์" className={inp} />
+              <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+                วิชา {loadingSubjects && <span className="text-slate-300 normal-case font-normal">(กำลังโหลด...)</span>}
+              </label>
+              {availableSubjects.length > 0 ? (
+                <select value={subject} onChange={e => handleSubjectChange(e.target.value)} className={inp}>
+                  <option value="">— เลือกวิชา —</option>
+                  {availableSubjects.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              ) : (
+                <div>
+                  <input value={subject} onChange={e => handleSubjectChange(e.target.value)} placeholder="พิมพ์ชื่อวิชา" className={inp} />
+                  {!loadingSubjects && (
+                    <p className="text-[11px] text-amber-600 font-bold mt-1">⚠️ ไม่พบวิชาของผู้รับผิดชอบคนนี้ในตารางสอน กรุณาพิมพ์เอง</p>
+                  )}
+                </div>
+              )}
             </div>
             <div>
-              <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">ระดับชั้น</label>
+              <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+                ระดับชั้น {subject && subjectGradeMap.has(subject) && <span className="text-slate-400 normal-case font-normal">(ตามตารางสอน)</span>}
+              </label>
               <select value={gradeLevel} onChange={e => setGradeLevel(e.target.value)} className={inp}>
                 <option value="">— เลือกระดับชั้น —</option>
-                {GRADE_LEVELS.map(g => <option key={g} value={g}>{g}</option>)}
+                {availableGradesForSubject.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
           </div>
@@ -194,14 +365,31 @@ function MediaFormModal({ item, currentUser, isAdmin, teachers, onSave, onClose 
 
           <div>
             <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">สถานที่จัดเก็บ</label>
-            <input value={storageLocation} onChange={e => setStorageLocation(e.target.value)} placeholder="เช่น Google Drive กลุ่มสาระฯ, ตู้เก็บสื่อ ห้อง 3" className={inp} />
+            <input value={storageLocation} onChange={e => setStorageLocation(e.target.value)} placeholder="เช่น OneDrive กลุ่มสาระฯ, ตู้เก็บสื่อ ห้อง 3" className={inp} />
+          </div>
+
+          {/* ไฟล์สื่อแนบ */}
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">แนบไฟล์สื่อ (อัปโหลดขึ้น OneDrive)</label>
+            <input type="file" onChange={handleAttachmentFile} className="text-xs" />
+            {attachmentName && (
+              <div className="mt-2 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                <span className="text-lg shrink-0">{attachmentUploading ? "⏳" : "📎"}</span>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-700 truncate">{attachmentName}</p>
+                  <p className="text-[10px] text-slate-400 font-bold">
+                    {attachmentUploading ? "กำลังอัปโหลดขึ้น OneDrive..." : `${formatFileSize(attachmentSize)} · อัปโหลดขึ้น OneDrive แล้ว`}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">ผู้รับผิดชอบ</label>
               {canPickOwner ? (
-                <select value={ownerId} onChange={e => setOwnerId(e.target.value)} className={inp}>
+                <select value={ownerId} onChange={e => { setOwnerId(e.target.value); setSubject(""); setGradeLevel(""); }} className={inp}>
                   {teachers.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
                 </select>
               ) : (
@@ -225,9 +413,9 @@ function MediaFormModal({ item, currentUser, isAdmin, teachers, onSave, onClose 
 
         <div className="px-5 pb-5 flex gap-2 border-t border-slate-100 pt-4">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm">ยกเลิก</button>
-          <button onClick={handleSubmit} disabled={loading}
+          <button onClick={handleSubmit} disabled={loading || imageUploading || attachmentUploading}
             className="flex-[2] py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm disabled:opacity-50">
-            {loading ? "⏳ กำลังบันทึก..." : "💾 บันทึก"}
+            {loading ? "⏳ กำลังบันทึก..." : (imageUploading || attachmentUploading) ? "⏳ กำลังอัปโหลดไฟล์..." : "💾 บันทึก"}
           </button>
         </div>
       </div>
@@ -247,8 +435,8 @@ function MediaDetailModal({ item, canEdit, onEdit, onDelete, onClose }: {
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="w-full h-56 bg-slate-100 overflow-hidden">
-          {item.image_url
-            ? <img src={item.image_url} alt={item.title} className="w-full h-full object-cover" />
+          {item.image_item_id
+            ? <img src={onedriveSrc(item.image_item_id)} alt={item.title} className="w-full h-full object-cover" />
             : <div className="w-full h-full flex items-center justify-center text-slate-300 text-5xl">🖼️</div>}
         </div>
         <div className="p-5 space-y-3">
@@ -265,6 +453,16 @@ function MediaDetailModal({ item, canEdit, onEdit, onDelete, onClose }: {
             <div><p className="text-xs font-black text-slate-400 uppercase">แหล่งที่มา/ผู้ผลิต</p><p className="font-bold text-slate-700">{item.source || "—"}</p></div>
             <div><p className="text-xs font-black text-slate-400 uppercase">สถานที่จัดเก็บ</p><p className="font-bold text-slate-700">{item.storage_location || "—"}</p></div>
           </div>
+          {item.attachment_item_id && (
+            <a href={onedriveSrc(item.attachment_item_id)} target="_blank" rel="noreferrer"
+              className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 hover:bg-blue-100 transition-all">
+              <span className="text-lg">📎</span>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-blue-700 truncate">{item.attachment_name}</p>
+                <p className="text-[10px] text-blue-400 font-bold">{formatFileSize(item.attachment_size)} · เปิด/ดาวน์โหลดจาก OneDrive</p>
+              </div>
+            </a>
+          )}
           {item.note && <div className="bg-slate-50 rounded-xl px-3 py-2 text-sm text-slate-600">💬 {item.note}</div>}
         </div>
         <div className="px-5 pb-5 flex gap-2 border-t border-slate-100 pt-4">
@@ -292,10 +490,13 @@ function MediaCard({ item, onClick }: { item: MediaItem; onClick: () => void }) 
   return (
     <div onClick={onClick}
       className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all">
-      <div className="w-full h-32 bg-slate-100 overflow-hidden">
-        {item.image_url
-          ? <img src={item.image_url} alt={item.title} className="w-full h-full object-cover" />
+      <div className="w-full h-32 bg-slate-100 overflow-hidden relative">
+        {item.image_item_id
+          ? <img src={onedriveSrc(item.image_item_id)} alt={item.title} className="w-full h-full object-cover" loading="lazy" />
           : <div className="w-full h-full flex items-center justify-center text-slate-300 text-3xl">🖼️</div>}
+        {item.attachment_item_id && (
+          <span className="absolute top-1.5 right-1.5 bg-white/90 rounded-md px-1.5 py-0.5 text-[10px] font-black text-slate-500">📎</span>
+        )}
       </div>
       <div className="p-3">
         <div className="flex items-center gap-1 flex-wrap mb-1.5">
@@ -469,12 +670,12 @@ export default function MediaLibraryPage() {
 
       let profileData: any = null;
       const { data: byAuthId } = await supabase.from("users")
-        .select("id,first_name,last_name,full_name,email,role,position,department_id")
+        .select("id,title,first_name,last_name,full_name,email,role,position,department_id")
         .eq("auth_id", authUser.id).maybeSingle();
       profileData = byAuthId;
       if (!profileData && email) {
         const { data: byEmail } = await supabase.from("users")
-          .select("id,first_name,last_name,full_name,email,role,position,department_id")
+          .select("id,title,first_name,last_name,full_name,email,role,position,department_id")
           .eq("email", email).maybeSingle();
         profileData = byEmail;
       }
@@ -482,11 +683,12 @@ export default function MediaLibraryPage() {
       setUser(profileData);
 
       const { data: allUsers } = await supabase.from("users")
-        .select("id,first_name,last_name,full_name,email,role,position,department_id")
+        .select("id,title,first_name,last_name,full_name,email,role,position,department_id")
         .order("first_name");
-      setTeachers(((allUsers ?? []) as any[]).map(t => ({ ...t, full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim() })));
+      const teacherList = ((allUsers ?? []) as any[]).map(t => ({ ...t, full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim() }));
+      setTeachers(teacherList);
 
-      await loadItems(allUsers ?? []);
+      await loadItems(teacherList);
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -506,26 +708,13 @@ export default function MediaLibraryPage() {
   useEffect(() => { if (!loading) loadItems(); /* eslint-disable-next-line */ }, [teachers.length]);
 
   // ── Save (insert / update) ───────────────────────────────────────────────
-  async function handleSave(data: Partial<MediaItem>, file: File | null) {
-    let imageUrl = data.image_url;
-    if (file) {
-      const ext = file.name.split(".").pop();
-      const fileName = `${crypto.randomUUID()}.${ext}`;
-      const { error: uploadErr } = await supabase.storage.from(STORAGE_BUCKET).upload(fileName, file);
-      if (uploadErr) {
-        alert("⚠️ อัปโหลดรูปไม่สำเร็จ: " + uploadErr.message + " (จะบันทึกข้อมูลโดยไม่มีรูป)");
-      } else {
-        const { data: urlData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(fileName);
-        imageUrl = urlData.publicUrl;
-      }
-    }
-    const payload = { ...data, image_url: imageUrl };
+  async function handleSave(data: Partial<MediaItem>) {
     if (data.id) {
-      const { id, ...rest } = payload;
+      const { id, ...rest } = data;
       const { error } = await (supabase.from("media_items") as any).update(rest).eq("id", id);
       if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); return; }
     } else {
-      const { error } = await (supabase.from("media_items") as any).insert([payload]);
+      const { error } = await (supabase.from("media_items") as any).insert([data]);
       if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); return; }
     }
     await loadItems();

@@ -144,6 +144,10 @@ function gradeGroupSortKey(g?: string) {
 
 // ★ FIX: สร้าง time slots จาก template เสมอ ไม่ depend on DB schedule_type
 // จับคู่ด้วย start_time เท่านั้น (ไม่ filter schedule_type เพื่อ backward compat)
+// ⚠️ หมายเหตุสำคัญ: ถ้าเวลาของ template นี้ไม่มีอยู่จริงในตาราง time_slots ของ DB
+// (เช่น คาบเฉพาะของอนุบาล 09:30–09:50 ที่ตารางประถมไม่มี) ฟังก์ชันนี้จะสร้าง "virtual slot"
+// ที่มี id ขึ้นต้นด้วย tmpl- ให้ใช้แสดงผลไปก่อน แต่ id นี้ไม่ใช่ UUID จริงในฐานข้อมูล
+// ถ้าจะบันทึกคาบเรียนลงคาบเวลานี้ ต้องสร้างแถวจริงใน time_slots ก่อนเสมอ (ดู ensureRealTimeSlot)
 function buildRoomSlots(scheduleType: string | undefined, allDbSlots: TimeSlot[]): TimeSlot[] {
   const type = scheduleType ?? "primary";
   const tmpl = SCHEDULE_TEMPLATES.find(t => t.key === type) ?? SCHEDULE_TEMPLATES[0];
@@ -160,7 +164,7 @@ function buildRoomSlots(scheduleType: string | undefined, allDbSlots: TimeSlot[]
         end_time: tmplSlot.end_time,
       };
     }
-    // fallback: สร้าง virtual slot จาก template
+    // fallback: สร้าง virtual slot จาก template (ยังไม่มีแถวจริงใน DB)
     return {
       id: `tmpl-${type}-${idx}-${tmplSlot.start_time.replace(":", "")}`,
       slot_number: tmplSlot.slot_number,
@@ -256,7 +260,11 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
       id: entry?.id,
       classroom_id: classroom.id,
       subject_id: subjectId, teacher_id: teacherId1, teacher_id_2: teacherId2 || null,
-      day_of_week: day, time_slot_id: slot.id, academic_year_id: academicYearId,
+      day_of_week: day, time_slot_id: slot.id,
+      // ✅ ส่ง object ของคาบเวลาเต็มๆ ไปด้วย — ใช้ตอนต้องสร้างแถว time_slots จริงใน DB
+      // กรณีคาบนี้เป็น virtual slot จาก template (id ขึ้นต้นด้วย tmpl-) ที่ยังไม่มีอยู่จริง
+      time_slot: slot,
+      academic_year_id: academicYearId,
       old_subject_id: entry?.subject_id, old_teacher_id: entry?.teacher_id, old_teacher_id_2: entry?.teacher_id_2,
       note,
     };
@@ -1102,74 +1110,144 @@ useEffect(() => {
     } else setClassrooms(allRooms);
   }
 
-  // ── Save direct (admin) ───────────────────────────────────────────────────
-  async function handleSaveDirect(data: any) {
-    if (data.id) {
-      await (supabase.from("timetable_entries") as any)
-        .update({ subject_id: data.subject_id, teacher_id: data.teacher_id, teacher_id_2: data.teacher_id_2 ?? null })
-        .eq("id", data.id);
-    } else {
-      await (supabase.from("timetable_entries") as any).insert([{
-        classroom_id: data.classroom_id, subject_id: data.subject_id,
-        teacher_id: data.teacher_id, teacher_id_2: data.teacher_id_2 ?? null,
-        day_of_week: data.day_of_week, time_slot_id: data.time_slot_id,
-        academic_year_id: data.academic_year_id,
-      }]);
+  // ══════════════════════════════════════════════════════════════════════════
+  // ✅ ใหม่: ensureRealTimeSlot — แก้ปัญหา "กดเพิ่มคาบแล้วไม่มีอะไรเกิดขึ้น"
+  // สาเหตุ: บางคาบ (เช่นคาบเฉพาะของอนุบาล 09:30–09:50) เป็นแค่ "virtual slot" ที่สร้างจาก
+  // template ในหน้าเว็บ (id ขึ้นต้นด้วย tmpl-) เพราะยังไม่มีแถวจริงในตาราง time_slots ของ DB
+  // เวลาพยายามบันทึกคาบเรียนโดยใช้ id ปลอมนี้ Supabase จะปฏิเสธ (400 invalid input syntax for
+  // type uuid) แต่โค้ดเดิมไม่ได้เช็ค error เลยดูเหมือน "กดแล้วเงียบ ไม่มีอะไรเกิดขึ้น"
+  // ฟังก์ชันนี้จะสร้างแถวจริงใน time_slots ให้อัตโนมัติก่อนบันทึก แล้วคืน id จริงกลับมาใช้แทน
+  // ══════════════════════════════════════════════════════════════════════════
+  async function ensureRealTimeSlot(slotId: string, slotInfo?: TimeSlot): Promise<string> {
+    if (!slotId || !slotId.startsWith("tmpl-")) return slotId; // เป็น id จริงอยู่แล้ว ไม่ต้องทำอะไร
+    if (!slotInfo) {
+      throw new Error("ไม่พบข้อมูลคาบเวลานี้ในระบบ (time_slots) กรุณาแจ้งผู้ดูแลระบบให้เพิ่มคาบเวลานี้ก่อน");
     }
-    await loadEntries();
+    const { data, error } = await (supabase.from("time_slots") as any)
+      .insert([{
+        slot_number: slotInfo.slot_number,
+        start_time: slotInfo.start_time,
+        end_time: slotInfo.end_time,
+        slot_label: slotInfo.slot_label,
+        is_break: slotInfo.is_break,
+        schedule_type: slotInfo.schedule_type,
+      }])
+      .select("id")
+      .single();
+    if (error) throw error;
+
+    // รีเฟรช time_slots ในสถานะ ให้ทุกห้อง/ทุกตารางที่ใช้เวลานี้เห็น id จริงตัวเดียวกันทันที
+    const { data: freshSlots } = await supabase.from("time_slots").select("*").order("start_time");
+    setTimeSlots((freshSlots ?? []) as TimeSlot[]);
+
+    return data.id as string;
+  }
+
+  // ── Save direct (admin) ───────────────────────────────────────────────────
+  // ✅ เพิ่ม try/catch + alert ให้เห็น error จริงเสมอ (เดิมไม่เช็ค error เลย ทำให้ "กดแล้วเงียบ")
+  async function handleSaveDirect(data: any) {
+    try {
+      const realSlotId = await ensureRealTimeSlot(data.time_slot_id, data.time_slot);
+
+      if (data.id) {
+        const { error } = await (supabase.from("timetable_entries") as any)
+          .update({
+            subject_id: data.subject_id, teacher_id: data.teacher_id, teacher_id_2: data.teacher_id_2 ?? null,
+            time_slot_id: realSlotId,
+          })
+          .eq("id", data.id);
+        if (error) throw error;
+      } else {
+        const { error } = await (supabase.from("timetable_entries") as any).insert([{
+          classroom_id: data.classroom_id, subject_id: data.subject_id,
+          teacher_id: data.teacher_id, teacher_id_2: data.teacher_id_2 ?? null,
+          day_of_week: data.day_of_week, time_slot_id: realSlotId,
+          academic_year_id: data.academic_year_id,
+        }]);
+        if (error) throw error;
+      }
+      await loadEntries();
+    } catch (err: any) {
+      console.error("[handleSaveDirect] error:", err);
+      alert(
+        "❌ บันทึกคาบเรียนไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ") +
+        "\n\nถ้าปัญหายังเกิดซ้ำ ลองกดปุ่ม ⚙️ มุมขวาบนเพื่อเลือกตารางเวลาของห้องนี้ใหม่อีกครั้ง หรือแจ้งผู้ดูแลระบบ"
+      );
+    }
   }
 
   // ── Request change (teacher) ──────────────────────────────────────────────
+  // ✅ เพิ่ม ensureRealTimeSlot เหมือนกัน กันคำขอพังด้วยสาเหตุเดียวกัน
   async function handleRequestChange(data: any) {
     if (!user) return;
-    const { error } = await (supabase.from("timetable_change_requests") as any).insert([{
-      requester_id: user.id, classroom_id: data.classroom_id,
-      time_slot_id: data.time_slot_id, day_of_week: data.day_of_week,
-      academic_year_id: data.academic_year_id,
-      old_subject_id: data.old_subject_id ?? null, old_teacher_id: data.old_teacher_id ?? null, old_teacher_id_2: data.old_teacher_id_2 ?? null,
-      new_subject_id: data.subject_id, new_teacher_id: data.teacher_id, new_teacher_id_2: data.teacher_id_2 ?? null,
-      note: data.note ?? null, status: "pending",
-    }]);
-    if (error) { alert("❌ ส่งคำขอไม่สำเร็จ: " + error.message); return; }
-    alert("✅ ส่งคำขอแก้ไขแล้ว รอการอนุมัติ");
-    await loadChangeRequests();
+    try {
+      const realSlotId = await ensureRealTimeSlot(data.time_slot_id, data.time_slot);
+      const { error } = await (supabase.from("timetable_change_requests") as any).insert([{
+        requester_id: user.id, classroom_id: data.classroom_id,
+        time_slot_id: realSlotId, day_of_week: data.day_of_week,
+        academic_year_id: data.academic_year_id,
+        old_subject_id: data.old_subject_id ?? null, old_teacher_id: data.old_teacher_id ?? null, old_teacher_id_2: data.old_teacher_id_2 ?? null,
+        new_subject_id: data.subject_id, new_teacher_id: data.teacher_id, new_teacher_id_2: data.teacher_id_2 ?? null,
+        note: data.note ?? null, status: "pending",
+      }]);
+      if (error) throw error;
+      alert("✅ ส่งคำขอแก้ไขแล้ว รอการอนุมัติ");
+      await loadChangeRequests();
+    } catch (err: any) {
+      console.error("[handleRequestChange] error:", err);
+      alert("❌ ส่งคำขอไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
+    }
   }
 
   // ── Approve request ───────────────────────────────────────────────────────
   async function handleApproveRequest(requestId: string) {
     if (!user) return;
-    const req = changeRequests.find(r => r.id === requestId);
-    if (!req) return;
-    const existing = entries.find(e =>
-      e.classroom_id === req.classroom_id &&
-      e.time_slot_id === req.time_slot_id &&
-      e.day_of_week  === req.day_of_week
-    );
-    if (existing) {
-      await (supabase.from("timetable_entries") as any)
-        .update({ subject_id: req.new_subject_id, teacher_id: req.new_teacher_id, teacher_id_2: req.new_teacher_id_2 ?? null })
-        .eq("id", existing.id);
-    } else {
-      await (supabase.from("timetable_entries") as any).insert([{
-        classroom_id: req.classroom_id, time_slot_id: req.time_slot_id, day_of_week: req.day_of_week,
-        academic_year_id: req.academic_year_id,
-        subject_id: req.new_subject_id, teacher_id: req.new_teacher_id, teacher_id_2: req.new_teacher_id_2 ?? null,
-      }]);
+    try {
+      const req = changeRequests.find(r => r.id === requestId);
+      if (!req) return;
+      const existing = entries.find(e =>
+        e.classroom_id === req.classroom_id &&
+        e.time_slot_id === req.time_slot_id &&
+        e.day_of_week  === req.day_of_week
+      );
+      if (existing) {
+        const { error } = await (supabase.from("timetable_entries") as any)
+          .update({ subject_id: req.new_subject_id, teacher_id: req.new_teacher_id, teacher_id_2: req.new_teacher_id_2 ?? null })
+          .eq("id", existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await (supabase.from("timetable_entries") as any).insert([{
+          classroom_id: req.classroom_id, time_slot_id: req.time_slot_id, day_of_week: req.day_of_week,
+          academic_year_id: req.academic_year_id,
+          subject_id: req.new_subject_id, teacher_id: req.new_teacher_id, teacher_id_2: req.new_teacher_id_2 ?? null,
+        }]);
+        if (error) throw error;
+      }
+      const { error: updErr } = await (supabase.from("timetable_change_requests") as any)
+        .update({ status: "approved", reviewed_by: user.id, reviewed_at: new Date().toISOString() })
+        .eq("id", requestId);
+      if (updErr) throw updErr;
+      await Promise.all([loadEntries(), loadChangeRequests()]);
+      alert("✅ อนุมัติและอัปเดตตารางสอนแล้ว");
+    } catch (err: any) {
+      console.error("[handleApproveRequest] error:", err);
+      alert("❌ อนุมัติไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
     }
-    await (supabase.from("timetable_change_requests") as any)
-      .update({ status: "approved", reviewed_by: user.id, reviewed_at: new Date().toISOString() })
-      .eq("id", requestId);
-    await Promise.all([loadEntries(), loadChangeRequests()]);
-    alert("✅ อนุมัติและอัปเดตตารางสอนแล้ว");
   }
 
   // ── Reject request ────────────────────────────────────────────────────────
   async function handleRejectRequest(requestId: string, reason: string) {
     if (!user) return;
-    await (supabase.from("timetable_change_requests") as any)
-      .update({ status: "rejected", reject_reason: reason, reviewed_by: user.id, reviewed_at: new Date().toISOString() })
-      .eq("id", requestId);
-    await loadChangeRequests();
+    try {
+      const { error } = await (supabase.from("timetable_change_requests") as any)
+        .update({ status: "rejected", reject_reason: reason, reviewed_by: user.id, reviewed_at: new Date().toISOString() })
+        .eq("id", requestId);
+      if (error) throw error;
+      await loadChangeRequests();
+    } catch (err: any) {
+      console.error("[handleRejectRequest] error:", err);
+      alert("❌ ปฏิเสธคำขอไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
+    }
   }
 
   // ── Derived values ────────────────────────────────────────────────────────
