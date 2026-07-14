@@ -8,11 +8,14 @@ function sanitizeSegment(s: string) {
   return s.replace(/[\\/:*?"<>|]/g, '_').trim();
 }
 
-function buildUniqueFileName(originalName: string) {
-  const ts = Date.now();
-  const rand = Math.random().toString(36).slice(2, 6);
-  const safeName = sanitizeSegment(originalName);
-  return `${ts}_${rand}_${safeName}`;
+function buildSequentialFileName(originalName: string, seq: number) {
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2, '0');
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const yyyyBE = now.getFullYear() + 543;
+  const ext = originalName.includes('.') ? '.' + originalName.split('.').pop() : '';
+  const seqStr = String(seq).padStart(2, '0');
+  return `${dd}${mm}${yyyyBE}_${seqStr}${ext}`;
 }
 
 export default function OneDriveMultiImageUpload({
@@ -46,21 +49,23 @@ export default function OneDriveMultiImageUpload({
     }
 
     setUploading(true);
-    try {
-      const uploaded: UploadedFile[] = [];
-      for (const file of files) {
-        const fd = new FormData();
-        fd.append('file', file);
-        fd.append('path', `${folderPath}/${buildUniqueFileName(file.name)}`);
-        fd.append('account', account);
+try {
+  const uploaded: UploadedFile[] = [];
+  let seq = value.length + 1; // ★ นับต่อจากรูปที่มีอยู่แล้ว กันชื่อไฟล์ซ้ำ
+  for (const file of files) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('path', `${folderPath}/${buildSequentialFileName(file.name, seq)}`);
+    fd.append('account', account);
 
-        const res = await fetch('/api/upload-onedrive', { method: 'POST', body: fd });
-        const data = await res.json();
-        if (!data.ok) throw new Error(data.error?.message || data.error || 'อัปโหลดไม่สำเร็จ');
+    const res = await fetch('/api/upload-onedrive', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error?.message || data.error || 'อัปโหลดไม่สำเร็จ');
 
-        uploaded.push({ url: data.url, name: file.name, itemId: data.itemId });
-      }
-      onChange([...value, ...uploaded]);
+    uploaded.push({ url: data.url, name: file.name, itemId: data.itemId });
+    seq++;
+  }
+  onChange([...value, ...uploaded]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'อัปโหลดไม่สำเร็จ');
     } finally {

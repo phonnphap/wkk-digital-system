@@ -7,11 +7,14 @@ function sanitizeSegment(s: string) {
   return s.replace(/[\\/:*?"<>|]/g, '_').trim();
 }
 
-function buildUniqueFileName(originalName: string) {
-  const ts = Date.now();
-  const rand = Math.random().toString(36).slice(2, 6);
-  const safeName = sanitizeSegment(originalName);
-  return `${ts}_${rand}_${safeName}`;
+function buildSequentialFileName(originalName: string, seq = 1) {
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2, '0');
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const yyyyBE = now.getFullYear() + 543;
+  const ext = originalName.includes('.') ? '.' + originalName.split('.').pop() : '';
+  const seqStr = String(seq).padStart(2, '0');
+  return `${dd}${mm}${yyyyBE}_${seqStr}${ext}`;
 }
 
 function isImageName(name: string) {
@@ -52,7 +55,7 @@ export default function OneDriveDocumentUpload({
     try {
       const fd = new FormData();
       fd.append('file', file);
-      fd.append('path', `${folderPath}/${buildUniqueFileName(file.name)}`);
+fd.append('path', `${folderPath}/${buildSequentialFileName(file.name)}`);
       fd.append('account', account);
 
       const res = await fetch('/api/upload-onedrive', { method: 'POST', body: fd });
