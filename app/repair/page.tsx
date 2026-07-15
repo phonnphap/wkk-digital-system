@@ -25,6 +25,7 @@ interface RepairRequest {
   building_id?: string; room?: string; category?: string;
   status: string; priority?: string; photo_urls?: string[];
   reporter_id: string; assigned_to?: string;
+  estimated_cost?: number; budget_source?: string;
   created_at: string; updated_at?: string;
   completed_at?: string; memo_pdf_url?: string;
   memo_items?: any[]; memo_created_by?: string; memo_created_at?: string;
@@ -61,109 +62,170 @@ const PRIORITY_CFG: Record<string,{label:string;color:string}> = {
   medium: { label:"ปานกลาง",color:"#d97706" },
   high:   { label:"เร่งด่วน",color:"#dc2626" },
 };
-const CATEGORIES = ["ระบบไฟฟ้า","ระบบประปา","ประตู/หน้าต่าง","พื้น/ฝ้า/ผนัง","เฟอร์นิเจอร์","คอมพิวเตอร์/อุปกรณ์","ห้องน้ำ","อื่นๆ"];
+const CATEGORIES = ["ระบบไฟฟ้า","ระบบประปา","ประตู/หน้าต่าง","พื้น/ฝ้า/ผนัง","เฟอร์นิเจอร์","คอมพิวเตอร์/อุปกรณ์","เครือข่ายอินเตอร์เน็ต","ห้องน้ำ","อื่นๆ"];
+
+// ★ หมวดหมู่ที่ต้องแจ้งเตือนอีเมลเฉพาะทาง (ต้องมีสิทธิ์ Mail.Send ใน Azure App ถึงจะส่งได้จริง)
+const CATEGORY_NOTIFY_EMAIL: Record<string,string> = {
+  "เครือข่ายอินเตอร์เน็ต": "sirilack@khienkhet.ac.th",
+};
+
+// ★ แปลงตัวเลขเป็นคำอ่านภาษาไทย (สำหรับ "จำนวนเงิน...บาทถ้วน" ในบันทึกข้อความ)
+function bahttext(num: number): string {
+  if (!num || isNaN(num)) return "";
+  const numText = ["", "หนึ่ง","สอง","สาม","สี่","ห้า","หก","เจ็ด","แปด","เก้า"];
+  const digitText = ["", "สิบ","ร้อย","พัน","หมื่น","แสน","ล้าน"];
+  function convert(numStr: string): string {
+    let result = "";
+    const len = numStr.length;
+    for (let i = 0; i < len; i++) {
+      const digit = parseInt(numStr[i]);
+      const pos = len - i - 1;
+      if (digit === 0) continue;
+      if (pos === 0 && digit === 1 && len > 1) { result += "เอ็ด"; continue; }
+      if (pos === 1 && digit === 2) { result += "ยี่"; continue; }
+      if (pos === 1 && digit === 1) { result += "สิบ"; continue; }
+      result += numText[digit] + digitText[pos % 7];
+    }
+    return result;
+  }
+  const parts = num.toFixed(2).split(".");
+  const intPart = parts[0].replace(/^0+/, "") || "0";
+  const decPart = parts[1];
+  let text = "";
+  if (intPart === "0") text = "ศูนย์บาท";
+  else {
+    // ตัดเป็นช่วงล้าน
+    let millions: string[] = [];
+    let remain = intPart;
+    while (remain.length > 6) {
+      millions.unshift(remain.slice(-6));
+      remain = remain.slice(0, -6);
+    }
+    millions.unshift(remain);
+    text = millions.map((seg, idx) => convert(seg) + (idx < millions.length - 1 ? "ล้าน" : "")).join("");
+    text += "บาท";
+  }
+  if (decPart === "00") text += "ถ้วน";
+  else text += convert(decPart) + "สตางค์";
+  return text;
+}
 
 // ── PDF Generator ─────────────────────────────────────────────────────────────
-function generateMemoHTML(
-  items: {no:number;title:string;building:string;room:string;detail:string;checked:boolean}[],
-  creatorName: string,
-  directorName: string,
-  directorSignUrl: string,
-  creatorSignUrl: string,
-  dateStr: string,
-  memoNo: string,
-) {
-  const checkedItems = items.filter(i => i.checked);
-  const rows = checkedItems.map((it, i) => `
-    <tr>
-      <td style="text-align:center;padding:6px 8px;border:1px solid #cbd5e1">${i+1}</td>
-      <td style="padding:6px 8px;border:1px solid #cbd5e1">${it.title}</td>
-      <td style="padding:6px 8px;border:1px solid #cbd5e1">${it.building}</td>
-      <td style="padding:6px 8px;border:1px solid #cbd5e1">${it.room || "—"}</td>
-      <td style="padding:6px 8px;border:1px solid #cbd5e1">${it.detail || "—"}</td>
-    </tr>`).join("");
+// ★ เขียนใหม่ทั้งหมดให้ตรงกับเทมเพลตราชการ "บันทึกข้อความแจ้งซ่อมสายชั้น" ตามตัวอย่างที่แนบ
+function generateMemoHTML(params: {
+  items: { no:number; title:string; detail:string; amount:number }[];
+  subject: string;
+  reporterName: string;
+  reporterPosition: string;
+  gradeLevel: string;
+  budgetSource: string;
+  totalAmount: number;
+  attachmentCount: number;
+  routing: { label:string; checked:boolean; name:string }[];
+  directorName: string;
+  directorSignUrl: string;
+  creatorSignUrl: string;
+  dateStr: string;
+  memoNo: string;
+  department: string;
+}) {
+  const {
+    items, subject, reporterName, reporterPosition, gradeLevel, budgetSource,
+    totalAmount, attachmentCount, routing, directorName, directorSignUrl,
+    creatorSignUrl, dateStr, memoNo, department,
+  } = params;
+
+  const itemLines = items.map((it,i) =>
+    `<div style="margin:4px 0">${i+1}. ${it.title}${it.detail ? ` (${it.detail})` : ""} จำนวน ${it.amount ? it.amount.toLocaleString("th-TH") : "…………"} บาท</div>`
+  ).join("");
+
+  const routingBoxes = routing.map(r => `
+    <div style="margin:3px 0">
+      <span style="display:inline-block;width:14px;height:14px;border:1.5px solid #111;text-align:center;line-height:12px;margin-right:6px;">${r.checked ? "✓" : ""}</span>
+      ${r.label}${r.checked && r.name ? ` (${r.name})` : ""}
+    </div>`).join("");
 
   return `<!DOCTYPE html><html><head>
   <meta charset="UTF-8">
   <style>
     @page { size: A4; margin: 20mm 25mm; }
-    body { font-family:'Sarabun','TH SarabunNew',sans-serif; font-size:14pt; color:#111; line-height:1.6; }
-    .header { text-align:center; margin-bottom:8px; }
-    .header img { height:70px; }
-    h2 { text-align:center; font-size:18pt; font-weight:bold; margin:8px 0 2px; letter-spacing:2px; }
-    h3 { text-align:center; font-size:14pt; margin:0 0 16px; }
-    .meta-table { width:100%; margin-bottom:16px; font-size:13pt; }
+    body { font-family:'Sarabun','TH SarabunNew',sans-serif; font-size:15pt; color:#111; line-height:1.7; }
+    .header { text-align:center; margin-bottom:6px; }
+    h2 { text-align:center; font-size:18pt; font-weight:bold; margin:0 0 10px; }
+    .meta-table { width:100%; margin-bottom:10px; font-size:15pt; }
     .meta-table td { padding:2px 0; vertical-align:top; }
-    table.items { width:100%; border-collapse:collapse; font-size:12pt; margin:12px 0; }
-    table.items th { background:#1e3a8a; color:#fff; padding:7px 8px; border:1px solid #1e3a8a; }
-    table.items td { padding:6px 8px; border:1px solid #cbd5e1; }
-    table.items tr:nth-child(even) td { background:#f8faff; }
-    .sign-section { display:flex; justify-content:space-between; margin-top:48px; gap:24px; }
-    .sign-box { text-align:center; flex:1; }
-    .sign-img { height:64px; display:block; margin:0 auto; object-fit:contain; }
-    .sign-name { font-size:13pt; margin-top:4px; }
-    .sign-pos { font-size:11pt; color:#475569; }
-    .body-text { font-size:13pt; margin:8px 0 16px; text-indent:2em; }
+    .indent { text-indent:2em; margin:8px 0; }
+    .section-title { font-weight:bold; text-align:center; margin:14px 0 4px; }
+    .routing-box { border:1px solid #111; padding:10px 16px; width:60%; margin-top:8px; }
+    .sign-section { display:flex; justify-content:flex-end; margin-top:20px; }
+    .sign-box { text-align:center; width:260px; }
+    .sign-img { height:56px; display:block; margin:0 auto; object-fit:contain; }
+    .sign-line { border-bottom:1px dotted #111; width:200px; margin:0 auto 4px; height:20px; }
+    .director-block { margin-top:40px; }
+    .director-sign { display:flex; justify-content:flex-end; margin-top:16px; }
     @media print { button{display:none} }
   </style></head>
   <body>
-    <div class="header">
-      <h2>บันทึกข้อความ</h2>
-      <h3>โรงเรียนวัดเขียนเขต</h3>
-    </div>
+    <div class="header"><h2>บันทึกข้อความ</h2></div>
     <table class="meta-table">
-      <tr>
-        <td width="15%"><b>ส่วนราชการ</b></td>
-        <td>โรงเรียนวัดเขียนเขต สำนักงานเขตพื้นที่การศึกษาประถมศึกษาปทุมธานี เขต 2</td>
-      </tr>
+      <tr><td width="16%"><b>ส่วนราชการ</b></td><td>${department || "กลุ่มบริหารทั่วไป"}</td></tr>
       <tr>
         <td><b>ที่</b></td>
-        <td>${memoNo || "ศธ …………………………"}&nbsp;&nbsp;&nbsp;&nbsp;<b>วันที่</b> ${dateStr}</td>
+        <td style="width:50%">${memoNo || "…………………………"}</td>
       </tr>
-      <tr>
-        <td><b>เรื่อง</b></td>
-        <td>รายการแจ้งซ่อมบำรุงอาคารสถานที่และสิ่งอำนวยความสะดวก</td>
-      </tr>
-      <tr>
-        <td><b>เรียน</b></td>
-        <td>ผู้อำนวยการโรงเรียนวัดเขียนเขต</td>
-      </tr>
+      <tr><td><b>วันที่</b></td><td>${dateStr}</td></tr>
+      <tr><td><b>เรื่อง</b></td><td>${subject}</td></tr>
+      <tr><td><b>เรียน</b></td><td>ผู้อำนวยการโรงเรียนวัดเขียนเขต</td></tr>
     </table>
 
-    <p class="body-text">
-      ด้วยมีรายการแจ้งซ่อมบำรุงอาคารสถานที่และสิ่งอำนวยความสะดวกของโรงเรียนวัดเขียนเขต
-      จำนวน <b>${checkedItems.length} รายการ</b> ตามรายละเอียดในตารางแนบท้าย
-      จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติดำเนินการต่อไป
+    <div class="section-title">ต้นเรื่อง</div>
+    <p class="indent">
+      ด้วยห้องเรียน/บริเวณระดับชั้น ${gradeLevel || "……………………"} ซึ่งอยู่ในความดูแลของข้าพเจ้า
+      ${reporterName} ตำแหน่ง ${reporterPosition || "……………………"}
+      ได้เปิดใช้งานมาเป็นระยะเวลาหนึ่ง ส่งผลให้อุปกรณ์และโครงสร้างอาคารบางส่วนเกิดการชำรุดทรุดโทรม
+      ซึ่งอาจก่อให้เกิดอันตรายต่อนักเรียนและไม่เอื้อต่อการจัดการเรียนการสอน
     </p>
 
-    <table class="items">
-      <thead>
-        <tr>
-          <th style="width:36px">ที่</th>
-          <th>รายการ</th>
-          <th>อาคาร</th>
-          <th>ห้อง/บริเวณ</th>
-          <th>รายละเอียด</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-
-    <p class="body-text">
-      จึงเรียนมาเพื่อโปรดพิจารณา
+    <div class="section-title">ข้อเท็จจริง</div>
+    <p class="indent">
+      ในการนี้ ข้าพเจ้าจึงใคร่ขออนุมัติใช้งบประมาณ ${budgetSource || "……………………"}
+      จำนวน ${totalAmount ? totalAmount.toLocaleString("th-TH") : "……………………"} บาท
+      (${totalAmount ? bahttext(totalAmount) : "……………………"}) เพื่อดำเนินการปรับปรุงและซ่อมแซมรายการดังต่อไปนี้
+    </p>
+    <div style="padding-left:1.5em">${itemLines}</div>
+    <p style="text-align:right;font-weight:bold;margin:10px 0">
+      รวมเป็นเงินทั้งสิ้น ${totalAmount ? totalAmount.toLocaleString("th-TH") : "……………"} บาท
     </p>
 
-    <div class="sign-section">
+    <div class="section-title">ข้อพิจารณา</div>
+    <p class="indent">
+      พร้อมนี้ ข้าพเจ้าได้แนบภาพถ่ายจุดที่ชำรุดมาพร้อมกับบันทึกข้อความฉบับนี้ จำนวน ${attachmentCount || 0} แผ่น
+      เพื่อประกอบการพิจารณาอนุมัติ
+    </p>
+
+    <div class="section-title">ข้อเสนอแนะ</div>
+    <p style="text-align:center;margin:2px 0 8px">เพื่อโปรดทราบและพิจารณา</p>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div class="routing-box">${routingBoxes}</div>
       <div class="sign-box">
-        ${creatorSignUrl ? `<img class="sign-img" src="${creatorSignUrl}" />` : `<div style="height:64px"></div>`}
-        <div class="sign-name">(${creatorName})</div>
-        <div class="sign-pos">ผู้เสนอ / ผู้ดูแลโครงการ</div>
+        ${creatorSignUrl ? `<img class="sign-img" src="${creatorSignUrl}" />` : `<div class="sign-line"></div>`}
+        <div>ลงชื่อ</div>
+        <div>(${reporterName})</div>
+        <div>ตำแหน่ง ${reporterPosition || "……………………"}</div>
       </div>
-      <div class="sign-box">
-        ${directorSignUrl ? `<img class="sign-img" src="${directorSignUrl}" />` : `<div style="height:64px"></div>`}
-        <div class="sign-name">(${directorName || "นายธนณัฐ  ศิระวงษ์"})</div>
-        <div class="sign-pos">ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
-        <div class="sign-pos">ผู้อนุมัติ</div>
+    </div>
+
+    <div class="director-block">
+      <p><b>ความเห็นผู้อำนวยการโรงเรียนวัดเขียนเขต</b>&nbsp;&nbsp;☐ อนุมัติ&nbsp;&nbsp;&nbsp;&nbsp;☐ ไม่อนุมัติ</p>
+      <div style="border-bottom:1px dotted #111;height:24px;margin:8px 0"></div>
+      <div style="border-bottom:1px dotted #111;height:24px;margin:8px 0"></div>
+      <div class="director-sign">
+        <div class="sign-box">
+          ${directorSignUrl ? `<img class="sign-img" src="${directorSignUrl}" />` : `<div class="sign-line"></div>`}
+          <div>ลงชื่อ</div>
+          <div>(${directorName || "นายธนณัฐ  ศิระวงษ์"})</div>
+          <div>ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
+        </div>
       </div>
     </div>
     <script>window.onload=()=>window.print()<\/script>
@@ -171,17 +233,42 @@ function generateMemoHTML(
 }
 
 // ── MemoModal ─────────────────────────────────────────────────────────────────
+const ROUTING_LABELS = [
+  "หัวหน้ากลุ่มบริหารทั่วไป",
+  "รองผู้อำนวยการกลุ่มบริหารทั่วไป",
+  "รองผู้อำนวยการกลุ่มบริหารงบประมาณ",
+  "เจ้าหน้าที่การเงิน",
+];
+
 function MemoModal({ requests, buildings, currentUser, director, onClose }: {
   requests: RepairRequest[]; buildings: Building[];
   currentUser: User; director?: User; onClose: () => void;
 }) {
   const [memoNo, setMemoNo] = useState("");
   const [memoDate, setMemoDate] = useState(format(new Date(),"yyyy-MM-dd"));
+  const [subject, setSubject] = useState("ขออนุมัติงบประมาณและซ่อมแซมอาคารสถานที่");
+  const [department, setDepartment] = useState("กลุ่มบริหารทั่วไป");
+  const [gradeLevel, setGradeLevel] = useState("");
+  const [reporterPosition, setReporterPosition] = useState(currentUser.position ?? "");
+  const [budgetSource, setBudgetSource] = useState("");
   const [selected, setSelected] = useState<Record<string,boolean>>(
     () => Object.fromEntries(requests.map(r => [r.id, true]))
   );
+  // ★ จำนวนเงินต่อรายการ — ดึงจาก estimated_cost ที่บันทึกไว้แล้ว (ถ้ามี) ให้แก้ต่อได้ตอนสร้างบันทึก
+  const [amounts, setAmounts] = useState<Record<string,string>>(
+    () => Object.fromEntries(requests.map(r => [r.id, (r as any).estimated_cost != null ? String((r as any).estimated_cost) : ""]))
+  );
+  // ★ รายชื่อผู้ลงนามในลำดับขั้นตอน 4 ตำแหน่ง — กรอกอิสระ (ระบบยังไม่มีตำแหน่งเหล่านี้เก็บไว้)
+  const [routingChecks, setRoutingChecks] = useState<boolean[]>([false,false,false,false]);
+  const [routingNames, setRoutingNames] = useState<string[]>(["","","",""]);
 
   const checkedCount = Object.values(selected).filter(Boolean).length;
+  const totalAmount = requests
+    .filter(r => selected[r.id])
+    .reduce((sum, r) => sum + (Number(amounts[r.id]) || 0), 0);
+  const attachmentCount = requests
+    .filter(r => selected[r.id])
+    .reduce((sum, r) => sum + (r.photo_urls?.length ?? 0), 0);
 
   const handlePrint = () => {
     const items = requests
@@ -189,21 +276,27 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
       .map((r,i) => ({
         no: i+1,
         title: r.title,
-        building: r.building?.name ?? "—",
-        room: r.room ?? "",
-        detail: r.description ?? "",
-        checked: true,
+        detail: [r.building?.name, r.room].filter(Boolean).join(" · "),
+        amount: Number(amounts[r.id]) || 0,
       }));
     if (items.length === 0) { alert("กรุณาเลือกรายการอย่างน้อย 1 รายการ"); return; }
-    const html = generateMemoHTML(
+    const html = generateMemoHTML({
       items,
-      fullName(currentUser),
-      fullName(director),
-      director?.signature_url ?? "",
-      currentUser.signature_url ?? "",
-      thaiDateFull(memoDate),
+      subject,
+      reporterName: fullName(currentUser),
+      reporterPosition,
+      gradeLevel,
+      budgetSource,
+      totalAmount,
+      attachmentCount,
+      routing: ROUTING_LABELS.map((label,i) => ({ label, checked: routingChecks[i], name: routingNames[i] })),
+      directorName: fullName(director),
+      directorSignUrl: director?.signature_url ?? "",
+      creatorSignUrl: currentUser.signature_url ?? "",
+      dateStr: thaiDateFull(memoDate),
       memoNo,
-    );
+      department,
+    });
     const w = window.open("","_blank","width=900,height=780");
     if (!w) return;
     w.document.write(html);
@@ -234,6 +327,38 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
           </div>
 
           <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ส่วนราชการ</label>
+            <input type="text" value={department} onChange={e=>setDepartment(e.target.value)}
+              className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">เรื่อง</label>
+            <input type="text" value={subject} onChange={e=>setSubject(e.target.value)}
+              className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ระดับชั้น/ห้อง</label>
+              <input type="text" value={gradeLevel} onChange={e=>setGradeLevel(e.target.value)}
+                placeholder="เช่น ม.2/3" className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ตำแหน่งผู้เสนอ</label>
+              <input type="text" value={reporterPosition} onChange={e=>setReporterPosition(e.target.value)}
+                placeholder="เช่น หัวหน้าสายชั้น ม.2" className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">แหล่งงบประมาณ</label>
+            <input type="text" value={budgetSource} onChange={e=>setBudgetSource(e.target.value)}
+              placeholder="เช่น งบประมาณรายได้สถานศึกษา / งบดำเนินงาน"
+              className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+          </div>
+
+          <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">
                 เลือกรายการที่ต้องการรวม ({checkedCount}/{requests.length})
@@ -247,27 +372,61 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
             </div>
             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
               {requests.map((r,i) => (
-                <label key={r.id} className={`flex items-start gap-3 cursor-pointer p-3 rounded-xl border-2 transition-all
-                  ${selected[r.id] ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}>
-                  <input type="checkbox" checked={!!selected[r.id]}
-                    onChange={e=>setSelected(prev=>({...prev,[r.id]:e.target.checked}))}
-                    className="mt-0.5 w-4 h-4 accent-blue-600 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="font-bold text-slate-800 text-sm">{i+1}. {r.title}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">
-                      {r.building?.name ?? "—"}{r.room ? ` · ${r.room}` : ""}
-                      {r.description && <span className="ml-2 text-slate-300">— {r.description.slice(0,40)}{r.description.length>40?"...":""}</span>}
+                <div key={r.id} className={`p-3 rounded-xl border-2 transition-all
+                  ${selected[r.id] ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50"}`}>
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input type="checkbox" checked={!!selected[r.id]}
+                      onChange={e=>setSelected(prev=>({...prev,[r.id]:e.target.checked}))}
+                      className="mt-0.5 w-4 h-4 accent-blue-600 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-slate-800 text-sm">{i+1}. {r.title}</div>
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        {r.building?.name ?? "—"}{r.room ? ` · ${r.room}` : ""}
+                        {r.photo_urls?.length ? ` · 📷 ${r.photo_urls.length} รูป` : ""}
+                      </div>
                     </div>
-                  </div>
-                </label>
+                  </label>
+                  {selected[r.id] && (
+                    <div className="mt-2 ml-7 flex items-center gap-2">
+                      <span className="text-xs text-slate-400 shrink-0">จำนวนเงิน (บาท)</span>
+                      <input type="number" value={amounts[r.id] ?? ""} onChange={e=>setAmounts(prev=>({...prev,[r.id]:e.target.value}))}
+                        placeholder="0" className="w-32 border-2 border-blue-200 rounded-lg px-2 py-1 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           </div>
 
-          <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-700">
-            <p className="font-bold mb-1">ข้อมูลในเอกสาร</p>
-            <p>ผู้เสนอ: {fullName(currentUser)}</p>
-            <p>ผู้อนุมัติ: {fullName(director) || "นายธนณัฐ  ศิระวงษ์"} (ผอ.)</p>
+          <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-700 flex items-center justify-between">
+            <span className="font-bold">รวมเป็นเงินทั้งสิ้น</span>
+            <span className="font-black text-base">{totalAmount.toLocaleString("th-TH")} บาท</span>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">
+              เรียนผ่าน (เลือกได้มากกว่า 1 ตำแหน่ง)
+            </label>
+            <div className="space-y-2">
+              {ROUTING_LABELS.map((label, i) => (
+                <div key={label} className="flex items-center gap-2">
+                  <input type="checkbox" checked={routingChecks[i]}
+                    onChange={e=>setRoutingChecks(prev=>prev.map((v,idx)=>idx===i?e.target.checked:v))}
+                    className="w-4 h-4 accent-blue-600 shrink-0" />
+                  <span className="text-sm text-slate-600 w-56 shrink-0">{label}</span>
+                  {routingChecks[i] && (
+                    <input type="text" value={routingNames[i]} onChange={e=>setRoutingNames(prev=>prev.map((v,idx)=>idx===i?e.target.value:v))}
+                      placeholder="ชื่อผู้ดำรงตำแหน่งนี้" className="flex-1 border-2 border-blue-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-slate-50 rounded-xl px-4 py-3 text-sm text-slate-600">
+            <p className="font-bold mb-1">ข้อมูลผู้อนุมัติ</p>
+            <p>ผู้อำนวยการ: {fullName(director) || "นายธนณัฐ  ศิระวงษ์"}</p>
+            <p className="text-xs text-slate-400 mt-1">📎 จำนวนภาพแนบรวม: {attachmentCount} รูป (นับอัตโนมัติจากรายการที่เลือก)</p>
           </div>
         </div>
         <div className="px-6 py-4 border-t border-slate-100 flex gap-2 justify-end shrink-0 bg-slate-50 rounded-b-2xl">
@@ -382,6 +541,23 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
       const { error } = await supabase.from("repair_requests").insert([payload]);
       if (error) { alert("❌ แจ้งซ่อมไม่สำเร็จ: " + error.message); setSaving(false); return; }
     }
+
+    // ★ แจ้งเตือนอีเมลเฉพาะหมวดหมู่ที่ตั้งไว้ (เช่น เครือข่ายอินเตอร์เน็ต -> sirilack@)
+    //   ยิงแบบ fire-and-forget ห่อด้วย try/catch ทั้งหมด กันไม่ให้กระทบการบันทึกหลัก
+    //   ถ้า Azure App ยังไม่มีสิทธิ์ Mail.Send จะแค่เงียบๆ ไม่ได้ส่ง ไม่ทำให้ฟอร์มพัง
+    const notifyEmail = CATEGORY_NOTIFY_EMAIL[category];
+    if (notifyEmail) {
+      fetch("/api/notify-repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: notifyEmail,
+          subject: `แจ้งซ่อม: ${title.trim()}`,
+          body: `มีการแจ้งซ่อมหมวดหมู่ "${category}"\n\nหัวข้อ: ${title.trim()}\nรายละเอียด: ${desc.trim() || "-"}\nผู้แจ้ง: ${fullName(currentUser)}\nอาคาร: ${buildings.find(b=>b.id===buildingId)?.name ?? "-"} ${room.trim()}\n\nกรุณาเข้าระบบแจ้งซ่อมเพื่อดำเนินการต่อ`,
+        }),
+      }).catch((e) => console.warn("[repair] ส่งอีเมลแจ้งเตือนไม่สำเร็จ (ไม่กระทบการบันทึก):", e));
+    }
+
     setSaving(false);
     onSave();
   };
@@ -588,6 +764,22 @@ function DetailModal({ request, canManage, allUsers, onUpdate, onClose }: {
   const [assignedTo, setAssignedTo] = useState(request.assigned_to ?? "");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  // ★ เพิ่ม: งบประมาณต่อรายการ (ใช้ตอนสร้างบันทึกข้อความ)
+  const [estimatedCost, setEstimatedCost] = useState<string>(
+    (request as any).estimated_cost != null ? String((request as any).estimated_cost) : ""
+  );
+  const [budgetSource, setBudgetSource] = useState<string>((request as any).budget_source ?? "");
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
+  // ★ ครูที่ดูแลอาคารนี้ (repair_user_ids) — ใช้กรอง dropdown "มอบหมายให้"
+  const buildingRepairIds = (request.building as any)?.repair_user_ids ?? [];
+  const assignableUsers = buildingRepairIds.length > 0
+    ? allUsers.filter(u => buildingRepairIds.includes(u.id))
+    : allUsers; // ★ ถ้าอาคารนี้ยังไม่ได้ตั้งค่าครูดูแล ให้ fallback เห็นทุกคน (กันเลือกไม่ได้เลย)
+
+  // ★ ครูดูแลตึก (inspector_user_ids) — แสดงไว้อ้างอิงเฉยๆ ไม่ใช่ dropdown
+  const inspectorIds = (request.building as any)?.inspector_user_ids ?? [];
+  const inspectorNames = allUsers.filter(u => inspectorIds.includes(u.id)).map(fullName);
 
   const handleUpdate = async () => {
     setSaving(true);
@@ -595,6 +787,8 @@ function DetailModal({ request, canManage, allUsers, onUpdate, onClose }: {
     //   และเช็คสถานะ 'completed' (ตรงกับ enum) แทน 'resolved'
     const { error } = await supabase.from("repair_requests").update({
       status, assigned_to: assignedTo || null,
+      estimated_cost: estimatedCost.trim() ? Number(estimatedCost) : null,
+      budget_source: budgetSource.trim() || null,
       updated_at: new Date().toISOString(),
       ...(status === "completed" ? { completed_at: new Date().toISOString() } : {}),
     }).eq("id", request.id);
@@ -636,14 +830,21 @@ function DetailModal({ request, canManage, allUsers, onUpdate, onClose }: {
           {request.description && <p className="text-sm text-slate-600 bg-slate-50 rounded-xl px-4 py-3">{request.description}</p>}
           {(request.photo_urls??[]).length > 0 && (
             <div>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">รูปภาพ</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                รูปภาพที่แนบ ({request.photo_urls!.length} รูป)
+              </p>
               <div className="grid grid-cols-3 gap-2">
                 {request.photo_urls!.map((url,i)=>(
-                  <img key={i} src={url} alt="" onClick={()=>window.open(url,"_blank")}
+                  <img key={i} src={url} alt="" onClick={()=>setLightboxUrl(url)}
                     className="w-full h-24 object-cover rounded-xl border border-slate-200 cursor-pointer hover:brightness-90 transition-all" />
                 ))}
               </div>
             </div>
+          )}
+          {inspectorNames.length > 0 && (
+            <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">
+              🛠️ ครูดูแลตึกนี้ (อ้างอิง): {inspectorNames.join(", ")}
+            </p>
           )}
           {canManage && (
             <div className="space-y-3 pt-2 border-t border-slate-100">
@@ -658,12 +859,28 @@ function DetailModal({ request, canManage, allUsers, onUpdate, onClose }: {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">มอบหมายให้</label>
+                <label className="block text-xs font-bold text-slate-400 mb-1">
+                  มอบหมายให้ {buildingRepairIds.length===0 && <span className="text-amber-500 font-normal">(อาคารนี้ยังไม่ได้ตั้งค่าครูดูแล แสดงทุกคน)</span>}
+                </label>
                 <select value={assignedTo} onChange={e=>setAssignedTo(e.target.value)}
                   className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none">
                   <option value="">— ยังไม่ได้มอบหมาย —</option>
-                  {allUsers.map(u=><option key={u.id} value={u.id}>{fullName(u)}</option>)}
+                  {assignableUsers.map(u=><option key={u.id} value={u.id}>{fullName(u)}</option>)}
                 </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">งบประมาณโดยประมาณ (บาท)</label>
+                  <input type="number" value={estimatedCost} onChange={e=>setEstimatedCost(e.target.value)}
+                    placeholder="เช่น 3500"
+                    className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">แหล่งงบประมาณ</label>
+                  <input type="text" value={budgetSource} onChange={e=>setBudgetSource(e.target.value)}
+                    placeholder="เช่น งบดำเนินงาน"
+                    className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+                </div>
               </div>
               <button onClick={handleUpdate} disabled={saving}
                 className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold disabled:opacity-50">
@@ -672,6 +889,13 @@ function DetailModal({ request, canManage, allUsers, onUpdate, onClose }: {
             </div>
           )}
         </div>
+        {lightboxUrl && (
+          <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onClick={()=>setLightboxUrl(null)}>
+            <img src={lightboxUrl} alt="" className="max-w-full max-h-full rounded-xl object-contain" />
+            <button onClick={()=>setLightboxUrl(null)}
+              className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 text-white text-xl flex items-center justify-center">✕</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -734,9 +958,19 @@ export default function Page() {
     setAllUsers((usrs??[]) as User[]);
     const dir=(usrs??[]).find((u:any)=>u.role==="director") as User|undefined;
     setDirector(dir);
-    const {data:mgrs}=await supabase.from("repair_project_managers")
-      .select("*,user:users(id,first_name,last_name,title,role)");
-    setManagers((mgrs??[]) as ProjectManager[]);
+    // ★ แก้: repair_project_managers มี FK ไปยัง users 2 เส้นทาง (user_id, added_by)
+    //   embed แบบ 'user:users(...)' เดิม ambiguous ทำให้ query error เงียบๆ (data=null)
+    //   -> เพิ่มผู้ดูแลสำเร็จแต่รายชื่อไม่ขึ้นเลย แก้โดยดึงแยก 2 รอบแล้ว join เองใน JS
+    const {data:mgrRows, error:mgrErr}=await supabase.from("repair_project_managers").select("*");
+    if (mgrErr) console.error("[repair] โหลด repair_project_managers ไม่สำเร็จ:", mgrErr.message);
+    const mgrUserIds = [...new Set((mgrRows??[]).map((m:any)=>m.user_id).filter(Boolean))];
+    let mgrUserMap: Record<string,User> = {};
+    if (mgrUserIds.length > 0) {
+      const {data:mgrUsers} = await supabase.from("users")
+        .select("id,first_name,last_name,title,role").in("id", mgrUserIds);
+      (mgrUsers??[]).forEach((u:any)=>{ mgrUserMap[u.id]=u; });
+    }
+    setManagers(((mgrRows??[]) as any[]).map(m=>({ ...m, user: mgrUserMap[m.user_id] })) as ProjectManager[]);
     const {data:rqs}=await supabase.from("repair_requests")
   .select(`*,reporter:users!reporter_id(id,first_name,last_name,title),
     building:buildings(id,name)`)
@@ -784,7 +1018,7 @@ export default function Page() {
     <div className="min-h-screen bg-slate-50 flex flex-col" style={{fontFamily:"'Sarabun','Noto Sans Thai',sans-serif"}}>
       <div className="bg-gradient-to-r from-orange-500 via-orange-400 to-amber-400 px-5 py-4 flex items-center gap-3 shadow-lg shrink-0">
         <button onClick={()=>router.push("/dashboard")}
-          className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white font-bold text-lg shrink-0">←</button>
+          className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white text-lg shrink-0" aria-label="กลับหน้าหลัก">🏠</button>
         <div className="flex-1 min-w-0">
           <h1 className="text-white font-bold text-lg leading-tight">🔧 ระบบแจ้งซ่อม</h1>
           <p className="text-orange-100 text-sm">{fullName(user)}{isBuildingManager&&!canSeeAll?" · ผู้ดูแลอาคาร":""}{isProjManager?" · ผู้ดูแลโครงการ":""}</p>
