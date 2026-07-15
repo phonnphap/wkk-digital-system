@@ -34,6 +34,7 @@ const SCHEDULE_TEMPLATES = [
   {
     key: "kindergarten", label: "อนุบาล (อ.2–อ.3)",
     slots: [
+      { slot_number: 0, start_time: "08:00", end_time: "08:30", slot_label: "คาบ 0", is_break: false },
       { slot_number: 1, start_time: "08:30", end_time: "09:30", slot_label: "คาบ 1", is_break: false },
       { slot_number: 2, start_time: "09:30", end_time: "09:50", slot_label: "คาบ 2", is_break: false },
       { slot_number: 3, start_time: "09:50", end_time: "11:00", slot_label: "คาบ 3", is_break: false },
