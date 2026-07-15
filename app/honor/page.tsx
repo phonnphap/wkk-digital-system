@@ -4,8 +4,10 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { fetchAwards, fetchStats } from '@/lib/honor-awards';
 import type { AwardWithRecipients } from '@/types/honor';
-import StatsCards from '@/components/honor/StatsCards';
+import { StatsCards } from '@/components/honor/AwardListControls';
 import AwardCard from '@/components/honor/AwardCard';
+
+const THAI_FONT = "'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif";
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
@@ -29,7 +31,7 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <div className="px-6 md:px-10 py-8 max-w-7xl mx-auto">
+    <div className="px-6 md:px-10 py-8 max-w-7xl mx-auto" style={{ fontFamily: THAI_FONT }}>
       <header className="mb-8">
         <p className="eyebrow">ภาพรวมระบบ</p>
         <h1 className="font-display text-3xl font-semibold text-navy mt-1">

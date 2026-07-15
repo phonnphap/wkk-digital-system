@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { fetchAwards, fetchFilterOptions } from '@/lib/honor-awards';
 import type { AwardFilters, AwardWithRecipients } from '@/types/honor';
-import FilterBar from '@/components/honor/FilterBar';
-import ExportButton from '@/components/honor/ExportButton';
+import { FilterBar, ExportButton } from '@/components/honor/AwardListControls';
 import AwardCard from '@/components/honor/AwardCard';
+
+const THAI_FONT = "'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif";
 
 export default function AwardsListPage() {
   const router = useRouter();
@@ -50,7 +51,7 @@ export default function AwardsListPage() {
   const resultCountLabel = useMemo(() => `พบ ${awards.length} รายการ`, [awards.length]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 via-white to-orange-50/30">
+    <div className="min-h-screen bg-gradient-to-b from-blue-50 via-white to-orange-50/30" style={{ fontFamily: THAI_FONT }}>
       <div className="px-4 sm:px-6 md:px-10 py-8 w-full max-w-[1600px] mx-auto">
         <header className="flex flex-wrap items-start justify-between gap-4 mb-6">
           <div className="flex items-center gap-3">

@@ -11,8 +11,9 @@ import {
   AWARD_TYPE_LABELS,
   RECIPIENT_ROLE_LABELS,
 } from '@/types/honor';
-import RibbonBadge from '@/components/honor/RibbonBadge';
-import DeleteAwardButton from '@/components/honor/DeleteAwardButton';
+import { RibbonBadge, DeleteAwardButton } from '@/components/honor/AwardCard';
+
+const THAI_FONT = "'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif";
 
 function formatThaiDate(iso: string) {
   return new Date(iso).toLocaleDateString('th-TH', {
@@ -49,12 +50,12 @@ export default function AwardDetailPage() {
   }, [params.id]);
 
   if (loading) {
-    return <div className="px-6 md:px-10 py-8 max-w-4xl mx-auto text-slate-400 text-sm">กำลังโหลด...</div>;
+    return <div className="px-6 md:px-10 py-8 max-w-4xl mx-auto text-slate-400 text-sm" style={{ fontFamily: THAI_FONT }}>กำลังโหลด...</div>;
   }
 
   if (error || !award) {
     return (
-      <div className="px-6 md:px-10 py-8 max-w-4xl mx-auto">
+      <div className="px-6 md:px-10 py-8 max-w-4xl mx-auto" style={{ fontFamily: THAI_FONT }}>
         <p className="text-red-500 text-sm">{error ?? 'ไม่พบรางวัลนี้'}</p>
         <Link href="/honor/awards" className="text-sm text-orange-500 hover:underline">← กลับไปหน้ารายการ</Link>
       </div>
@@ -72,7 +73,7 @@ export default function AwardDetailPage() {
   );
 
   return (
-    <div className="px-6 md:px-10 py-8 max-w-4xl mx-auto">
+    <div className="px-6 md:px-10 py-8 max-w-4xl mx-auto" style={{ fontFamily: THAI_FONT }}>
       <Link href="/honor/awards" className="text-sm text-slate-500 hover:text-blue-900">← กลับไปหน้ารายการ</Link>
 
       <div className="rounded-2xl border border-blue-100 bg-white shadow-sm overflow-hidden mt-4">
