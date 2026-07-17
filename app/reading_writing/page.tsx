@@ -1017,48 +1017,51 @@ function OverviewPage() {
   const [chartFilter, setChartFilter] = useState(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    const { data: classrooms } = await supabase.from("classrooms")
-      .select("id,room_name,student_count,academic_year_id");
-    const { data: records } = await supabase.from("reading_writing_records").select("*");
+  setLoading(true);
+  const { data: classrooms } = await supabase.from("classrooms")
+    .select("id,room_name,student_count,academic_year_id");
+  const { data: records } = await supabase.from("reading_writing_records").select("*");
 
-    let summary = sortClassrooms(classrooms || []).map(c => {
-      const gradeLevel = parseGradeLevel(c.room_name);
-      const g = gradeLevel ? GRADES[gradeLevel] : null;
-      const recs = (records || []).filter(r => r.classroom_id === c.id);
-      let ok = 0, warn = 0, bad = 0;
-      if (g) {
-        recs.forEach(r => {
-          const parts = flatParts(g);
-          const levels = g.evalLevel === "part"
-            ? parts.map(p => classify(r.scores?.[p.key], p.max))
-            : g.groups.map(gr => {
-                const total = gr.parts.reduce((s, p) => s + (Number(r.scores?.[p.key]) || 0), 0);
-                return classify(total, groupMax(g, gr.key));
-              });
-          const worst = levels.reduce((acc, l) => {
-            const order = { "ปรับปรุง": 0, "พอใช้": 1, "ดี": 2, "ดีมาก": 3 };
-            if (!l) return acc;
-            if (!acc || order[l.label] < order[acc.label]) return l;
-            return acc;
-          }, null);
-          if (worst?.label === "ดีมาก" || worst?.label === "ดี") ok++;
-          else if (worst?.label === "พอใช้") warn++;
-          else if (worst?.label === "ปรับปรุง") bad++;
-        });
-      }
-      const measured = recs.length;
-      return {
-        room_name: c.room_name, gradeLevel, total: c.student_count || 0, measured,
-        ok, warn, bad,
-        okPct: measured ? Math.round((ok / measured) * 100) : 0,
-        warnPct: measured ? Math.round((warn / measured) * 100) : 0,
-        badPct: measured ? Math.round((bad / measured) * 100) : 0,
-      };
-    });
-    setRows(summary);
-    setLoading(false);
-  }, []);
+  // ✅ ตัดห้องที่ไม่รองรับออกก่อน (อ.1-3 และห้องที่ไม่ตรงรูปแบบ ป./ม.1-6)
+  const supportedClassrooms = (classrooms || []).filter(c => isSupportedClassroom(c.room_name));
+
+  let summary = sortClassrooms(supportedClassrooms).map(c => {
+    const gl = parseGradeLevel(c.room_name);
+    const g = getGradeConfig(gl);
+    const recs = (records || []).filter(r => r.classroom_id === c.id);
+    let ok = 0, warn = 0, bad = 0;
+    if (g) {
+      recs.forEach(r => {
+        const parts = flatParts(g);
+        const levels = g.evalLevel === "part"
+          ? parts.map(p => classify(r.scores?.[p.key], p.max))
+          : g.groups.map(gr => {
+              const total = gr.parts.reduce((s, p) => s + (Number(r.scores?.[p.key]) || 0), 0);
+              return classify(total, groupMax(g, gr.key));
+            });
+        const worst = levels.reduce((acc, l) => {
+          const order = { "ปรับปรุง": 0, "พอใช้": 1, "ดี": 2, "ดีมาก": 3 };
+          if (!l) return acc;
+          if (!acc || order[l.label] < order[acc.label]) return l;
+          return acc;
+        }, null);
+        if (worst?.label === "ดีมาก" || worst?.label === "ดี") ok++;
+        else if (worst?.label === "พอใช้") warn++;
+        else if (worst?.label === "ปรับปรุง") bad++;
+      });
+    }
+    const measured = recs.length;
+    return {
+      room_name: c.room_name, gradeLevel: gl, total: c.student_count || 0, measured,
+      ok, warn, bad,
+      okPct: measured ? Math.round((ok / measured) * 100) : 0,
+      warnPct: measured ? Math.round((warn / measured) * 100) : 0,
+      badPct: measured ? Math.round((bad / measured) * 100) : 0,
+    };
+  });
+  setRows(summary);
+  setLoading(false);
+}, []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1189,6 +1192,24 @@ function StatCardOutline({ label, value, sub, color, active }) {
   );
 }
 
+// เปลี่ยนตัวกรองสายชั้นให้เลือกได้ทั้ง ป. และ ม.
+const GRADE_FILTER_OPTIONS = [
+  ...[1,2,3,4,5,6].map(l => ({ value: `ป-${l}`, label: GRADES[l].full })),
+  ...[1,2,3,4,5,6].map(l => ({ value: `ม-${l}`, label: GRADES_M[l].full })),
+];
+
+// ในตัว select
+<select style={S.select} value={gradeFilter} onChange={e => setGradeFilter(e.target.value)}>
+  <option value="">ทั้งหมด</option>
+  {GRADE_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+</select>
+
+// filteredRows
+const filteredRows = useMemo(() => {
+  if (!gradeFilter) return rows;
+  const [prefix, level] = gradeFilter.split("-");
+  return rows.filter(r => r.gradeLevel?.prefix === prefix && String(r.gradeLevel?.level) === level);
+}, [rows, gradeFilter]);
 // ══════════════════════════════════════════════════════════════
 // ManagersPage — จัดการผู้ดูแลโครงการอ่าน-เขียน (เฉพาะแอดมินตัวจริง)
 // ══════════════════════════════════════════════════════════════
