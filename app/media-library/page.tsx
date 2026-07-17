@@ -108,41 +108,105 @@ function onedriveSrc(itemId?: string) {
   return itemId ? `/api/onedrive-file?account=${encodeURIComponent(ONEDRIVE_ACCOUNT)}&itemId=${encodeURIComponent(itemId)}` : "";
 }
 
-// ★ ดึง "วิชา → ชุดระดับชั้น" ที่ครูคนนี้สอนอยู่จริงจากตารางสอน (timetable_entries)
-// เพื่อให้เลือกชื่อวิชาได้เฉพาะวิชาที่ครูผู้ล็อกอิน (หรือผู้รับผิดชอบที่เลือก) สอนอยู่ และผูกระดับชั้นอัตโนมัติ
-async function loadTeacherSubjectGradeMap(teacherId: string): Promise<Map<string, Set<string>>> {
-  const map = new Map<string, Set<string>>();
+// ★ แปลงรหัสวิชา (เช่น "ว11282") เป็นระดับชั้นตามกติกา:
+// ตัวเลขหลังอักษรแรก (หลักที่ 1) = กลุ่มระดับ → 0=อนุบาล, 1=ประถม, 2=ม.ต้น, 3=ม.ปลาย
+// ตัวเลขถัดมา (หลักที่ 2) = ลำดับภายในกลุ่ม → เช่น กลุ่ม "1" เลข "1" = ป.1, เลข "2" = ป.2 ฯลฯ
+function gradeFromSubjectCode(code?: string): string | undefined {
+  if (!code) return undefined;
+  const m = code.match(/^[ก-ฮA-Za-z]+(\d)(\d)/);
+  if (!m) return undefined;
+  const levelDigit = m[1];
+  const orderDigit = parseInt(m[2], 10);
+  switch (levelDigit) {
+    case "0": // อนุบาล 2-3
+      if (orderDigit === 2) return "อ.2";
+      if (orderDigit === 3) return "อ.3";
+      return undefined;
+    case "1": // ประถม 1-6
+      return orderDigit >= 1 && orderDigit <= 6 ? `ป.${orderDigit}` : undefined;
+    case "2": // มัธยมต้น 1-3
+      return orderDigit >= 1 && orderDigit <= 3 ? `ม.${orderDigit}` : undefined;
+    case "3": // มัธยมปลาย 4-6 (เลขในรหัส 1-3 → บวก 3)
+      return orderDigit >= 1 && orderDigit <= 3 ? `ม.${orderDigit + 3}` : undefined;
+    default:
+      return undefined;
+  }
+}
+
+// ★ ดึง "วิชา → { รหัสวิชา, ชุดระดับชั้นจากตารางสอน }" ที่ครูคนนี้สอนอยู่จริงจาก timetable_entries
+// เพื่อให้เลือกชื่อวิชาได้เฉพาะวิชาที่ครูผู้ล็อกอิน (หรือผู้รับผิดชอบที่เลือก) สอนอยู่
+// ระดับชั้นจริงผูกจากรหัสวิชา (gradeFromSubjectCode) เป็นหลัก ใช้ grades จากตารางสอนเป็น fallback
+async function loadTeacherSubjectGradeMap(teacherId: string): Promise<Map<string, { code: string; grades: Set<string> }>> {
+  const map = new Map<string, { code: string; grades: Set<string> }>();
   if (!teacherId) return map;
   const { data: rows } = await (supabase.from("timetable_entries") as any)
-    .select("subject_id, teacher_id, teacher_id_2")
+    .select("subject_id, classroom_id, teacher_id, teacher_id_2")
     .or(`teacher_id.eq.${teacherId},teacher_id_2.eq.${teacherId}`);
   const entries = (rows ?? []) as any[];
   if (entries.length === 0) return map;
 
-  const subjectIds = [...new Set(entries.map(e => e.subject_id))];
-  // ★ ดึง subject_code มาด้วย เพื่อ parse ระดับชั้นจากรหัสวิชาแทนการดูห้องเรียน
-  const { data: subjectsData } = await supabase
-    .from("subjects")
-    .select("id,name_th,subject_code")
-    .in("id", subjectIds.length ? subjectIds : ["_none_"]);
+  const subjectIds   = [...new Set(entries.map(e => e.subject_id))];
+  const classroomIds = [...new Set(entries.map(e => e.classroom_id))];
+  const [{ data: subjectsData }, { data: classroomsData }] = await Promise.all([
+    supabase.from("subjects").select("id,subject_code,name_th").in("id", subjectIds.length ? subjectIds : ["_none_"]),
+    supabase.from("classrooms").select("id,grade_group").in("id", classroomIds.length ? classroomIds : ["_none_"]),
+  ]);
+  const subjectInfoMap: Record<string, { name: string; code: string }> = {};
+  (subjectsData ?? []).forEach((s: any) => { subjectInfoMap[s.id] = { name: s.name_th, code: s.subject_code }; });
+  const classroomGradeMap: Record<string, string> = {};
+  (classroomsData ?? []).forEach((c: any) => { classroomGradeMap[c.id] = c.grade_group; });
 
-  (subjectsData ?? []).forEach((s: any) => {
-    const grade = parseGradeFromSubjectCode(s.subject_code);
-    if (!map.has(s.name_th)) map.set(s.name_th, new Set());
-    if (grade) map.get(s.name_th)!.add(grade);
+  entries.forEach(e => {
+    const info  = subjectInfoMap[e.subject_id];
+    const grade = classroomGradeMap[e.classroom_id];
+    if (!info) return;
+    if (!map.has(info.name)) map.set(info.name, { code: info.code, grades: new Set() });
+    if (grade) map.get(info.name)!.grades.add(grade);
   });
   return map;
 }
 
-// อัปโหลดไฟล์ไปยัง OneDrive แยกโฟลเดอร์ตามชื่อครู + เลขรันต่อเนื่อง (server เป็นคนคำนวณเลขให้)
-async function uploadFileToOneDrive(file: File, teacherName: string): Promise<{
+// ★ ไฟล์ภาพ (ใช้ตัดสินใจว่าจะแสดงเป็นรูปตัวอย่าง หรือไอคอนตามประเภทไฟล์)
+function isImageExt(name?: string) {
+  const ext = (name ?? "").split(".").pop()?.toLowerCase() ?? "";
+  return ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext);
+}
+function attachmentIcon(name?: string) {
+  const ext = (name ?? "").split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "pdf") return "📕";
+  if (["doc", "docx"].includes(ext)) return "📘";
+  if (["ppt", "pptx"].includes(ext)) return "📙";
+  if (["xls", "xlsx", "csv"].includes(ext)) return "📗";
+  if (["mp4", "mov", "avi", "mkv", "webm"].includes(ext)) return "🎬";
+  if (["mp3", "wav", "m4a"].includes(ext)) return "🎵";
+  if (["zip", "rar", "7z"].includes(ext)) return "🗜️";
+  return "📎";
+}
+// ชื่อโฟลเดอร์ OneDrive ต้องไม่มีอักขระต้องห้ามของระบบไฟล์
+function sanitizeFolderName(name: string) {
+  return name.replace(/[\\/:*?"<>|]/g, "_").trim();
+}
+
+// ★ ขอลำดับไฟล์ถัดไปของครูคนนี้ในวันนี้แบบ atomic (กันไฟล์ที่อัปพร้อมกันได้เลขซ้ำกัน)
+// ดู RPC increment_onedrive_counter ใน schema.sql
+async function getNextOneDriveSeq(teacherId: string): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data, error } = await supabase.rpc("increment_onedrive_counter", { p_teacher_id: teacherId, p_date: today });
+  if (error) throw new Error("ขอลำดับไฟล์ไม่สำเร็จ: " + error.message);
+  return data as number;
+}
+
+// อัปโหลดไฟล์ไปยัง OneDrive ผ่าน endpoint กลางของโรงเรียน (ใช้ร่วมกับระบบลา/ปฏิทินกิจกรรม)
+// ★ ใช้ field "path" (ไม่ใช่ "folder") เพราะ endpoint นี้ encode "folder" เป็น segment เดียว
+// ถ้ามี "/" ใน folder จะถูก escape เป็น %2F แทนที่จะสร้างโฟลเดอร์ย่อยจริงๆ
+// "path" จะ split ด้วย "/" แล้ว encode ทีละ segment ให้ถูกต้อง จึงใช้สร้างโครงสร้างโฟลเดอร์ซ้อนได้
+async function uploadFileToOneDriveWithPath(file: File, path: string): Promise<{
   itemId: string; name: string; webUrl: string; size: number; account: string;
 }> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("account", ONEDRIVE_ACCOUNT);
-  formData.append("teacherFolderBase", "คลังสื่อการสอน");
-  formData.append("teacherName", teacherName);
+  formData.append("path", path);
 
   const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
   const data = await res.json();
@@ -150,7 +214,23 @@ async function uploadFileToOneDrive(file: File, teacherName: string): Promise<{
     const msg = typeof data.error === "string" ? data.error : (data.error?.message ?? "อัปโหลดไม่สำเร็จ");
     throw new Error(msg);
   }
-  return { itemId: data.itemId, name: data.fileName || file.name, webUrl: data.webUrl, size: file.size, account: data.account };
+  // ★ ชื่อไฟล์และขนาดรู้อยู่แล้วจากฝั่ง client ก่อนอัปโหลด ไม่ต้องรอ endpoint ส่งกลับ
+  return { itemId: data.itemId, name: file.name, webUrl: data.webUrl, size: file.size, account: data.account };
+}
+
+// ★ อัปโหลดเข้าโฟลเดอร์ประจำตัว "ครูที่อัพ" เสมอ (ไม่ใช่ผู้รับผิดชอบที่เลือกไว้ในฟอร์ม)
+// ชื่อไฟล์ = วันที่_ลำดับ (เช่น 2026-07-14_01.png, 2026-07-14_02.pdf, ...) นับต่อเนื่องไม่ว่าจะเป็น
+// รูปภาพหรือไฟล์แนบ ไฟล์ทั้งหมดของครูคนเดิมจะสะสมอยู่ในโฟลเดอร์ชื่อครูคนนั้นคนเดียวเสมอ
+async function uploadToTeacherFolder(file: File, uploader: UserProfile): Promise<{
+  itemId: string; name: string; webUrl: string; size: number; account: string;
+}> {
+  const seq = await getNextOneDriveSeq(uploader.id);
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const ext = (file.name.split(".").pop() || "bin").toLowerCase();
+  const fileName = `${dateStr}_${String(seq).padStart(2, "0")}.${ext}`;
+  const folder = sanitizeFolderName(displayName(uploader));
+  const path = `คลังสื่อการสอน/${folder}/${fileName}`;
+  return uploadFileToOneDriveWithPath(file, path);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -180,20 +260,19 @@ function MediaFormModal({ item, currentUser, isAdmin, teachers, onSave, onClose 
 
   // ── ไฟล์สื่อแนบ (เอกสาร/วิดีโอ/ไฟล์อื่นๆ) → OneDrive เช่นกัน ──
   const [attachmentItemId, setAttachmentItemId] = useState(item?.attachment_item_id ?? "");
-  const [attachmentPreview, setAttachmentPreview] = useState(
-  item?.attachment_item_id && /\.(jpg|jpeg|png|gif|webp)$/i.test(item?.attachment_name ?? "")
-    ? onedriveSrc(item.attachment_item_id)
-    : ""
-);
   const [attachmentName, setAttachmentName]     = useState(item?.attachment_name ?? "");
   const [attachmentWebUrl, setAttachmentWebUrl] = useState(item?.attachment_web_url ?? "");
   const [attachmentSize, setAttachmentSize]     = useState(item?.attachment_size ?? 0);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
+  // ★ ตัวอย่างไฟล์แนบ: ถ้าเป็นรูปภาพแสดง thumbnail จริง ถ้าเป็นไฟล์อื่นใช้ไอคอนตามประเภท
+  const [attachmentPreview, setAttachmentPreview] = useState(
+    isImageExt(item?.attachment_name) ? onedriveSrc(item?.attachment_item_id) : ""
+  );
 
   const [loading, setLoading] = useState(false);
 
-  // ── วิชาที่ผู้รับผิดชอบสอนอยู่จริง (ผูกจากตารางสอน) → ใช้กรองช่องวิชา + ผูกระดับชั้นอัตโนมัติ ──
-  const [subjectGradeMap, setSubjectGradeMap] = useState<Map<string, Set<string>>>(new Map());
+  // ── วิชาที่ผู้รับผิดชอบสอนอยู่จริง (ผูกจากตารางสอน) → ใช้กรองช่องวิชา + ผูกระดับชั้นอัตโนมัติจากรหัสวิชา ──
+  const [subjectGradeMap, setSubjectGradeMap] = useState<Map<string, { code: string; grades: Set<string> }>>(new Map());
   const [loadingSubjects, setLoadingSubjects] = useState(true);
 
   useEffect(() => {
@@ -204,14 +283,19 @@ function MediaFormModal({ item, currentUser, isAdmin, teachers, onSave, onClose 
   }, [ownerId]);
 
   const availableSubjects = [...subjectGradeMap.keys()].sort();
-  const availableGradesForSubject = subject && subjectGradeMap.has(subject)
-    ? [...subjectGradeMap.get(subject)!].sort((a, b) => GRADE_LEVELS.indexOf(a) - GRADE_LEVELS.indexOf(b))
+  const currentSubjectEntry = subject ? subjectGradeMap.get(subject) : undefined;
+  const availableGradesForSubject = currentSubjectEntry && currentSubjectEntry.grades.size > 0
+    ? [...currentSubjectEntry.grades].sort((a, b) => GRADE_LEVELS.indexOf(a) - GRADE_LEVELS.indexOf(b))
     : GRADE_LEVELS;
 
-  // ★ เลือกวิชา → ผูกระดับชั้นอัตโนมัติ (ถ้าครูสอนวิชานี้ระดับเดียว เลือกให้ทันที)
+  // ★ เลือกวิชา → ผูกระดับชั้นอัตโนมัติจาก "รหัสวิชา" เป็นหลัก (เช่น ว11282 → ป.1)
+  // ถ้ารหัสวิชาแปลไม่ได้ ค่อย fallback ไปใช้ระดับชั้นจากห้องที่สอนจริงในตารางสอน
   function handleSubjectChange(v: string) {
     setSubject(v);
-    const grades = v && subjectGradeMap.has(v) ? [...subjectGradeMap.get(v)!] : [];
+    const entry = subjectGradeMap.get(v);
+    const fromCode = gradeFromSubjectCode(entry?.code);
+    if (fromCode) { setGradeLevel(fromCode); return; }
+    const grades = entry ? [...entry.grades] : [];
     if (grades.length === 1) setGradeLevel(grades[0]);
     else if (grades.length > 0 && !grades.includes(gradeLevel)) setGradeLevel("");
   }
@@ -220,42 +304,40 @@ function MediaFormModal({ item, currentUser, isAdmin, teachers, onSave, onClose 
   const canPickOwner = isAdmin;
 
   async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
-  const f = e.target.files?.[0];
-  if (!f) return;
-  setImagePreview(URL.createObjectURL(f));
-  setImageUploading(true);
-  try {
-    const ownerName = displayName(teachers.find(t => t.id === ownerId) ?? currentUser);
-    const result = await uploadFileToOneDrive(f, ownerName); // ★ ส่งชื่อครูแทน kind เดิม
-    setImageItemId(result.itemId);
-    setImageName(result.name);
-  } catch (err: any) {
-    alert("⚠️ อัปโหลดรูปไป OneDrive ไม่สำเร็จ: " + err.message);
-  } finally {
-    setImageUploading(false);
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setImagePreview(URL.createObjectURL(f)); // ★ แสดงตัวอย่างภาพทันที ไม่ต้องรออัปโหลดเสร็จ
+    setImageUploading(true);
+    try {
+      const result = await uploadToTeacherFolder(f, currentUser); // ★ โฟลเดอร์ตามชื่อครูที่อัพ (ไม่ใช่ผู้รับผิดชอบที่เลือกในฟอร์ม)
+      setImageItemId(result.itemId);
+      setImageName(result.name);
+    } catch (err: any) {
+      alert("⚠️ อัปโหลดรูปไป OneDrive ไม่สำเร็จ: " + err.message);
+    } finally {
+      setImageUploading(false);
+    }
   }
-}
 
-async function handleAttachmentFile(e: React.ChangeEvent<HTMLInputElement>) {
-  const f = e.target.files?.[0];
-  if (!f) return;
-  setAttachmentName(f.name);
-  setAttachmentSize(f.size);
-  setAttachmentPreview(f.type.startsWith("image/") ? URL.createObjectURL(f) : "");
-  setAttachmentUploading(true);
-  try {
-    const ownerName = displayName(teachers.find(t => t.id === ownerId) ?? currentUser);
-    const result = await uploadFileToOneDrive(f, ownerName); // ★ ส่งชื่อครูแทน kind เดิม
-    setAttachmentItemId(result.itemId);
-    setAttachmentName(result.name);
-    setAttachmentWebUrl(result.webUrl);
-    setAttachmentSize(result.size);
-  } catch (err: any) {
-    alert("⚠️ อัปโหลดไฟล์สื่อไป OneDrive ไม่สำเร็จ: " + err.message);
-  } finally {
-    setAttachmentUploading(false);
+  async function handleAttachmentFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setAttachmentName(f.name);
+    setAttachmentSize(f.size);
+    setAttachmentPreview(isImageExt(f.name) ? URL.createObjectURL(f) : ""); // ★ แสดงตัวอย่างทันทีถ้าเป็นไฟล์รูปภาพ
+    setAttachmentUploading(true);
+    try {
+      const result = await uploadToTeacherFolder(f, currentUser); // ★ โฟลเดอร์เดียวกับรูปภาพ (ตามชื่อครูที่อัพ)
+      setAttachmentItemId(result.itemId);
+      setAttachmentName(result.name);
+      setAttachmentWebUrl(result.webUrl);
+      setAttachmentSize(result.size);
+    } catch (err: any) {
+      alert("⚠️ อัปโหลดไฟล์สื่อไป OneDrive ไม่สำเร็จ: " + err.message);
+    } finally {
+      setAttachmentUploading(false);
+    }
   }
-}
 
   async function handleSubmit() {
     if (!title.trim() || !mediaType) { alert("กรุณากรอกชื่อสื่อ/รายละเอียด และเลือกประเภท"); return; }
@@ -344,7 +426,7 @@ async function handleAttachmentFile(e: React.ChangeEvent<HTMLInputElement>) {
             </div>
             <div>
               <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
-                ระดับชั้น {subject && subjectGradeMap.has(subject) && <span className="text-slate-400 normal-case font-normal">(ตามตารางสอน)</span>}
+                ระดับชั้น {currentSubjectEntry && gradeFromSubjectCode(currentSubjectEntry.code) && <span className="text-slate-400 normal-case font-normal">(ผูกจากรหัสวิชาอัตโนมัติ)</span>}
               </label>
               <select value={gradeLevel} onChange={e => setGradeLevel(e.target.value)} className={inp}>
                 <option value="">— เลือกระดับชั้น —</option>
@@ -363,29 +445,26 @@ async function handleAttachmentFile(e: React.ChangeEvent<HTMLInputElement>) {
             <input value={storageLocation} onChange={e => setStorageLocation(e.target.value)} placeholder="เช่น OneDrive กลุ่มสาระฯ, ตู้เก็บสื่อ ห้อง 3" className={inp} />
           </div>
 
-          {/* ไฟล์สื่อแนบ — พร้อม preview ทั้งรูปและเอกสาร */}
-<div>
-  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">แนบไฟล์สื่อ (อัปโหลดขึ้น OneDrive)</label>
-  <input type="file" onChange={handleAttachmentFile} className="text-xs" />
-  {attachmentName && (
-    <div className="mt-2 flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-      {/* ★ preview: รูปโชว์ thumbnail จริง, ไฟล์อื่นโชว์ไอคอนตามนามสกุล */}
-      {attachmentPreview ? (
-        <img src={attachmentPreview} alt="" className="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0" />
-      ) : (
-        <span className="w-12 h-12 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-xl shrink-0">
-          {attachmentName.toLowerCase().endsWith(".pdf") ? "📄" : "📎"}
-        </span>
-      )}
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-bold text-slate-700 truncate">{attachmentName}</p>
-        <p className="text-[10px] text-slate-400 font-bold">
-          {attachmentUploading ? "⏳ กำลังอัปโหลดขึ้น OneDrive..." : `${formatFileSize(attachmentSize)} · อัปโหลดขึ้น OneDrive แล้ว`}
-        </p>
-      </div>
-    </div>
-  )}
-</div>
+          {/* ไฟล์สื่อแนบ */}
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">แนบไฟล์สื่อ (อัปโหลดขึ้น OneDrive)</label>
+            <input type="file" onChange={handleAttachmentFile} className="text-xs" />
+            {attachmentName && (
+              <div className="mt-2 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                {attachmentPreview ? (
+                  <img src={attachmentPreview} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                ) : (
+                  <span className="text-lg shrink-0">{attachmentUploading ? "⏳" : attachmentIcon(attachmentName)}</span>
+                )}
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-700 truncate">{attachmentName}</p>
+                  <p className="text-[10px] text-slate-400 font-bold">
+                    {attachmentUploading ? "กำลังอัปโหลดขึ้น OneDrive..." : `${formatFileSize(attachmentSize)} · อัปโหลดขึ้น OneDrive แล้ว`}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -458,7 +537,11 @@ function MediaDetailModal({ item, canEdit, onEdit, onDelete, onClose }: {
           {item.attachment_item_id && (
             <a href={onedriveSrc(item.attachment_item_id)} target="_blank" rel="noreferrer"
               className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 hover:bg-blue-100 transition-all">
-              <span className="text-lg">📎</span>
+              {isImageExt(item.attachment_name) ? (
+                <img src={onedriveSrc(item.attachment_item_id)} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+              ) : (
+                <span className="text-lg shrink-0">{attachmentIcon(item.attachment_name)}</span>
+              )}
               <div className="min-w-0">
                 <p className="text-xs font-bold text-blue-700 truncate">{item.attachment_name}</p>
                 <p className="text-[10px] text-blue-400 font-bold">{formatFileSize(item.attachment_size)} · เปิด/ดาวน์โหลดจาก OneDrive</p>
@@ -638,37 +721,6 @@ function DashboardSummary({ items, teachers }: { items: MediaItem[]; teachers: U
       </div>
     </div>
   );
-}
-
-// ══════════════════════════════════════════════════════════
-// ★ แปลงรหัสวิชา (เช่น ว11282, ว31101) เป็นระดับชั้น
-// รูปแบบมาตรฐานหลักสูตรไทย: [ตัวอักษรวิชา][กลุ่มระดับ 1 หลัก][ชั้นในกลุ่ม 1 หลัก][เลขลำดับ...]
-//   กลุ่ม 0 = อนุบาล  → เลขชั้น 2,3 = อ.2, อ.3
-//   กลุ่ม 1 = ประถม   → เลขชั้น 1-6 = ป.1–ป.6
-//   กลุ่ม 2 = ม.ต้น   → เลขชั้น 1-3 = ม.1–ม.3
-//   กลุ่ม 3 = ม.ปลาย  → เลขชั้น 1-3 = ม.4–ม.6 (ออฟเซ็ต +3)
-// ══════════════════════════════════════════════════════════
-function parseGradeFromSubjectCode(code?: string): string | undefined {
-  if (!code) return undefined;
-  // ตัดตัวอักษรนำหน้าออก เอาเฉพาะตัวเลขที่ตามมา
-  const match = code.match(/[0-9]+/);
-  if (!match || match[0].length < 2) return undefined;
-  const digits = match[0];
-  const group = digits[0];
-  const level = parseInt(digits[1], 10);
-
-  switch (group) {
-    case "0":
-      return (level === 2 || level === 3) ? `อ.${level}` : undefined;
-    case "1":
-      return (level >= 1 && level <= 6) ? `ป.${level}` : undefined;
-    case "2":
-      return (level >= 1 && level <= 3) ? `ม.${level}` : undefined;
-    case "3":
-      return (level >= 1 && level <= 3) ? `ม.${level + 3}` : undefined;
-    default:
-      return undefined;
-  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

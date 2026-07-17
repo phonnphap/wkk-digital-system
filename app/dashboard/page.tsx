@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   LayoutDashboard, UserCheck, CalendarDays, FileText,
-  Wrench, Car, Monitor, FolderOpen, Trophy, Calendar, RefreshCw, Users, LogOut, Bell, Settings
+  Wrench, Car, Monitor, FolderOpen, FileEdit, Trophy, Calendar, RefreshCw, Users, LogOut, Bell, Settings
 } from "lucide-react";
 
 // ══════════════════════════════════════════════════════════
@@ -325,6 +325,7 @@ function StatusBadge({ status }: { status: ItemStatus }) {
         { name: "ระบบบันทึกชั่วโมง PLC", icon: <Users className="w-6 h-6" />, color: "bg-teal-500", path: "/plc", status: "live" as ItemStatus },
         { name: "นิเทศการสอน", icon: <Settings className="w-6 h-6" />, color: "bg-rose-500", path: "/supervision" },
         { name: "คลังสื่อการสอน", icon: <FolderOpen className="w-6 h-6" />, color: "bg-cyan-500", path: "/media-library", status: "wip" as ItemStatus },
+        { name: "ประเมินความสามารถในการอ่านและการเขียน", icon: <FileEdit className="w-6 h-6" />, color: "bg-sky-500", path: "/literacy-assessment", status: "live" as ItemStatus },
       ]
     },
     {
