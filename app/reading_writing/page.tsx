@@ -1023,11 +1023,14 @@ function OverviewPage() {
   const { data: records } = await supabase.from("reading_writing_records").select("*");
 
   // ✅ ตัดห้องที่ไม่รองรับออกก่อน (อ.1-3 และห้องที่ไม่ตรงรูปแบบ ป./ม.1-6)
-  const supportedClassrooms = (classrooms || []).filter(c => isSupportedClassroom(c.room_name));
+  // ✅ ตัดห้องอนุบาล ๒-๓ ออกก่อน และเก็บเฉพาะห้องที่ parse ระดับชั้นได้ (ป.1-6, ม.1-6)
+const supportedClassrooms = (classrooms || [])
+  .filter(c => !isExcludedKindergarten(c.room_name))
+  .filter(c => parseGradeLevel(c.room_name) !== null);
 
-  let summary = sortClassrooms(supportedClassrooms).map(c => {
-    const gl = parseGradeLevel(c.room_name);
-    const g = getGradeConfig(gl);
+let summary = sortClassrooms(supportedClassrooms).map(c => {
+  const gl = parseGradeLevel(c.room_name);
+  const g = gl ? GRADES[gl] : null;
     const recs = (records || []).filter(r => r.classroom_id === c.id);
     let ok = 0, warn = 0, bad = 0;
     if (g) {

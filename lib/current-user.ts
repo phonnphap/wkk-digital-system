@@ -12,7 +12,6 @@ export interface CurrentUserProfile {
 }
 
 // ★ สมมติฐาน: ตาราง users มีคอลัมน์ auth_id, first_name, last_name, full_name, email, role
-// (ใช้ pattern เดียวกับระบบตารางสอน/ปฏิทินกิจกรรมในโปรเจกต์นี้ — ถ้าโครงสร้างไม่ตรง แจ้งได้)
 export async function getCurrentUserProfile(): Promise<CurrentUserProfile | null> {
   const { data: { user: authUser } } = await supabase.auth.getUser();
   if (!authUser) return null;
@@ -35,6 +34,19 @@ export async function getCurrentUserProfile(): Promise<CurrentUserProfile | null
       .eq('email', email)
       .maybeSingle();
     profile = byEmail;
+
+    // ★ เจอ user จาก email แต่ auth_id ยังไม่ถูกผูกไว้ -> ผูกให้เลยตอนนี้ (self-heal)
+    // ป้องกันปัญหาฝั่ง backend (เช่นฟังก์ชัน upsert_award ที่ query จาก auth_id ตรงๆ)
+    // ที่จะหา user ไม่เจอเพราะ auth_id เป็น null แล้วได้ created_by ผิด/ว่างไปเรื่อยๆ
+    if (profile) {
+      const { error: linkErr } = await supabase
+        .from('users')
+        .update({ auth_id: authUser.id })
+        .eq('id', profile.id);
+      if (linkErr) {
+        console.error('[getCurrentUserProfile] ผูก auth_id ไม่สำเร็จ:', linkErr.message, linkErr);
+      }
+    }
   }
 
   if (!profile) return null;
@@ -45,5 +57,5 @@ export async function getCurrentUserProfile(): Promise<CurrentUserProfile | null
   };
 }
 
-// ★ สมมติฐาน: role ที่นับเป็น "แอดมิน" ในระบบนี้ — ถ้ามี role อื่นที่ควรนับด้วย (เช่น deputy_director) แจ้งเพิ่มได้
+// ★ สมมติฐาน: role ที่นับเป็น "แอดมิน" ในระบบนี้ — ถ้ามี role อื่นที่ควรนับด้วย แจ้งเพิ่มได้
 export const ADMIN_ROLES = ['admin', 'director', 'deputy_director'];
