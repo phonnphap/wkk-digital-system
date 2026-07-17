@@ -1191,25 +1191,6 @@ function StatCardOutline({ label, value, sub, color, active }) {
     </div>
   );
 }
-
-// เปลี่ยนตัวกรองสายชั้นให้เลือกได้ทั้ง ป. และ ม.
-const GRADE_FILTER_OPTIONS = [
-  ...[1,2,3,4,5,6].map(l => ({ value: `ป-${l}`, label: GRADES[l].full })),
-  ...[1,2,3,4,5,6].map(l => ({ value: `ม-${l}`, label: GRADES_M[l].full })),
-];
-
-// ในตัว select
-<select style={S.select} value={gradeFilter} onChange={e => setGradeFilter(e.target.value)}>
-  <option value="">ทั้งหมด</option>
-  {GRADE_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-</select>
-
-// filteredRows
-const filteredRows = useMemo(() => {
-  if (!gradeFilter) return rows;
-  const [prefix, level] = gradeFilter.split("-");
-  return rows.filter(r => r.gradeLevel?.prefix === prefix && String(r.gradeLevel?.level) === level);
-}, [rows, gradeFilter]);
 // ══════════════════════════════════════════════════════════════
 // ManagersPage — จัดการผู้ดูแลโครงการอ่าน-เขียน (เฉพาะแอดมินตัวจริง)
 // ══════════════════════════════════════════════════════════════
