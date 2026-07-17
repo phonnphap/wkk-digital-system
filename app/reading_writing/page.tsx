@@ -210,6 +210,19 @@ async function fetchAllMyClassrooms(userId) {
   [...home, ...evalRooms].forEach(c => { map[c.classroom_id || c.id] = c; });
   return sortClassrooms(Object.values(map));
 }
+// ── ห้องที่ "ประเมินคะแนนได้" (ใช้กับหน้าบันทึกคะแนนเท่านั้น) ──
+// ป.4-6 และ ม.1-6 ต้องเป็นครูผู้ประเมินที่ถูกมอบหมายเท่านั้นจึงจะบันทึกคะแนนได้
+// (ครูประจำชั้นของห้องเหล่านี้ที่ไม่ได้รับมอบหมาย จะเห็นห้องได้เฉพาะในแท็บ "รายห้องเรียน" เท่านั้น)
+async function fetchAssessableClassrooms(userId) {
+  const [home, evalRooms] = await Promise.all([
+    fetchMyClassrooms(userId),
+    fetchEvaluatorClassrooms(userId),
+  ]);
+  const filteredHome = home.filter(c => !isEvaluatorGrade(parseGradeLevel(c.room_name)));
+  const map = {};
+  [...filteredHome, ...evalRooms].forEach(c => { map[c.classroom_id || c.id] = c; });
+  return sortClassrooms(Object.values(map));
+}
 const GRADE_ORDER = { "อ": 0, "ป": 1, "ม": 2 };
 function classroomSortKey(roomName) {
   const match = (roomName || "").match(/^([อปม])\.?(\d+)\/(\d+)/);
@@ -389,7 +402,7 @@ function AssessPage({ currentUser, isAdmin }) {
   useEffect(() => {
     if (!currentUser) return;
     setLoadingRooms(true);
-    fetchAllMyClassrooms(currentUser.id).then(rooms => {
+    fetchAssessableClassrooms(currentUser.id).then(rooms => {
       setClassrooms(rooms);
       if (rooms.length > 0) setSelectedClass(rooms[0]);
       setLoadingRooms(false);
@@ -505,8 +518,11 @@ function AssessPage({ currentUser, isAdmin }) {
     <div style={{ ...S.card, textAlign: "center", padding: 48 }}>
       <div style={{ fontSize: 64, marginBottom: 16 }}>🏫</div>
       <div style={{ color: "#6b7280", fontSize: 15, fontWeight: 600 }}>
-        ไม่พบห้องเรียนที่คุณเป็นครูประจำชั้นหรือได้รับมอบหมายเป็นครูผู้ประเมิน<br />
-        <span style={{ fontSize: 13, color: "#9ca3af" }}>กรุณาติดต่อผู้ดูแลระบบเพื่อตรวจสอบข้อมูล</span>
+        ไม่พบห้องเรียนที่คุณสามารถบันทึกคะแนนได้<br />
+        <span style={{ fontSize: 13, color: "#9ca3af" }}>
+          ห้อง ป.4–ป.6 และ ม.1–ม.6 ต้องได้รับมอบหมายเป็น "ครูผู้ประเมิน" จากผู้ดูแลระบบก่อนจึงจะบันทึกคะแนนได้<br />
+          (ครูประจำชั้นยังดูข้อมูลห้องของตนได้ที่แท็บ "รายห้องเรียน")
+        </span>
       </div>
     </div>
   );
