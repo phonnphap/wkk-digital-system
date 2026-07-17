@@ -5,6 +5,9 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { differenceInMonths, differenceInYears } from "date-fns";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from "recharts";
 
 const supabase = createClient();
 const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head"];
@@ -206,8 +209,10 @@ export default function ReadingWritingApp() {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("assess");
+  const [isProjectManager, setIsProjectManager] = useState(false);
 
-  const isAdmin = useMemo(() => ADMIN_ROLES.includes(currentUser?.role ?? ""), [currentUser]);
+  const isRealAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
+  const isAdmin = useMemo(() => isRealAdmin || isProjectManager, [isRealAdmin, isProjectManager]);
 
   useEffect(() => {
     const init = async () => {
@@ -228,7 +233,17 @@ export default function ReadingWritingApp() {
           if (data) await supabase.from("users").update({ auth_id: authUser.id }).eq("id", data.id);
         }
       }
-      if (data) setCurrentUser(data);
+
+      if (data) {
+        setCurrentUser(data);
+        // ✅ เช็คว่าเป็นผู้ดูแลโครงการอ่าน-เขียนไหม
+        const { data: pmData } = await supabase
+          .from("reading_writing_project_managers")
+          .select("id")
+          .eq("user_id", data.id)
+          .maybeSingle();
+        if (pmData) setIsProjectManager(true);
+      }
       setLoading(false);
     };
     init();
@@ -253,7 +268,11 @@ export default function ReadingWritingApp() {
     grade_head: "หัวหน้าระดับ" }[currentUser.role] || currentUser.role;
 
   const tabs = isAdmin
-    ? [{ key: "assess", label: "✏️ บันทึกคะแนน" }, { key: "overview", label: "🏫 ภาพรวมโรงเรียน" }]
+    ? [
+        { key: "assess", label: "✏️ บันทึกคะแนน" },
+        { key: "overview", label: "🏫 ภาพรวมโรงเรียน" },
+        ...(isRealAdmin ? [{ key: "managers", label: "⚙️ ผู้ดูแลโครงการ" }] : []),
+      ]
     : [{ key: "assess", label: "✏️ บันทึกคะแนน" }];
 
   return (
@@ -263,7 +282,7 @@ export default function ReadingWritingApp() {
           className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg">🏠</button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 style={S.headerTitle}>📖 ระบบบันทึกคะแนนความสามารถในการอ่านและการเขียน</h1>
-          <p style={S.headerSub}>{currentUser.title}{currentUser.first_name} {currentUser.last_name} · {roleLabel}</p>
+          <p style={S.headerSub}>{currentUser.title}{currentUser.first_name} {currentUser.last_name} · {roleLabel}{isProjectManager && !isRealAdmin ? " · ผู้ดูแลโครงการ" : ""}</p>
         </div>
         <div style={{ background: "rgba(255,255,255,0.2)", borderRadius: 10, padding: "6px 14px",
           color: "#fff", fontSize: 13, fontWeight: 600, flexShrink: 0 }}>ภาคเรียนที่ ๑ / ๒๕๖๙</div>
@@ -274,6 +293,7 @@ export default function ReadingWritingApp() {
       <div style={S.content}>
         {tab === "assess" && <AssessPage currentUser={currentUser} isAdmin={isAdmin} />}
         {tab === "overview" && isAdmin && <OverviewPage />}
+        {tab === "managers" && isRealAdmin && <ManagersPage currentUser={currentUser} />}
       </div>
     </div>
   );
@@ -544,11 +564,15 @@ const thStyle = { padding: "8px 6px", textAlign: "center", color: "#fff", fontWe
 const tdStyle = { padding: "6px", textAlign: "center" };
 
 // ══════════════════════════════════════════════════════════════
-// OverviewPage — เฉพาะแอดมิน/ผู้บริหาร เห็นทุกห้อง
+// OverviewPage — เฉพาะแอดมิน/ผู้บริหาร/ผู้ดูแลโครงการ เห็นทุกห้อง
 // ══════════════════════════════════════════════════════════════
+const GRADE_FILTERS = ["", "1", "2", "3", "4", "5", "6"];
+
 function OverviewPage() {
+  const [gradeFilter, setGradeFilter] = useState("");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [chartFilter, setChartFilter] = useState(null); // null|"ok"|"warn"|"bad"
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -556,7 +580,7 @@ function OverviewPage() {
       .select("id,room_name,student_count,academic_year_id");
     const { data: records } = await supabase.from("reading_writing_records").select("*");
 
-    const summary = sortClassrooms(classrooms || []).map(c => {
+    let summary = sortClassrooms(classrooms || []).map(c => {
       const gradeLevel = parseGradeLevel(c.room_name);
       const g = gradeLevel ? GRADES[gradeLevel] : null;
       const recs = (records || []).filter(r => r.classroom_id === c.id);
@@ -581,7 +605,14 @@ function OverviewPage() {
           else if (worst?.label === "ปรับปรุง") bad++;
         });
       }
-      return { room_name: c.room_name, gradeLevel, total: c.student_count || 0, measured: recs.length, ok, warn, bad };
+      const measured = recs.length;
+      return {
+        room_name: c.room_name, gradeLevel, total: c.student_count || 0, measured,
+        ok, warn, bad,
+        okPct: measured ? Math.round((ok / measured) * 100) : 0,
+        warnPct: measured ? Math.round((warn / measured) * 100) : 0,
+        badPct: measured ? Math.round((bad / measured) * 100) : 0,
+      };
     });
     setRows(summary);
     setLoading(false);
@@ -589,31 +620,265 @@ function OverviewPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  const filteredRows = useMemo(() => {
+    if (!gradeFilter) return rows;
+    return rows.filter(r => String(r.gradeLevel) === gradeFilter);
+  }, [rows, gradeFilter]);
+
+  const totals = useMemo(() => {
+    const total = filteredRows.reduce((s, r) => s + r.total, 0);
+    const measured = filteredRows.reduce((s, r) => s + r.measured, 0);
+    const ok = filteredRows.reduce((s, r) => s + r.ok, 0);
+    const warn = filteredRows.reduce((s, r) => s + r.warn, 0);
+    const bad = filteredRows.reduce((s, r) => s + r.bad, 0);
+    return {
+      total, measured, ok, warn, bad,
+      okPct: measured ? Math.round((ok / measured) * 100) : 0,
+      warnPct: measured ? Math.round((warn / measured) * 100) : 0,
+      badPct: measured ? Math.round((bad / measured) * 100) : 0,
+    };
+  }, [filteredRows]);
+
   if (loading) return <div style={{ ...S.card, textAlign: "center", padding: 40 }}>⏳ กำลังโหลด...</div>;
 
   return (
-    <div style={S.card}>
-      <div style={S.cardTitle}><span>🏫 สรุปผลรายห้องเรียน — ทุกระดับชั้น</span>
-        <button onClick={load} style={S.btnPrint}>🔄 รีเฟรช</button></div>
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead><tr style={{ background: "linear-gradient(135deg,#1e40af,#3b82f6)" }}>
-            {["ห้องเรียน", "นักเรียนทั้งหมด", "วัดแล้ว", "ดี/ดีมาก", "พอใช้", "ต้องปรับปรุง"].map(h =>
-              <th key={h} style={thStyle}>{h}</th>)}
-          </tr></thead>
-          <tbody>
-            {rows.map(r => (
-              <tr key={r.room_name} style={{ textAlign: "center" }}>
-                <td style={{ ...tdStyle, fontWeight: 700, color: "#1e3a8a" }}>{r.room_name}</td>
-                <td style={tdStyle}>{r.total}</td>
-                <td style={tdStyle}>{r.measured}</td>
-                <td style={{ ...tdStyle, color: "#16a34a", fontWeight: 700 }}>{r.ok}</td>
-                <td style={{ ...tdStyle, color: "#b45309", fontWeight: 700 }}>{r.warn}</td>
-                <td style={{ ...tdStyle, color: "#dc2626", fontWeight: 700 }}>{r.bad}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div>
+      <div style={S.card}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ minWidth: 160 }}>
+            <label style={S.label}>สายชั้น</label>
+            <select style={S.select} value={gradeFilter} onChange={e => setGradeFilter(e.target.value)}>
+              <option value="">ทั้งหมด</option>
+              {GRADE_FILTERS.filter(Boolean).map(gl => <option key={gl} value={gl}>{GRADES[gl].full}</option>)}
+            </select>
+          </div>
+          <button onClick={load} style={S.btnPrint}>🔄 รีเฟรช</button>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 12, marginBottom: 16 }}>
+        <StatCard label="นักเรียนทั้งหมด" value={totals.total.toLocaleString()} color="#3b82f6" />
+        <StatCard label="วัดแล้ว" value={totals.measured.toLocaleString()} color="#7c3aed" />
+        <div onClick={() => setChartFilter(chartFilter === "ok" ? null : "ok")} style={{ cursor: "pointer" }}>
+          <StatCardOutline active={chartFilter === "ok"} color="#16a34a" label="ดี/ดีมาก" value={`${totals.ok} คน`} sub={`${totals.okPct}% ของที่วัดแล้ว`} />
+        </div>
+        <div onClick={() => setChartFilter(chartFilter === "warn" ? null : "warn")} style={{ cursor: "pointer" }}>
+          <StatCardOutline active={chartFilter === "warn"} color="#f59e0b" label="พอใช้" value={`${totals.warn} คน`} sub={`${totals.warnPct}% ของที่วัดแล้ว`} />
+        </div>
+        <div onClick={() => setChartFilter(chartFilter === "bad" ? null : "bad")} style={{ cursor: "pointer" }}>
+          <StatCardOutline active={chartFilter === "bad"} color="#dc2626" label="ต้องปรับปรุง" value={`${totals.bad} คน`} sub={`${totals.badPct}% ของที่วัดแล้ว`} />
+        </div>
+      </div>
+
+      {chartFilter && (
+        <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 700,
+            color: chartFilter === "ok" ? "#16a34a" : chartFilter === "warn" ? "#b45309" : "#dc2626" }}>
+            {chartFilter === "ok" ? "✅ กราฟ: ดี/ดีมาก" : chartFilter === "warn" ? "⚠️ กราฟ: พอใช้" : "🚨 กราฟ: ต้องปรับปรุง"}
+          </span>
+          <button onClick={() => setChartFilter(null)} style={{ ...S.btnPrint, background: "#f1f5f9", color: "#6b7280", boxShadow: "none" }}>✕ ดูทั้งหมด</button>
+        </div>
+      )}
+
+      {filteredRows.length > 0 && (
+        <div style={S.card}>
+          <div style={S.cardTitle}>📊 สัดส่วนผลการประเมินรายห้องเรียน (ร้อยละของนักเรียนที่วัดแล้ว)</div>
+          <ResponsiveContainer width="100%" height={340}>
+            <BarChart data={filteredRows} margin={{ top: 8, right: 16, left: 0, bottom: 60 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f4ff" />
+              <XAxis dataKey="room_name" tick={{ fontSize: 11 }} angle={-40} textAnchor="end" interval={0} />
+              <YAxis tick={{ fontSize: 11 }} unit="%" domain={[0, 100]} />
+              <Tooltip contentStyle={{ borderRadius: 10, fontSize: 12 }} formatter={(v, name) => [`${v ?? 0}%`, name]} />
+              <Legend verticalAlign="top" height={36} />
+              {(!chartFilter || chartFilter === "ok") && (
+                <Bar dataKey="okPct" name="✅ ดี/ดีมาก" fill="#16a34a" stackId={chartFilter ? undefined : "a"} radius={chartFilter ? [4, 4, 0, 0] : undefined} />
+              )}
+              {(!chartFilter || chartFilter === "warn") && (
+                <Bar dataKey="warnPct" name="⚠️ พอใช้" fill="#f59e0b" stackId={chartFilter ? undefined : "a"} radius={chartFilter ? [4, 4, 0, 0] : undefined} />
+              )}
+              {(!chartFilter || chartFilter === "bad") && (
+                <Bar dataKey="badPct" name="🚨 ต้องปรับปรุง" fill="#dc2626" stackId={chartFilter ? undefined : "a"} radius={[4, 4, 0, 0]} />
+              )}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      <div style={S.card}>
+        <div style={S.cardTitle}>📋 ตารางสรุปรายห้องเรียน</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr style={{ background: "linear-gradient(135deg,#1e40af,#3b82f6)" }}>
+              {["ห้องเรียน", "นักเรียนทั้งหมด", "วัดแล้ว", "✅ ดี/ดีมาก", "% ดี/ดีมาก", "⚠️ พอใช้", "% พอใช้", "🚨 ปรับปรุง", "% ปรับปรุง"].map(h =>
+                <th key={h} style={thStyle}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {filteredRows.map((r, i) => (
+                <tr key={r.room_name} style={{ textAlign: "center", background: i % 2 === 0 ? "#f8faff" : "#fff" }}>
+                  <td style={{ ...tdStyle, fontWeight: 700, color: "#1e3a8a" }}>{r.room_name}</td>
+                  <td style={tdStyle}>{r.total}</td>
+                  <td style={tdStyle}>{r.measured}</td>
+                  <td style={{ ...tdStyle, color: "#16a34a", fontWeight: 700 }}>{r.ok}</td>
+                  <td style={tdStyle}><span style={{ background: "#dcfce7", color: "#166534", padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700 }}>{r.okPct}%</span></td>
+                  <td style={{ ...tdStyle, color: "#b45309", fontWeight: 700 }}>{r.warn}</td>
+                  <td style={tdStyle}><span style={{ background: "#fef9c3", color: "#854d0e", padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700 }}>{r.warnPct}%</span></td>
+                  <td style={{ ...tdStyle, color: "#dc2626", fontWeight: 700 }}>{r.bad}</td>
+                  <td style={tdStyle}><span style={{ background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700 }}>{r.badPct}%</span></td>
+                </tr>
+              ))}
+              {filteredRows.length === 0 && (
+                <tr><td colSpan={9} style={{ textAlign: "center", padding: 32, color: "#9ca3af" }}>📭 ไม่พบข้อมูลห้องเรียนที่รองรับ (ป.1–ป.6) ในตัวกรองนี้</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+function StatCardOutline({ label, value, sub, color, active }) {
+  return (
+    <div style={{ background: "#fff", borderRadius: 14, padding: "12px 14px",
+      border: `2px solid ${color}30`, outline: active ? `3px solid ${color}` : "none" }}>
+      <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color }}>{value}</div>
+      {sub && <div style={{ fontSize: 10.5, color: "#9ca3af" }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// ManagersPage — จัดการผู้ดูแลโครงการอ่าน-เขียน (เฉพาะแอดมินตัวจริง)
+// ══════════════════════════════════════════════════════════════
+function ManagersPage({ currentUser }) {
+  const [managers, setManagers] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    const { data: mgData } = await supabase
+      .from("reading_writing_project_managers")
+      .select("id, user_id, created_at")
+      .order("created_at", { ascending: false });
+
+    const { data: usrData } = await supabase
+      .from("users")
+      .select("id, first_name, last_name, title, role")
+      .order("first_name");
+
+    const userMap = {};
+    (usrData || []).forEach(u => { userMap[u.id] = u; });
+
+    const merged = (mgData || []).map(m => ({ ...m, user: userMap[m.user_id] || null }));
+    setManagers(merged);
+    setAllUsers(usrData || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const managerIds = useMemo(() => new Set(managers.map(m => m.user_id)), [managers]);
+
+  const filtered = useMemo(() => {
+    if (!search) return [];
+    const q = search.toLowerCase();
+    return allUsers.filter(u =>
+      !managerIds.has(u.id) &&
+      (`${u.first_name} ${u.last_name}`.toLowerCase().includes(q) || (u.title || "").toLowerCase().includes(q))
+    ).slice(0, 8);
+  }, [allUsers, search, managerIds]);
+
+  const handleAdd = async (userToAdd) => {
+    setAdding(true);
+    const { error } = await supabase
+      .from("reading_writing_project_managers")
+      .upsert([{ user_id: userToAdd.id, added_by: currentUser.id }], { onConflict: "user_id", ignoreDuplicates: true });
+    if (error) alert("❌ " + error.message);
+    else { setSearch(""); await loadData(); }
+    setAdding(false);
+  };
+
+  const handleRemove = async (id) => {
+    if (!confirm("ยืนยันการลบผู้ดูแลโครงการคนนี้?")) return;
+    await supabase.from("reading_writing_project_managers").delete().eq("id", id);
+    await loadData();
+  };
+
+  const roleLabel = { homeroom_teacher: "ครูประจำชั้น", subject_teacher: "ครูผู้สอน", admin: "ผู้ดูแลระบบ",
+    director: "ผู้อำนวยการ", deputy_director: "รองผู้อำนวยการ", dept_head: "หัวหน้าฝ่าย", grade_head: "หัวหน้าระดับ" };
+
+  return (
+    <div style={{ maxWidth: 700 }}>
+      <div style={{ ...S.card, background: "linear-gradient(135deg,#fffbeb,#fef3c7)", border: "1px solid #fcd34d" }}>
+        <div style={{ fontWeight: 700, color: "#92400e", fontSize: 14, marginBottom: 4 }}>⚙️ ผู้ดูแลโครงการอ่าน-เขียน</div>
+        <div style={{ color: "#92400e", fontSize: 13 }}>ผู้ดูแลโครงการสามารถดูภาพรวมผลการประเมินทุกห้อง/ทุกสายชั้นได้ เหมือนผู้บริหาร โดยไม่ต้องเปลี่ยนตำแหน่งในระบบ</div>
+      </div>
+
+      <div style={S.card}>
+        <div style={S.cardTitle}>➕ เพิ่มผู้ดูแลโครงการ</div>
+        <div style={{ position: "relative" }}>
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="🔍 พิมพ์ชื่อหรือนามสกุลเพื่อค้นหา..."
+            style={{ ...S.select, width: "100%" }} />
+          {filtered.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff",
+              border: "1.5px solid #c7d2fe", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+              zIndex: 50, overflow: "hidden", marginTop: 4 }}>
+              {filtered.map(u => (
+                <button key={u.id} onClick={() => handleAdd(u)} disabled={adding}
+                  style={{ width: "100%", padding: "10px 14px", border: "none", background: "transparent",
+                    textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center",
+                    justifyContent: "space-between", gap: 8, fontFamily: "inherit", borderBottom: "1px solid #f0f4ff" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "#eff6ff"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <div>
+                    <span style={{ fontWeight: 700, color: "#1e3a8a", fontSize: 14 }}>{u.title}{u.first_name} {u.last_name}</span>
+                    <span style={{ color: "#6b7280", fontSize: 12, marginLeft: 8 }}>{roleLabel[u.role] || u.role}</span>
+                  </div>
+                  <span style={{ color: "#3b82f6", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>+ เพิ่ม</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {search.length > 0 && filtered.length === 0 && (
+            <div style={{ padding: "12px 14px", color: "#9ca3af", fontSize: 13, marginTop: 4,
+              background: "#f8faff", borderRadius: 10, border: "1px solid #e0e7ff" }}>
+              ไม่พบผู้ใช้ หรืออาจเป็นผู้ดูแลโครงการอยู่แล้ว
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={S.card}>
+        <div style={S.cardTitle}>👥 ผู้ดูแลโครงการปัจจุบัน ({managers.length} คน)</div>
+        {loading ? (
+          <div style={{ textAlign: "center", padding: 24, color: "#6b7280" }}>⏳ กำลังโหลด...</div>
+        ) : managers.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 24, color: "#9ca3af" }}>ยังไม่มีผู้ดูแลโครงการ</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {managers.map(m => {
+              const u = m.user;
+              return (
+                <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "10px 14px", background: "#f8faff", borderRadius: 12, border: "1px solid #e0e7ff" }}>
+                  <div>
+                    <span style={{ fontWeight: 700, color: "#1e3a8a", fontSize: 14 }}>{u?.title}{u?.first_name} {u?.last_name}</span>
+                    <span style={{ color: "#6b7280", fontSize: 12, marginLeft: 8 }}>{roleLabel[u?.role] || u?.role}</span>
+                  </div>
+                  <button onClick={() => handleRemove(m.id)}
+                    style={{ padding: "7px 14px", background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5",
+                      borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>
+                    🗑️ ลบ
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
