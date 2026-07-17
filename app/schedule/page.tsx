@@ -119,6 +119,25 @@ type ChangeRequest = {
   note?: string; reject_reason?: string; reviewed_by?: string; reviewed_at?: string; created_at: string;
   requester?: any;
 };
+type ClubPeriod = { id: string; grade_label: string; day_of_week: number; slot_label: string; academic_year_id: string };
+type Club = { id: string; name: string; teacher_id: string; grade_label: string; room_note?: string; academic_year_id: string; teacher?: Teacher };
+
+const GRADE_LABELS_MS = ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"];
+
+function getClassroomGradeLabel(c: { room_name?: string }): string {
+  const m = (c.room_name ?? "").match(/([ปมอ])\.?(\d+)/);
+  return m ? `${m[1]}.${m[2]}` : "";
+}
+
+function scheduleTypeForGradeLabel(label: string): string {
+  if (label.startsWith("อ.")) return "kindergarten";
+  if (label.startsWith("ป.")) return "primary";
+  if (label.startsWith("ม.")) {
+    const n = parseInt(label.replace("ม.", ""), 10);
+    return n <= 2 ? "junior" : "senior";
+  }
+  return "primary";
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 function fullName(u: any) {
@@ -542,14 +561,16 @@ function ChangeRequestsPanel({ requests, subjects, teachers, classrooms, timeSlo
 // ── Timetable Grid ────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, academicYearId,
-  currentUser, onSave, onRequestChange, onDelete }: {
+  currentUser, clubPeriod, clubsForGrade, onSave, onRequestChange, onDelete }: {
   classroom: Classroom; entries: TimetableEntry[]; timeSlots: TimeSlot[];
   subjects: Subject[]; teachers: Teacher[]; academicYearId: string;
-  currentUser: UserProfile; // ← เอา canEditDirect ออก
+  currentUser: UserProfile;
+  clubPeriod?: ClubPeriod; clubsForGrade: Club[]; // ★ เพิ่ม
   onSave: (d: any) => Promise<void>;
   onRequestChange: (d: any) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
+
   const [modal, setModal] = useState<{ slot: TimeSlot; day: number; entry?: TimetableEntry; permission: "direct"|"request" } | null>(null);
 
   function getEntry(day: number, slotId: string) {
@@ -650,6 +671,23 @@ function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, acad
                     <div className={`text-[10px] ${dc.text} opacity-60`}>{DAY_SHORT[day - 1]}</div>
                   </td>
                   {timeSlots.map(slot => {
+    const isClubSlot = clubPeriod && clubPeriod.day_of_week === day && clubPeriod.slot_label === slot.slot_label;
+    if (isClubSlot) {
+      return (
+        <td key={slot.id} className="p-1 align-top border-r border-slate-100">
+          <div className="rounded-xl border-2 border-purple-300 bg-purple-50 flex flex-col items-center justify-center text-center px-1"
+            style={{ minHeight: "92px" }}
+            title={clubsForGrade.map(c => `${c.name}${c.room_note ? " " + c.room_note : ""} (${displayName(c.teacher)})`).join("\n")}>
+            <span className="font-black text-purple-700 text-sm">🎪 ชุมนุม</span>
+            {clubsForGrade.length > 0 && (
+              <p className="text-[9px] text-purple-500 font-bold mt-1 leading-tight line-clamp-3">
+                {clubsForGrade.map(c => displayName(c.teacher)).join(", ")}
+              </p>
+            )}
+          </div>
+        </td>
+      );
+    }
                     if (slot.is_break) return (
                       <td key={slot.id} className="bg-slate-50 border-r border-slate-100 text-center p-0">
                         <div className="text-[9px] text-slate-300 font-bold" style={{ writingMode: "vertical-rl", whiteSpace: "nowrap", margin: "0 auto" }}>พัก</div>
@@ -744,9 +782,135 @@ function ScheduleSettingsModal({ onClose, onApply }: { onClose: () => void; onAp
   );
 }
 
+function ClubManagementModal({ clubPeriods, clubs, teachers, academicYearId, onClose, onReload }: {
+  clubPeriods: ClubPeriod[]; clubs: Club[]; teachers: Teacher[]; academicYearId: string;
+  onClose: () => void; onReload: () => Promise<void>;
+}) {
+  const [tab, setTab] = useState<"periods" | "clubs">("periods");
+  const [savingPeriod, setSavingPeriod] = useState<string | null>(null);
+  const [newClub, setNewClub] = useState({ name: "", teacher_id: "", grade_label: "ม.1", room_note: "" });
+  const [savingClub, setSavingClub] = useState(false);
+
+  async function savePeriod(grade: string, day: number, slotLabel: string) {
+    if (!day || !slotLabel) return;
+    setSavingPeriod(grade);
+    const existing = clubPeriods.find(p => p.grade_label === grade);
+    if (existing) {
+      await (supabase.from("club_periods") as any).update({ day_of_week: day, slot_label: slotLabel }).eq("id", existing.id);
+    } else {
+      await (supabase.from("club_periods") as any).insert([{ grade_label: grade, day_of_week: day, slot_label: slotLabel, academic_year_id: academicYearId }]);
+    }
+    await onReload();
+    setSavingPeriod(null);
+  }
+
+  async function addClub() {
+    if (!newClub.name.trim() || !newClub.teacher_id) { alert("กรุณากรอกชื่อชุมนุมและเลือกครู"); return; }
+    setSavingClub(true);
+    await (supabase.from("clubs") as any).insert([{
+      name: newClub.name.trim(), teacher_id: newClub.teacher_id, grade_label: newClub.grade_label,
+      room_note: newClub.room_note.trim() || null, academic_year_id: academicYearId,
+    }]);
+    setNewClub(v => ({ ...v, name: "", teacher_id: "", room_note: "" }));
+    await onReload();
+    setSavingClub(false);
+  }
+
+  async function deleteClub(id: string) {
+    if (!confirm("ลบชุมนุมนี้?")) return;
+    await supabase.from("clubs").delete().eq("id", id);
+    await onReload();
+  }
+
+  const inp = "bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-800 text-sm font-bold focus:border-purple-400 focus:outline-none";
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="bg-purple-600 px-6 py-4 flex items-center justify-between">
+          <h3 className="text-lg font-black text-white">🎪 จัดการชุมนุม</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-white/20 hover:bg-white/30 text-white font-black">✕</button>
+        </div>
+        <div className="flex border-b border-slate-100 px-6">
+          {(["periods", "clubs"] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`px-4 py-3 text-sm font-black border-b-2 ${tab === t ? "border-purple-500 text-purple-600" : "border-transparent text-slate-400"}`}>
+              {t === "periods" ? "🕐 คาบชุมนุมแต่ละชั้น" : "📋 รายชื่อชุมนุม"}
+            </button>
+          ))}
+        </div>
+        <div className="p-5 overflow-y-auto flex-1 space-y-3">
+          {tab === "periods" && GRADE_LABELS_MS.map(grade => {
+            const type = scheduleTypeForGradeLabel(grade);
+            const tmpl = SCHEDULE_TEMPLATES.find(t => t.key === type)!;
+            const periodSlots = tmpl.slots.filter(s => !s.is_break);
+            const existing = clubPeriods.find(p => p.grade_label === grade);
+            return (
+              <div key={grade} className="bg-slate-50 rounded-xl border border-slate-200 p-3 flex items-center gap-3 flex-wrap">
+                <span className="font-black text-slate-700 w-14">{grade}</span>
+                <select id={`day-${grade}`} defaultValue={existing?.day_of_week ?? ""}
+                  onChange={e => savePeriod(grade, Number(e.target.value), (document.getElementById(`slot-${grade}`) as HTMLSelectElement)?.value)}
+                  className={inp + " w-32"}>
+                  <option value="">— วัน —</option>
+                  {DAYS.map((d, i) => <option key={d} value={i + 1}>{d}</option>)}
+                </select>
+                <select id={`slot-${grade}`} defaultValue={existing?.slot_label ?? ""}
+                  onChange={e => savePeriod(grade, Number((document.getElementById(`day-${grade}`) as HTMLSelectElement)?.value) || (existing?.day_of_week ?? 0), e.target.value)}
+                  className={inp + " w-40"}>
+                  <option value="">— คาบ —</option>
+                  {periodSlots.map(s => <option key={s.slot_label} value={s.slot_label}>{s.slot_label} ({s.start_time}-{s.end_time})</option>)}
+                </select>
+                {savingPeriod === grade && <span className="text-xs text-purple-500 font-bold">⏳...</span>}
+                {existing && <span className="text-xs text-emerald-600 font-bold">✅ {DAYS[existing.day_of_week - 1]} · {existing.slot_label}</span>}
+              </div>
+            );
+          })}
+
+          {tab === "clubs" && (
+            <>
+              <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4 space-y-2">
+                <p className="text-xs font-black text-purple-600 uppercase">+ เพิ่มชุมนุมใหม่</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={newClub.name} onChange={e => setNewClub(v => ({ ...v, name: e.target.value }))} placeholder="ชื่อชุมนุม เช่น ภาษาอังกฤษ" className={inp} />
+                  <select value={newClub.grade_label} onChange={e => setNewClub(v => ({ ...v, grade_label: e.target.value }))} className={inp}>
+                    {GRADE_LABELS_MS.map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                  <select value={newClub.teacher_id} onChange={e => setNewClub(v => ({ ...v, teacher_id: e.target.value }))} className={inp}>
+                    <option value="">— เลือกครูผู้ดูแล —</option>
+                    {teachers.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
+                  </select>
+                  <input value={newClub.room_note} onChange={e => setNewClub(v => ({ ...v, room_note: e.target.value }))} placeholder="ห้องที่ระบุ (ถ้ามี) เช่น 2/1" className={inp} />
+                </div>
+                <button onClick={addClub} disabled={savingClub} className="w-full py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black text-sm disabled:opacity-50">
+                  {savingClub ? "⏳ กำลังบันทึก..." : "+ เพิ่มชุมนุม"}
+                </button>
+              </div>
+              <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+                {clubs.length === 0 ? (
+                  <div className="text-center py-8 text-slate-400 text-sm">ยังไม่มีชุมนุม</div>
+                ) : clubs.map(c => (
+                  <div key={c.id} className="px-4 py-3 flex items-center justify-between gap-2 bg-white">
+                    <div>
+                      <p className="font-bold text-slate-800 text-sm">🎪 {c.name} <span className="text-slate-400 font-normal">· {c.grade_label}{c.room_note ? ` · ${c.room_note}` : ""}</span></p>
+                      <p className="text-xs text-slate-500">{displayName(c.teacher)}</p>
+                    </div>
+                    <button onClick={() => deleteClub(c.id)} className="px-3 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs font-black">🗑️ ลบ</button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Personal Timetable Grid ────────────────────────────────────────────────────
-function PersonalTimetableGrid({ myEntries, timeSlots, subjects, teachers, classrooms, userId }: {
-  myEntries: TimetableEntry[]; timeSlots: TimeSlot[]; subjects: Subject[]; teachers: Teacher[]; classrooms: Classroom[]; userId: string;
+function PersonalTimetableGrid({ myEntries, myClubBlocks, timeSlots, subjects, teachers, classrooms, userId }: {
+  myEntries: TimetableEntry[];
+  myClubBlocks: { dayOfWeek: number; slotLabel: string; club: Club }[]; // ★ เพิ่ม
+  timeSlots: TimeSlot[]; subjects: Subject[]; teachers: Teacher[]; classrooms: Classroom[]; userId: string;
 }) {
   const subjectColorMap: Record<string, typeof SUBJECT_COLORS[0]> = {};
   subjects.forEach((s, i) => { subjectColorMap[s.id] = SUBJECT_COLORS[i % SUBJECT_COLORS.length]; });
@@ -786,6 +950,24 @@ function PersonalTimetableGrid({ myEntries, timeSlots, subjects, teachers, class
                       <div className="text-[9px] text-slate-300 font-bold" style={{ writingMode: "vertical-rl", whiteSpace: "nowrap", margin: "0 auto" }}>พัก</div>
                     </td>
                   );
+
+                  // ★ เช็คชุมนุมก่อนคาบปกติ
+    const clubBlock = myClubBlocks.find(b => b.dayOfWeek === day && b.slotLabel === slot.slot_label);
+    if (clubBlock) {
+      const c = clubBlock.club;
+      return (
+        <td key={slot.id} className="p-1 align-top border-r border-slate-100">
+          <div className="rounded-xl border-2 border-purple-300 bg-purple-50 px-2 py-2 ring-2 ring-offset-1 ring-purple-400" style={{ minHeight: "92px" }}>
+            <p className="font-black text-xs leading-tight text-purple-700 mb-1">
+              🎪 ชุมนุม{c.name}{c.room_note ? ` ${c.room_note}` : ""}
+            </p>
+            <p className="text-[10px] font-bold text-purple-500">({displayName(teachers.find(t => t.id === userId))})</p>
+          </div>
+        </td>
+      );
+    }
+
+                  
                   const entry = myEntries.find(e => e.day_of_week === day && e.time_slot_id === slot.id);
 if (!entry) return <td key={slot.id} className="p-1 border-r border-slate-100"><div className="rounded-xl border-2 border-dashed border-slate-100" style={{ minHeight: "92px" }} /></td>;
 const colors  = subjectColorMap[entry.subject_id] ?? SUBJECT_COLORS[0];
@@ -889,6 +1071,32 @@ export default function SchedulePage() {
   const [allEntriesForCheck, setAllEntriesForCheck] = useState<TimetableEntry[]>([]);
   const [checkingAllYears,   setCheckingAllYears]   = useState(false);
   const [roomTimeSlots,    setRoomTimeSlots]    = useState<TimeSlot[]>([]);
+  const [clubPeriods, setClubPeriods] = useState<ClubPeriod[]>([]);
+const [clubs, setClubs] = useState<Club[]>([]);
+const [showClubAdmin, setShowClubAdmin] = useState(false);
+
+const loadClubs = useCallback(async () => {
+  if (!selectedYear) return;
+  const selRow = academicYearsRaw.find(y => y.id === selectedYear);
+  const yearIds = selRow ? academicYearsRaw.filter(y => y.year_name === selRow.year_name).map(y => y.id) : [selectedYear];
+
+  const [{ data: periodsData }, { data: clubsData }] = await Promise.all([
+    supabase.from("club_periods").select("*").in("academic_year_id", yearIds),
+    supabase.from("clubs").select("*").in("academic_year_id", yearIds),
+  ]);
+  setClubPeriods((periodsData ?? []) as ClubPeriod[]);
+
+  const teacherIds = [...new Set((clubsData ?? []).map((c: any) => c.teacher_id))];
+  const { data: teacherRows } = await supabase.from("users")
+    .select("id,title,first_name,last_name,full_name")
+    .in("id", teacherIds.length ? teacherIds : ["_none_"]);
+  const teacherMap: Record<string, Teacher> = {};
+  (teacherRows ?? []).forEach((t: any) => { teacherMap[t.id] = { ...t, full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim() }; });
+
+  setClubs(((clubsData ?? []) as any[]).map(c => ({ ...c, teacher: teacherMap[c.teacher_id] })));
+}, [selectedYear, academicYearsRaw]);
+
+useEffect(() => { loadClubs(); }, [loadClubs]);
 
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1404,6 +1612,12 @@ const totalScheduledPeriods = entries.length;
     onClose={() => setSelectedDayDetail(null)}
   />
 )}
+{showClubAdmin && (
+  <ClubManagementModal
+    clubPeriods={clubPeriods} clubs={clubs} teachers={teachers} academicYearId={selectedYear}
+    onClose={() => setShowClubAdmin(false)} onReload={loadClubs}
+  />
+)}
 
       {/* Top bar */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3 print:hidden">
@@ -1452,6 +1666,12 @@ const totalScheduledPeriods = entries.length;
         {duplicateGroups.length + teacherConflictGroups.length + duplicateClassroomGroups.length}
       </span>
     )}
+  </button>
+)}
+{isAdmin && (
+  <button onClick={() => setShowClubAdmin(true)}
+    className="px-3 py-2 rounded-xl border-2 border-purple-200 bg-purple-50 text-purple-700 font-black text-sm hover:bg-purple-100">
+    🎪 จัดการชุมนุม
   </button>
 )}
             </div>
@@ -1569,15 +1789,17 @@ const totalScheduledPeriods = entries.length;
                 </div>
               </div>
               <TimetableGrid
-  classroom={selectedClassroom} entries={roomEntries} timeSlots={roomTimeSlots}
-  subjects={subjects} teachers={teachers} academicYearId={selectedYear}
-  currentUser={user}  // ← ไม่ส่ง canEditDirect แล้ว
-  onSave={handleSaveDirect}
-  onRequestChange={handleRequestChange}
-                onDelete={async (id) => { await supabase.from("timetable_entries").delete().eq("id", id); await loadEntries(); }}
-              />
-            </div>
-          )}
+      classroom={selectedClassroom} entries={roomEntries} timeSlots={roomTimeSlots}
+      subjects={subjects} teachers={teachers} academicYearId={selectedYear}
+      currentUser={user}
+      clubPeriod={clubPeriods.find(cp => cp.grade_label === getClassroomGradeLabel(selectedClassroom))}
+      clubsForGrade={clubs.filter(c => c.grade_label === getClassroomGradeLabel(selectedClassroom))}
+      onSave={handleSaveDirect}
+      onRequestChange={handleRequestChange}
+      onDelete={async (id) => { await supabase.from("timetable_entries").delete().eq("id", id); await loadEntries(); }}
+    />
+  </div>
+)}
 
           {/* ── ของฉัน ── */}
           {viewMode === "teacher" && (
@@ -1601,15 +1823,24 @@ const totalScheduledPeriods = entries.length;
     );
   })}
 </div>
-              {myEntries.length > 0 ? (
+              {myEntries.length > 0 || clubs.some(c => c.teacher_id === user.id) ? (
   <div className="mb-5 space-y-6">
     {(["kindergarten", "primary", "junior", "senior"] as const).map(type => {
       const roomsOfType = myClassrooms.filter(c => (c.schedule_type ?? "primary") === type);
-      if (roomsOfType.length === 0) return null;
+      const myClubBlocksAll = clubs
+        .filter(c => c.teacher_id === user.id)
+        .map(c => {
+          const period = clubPeriods.find(cp => cp.grade_label === c.grade_label);
+          return period ? { dayOfWeek: period.day_of_week, slotLabel: period.slot_label, club: c } : null;
+        })
+        .filter((b): b is { dayOfWeek: number; slotLabel: string; club: Club } => !!b);
+      const myClubBlocksOfType = myClubBlocksAll.filter(b => scheduleTypeForGradeLabel(b.club.grade_label) === type);
 
-      const roomIds       = roomsOfType.map(r => r.id);
+      if (roomsOfType.length === 0 && myClubBlocksOfType.length === 0) return null;
+
+      const roomIds = roomsOfType.map(r => r.id);
       const entriesOfType = myEntries.filter(e => roomIds.includes(e.classroom_id));
-      if (entriesOfType.length === 0) return null;
+      if (entriesOfType.length === 0 && myClubBlocksOfType.length === 0) return null;
 
       const slots = buildRoomSlots(type, timeSlots);
       const label = SCHEDULE_TEMPLATES.find(t => t.key === type)?.label ?? type;
@@ -1618,7 +1849,7 @@ const totalScheduledPeriods = entries.length;
         <div key={type}>
           <h3 className="font-black text-slate-700 text-sm mb-3">📅 ตารางคาบสอนของฉัน · {label}</h3>
           <PersonalTimetableGrid
-            myEntries={entriesOfType} timeSlots={slots}
+            myEntries={entriesOfType} myClubBlocks={myClubBlocksOfType} timeSlots={slots}
             subjects={subjects} teachers={teachers} classrooms={classrooms} userId={user.id}
           />
         </div>
