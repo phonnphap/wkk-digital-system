@@ -314,24 +314,18 @@ function AssessPage({ currentUser, isAdmin }) {
   const [saveMsg, setSaveMsg] = useState("");
 
   // โหลดห้องเรียน: ครูประจำชั้น -> เฉพาะห้องตัวเอง / แอดมิน -> ทุกห้อง
-  useEffect(() => {
-    if (!currentUser) return;
-    setLoadingRooms(true);
-    const load = async () => {
-      let rooms = [];
-      if (isAdmin) {
-        const { data } = await supabase.from("classrooms")
-          .select("id,room_name,room_number,academic_year_id");
-        rooms = sortClassrooms((data || []).map(c => ({ ...c, classroom_id: c.id })));
-      } else {
-        rooms = await fetchMyClassrooms(currentUser.id); // ← ข้อจำกัดอัตโนมัติตามครูที่ล็อกอิน
-      }
-      setClassrooms(rooms);
-      if (rooms.length > 0) setSelectedClass(rooms[0]);
-      setLoadingRooms(false);
-    };
-    load();
-  }, [currentUser, isAdmin]);
+  // โหลดห้องเรียน: ใช้ fetchMyClassrooms เสมอ ไม่ว่าจะเป็นครูประจำชั้น / แอดมิน / ผู้ดูแลโครงการ
+// (เหมือนระบบโภชนาการ — แท็บ "บันทึกคะแนน" แสดงเฉพาะห้องที่ตัวเองเป็นครูประจำชั้นเท่านั้น
+//  ส่วนแอดมิน/ผู้ดูแลโครงการที่ต้องการดูทุกห้อง ให้ไปที่แท็บ "ภาพรวมโรงเรียน" แทน)
+useEffect(() => {
+  if (!currentUser) return;
+  setLoadingRooms(true);
+  fetchMyClassrooms(currentUser.id).then(rooms => {
+    setClassrooms(rooms);
+    if (rooms.length > 0) setSelectedClass(rooms[0]);
+    setLoadingRooms(false);
+  });
+}, [currentUser]);
 
   // โหลดรายชื่อนักเรียนของห้องที่เลือก (ใช้ RPC เดียวกับระบบโภชนาการ — คืนเฉพาะนักเรียนในห้องของครูคนนั้น)
   useEffect(() => {
@@ -453,17 +447,17 @@ function AssessPage({ currentUser, isAdmin }) {
       <div style={S.card}>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
           {classrooms.length > 1 ? (
-            <div style={{ flex: 1, minWidth: 160 }}>
-              <label style={S.label}>ห้องเรียน</label>
-              <select style={S.select} value={selectedClass?.classroom_id || selectedClass?.id || ""}
-                onChange={e => setSelectedClass(classrooms.find(c => (c.classroom_id || c.id) === e.target.value))}>
-                {classrooms.map(c => <option key={c.classroom_id || c.id} value={c.classroom_id || c.id}>{c.room_name}</option>)}
-              </select>
-            </div>
-          ) : (
-            <div style={{ flex: 1, background: "#eff6ff", borderRadius: 10, padding: "10px 14px",
-              color: "#1e40af", fontWeight: 700, fontSize: 14 }}>📚 {classrooms[0]?.room_name}</div>
-          )}
+  <div style={{ flex: 1, minWidth: 160 }}>
+    <label style={S.label}>ห้องเรียน</label>
+    <select style={S.select} value={selectedClass?.classroom_id || selectedClass?.id || ""}
+      onChange={e => setSelectedClass(classrooms.find(c => (c.classroom_id || c.id) === e.target.value))}>
+      {classrooms.map(c => <option key={c.classroom_id || c.id} value={c.classroom_id || c.id}>{c.room_name}</option>)}
+    </select>
+  </div>
+) : (
+  <div style={{ flex: 1, background: "#eff6ff", borderRadius: 10, padding: "10px 14px",
+    color: "#1e40af", fontWeight: 700, fontSize: 14 }}>📚 {classrooms[0]?.room_name}</div>
+)}
         </div>
       </div>
 
