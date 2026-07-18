@@ -2179,6 +2179,7 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
   const [pendingApproveId,   setPendingApproveId]   = useState<{id:string;slot:1|2|3;action:"approved"|"rejected"}|null>(null);
   const [viewModal,  setViewModal]  = useState<any|null>(null);
   const [rejectModal,setRejectModal]= useState<{id:string;slot:1|2|3}|null>(null);
+  const [gradeLevelsMap, setGradeLevelsMap] = useState<Record<string,string>>({});
 
   const loadAll = useCallback(async()=>{
     setLoading(true);
@@ -2198,6 +2199,11 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
   },[]);
 
   useEffect(()=>{loadAll();},[loadAll]);
+  useEffect(()=>{
+  supabase.from("grade_levels").select("id,name").then(({data})=>{
+    if (data) setGradeLevelsMap(Object.fromEntries(data.map((g:any)=>[g.id, g.name])));
+  });
+},[]);
   useEffect(()=>{if(viewModal){const updated=requests.find(r=>r.id===viewModal.id);if(updated)setViewModal(updated);}},[requests]);
   useEffect(()=>{if(user.signature_url)setApproverSigUrl(user.signature_url);},[user.signature_url]);
 
@@ -2395,7 +2401,7 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
         {tab==="history"&&(
           <div>
             <div className="flex gap-2 mb-4 flex-wrap">
-              <select value={filterGrade} onChange={e=>setFilterGrade(e.target.value)} className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none">{allGrades.map(g=><option key={g} value={g}>{g==="all"?"ทุกสายชั้น":GRADE_LABEL[g]??g}</option>)}</select>
+              <select value={filterGrade} onChange={e=>setFilterGrade(e.target.value)} className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none">{allGrades.map(g=><option key={g} value={g}>{g==="all"?"ทุกสายชั้น":gradeLevelsMap[g]??g}</option>)}</select>
               <select value={filterType} onChange={e=>setFilterType(e.target.value as any)} className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none"><option value="all">ทุกประเภท</option>{(Object.entries(LEAVE_TYPE_CONFIG) as any[]).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}</select>
               <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value as any)} className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none"><option value="all">ทุกสถานะ</option>{(Object.entries(LEAVE_STATUS_CONFIG) as any[]).map(([k,v])=><option key={k} value={k}>{(v as any).icon} {(v as any).label}</option>)}</select>
             </div>
@@ -2407,7 +2413,7 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
                     <div key={r.id} className="px-5 py-4 flex items-center justify-between gap-3 flex-wrap hover:bg-slate-50">
                       <div>
                         <p className="font-black text-slate-800 text-sm">{fullName((r as any).user)}</p>
-                        <p className="text-slate-500 text-xs">{(r as any).user?.position} {(r as any).user?.grade_level?`· ${GRADE_LABEL[(r as any).user.grade_level]??(r as any).user.grade_level}`:""}</p>
+                        <p className="text-slate-500 text-xs">{(r as any).user?.position} {(r as any).user?.grade_level?`· ${gradeLevelsMap[(r as any).user.grade_level]??(r as any).user.grade_level}`:""}</p>
                         <span className={`inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-lg border ${c.bg} ${c.border} ${c.text}`}>{typeCfg?.icon} {typeCfg?.label} · {r.days_count} วัน</span>
                         <p className="text-slate-400 text-xs mt-1">{toThaiDate(r.start_date)} – {toThaiDate(r.end_date)}</p>
                         {(r as any).document_url&&<a href={(r as any).document_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-1 text-xs font-bold text-blue-500 hover:text-blue-700">📎 เอกสารแนบ</a>}
@@ -2460,7 +2466,7 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h4 className="font-black text-slate-700">📊 สถิติการลารายเดือน {fiscalYearLabel(filterFY)}</h4>
-              <select value={filterGrade} onChange={e=>setFilterGrade(e.target.value)} className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none">{allGrades.map(g=><option key={g} value={g}>{g==="all"?"📊 ภาพรวมทั้งโรงเรียน":"สายชั้น: "+g}</option>)}</select>
+              <select value={filterGrade} onChange={e=>setFilterGrade(e.target.value)} className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none">{allGrades.map(g=><option key={g} value={g}>{g==="all"?"📊 ภาพรวมทั้งโรงเรียน":"สายชั้น: "+(gradeLevelsMap[g]??g)}</option>)}</select>
             </div>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={graphData} margin={{top:5,right:10,left:0,bottom:5}}>
