@@ -606,7 +606,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const [objectives,  setObjectives]  = useState(meeting?.objectives ?? "");
   const [methods,     setMethods]     = useState(meeting?.methods ?? "");
   const [results,     setResults]     = useState(meeting?.results ?? "");
-  const [suggestions, setSuggestions] = useState(meeting?.suggestions ?? "");
   const [solutions,   setSolutions]   = useState(meeting?.solutions ?? "");
   const [reflections, setReflections] = useState(meeting?.reflections ?? "");
   const [futuredev,   setFuturedev]   = useState(meeting?.future_development ?? "");
@@ -722,9 +721,9 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const gradeRequired = scope === "grade" ? !!gradeLevelSel : true;
   const basicRequired = !!(date && title.trim()) && gradeRequired;
   const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim()
-    && selected.length > 0) && gradeRequired;
+  && selected.length > 0 && sessionNumber.trim()) && gradeRequired;
   // ✅ ข้อเสนอแนะรายบุคคลถูกย้ายออกจากแบบฟอร์มนี้แล้ว (ผู้เข้าร่วมแต่ละคนกรอกเอง) จึงไม่นับรวมในเงื่อนไขการส่งรายงานอีกต่อไป
-  const allReportFilled = !!(problem.trim() && objectives.trim() && methods.trim() && results.trim() && suggestions.trim() && solutions.trim() && reflections.trim() && futuredev.trim() && images.length > 0);
+  const allReportFilled = !!(problem.trim() && objectives.trim() && methods.trim() && results.trim() && solutions.trim() && reflections.trim() && futuredev.trim() && images.length > 0);
   const canSubmit = allBasicFilled && allReportFilled;
 
   const errors = {
@@ -734,9 +733,9 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
     gradeLevel: submitted && scope === "grade" && !gradeLevelSel,
     problem: submitted && !problem.trim(), objectives: submitted && !objectives.trim(),
     methods: submitted && !methods.trim(), results: submitted && !results.trim(),
-    suggestions: submitted && !suggestions.trim(),
     solutions: submitted && !solutions.trim(), reflections: submitted && !reflections.trim(),
     futuredev: submitted && !futuredev.trim(), images: submitted && images.length === 0,
+    sessionNumber: submitted && !sessionNumber.trim(),
   };
 
   async function handleSave(isDraft: boolean) {
@@ -760,8 +759,8 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
       participants: selected,
       academic_year_id: yearId,
       problem_description: problem, objectives, methods, results,
-      suggestions,
-      solutions,
+suggestions: null,
+solutions,
       reflections, future_development: futuredev,
       participant_suggestions: participantSuggestions,
       image_urls: images.map(i => i.url).filter(Boolean),
@@ -845,10 +844,11 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                   {errors.date && <p className="text-red-500 text-xs mt-1">กรุณาเลือกวันที่</p>}
                 </div>
                 <div>
-                  <label className={labelCls}>ครั้งที่</label>
-                  <input type="text" inputMode="numeric" value={sessionNumber} onChange={e => setSessionNumber(e.target.value)}
-                    placeholder="เช่น 1" className={inp()} />
-                </div>
+  <label className={labelCls}>ครั้งที่ {reqStar}</label>
+  <input type="text" inputMode="numeric" value={sessionNumber} onChange={e => setSessionNumber(e.target.value)}
+    placeholder="เช่น 1" className={inp(errors.sessionNumber)} />
+  {errors.sessionNumber && <p className="text-red-500 text-xs mt-1">กรุณากรอกครั้งที่</p>}
+</div>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
