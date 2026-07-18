@@ -1087,8 +1087,8 @@ function PendingSuggestionModal({ meeting, allTeachers, currentUserId, onSave, o
 }
 
 // ✅ การ์ดแสดงรายการประชุมที่ผู้ใช้ปัจจุบันเข้าร่วมแต่ยังไม่ได้กรอกข้อเสนอแนะของตนเอง — ทำหน้าที่ "เด้ง" เตือนให้ผู้เข้าร่วมกรอกเอง
-function PendingSuggestionsCard({ meetings, onOpen }: {
-  meetings: PLCMeeting[]; onOpen: (m: PLCMeeting) => void;
+function PendingSuggestionsCard({ meetings, onOpen, onView }: {
+  meetings: PLCMeeting[]; onOpen: (m: PLCMeeting) => void; onView: (m: PLCMeeting) => void;
 }) {
   if (meetings.length === 0) return null;
   return (
@@ -1102,14 +1102,23 @@ function PendingSuggestionsCard({ meetings, onOpen }: {
       </div>
       <div className="divide-y divide-amber-200/60">
         {meetings.map(m => (
-          <button key={m.id} onClick={() => onOpen(m)}
-            className="w-full px-5 py-3 flex items-center justify-between gap-3 text-left hover:bg-amber-100/50 transition-colors">
+          <div key={m.id}
+            className="w-full px-5 py-3 flex items-center justify-between gap-3 hover:bg-amber-100/50 transition-colors">
             <div className="min-w-0">
               <p className="font-bold text-slate-800 text-sm line-clamp-1">{m.title}</p>
               <p className="text-slate-400 text-xs">📅 {toThaiDate(m.meeting_date)}{m.session_number ? ` · ครั้งที่ ${m.session_number}` : ""}</p>
             </div>
-            <span className="shrink-0 text-xs font-black px-3 py-1.5 rounded-xl bg-amber-500 text-white">กรอกเลย →</span>
-          </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={() => onView(m)}
+                className="text-xs font-black px-3 py-1.5 rounded-xl border-2 border-slate-300 bg-white text-slate-600 hover:bg-slate-50">
+                👁️ ดูรายงาน
+              </button>
+              <button onClick={() => onOpen(m)}
+                className="text-xs font-black px-3 py-1.5 rounded-xl bg-amber-500 text-white hover:bg-amber-600">
+                กรอกเลย →
+              </button>
+            </div>
+          </div>
         ))}
       </div>
     </div>
@@ -1734,8 +1743,11 @@ setGradeLevelMap(glMap);
 
         {isTeacher && (
           <>
-            <PendingSuggestionsCard meetings={pendingSuggestions} onOpen={m => setSuggestMeeting(m)} />
-
+            <PendingSuggestionsCard 
+  meetings={pendingSuggestions} 
+  onOpen={m => setSuggestMeeting(m)} 
+  onView={m => setViewMeeting(m)} 
+/>
             <div className="flex flex-col items-center gap-3 py-4">
               <div className="flex gap-2 bg-white border-2 border-slate-200 rounded-2xl p-1.5">
                 <button onClick={() => setViewScope("subject")}

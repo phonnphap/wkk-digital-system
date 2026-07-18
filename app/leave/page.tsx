@@ -303,13 +303,15 @@ const GRADE_LABEL: Record<string, string> = {
   "m1":"ม.1","m2":"ม.2","m3":"ม.3","m4":"ม.4","m5":"ม.5","m6":"ม.6",
 };
 
-const GRADE_ORDER = ["k2","k3","p1","p2","p3","p4","p5","p6","m1","m2","m3","m4","m5","m6"];
+const THAI_GRADE_ORDER = ["อ.2","อ.3","ป.1","ป.2","ป.3","ป.4","ป.5","ป.6","ม.1","ม.2","ม.3","ม.4","ม.5","ม.6"];
 
-function gradeOrderIndex(g: string | null | undefined): number {
-  const norm = (g ?? "").toString().trim().toLowerCase();
-  const idx = GRADE_ORDER.indexOf(norm);
+function thaiGradeOrderIndex(name: string | null | undefined): number {
+  const norm = (name ?? "").toString().trim();
+  const idx = THAI_GRADE_ORDER.indexOf(norm);
   return idx === -1 ? 999 : idx;
 }
+
+
 
 const LEAVE_TYPE_LIST: { key:LeaveType; label:string; icon:string }[] = [
   { key:"sick",       label:"ลาป่วย",                           icon:"🤒" },
@@ -2314,7 +2316,11 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
   const pendingList=requests.filter(r=>r.status==="pending");
   const uniqueGrades = Array.from(
   new Set(requests.map(r => (r as any).user?.grade_level).filter(Boolean))
-).sort((a, b) => gradeOrderIndex(a as string) - gradeOrderIndex(b as string));
+).sort((a, b) => {
+  const nameA = gradeLevelsMap[a as string] ?? (a as string);
+  const nameB = gradeLevelsMap[b as string] ?? (b as string);
+  return thaiGradeOrderIndex(nameA) - thaiGradeOrderIndex(nameB);
+});
 const allGrades = ["all", ...uniqueGrades];
   const totalRequests=fyAll.length;
   const totalApproved=fyAll.filter(r=>r.status==="approved").length;
@@ -2508,7 +2514,7 @@ const allGrades = ["all", ...uniqueGrades];
   const rows = Array.from(byUser.values()).sort((a,b) => b.total - a.total);
 
   return (
-    <div className="mt-5 w-full">
+    <div className="mt-5 w-full col-span-2 sm:col-span-4">
       <h5 className="font-black text-slate-700 mb-2 text-sm">
         👥 รายชื่อครูสายชั้น {gradeLevelsMap[filterGrade] ?? filterGrade} — สรุปการลา {fiscalYearLabel(filterFY)}
       </h5>
