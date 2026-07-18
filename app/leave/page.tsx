@@ -303,6 +303,8 @@ const GRADE_LABEL: Record<string, string> = {
   "m1":"ม.1","m2":"ม.2","m3":"ม.3","m4":"ม.4","m5":"ม.5","m6":"ม.6",
 };
 
+const GRADE_ORDER = ["k2","k3","p1","p2","p3","p4","p5","p6","m1","m2","m3","m4","m5","m6"];
+
 const LEAVE_TYPE_LIST: { key:LeaveType; label:string; icon:string }[] = [
   { key:"sick",       label:"ลาป่วย",                           icon:"🤒" },
   { key:"personal",   label:"ลากิจส่วนตัว",                     icon:"📋" },
@@ -2304,7 +2306,12 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
   const fyAll=requests.filter(r=>isInFiscalYear(r.start_date,filterFY)&&r.status!=="cancelled");
   const summaryByType=Object.fromEntries((Object.keys(LEAVE_TYPE_CONFIG) as LeaveType[]).map(t=>[t,{approved:fyAll.filter(r=>r.leave_type===t&&r.status==="approved").reduce((s,r)=>s+Number(r.days_count),0),pending:fyAll.filter(r=>r.leave_type===t&&r.status==="pending").length}])) as Record<LeaveType,{approved:number;pending:number}>;
   const pendingList=requests.filter(r=>r.status==="pending");
-  const allGrades=["all",...Array.from(new Set(requests.map(r=>(r as any).user?.grade_level).filter(Boolean)))];
+  const allGrades=["all",...Array.from(new Set(requests.map(r=>(r as any).user?.grade_level).filter(Boolean)))
+  .sort((a,b)=>{
+    const ia = GRADE_ORDER.indexOf(a as string);
+    const ib = GRADE_ORDER.indexOf(b as string);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  })];
   const totalRequests=fyAll.length;
   const totalApproved=fyAll.filter(r=>r.status==="approved").length;
   const totalPending=fyAll.filter(r=>r.status==="pending").length;
@@ -2479,6 +2486,65 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
               {[{label:"ลาป่วย",val:graphData.reduce((s,d)=>s+d["ลาป่วย"],0),color:"text-red-600",bg:"bg-red-50",border:"border-red-200"},{label:"ลากิจ",val:graphData.reduce((s,d)=>s+d["ลากิจ"],0),color:"text-amber-600",bg:"bg-amber-50",border:"border-amber-200"},{label:"ไปราชการ",val:graphData.reduce((s,d)=>s+d["ไปราชการ"],0),color:"text-blue-600",bg:"bg-blue-50",border:"border-blue-200"},{label:"รวมทั้งหมด",val:graphData.reduce((s,d)=>s+d["ลาป่วย"]+d["ลากิจ"]+d["ไปราชการ"]+d["อื่นๆ"],0),color:"text-slate-700",bg:"bg-slate-50",border:"border-slate-200"}].map(st=>(
                 <div key={st.label} className={`${st.bg} border-2 ${st.border} rounded-xl p-3 text-center`}><div className={`text-2xl font-black ${st.color}`}>{st.val}</div><div className="text-xs text-slate-500 font-bold mt-0.5">{st.label} (วัน)</div></div>
               ))}
+              {filterGrade !== "all" && (() => {
+  const gradeReqs = fyAll.filter(r =>
+    r.status !== "rejected" && (r as any).user?.grade_level === filterGrade
+  );
+  const byUser = new Map<string, any>();
+  gradeReqs.forEach(r => {
+    const uid = r.user_id;
+    if (!byUser.has(uid)) {
+      byUser.set(uid, { user: (r as any).user, sick:0, personal:0, maternity:0, official:0, ordination:0, other:0, total:0 });
+    }
+    const row = byUser.get(uid);
+    const days = Number(r.days_count);
+    row[r.leave_type] = (row[r.leave_type] ?? 0) + days;
+    row.total += days;
+  });
+  const rows = Array.from(byUser.values()).sort((a,b) => b.total - a.total);
+
+  return (
+    <div className="mt-5">
+      <h5 className="font-black text-slate-700 mb-2 text-sm">
+        👥 รายชื่อครูสายชั้น {gradeLevelsMap[filterGrade] ?? filterGrade} — สรุปการลา {fiscalYearLabel(filterFY)}
+      </h5>
+      {rows.length === 0 ? (
+        <div className="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-xl border border-slate-200">ไม่มีข้อมูลการลาในสายชั้นนี้</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 border-b">
+                <th className="text-left px-4 py-2.5 font-black text-slate-600">ชื่อ-สกุล</th>
+                <th className="text-center px-3 py-2.5 font-black text-red-600">🤒 ป่วย</th>
+                <th className="text-center px-3 py-2.5 font-black text-amber-600">📋 กิจ</th>
+                <th className="text-center px-3 py-2.5 font-black text-pink-600">👶 คลอด</th>
+                <th className="text-center px-3 py-2.5 font-black text-sky-600">🏛️ ราชการ</th>
+                <th className="text-center px-3 py-2.5 font-black text-violet-600">🙏 อุปสมบท</th>
+                <th className="text-center px-3 py-2.5 font-black text-slate-600">📌 อื่นๆ</th>
+                <th className="text-center px-3 py-2.5 font-black text-slate-800">รวม</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((row, i) => (
+                <tr key={i} className="hover:bg-slate-50">
+                  <td className="px-4 py-2.5 font-bold text-slate-800">{fullName(row.user)}</td>
+                  <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.sick>0?"text-red-600":"text-slate-300"}`}>{row.sick||"-"}</span></td>
+                  <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.personal>0?"text-amber-600":"text-slate-300"}`}>{row.personal||"-"}</span></td>
+                  <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.maternity>0?"text-pink-600":"text-slate-300"}`}>{row.maternity||"-"}</span></td>
+                  <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.official>0?"text-sky-600":"text-slate-300"}`}>{row.official||"-"}</span></td>
+                  <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.ordination>0?"text-violet-600":"text-slate-300"}`}>{row.ordination||"-"}</span></td>
+                  <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.other>0?"text-slate-600":"text-slate-300"}`}>{row.other||"-"}</span></td>
+                  <td className="px-3 py-2.5 text-center"><span className="font-black text-base text-slate-800">{row.total}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+})()}
             </div>
           </div>
         )}
