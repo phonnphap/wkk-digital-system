@@ -1680,11 +1680,12 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
 
   // ✅ ข้อมูลตารางสอน — ใช้ตอนจัดสอนแทนในฟอร์ม (ย้ายมาจาก WholeDaySwapModal เดิม)
   const [timetableEntries, setTimetableEntries] = useState<any[]>([]);
-  const [allTimeSlots, setAllTimeSlots] = useState<any[]>([]);
-  const [currentAcademicYearId, setCurrentAcademicYearId] = useState<string|null>(null);
-  const [loadingTimetable, setLoadingTimetable] = useState(true);
+const [allTimeSlots, setAllTimeSlots] = useState<any[]>([]);
+const [currentAcademicYearId, setCurrentAcademicYearId] = useState<string|null>(null);
+const [loadingTimetable, setLoadingTimetable] = useState(false); // ★ เริ่มที่ false — ไม่โหลดจนกว่าจะเปิดฟอร์ม
+const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำถ้าเคยโหลดแล้ว
 
-    const loadRequests = useCallback(async()=>{
+  const loadRequests = useCallback(async()=>{
     setLoading(true);
     const {data}=await supabase.from("leave_requests").select("*").eq("user_id",user.id).order("created_at",{ascending:false});
     setRequests((data as LeaveRequest[])||[]);
@@ -1693,39 +1694,44 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
   useEffect(()=>{loadRequests();},[loadRequests]);
 
   const loadTimetableData = useCallback(async () => {
+  if (timetableLoadedRef.current) return; // เคยโหลดแล้ว ไม่ยิงซ้ำ
   setLoadingTimetable(true);
   try {
+    // ★ หา academic_year ปัจจุบันก่อน (จำเป็นต้องรู้ก่อนถึงจะ filter timetable_entries ได้แม่นยำ)
     const { data: ay } = await supabase.from("academic_years").select("id").eq("is_current", true).maybeSingle();
     const ayId = (ay as any)?.id ?? null;
     setCurrentAcademicYearId(ayId);
 
-    let q = supabase.from("timetable_entries")
+    // ★ ยิง 4 query พร้อมกันแทนที่จะรอทีละอัน (waterfall) — ลดเวลารวมลงมาก
+    let entriesQuery = supabase.from("timetable_entries")
       .select("id,academic_year_id,classroom_id,subject_id,teacher_id,day_of_week,time_slot_id,teacher_id_2,created_at");
-    if (ayId) q = q.eq("academic_year_id", ayId);
-    const { data: rawEntries } = await q;
+    if (ayId) entriesQuery = entriesQuery.eq("academic_year_id", ayId);
 
-    const { data: slots } = await supabase.from("time_slots")
-      .select("id,slot_number,start_time,end_time,slot_label,is_break,schedule_type")
-      .order("slot_number", { ascending: true });
-    setAllTimeSlots(slots || []);
+    const [entriesRes, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
+      entriesQuery,
+      supabase.from("time_slots")
+        .select("id,slot_number,start_time,end_time,slot_label,is_break,schedule_type")
+        .order("slot_number", { ascending: true }),
+      supabase.from("classrooms").select("id,room_name,grade_group,schedule_type"),
+      supabase.from("subjects").select("id,subject_code,name_th"),
+    ]);
 
-    // ★ ต้อง fetch classrooms + subjects เพื่อ resolve คาบจริง + แสดงชื่อวิชา/ชั้นเรียน
-    const { data: classroomsData } = await supabase.from("classrooms")
-      .select("id,room_name,grade_group,schedule_type");
-    const classroomsMap = Object.fromEntries((classroomsData || []).map((c: any) => [c.id, c]));
+    const slots = slotsRes.data || [];
+    setAllTimeSlots(slots);
 
-    const { data: subjectsData } = await supabase.from("subjects").select("id,subject_code,name_th");
-    const subjectsMap = Object.fromEntries((subjectsData || []).map((s: any) => [s.id, s]));
+    const classroomsMap = Object.fromEntries((classroomsRes.data || []).map((c: any) => [c.id, c]));
+    const subjectsMap = Object.fromEntries((subjectsRes.data || []).map((s: any) => [s.id, s]));
 
-    const enriched = enrichEntries(rawEntries || [], classroomsMap, subjectsMap, slots || []);
+    const enriched = enrichEntries(entriesRes.data || [], classroomsMap, subjectsMap, slots);
     setTimetableEntries(enriched);
+    timetableLoadedRef.current = true;
   } catch (err) {
     console.error("[loadTimetableData] error:", err);
   }
   setLoadingTimetable(false);
 }, []);
 
-  useEffect(()=>{loadTimetableData();},[loadTimetableData]);
+  // ★ ลบ useEffect ที่โหลดตอน mount ทิ้ง — ย้ายไปโหลดตอนกดเปิดฟอร์มแทน (ดูจุดเรียก setShowForm/setEditRequest ด้านล่าง)
 
     // ✅ แก้ submitLeave ให้บันทึก substitute_assignments ต่อจาก insert/update leave_requests
   async function submitLeave(payload:any){
@@ -1814,9 +1820,9 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
           <div className="flex items-baseline gap-2 flex-wrap"><span className="text-xl font-bold text-blue-100">ยินดีต้อนรับ</span><h2 className="text-2xl font-black">{fullName(user)}</h2></div>
           <p className="text-xl font-bold text-blue-200 mt-0.5">{user.position}</p>
         </div>
-        <button onClick={()=>setShowForm(true)} className="shrink-0 px-6 py-4 bg-white text-blue-700 rounded-2xl font-black shadow-xl hover:bg-blue-50 active:scale-95 flex items-center gap-3 min-w-[200px]">
-          <span className="text-3xl">✍️</span><span className="text-lg leading-tight">ยื่นใบลา<br/><span className="text-sm opacity-70">/ ไปราชการ</span></span>
-        </button>
+        <button onClick={()=>{loadTimetableData();setShowForm(true);}} className="shrink-0 px-6 py-4 bg-white text-blue-700 rounded-2xl font-black shadow-xl hover:bg-blue-50 active:scale-95 flex items-center gap-3 min-w-[200px]">
+  <span className="text-3xl">✍️</span><span className="text-lg leading-tight">ยื่นใบลา<br/><span className="text-sm opacity-70">/ ไปราชการ</span></span>
+</button>
       </div>
       <div className="px-4 py-5 space-y-5 max-w-5xl mx-auto">
         <div className="flex gap-2 flex-wrap">
@@ -1880,7 +1886,7 @@ function TeacherDashboard({ user, approvers, allTeachers, savedSignature, canPri
                           {(isApproved||canPrint)&&(
                             <button onClick={()=>printFullLeave(r, user, savedSignature)} className="text-xs font-bold text-slate-600 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-slate-100 border border-slate-200">🖨️ พิมพ์</button>
                           )}
-                          {canEdit&&(<><button onClick={()=>setEditRequest(r)} className="text-xs font-bold text-amber-600 hover:text-amber-800 px-2 py-1 rounded-lg hover:bg-amber-50 border border-amber-200">✏️ แก้ไข</button><button onClick={()=>deleteRequest(r.id)} className="text-xs font-bold text-red-500 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 border border-red-200">🗑️ ลบ</button></>)}
+                          {canEdit&&(<><button onClick={()=>{loadTimetableData();setEditRequest(r);}} className="text-xs font-bold text-amber-600 hover:text-amber-800 px-2 py-1 rounded-lg hover:bg-amber-50 border border-amber-200">✏️ แก้ไข</button><button onClick={()=>deleteRequest(r.id)} className="text-xs font-bold text-red-500 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 border border-red-200">🗑️ ลบ</button></>)}
                         </div>
                       </div>
                       <div className="flex flex-col items-end gap-1.5 shrink-0">
