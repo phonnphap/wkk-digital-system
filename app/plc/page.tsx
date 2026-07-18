@@ -955,34 +955,43 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
           )}
 
           {tab === "report" && (
-            <>
-              {[
-                { label:"⚠️ สภาพปัญหา", ph:"ระบุปัญหาหรือความท้าทายที่พบในการจัดการเรียนการสอน...", val:problem, set:setProblem, err:errors.problem },
-                { label:"🎯 วัตถุประสงค์", ph:"ระบุวัตถุประสงค์ของการประชุม PLC ครั้งนี้...", val:objectives, set:setObjectives, err:errors.objectives },
-                { label:"📋 วิธีการดำเนินการ", ph:"อธิบายกระบวนการ/กิจกรรมที่ดำเนินการ...", val:methods, set:setMethods, err:errors.methods },
-                { label:"✨ ผลที่เกิดขึ้น", ph:"ระบุผลลัพธ์ที่เกิดขึ้นจากการประชุม...", val:results, set:setResults, err:errors.results },
-                { label:"💡 ข้อเสนอแนะ", ph:"ข้อเสนอแนะโดยรวมของการประชุมครั้งนี้...", val:suggestions, set:setSuggestions, err:errors.suggestions },
-                { label:"🔧 แนวทางแก้ไขปัญหา", ph:"แนวทางหรือมาตรการที่ตกลงร่วมกัน...", val:solutions, set:setSolutions, err:errors.solutions },
-                { label:"🪞 การสะท้อนผล", ph:"สะท้อนสิ่งที่ได้เรียนรู้และข้อค้นพบ...", val:reflections, set:setReflections, err:errors.reflections },
-                { label:"🚀 แนวทางการพัฒนาต่อ", ph:"แผนหรือแนวทางที่จะนำไปพัฒนาต่อ...", val:futuredev, set:setFuturedev, err:errors.futuredev },
-              ].map(f => (
-                <div key={f.label}>
-                  <label className={labelCls}>{f.label} {reqStar}</label>
-                  <textarea value={f.val} onChange={e => f.set(e.target.value)} rows={3}
-                    placeholder={f.ph} className={textareaCls(f.err)} />
-                  {f.err && <p className="text-red-500 text-xs mt-1">กรุณากรอกข้อมูล</p>}
-                </div>
-              ))}
+  <>
+    {[
+      { label:"⚠️ สภาพปัญหา", ph:"ระบุปัญหาหรือความท้าทายที่พบในการจัดการเรียนการสอน...", val:problem, set:setProblem, err:errors.problem },
+      { label:"🎯 วัตถุประสงค์", ph:"ระบุวัตถุประสงค์ของการประชุม PLC ครั้งนี้...", val:objectives, set:setObjectives, err:errors.objectives },
+      { label:"📋 วิธีการดำเนินการ", ph:"อธิบายกระบวนการ/กิจกรรมที่ดำเนินการ...", val:methods, set:setMethods, err:errors.methods },
+      { label:"✨ ผลที่เกิดขึ้น", ph:"ระบุผลลัพธ์ที่เกิดขึ้นจากการประชุม...", val:results, set:setResults, err:errors.results },
+    ].map(f => (
+      <div key={f.label}>
+        <label className={labelCls}>{f.label} {reqStar}</label>
+        <textarea value={f.val} onChange={e => f.set(e.target.value)} rows={3}
+          placeholder={f.ph} className={textareaCls(f.err)} />
+        {f.err && <p className="text-red-500 text-xs mt-1">กรุณากรอกข้อมูล</p>}
+      </div>
+    ))}
 
-              <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-4">
-                <p className="text-xs font-black text-slate-500 mb-1 flex items-center gap-1.5"><span>💬</span>ข้อเสนอแนะรายบุคคล</p>
-                <p className="text-slate-400 text-xs leading-relaxed">
-                  ผู้เข้าร่วมประชุมแต่ละท่านจะต้องเข้าสู่ระบบและกรอกข้อเสนอแนะของตนเองในภายหลัง
-                  (จะปรากฏเป็นรายการ "รอกรอกข้อเสนอแนะ" ในหน้าหลักของแต่ละท่าน) วิทยากรไม่สามารถกรอกแทนได้ แต่จะเห็นว่าใครกรอกว่าอะไรบ้างในหน้ารายละเอียดรายงาน
-                </p>
-              </div>
+    <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-4">
+      <p className="text-xs font-black text-slate-500 mb-1 flex items-center gap-1.5"><span>💬</span>ข้อเสนอแนะรายบุคคล</p>
+      <p className="text-slate-400 text-xs leading-relaxed">
+        ผู้เข้าร่วมประชุมแต่ละท่านจะต้องเข้าสู่ระบบและกรอกข้อเสนอแนะของตนเองในภายหลัง
+        (จะปรากฏเป็นรายการ "รอกรอกข้อเสนอแนะ" ในหน้าหลักของแต่ละท่าน) วิทยากรไม่สามารถกรอกแทนได้ แต่จะเห็นว่าใครกรอกว่าอะไรบ้างในหน้ารายละเอียดรายงาน
+      </p>
+    </div>
 
-              <div>
+    {[
+      { label:"🔧 แนวทางแก้ไขปัญหา", ph:"แนวทางหรือมาตรการที่ตกลงร่วมกัน...", val:solutions, set:setSolutions, err:errors.solutions },
+      { label:"🪞 การสะท้อนผล", ph:"สะท้อนสิ่งที่ได้เรียนรู้และข้อค้นพบ...", val:reflections, set:setReflections, err:errors.reflections },
+      { label:"🚀 แนวทางการพัฒนาต่อ", ph:"แผนหรือแนวทางที่จะนำไปพัฒนาต่อ...", val:futuredev, set:setFuturedev, err:errors.futuredev },
+    ].map(f => (
+      <div key={f.label}>
+        <label className={labelCls}>{f.label} {reqStar}</label>
+        <textarea value={f.val} onChange={e => f.set(e.target.value)} rows={3}
+          placeholder={f.ph} className={textareaCls(f.err)} />
+        {f.err && <p className="text-red-500 text-xs mt-1">กรุณากรอกข้อมูล</p>}
+      </div>
+    ))}
+
+    <div>
                 <label className={labelCls}>📷 แนบรูปการประชุม {reqStar} <span className="text-slate-400 font-normal normal-case">(สูงสุด 4 รูป)</span></label>
                 {images.length > 0 && (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
