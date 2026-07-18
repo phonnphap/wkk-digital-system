@@ -75,7 +75,7 @@ type Teacher = UserProfile & { department_id?: string; grade_level?: string; sig
 type AcademicYear = { id: string; year_name: string; semester: number; is_current?: boolean };
 type MeetingScope = "subject" | "grade";
 type PLCMeeting = {
-  id: string; meeting_date: string; start_time?: string; end_time?: string;
+  id: string; meeting_date: string; session_number?: string | number; start_time?: string; end_time?: string;
   title: string; topic?: string; duration_hours: number; facilitator_id: string;
   participants: string[]; academic_year_id: string; location?: string;
   problem_description?: string; objectives?: string; methods?: string; results?: string;
@@ -242,8 +242,9 @@ function buildPLCReportHTML(
     ...participants.map(p => ({ name: fullName(p), role: "ผู้เข้าร่วมประชุม", signatureUrl: p.signature_url })),
   ];
 
+  // ✅ ใช้ CSS grid แบบ 3 คอลัมน์เท่ากันทุกช่อง แทน flex-wrap เดิม เพื่อให้ช่องลายเซ็นมีขนาดเท่ากันเสมอไม่ว่าจะมีกี่คนหรือชื่อยาวแค่ไหน
   const sigBox = (s: SignatureEntry) => `
-    <div style="text-align:center;width:31%;margin-bottom:16px">
+    <div style="text-align:center;margin-bottom:16px">
       ${s.signatureUrl ? `<img src="${s.signatureUrl}" style="max-height:50px;max-width:140px;object-fit:contain;margin:0 auto;display:block"/>` : `<div style="height:50px"></div>`}
       <div style="border-bottom:1px solid #000;width:150px;margin:0 auto"></div>
       <div style="font-size:9.5pt;margin-top:4px">(${s.name})</div>
@@ -252,7 +253,7 @@ function buildPLCReportHTML(
 
   const attendeeSignaturesHTML = `
     <div style="margin-top:24px;page-break-inside:avoid">
-      <div style="display:flex;flex-wrap:wrap;justify-content:flex-start;gap:8px">
+      <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px 4px">
         ${attendeeSignatures.map(sigBox).join("")}
       </div>
     </div>`;
@@ -292,6 +293,7 @@ table.meta td.k{color:#64748b;font-weight:700;white-space:nowrap;width:110px}
 <table class="meta">
   <tr><td class="k">ประเภทการประชุม</td><td>${scopeLabel}</td></tr>
   <tr><td class="k">ชื่อกิจกรรม</td><td style="font-weight:700">${meeting.title}</td></tr>
+  ${meeting.session_number ? `<tr><td class="k">ครั้งที่</td><td>${meeting.session_number}</td></tr>` : ""}
   ${meeting.topic ? `<tr><td class="k">หัวข้อ/ประเด็น</td><td>${meeting.topic}</td></tr>` : ""}
   <tr><td class="k">วันที่</td><td>${toThaiDateLong(meeting.meeting_date)}</td></tr>
   <tr><td class="k">เวลา</td><td>${meeting.start_time ?? "—"} – ${meeting.end_time ?? "—"} น. (รวม ${meeting.duration_hours} ชั่วโมง)</td></tr>
@@ -432,6 +434,11 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
   ];
 
   const participantSuggestionsList = Object.entries(meeting.participant_suggestions ?? {}).filter(([,v]) => (v||"").trim());
+  const attendeesForSuggestions = useMemo(() => {
+    const ids = new Set([meeting.facilitator_id, ...(meeting.participants ?? [])]);
+    return Array.from(ids);
+  }, [meeting.facilitator_id, meeting.participants]);
+  const suggestionsFilledCount = attendeesForSuggestions.filter(id => (meeting.participant_suggestions?.[id] ?? "").trim()).length;
 
   async function handlePrint() {
     setPrinting(true);
@@ -454,6 +461,11 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
               <span className={`text-xs font-black px-2 py-1 rounded-lg border ${isGrade ? `${GRADE_META.bgLight} ${GRADE_META.textColor} ${GRADE_META.borderColor}` : "bg-indigo-50 text-indigo-700 border-indigo-200"}`}>
                 {isGrade ? `${GRADE_META.icon} สายชั้น ${gradeLabel(meeting.grade_level ?? "", gradeLevelMap)}` : "📚 กลุ่มสาระ"}
               </span>
+              {meeting.session_number && (
+                <span className="text-xs font-black px-2 py-1 rounded-lg border bg-slate-100 text-slate-600 border-slate-200">
+                  🔁 ครั้งที่ {meeting.session_number}
+                </span>
+              )}
             </div>
             <h3 className="font-black text-slate-800 text-lg leading-tight">{meeting.title}</h3>
             <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
@@ -485,22 +497,38 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
               <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{s.value}</p>
             </div>
           ) : null)}
-          {participantSuggestionsList.length > 0 && (
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
-              <p className="text-xs font-black text-slate-500 mb-2 flex items-center gap-1.5"><span>💬</span>ข้อเสนอแนะรายบุคคล</p>
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
+            <p className="text-xs font-black text-slate-500 mb-2 flex items-center gap-1.5">
+              <span>💬</span>ข้อเสนอแนะรายบุคคล
+              <span className="ml-auto text-[10px] font-black px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-500">
+                กรอกแล้ว {suggestionsFilledCount}/{attendeesForSuggestions.length}
+              </span>
+            </p>
+            {participantSuggestionsList.length === 0 ? (
+              <p className="text-slate-400 text-xs">ยังไม่มีผู้เข้าร่วมกรอกข้อเสนอแนะ</p>
+            ) : (
               <div className="space-y-2">
                 {participantSuggestionsList.map(([pid, val]) => {
                   const person = allTeachers.find(t => t.id === pid);
                   return (
                     <div key={pid} className="bg-white border border-slate-200 rounded-xl px-3 py-2">
-                      <p className="text-xs font-black text-slate-600">{person ? fullName(person) : "—"}</p>
+                      <p className="text-xs font-black text-slate-600">{person ? fullName(person) : "—"}{pid === meeting.facilitator_id && <span className="text-blue-500"> (วิทยากร)</span>}</p>
                       <p className="text-sm text-slate-700 whitespace-pre-wrap">{val}</p>
                     </div>
                   );
                 })}
               </div>
-            </div>
-          )}
+            )}
+            {attendeesForSuggestions.filter(id => !(meeting.participant_suggestions?.[id] ?? "").trim()).length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                <span className="text-[10px] text-slate-400 font-bold mr-1">ยังไม่ได้กรอก:</span>
+                {attendeesForSuggestions.filter(id => !(meeting.participant_suggestions?.[id] ?? "").trim()).map(id => {
+                  const person = allTeachers.find(t => t.id === id);
+                  return <span key={id} className="text-[10px] font-bold px-1.5 py-0.5 rounded-lg bg-amber-50 text-amber-600 border border-amber-200">{person ? fullName(person) : "—"}</span>;
+                })}
+              </div>
+            )}
+          </div>
           {((meeting.image_urls && meeting.image_urls.length > 0) || (meeting.image_paths && meeting.image_paths.length > 0)) && (
             <div>
               <p className="text-xs font-black text-slate-500 mb-2">
@@ -567,6 +595,7 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
 
   const [yearId,      setYearId]      = useState(meeting?.academic_year_id ?? defaultYear?.id ?? "");
   const [date,        setDate]        = useState(meeting?.meeting_date ?? new Date().toISOString().slice(0, 10));
+  const [sessionNumber, setSessionNumber] = useState<string>(meeting?.session_number != null ? String(meeting.session_number) : "");
   const [startTime,   setStartTime]   = useState(meeting?.start_time ?? "08:30");
   const [endTime,     setEndTime]     = useState(meeting?.end_time ?? "12:30");
   const [title,       setTitle]       = useState(meeting?.title ?? "");
@@ -581,7 +610,8 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   const [solutions,   setSolutions]   = useState(meeting?.solutions ?? "");
   const [reflections, setReflections] = useState(meeting?.reflections ?? "");
   const [futuredev,   setFuturedev]   = useState(meeting?.future_development ?? "");
-  const [participantSuggestions, setParticipantSuggestions] = useState<Record<string, string>>(meeting?.participant_suggestions ?? {});
+  // ✅ ค่าข้อเสนอแนะรายบุคคลเดิม (ถ้ามี) จะถูกเก็บไว้และส่งกลับตามเดิมเมื่อบันทึก แต่วิทยากรจะไม่สามารถแก้ไขค่าเหล่านี้จากหน้านี้ได้อีกต่อไป
+  const [participantSuggestions] = useState<Record<string, string>>(meeting?.participant_suggestions ?? {});
   const [images,      setImages]      = useState<{ url: string; path: string; preview: string }[]>(
     (meeting?.image_urls ?? []).map((u, i) => ({ url: u, path: meeting?.image_paths?.[i] ?? "", preview: u }))
   );
@@ -626,16 +656,6 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
     if (!didInitRef.current) { didInitRef.current = true; return; }
     setSelected(candidateTeachers.map(t => t.id));
   }, [scope, gradeLevelSel]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // เมื่อรายชื่อผู้เข้าร่วมเปลี่ยน ให้เก็บเฉพาะข้อเสนอแนะของผู้ที่ยังอยู่ในรายชื่อ (+ วิทยากรเสมอ)
-  useEffect(() => {
-    setParticipantSuggestions(prev => {
-      const next: Record<string, string> = {};
-      const keepIds = new Set([currentUserId, ...selected]);
-      keepIds.forEach(id => { next[id] = prev[id] ?? ""; });
-      return next;
-    });
-  }, [selected, currentUserId]);
 
   const selectedYear = academicYears.find(y => y.id === yearId);
   const yearLabel = selectedYear ? `ปีการศึกษา ${selectedYear.year_name} ภาคเรียนที่ ${selectedYear.semester}` : "";
@@ -699,17 +719,12 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  const attendeeList = useMemo(() => {
-    const list: Teacher[] = [ (currentUser as Teacher), ...candidateTeachers.filter(t => selected.includes(t.id)) ];
-    return list;
-  }, [currentUser, candidateTeachers, selected]);
-
   const gradeRequired = scope === "grade" ? !!gradeLevelSel : true;
   const basicRequired = !!(date && title.trim()) && gradeRequired;
   const allBasicFilled = !!(date && title.trim() && topic.trim() && location.trim()
     && selected.length > 0) && gradeRequired;
-  const allSuggestionsFilled = attendeeList.every(t => (participantSuggestions[t.id] ?? "").trim());
-  const allReportFilled = !!(problem.trim() && objectives.trim() && methods.trim() && results.trim() && suggestions.trim() && solutions.trim() && reflections.trim() && futuredev.trim() && images.length > 0) && allSuggestionsFilled;
+  // ✅ ข้อเสนอแนะรายบุคคลถูกย้ายออกจากแบบฟอร์มนี้แล้ว (ผู้เข้าร่วมแต่ละคนกรอกเอง) จึงไม่นับรวมในเงื่อนไขการส่งรายงานอีกต่อไป
+  const allReportFilled = !!(problem.trim() && objectives.trim() && methods.trim() && results.trim() && suggestions.trim() && solutions.trim() && reflections.trim() && futuredev.trim() && images.length > 0);
   const canSubmit = allBasicFilled && allReportFilled;
 
   const errors = {
@@ -731,9 +746,7 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
     } else {
       if (!canSubmit) {
         if (!allBasicFilled) setTab("basic"); else setTab("report");
-        alert(!allSuggestionsFilled && allBasicFilled && problem.trim() && objectives.trim() && methods.trim() && results.trim() && suggestions.trim() && solutions.trim() && reflections.trim() && futuredev.trim() && images.length > 0
-          ? "กรุณาให้ผู้เข้าร่วมทุกคนกรอกข้อเสนอแนะให้ครบ"
-          : "กรุณากรอกข้อมูลให้ครบทุกช่อง"); return;
+        alert("กรุณากรอกข้อมูลให้ครบทุกช่อง"); return;
       }
       if (images.some(img => !img.url)) { alert("กรุณารอให้รูปอัพโหลดเสร็จก่อนส่ง"); return; }
     }
@@ -741,7 +754,7 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
     await onSave({
       meeting_scope: scope,
       grade_level: scope === "grade" ? gradeLevelSel : null,
-      meeting_date: date, start_time: startTime, end_time: endTime,
+      meeting_date: date, session_number: sessionNumber.trim() || null, start_time: startTime, end_time: endTime,
       title, topic, duration_hours: hours, location,
       facilitator_id: currentUserId,
       participants: selected,
@@ -825,10 +838,17 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                   ))}
                 </select>
               </div>
-              <div>
-                <label className={labelCls}>วันที่ประชุม {reqStar}</label>
-                <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inp(errors.date)} />
-                {errors.date && <p className="text-red-500 text-xs mt-1">กรุณาเลือกวันที่</p>}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>วันที่ประชุม {reqStar}</label>
+                  <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inp(errors.date)} />
+                  {errors.date && <p className="text-red-500 text-xs mt-1">กรุณาเลือกวันที่</p>}
+                </div>
+                <div>
+                  <label className={labelCls}>ครั้งที่</label>
+                  <input type="text" inputMode="numeric" value={sessionNumber} onChange={e => setSessionNumber(e.target.value)}
+                    placeholder="เช่น 1" className={inp()} />
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -954,26 +974,12 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
                 </div>
               ))}
 
-              <div>
-                <label className={labelCls}>💬 ข้อเสนอแนะรายบุคคล (ผู้เข้าร่วมทุกคนต้องกรอก) {reqStar}</label>
-                <div className="space-y-2.5 border-2 border-blue-100 rounded-2xl p-3 bg-blue-50/40">
-                  {attendeeList.map(t => {
-                    const val = participantSuggestions[t.id] ?? "";
-                    const errThis = submitted && !val.trim();
-                    return (
-                      <div key={t.id}>
-                        <p className="text-xs font-black text-slate-600 mb-1 flex items-center gap-1.5">
-                          <span>{t.id === currentUserId ? "👤" : "🙋"}</span>
-                          {fullName(t)}{t.id === currentUserId && <span className="text-blue-500">(วิทยากร)</span>}
-                        </p>
-                        <textarea value={val} rows={2}
-                          onChange={e => setParticipantSuggestions(prev => ({ ...prev, [t.id]: e.target.value }))}
-                          placeholder="ข้อเสนอแนะจากผู้เข้าร่วมท่านนี้..." className={textareaCls(errThis)} />
-                        {errThis && <p className="text-red-500 text-xs mt-1">กรุณากรอกข้อเสนอแนะของ{fullName(t)}</p>}
-                      </div>
-                    );
-                  })}
-                </div>
+              <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-4">
+                <p className="text-xs font-black text-slate-500 mb-1 flex items-center gap-1.5"><span>💬</span>ข้อเสนอแนะรายบุคคล</p>
+                <p className="text-slate-400 text-xs leading-relaxed">
+                  ผู้เข้าร่วมประชุมแต่ละท่านจะต้องเข้าสู่ระบบและกรอกข้อเสนอแนะของตนเองในภายหลัง
+                  (จะปรากฏเป็นรายการ "รอกรอกข้อเสนอแนะ" ในหน้าหลักของแต่ละท่าน) วิทยากรไม่สามารถกรอกแทนได้ แต่จะเห็นว่าใครกรอกว่าอะไรบ้างในหน้ารายละเอียดรายงาน
+                </p>
               </div>
 
               <div>
@@ -1035,6 +1041,76 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
               : isEdit ? "💾 บันทึกการแก้ไข" : "✅ บันทึกและส่ง"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ✅ โมดัลสำหรับผู้เข้าร่วม (ไม่ใช่วิทยากร) ให้กรอกข้อเสนอแนะของตนเองโดยเฉพาะ — เข้าถึงได้เฉพาะเจ้าของบัญชี currentUserId เท่านั้น
+function PendingSuggestionModal({ meeting, allTeachers, currentUserId, onSave, onClose }: {
+  meeting: PLCMeeting; allTeachers: Teacher[]; currentUserId: string;
+  onSave: (meetingId: string, value: string) => Promise<void>; onClose: () => void;
+}) {
+  const [val, setVal] = useState(meeting.participant_suggestions?.[currentUserId] ?? "");
+  const [saving, setSaving] = useState(false);
+  const facilitator = allTeachers.find(t => t.id === meeting.facilitator_id);
+
+  async function handleSave() {
+    if (!val.trim()) { alert("กรุณากรอกข้อเสนอแนะก่อนบันทึก"); return; }
+    setSaving(true);
+    try { await onSave(meeting.id, val); } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-5 border-b border-slate-100">
+          <h3 className="font-black text-slate-800 text-lg flex items-center gap-2">💬 กรอกข้อเสนอแนะของคุณ</h3>
+          <p className="text-slate-400 text-xs mt-1">{meeting.title} · {toThaiDate(meeting.meeting_date)}{meeting.session_number ? ` · ครั้งที่ ${meeting.session_number}` : ""}</p>
+          <p className="text-blue-500 text-xs font-bold mt-0.5">วิทยากร: {facilitator ? fullName(facilitator) : "—"}</p>
+        </div>
+        <div className="px-6 py-5">
+          <label className={labelCls}>ข้อเสนอแนะของคุณ {reqStar}</label>
+          <textarea value={val} onChange={e => setVal(e.target.value)} rows={5}
+            placeholder="พิมพ์ข้อเสนอแนะของคุณเกี่ยวกับการประชุมครั้งนี้..." className={textareaCls()} autoFocus />
+        </div>
+        <div className="px-6 py-4 border-t border-slate-100 flex gap-2">
+          <button onClick={onClose} className="px-4 py-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm hover:bg-slate-50">ปิด</button>
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+            {saving ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : "✅ บันทึกข้อเสนอแนะ"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ✅ การ์ดแสดงรายการประชุมที่ผู้ใช้ปัจจุบันเข้าร่วมแต่ยังไม่ได้กรอกข้อเสนอแนะของตนเอง — ทำหน้าที่ "เด้ง" เตือนให้ผู้เข้าร่วมกรอกเอง
+function PendingSuggestionsCard({ meetings, onOpen }: {
+  meetings: PLCMeeting[]; onOpen: (m: PLCMeeting) => void;
+}) {
+  if (meetings.length === 0) return null;
+  return (
+    <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl overflow-hidden">
+      <div className="px-5 py-4 flex items-center gap-3 border-b border-amber-200/70">
+        <span className="text-3xl">💬</span>
+        <div className="flex-1">
+          <p className="font-black text-amber-700 text-sm">รอคุณกรอกข้อเสนอแนะ</p>
+          <p className="text-amber-500 text-xs font-bold">{meetings.length} รายการที่คุณเข้าร่วมแต่ยังไม่ได้กรอก</p>
+        </div>
+      </div>
+      <div className="divide-y divide-amber-200/60">
+        {meetings.map(m => (
+          <button key={m.id} onClick={() => onOpen(m)}
+            className="w-full px-5 py-3 flex items-center justify-between gap-3 text-left hover:bg-amber-100/50 transition-colors">
+            <div className="min-w-0">
+              <p className="font-bold text-slate-800 text-sm line-clamp-1">{m.title}</p>
+              <p className="text-slate-400 text-xs">📅 {toThaiDate(m.meeting_date)}{m.session_number ? ` · ครั้งที่ ${m.session_number}` : ""}</p>
+            </div>
+            <span className="shrink-0 text-xs font-black px-3 py-1.5 rounded-xl bg-amber-500 text-white">กรอกเลย →</span>
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -1115,6 +1191,7 @@ function DeptGroupPanel({ group, allTeachers, onEdit, onDelete, gradeLevelMap, s
                     <thead>
                       <tr className="border-b border-white/80">
                         <th className="text-left pb-2 text-xs font-black text-slate-400">วันที่</th>
+                        <th className="text-center pb-2 text-xs font-black text-slate-400">ครั้งที่</th>
                         <th className="text-left pb-2 text-xs font-black text-slate-400">ชื่อ/หัวข้อ</th>
                         <th className="text-center pb-2 text-xs font-black text-slate-400">ชม.</th>
                         <th className="text-center pb-2 text-xs font-black text-slate-400">สถานะ</th>
@@ -1125,6 +1202,7 @@ function DeptGroupPanel({ group, allTeachers, onEdit, onDelete, gradeLevelMap, s
                       {group.meetings.map(m => (
                         <tr key={m.id} className="hover:bg-white/50">
                           <td className="py-2.5 pr-3 text-xs text-slate-600 font-bold whitespace-nowrap">{toThaiDate(m.meeting_date)}</td>
+                          <td className="py-2.5 pr-3 text-center text-xs text-slate-500 font-bold">{m.session_number ?? "—"}</td>
                           <td className="py-2.5 pr-3">
                             <p className="font-bold text-slate-700 text-xs line-clamp-1">{m.title}</p>
                             {m.topic && <p className="text-slate-400 text-[10px]">{m.topic}</p>}
@@ -1247,6 +1325,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
                   <thead><tr className="border-b border-slate-100">
                     <th className="text-left pb-3 text-xs font-black text-slate-400">ประเภท</th>
                     <th className="text-left pb-3 text-xs font-black text-slate-400">วันที่</th>
+                    <th className="text-center pb-3 text-xs font-black text-slate-400">ครั้งที่</th>
                     <th className="text-left pb-3 text-xs font-black text-slate-400">ชื่อ / หัวข้อ</th>
                     <th className="text-center pb-3 text-xs font-black text-slate-400">ชม.</th>
                     <th className="text-center pb-3 text-xs font-black text-slate-400">สถานะ</th>
@@ -1264,6 +1343,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
                             </span>
                           </td>
                           <td className="py-3 pr-3 text-xs text-slate-600 font-bold whitespace-nowrap">{toThaiDate(m.meeting_date)}</td>
+                          <td className="py-3 pr-3 text-center text-xs text-slate-500 font-bold">{m.session_number ?? "—"}</td>
                           <td className="py-3 pr-3"><p className="font-bold text-slate-800 text-sm line-clamp-1">{m.title}</p>{m.topic&&<p className="text-slate-400 text-xs">{m.topic}</p>}</td>
                           <td className="py-3 pr-3 text-center"><span className="font-black text-blue-600">{m.duration_hours}</span></td>
                           <td className="py-3 pr-3 text-center"><span className={`text-xs font-black px-2 py-1 rounded-lg border ${m.status==="submitted"?"bg-emerald-50 text-emerald-700 border-emerald-200":"bg-amber-50 text-amber-700 border-amber-200"}`}>{m.status==="submitted"?"✅ ส่งแล้ว":"📝 ร่าง"}</span></td>
@@ -1359,6 +1439,9 @@ function TeacherHistorySection({ meetings, userId, allTeachers, onEdit, onDelete
                         <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${m.status==="submitted"?"bg-emerald-50 text-emerald-700 border-emerald-200":"bg-amber-50 text-amber-700 border-amber-200"}`}>
                           {m.status==="submitted"?"✅ ส่งแล้ว":"📝 ร่าง"}
                         </span>
+                        {m.session_number && (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-lg border bg-slate-100 text-slate-500 border-slate-200">🔁 ครั้งที่ {m.session_number}</span>
+                        )}
                         {!isOwner && (
                           <span className="text-[10px] font-black px-2 py-0.5 rounded-lg border bg-slate-100 text-slate-400 border-slate-200">👁️ ดูอย่างเดียว</span>
                         )}
@@ -1424,6 +1507,7 @@ export default function PLCHoursPage() {
   const [activeGroupKey, setActiveGroupKey] = useState<string>("all");
   const [showReports,    setShowReports]    = useState(false);
   const [viewMeeting,    setViewMeeting]    = useState<PLCMeeting | null>(null);
+  const [suggestMeeting, setSuggestMeeting] = useState<PLCMeeting | null>(null);
   const [deputySignature, setDeputySignature] = useState<string>("");
   const [directorSignature, setDirectorSignature] = useState<string>("");
 
@@ -1569,6 +1653,12 @@ setGradeLevelMap(glMap);
   const totalMeetings = meetings.length;
   const totalTeachers = allTeachers.length;
 
+  // ✅ รายการประชุมที่ผู้ใช้ปัจจุบันเข้าร่วม (วิทยากรหรือผู้เข้าร่วม) แต่ยังไม่ได้กรอกข้อเสนอแนะรายบุคคลของตนเอง
+  const pendingSuggestions = useMemo(() => {
+    if (!user) return [];
+    return meetings.filter(m => attendsMeeting(user.id, m) && !(m.participant_suggestions?.[user.id] ?? "").trim());
+  }, [meetings, user]);
+
   async function handleSave(data: any, isDraft: boolean) {
     const payload = { ...data, status: isDraft ? "draft" : "submitted" };
     if (editMeeting?.id) {
@@ -1585,6 +1675,20 @@ setGradeLevelMap(glMap);
 
   async function handleDelete(id: string) {
     await supabase.from("plc_meetings").delete().eq("id", id);
+    await loadMeetings();
+  }
+
+  // ✅ บันทึกข้อเสนอแนะของผู้เข้าร่วมแต่ละคนแยกจากกัน — merge เข้ากับ participant_suggestions เดิม โดยแก้เฉพาะคีย์ของตนเอง ไม่แตะของคนอื่น
+  async function handleSaveSuggestion(meetingId: string, value: string) {
+    if (!user) return;
+    const meeting = meetings.find(m => m.id === meetingId);
+    if (!meeting) return;
+    const next = { ...(meeting.participant_suggestions ?? {}), [user.id]: value };
+    const { error } = await (supabase.from("plc_meetings") as any)
+      .update({ participant_suggestions: next })
+      .eq("id", meetingId);
+    if (error) { alert("❌ " + error.message); return; }
+    setSuggestMeeting(null);
     await loadMeetings();
   }
 
@@ -1630,6 +1734,8 @@ setGradeLevelMap(glMap);
 
         {isTeacher && (
           <>
+            <PendingSuggestionsCard meetings={pendingSuggestions} onOpen={m => setSuggestMeeting(m)} />
+
             <div className="flex flex-col items-center gap-3 py-4">
               <div className="flex gap-2 bg-white border-2 border-slate-200 rounded-2xl p-1.5">
                 <button onClick={() => setViewScope("subject")}
@@ -1853,6 +1959,15 @@ setGradeLevelMap(glMap);
           subjectMap={subjectMap}
           deputySignatureUrl={deputySignature}
           directorSignatureUrl={directorSignature}
+        />
+      )}
+      {suggestMeeting && user && (
+        <PendingSuggestionModal
+          meeting={suggestMeeting}
+          allTeachers={allTeachers}
+          currentUserId={user.id}
+          onSave={handleSaveSuggestion}
+          onClose={() => setSuggestMeeting(null)}
         />
       )}
     </div>
