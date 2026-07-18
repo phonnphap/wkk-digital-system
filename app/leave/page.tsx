@@ -305,6 +305,12 @@ const GRADE_LABEL: Record<string, string> = {
 
 const GRADE_ORDER = ["k2","k3","p1","p2","p3","p4","p5","p6","m1","m2","m3","m4","m5","m6"];
 
+function gradeOrderIndex(g: string | null | undefined): number {
+  const norm = (g ?? "").toString().trim().toLowerCase();
+  const idx = GRADE_ORDER.indexOf(norm);
+  return idx === -1 ? 999 : idx;
+}
+
 const LEAVE_TYPE_LIST: { key:LeaveType; label:string; icon:string }[] = [
   { key:"sick",       label:"ลาป่วย",                           icon:"🤒" },
   { key:"personal",   label:"ลากิจส่วนตัว",                     icon:"📋" },
@@ -2308,12 +2314,8 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
   const pendingList=requests.filter(r=>r.status==="pending");
   const uniqueGrades = Array.from(
   new Set(requests.map(r => (r as any).user?.grade_level).filter(Boolean))
-).sort((a, b) => {
-  const ia = GRADE_ORDER.indexOf(a as string);
-  const ib = GRADE_ORDER.indexOf(b as string);
-  return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-});
-  const allGrades = ["all", ...uniqueGrades];
+).sort((a, b) => gradeOrderIndex(a as string) - gradeOrderIndex(b as string));
+const allGrades = ["all", ...uniqueGrades];
   const totalRequests=fyAll.length;
   const totalApproved=fyAll.filter(r=>r.status==="approved").length;
   const totalPending=fyAll.filter(r=>r.status==="pending").length;
@@ -2506,56 +2508,44 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
   const rows = Array.from(byUser.values()).sort((a,b) => b.total - a.total);
 
   return (
-    <div
-      className="mt-5"
-      style={{
-        width: "100vw",
-        position: "relative",
-        left: "50%",
-        right: "50%",
-        marginLeft: "-50vw",
-        marginRight: "-50vw",
-      }}
-    >
-      <div className="px-4 sm:px-8">
-        <h5 className="font-black text-slate-700 mb-2 text-sm">
-          👥 รายชื่อครูสายชั้น {gradeLevelsMap[filterGrade] ?? filterGrade} — สรุปการลา {fiscalYearLabel(filterFY)}
-        </h5>
-        {rows.length === 0 ? (
-          <div className="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-xl border border-slate-200">ไม่มีข้อมูลการลาในสายชั้นนี้</div>
-        ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 border-b">
-                  <th className="text-left px-4 py-2.5 font-black text-slate-600">ชื่อ-สกุล</th>
-                  <th className="text-center px-3 py-2.5 font-black text-red-600">🤒 ป่วย</th>
-                  <th className="text-center px-3 py-2.5 font-black text-amber-600">📋 กิจ</th>
-                  <th className="text-center px-3 py-2.5 font-black text-pink-600">👶 คลอด</th>
-                  <th className="text-center px-3 py-2.5 font-black text-sky-600">🏛️ ราชการ</th>
-                  <th className="text-center px-3 py-2.5 font-black text-violet-600">🙏 อุปสมบท</th>
-                  <th className="text-center px-3 py-2.5 font-black text-slate-600">📌 อื่นๆ</th>
-                  <th className="text-center px-3 py-2.5 font-black text-slate-800">รวม</th>
+    <div className="mt-5 w-full">
+      <h5 className="font-black text-slate-700 mb-2 text-sm">
+        👥 รายชื่อครูสายชั้น {gradeLevelsMap[filterGrade] ?? filterGrade} — สรุปการลา {fiscalYearLabel(filterFY)}
+      </h5>
+      {rows.length === 0 ? (
+        <div className="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-xl border border-slate-200">ไม่มีข้อมูลการลาในสายชั้นนี้</div>
+      ) : (
+        <div className="w-full overflow-x-auto rounded-xl border border-slate-200">
+          <table className="w-full text-sm min-w-[700px]">
+            <thead>
+              <tr className="bg-slate-50 border-b">
+                <th className="text-left px-4 py-2.5 font-black text-slate-600 sticky left-0 bg-slate-50">ชื่อ-สกุล</th>
+                <th className="text-center px-3 py-2.5 font-black text-red-600">🤒 ป่วย</th>
+                <th className="text-center px-3 py-2.5 font-black text-amber-600">📋 กิจ</th>
+                <th className="text-center px-3 py-2.5 font-black text-pink-600">👶 คลอด</th>
+                <th className="text-center px-3 py-2.5 font-black text-sky-600">🏛️ ราชการ</th>
+                <th className="text-center px-3 py-2.5 font-black text-violet-600">🙏 อุปสมบท</th>
+                <th className="text-center px-3 py-2.5 font-black text-slate-600">📌 อื่นๆ</th>
+                <th className="text-center px-3 py-2.5 font-black text-slate-800">รวม</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((row, i) => (
+                <tr key={i} className="hover:bg-slate-50">
+                  <td className="px-4 py-2.5 font-bold text-slate-800 sticky left-0 bg-white whitespace-nowrap">{fullName(row.user)}</td>
+                  <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.sick>0?"text-red-600":"text-slate-300"}`}>{row.sick||"-"}</span></td>
+                  <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.personal>0?"text-amber-600":"text-slate-300"}`}>{row.personal||"-"}</span></td>
+                  <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.maternity>0?"text-pink-600":"text-slate-300"}`}>{row.maternity||"-"}</span></td>
+                  <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.official>0?"text-sky-600":"text-slate-300"}`}>{row.official||"-"}</span></td>
+                  <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.ordination>0?"text-violet-600":"text-slate-300"}`}>{row.ordination||"-"}</span></td>
+                  <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.other>0?"text-slate-600":"text-slate-300"}`}>{row.other||"-"}</span></td>
+                  <td className="px-3 py-2.5 text-center"><span className="font-black text-base text-slate-800">{row.total}</span></td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rows.map((row, i) => (
-                  <tr key={i} className="hover:bg-slate-50">
-                    <td className="px-4 py-2.5 font-bold text-slate-800">{fullName(row.user)}</td>
-                    <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.sick>0?"text-red-600":"text-slate-300"}`}>{row.sick||"-"}</span></td>
-                    <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.personal>0?"text-amber-600":"text-slate-300"}`}>{row.personal||"-"}</span></td>
-                    <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.maternity>0?"text-pink-600":"text-slate-300"}`}>{row.maternity||"-"}</span></td>
-                    <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.official>0?"text-sky-600":"text-slate-300"}`}>{row.official||"-"}</span></td>
-                    <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.ordination>0?"text-violet-600":"text-slate-300"}`}>{row.ordination||"-"}</span></td>
-                    <td className="px-3 py-2.5 text-center"><span className={`font-black ${row.other>0?"text-slate-600":"text-slate-300"}`}>{row.other||"-"}</span></td>
-                    <td className="px-3 py-2.5 text-center"><span className="font-black text-base text-slate-800">{row.total}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 })()}
