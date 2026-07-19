@@ -69,6 +69,17 @@ const CATEGORY_NOTIFY_EMAIL: Record<string,string> = {
   "เครือข่ายอินเตอร์เน็ต": "sirilack@khienkhet.ac.th",
 };
 
+// ★ หมวดหมู่ที่ต้องมอบหมายงานให้ครูที่รับผิดชอบทันทีตอนแจ้งซ่อม (ล็อกไม่ให้ครูผู้แจ้งแก้ไข/ลบเองอัตโนมัติ)
+const CATEGORY_AUTO_ASSIGN: Record<string,string> = {
+  "เครือข่ายอินเตอร์เน็ต": "76c71d91-9064-42a6-a54f-3a5be184301f", // sirilack@khienkhet.ac.th
+};
+
+// ★ แปลงเลขอารบิกในสตริงให้เป็นเลขไทยล้วน (ใช้เฉพาะข้อความเนื้อหาในบันทึกข้อความ ห้ามใช้กับ CSS/สี)
+function toThaiDigits(input: string | number): string {
+  const th = ["๐","๑","๒","๓","๔","๕","๖","๗","๘","๙"];
+  return String(input).replace(/[0-9]/g, d => th[Number(d)]);
+}
+
 // ★ แปลงตัวเลขเป็นคำอ่านภาษาไทย (สำหรับ "จำนวนเงิน...บาทถ้วน" ในบันทึกข้อความ)
 function bahttext(num: number): string {
   if (!num || isNaN(num)) return "";
@@ -113,7 +124,7 @@ function bahttext(num: number): string {
 // ── PDF Generator ─────────────────────────────────────────────────────────────
 // ★ เขียนใหม่ทั้งหมดให้ตรงกับเทมเพลตราชการ "บันทึกข้อความแจ้งซ่อมสายชั้น" ตามตัวอย่างที่แนบ
 function generateMemoHTML(params: {
-  items: { no:number; title:string; detail:string; amount:number }[];
+  items: { no:number; title:string; detail:string; amount:number; photos:string[] }[];
   subject: string;
   reporterName: string;
   reporterPosition: string;
@@ -121,38 +132,56 @@ function generateMemoHTML(params: {
   budgetSource: string;
   totalAmount: number;
   attachmentCount: number;
-  routing: { label:string; checked:boolean; name:string }[];
   directorName: string;
   directorSignUrl: string;
   creatorSignUrl: string;
   dateStr: string;
   memoNo: string;
   department: string;
+  logoUrl: string;
 }) {
   const {
     items, subject, reporterName, reporterPosition, gradeLevel, budgetSource,
-    totalAmount, attachmentCount, routing, directorName, directorSignUrl,
-    creatorSignUrl, dateStr, memoNo, department,
+    totalAmount, attachmentCount, directorName, directorSignUrl,
+    creatorSignUrl, dateStr, memoNo, department, logoUrl,
   } = params;
 
   const itemLines = items.map((it,i) =>
-    `<div style="margin:4px 0">${i+1}. ${it.title}${it.detail ? ` (${it.detail})` : ""} จำนวน ${it.amount ? it.amount.toLocaleString("th-TH") : "…………"} บาท</div>`
+    `<div style="margin:4px 0">${toThaiDigits(i+1)}. ${it.title}${it.detail ? ` (${it.detail})` : ""} จำนวน ${it.amount ? toThaiDigits(it.amount.toLocaleString("th-TH")) : "…………"} บาท</div>`
   ).join("");
 
-  const routingBoxes = routing.map(r => `
-    <div style="margin:3px 0">
-      <span style="display:inline-block;width:14px;height:14px;border:1.5px solid #111;text-align:center;line-height:12px;margin-right:6px;">${r.checked ? "✓" : ""}</span>
-      ${r.label}${r.checked && r.name ? ` (${r.name})` : ""}
-    </div>`).join("");
+  // ★ กล่อง "ตรวจเสนอ" เป็นรายการคงที่ตามแบบฟอร์มราชการจริง (เอาส่วนเลือกได้มากกว่า 1 ตำแหน่งออกแล้ว)
+  const routingBoxes = ROUTING_LABELS.map(label => `
+    <div style="margin:3px 0">.................... ${label}</div>`).join("") +
+    `<div style="margin:3px 0">....................</div>`;
+
+  // ★ หน้าที่ 2: ภาพแนบตามรายการที่เลือก พร้อมชื่อรายการด้านล่างภาพ
+  const photoEntries = items.flatMap(it => (it.photos ?? []).map(url => ({ url, title: it.title })));
+  const photosPageHTML = photoEntries.length > 0
+    ? `<div style="page-break-before:always;">
+        <h2 style="text-align:center;font-size:16pt;margin:0 0 14px">ภาพถ่ายประกอบการแจ้งซ่อม</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          ${photoEntries.map(p => `
+            <div style="text-align:center">
+              <img src="${p.url}" style="width:100%;height:220px;object-fit:cover;border:1px solid #ccc;border-radius:4px;" />
+              <div style="margin-top:4px;font-size:14pt">${p.title}</div>
+            </div>`).join("")}
+        </div>
+      </div>`
+    : `<div style="page-break-before:always;">
+        <h2 style="text-align:center;font-size:16pt;margin:0 0 14px">ภาพถ่ายประกอบการแจ้งซ่อม</h2>
+        <p style="text-align:center;color:#666">ไม่มีภาพถ่ายแนบ</p>
+      </div>`;
 
   return `<!DOCTYPE html><html><head>
   <meta charset="UTF-8">
   <style>
     @page { size: A4; margin: 20mm 25mm; }
-    body { font-family:'Sarabun','TH SarabunNew',sans-serif; font-size:15pt; color:#111; line-height:1.7; }
+    body { font-family:'TH Sarabun New','THSarabunPSK','Sarabun',sans-serif; font-size:16pt; color:#111; line-height:1.7; }
     .header { text-align:center; margin-bottom:6px; }
+    .header img { height:70px; display:block; margin:0 auto 6px; }
     h2 { text-align:center; font-size:18pt; font-weight:bold; margin:0 0 10px; }
-    .meta-table { width:100%; margin-bottom:10px; font-size:15pt; }
+    .meta-table { width:100%; margin-bottom:10px; font-size:16pt; }
     .meta-table td { padding:2px 0; vertical-align:top; }
     .indent { text-indent:2em; margin:8px 0; }
     .section-title { font-weight:bold; text-align:center; margin:14px 0 4px; }
@@ -166,14 +195,17 @@ function generateMemoHTML(params: {
     @media print { button{display:none} }
   </style></head>
   <body>
-    <div class="header"><h2>บันทึกข้อความ</h2></div>
+    <div class="header">
+      ${logoUrl ? `<img src="${logoUrl}" />` : ""}
+      <h2>บันทึกข้อความ</h2>
+    </div>
     <table class="meta-table">
       <tr><td width="16%"><b>ส่วนราชการ</b></td><td>${department || "กลุ่มบริหารทั่วไป"}</td></tr>
       <tr>
         <td><b>ที่</b></td>
-        <td style="width:50%">${memoNo || "…………………………"}</td>
+        <td style="width:50%">${memoNo ? toThaiDigits(memoNo) : "…………………………"}</td>
       </tr>
-      <tr><td><b>วันที่</b></td><td>${dateStr}</td></tr>
+      <tr><td><b>วันที่</b></td><td>${toThaiDigits(dateStr)}</td></tr>
       <tr><td><b>เรื่อง</b></td><td>${subject}</td></tr>
       <tr><td><b>เรียน</b></td><td>ผู้อำนวยการโรงเรียนวัดเขียนเขต</td></tr>
     </table>
@@ -189,17 +221,17 @@ function generateMemoHTML(params: {
     <div class="section-title">ข้อเท็จจริง</div>
     <p class="indent">
       ในการนี้ ข้าพเจ้าจึงใคร่ขออนุมัติใช้งบประมาณ ${budgetSource || "……………………"}
-      จำนวน ${totalAmount ? totalAmount.toLocaleString("th-TH") : "……………………"} บาท
+      จำนวน ${totalAmount ? toThaiDigits(totalAmount.toLocaleString("th-TH")) : "……………………"} บาท
       (${totalAmount ? bahttext(totalAmount) : "……………………"}) เพื่อดำเนินการปรับปรุงและซ่อมแซมรายการดังต่อไปนี้
     </p>
     <div style="padding-left:1.5em">${itemLines}</div>
     <p style="text-align:right;font-weight:bold;margin:10px 0">
-      รวมเป็นเงินทั้งสิ้น ${totalAmount ? totalAmount.toLocaleString("th-TH") : "……………"} บาท
+      รวมเป็นเงินทั้งสิ้น ${totalAmount ? toThaiDigits(totalAmount.toLocaleString("th-TH")) : "……………"} บาท
     </p>
 
     <div class="section-title">ข้อพิจารณา</div>
     <p class="indent">
-      พร้อมนี้ ข้าพเจ้าได้แนบภาพถ่ายจุดที่ชำรุดมาพร้อมกับบันทึกข้อความฉบับนี้ จำนวน ${attachmentCount || 0} แผ่น
+      พร้อมนี้ ข้าพเจ้าได้แนบภาพถ่ายจุดที่ชำรุดมาพร้อมกับบันทึกข้อความฉบับนี้ จำนวน ${toThaiDigits(attachmentCount || 0)} แผ่น
       เพื่อประกอบการพิจารณาอนุมัติ
     </p>
 
@@ -228,6 +260,8 @@ function generateMemoHTML(params: {
         </div>
       </div>
     </div>
+
+    ${photosPageHTML}
     <script>window.onload=()=>window.print()<\/script>
   </body></html>`;
 }
@@ -258,10 +292,6 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
   const [amounts, setAmounts] = useState<Record<string,string>>(
     () => Object.fromEntries(requests.map(r => [r.id, (r as any).estimated_cost != null ? String((r as any).estimated_cost) : ""]))
   );
-  // ★ รายชื่อผู้ลงนามในลำดับขั้นตอน 4 ตำแหน่ง — กรอกอิสระ (ระบบยังไม่มีตำแหน่งเหล่านี้เก็บไว้)
-  const [routingChecks, setRoutingChecks] = useState<boolean[]>([false,false,false,false]);
-  const [routingNames, setRoutingNames] = useState<string[]>(["","","",""]);
-
   const checkedCount = Object.values(selected).filter(Boolean).length;
   const totalAmount = requests
     .filter(r => selected[r.id])
@@ -278,8 +308,11 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
         title: r.title,
         detail: [r.building?.name, r.room].filter(Boolean).join(" · "),
         amount: Number(amounts[r.id]) || 0,
+        photos: r.photo_urls ?? [],
       }));
     if (items.length === 0) { alert("กรุณาเลือกรายการอย่างน้อย 1 รายการ"); return; }
+    // ★ ใช้ origin ของหน้าปัจจุบันประกอบ URL ตราครุฑ (public/images.jpg) กันปัญหา relative path ในหน้าต่างที่เปิดใหม่
+    const logoUrl = typeof window !== "undefined" ? `${window.location.origin}/images.jpg` : "/images.jpg";
     const html = generateMemoHTML({
       items,
       subject,
@@ -289,13 +322,13 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
       budgetSource,
       totalAmount,
       attachmentCount,
-      routing: ROUTING_LABELS.map((label,i) => ({ label, checked: routingChecks[i], name: routingNames[i] })),
       directorName: fullName(director),
       directorSignUrl: director?.signature_url ?? "",
       creatorSignUrl: currentUser.signature_url ?? "",
       dateStr: thaiDateFull(memoDate),
       memoNo,
       department,
+      logoUrl,
     });
     const w = window.open("","_blank","width=900,height=780");
     if (!w) return;
@@ -401,26 +434,6 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
           <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-700 flex items-center justify-between">
             <span className="font-bold">รวมเป็นเงินทั้งสิ้น</span>
             <span className="font-black text-base">{totalAmount.toLocaleString("th-TH")} บาท</span>
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">
-              เรียนผ่าน (เลือกได้มากกว่า 1 ตำแหน่ง)
-            </label>
-            <div className="space-y-2">
-              {ROUTING_LABELS.map((label, i) => (
-                <div key={label} className="flex items-center gap-2">
-                  <input type="checkbox" checked={routingChecks[i]}
-                    onChange={e=>setRoutingChecks(prev=>prev.map((v,idx)=>idx===i?e.target.checked:v))}
-                    className="w-4 h-4 accent-blue-600 shrink-0" />
-                  <span className="text-sm text-slate-600 w-56 shrink-0">{label}</span>
-                  {routingChecks[i] && (
-                    <input type="text" value={routingNames[i]} onChange={e=>setRoutingNames(prev=>prev.map((v,idx)=>idx===i?e.target.value:v))}
-                      placeholder="ชื่อผู้ดำรงตำแหน่งนี้" className="flex-1 border-2 border-blue-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-                  )}
-                </div>
-              ))}
-            </div>
           </div>
 
           <div className="bg-slate-50 rounded-xl px-4 py-3 text-sm text-slate-600">
@@ -529,10 +542,14 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
     // ★ แก้: payload ตรงกับสคีมาจริงของ repair_requests แล้ว
     //   - photo_urls (jsonb) แทน image_urls (คอลัมน์เดิมถูกลบไปแล้ว)
     //   - ไม่ส่ง ticket_no / location เพราะมี default ให้แล้วที่ฝั่ง DB
+    // ★ บางหมวดหมู่ (เช่น เครือข่ายอินเตอร์เน็ต) ต้องมอบหมายงานให้ครูที่รับผิดชอบทันทีตอนแจ้งซ่อม
+    //   ถ้ายังไม่เคยมีการมอบหมายไว้ก่อน (assigned_to ว่าง) ให้ใช้ค่าจาก CATEGORY_AUTO_ASSIGN แทน
+    const autoAssignId = CATEGORY_AUTO_ASSIGN[category];
     const payload = {
       title: title.trim(), description: desc.trim(), building_id: buildingId,
       room: room.trim(), category, priority, photo_urls: imageUrls,
       reporter_id: currentUser.id, status: existing?.status ?? "pending",
+      assigned_to: existing?.assigned_to ?? autoAssignId ?? null,
     };
     const isNewRequest = !existing?.id;
     if (existing?.id) {

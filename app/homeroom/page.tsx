@@ -3,10 +3,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   Users, ClipboardCheck, NotebookPen, UtensilsCrossed,
-  UserCheck, FileEdit, HeartHandshake, Home, ArrowRight,
+  UserCheck, FileEdit, Home, HeartHandshake, ArrowRight,
   type LucideIcon,
 } from "lucide-react";
 
@@ -51,6 +52,7 @@ const STATUS_LABEL: Record<MenuStatus, { text: string; cls: string }> = {
 const DASHBOARD_PATH = "/dashboard";
 
 export default function HomeroomHubPage() {
+  const router = useRouter();
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -63,14 +65,14 @@ export default function HomeroomHubPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-6 lg:px-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold text-slate-800">ครูประจำชั้น</h1>
-        <Link
-          href={DASHBOARD_PATH}
-          className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => router.push(DASHBOARD_PATH)}
+          className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg"
         >
-          <Home className="h-4 w-4" /> กลับหน้าแดชบอร์ด
-        </Link>
+          🏠
+        </button>
+        <h1 className="text-lg font-bold text-slate-800">ครูประจำชั้น</h1>
       </div>
 
       <div className="mt-2 flex flex-wrap gap-2">
