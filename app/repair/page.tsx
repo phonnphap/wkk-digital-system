@@ -534,6 +534,7 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
       room: room.trim(), category, priority, photo_urls: imageUrls,
       reporter_id: currentUser.id, status: existing?.status ?? "pending",
     };
+    const isNewRequest = !existing?.id;
     if (existing?.id) {
       const { error } = await supabase.from("repair_requests").update(payload).eq("id", existing.id);
       if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); setSaving(false); return; }
@@ -556,6 +557,33 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
           body: `มีการแจ้งซ่อมหมวดหมู่ "${category}"\n\nหัวข้อ: ${title.trim()}\nรายละเอียด: ${desc.trim() || "-"}\nผู้แจ้ง: ${fullName(currentUser)}\nอาคาร: ${buildings.find(b=>b.id===buildingId)?.name ?? "-"} ${room.trim()}\n\nกรุณาเข้าระบบแจ้งซ่อมเพื่อดำเนินการต่อ`,
         }),
       }).catch((e) => console.warn("[repair] ส่งอีเมลแจ้งเตือนไม่สำเร็จ (ไม่กระทบการบันทึก):", e));
+    }
+
+    // ★ เด้งเตือนครูที่รับผิดชอบอาคารนี้ทันที (จาก buildings.repair_user_ids) เฉพาะตอนแจ้งซ่อมใหม่
+    //   ดึงอีเมลของครูดูแลอาคารแยกอีกครั้ง (allUsers ที่โหลดไว้ปกติไม่มี email) แล้วยิงอีเมลแจ้งเตือนทีละคน
+    //   fire-and-forget ทั้งหมด ไม่กระทบการบันทึกหลักหากส่งไม่สำเร็จ
+    if (isNewRequest) {
+      const bld = buildings.find(b => b.id === buildingId);
+      const repairIds = (bld as any)?.repair_user_ids ?? [];
+      if (repairIds.length > 0) {
+        supabase.from("users").select("email,first_name,last_name,title")
+          .in("id", repairIds)
+          .then(({ data: teachers, error: tErr }) => {
+            if (tErr) { console.warn("[repair] โหลดรายชื่อครูดูแลอาคารไม่สำเร็จ:", tErr.message); return; }
+            (teachers ?? []).forEach((t: any) => {
+              if (!t.email) return;
+              fetch("/api/notify-repair", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  to: t.email,
+                  subject: `🔧 แจ้งซ่อมใหม่ในอาคารที่ท่านดูแล: ${title.trim()}`,
+                  body: `มีการแจ้งซ่อมใหม่ในอาคาร "${bld?.name ?? "-"}" ซึ่งท่านเป็นผู้รับผิดชอบดูแล\n\nหัวข้อ: ${title.trim()}\nหมวดหมู่: ${category}\nห้อง/บริเวณ: ${room.trim() || "-"}\nความเร่งด่วน: ${PRIORITY_CFG[priority]?.label ?? priority}\nรายละเอียด: ${desc.trim() || "-"}\nผู้แจ้ง: ${fullName(currentUser)}\n\nกรุณาเข้าระบบแจ้งซ่อมเพื่อดำเนินการต่อ`,
+                }),
+              }).catch((e) => console.warn("[repair] ส่งอีเมลเตือนครูดูแลอาคารไม่สำเร็จ (ไม่กระทบการบันทึก):", e));
+            });
+          });
+      }
     }
 
     setSaving(false);
@@ -756,8 +784,10 @@ function ManagersModal({ currentUser, allUsers, managers, onClose, onRefresh }: 
 }
 
 // ── DetailModal ───────────────────────────────────────────────────────────────
-function DetailModal({ request, canManage, allUsers, onUpdate, onClose }: {
+function DetailModal({ request, canManage, allUsers, currentUserId, isAdmin, isProjManager, onEdit, onDelete, onUpdate, onClose }: {
   request: RepairRequest; canManage: boolean; allUsers: User[];
+  currentUserId: string; isAdmin: boolean; isProjManager: boolean;
+  onEdit: (r: RepairRequest) => void; onDelete: (id: string) => void;
   onUpdate: () => void; onClose: () => void;
 }) {
   const [status, setStatus] = useState(request.status);
@@ -780,6 +810,14 @@ function DetailModal({ request, canManage, allUsers, onUpdate, onClose }: {
   // ★ ครูดูแลตึก (inspector_user_ids) — แสดงไว้อ้างอิงเฉยๆ ไม่ใช่ dropdown
   const inspectorIds = (request.building as any)?.inspector_user_ids ?? [];
   const inspectorNames = allUsers.filter(u => inspectorIds.includes(u.id)).map(fullName);
+
+  // ★ สิทธิ์แก้ไข/ลบรายการ:
+  //   - แอดมิน/ผู้ดูแลโครงการ: แก้ไข/ลบได้เสมอ
+  //   - ครูผู้แจ้งเอง: แก้ไข/ลบได้ ตราบใดที่ยังไม่ถูกมอบหมายงาน (assigned_to ยังว่าง)
+  //     เมื่อถูกมอบหมายแล้ว ครูผู้แจ้งจะไม่สามารถแก้ไข/ลบได้อีก
+  const isReporter = request.reporter_id === currentUserId;
+  const isLocked = !!request.assigned_to;
+  const canEditDelete = isAdmin || isProjManager || (isReporter && !isLocked);
 
   const handleUpdate = async () => {
     setSaving(true);
@@ -828,24 +866,48 @@ function DetailModal({ request, canManage, allUsers, onUpdate, onClose }: {
             <p>📅 {thaiDate(request.created_at)}</p>
           </div>
           {request.description && <p className="text-sm text-slate-600 bg-slate-50 rounded-xl px-4 py-3">{request.description}</p>}
-          {(request.photo_urls??[]).length > 0 && (
-            <div>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                รูปภาพที่แนบ ({request.photo_urls!.length} รูป)
-              </p>
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+              รูปภาพที่แนบ {(request.photo_urls??[]).length > 0 ? `(${request.photo_urls!.length} รูป)` : ""}
+            </p>
+            {(request.photo_urls??[]).length > 0 ? (
               <div className="grid grid-cols-3 gap-2">
                 {request.photo_urls!.map((url,i)=>(
                   <img key={i} src={url} alt="" onClick={()=>setLightboxUrl(url)}
                     className="w-full h-24 object-cover rounded-xl border border-slate-200 cursor-pointer hover:brightness-90 transition-all" />
                 ))}
               </div>
-            </div>
-          )}
+            ) : (
+              <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">📷 ไม่มีรูปภาพแนบ</p>
+            )}
+          </div>
           {inspectorNames.length > 0 && (
             <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">
               🛠️ ครูดูแลตึกนี้ (อ้างอิง): {inspectorNames.join(", ")}
             </p>
           )}
+
+          <div className="pt-2 border-t border-slate-100">
+            {canEditDelete ? (
+              <div className="flex gap-2">
+                <button onClick={()=>onEdit(request)}
+                  className="flex-1 py-2.5 rounded-xl border-2 border-blue-200 text-blue-600 text-sm font-bold hover:bg-blue-50">
+                  ✏️ แก้ไขรายการ
+                </button>
+                <button onClick={()=>onDelete(request.id)}
+                  className="flex-1 py-2.5 rounded-xl border-2 border-red-200 text-red-600 text-sm font-bold hover:bg-red-50">
+                  🗑️ ลบรายการ
+                </button>
+              </div>
+            ) : (
+              isReporter && isLocked && (
+                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                  🔒 รายการนี้ถูกมอบหมายงานให้ผู้รับผิดชอบแล้ว จึงไม่สามารถแก้ไขหรือลบได้ หากต้องการเปลี่ยนแปลงกรุณาติดต่อผู้ดูแลระบบ
+                </p>
+              )
+            )}
+          </div>
+
           {canManage && (
             <div className="space-y-3 pt-2 border-t border-slate-100">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">จัดการ</p>
@@ -915,6 +977,7 @@ export default function Page() {
   const [filterStatus, setFilterStatus]= useState("");
   const [filterBldg,   setFilterBldg]  = useState("");
   const [showForm,     setShowForm]    = useState(false);
+  const [editingReq,   setEditingReq]  = useState<RepairRequest|null>(null);
   const [showManagers, setShowManagers]= useState(false);
   const [showMemo,     setShowMemo]    = useState(false);
   const [detailReq,    setDetailReq]   = useState<RepairRequest|null>(null);
@@ -971,9 +1034,12 @@ export default function Page() {
       (mgrUsers??[]).forEach((u:any)=>{ mgrUserMap[u.id]=u; });
     }
     setManagers(((mgrRows??[]) as any[]).map(m=>({ ...m, user: mgrUserMap[m.user_id] })) as ProjectManager[]);
+    // ★ แก้: เพิ่ม repair_user_ids, inspector_user_ids ใน embed ของ building
+    //   เดิม select แค่ id,name ทำให้ DetailModal อ่าน request.building.repair_user_ids ไม่ได้เลย
+    //   (ดรอปดาวน์ "มอบหมายให้" เลยไม่กรองตามครูที่ดูแลอาคารจริง ๆ)
     const {data:rqs}=await supabase.from("repair_requests")
   .select(`*,reporter:users!reporter_id(id,first_name,last_name,title),
-    building:buildings(id,name)`)
+    building:buildings(id,name,repair_user_ids,inspector_user_ids)`)
       .order("created_at",{ascending:false}).limit(300);
     setRequests((rqs??[]) as unknown as RepairRequest[]);
   },[user]);
@@ -1002,6 +1068,16 @@ export default function Page() {
       completed:   base.filter(r=>r.status==="completed").length,
     };
   },[requests,myRequests,canSeeAll]);
+
+  // ★ ลบรายการแจ้งซ่อม (ใช้จาก DetailModal) — สิทธิ์ถูกเช็คแล้วฝั่ง UI ใน DetailModal
+  //   (แอดมิน/ผู้ดูแลโครงการ ลบได้เสมอ, ครูผู้แจ้งลบได้เฉพาะตอนยังไม่ถูกมอบหมายงาน)
+  const handleDeleteRequest = useCallback(async (id: string) => {
+    if (!confirm("ยืนยันการลบรายการแจ้งซ่อมนี้? เมื่อลบแล้วจะไม่สามารถกู้คืนได้")) return;
+    const { error } = await supabase.from("repair_requests").delete().eq("id", id);
+    if (error) { alert("❌ ลบไม่สำเร็จ: " + error.message); return; }
+    setDetailReq(null);
+    await loadData();
+  },[loadData]);
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -1243,10 +1319,10 @@ export default function Page() {
         )}
       </div>
 
-      {showForm && (
-        <RepairFormModal buildings={buildings} currentUser={user}
-          onSave={async()=>{setShowForm(false);await loadData();}}
-          onClose={()=>setShowForm(false)} />
+      {(showForm || editingReq) && (
+        <RepairFormModal buildings={buildings} currentUser={user} existing={editingReq}
+          onSave={async()=>{setShowForm(false);setEditingReq(null);await loadData();}}
+          onClose={()=>{setShowForm(false);setEditingReq(null);}} />
       )}
       {showManagers && (
         <ManagersModal currentUser={user} allUsers={allUsers} managers={managers}
@@ -1259,6 +1335,9 @@ export default function Page() {
       )}
       {detailReq && (
         <DetailModal request={detailReq} canManage={canManage} allUsers={allUsers}
+          currentUserId={user.id} isAdmin={isAdmin} isProjManager={isProjManager}
+          onEdit={(r)=>{setDetailReq(null); setEditingReq(r);}}
+          onDelete={handleDeleteRequest}
           onUpdate={async()=>{setDetailReq(null);await loadData();}}
           onClose={()=>setDetailReq(null)} />
       )}
