@@ -194,22 +194,26 @@ function buildPLCReportHTML(
   const now = new Date();
   const printedDate = now.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Bangkok" });
 
-  const sections = [
+  const sectionsBeforeSuggestions = [
     { label: "สภาพปัญหา", icon: "⚠️", value: meeting.problem_description },
     { label: "วัตถุประสงค์", icon: "🎯", value: meeting.objectives },
     { label: "วิธีการดำเนินการ", icon: "📋", value: meeting.methods },
     { label: "ผลที่เกิดขึ้น", icon: "✨", value: meeting.results },
-    { label: "ข้อเสนอแนะ", icon: "💡", value: meeting.suggestions },
+  ];
+  const sectionsAfterSuggestions = [
     { label: "แนวทางแก้ไขปัญหา", icon: "🔧", value: meeting.solutions },
     { label: "การสะท้อนผล", icon: "🪞", value: meeting.reflections },
     { label: "แนวทางการพัฒนาต่อ", icon: "🚀", value: meeting.future_development },
   ];
 
-  const sectionsHTML = sections.map(s => s.value ? `
+  const renderSectionsHTML = (list: { label: string; icon: string; value?: string }[]) => list.map(s => s.value ? `
     <div style="margin-bottom:9px">
       <div style="font-weight:700;font-size:11pt;margin-bottom:2px">${s.icon} ${s.label}</div>
       <div style="font-size:10.5pt;line-height:1.6;white-space:pre-wrap;padding-left:8px;border-left:2px solid #cbd5e1">${(s.value || "").replace(/</g,"&lt;")}</div>
     </div>` : "").join("");
+
+  const sectionsBeforeHTML = renderSectionsHTML(sectionsBeforeSuggestions);
+  const sectionsAfterHTML = renderSectionsHTML(sectionsAfterSuggestions);
 
   const participantSuggestionsEntries = Object.entries(meeting.participant_suggestions ?? {}).filter(([,v]) => (v||"").trim());
   const participantSuggestionsHTML = participantSuggestionsEntries.length ? `
@@ -302,8 +306,10 @@ table.meta td.k{color:#64748b;font-weight:700;white-space:nowrap;width:110px}
   <tr><td class="k">ผู้เข้าร่วม (${participants.length} คน)</td><td>${participantsHTML}</td></tr>
 </table>
 <div style="border-top:1px solid #cbd5e1;padding-top:8px;margin-top:4px">
-  ${sectionsHTML || "<p style='color:#94a3b8;font-size:10.5pt'>ไม่มีข้อมูลรายงานเพิ่มเติม</p>"}
+  ${sectionsBeforeHTML}
   ${participantSuggestionsHTML}
+  ${sectionsAfterHTML}
+  ${(!sectionsBeforeHTML && !sectionsAfterHTML && !participantSuggestionsHTML) ? "<p style='color:#94a3b8;font-size:10.5pt'>ไม่มีข้อมูลรายงานเพิ่มเติม</p>" : ""}
 </div>
 ${attendeeSignaturesHTML}
 ${approverSignaturesHTML}
@@ -422,12 +428,13 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
     return () => { cancelled = true; };
   }, [meeting.id]);
 
-  const sections = [
+  const sectionsBeforeSuggestions = [
     { label:"สภาพปัญหา", value:meeting.problem_description, icon:"⚠️" },
     { label:"วัตถุประสงค์", value:meeting.objectives, icon:"🎯" },
     { label:"วิธีการดำเนินการ", value:meeting.methods, icon:"📋" },
     { label:"ผลที่เกิดขึ้น", value:meeting.results, icon:"✨" },
-    { label:"ข้อเสนอแนะ", value:meeting.suggestions, icon:"💡" },
+  ];
+  const sectionsAfterSuggestions = [
     { label:"แนวทางแก้ไขปัญหา", value:meeting.solutions, icon:"🔧" },
     { label:"การสะท้อนผล", value:meeting.reflections, icon:"🪞" },
     { label:"แนวทางการพัฒนาต่อ", value:meeting.future_development, icon:"🚀" },
@@ -491,7 +498,7 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
               </div>
             </div>
           </div>
-          {sections.map(s => s.value ? (
+          {sectionsBeforeSuggestions.map(s => s.value ? (
             <div key={s.label} className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
               <p className="text-xs font-black text-slate-500 mb-1.5 flex items-center gap-1.5"><span>{s.icon}</span>{s.label}</p>
               <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{s.value}</p>
@@ -519,6 +526,12 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
                 })}
               </div>
             )}
+                          {sectionsAfterSuggestions.map(s => s.value ? (
+            <div key={s.label} className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
+              <p className="text-xs font-black text-slate-500 mb-1.5 flex items-center gap-1.5"><span>{s.icon}</span>{s.label}</p>
+              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{s.value}</p>
+            </div>
+          ) : null)}
             {attendeesForSuggestions.filter(id => !(meeting.participant_suggestions?.[id] ?? "").trim()).length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
                 <span className="text-[10px] text-slate-400 font-bold mr-1">ยังไม่ได้กรอก:</span>
@@ -769,8 +782,8 @@ function MeetingModal({ meeting, allTeachers, academicYears, currentUserId, curr
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="bg-white w-full sm:max-w-2xl sm:rounded-3xl rounded-t-3xl shadow-2xl max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 bg-white flex flex-col">
+      <div className="bg-white w-full h-full flex flex-col">
         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between shrink-0">
           <div>
             <h3 className="font-black text-slate-800 text-lg">{isEdit ? "✏️ แก้ไขการประชุม" : "➕ บันทึกชั่วโมง PLC"}</h3>
