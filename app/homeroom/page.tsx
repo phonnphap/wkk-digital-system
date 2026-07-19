@@ -33,7 +33,7 @@ type SubMenuItem = {
 // ★ เมนูย่อยทั้งหมดของครูประจำชั้น — เพิ่ม/ลบ/แก้ path ที่นี่ที่เดียว
 const SUBMENUS: SubMenuItem[] = [
   { key: "students", name: "ทะเบียนนักเรียน", desc: "รายชื่อ ข้อมูลพื้นฐาน และผู้ปกครอง", icon: Users, color: "bg-blue-600", path: "/students", status: "live" },
-  { key: "attendance", name: "บันทึกเช็คชื่อ", desc: "มาเรียน / ขาด / ลา / มาสาย รายวัน", icon: ClipboardCheck, color: "bg-indigo-600", path: "/attendance", status: "in_progress" },
+  { key: "attendance", name: "บันทึกเช็คชื่อ", desc: "มาเรียน / ขาด / ลา / มาสาย รายวัน", icon: ClipboardCheck, color: "bg-indigo-600", path: "/attendance", status: "live" },
   { key: "homeroom-notes", name: "บันทึกโฮมรูม", desc: "ประเด็น/กิจกรรมโฮมรูมประจำวัน", icon: NotebookPen, color: "bg-violet-600", path: "/homeroom-notes", status: "in_progress" },
   { key: "meals", name: "บันทึกอาหารและนม", desc: "การรับอาหารกลางวัน/ดื่มนมรายวัน", icon: UtensilsCrossed, color: "bg-orange-500", path: "/meals", status: "in_progress" },
   { key: "nutrition", name: "ประเมินโภชนาการ", desc: "ส่วนสูง น้ำหนัก สรุปภาวะโภชนาการ", icon: UserCheck, color: "bg-emerald-600", path: "/nutrition", status: "live" },
@@ -46,6 +46,9 @@ const STATUS_LABEL: Record<MenuStatus, { text: string; cls: string }> = {
   live: { text: "ใช้งานได้", cls: "bg-emerald-100 text-emerald-700" },
   in_progress: { text: "กำลังพัฒนา", cls: "bg-amber-100 text-amber-700" },
 };
+
+// ★ แก้ path นี้ให้ตรงกับหน้า dashboard จริงของระบบ (เช่น "/dashboard")
+const DASHBOARD_PATH = "/dashboard";
 
 export default function HomeroomHubPage() {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
@@ -60,7 +63,15 @@ export default function HomeroomHubPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-6 lg:px-8">
-      <h1 className="text-lg font-bold text-slate-800">ครูประจำชั้น</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-bold text-slate-800">ครูประจำชั้น</h1>
+        <Link
+          href={DASHBOARD_PATH}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+        >
+          <Home className="h-4 w-4" /> กลับหน้าแดชบอร์ด
+        </Link>
+      </div>
 
       <div className="mt-2 flex flex-wrap gap-2">
         {loading ? (

@@ -2,10 +2,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { Phone, MapPin, Plus, Pencil, Trash2, X } from "lucide-react";
+import { Phone, MapPin, Plus, Pencil, Trash2, X, Home, ArrowLeft } from "lucide-react";
 
 const supabase = createClient();
+
+// ★ แก้ path เหล่านี้ให้ตรงกับระบบจริง
+const DASHBOARD_PATH = "/dashboard";
+const HOMEROOM_PATH = "/homeroom";
+
+const PREFIX_OPTIONS = ["เด็กชาย", "เด็กหญิง", "นาย", "นางสาว"];
 
 type Classroom = {
   classroom_id: string;
@@ -17,6 +24,7 @@ type Student = {
   id: string;
   seat_number: number | null;
   student_code: string | null;
+  prefix: string | null;
   first_name: string;
   last_name: string;
   nick_name: string | null;
@@ -31,6 +39,7 @@ type Student = {
 type FormState = {
   seat_number: string;
   student_code: string;
+  prefix: string;
   first_name: string;
   last_name: string;
   nick_name: string;
@@ -43,7 +52,7 @@ type FormState = {
 };
 
 const EMPTY_FORM: FormState = {
-  seat_number: "", student_code: "", first_name: "", last_name: "",
+  seat_number: "", student_code: "", prefix: "", first_name: "", last_name: "",
   nick_name: "", birth_date: "", gender: "",
   guardian_name: "", guardian_relation: "", guardian_phone: "", address: "",
 };
@@ -71,7 +80,7 @@ export default function StudentsPage() {
     supabase
       .from("students")
       .select(
-        "id, seat_number, student_code, first_name, last_name, nick_name, birth_date, gender, guardian_name, guardian_relation, guardian_phone, address"
+        "id, seat_number, student_code, prefix, first_name, last_name, nick_name, birth_date, gender, guardian_name, guardian_relation, guardian_phone, address"
       )
       .eq("classroom_id", cid)
       .order("seat_number")
@@ -97,6 +106,7 @@ export default function StudentsPage() {
     setForm({
       seat_number: s.seat_number?.toString() ?? "",
       student_code: s.student_code ?? "",
+      prefix: s.prefix ?? "",
       first_name: s.first_name ?? "",
       last_name: s.last_name ?? "",
       nick_name: s.nick_name ?? "",
@@ -150,7 +160,23 @@ export default function StudentsPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-6 lg:px-8">
-      <div className="flex items-start justify-between gap-3">
+      {/* แถบนำทางด้านบน: ย้อนกลับไปครูประจำชั้น + กลับแดชบอร์ด */}
+      <div className="flex items-center justify-between">
+        <Link
+          href={HOMEROOM_PATH}
+          className="flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-blue-600"
+        >
+          <ArrowLeft className="h-4 w-4" /> ครูประจำชั้น
+        </Link>
+        <Link
+          href={DASHBOARD_PATH}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+        >
+          <Home className="h-4 w-4" /> กลับหน้าแดชบอร์ด
+        </Link>
+      </div>
+
+      <div className="mt-4 flex items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-bold text-slate-800">ทะเบียนนักเรียน</h1>
           <p className="mt-1 text-sm text-slate-500">รายชื่อ ข้อมูลพื้นฐาน และข้อมูลผู้ปกครองของนักเรียนในความดูแล</p>
@@ -202,7 +228,7 @@ export default function StudentsPage() {
                     </span>
                     <div>
                       <p className="text-sm font-semibold text-slate-800">
-                        {s.first_name} {s.last_name}
+                        {s.prefix ? `${s.prefix}` : ""}{s.first_name} {s.last_name}
                         {s.nick_name && <span className="ml-1 font-normal text-slate-400">({s.nick_name})</span>}
                       </p>
                       <p className="text-xs text-slate-400">{s.student_code}</p>
@@ -258,6 +284,22 @@ export default function StudentsPage() {
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
               <Field label="เลขที่" value={form.seat_number} onChange={(v) => setForm({ ...form, seat_number: v })} type="number" />
               <Field label="รหัสนักเรียน" value={form.student_code} onChange={(v) => setForm({ ...form, student_code: v })} />
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500">คำนำหน้า</label>
+                <select
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2"
+                  value={form.prefix}
+                  onChange={(e) => setForm({ ...form, prefix: e.target.value })}
+                >
+                  <option value="">เลือก</option>
+                  {PREFIX_OPTIONS.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+              <div />
+
               <Field label="ชื่อ" value={form.first_name} onChange={(v) => setForm({ ...form, first_name: v })} required />
               <Field label="นามสกุล" value={form.last_name} onChange={(v) => setForm({ ...form, last_name: v })} required />
               <Field label="ชื่อเล่น" value={form.nick_name} onChange={(v) => setForm({ ...form, nick_name: v })} />

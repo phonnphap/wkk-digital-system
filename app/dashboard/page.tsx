@@ -319,20 +319,18 @@ function StatusBadge({ status }: { status: ItemStatus }) {
       title: "🏫 ระบบจัดการห้องเรียนและงานสอน",
       items: [
         { name: "เช็คชื่อนักเรียน-ครูประจำวิชา", icon: <UserCheck className="w-6 h-6" />, color: "bg-emerald-500", path: "/attendance" },
-        { name: "ครูประจำชั้น", icon: <Users className="w-6 h-6" />, color: "bg-teal-500", path: "/homeroom" },
+        { name: "ครูประจำชั้น", icon: <Users className="w-6 h-6" />, color: "bg-teal-500", path: "/homeroom", status: "live" as ItemStatus },
         { name: "ตารางสอน", icon: <Calendar className="w-6 h-6" />, color: "bg-purple-500", path: "/schedule", status: "live"  as ItemStatus },
         { name: "แลกคาบ & สอนแทน", icon: <RefreshCw className="w-6 h-6" />, color: "bg-pink-500", path: "/substitution", status: "wip"  as ItemStatus },
         { name: "ระบบบันทึกชั่วโมง PLC", icon: <Users className="w-6 h-6" />, color: "bg-teal-500", path: "/plc", status: "live" as ItemStatus },
         { name: "นิเทศการสอน", icon: <Settings className="w-6 h-6" />, color: "bg-rose-500", path: "/supervision" },
         { name: "คลังสื่อการสอน", icon: <FolderOpen className="w-6 h-6" />, color: "bg-cyan-500", path: "/media-library", status: "wip" as ItemStatus },
-        { name: "ประเมินความสามารถในการอ่านและการเขียน", icon: <FileEdit className="w-6 h-6" />, color: "bg-sky-500", path: "/reading_writing", status: "live" as ItemStatus },
       ]
     },
     {
       title: "🛠️ ระบบสนับสนุนและยานพาหนะ",
       items: [
         { name: "รายงานเวรประจำวัน", icon: <Calendar className="w-6 h-6" />, color: "bg-orange-500", path: "/duty-report" },
-        { name: "ประเมินโภชนาการนักเรียน", icon: <UserCheck className="w-6 h-6" />, color: "bg-emerald-600", path: "/nutrition", status: "live" as ItemStatus },
         { name: "จองรถ & ห้องประชุม", icon: <Car className="w-6 h-6" />, color: "bg-blue-600", path: "/booking" },
         { name: "ยืม-คืน อุปกรณ์ ICT", icon: <Monitor className="w-6 h-6" />, color: "bg-sky-600", path: "/ict-borrow" },
         { name: "แจ้งซ่อม (Helpdesk)", icon: <Wrench className="w-6 h-6" />, color: "bg-rose-600", path: "/repair", status: "wip"  as ItemStatus },
