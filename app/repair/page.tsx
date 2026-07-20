@@ -178,13 +178,14 @@ function generateMemoHTML(params: {
   return `<!DOCTYPE html><html><head>
   <meta charset="UTF-8">
   <style>
-    @page { size: A4; margin: 20mm 25mm; }
+    @page { size: A4 portrait; margin: 20mm 25mm; }
     body { font-family:'TH Sarabun New','THSarabunPSK','Sarabun',sans-serif; font-size:16pt; color:#111; line-height:1.5; }
     .header { text-align:center; margin-bottom:6px; }
     .header img { height:65px; display:block; margin:0 auto 4px; }
     h2 { text-align:center; font-size:18pt; font-weight:bold; margin:0 0 8px; }
     .meta-table { width:100%; margin-bottom:8px; font-size:16pt; }
     .meta-table td { padding:1px 0; vertical-align:bottom; }
+    .meta-table td:first-child { white-space:nowrap; padding-right:10px; }
     .fill { display:inline-block; border-bottom:1px dotted #111; min-height:1.3em; }
     .indent { text-indent:2em; margin:6px 0; }
     .section-title { font-weight:bold; text-align:center; margin:10px 0 3px; }
@@ -203,7 +204,7 @@ function generateMemoHTML(params: {
       <h2>บันทึกข้อความ</h2>
     </div>
     <table class="meta-table">
-      <tr><td width="16%"><b>ส่วนราชการ</b></td><td><span class="fill" style="width:100%">${department || "&nbsp;"}</span></td></tr>
+      <tr><td><b>ส่วนราชการ</b></td><td><span class="fill" style="width:100%">${department || "&nbsp;"}</span></td></tr>
       <tr>
         <td><b>ที่</b></td>
         <td>
