@@ -139,11 +139,12 @@ function generateMemoHTML(params: {
   memoNo: string;
   department: string;
   logoUrl: string;
+  fontUrl: string;
 }) {
   const {
     items, subject, reporterName, reporterPosition, gradeLevel, budgetSource,
     totalAmount, attachmentCount, directorName, directorSignUrl,
-    creatorSignUrl, dateStr, memoNo, department, logoUrl,
+    creatorSignUrl, dateStr, memoNo, department, logoUrl, fontUrl,
   } = params;
 
   const itemLines = items.map((it,i) =>
@@ -177,15 +178,19 @@ function generateMemoHTML(params: {
 
   return `<!DOCTYPE html><html><head>
   <meta charset="UTF-8">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
+    /* ★ ใช้ฟอนต์ TH Sarabun New ตัวจริงจาก public/fonts/THSarabunNew.ttf ผ่าน @font-face
+       แทนการพึ่งฟอนต์ที่ติดตั้งในเครื่อง หรือฟอนต์ทดแทนจาก Google Fonts — รับประกันว่าหน้าตาตรงกับต้นฉบับ 100%
+       ไม่ระบุ font-weight:bold แยกไฟล์ (ไม่มีไฟล์ตัวหนาให้) เบราว์เซอร์จะ synthesize ตัวหนาเองสำหรับ <b>/bold */
+    @font-face {
+      font-family: 'TH Sarabun New';
+      src: url('${fontUrl}') format('truetype');
+      font-weight: normal;
+      font-style: normal;
+      font-display: block;
+    }
     @page { size: A4 portrait; margin: 20mm 25mm; }
-    /* ★ ใช้ฟอนต์ Sarabun (เว็บฟอนต์จาก Google Fonts ตระกูลเดียวกับ TH Sarabun New) แทน
-       เพราะ TH Sarabun New เป็นฟอนต์ที่ต้องติดตั้งในเครื่อง ถ้าเครื่องไหนไม่มีฟอนต์นี้ browser จะ fallback
-       ไปใช้ฟอนต์ระบบซึ่งหน้าตาไม่เหมือนเอกสารราชการเลย การโหลดจาก Google Fonts การันตีว่าหน้าตาเหมือนกันทุกเครื่อง */
-    body { font-family:'Sarabun','TH Sarabun New','THSarabunPSK',sans-serif; font-size:16pt; color:#111; line-height:1.5; }
+    body { font-family:'TH Sarabun New','Sarabun','THSarabunPSK',sans-serif; font-size:16pt; color:#111; line-height:1.5; }
     .header { position:relative; text-align:center; min-height:60px; margin-bottom:6px; }
     .header img { position:absolute; left:0; top:0; height:58px; }
     h2 { text-align:center; font-size:18pt; font-weight:bold; margin:0 0 8px; }
@@ -275,7 +280,16 @@ function generateMemoHTML(params: {
     </div>
 
     ${photosPageHTML}
-    <script>window.onload=()=>window.print()<\/script>
+    <script>
+      window.onload = () => {
+        // ★ รอให้ฟอนต์ TH Sarabun New โหลดเสร็จก่อนค่อยเปิดหน้าต่างพิมพ์ กัน print ด้วยฟอนต์ fallback
+        if (document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(() => window.print());
+        } else {
+          window.print();
+        }
+      };
+    <\/script>
   </body></html>`;
 }
 
@@ -324,8 +338,10 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
         photos: r.photo_urls ?? [],
       }));
     if (items.length === 0) { alert("กรุณาเลือกรายการอย่างน้อย 1 รายการ"); return; }
-    // ★ ใช้ origin ของหน้าปัจจุบันประกอบ URL ตราครุฑ (public/images.jpg) กันปัญหา relative path ในหน้าต่างที่เปิดใหม่
+    // ★ ใช้ origin ของหน้าปัจจุบันประกอบ URL ตราครุฑ (public/images.jpg) และฟอนต์ TH Sarabun New
+    //   (public/fonts/THSarabunNew.ttf) กันปัญหา relative path ในหน้าต่างที่เปิดใหม่
     const logoUrl = typeof window !== "undefined" ? `${window.location.origin}/images.jpg` : "/images.jpg";
+    const fontUrl = typeof window !== "undefined" ? `${window.location.origin}/fonts/THSarabunNew.ttf` : "/fonts/THSarabunNew.ttf";
     const html = generateMemoHTML({
       items,
       subject,
@@ -342,6 +358,7 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
       memoNo,
       department,
       logoUrl,
+      fontUrl,
     });
     const w = window.open("","_blank","width=900,height=780");
     if (!w) return;

@@ -68,6 +68,7 @@ export default function StudentsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     supabase.rpc("get_my_classrooms").then(({ data }: { data: Classroom[] | null }) => {
@@ -99,6 +100,7 @@ export default function StudentsPage() {
   function openAddForm() {
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setSaveError("");
     setShowForm(true);
   }
 
@@ -118,6 +120,7 @@ export default function StudentsPage() {
       guardian_phone: s.guardian_phone ?? "",
       address: s.address ?? "",
     });
+    setSaveError("");
     setShowForm(true);
   }
 
@@ -128,6 +131,7 @@ export default function StudentsPage() {
       return;
     }
     setSaving(true);
+    setSaveError("");
     const cid = selectedClass.classroom_id;
     const payload = {
       ...form,
@@ -136,15 +140,33 @@ export default function StudentsPage() {
       classroom_id: cid,
     };
 
-    const { error } = editingId
-      ? await supabase.from("students").update(payload).eq("id", editingId)
-      : await supabase.from("students").insert(payload);
+    // ✅ เพิ่ม .select() เพื่อตรวจสอบว่ามีแถวถูกบันทึก/แก้ไขจริงกี่แถว
+    // (เดิม: ถ้า RLS ของตาราง students ไม่อนุญาตให้แก้ไขแถวนี้ Supabase จะไม่โยน error
+    //  แต่จะ "อัปเดตสำเร็จ 0 แถว" แบบเงียบๆ ทำให้ดูเหมือนบันทึกได้ทั้งที่ข้อมูลไม่เปลี่ยน)
+    const query = editingId
+      ? supabase.from("students").update(payload).eq("id", editingId).select()
+      : supabase.from("students").insert(payload).select();
+
+    const { data: savedRows, error } = await query;
 
     setSaving(false);
+
     if (error) {
+      console.error("students save error:", error);
+      setSaveError("บันทึกไม่สำเร็จ: " + error.message);
       alert("บันทึกไม่สำเร็จ: " + error.message);
       return;
     }
+
+    if (!savedRows || savedRows.length === 0) {
+      const msg = editingId
+        ? "ไม่สามารถบันทึกการแก้ไขได้ — ระบบไม่พบสิทธิ์ในการแก้ไขแถวข้อมูลนี้ กรุณาตรวจสอบ RLS policy (UPDATE) ของตาราง students หรือแจ้งผู้ดูแลระบบ"
+        : "ไม่สามารถเพิ่มข้อมูลได้ — กรุณาตรวจสอบ RLS policy (INSERT) ของตาราง students";
+      setSaveError(msg);
+      alert(msg);
+      return;
+    }
+
     setShowForm(false);
     loadStudents(cid);
   }
@@ -281,6 +303,12 @@ export default function StudentsPage() {
                 <X className="h-5 w-5 text-slate-400" />
               </button>
             </div>
+
+            {saveError && (
+              <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">
+                ⚠️ {saveError}
+              </div>
+            )}
 
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
               <Field label="เลขที่" value={form.seat_number} onChange={(v) => setForm({ ...form, seat_number: v })} type="number" />

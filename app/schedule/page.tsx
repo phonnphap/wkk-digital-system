@@ -5,6 +5,8 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { format } from "date-fns";
+import { th } from "date-fns/locale";
 
 const supabase = createClient();
 
