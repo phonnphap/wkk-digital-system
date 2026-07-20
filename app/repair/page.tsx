@@ -147,11 +147,13 @@ function generateMemoHTML(params: {
   } = params;
 
   const itemLines = items.map((it,i) =>
-    `<div style="margin:4px 0">${toThaiDigits(i+1)}. ${it.title}${it.detail ? ` (${it.detail})` : ""} จำนวน ${it.amount ? toThaiDigits(it.amount.toLocaleString("th-TH")) : "…………"} บาท</div>`
+    `<div style="margin:2px 0">${toThaiDigits(i+1)}. ${it.title}${it.detail ? ` (${it.detail})` : ""} จำนวน ${it.amount ? toThaiDigits(it.amount.toLocaleString("th-TH")) : "…………"} บาท</div>`
   ).join("");
 
   // ★ กล่อง "ตรวจเสนอ" เป็นรายการคงที่ตามแบบฟอร์มราชการจริง (เอาส่วนเลือกได้มากกว่า 1 ตำแหน่งออกแล้ว)
-  const routingBoxes = ROUTING_LABELS.map(label => `
+  //   เพิ่มหัวข้อ "ตรวจเสนอ" ที่มุมบนของกล่อง ให้ตรงกับเอกสารต้นฉบับ (เดิมขาดหายไป)
+  const routingBoxes = `<div style="font-weight:bold;margin-bottom:4px">ตรวจเสนอ</div>` +
+    ROUTING_LABELS.map(label => `
     <div style="margin:3px 0">.................... ${label}</div>`).join("") +
     `<div style="margin:3px 0">....................</div>`;
 
@@ -177,21 +179,22 @@ function generateMemoHTML(params: {
   <meta charset="UTF-8">
   <style>
     @page { size: A4; margin: 20mm 25mm; }
-    body { font-family:'TH Sarabun New','THSarabunPSK','Sarabun',sans-serif; font-size:16pt; color:#111; line-height:1.7; }
+    body { font-family:'TH Sarabun New','THSarabunPSK','Sarabun',sans-serif; font-size:16pt; color:#111; line-height:1.5; }
     .header { text-align:center; margin-bottom:6px; }
-    .header img { height:70px; display:block; margin:0 auto 6px; }
-    h2 { text-align:center; font-size:18pt; font-weight:bold; margin:0 0 10px; }
-    .meta-table { width:100%; margin-bottom:10px; font-size:16pt; }
-    .meta-table td { padding:2px 0; vertical-align:top; }
-    .indent { text-indent:2em; margin:8px 0; }
-    .section-title { font-weight:bold; text-align:center; margin:14px 0 4px; }
-    .routing-box { border:1px solid #111; padding:10px 16px; width:60%; margin-top:8px; }
+    .header img { height:65px; display:block; margin:0 auto 4px; }
+    h2 { text-align:center; font-size:18pt; font-weight:bold; margin:0 0 8px; }
+    .meta-table { width:100%; margin-bottom:8px; font-size:16pt; }
+    .meta-table td { padding:1px 0; vertical-align:bottom; }
+    .fill { display:inline-block; border-bottom:1px dotted #111; min-height:1.3em; }
+    .indent { text-indent:2em; margin:6px 0; }
+    .section-title { font-weight:bold; text-align:center; margin:10px 0 3px; }
+    .routing-box { border:1px solid #111; padding:8px 14px; width:60%; margin-top:6px; }
     .sign-section { display:flex; justify-content:flex-end; margin-top:20px; }
     .sign-box { text-align:center; width:260px; }
-    .sign-img { height:56px; display:block; margin:0 auto; object-fit:contain; }
+    .sign-img { height:50px; display:block; margin:0 auto; object-fit:contain; }
     .sign-line { border-bottom:1px dotted #111; width:200px; margin:0 auto 4px; height:20px; }
-    .director-block { margin-top:40px; }
-    .director-sign { display:flex; justify-content:flex-end; margin-top:16px; }
+    .director-block { margin-top:12px; }
+    .director-sign { display:flex; justify-content:flex-end; margin-top:12px; }
     @media print { button{display:none} }
   </style></head>
   <body>
@@ -200,13 +203,16 @@ function generateMemoHTML(params: {
       <h2>บันทึกข้อความ</h2>
     </div>
     <table class="meta-table">
-      <tr><td width="16%"><b>ส่วนราชการ</b></td><td>${department || "กลุ่มบริหารทั่วไป"}</td></tr>
+      <tr><td width="16%"><b>ส่วนราชการ</b></td><td><span class="fill" style="width:100%">${department || "&nbsp;"}</span></td></tr>
       <tr>
         <td><b>ที่</b></td>
-        <td style="width:50%">${memoNo ? toThaiDigits(memoNo) : "…………………………"}</td>
+        <td>
+          <span class="fill" style="width:45%">${memoNo ? toThaiDigits(memoNo) : "&nbsp;"}</span>
+          &nbsp;&nbsp;&nbsp;<b>วันที่</b>&nbsp;
+          <span class="fill" style="width:33%">${toThaiDigits(dateStr) || "&nbsp;"}</span>
+        </td>
       </tr>
-      <tr><td><b>วันที่</b></td><td>${toThaiDigits(dateStr)}</td></tr>
-      <tr><td><b>เรื่อง</b></td><td>${subject}</td></tr>
+      <tr><td><b>เรื่อง</b></td><td><span class="fill" style="width:100%">${subject}</span></td></tr>
       <tr><td><b>เรียน</b></td><td>ผู้อำนวยการโรงเรียนวัดเขียนเขต</td></tr>
     </table>
 
@@ -225,7 +231,7 @@ function generateMemoHTML(params: {
       (${totalAmount ? bahttext(totalAmount) : "……………………"}) เพื่อดำเนินการปรับปรุงและซ่อมแซมรายการดังต่อไปนี้
     </p>
     <div style="padding-left:1.5em">${itemLines}</div>
-    <p style="text-align:right;font-weight:bold;margin:10px 0">
+    <p style="text-align:right;font-weight:bold;margin:6px 0">
       รวมเป็นเงินทั้งสิ้น ${totalAmount ? toThaiDigits(totalAmount.toLocaleString("th-TH")) : "……………"} บาท
     </p>
 
@@ -236,7 +242,7 @@ function generateMemoHTML(params: {
     </p>
 
     <div class="section-title">ข้อเสนอแนะ</div>
-    <p style="text-align:center;margin:2px 0 8px">เพื่อโปรดทราบและพิจารณา</p>
+    <p style="text-align:center;margin:2px 0 6px">เพื่อโปรดทราบและพิจารณา</p>
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
       <div class="routing-box">${routingBoxes}</div>
       <div class="sign-box">
