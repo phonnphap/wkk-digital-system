@@ -123,8 +123,15 @@ type ChangeRequest = {
 };
 type ClubPeriod = { id: string; grade_label: string; day_of_week: number; slot_label: string; academic_year_id: string };
 type Club = { id: string; name: string; teacher_id: string; grade_label: string; room_note?: string; academic_year_id: string; teacher?: Teacher };
+type SubjectAdditionRequest = {
+  id: string; requester_id: string; subject_code: string; name_th: string;
+  grade_level: string; subject_group?: string; status: "pending" | "approved" | "rejected";
+  reject_reason?: string; reviewed_by?: string; reviewed_at?: string; created_at: string;
+  requester?: any;
+};
 
 const GRADE_LABELS_MS = ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"];
+const ALL_GRADE_LABELS = ["อ.2", "อ.3", "ป.1", "ป.2", "ป.3", "ป.4", "ป.5", "ป.6", "ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"];
 
 function getClassroomGradeLabel(c: { room_name?: string }): string {
   const m = (c.room_name ?? "").match(/([ปมอ])\.?(\d+)/);
@@ -264,9 +271,6 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
 
   // ★ ครูคนที่ 2 (ผู้ร่วมสอน): เปิดให้ครูทุกระดับเลือกได้จากรายชื่อครูทั้งหมด (ยกเว้นคนที่เลือกเป็นครู 1 แล้ว)
   const selectableTeacher2Options = teachers.filter(t => t.id !== teacherId1);
-  // ★ สิทธิ์ระดับผู้บริหาร/หัวหน้า ที่บันทึกได้ทันทีไม่ต้องรออนุมัติ
-  const isFullAdminLevel = ["admin","director","deputy_director"].includes(currentUser.role)
-    || extraRoles.includes("dept_head") || extraRoles.includes("grade_head");
   const dc = DAY_COLORS[day - 1];
 
   function getRoomGradeLevel() {
@@ -309,13 +313,9 @@ const filteredByGrade = roomGradeLabel
       note,
     };
 
-    // ★ ถ้าเป็นครูทั่วไป/ครูประจำชั้น (ไม่ใช่ admin/dept_head/grade_head) และมีการเพิ่ม/เปลี่ยนครูคนที่ 2
-    // ต้องส่งเป็นคำขอให้แอดมิน/ฝ่ายบริหารอนุมัติเสมอ แม้ว่าปกติจะแก้คาบของตัวเองได้ทันที (permission="direct")
-    const teacher2Changed = (teacherId2 || null) !== (entry?.teacher_id_2 ?? null);
-    const mustRequestApproval = !isFullAdminLevel && teacher2Changed;
-    const effectiveDirect = canEditDirect && !mustRequestApproval;
-
-    if (effectiveDirect) await onSave(data);
+    // ★ FIX: ไม่ต้องรออนุมัติสำหรับครูคนที่ 2 อีกต่อไป — ถ้าผู้ใช้แก้คาบของตัวเอง/มีสิทธิ์แก้ตรง (permission="direct")
+    // ก็บันทึกได้ทันทีทั้งครู 1 และครู 2 โดยไม่ต้องผ่านการอนุมัติ
+    if (canEditDirect) await onSave(data);
     else await onRequestChange(data);
     setLoading(false);
   }
@@ -328,11 +328,7 @@ const filteredByGrade = roomGradeLabel
         <div className={`${dc.header} px-6 py-4`}>
           <p className="text-sm text-white/80">{DAYS[day-1]} · {slot.slot_label} · {formatTime(slot.start_time)}–{formatTime(slot.end_time)}</p>
           <h3 className="text-lg font-black text-white mt-0.5">
-            {canEditDirect
-              ? ((teacherId2 || null) !== (entry?.teacher_id_2 ?? null) && !isFullAdminLevel
-                  ? "📝 เสนอขอเพิ่ม/เปลี่ยนครูร่วมสอน (รออนุมัติ)"
-                  : (entry ? "✏️ แก้ไขคาบเรียน" : "➕ เพิ่มคาบเรียน"))
-              : "📝 เสนอขอแก้ไขคาบเรียน"}
+            {canEditDirect ? (entry ? "✏️ แก้ไขคาบเรียน" : "➕ เพิ่มคาบเรียน") : "📝 เสนอขอแก้ไขคาบเรียน"}
           </h3>
           <p className="text-sm text-white/70">ห้อง {classroom.grade_group} {classroom.room_name}</p>
         </div>
@@ -371,7 +367,7 @@ const filteredByGrade = roomGradeLabel
               {filteredSubjects.map(s => <option key={s.id} value={s.id}>{s.subject_code} {s.name_th}</option>)}
             </select>
             {filteredSubjects.length === 0 && (
-              <p className="text-xs text-red-500 font-bold mt-1">⚠️ ไม่พบวิชา กรุณาเพิ่มวิชาในระบบ</p>
+              <p className="text-xs text-red-500 font-bold mt-1">⚠️ ไม่พบวิชา กรุณาเพิ่มวิชาในระบบ (ดูปุ่ม “➕ ขอเพิ่มรายวิชา” ที่หน้าคำขอ)</p>
             )}
           </div>
 
@@ -396,11 +392,9 @@ const filteredByGrade = roomGradeLabel
               <option value="">— ไม่มีครูคนที่ 2 —</option>
               {selectableTeacher2Options.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
             </select>
-            {!isFullAdminLevel && (
-              <p className="text-xs text-amber-600 font-bold mt-1">
-                ⚠️ การเพิ่ม/เปลี่ยนครูคนที่ 2 ต้องได้รับการอนุมัติจากแอดมินหรือฝ่ายบริหารก่อนจึงจะมีผล
-              </p>
-            )}
+            <p className="text-xs text-slate-400 font-bold mt-1">
+              💡 {canEditDirect ? "เพิ่ม/เปลี่ยนครูคนที่ 2 บันทึกได้ทันที ไม่ต้องรออนุมัติ" : "จะถูกส่งไปพร้อมคำขอแก้ไขคาบนี้เพื่อรออนุมัติ"}
+            </p>
           </div>
 
           {!canEditDirect && (
@@ -421,11 +415,7 @@ const filteredByGrade = roomGradeLabel
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm">ยกเลิก</button>
           <button onClick={handleSubmit} disabled={loading}
             className="flex-[2] py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm disabled:opacity-50">
-            {loading ? "⏳..." : (
-              canEditDirect && ((teacherId2 || null) === (entry?.teacher_id_2 ?? null) || isFullAdminLevel)
-                ? "💾 บันทึก"
-                : "📤 ส่งคำขออนุมัติ"
-            )}
+            {loading ? "⏳..." : (canEditDirect ? "💾 บันทึก" : "📤 ส่งคำขออนุมัติ")}
           </button>
         </div>
       </div>
@@ -537,6 +527,178 @@ function ChangeRequestsPanel({ requests, subjects, teachers, classrooms, timeSlo
                   </div>
                 </div>
                 {req.note && <p className="text-xs text-slate-500 mt-2 bg-slate-50 rounded-lg px-3 py-1.5">💬 {req.note}</p>}
+                {req.reject_reason && <p className="text-xs text-red-600 mt-2 bg-red-50 rounded-lg px-3 py-1.5">❌ {req.reject_reason}</p>}
+                <p className="text-xs text-slate-400 mt-1">{new Date(req.created_at).toLocaleDateString("th-TH", { day:"numeric", month:"short", year:"numeric" })}</p>
+              </div>
+              {canApprove && req.status === "pending" && (
+                <div className="flex gap-2 shrink-0">
+                  <button disabled={loading === req.id}
+                    onClick={async () => { setLoading(req.id); await onApprove(req.id); setLoading(null); }}
+                    className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-sm disabled:opacity-50">
+                    {loading === req.id ? "⏳" : "✅ อนุมัติ"}
+                  </button>
+                  <button onClick={() => setRejectId(req.id)}
+                    className="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-sm">❌ ปฏิเสธ</button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Subject Addition Request Modal + Panel ────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function AddSubjectRequestModal({ subjects, onClose, onSubmit }: {
+  subjects: Subject[]; onClose: () => void; onSubmit: (d: { subject_code: string; name_th: string; grade_level: string; subject_group: string }) => Promise<void>;
+}) {
+  const existingGroups = [...new Set(subjects.map(s => s.subject_group).filter(Boolean))].sort() as string[];
+  const [subjectCode,  setSubjectCode]  = useState("");
+  const [nameTh,       setNameTh]       = useState("");
+  const [gradeLevel,   setGradeLevel]   = useState(ALL_GRADE_LABELS[0]);
+  const [subjectGroup, setSubjectGroup] = useState("");
+  const [loading,      setLoading]      = useState(false);
+
+  const inp = "w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm font-bold focus:border-emerald-400 focus:outline-none";
+
+  async function handleSubmit() {
+    if (!subjectCode.trim() || !nameTh.trim() || !gradeLevel) {
+      alert("กรุณากรอกรหัสวิชา ชื่อวิชา และเลือกชั้น");
+      return;
+    }
+    setLoading(true);
+    await onSubmit({ subject_code: subjectCode.trim(), name_th: nameTh.trim(), grade_level: gradeLevel, subject_group: subjectGroup.trim() });
+    setLoading(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="bg-emerald-600 px-6 py-4">
+          <h3 className="text-lg font-black text-white">➕ ขอเพิ่มรายวิชาใหม่</h3>
+          <p className="text-sm text-white/70">ส่งคำขอให้แอดมิน/ผู้บริหารตรวจสอบและอนุมัติ</p>
+        </div>
+
+        <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">รหัสวิชา *</label>
+            <input value={subjectCode} onChange={e => setSubjectCode(e.target.value)} placeholder="เช่น ว31101" className={inp} />
+          </div>
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">ชื่อวิชา *</label>
+            <input value={nameTh} onChange={e => setNameTh(e.target.value)} placeholder="เช่น วิทยาศาสตร์พื้นฐาน" className={inp} />
+          </div>
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">ชั้น *</label>
+            <select value={gradeLevel} onChange={e => setGradeLevel(e.target.value)} className={inp}>
+              {ALL_GRADE_LABELS.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+              กลุ่มสาระ <span className="text-slate-400 font-normal normal-case">(ถ้ามี)</span>
+            </label>
+            <input value={subjectGroup} onChange={e => setSubjectGroup(e.target.value)}
+              placeholder="เช่น วิทยาศาสตร์และเทคโนโลยี" list="subject-group-suggestions" className={inp} />
+            <datalist id="subject-group-suggestions">
+              {existingGroups.map(g => <option key={g} value={g} />)}
+            </datalist>
+          </div>
+        </div>
+
+        <div className="px-5 pb-5 flex gap-2 border-t border-slate-100 pt-4">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm">ยกเลิก</button>
+          <button onClick={handleSubmit} disabled={loading}
+            className="flex-[2] py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm disabled:opacity-50">
+            {loading ? "⏳..." : "📤 ส่งคำขอ"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SubjectRequestsPanel({ requests, canApprove, onApprove, onReject }: {
+  requests: SubjectAdditionRequest[];
+  canApprove: boolean;
+  onApprove: (id: string) => Promise<void>;
+  onReject: (id: string, reason: string) => Promise<void>;
+}) {
+  const [rejectId,     setRejectId]     = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [tab,          setTab]          = useState<"pending" | "history">("pending");
+  const [loading,      setLoading]      = useState<string | null>(null);
+
+  const pending = requests.filter(r => r.status === "pending");
+  const history = requests.filter(r => r.status !== "pending");
+  const list    = tab === "pending" ? pending : history;
+
+  const statusBadge = (s: string) => {
+    if (s === "pending")  return <span className="text-xs font-black px-2 py-0.5 rounded-lg bg-amber-100 text-amber-700 border border-amber-300">⏳ รออนุมัติ</span>;
+    if (s === "approved") return <span className="text-xs font-black px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-700 border border-emerald-300">✅ อนุมัติแล้ว</span>;
+    return <span className="text-xs font-black px-2 py-0.5 rounded-lg bg-red-100 text-red-700 border border-red-300">❌ ปฏิเสธ</span>;
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-slate-50 border-b px-5 py-3 flex items-center justify-between">
+        <div>
+          <h3 className="font-black text-slate-700">📚 คำขอเพิ่มรายวิชาใหม่</h3>
+          {pending.length > 0 && <p className="text-xs text-amber-600 font-bold">มี {pending.length} รายการรออนุมัติ</p>}
+        </div>
+        <div className="flex gap-1">
+          {(["pending", "history"] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${tab === t ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+              {t === "pending" ? `⏳ รออนุมัติ${pending.length > 0 ? ` (${pending.length})` : ""}` : "📜 ประวัติ"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {rejectId && (
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="font-black text-slate-800 text-lg mb-3">❌ เหตุผลที่ปฏิเสธ</h3>
+            <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={3}
+              placeholder="กรุณาระบุเหตุผล..."
+              className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm resize-none focus:border-red-400 focus:outline-none mb-4" />
+            <div className="flex gap-2">
+              <button onClick={() => { setRejectId(null); setRejectReason(""); }}
+                className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">ยกเลิก</button>
+              <button onClick={async () => {
+                if (!rejectReason.trim()) { alert("กรุณาระบุเหตุผล"); return; }
+                setLoading(rejectId);
+                await onReject(rejectId, rejectReason);
+                setRejectId(null); setRejectReason(""); setLoading(null);
+              }} className="flex-[2] py-2.5 rounded-xl bg-red-500 text-white font-black text-sm">❌ ยืนยันปฏิเสธ</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="divide-y divide-slate-100">
+        {list.length === 0 && (
+          <div className="text-center py-10 text-slate-400">
+            <p className="text-3xl mb-2">{tab === "pending" ? "✅" : "📭"}</p>
+            <p className="font-bold text-sm">{tab === "pending" ? "ไม่มีรายการรออนุมัติ" : "ยังไม่มีประวัติ"}</p>
+          </div>
+        )}
+        {list.map(req => (
+          <div key={req.id} className="px-5 py-4">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-2">
+                  {statusBadge(req.status)}
+                  <span className="text-xs text-slate-500 font-bold">{fullName(req.requester)}</span>
+                </div>
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 inline-block">
+                  <p className="font-bold text-slate-700 text-sm">{req.subject_code} · {req.name_th}</p>
+                  <p className="text-slate-500 text-xs">ชั้น {req.grade_level}{req.subject_group ? ` · ${req.subject_group}` : ""}</p>
+                </div>
                 {req.reject_reason && <p className="text-xs text-red-600 mt-2 bg-red-50 rounded-lg px-3 py-1.5">❌ {req.reject_reason}</p>}
                 <p className="text-xs text-slate-400 mt-1">{new Date(req.created_at).toLocaleDateString("th-TH", { day:"numeric", month:"short", year:"numeric" })}</p>
               </div>
@@ -1063,6 +1225,8 @@ export default function SchedulePage() {
   const [teachers,         setTeachers]         = useState<Teacher[]>([]);
   const [entries,          setEntries]          = useState<TimetableEntry[]>([]);
   const [changeRequests,   setChangeRequests]   = useState<ChangeRequest[]>([]);
+  const [subjectRequests,  setSubjectRequests]  = useState<SubjectAdditionRequest[]>([]);
+  const [showAddSubjectRequest, setShowAddSubjectRequest] = useState(false);
   const [academicYearsRaw, setAcademicYearsRaw] = useState<AcademicYearRaw[]>([]);
   const [academicYears,    setAcademicYears]    = useState<{ id: string; year_name: string }[]>([]);
   const [selectedYear,     setSelectedYear]     = useState("");
@@ -1324,6 +1488,20 @@ useEffect(() => {
 
   useEffect(() => { loadChangeRequests(); }, [loadChangeRequests]);
 
+  // ── Load subject addition requests ────────────────────────────────────────
+  const loadSubjectRequests = useCallback(async () => {
+    if (!user) return;
+    const isAdminUser = ADMIN_ROLES.includes(user.role);
+    let query = (supabase.from("subject_addition_requests") as any)
+      .select("*, requester:users!subject_addition_requests_requester_id_fkey(id,first_name,last_name,full_name)")
+      .order("created_at", { ascending: false });
+    if (!isAdminUser) query = query.eq("requester_id", user.id);
+    const { data } = await query;
+    setSubjectRequests((data ?? []) as SubjectAdditionRequest[]);
+  }, [user]);
+
+  useEffect(() => { loadSubjectRequests(); }, [loadSubjectRequests]);
+
   // ── applyScheduleType ─────────────────────────────────────────────────────
   async function applyScheduleType(type: string) {
     await (supabase.from("classrooms") as any).update({ schedule_type: type }).eq("id", selectedRoom);
@@ -1479,6 +1657,66 @@ useEffect(() => {
     }
   }
 
+  // ── Subject addition request: submit / approve / reject ───────────────────
+  async function handleAddSubjectRequest(d: { subject_code: string; name_th: string; grade_level: string; subject_group: string }) {
+    if (!user) return;
+    try {
+      const { error } = await (supabase.from("subject_addition_requests") as any).insert([{
+        requester_id: user.id,
+        subject_code: d.subject_code,
+        name_th: d.name_th,
+        grade_level: d.grade_level,
+        subject_group: d.subject_group || null,
+        status: "pending",
+      }]);
+      if (error) throw error;
+      alert("✅ ส่งคำขอเพิ่มรายวิชาแล้ว รอแอดมินอนุมัติ");
+      await loadSubjectRequests();
+    } catch (err: any) {
+      console.error("[handleAddSubjectRequest] error:", err);
+      alert("❌ ส่งคำขอไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
+    }
+  }
+
+  async function handleApproveSubjectRequest(requestId: string) {
+    if (!user) return;
+    try {
+      const req = subjectRequests.find(r => r.id === requestId);
+      if (!req) return;
+      const { error: insErr } = await (supabase.from("subjects") as any).insert([{
+        subject_code: req.subject_code, name_th: req.name_th, subject_group: req.subject_group ?? null,
+      }]);
+      if (insErr) throw insErr;
+      const { error: updErr } = await (supabase.from("subject_addition_requests") as any)
+        .update({ status: "approved", reviewed_by: user.id, reviewed_at: new Date().toISOString() })
+        .eq("id", requestId);
+      if (updErr) throw updErr;
+
+      const { data: subjectsData } = await supabase.from("subjects")
+        .select("id,subject_code,name_th,subject_group").order("subject_code");
+      setSubjects((subjectsData ?? []) as Subject[]);
+      await loadSubjectRequests();
+      alert("✅ อนุมัติและเพิ่มรายวิชาใหม่เข้าระบบแล้ว");
+    } catch (err: any) {
+      console.error("[handleApproveSubjectRequest] error:", err);
+      alert("❌ อนุมัติไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
+    }
+  }
+
+  async function handleRejectSubjectRequest(requestId: string, reason: string) {
+    if (!user) return;
+    try {
+      const { error } = await (supabase.from("subject_addition_requests") as any)
+        .update({ status: "rejected", reject_reason: reason, reviewed_by: user.id, reviewed_at: new Date().toISOString() })
+        .eq("id", requestId);
+      if (error) throw error;
+      await loadSubjectRequests();
+    } catch (err: any) {
+      console.error("[handleRejectSubjectRequest] error:", err);
+      alert("❌ ปฏิเสธคำขอไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
+    }
+  }
+
   // ── Derived values ────────────────────────────────────────────────────────
   if (loading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-blue-500 font-black text-lg animate-pulse">กำลังโหลดตารางสอน...</div></div>;
   if (!user)   return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><p className="text-red-500 font-black">❌ กรุณาเข้าสู่ระบบก่อน</p></div>;
@@ -1500,6 +1738,7 @@ useEffect(() => {
   });
   const homeroomClassroom = classrooms.find(c => c.homeroom_teacher_id === user.id || c.homeroom_teacher_2_id === user.id) ?? null;
   const pendingCount      = changeRequests.filter(r => r.status === "pending").length;
+  const pendingSubjectCount = subjectRequests.filter(r => r.status === "pending").length;
 
   const subjectColorMap: Record<string, typeof SUBJECT_COLORS[0]> = {};
   subjects.forEach((s, i) => { subjectColorMap[s.id] = SUBJECT_COLORS[i % SUBJECT_COLORS.length]; });
@@ -1620,6 +1859,13 @@ const totalScheduledPeriods = entries.length;
     onClose={() => setShowClubAdmin(false)} onReload={loadClubs}
   />
 )}
+{showAddSubjectRequest && (
+  <AddSubjectRequestModal
+    subjects={subjects}
+    onClose={() => setShowAddSubjectRequest(false)}
+    onSubmit={async (d) => { await handleAddSubjectRequest(d); setShowAddSubjectRequest(false); }}
+  />
+)}
 
       {/* Top bar */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3 print:hidden">
@@ -1649,8 +1895,8 @@ const totalScheduledPeriods = entries.length;
               <button onClick={() => setViewMode("requests")}
                 className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all relative ${viewMode === "requests" ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
                 📋 คำขอ
-                {pendingCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">{pendingCount}</span>
+                {(pendingCount + pendingSubjectCount) > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">{pendingCount + pendingSubjectCount}</span>
                 )}
               </button>
               {isAdmin && (
@@ -1870,9 +2116,15 @@ const totalScheduledPeriods = entries.length;
           {/* ── คำขอ ── */}
           {viewMode === "requests" && (
             <div>
-              <div className="mb-4">
-                <h2 className="text-xl font-black text-slate-800">📋 คำขอแก้ไขตารางสอน</h2>
-                <p className="text-slate-400 text-sm">{isApprover ? "คุณสามารถอนุมัติหรือปฏิเสธคำขอได้" : "คำขอที่คุณส่งไป"}</p>
+              <div className="mb-4 flex items-start justify-between flex-wrap gap-3">
+                <div>
+                  <h2 className="text-xl font-black text-slate-800">📋 คำขอ</h2>
+                  <p className="text-slate-400 text-sm">{isApprover ? "คุณสามารถอนุมัติหรือปฏิเสธคำขอได้" : "คำขอที่คุณส่งไป"}</p>
+                </div>
+                <button onClick={() => setShowAddSubjectRequest(true)}
+                  className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm shrink-0">
+                  ➕ ขอเพิ่มรายวิชา
+                </button>
               </div>
               <div className={`mb-4 rounded-2xl border-2 px-4 py-3 flex items-center gap-3 ${isApprover ? "bg-indigo-50 border-indigo-200" : "bg-blue-50 border-blue-200"}`}>
                 <span className="text-xl">{isApprover ? "🔑" : "👤"}</span>
@@ -1890,6 +2142,14 @@ const totalScheduledPeriods = entries.length;
                 onApprove={handleApproveRequest}
                 onReject={handleRejectRequest}
               />
+              <div className="mt-6">
+                <SubjectRequestsPanel
+                  requests={subjectRequests}
+                  canApprove={isAdmin}
+                  onApprove={handleApproveSubjectRequest}
+                  onReject={handleRejectSubjectRequest}
+                />
+              </div>
             </div>
           )}
 
