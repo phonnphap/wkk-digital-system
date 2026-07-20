@@ -177,11 +177,17 @@ function generateMemoHTML(params: {
 
   return `<!DOCTYPE html><html><head>
   <meta charset="UTF-8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
     @page { size: A4 portrait; margin: 20mm 25mm; }
-    body { font-family:'TH Sarabun New','THSarabunPSK','Sarabun',sans-serif; font-size:16pt; color:#111; line-height:1.5; }
-    .header { text-align:center; margin-bottom:6px; }
-    .header img { height:65px; display:block; margin:0 auto 4px; }
+    /* ★ ใช้ฟอนต์ Sarabun (เว็บฟอนต์จาก Google Fonts ตระกูลเดียวกับ TH Sarabun New) แทน
+       เพราะ TH Sarabun New เป็นฟอนต์ที่ต้องติดตั้งในเครื่อง ถ้าเครื่องไหนไม่มีฟอนต์นี้ browser จะ fallback
+       ไปใช้ฟอนต์ระบบซึ่งหน้าตาไม่เหมือนเอกสารราชการเลย การโหลดจาก Google Fonts การันตีว่าหน้าตาเหมือนกันทุกเครื่อง */
+    body { font-family:'Sarabun','TH Sarabun New','THSarabunPSK',sans-serif; font-size:16pt; color:#111; line-height:1.5; }
+    .header { position:relative; text-align:center; min-height:60px; margin-bottom:6px; }
+    .header img { position:absolute; left:0; top:0; height:58px; }
     h2 { text-align:center; font-size:18pt; font-weight:bold; margin:0 0 8px; }
     .meta-table { width:100%; margin-bottom:8px; font-size:16pt; }
     .meta-table td { padding:1px 0; vertical-align:bottom; }
