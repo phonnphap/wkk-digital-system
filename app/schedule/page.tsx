@@ -1212,6 +1212,71 @@ function DayDetailModal({ day, entries, timeSlots, subjects, teachers, classroom
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ── Teacher Conflict Panel (ตรวจสอบครูสอนซ้อนคาบ) ─────────────────────────────
+// ★ ใช้ร่วมกันทั้งในแท็บ "duplicates" (แอดมิน, ลบได้) และแท็บ "คำขอ" (ทุกโรล, ดูอย่างเดียวถ้าไม่ใช่แอดมิน)
+// ══════════════════════════════════════════════════════════════════════════════
+function TeacherConflictPanel({ groups, classrooms, allClassrooms, subjects, teachers, timeSlots, canManage, onDeleteEntry }: {
+  groups: { key: string; list: { teacherId: string; entry: TimetableEntry }[] }[];
+  classrooms: Classroom[]; allClassrooms: Classroom[]; subjects: Subject[]; teachers: Teacher[]; timeSlots: TimeSlot[];
+  canManage: boolean;
+  onDeleteEntry: (id: string) => Promise<void>;
+}) {
+  return (
+    <div>
+      <div className="mb-4">
+        <h2 className="text-lg font-black text-slate-800">👤 ตรวจสอบครูสอนซ้อนคาบ</h2>
+        <p className="text-slate-400 text-sm">ครูคนเดียวกันถูกจัดให้สอนคนละห้องในวัน/เวลาเดียวกัน (สอนพร้อมกัน 2 ที่ไม่ได้)</p>
+      </div>
+      {groups.length === 0 ? (
+        <div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">
+          <p className="text-3xl mb-2">✅</p>
+          <p className="font-bold text-sm">ไม่พบครูสอนซ้อนคาบ</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {groups.map(({ key, list }) => {
+            const teacher = teachers.find(t => t.id === list[0].teacherId);
+            const dayOfWeek = list[0].entry.day_of_week;
+            const slot = timeSlots.find(s => s.id === list[0].entry.time_slot_id);
+            return (
+              <div key={key} className="bg-white rounded-2xl border-2 border-rose-200 shadow-sm overflow-hidden">
+                <div className="bg-rose-50 border-b border-rose-200 px-5 py-3">
+                  <p className="font-black text-rose-700 text-sm">
+                    ⚠️ {displayName(teacher)} · {DAYS[(dayOfWeek ?? 1) - 1]} · {slot?.slot_label ?? "—"} ({formatTime(slot?.start_time ?? "")}–{formatTime(slot?.end_time ?? "")})
+                  </p>
+                  <p className="text-rose-600 text-xs font-bold">ถูกจัดสอนพร้อมกัน {list.length} ห้อง</p>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {list.map(({ entry: e }) => {
+                    const room = classrooms.find(c => c.id === e.classroom_id) ?? allClassrooms.find(c => c.id === e.classroom_id);
+                    const subject = subjects.find(s => s.id === e.subject_id) ?? (e as any).subject;
+                    return (
+                      <div key={e.id} className="px-5 py-3 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-bold text-slate-800 text-sm">ห้อง {room?.grade_group} {room?.room_name}</p>
+                          <p className="text-slate-500 text-xs">{(subject as any)?.name_th ?? "—"}</p>
+                        </div>
+                        {canManage && (
+                          <button
+                            onClick={async () => { if (confirm(`ลบคาบนี้ออกจากห้อง ${room?.room_name}?`)) { await onDeleteEntry(e.id); } }}
+                            className="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-xs shrink-0">
+                            🗑️ ลบคาบนี้
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ── Main Page ─────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 export default function SchedulePage() {
@@ -1460,9 +1525,9 @@ const loadAllEntriesForCheck = useCallback(async () => {
   setCheckingAllYears(false);
 }, []);
 
-// โหลดเฉพาะตอนเข้าแท็บ "duplicates" (ไม่ต้องโหลดทุกครั้งที่เปลี่ยนปี)
+// โหลดตอนเข้าแท็บ "duplicates" (แอดมิน) หรือ "requests" (ทุกโรล — ใช้แสดงส่วนตรวจสอบครูสอนซ้อนคาบ)
 useEffect(() => {
-  if (viewMode === "duplicates") loadAllEntriesForCheck();
+  if (viewMode === "duplicates" || viewMode === "requests") loadAllEntriesForCheck();
 }, [viewMode, loadAllEntriesForCheck]);
 
   useEffect(() => { loadEntries(); }, [loadEntries]);
@@ -1501,6 +1566,23 @@ useEffect(() => {
   }, [user]);
 
   useEffect(() => { loadSubjectRequests(); }, [loadSubjectRequests]);
+
+  // ── แจ้งเตือนครูผู้ขอ เมื่อคำขอเพิ่มรายวิชาของตัวเองได้รับการอนุมัติแล้ว ───────
+  // (เก็บรายการที่แจ้งไปแล้วไว้ใน localStorage ต่อผู้ใช้ เพื่อไม่แจ้งซ้ำทุกครั้งที่โหลดหน้า)
+  useEffect(() => {
+    if (!user) return;
+    const myApproved = subjectRequests.filter(r => r.requester_id === user.id && r.status === "approved");
+    if (myApproved.length === 0) return;
+    const seenKey = `subject_request_notified_${user.id}`;
+    let seenIds: string[] = [];
+    try { seenIds = JSON.parse(localStorage.getItem(seenKey) ?? "[]"); } catch { seenIds = []; }
+    const newlyApproved = myApproved.filter(r => !seenIds.includes(r.id));
+    if (newlyApproved.length > 0) {
+      const names = newlyApproved.map(r => `${r.subject_code} ${r.name_th} (ชั้น ${r.grade_level})`).join("\n");
+      alert(`✅ วิชาที่คุณขอเพิ่มได้รับการอนุมัติและถูกเพิ่มเข้าระบบแล้ว:\n${names}`);
+      localStorage.setItem(seenKey, JSON.stringify([...seenIds, ...newlyApproved.map(r => r.id)]));
+    }
+  }, [subjectRequests, user]);
 
   // ── applyScheduleType ─────────────────────────────────────────────────────
   async function applyScheduleType(type: string) {
@@ -2121,10 +2203,13 @@ const totalScheduledPeriods = entries.length;
                   <h2 className="text-xl font-black text-slate-800">📋 คำขอ</h2>
                   <p className="text-slate-400 text-sm">{isApprover ? "คุณสามารถอนุมัติหรือปฏิเสธคำขอได้" : "คำขอที่คุณส่งไป"}</p>
                 </div>
-                <button onClick={() => setShowAddSubjectRequest(true)}
-                  className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm shrink-0">
-                  ➕ ขอเพิ่มรายวิชา
-                </button>
+                {/* ★ FIX: แอดมิน/ผู้บริหารเป็นผู้อนุมัติ ไม่ใช่ผู้ขอ จึงไม่แสดงปุ่มนี้ให้แอดมิน */}
+                {!isAdmin && (
+                  <button onClick={() => setShowAddSubjectRequest(true)}
+                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm shrink-0">
+                    ➕ ขอเพิ่มรายวิชา
+                  </button>
+                )}
               </div>
               <div className={`mb-4 rounded-2xl border-2 px-4 py-3 flex items-center gap-3 ${isApprover ? "bg-indigo-50 border-indigo-200" : "bg-blue-50 border-blue-200"}`}>
                 <span className="text-xl">{isApprover ? "🔑" : "👤"}</span>
@@ -2148,6 +2233,20 @@ const totalScheduledPeriods = entries.length;
                   canApprove={isAdmin}
                   onApprove={handleApproveSubjectRequest}
                   onReject={handleRejectSubjectRequest}
+                />
+              </div>
+              {/* ★ FIX: ย้ายส่วนตรวจสอบครูสอนซ้อนคาบจากแท็บ "duplicates" (เดิมแอดมินเท่านั้น) มาแสดงในหน้าคำขอให้ทุกโรลเห็นด้วย */}
+              <div className="mt-6">
+                {checkingAllYears && (
+                  <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl px-4 py-3 text-blue-700 text-sm font-bold animate-pulse mb-4">
+                    ⏳ กำลังโหลดข้อมูลเพื่อตรวจสอบครูสอนซ้อนคาบ...
+                  </div>
+                )}
+                <TeacherConflictPanel
+                  groups={teacherConflictGroups}
+                  classrooms={classrooms} allClassrooms={allClassrooms} subjects={subjects} teachers={teachers} timeSlots={timeSlots}
+                  canManage={isAdmin}
+                  onDeleteEntry={async (id) => { await supabase.from("timetable_entries").delete().eq("id", id); await Promise.all([loadEntries(), loadAllEntriesForCheck()]); }}
                 />
               </div>
             </div>
@@ -2275,56 +2374,13 @@ const totalScheduledPeriods = entries.length;
       )}
     </div>
 
-    {/* ── ★ ใหม่: ครูสอนซ้อนคาบ (คนละห้อง) ── */}
-    <div>
-      <div className="mb-4">
-        <h2 className="text-xl font-black text-slate-800">👤 ตรวจสอบครูสอนซ้อนคาบ</h2>
-        <p className="text-slate-400 text-sm">ครูคนเดียวกันถูกจัดให้สอนคนละห้องในวัน/เวลาเดียวกัน (สอนพร้อมกัน 2 ที่ไม่ได้)</p>
-      </div>
-      {teacherConflictGroups.length === 0 ? (
-        <div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">
-          <p className="text-3xl mb-2">✅</p>
-          <p className="font-bold text-sm">ไม่พบครูสอนซ้อนคาบ</p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {teacherConflictGroups.map(({ key, list }) => {
-            const teacher = teachers.find(t => t.id === list[0].teacherId);
-            const dayOfWeek = list[0].entry.day_of_week;
-            const slot = timeSlots.find(s => s.id === list[0].entry.time_slot_id);
-            return (
-              <div key={key} className="bg-white rounded-2xl border-2 border-rose-200 shadow-sm overflow-hidden">
-                <div className="bg-rose-50 border-b border-rose-200 px-5 py-3">
-                  <p className="font-black text-rose-700 text-sm">
-                    ⚠️ {displayName(teacher)} · {DAYS[(dayOfWeek ?? 1) - 1]} · {slot?.slot_label ?? "—"} ({formatTime(slot?.start_time ?? "")}–{formatTime(slot?.end_time ?? "")})
-                  </p>
-                  <p className="text-rose-600 text-xs font-bold">ถูกจัดสอนพร้อมกัน {list.length} ห้อง</p>
-                </div>
-                <div className="divide-y divide-slate-100">
-                  {list.map(({ entry: e }) => {
-                    const room = classrooms.find(c => c.id === e.classroom_id) ?? allClassrooms.find(c => c.id === e.classroom_id);
-                    const subject = subjects.find(s => s.id === e.subject_id) ?? (e as any).subject;
-                    return (
-                      <div key={e.id} className="px-5 py-3 flex items-center justify-between gap-3">
-                        <div>
-                          <p className="font-bold text-slate-800 text-sm">ห้อง {room?.grade_group} {room?.room_name}</p>
-                          <p className="text-slate-500 text-xs">{(subject as any)?.name_th ?? "—"}</p>
-                        </div>
-                        <button
-                          onClick={async () => { if (confirm(`ลบคาบนี้ออกจากห้อง ${room?.room_name}?`)) { await supabase.from("timetable_entries").delete().eq("id", e.id); await Promise.all([loadEntries(), loadAllEntriesForCheck()]); } }}
-                          className="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-xs shrink-0">
-                          🗑️ ลบคาบนี้
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+    {/* ── ★ ครูสอนซ้อนคาบ (คนละห้อง) — ใช้ component เดียวกับที่แสดงในหน้าคำขอ ── */}
+    <TeacherConflictPanel
+      groups={teacherConflictGroups}
+      classrooms={classrooms} allClassrooms={allClassrooms} subjects={subjects} teachers={teachers} timeSlots={timeSlots}
+      canManage={true}
+      onDeleteEntry={async (id) => { await supabase.from("timetable_entries").delete().eq("id", id); await Promise.all([loadEntries(), loadAllEntriesForCheck()]); }}
+    />
   </div>
 )}
 
