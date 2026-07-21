@@ -1215,17 +1215,20 @@ function DayDetailModal({ day, entries, timeSlots, subjects, teachers, classroom
 // ── Teacher Conflict Panel (ตรวจสอบครูสอนซ้อนคาบ) ─────────────────────────────
 // ★ ใช้ร่วมกันทั้งในแท็บ "duplicates" (แอดมิน, ลบได้) และแท็บ "คำขอ" (ทุกโรล, ดูอย่างเดียวถ้าไม่ใช่แอดมิน)
 // ══════════════════════════════════════════════════════════════════════════════
-function TeacherConflictPanel({ groups, classrooms, allClassrooms, subjects, teachers, timeSlots, canManage, onDeleteEntry }: {
+function TeacherConflictPanel({ groups, classrooms, allClassrooms, subjects, teachers, timeSlots, canManage, onDeleteEntry, scopeLabel }: {
   groups: { key: string; list: { teacherId: string; entry: TimetableEntry }[] }[];
   classrooms: Classroom[]; allClassrooms: Classroom[]; subjects: Subject[]; teachers: Teacher[]; timeSlots: TimeSlot[];
   canManage: boolean;
   onDeleteEntry: (id: string) => Promise<void>;
+  scopeLabel?: string; // ★ ข้อความอธิบายขอบเขตที่แสดง เช่น "เฉพาะคาบของคุณ" สำหรับครูทั่วไป
 }) {
   return (
     <div>
       <div className="mb-4">
         <h2 className="text-lg font-black text-slate-800">👤 ตรวจสอบครูสอนซ้อนคาบ</h2>
-        <p className="text-slate-400 text-sm">ครูคนเดียวกันถูกจัดให้สอนคนละห้องในวัน/เวลาเดียวกัน (สอนพร้อมกัน 2 ที่ไม่ได้)</p>
+        <p className="text-slate-400 text-sm">
+          {scopeLabel ?? "ครูคนเดียวกันถูกจัดให้สอนคนละห้องในวัน/เวลาเดียวกัน (สอนพร้อมกัน 2 ที่ไม่ได้)"}
+        </p>
       </div>
       {groups.length === 0 ? (
         <div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">
@@ -2242,10 +2245,12 @@ const totalScheduledPeriods = entries.length;
                     ⏳ กำลังโหลดข้อมูลเพื่อตรวจสอบครูสอนซ้อนคาบ...
                   </div>
                 )}
+                {/* ★ FIX: ครูทั่วไปเห็นเฉพาะคาบซ้อนของตัวเอง ส่วนแอดมินเห็นทุกคน */}
                 <TeacherConflictPanel
-                  groups={teacherConflictGroups}
+                  groups={isAdmin ? teacherConflictGroups : teacherConflictGroups.filter(g => g.list.some(item => item.teacherId === user.id))}
                   classrooms={classrooms} allClassrooms={allClassrooms} subjects={subjects} teachers={teachers} timeSlots={timeSlots}
                   canManage={isAdmin}
+                  scopeLabel={isAdmin ? undefined : "แสดงเฉพาะคาบสอนของคุณที่ถูกจัดซ้อนกัน (สอนพร้อมกัน 2 ห้องในเวลาเดียวกันไม่ได้)"}
                   onDeleteEntry={async (id) => { await supabase.from("timetable_entries").delete().eq("id", id); await Promise.all([loadEntries(), loadAllEntriesForCheck()]); }}
                 />
               </div>
