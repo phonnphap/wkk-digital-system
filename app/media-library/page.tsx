@@ -111,9 +111,12 @@ function onedriveSrc(itemId?: string) {
 // ★ แปลงรหัสวิชา (เช่น "ว11282") เป็นระดับชั้นตามกติกา:
 // ตัวเลขหลังอักษรแรก (หลักที่ 1) = กลุ่มระดับ → 0=อนุบาล, 1=ประถม, 2=ม.ต้น, 3=ม.ปลาย
 // ตัวเลขถัดมา (หลักที่ 2) = ลำดับภายในกลุ่ม → เช่น กลุ่ม "1" เลข "1" = ป.1, เลข "2" = ป.2 ฯลฯ
+// ★ FIX: รองรับรหัสที่ไม่มีตัวอักษรนำหน้าเลย (เช่น "11282") และมี/ไม่มีช่องว่างคั่นด้วย
+// (เดิมบังคับต้องมีตัวอักษรอย่างน้อย 1 ตัว ทำให้บางรหัสวิชาแปลไม่ออกแล้วไปเข้า fallback ที่ผิด)
 function gradeFromSubjectCode(code?: string): string | undefined {
   if (!code) return undefined;
-  const m = code.match(/^[ก-ฮA-Za-z]+(\d)(\d)/);
+  const cleaned = code.trim();
+  const m = cleaned.match(/^[ก-ฮA-Za-z]*\s*(\d)(\d)/);
   if (!m) return undefined;
   const levelDigit = m[1];
   const orderDigit = parseInt(m[2], 10);
@@ -133,36 +136,26 @@ function gradeFromSubjectCode(code?: string): string | undefined {
   }
 }
 
-// ★ ดึง "วิชา → { รหัสวิชา, ชุดระดับชั้นจากตารางสอน }" ที่ครูคนนี้สอนอยู่จริงจาก timetable_entries
+// ★ ดึง "วิชา → รหัสวิชา" ที่ครูคนนี้สอนอยู่จริงจาก timetable_entries
 // เพื่อให้เลือกชื่อวิชาได้เฉพาะวิชาที่ครูผู้ล็อกอิน (หรือผู้รับผิดชอบที่เลือก) สอนอยู่
-// ระดับชั้นจริงผูกจากรหัสวิชา (gradeFromSubjectCode) เป็นหลัก ใช้ grades จากตารางสอนเป็น fallback
-async function loadTeacherSubjectGradeMap(teacherId: string): Promise<Map<string, { code: string; grades: Set<string> }>> {
-  const map = new Map<string, { code: string; grades: Set<string> }>();
+// ★ FIX: ตัด fallback ที่เคยดึง classroom.grade_group (เช่น "ประถมศึกษา") มาให้เลือกออกไปแล้ว
+// เพราะเป็นข้อความหมวดกว้างๆ ไม่ตรงกับรูปแบบ GRADE_LEVELS ที่ใช้จริง (ป.1 ... ม.6) ทำให้เลือกผิด
+// ระดับชั้นตอนนี้ผูกจาก "รหัสวิชา" ผ่าน gradeFromSubjectCode เพียงทางเดียว ถ้าแปลไม่ได้ให้ผู้ใช้เลือกเอง
+async function loadTeacherSubjectCodeMap(teacherId: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
   if (!teacherId) return map;
   const { data: rows } = await (supabase.from("timetable_entries") as any)
-    .select("subject_id, classroom_id, teacher_id, teacher_id_2")
+    .select("subject_id, teacher_id, teacher_id_2")
     .or(`teacher_id.eq.${teacherId},teacher_id_2.eq.${teacherId}`);
   const entries = (rows ?? []) as any[];
   if (entries.length === 0) return map;
 
-  const subjectIds   = [...new Set(entries.map(e => e.subject_id))];
-  const classroomIds = [...new Set(entries.map(e => e.classroom_id))];
-  const [{ data: subjectsData }, { data: classroomsData }] = await Promise.all([
-    supabase.from("subjects").select("id,subject_code,name_th").in("id", subjectIds.length ? subjectIds : ["_none_"]),
-    supabase.from("classrooms").select("id,grade_group").in("id", classroomIds.length ? classroomIds : ["_none_"]),
-  ]);
-  const subjectInfoMap: Record<string, { name: string; code: string }> = {};
-  (subjectsData ?? []).forEach((s: any) => { subjectInfoMap[s.id] = { name: s.name_th, code: s.subject_code }; });
-  const classroomGradeMap: Record<string, string> = {};
-  (classroomsData ?? []).forEach((c: any) => { classroomGradeMap[c.id] = c.grade_group; });
+  const subjectIds = [...new Set(entries.map(e => e.subject_id))];
+  const { data: subjectsData } = await supabase.from("subjects")
+    .select("id,subject_code,name_th")
+    .in("id", subjectIds.length ? subjectIds : ["_none_"]);
 
-  entries.forEach(e => {
-    const info  = subjectInfoMap[e.subject_id];
-    const grade = classroomGradeMap[e.classroom_id];
-    if (!info) return;
-    if (!map.has(info.name)) map.set(info.name, { code: info.code, grades: new Set() });
-    if (grade) map.get(info.name)!.grades.add(grade);
-  });
+  (subjectsData ?? []).forEach((s: any) => { map.set(s.name_th, s.subject_code); });
   return map;
 }
 
@@ -272,32 +265,29 @@ function MediaFormModal({ item, currentUser, isAdmin, teachers, onSave, onClose 
   const [loading, setLoading] = useState(false);
 
   // ── วิชาที่ผู้รับผิดชอบสอนอยู่จริง (ผูกจากตารางสอน) → ใช้กรองช่องวิชา + ผูกระดับชั้นอัตโนมัติจากรหัสวิชา ──
-  const [subjectGradeMap, setSubjectGradeMap] = useState<Map<string, { code: string; grades: Set<string> }>>(new Map());
+  const [subjectCodeMap, setSubjectCodeMap] = useState<Map<string, string>>(new Map());
   const [loadingSubjects, setLoadingSubjects] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     setLoadingSubjects(true);
-    loadTeacherSubjectGradeMap(ownerId).then(map => { if (!cancelled) { setSubjectGradeMap(map); setLoadingSubjects(false); } });
+    loadTeacherSubjectCodeMap(ownerId).then(map => { if (!cancelled) { setSubjectCodeMap(map); setLoadingSubjects(false); } });
     return () => { cancelled = true; };
   }, [ownerId]);
 
-  const availableSubjects = [...subjectGradeMap.keys()].sort();
-  const currentSubjectEntry = subject ? subjectGradeMap.get(subject) : undefined;
-  const availableGradesForSubject = currentSubjectEntry && currentSubjectEntry.grades.size > 0
-    ? [...currentSubjectEntry.grades].sort((a, b) => GRADE_LEVELS.indexOf(a) - GRADE_LEVELS.indexOf(b))
-    : GRADE_LEVELS;
+  const availableSubjects = [...subjectCodeMap.keys()].sort();
+  const currentSubjectCode = subject ? subjectCodeMap.get(subject) : undefined;
+  const currentSubjectGrade = gradeFromSubjectCode(currentSubjectCode);
+  // ★ เลือกได้จากรายการระดับชั้นมาตรฐานเสมอ (ไม่ผสมข้อความหมวดกว้างๆ จากห้องเรียนอีกต่อไป)
+  const availableGradesForSubject = GRADE_LEVELS;
 
-  // ★ เลือกวิชา → ผูกระดับชั้นอัตโนมัติจาก "รหัสวิชา" เป็นหลัก (เช่น ว11282 → ป.1)
-  // ถ้ารหัสวิชาแปลไม่ได้ ค่อย fallback ไปใช้ระดับชั้นจากห้องที่สอนจริงในตารางสอน
+  // ★ เลือกวิชา → ผูกระดับชั้นอัตโนมัติจาก "รหัสวิชา" เท่านั้น (เช่น ว11282 → ป.1)
+  // ถ้ารหัสวิชาแปลไม่ได้ ปล่อยว่างไว้ให้ผู้ใช้เลือกเองจากรายการระดับชั้นมาตรฐาน
   function handleSubjectChange(v: string) {
     setSubject(v);
-    const entry = subjectGradeMap.get(v);
-    const fromCode = gradeFromSubjectCode(entry?.code);
-    if (fromCode) { setGradeLevel(fromCode); return; }
-    const grades = entry ? [...entry.grades] : [];
-    if (grades.length === 1) setGradeLevel(grades[0]);
-    else if (grades.length > 0 && !grades.includes(gradeLevel)) setGradeLevel("");
+    const code = subjectCodeMap.get(v);
+    const fromCode = gradeFromSubjectCode(code);
+    setGradeLevel(fromCode ?? "");
   }
 
   const inp = "w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm font-bold focus:border-blue-400 focus:outline-none";
@@ -426,7 +416,7 @@ function MediaFormModal({ item, currentUser, isAdmin, teachers, onSave, onClose 
             </div>
             <div>
               <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
-                ระดับชั้น {currentSubjectEntry && gradeFromSubjectCode(currentSubjectEntry.code) && <span className="text-slate-400 normal-case font-normal">(ผูกจากรหัสวิชาอัตโนมัติ)</span>}
+                ระดับชั้น {currentSubjectGrade && <span className="text-slate-400 normal-case font-normal">(ผูกจากรหัสวิชาอัตโนมัติ)</span>}
               </label>
               <select value={gradeLevel} onChange={e => setGradeLevel(e.target.value)} className={inp}>
                 <option value="">— เลือกระดับชั้น —</option>
