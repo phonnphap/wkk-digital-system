@@ -79,8 +79,7 @@ export default function TrainingPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col" style={{ fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" }}>
       <div className="bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-500 px-5 py-4 flex items-center gap-3 shadow-lg shrink-0">
-        <button onClick={() => router.push('/dashboard')}
-          className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white font-bold text-lg shrink-0">←</button>
+        <button onClick={()=>router.push("/dashboard")} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg">🏠</button>
         <div className="flex-1 min-w-0">
           <h1 className="text-white font-bold text-lg leading-tight">📚 รายงานการอบรมรายบุคคล</h1>
           <p className="text-blue-100 text-sm">{access.user.full_name}{access.canViewAll ? ' · เห็นข้อมูลทั้งหมด' : ''}</p>
