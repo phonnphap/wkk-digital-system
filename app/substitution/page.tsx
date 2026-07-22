@@ -12,20 +12,18 @@ const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "acade
 // ══════════════════════════════════════════════════════════
 // ── Types ─────────────────────────────────────────────────
 // ★ ปรับให้ตรงกับ schema ที่หน้าใบลา (app/leave/page.tsx) ใช้จริง
-//   (classrooms.grade_group/schedule_type, subjects.name_th/subject_code,
-//    timetable_entries.teacher_id_2 สำหรับ co-teaching)
 // ══════════════════════════════════════════════════════════
 interface User {
   id: string; first_name: string; last_name: string;
   title?: string; role: string; position?: string; academic_level?: string;
-  grade_level?: string; email?: string;
+  grade_level?: string; email?: string; extra_roles?: string[];
 }
 interface TimeSlot {
   id: string; slot_number: number; start_time: string; end_time: string;
   slot_label: string; is_break: boolean; schedule_type?: string;
 }
 interface Classroom {
-  id: string; room_name: string; grade_group?: string; schedule_type?: string;
+  id: string; room_name: string; grade_group?: string; schedule_type?: string; homeroom_teacher_id?: string | null;
 }
 interface Subject {
   id: string; subject_code?: string; name_th: string;
@@ -33,21 +31,19 @@ interface Subject {
 interface TimetableEntry {
   id: string; classroom_id: string; subject_id: string; teacher_id: string; teacher_id_2?: string | null;
   day_of_week: number; time_slot_id: string; academic_year_id: string;
-  // เติมโดย enrichEntries() — ต้องเหมือนหน้าใบลาเป๊ะ ไม่งั้นชื่อวิชา/ห้อง/คาบจะไม่ตรงกัน
+  // เติมโดย enrichEntries() — ต้องเหมือนหน้าใบลาเป๊ะ
   slot_number?: number | null; slot_label?: string | null; start_time?: string | null; end_time?: string | null;
   is_break?: boolean; room_name?: string | null; grade_group?: string | null;
-  subject_name?: string | null; subject_code?: string | null;
+  subject_name?: string | null; subject_code?: string | null; schedule_type?: string | null;
 }
 interface SwapRequest {
   id: string; requester_id: string; target_teacher_id: string;
-  requester_entry_id: string; target_entry_id: string;
+  requester_entry_id: string; target_entry_id: string | null;
   swap_date: string; reason?: string; status: string;
   responded_at?: string; created_at: string;
   requester?: User; target_teacher?: User;
   requester_entry?: TimetableEntry; target_entry?: TimetableEntry;
 }
-// ★ แก้ชื่อตารางจาก "substitute_records" (เดิม, ไม่มีจริงในระบบใบลา) เป็น
-//   "substitution_records" (ตารางจริงที่หน้าใบลาเขียนลงไป) — คอลัมน์ก็ปรับให้ตรงกัน
 interface SubRecord {
   id: string; leave_request_id?: string | null; original_teacher_id?: string | null; absent_teacher_id: string;
   substitute_teacher_id?: string; timetable_entry_id?: string;
@@ -55,7 +51,6 @@ interface SubRecord {
   subject_id?: string; hours_count: number; assigned_by?: string;
   status: string; note?: string | null; academic_year_id?: string; created_at: string;
   absent_teacher?: User; substitute_teacher?: User;
-  // เติมฝั่ง client จาก enrichedEntries/classroomsMap/subjectsMap (ดู loadData)
   subject_name?: string | null; room_name?: string | null; slot_label?: string | null; grade_group?: string | null;
 }
 interface LeaveRequest {
@@ -95,7 +90,6 @@ const STATUS_SUB: Record<string,{label:string;cls:string}> = {
   confirmed: { label:"ยืนยัน",   cls:"bg-emerald-50 text-emerald-700 border-emerald-300" },
   done:      { label:"เสร็จสิ้น",cls:"bg-slate-100 text-slate-600 border-slate-300" },
 };
-// ★ ที่มาของรายการสอนแทน อ่านจาก note ที่หน้าใบลาบันทึกไว้ (ดูหมายเหตุการแก้ไข submitLeave ท้ายไฟล์)
 const SOURCE_LABEL: Record<string,{label:string;cls:string}> = {
   auto:      { label:"🤖 อัตโนมัติจากใบลา", cls:"bg-indigo-50 text-indigo-600 border-indigo-200" },
   specific:  { label:"🎯 เจาะจงจากใบลา",   cls:"bg-emerald-50 text-emerald-600 border-emerald-200" },
@@ -107,9 +101,18 @@ function sourceOf(note?: string | null): keyof typeof SOURCE_LABEL {
   return "admin";
 }
 
+// ── สายชั้น / ครูประจำชั้น helpers ────────────────────────
+function extractGradeOnly(gradeGroup?: string | null): string {
+  if (!gradeGroup) return "";
+  return gradeGroup.split("/")[0].trim();
+}
+function isHomeroomPriorityGrade(gradeGroup?: string | null): boolean {
+  const g = extractGradeOnly(gradeGroup);
+  return g === "ป.1" || g === "ป.2";
+}
+
 // ══════════════════════════════════════════════════════════
 // ── Schedule templates — ★ ต้องเหมือนกับหน้าใบลา (leave/page.tsx) เป๊ะ
-//   คัดลอกมาตรงๆ เพื่อให้ virtual slot id resolve ออกมาตรงกันทุกที่ในระบบ
 // ══════════════════════════════════════════════════════════
 const SCHEDULE_TEMPLATES = [
   {
@@ -207,6 +210,7 @@ function enrichEntries(rawEntries: any[], classroomsMap: Record<string, any>, su
       grade_group: room?.grade_group ?? null,
       subject_name: subject?.name_th ?? null,
       subject_code: subject?.subject_code ?? null,
+      schedule_type: room?.schedule_type ?? null,
     };
   });
 }
@@ -217,6 +221,15 @@ function computeSlotHours(slot: any): number {
   const [eh, em] = slot.end_time.split(":").map(Number);
   const diffMin = (eh * 60 + em) - (sh * 60 + sm);
   return diffMin > 0 ? Math.round((diffMin / 60) * 100) / 100 : 1;
+}
+
+function computeFreePeriodsForDay(teacherId: string, dow: number, scheduleType: string | undefined, allEntries: TimetableEntry[], allTimeSlots: any[]): number {
+  const templateSlots = buildRoomSlots(scheduleType, allTimeSlots).filter((s: any) => !s.is_break);
+  const busyStartTimes = new Set(
+    allEntries.filter(e => e.day_of_week === dow && (e.teacher_id === teacherId || e.teacher_id_2 === teacherId))
+      .map(e => (e.start_time ?? "").slice(0, 5))
+  );
+  return templateSlots.filter((s: any) => !busyStartTimes.has(s.start_time)).length;
 }
 
 // ── Print helpers ─────────────────────────────────────────
@@ -328,30 +341,131 @@ function printTeacherSubStat(records: SubRecord[], users: User[]) {
   w.document.close();
 }
 
-// ── SwapRequestModal ────────────────────────────────────────
-function SwapRequestModal({ user, teachers, myEntries, allEntries, academicYearId, onSave, onClose }: {
-  user: User; teachers: User[]; myEntries: TimetableEntry[];
-  allEntries: TimetableEntry[]; academicYearId: string;
+// ══════════════════════════════════════════════════════════
+// ── SwapRequestModal — เขียนใหม่ทั้งหมด ─────────────────────
+// 1) วันที่อยู่ช่องแรกและใช้กรองคาบจริง (เดิมไม่กรอง)
+// 2) คาบของฉันวันนั้นแสดงเป็นตารางกดเลือก (เทา -> น้ำเงินเมื่อเลือก)
+// 3) รายชื่อครูที่ว่าง เรียงตามกฎ: ครูประจำชั้น(ป.1/ป.2) -> สายชั้นเดียวกัน
+//    (คาบว่างเยอะสุดก่อน, เท่ากันดูสถิติสอนแทนน้อยสุดก่อน) -> วิชาเดียวกัน -> ที่เหลือ
+// ══════════════════════════════════════════════════════════
+function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academicYearId, onSave, onClose }: {
+  user: User; allEntries: TimetableEntry[]; allTeachers: User[]; allTimeSlots: any[]; academicYearId: string;
   onSave: () => void; onClose: () => void;
 }) {
-  const [targetTeacherId, setTargetTeacherId] = useState("");
-  const [myEntryId, setMyEntryId] = useState("");
-  const [targetEntryId, setTargetEntryId] = useState("");
   const [swapDate, setSwapDate] = useState(ymd(new Date()));
+  const [selectedEntry, setSelectedEntry] = useState<TimetableEntry | null>(null);
+  const [pickedTeacherId, setPickedTeacherId] = useState("");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
-  const [errors, setErrors] = useState<Record<string,boolean>>({});
+  const [loadingMeta, setLoadingMeta] = useState(true);
+  const [onLeaveIds, setOnLeaveIds] = useState<Set<string>>(new Set());
+  const [subHistCounts, setSubHistCounts] = useState<Record<string, number>>({});
+  const [homeroomMap, setHomeroomMap] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, boolean>>({});
 
-  const targetEntries = useMemo(() =>
-    allEntries.filter(e => e.teacher_id === targetTeacherId || e.teacher_id_2 === targetTeacherId)
-  ,[allEntries, targetTeacherId]);
+  const dow = swapDate ? dowOf(swapDate) : null;
+
+  const myDayEntries = useMemo(() =>
+    (dow === null ? [] : allEntries.filter(e =>
+      (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break
+    )).sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0))
+  , [allEntries, dow, user.id]);
+
+  // ★ โหลดข้อมูลประกอบใหม่ทุกครั้งที่เปลี่ยนวันที่: ครูที่ลาวันนั้น + สถิติสอนแทนสะสม + ครูประจำชั้น
+  useEffect(() => {
+    setSelectedEntry(null); setPickedTeacherId("");
+    if (!swapDate) return;
+    setLoadingMeta(true);
+    (async () => {
+      const [leavesRes, subHistRes, classroomsRes] = await Promise.all([
+        supabase.from("leave_requests").select("user_id,start_date,end_date,status").in("status", ["pending","approved"]),
+        supabase.from("substitution_records").select("substitute_teacher_id"),
+        // ★ ครูประจำชั้น: fetch แยกแบบกันพัง เผื่อคอลัมน์ homeroom_teacher_id ยังไม่มีในตาราง classrooms
+        supabase.from("classrooms").select("id,homeroom_teacher_id"),
+      ]);
+
+      const ids = new Set<string>();
+      (leavesRes.data || []).forEach((l: any) => { if (l.start_date <= swapDate && l.end_date >= swapDate) ids.add(l.user_id); });
+      setOnLeaveIds(ids);
+
+      const counts: Record<string, number> = {};
+      (subHistRes.data || []).forEach((r: any) => { counts[r.substitute_teacher_id] = (counts[r.substitute_teacher_id] ?? 0) + 1; });
+      setSubHistCounts(counts);
+
+      if (classroomsRes.error) {
+        console.error("[SwapRequestModal] ไม่พบคอลัมน์ homeroom_teacher_id ในตาราง classrooms (กฎครูประจำชั้น ป.1/ป.2 จะไม่ทำงาน):", classroomsRes.error.message);
+        setHomeroomMap({});
+      } else {
+        const hrMap: Record<string, string> = {};
+        (classroomsRes.data || []).forEach((c: any) => { if (c.homeroom_teacher_id) hrMap[c.id] = c.homeroom_teacher_id; });
+        setHomeroomMap(hrMap);
+      }
+      setLoadingMeta(false);
+    })();
+  }, [swapDate]);
+
+  // ★ รายชื่อครูที่ว่าง จัดเป็นชั้นลำดับความสำคัญตามกฎ
+  const tiers = useMemo(() => {
+    if (!selectedEntry || dow === null) return [] as { label: string; teachers: User[] }[];
+    const startKey = (selectedEntry.start_time ?? "").slice(0, 5);
+    const busyIds = new Set(
+      allEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
+        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+    );
+    const isEligible = (t: User) => t.id !== user.id && !busyIds.has(t.id) && !onLeaveIds.has(t.id);
+    const scored = (list: User[]) => list
+      .filter(isEligible)
+      .map(t => ({
+        teacher: t,
+        free: computeFreePeriodsForDay(t.id, dow, selectedEntry.schedule_type ?? undefined, allEntries, allTimeSlots),
+        hist: subHistCounts[t.id] ?? 0,
+      }))
+      .sort((a, b) => b.free - a.free || a.hist - b.hist)
+      .map(x => x.teacher);
+
+    const result: { label: string; teachers: User[] }[] = [];
+    const used = new Set<string>();
+
+    // 1. ครูประจำชั้น — ป.1/ป.2 เท่านั้น
+    if (isHomeroomPriorityGrade(selectedEntry.grade_group)) {
+      const hrId = homeroomMap[selectedEntry.classroom_id];
+      const hr = hrId ? allTeachers.find(t => t.id === hrId) : null;
+      if (hr && isEligible(hr)) { result.push({ label: "👩‍🏫 ครูประจำชั้น (สอนแทนก่อนเสมอ)", teachers: [hr] }); used.add(hr.id); }
+    }
+
+    // 2. สายชั้นเดียวกัน (ทั้งโรงเรียน ไม่ใช่แค่ห้องเดียวกัน)
+    const gradeOnly = extractGradeOnly(selectedEntry.grade_group);
+    if (gradeOnly) {
+      const gradeIds = new Set(
+        allEntries.filter(e => extractGradeOnly(e.grade_group) === gradeOnly)
+          .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+      );
+      const list = scored(allTeachers.filter(t => gradeIds.has(t.id) && !used.has(t.id)));
+      if (list.length > 0) { result.push({ label: `🏫 สายชั้น ${gradeOnly}`, teachers: list }); list.forEach(t => used.add(t.id)); }
+    }
+
+    // 3. วิชาเดียวกัน (ไม่จำกัดสายชั้น)
+    if (selectedEntry.subject_id) {
+      const subjIds = new Set(
+        allEntries.filter(e => e.subject_id === selectedEntry.subject_id)
+          .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+      );
+      const list = scored(allTeachers.filter(t => subjIds.has(t.id) && !used.has(t.id)));
+      if (list.length > 0) { result.push({ label: "📘 ครูวิชาเดียวกัน", teachers: list }); list.forEach(t => used.add(t.id)); }
+    }
+
+    // 4. กรณีวิกฤต — ครูที่ว่างทั้งหมดที่เหลือ
+    const rest = scored(allTeachers.filter(t => !used.has(t.id)));
+    if (rest.length > 0) result.push({ label: "⚠️ ครูที่ว่างทั้งหมด (นอกสายชั้น/วิชา)", teachers: rest });
+
+    return result;
+  }, [selectedEntry, dow, allEntries, allTeachers, allTimeSlots, onLeaveIds, subHistCounts, homeroomMap, user.id]);
 
   const validate = () => {
     const e: Record<string,boolean> = {};
-    if (!myEntryId) e.myEntryId = true;
-    if (!targetTeacherId) e.targetTeacherId = true;
-    if (!targetEntryId) e.targetEntryId = true;
     if (!swapDate) e.swapDate = true;
+    if (!selectedEntry) e.selectedEntry = true;
+    if (!pickedTeacherId) e.pickedTeacherId = true;
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -360,8 +474,8 @@ function SwapRequestModal({ user, teachers, myEntries, allEntries, academicYearI
     if (!validate()) return;
     setSaving(true);
     const { error } = await supabase.from("class_swap_requests").insert([{
-      requester_id: user.id, target_teacher_id: targetTeacherId,
-      requester_entry_id: myEntryId, target_entry_id: targetEntryId,
+      requester_id: user.id, target_teacher_id: pickedTeacherId,
+      requester_entry_id: selectedEntry!.id, target_entry_id: null,
       swap_date: swapDate, reason, status: "pending", academic_year_id: academicYearId,
     }]);
     setSaving(false);
@@ -375,65 +489,88 @@ function SwapRequestModal({ user, teachers, myEntries, allEntries, academicYearI
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[90vh]"
+      <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh]"
         onClick={e=>e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
           <h3 className="font-bold text-slate-800 text-base">🔄 ขอแลกคาบสอน</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">✕</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
-          {/* คาบของฉัน */}
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-              คาบของฉันที่ต้องการแลก <span className="text-red-400">*</span>
-            </label>
-            <select value={myEntryId} onChange={e=>setMyEntryId(e.target.value)} className={iCls(errors.myEntryId)}>
-              <option value="">— เลือกคาบ —</option>
-              {myEntries.map(e=>(
-                <option key={e.id} value={e.id}>
-                  {TH_DAYS[e.day_of_week]} {e.slot_label} — {e.subject_name} ({e.room_name})
-                </option>
-              ))}
-            </select>
-            {errors.myEntryId && <p className="text-xs text-red-500 mt-1">กรุณาเลือกคาบของคุณ</p>}
-          </div>
-          {/* ครูที่ต้องการแลก */}
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-              ครูที่ต้องการแลกด้วย <span className="text-red-400">*</span>
-            </label>
-            <select value={targetTeacherId} onChange={e=>{setTargetTeacherId(e.target.value);setTargetEntryId("");}} className={iCls(errors.targetTeacherId)}>
-              <option value="">— เลือกครู —</option>
-              {teachers.filter(t=>t.id!==user.id).map(t=>(
-                <option key={t.id} value={t.id}>{fullName(t)}</option>
-              ))}
-            </select>
-            {errors.targetTeacherId && <p className="text-xs text-red-500 mt-1">กรุณาเลือกครู</p>}
-          </div>
-          {/* คาบของครูที่ต้องการ */}
-          {targetTeacherId && (
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                คาบที่ต้องการแลก (ของครูคนนั้น) <span className="text-red-400">*</span>
-              </label>
-              <select value={targetEntryId} onChange={e=>setTargetEntryId(e.target.value)} className={iCls(errors.targetEntryId)}>
-                <option value="">— เลือกคาบ —</option>
-                {targetEntries.map(e=>(
-                  <option key={e.id} value={e.id}>
-                    {TH_DAYS[e.day_of_week]} {e.slot_label} — {e.subject_name} ({e.room_name})
-                  </option>
-                ))}
-              </select>
-              {errors.targetEntryId && <p className="text-xs text-red-500 mt-1">กรุณาเลือกคาบ</p>}
-            </div>
-          )}
-          {/* วันที่ */}
+          {/* ★ 1) วันที่ต้องการแลก — ช่องแรก */}
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
               วันที่ต้องการแลก <span className="text-red-400">*</span>
             </label>
             <input type="date" value={swapDate} onChange={e=>setSwapDate(e.target.value)} className={iCls(errors.swapDate)} />
           </div>
+
+          {/* ★ 2) คาบของฉันวันนั้น — ตารางกดเลือก เทา -> น้ำเงิน */}
+          {swapDate && (
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                คาบของฉันในวัน{TH_DAYS[dow!]} — กดเลือกคาบที่ต้องการแลก <span className="text-red-400">*</span>
+              </label>
+              {myDayEntries.length === 0 ? (
+                <p className="text-sm text-slate-400 py-4 text-center bg-slate-50 rounded-xl border border-slate-200">ไม่มีคาบสอนของคุณในวันนี้</p>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {myDayEntries.map(e => {
+                    const active = selectedEntry?.id === e.id;
+                    return (
+                      <button key={e.id} type="button"
+                        onClick={() => { setSelectedEntry(e); setPickedTeacherId(""); }}
+                        className={`p-2.5 rounded-xl border-2 text-[11px] font-bold text-left transition-all ${
+                          active ? "bg-blue-600 border-blue-600 text-white" : "bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200"
+                        }`}>
+                        <div className="flex justify-between"><span>{e.slot_label}</span><span className="opacity-70">{e.start_time?.slice(0,5)}</span></div>
+                        <div className="truncate mt-0.5">{e.subject_name ?? "ไม่ระบุวิชา"}</div>
+                        <div className={`truncate ${active ? "opacity-80" : "text-slate-400"}`}>{e.room_name ?? ""}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {errors.selectedEntry && <p className="text-xs text-red-500 mt-1">กรุณาเลือกคาบ</p>}
+            </div>
+          )}
+
+          {/* ★ 3) รายชื่อครูที่ว่าง เรียงตามกฎ */}
+          {selectedEntry && (
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                เลือกครูที่จะขอให้สอนแทน <span className="text-red-400">*</span>
+              </label>
+              {loadingMeta ? (
+                <p className="text-xs text-slate-400">⏳ กำลังตรวจสอบครูที่ว่าง...</p>
+              ) : tiers.length === 0 ? (
+                <p className="text-xs text-red-500 font-bold">ไม่พบครูที่ว่างในคาบนี้</p>
+              ) : (
+                <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                  {tiers.map(tier => (
+                    <div key={tier.label}>
+                      <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5">{tier.label}</p>
+                      <div className="space-y-1.5">
+                        {tier.teachers.map(t => {
+                          const active = pickedTeacherId === t.id;
+                          return (
+                            <button key={t.id} type="button" onClick={() => setPickedTeacherId(t.id)}
+                              className={`w-full text-left px-3 py-2 rounded-lg border-2 text-sm font-bold flex items-center justify-between transition-all ${
+                                active ? "bg-emerald-50 border-emerald-400 text-emerald-700" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                              }`}>
+                              <span>{fullName(t)}{t.position ? ` · ${t.position}` : ""}</span>
+                              {active && <span>✓</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {errors.pickedTeacherId && <p className="text-xs text-red-500 mt-1">กรุณาเลือกครู</p>}
+            </div>
+          )}
+
           {/* เหตุผล */}
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">เหตุผล</label>
@@ -454,7 +591,6 @@ function SwapRequestModal({ user, teachers, myEntries, allEntries, academicYearI
 }
 
 // ── AssignSubModal ──────────────────────────────────────────
-// ★ เขียนลง substitution_records (ตารางเดียวกับหน้าใบลา) แทน substitute_records เดิม
 function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, currentUser, onSave, onClose }: {
   leaveRequest: LeaveRequest; teachers: User[];
   entries: TimetableEntry[]; academicYearId: string;
@@ -591,8 +727,8 @@ export default function SubstitutionPage() {
   const [tab, setTab] = useState<"swap"|"substitute"|"stat">("swap");
   const [academicYear, setAcademicYear] = useState<AcademicYear|null>(null);
   const [teachers, setTeachers] = useState<User[]>([]);
-  const [myEntries, setMyEntries] = useState<TimetableEntry[]>([]);
   const [allEntries, setAllEntries] = useState<TimetableEntry[]>([]);
+  const [allTimeSlots, setAllTimeSlots] = useState<any[]>([]);
   const [swapRequests, setSwapRequests] = useState<SwapRequest[]>([]);
   const [subRecords, setSubRecords] = useState<SubRecord[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
@@ -602,6 +738,14 @@ export default function SubstitutionPage() {
   const [filterTeacher, setFilterTeacher] = useState("");
 
   const isAdmin = useMemo(() => ADMIN_ROLES.includes(user?.role ?? ""), [user]);
+  // ★ ขยายสิทธิ์ "จัดสอนแทน" ให้หัวหน้าสายชั้น/หัวหน้าหมวด ไม่ใช่แค่แอดมิน
+  //   ต้องมีคอลัมน์ users.extra_roles (text[]) เก็บค่าเช่น 'grade_head', 'dept_head'
+  const canAssignSub = useMemo(() => {
+    if (!user) return false;
+    if (isAdmin) return true;
+    const roles = user.extra_roles ?? [];
+    return roles.includes("grade_head") || roles.includes("dept_head");
+  }, [user, isAdmin]);
 
   // ── Load user ────────────────────────────────────────────
   useEffect(() => {
@@ -609,11 +753,11 @@ export default function SubstitutionPage() {
       const { data: { user: au } } = await supabase.auth.getUser();
       if (!au) { setLoading(false); return; }
       let { data } = await supabase.from("users")
-        .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email")
+        .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email,extra_roles")
         .eq("auth_id", au.id).maybeSingle();
       if (!data && au.email) {
         const r = await supabase.from("users")
-          .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email")
+          .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email,extra_roles")
           .eq("email", au.email).maybeSingle();
         data = r.data;
         if (data) await supabase.from("users").update({ auth_id: au.id }).eq("id", (data as any).id);
@@ -637,7 +781,7 @@ export default function SubstitutionPage() {
 
     // Teachers
     const { data: tch } = await supabase.from("users")
-      .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email")
+      .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email,extra_roles")
       .in("role", ["teacher","homeroom_teacher","subject_teacher"])
       .order("first_name");
     setTeachers((tch ?? []) as User[]);
@@ -656,13 +800,13 @@ export default function SubstitutionPage() {
       supabase.from("subjects").select("id,subject_code,name_th"),
     ]);
 
-    const allTimeSlots = slotsRes.data || [];
+    const timeSlots = slotsRes.data || [];
+    setAllTimeSlots(timeSlots);
     const classroomsMap = Object.fromEntries((classroomsRes.data || []).map((c: any) => [c.id, c]));
     const subjectsMap = Object.fromEntries((subjectsRes.data || []).map((s: any) => [s.id, s]));
 
-    const allE = enrichEntries(entriesRes.data || [], classroomsMap, subjectsMap, allTimeSlots) as TimetableEntry[];
+    const allE = enrichEntries(entriesRes.data || [], classroomsMap, subjectsMap, timeSlots) as TimetableEntry[];
     setAllEntries(allE);
-    setMyEntries(allE.filter(e => e.teacher_id === user.id || e.teacher_id_2 === user.id));
 
     // Swap requests (แลกคาบระหว่างครู — เป็นคนละฟีเจอร์กับสอนแทนจากใบลา)
     const swapQ = supabase.from("class_swap_requests")
@@ -673,7 +817,7 @@ export default function SubstitutionPage() {
     const { data: swaps } = await swapQ;
     setSwapRequests((swaps ?? []) as SwapRequest[]);
 
-    // ★ Substitution records — ตารางเดียวกับที่หน้าใบลาเขียนลง (substitution_records ไม่ใช่ substitute_records)
+    // ★ Substitution records — ตารางเดียวกับที่หน้าใบลาเขียนลง
     const { data: subs, error: subsErr } = await supabase.from("substitution_records")
       .select(`*,
         absent_teacher:users!absent_teacher_id(id,first_name,last_name,title),
@@ -684,16 +828,14 @@ export default function SubstitutionPage() {
     }
     const entryMap = Object.fromEntries(allE.map(e => [e.id, e]));
     const enrichedSubs: SubRecord[] = (subs ?? []).map((r: any) => {
-      // ★ ใช้ข้อมูลจาก timetable_entries ก่อนเสมอ (ตรงที่สุด ตรงกับที่หน้าใบลาใช้)
       const entry = r.timetable_entry_id ? entryMap[r.timetable_entry_id] : null;
       if (entry) {
         return { ...r, subject_name: entry.subject_name, room_name: entry.room_name, grade_group: entry.grade_group, slot_label: entry.slot_label };
       }
-      // fallback: entry อาจถูกลบ/แก้ตารางไปแล้ว -> resolve เองจาก id ที่บันทึกไว้ตรงๆ ในแถว
       const subj = subjectsMap[r.subject_id];
       const room = classroomsMap[r.classroom_id];
-      const roomSlots = buildRoomSlots(room?.schedule_type, allTimeSlots);
-      const slot = roomSlots.find((s: any) => s.id === r.time_slot_id) ?? allTimeSlots.find((s: any) => s.id === r.time_slot_id);
+      const roomSlots = buildRoomSlots(room?.schedule_type, timeSlots);
+      const slot = roomSlots.find((s: any) => s.id === r.time_slot_id) ?? timeSlots.find((s: any) => s.id === r.time_slot_id);
       return { ...r, subject_name: subj?.name_th ?? null, room_name: room?.room_name ?? null, grade_group: room?.grade_group ?? null, slot_label: slot?.slot_label ?? null };
     });
     setSubRecords(enrichedSubs);
@@ -738,10 +880,10 @@ export default function SubstitutionPage() {
     if (filterDate) list = list.filter(r => r.substitute_date === filterDate);
     if (filterTeacher) list = list.filter(r =>
       r.absent_teacher_id === filterTeacher || r.substitute_teacher_id === filterTeacher);
-    if (!isAdmin) list = list.filter(r =>
+    if (!canAssignSub) list = list.filter(r =>
       r.absent_teacher_id === user?.id || r.substitute_teacher_id === user?.id);
     return list;
-  }, [subRecords, filterDate, filterTeacher, isAdmin, user]);
+  }, [subRecords, filterDate, filterTeacher, canAssignSub, user]);
 
   // ── Stat ─────────────────────────────────────────────────
   const statMap = useMemo(() => {
@@ -760,7 +902,6 @@ export default function SubstitutionPage() {
     return Object.entries(m).sort((a,b) => b[1].hours - a[1].hours);
   }, [subRecords]);
 
-  // ★ ประวัติรวม: แลกคาบที่ตกลงแล้ว (peer swap) + สอนแทนทุกรายการ (จากใบลา/แอดมิน) เรียงตามวันที่ล่าสุด
   const combinedHistory = useMemo(() => {
     type HistItem = { key: string; date: string; kind: "swap" | "sub"; data: SwapRequest | SubRecord };
     const swapItems: HistItem[] = swapRequests
@@ -916,8 +1057,8 @@ export default function SubstitutionPage() {
         {/* ── Tab: สอนแทน ── */}
         {tab === "substitute" && (
           <div className="max-w-4xl mx-auto p-5 space-y-5">
-            {/* Admin: จัดสอนแทนจากใบลา */}
-            {isAdmin && leaveRequests.length > 0 && (
+            {/* แอดมิน/หัวหน้าสายชั้น/หัวหน้าหมวด: จัดสอนแทนจากใบลา */}
+            {canAssignSub && leaveRequests.length > 0 && (
               <div>
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
                   📋 ครูที่ลา (รอจัดสอนแทน) — {leaveRequests.length} คน
@@ -961,7 +1102,7 @@ export default function SubstitutionPage() {
                     <input type="date" value={filterDate} onChange={e=>setFilterDate(e.target.value)}
                       className="border-2 border-blue-200 rounded-xl px-3 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none" />
                   </div>
-                  {isAdmin && (
+                  {canAssignSub && (
                     <div>
                       <label className="block text-xs font-bold text-slate-400 mb-1">ครู</label>
                       <select value={filterTeacher} onChange={e=>setFilterTeacher(e.target.value)}
@@ -976,7 +1117,7 @@ export default function SubstitutionPage() {
                       className="px-3 py-2 text-xs text-slate-400 hover:text-slate-600 underline self-end">ล้างตัวกรอง</button>
                   )}
                 </div>
-                {isAdmin && filteredSubs.length > 0 && (
+                {canAssignSub && filteredSubs.length > 0 && (
                   <div className="flex gap-2">
                     <button onClick={()=>printSubOrder(filteredSubs, filterDate?thaiDate(filterDate):"ทั้งหมด")}
                       className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5">
@@ -1042,7 +1183,7 @@ export default function SubstitutionPage() {
           <div className="max-w-3xl mx-auto p-5 space-y-5">
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-slate-700 text-base">📊 สถิติการสอนแทน</h2>
-              {isAdmin && (
+              {canAssignSub && (
                 <button onClick={()=>printTeacherSubStat(subRecords, teachers)}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl flex items-center gap-1.5">
                   🖨️ พิมพ์สถิติ (คิดขั้นเงินเดือน)
@@ -1051,7 +1192,7 @@ export default function SubstitutionPage() {
             </div>
 
             {/* My stat card */}
-            {!isAdmin && (
+            {!canAssignSub && (
               <div className="grid grid-cols-2 gap-4">
                 {[
                   { label:"ครั้งที่ขาด/ลา", value: subRecords.filter(r=>r.absent_teacher_id===user.id).length, color:"#dc2626", icon:"📋" },
@@ -1070,8 +1211,8 @@ export default function SubstitutionPage() {
               </div>
             )}
 
-            {/* All teachers stat table (admin) */}
-            {isAdmin && (
+            {/* All teachers stat table (admin/grade-head/dept-head) */}
+            {canAssignSub && (
               <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
                 <div className="px-5 py-3 border-b border-slate-100">
                   <h3 className="font-bold text-slate-700 text-sm">สรุปรายบุคคล</h3>
@@ -1108,7 +1249,7 @@ export default function SubstitutionPage() {
               </div>
             )}
 
-            {/* ★ ประวัติการแลกคาบ/สอนแทน — รวมทั้งแลกคาบเพื่อน (ตกลงแล้ว) และสอนแทนทุกที่มา */}
+            {/* ประวัติการแลกคาบ/สอนแทน */}
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-slate-100">
                 <h3 className="font-bold text-slate-700 text-sm">🕘 ประวัติการแลกคาบ/สอนแทนล่าสุด</h3>
@@ -1163,8 +1304,7 @@ export default function SubstitutionPage() {
       {/* Modals */}
       {showSwapModal && academicYear && (
         <SwapRequestModal
-          user={user} teachers={teachers}
-          myEntries={myEntries} allEntries={allEntries}
+          user={user} allEntries={allEntries} allTeachers={teachers} allTimeSlots={allTimeSlots}
           academicYearId={academicYear.id}
           onSave={async()=>{ setShowSwapModal(false); await loadData(); }}
           onClose={()=>setShowSwapModal(false)}
