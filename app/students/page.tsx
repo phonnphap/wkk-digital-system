@@ -173,9 +173,16 @@ export default function StudentsPage() {
 
   async function handleDelete(id: string) {
     if (!confirm("ยืนยันการลบนักเรียนคนนี้?")) return;
-    const { error } = await supabase.from("students").delete().eq("id", id);
+    // ✅ เพิ่ม .select() เพื่อตรวจสอบว่ามีแถวถูกลบจริงกี่แถว
+    // (เดิม: ถ้า RLS ของตาราง students ไม่อนุญาตให้ลบแถวนี้ Supabase จะไม่โยน error
+    //  แต่จะ "ลบสำเร็จ 0 แถว" แบบเงียบๆ ทำให้ดูเหมือนลบได้ทั้งที่ข้อมูลยังอยู่)
+    const { data: deletedRows, error } = await supabase.from("students").delete().eq("id", id).select();
     if (error) {
       alert("ลบไม่สำเร็จ: " + error.message);
+      return;
+    }
+    if (!deletedRows || deletedRows.length === 0) {
+      alert("ไม่สามารถลบข้อมูลได้ — ระบบไม่พบสิทธิ์ในการลบแถวข้อมูลนี้ กรุณาตรวจสอบ RLS policy (DELETE) ของตาราง students หรือแจ้งผู้ดูแลระบบ");
       return;
     }
     if (selectedClass) loadStudents(selectedClass.classroom_id);
@@ -255,18 +262,18 @@ export default function StudentsPage() {
                   <div className="flex items-center justify-between gap-3 px-4 py-3.5">
                     <button
                       onClick={() => setExpanded(active ? null : s.id)}
-                      className="flex flex-1 items-center gap-3 text-left"
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
                     >
                       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-indigo-500 to-sky-400 text-xs font-bold text-white shadow-sm">
                         {s.seat_number ?? "-"}
                       </span>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-800">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-semibold text-slate-800">
                           {s.prefix ? `${s.prefix}` : ""}
                           {s.first_name} {s.last_name}
                           {s.nick_name && <span className="ml-1 font-normal text-slate-400">({s.nick_name})</span>}
                         </p>
-                        <p className="text-xs text-slate-400">{s.student_code}</p>
+                        <p className="truncate text-[11px] text-slate-400">{s.student_code}</p>
                       </div>
                     </button>
                     <div className="flex shrink-0 items-center gap-1">
