@@ -7,7 +7,7 @@ import { addDays } from "date-fns";
 
 const supabase = createClient();
 
-const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "academic_head"];
+const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head"];
 
 // ══════════════════════════════════════════════════════════
 // ── Types ─────────────────────────────────────────────────
@@ -782,7 +782,7 @@ export default function SubstitutionPage() {
     // Teachers
 const { data: tch, error: tchErr } = await supabase.from("users")
   .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email,extra_roles")
-  .in("role", ["teacher","homeroom_teacher","subject_teacher"])
+  .in("role", ["homeroom_teacher","subject_teacher"])
   .order("first_name");
 
 if (tchErr) {
