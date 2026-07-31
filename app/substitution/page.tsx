@@ -780,11 +780,25 @@ export default function SubstitutionPage() {
     const ayId = ay?.id;
 
     // Teachers
-    const { data: tch } = await supabase.from("users")
-      .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email,extra_roles")
-      .in("role", ["teacher","homeroom_teacher","subject_teacher"])
-      .order("first_name");
-    setTeachers((tch ?? []) as User[]);
+const { data: tch, error: tchErr } = await supabase.from("users")
+  .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email,extra_roles")
+  .in("role", ["teacher","homeroom_teacher","subject_teacher"])
+  .order("first_name");
+
+if (tchErr) {
+  console.error("[SubstitutionPage] โหลด teachers ไม่สำเร็จ:", tchErr.code, tchErr.message, tchErr.details);
+  // fallback: ลองใหม่แบบไม่มี extra_roles เผื่อคอลัมน์นี้ยังไม่มีในตาราง users
+  const { data: tchFallback, error: tchErr2 } = await supabase.from("users")
+    .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email")
+    .in("role", ["teacher","homeroom_teacher","subject_teacher"])
+    .order("first_name");
+  if (tchErr2) {
+    console.error("[SubstitutionPage] fallback ก็ยังพัง:", tchErr2.message);
+  }
+  setTeachers((tchFallback ?? []) as User[]);
+} else {
+  setTeachers((tch ?? []) as User[]);
+}
 
     // ★ ตารางสอน — ใช้วิธี resolve เดียวกับหน้าใบลาเป๊ะ (schedule template + virtual slot id)
     let entriesQuery = supabase.from("timetable_entries")
