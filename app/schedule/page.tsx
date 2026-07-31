@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { format } from "date-fns";
 import { th } from "date-fns/locale";
+import { notifyTeams } from "../../lib/notify-teams";
 
 const supabase = createClient();
 
@@ -1683,6 +1684,17 @@ useEffect(() => {
         note: data.note ?? null, status: "pending",
       }]);
       if (error) throw error;
+
+      // ★ แจ้งเตือนผ่าน Teams
+      notifyTeams({
+        title: "🗓️ มีคำขอแก้ไขตารางสอนใหม่",
+        message: `${fullName(user)} ยื่นคำขอแก้ไขคาบเรียน`,
+        facts: {
+          ห้อง: classrooms.find(c => c.id === data.classroom_id)?.room_name ?? "-",
+          วัน: DAYS[(data.day_of_week ?? 1) - 1],
+        },
+      });
+
       alert("✅ ส่งคำขอแก้ไขแล้ว รอการอนุมัติ");
       await loadChangeRequests();
     } catch (err: any) {
@@ -1755,6 +1767,13 @@ useEffect(() => {
         status: "pending",
       }]);
       if (error) throw error;
+
+        // ★ แจ้งเตือนผ่าน Teams
+      notifyTeams({
+        title: "📚 มีคำขอเพิ่มรายวิชาใหม่",
+        message: `${fullName(user)} ขอเพิ่มวิชา ${d.subject_code} ${d.name_th} (ชั้น ${d.grade_level})`,
+      });
+
       alert("✅ ส่งคำขอเพิ่มรายวิชาแล้ว รอแอดมินอนุมัติ");
       await loadSubjectRequests();
     } catch (err: any) {

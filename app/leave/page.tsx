@@ -11,6 +11,7 @@ import {
   getCurrentFiscalYear, isInFiscalYear,
 } from "../../lib/leave-config";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { notifyTeams } from "../../lib/notify-teams";
 
 const supabase = createClient();
 const HR_EMAIL    = "hr@khienkhet.ac.th";
@@ -245,7 +246,13 @@ async function notifySwapAssignments(requester: UserProfile, assignments: SwapAs
           </div></div>`,
       }),
     }).catch(e => console.warn("[notifySwapAssignments] substitute email failed:", e));
-  }
+  // ★ แจ้งเตือนผ่าน Teams เพิ่มเติม
+  notifyTeams({
+    title: "📋 มีการจัดครูสอนแทนใหม่",
+    message: `${fullName(requester)} ยื่นใบลา และจัดครูสอนแทนแล้ว ${assignments.length} คาบ`,
+    facts: { วันที่แจ้ง: toThaiDate(new Date().toISOString()) },
+  });
+}
 
   const gradeHeads = allTeachers.filter(t => (t.extra_roles ?? []).includes("grade_head") && t.grade_level === requester.grade_level);
   const headEmails = gradeHeads.map(t => t.email).filter(Boolean);
@@ -1792,6 +1799,7 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
     setShowForm(false); setEditRequest(null);
     await loadRequests();
   }
+  
 
   async function deleteRequest(id:string){
     if(!confirm("ยืนยันการลบคำขอลานี้?"))return;

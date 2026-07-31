@@ -33,7 +33,7 @@ function toThaiDateShort(iso: string) {
   } catch { return ""; }
 }
 
-type NotifSource = "leave_approval" | "leave_status" | "timetable_request";
+type NotifSource = "leave_approval" | "leave_status" | "timetable_request" | "swap_request";
 type NotifItem = {
   id: string;
   source: NotifSource;
@@ -254,6 +254,29 @@ export default function DashboardPage() {
       // ── ตัวอย่างจุดที่จะเพิ่มระบบอื่นในอนาคต (แจ้งซ่อม/จองรถ/ขอออกนอกโรงเรียน) ──
       // เมื่อทราบชื่อตาราง+คอลัมน์สถานะแล้ว เพิ่ม query แบบเดียวกับด้านบน แล้ว push
       // เข้า items ได้เลย โครงสร้าง NotifItem รองรับ source ใหม่ได้ทันที (แค่เพิ่ม type)
+
+      // 4) คำขอแลกคาบที่ "รอฉันตอบรับ"   ← เพิ่มบล็อกนี้ตรงนี้
+      if (opts.profileId) {
+        const { data: swapReqs, error } = await supabase
+          .from("class_swap_requests")
+          .select("id, swap_date, created_at, requester:users!requester_id(first_name,last_name)")
+          .eq("target_teacher_id", opts.profileId)
+          .eq("status", "pending");
+        if (error) console.warn("[loadNotifications] swap request query error:", error.message);
+        (swapReqs || []).forEach((r: any) => {
+          const u = r.requester;
+          const name = `${u?.first_name ?? ""} ${u?.last_name ?? ""}`.trim() || "—";
+          items.push({
+            id: `swap-${r.id}`,
+            source: "swap_request",
+            title: "🔄 มีคำขอแลกคาบสอน",
+            detail: `${name} ขอให้คุณสอนแทนวันที่ ${toThaiDateShort(r.swap_date)}`,
+            date: r.created_at,
+            path: "/substitution",
+            urgent: true,
+          });
+        });
+      }
 
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setNotifications(items);

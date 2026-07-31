@@ -78,6 +78,9 @@ function ymd(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 function dowOf(dateStr: string): number { return new Date(dateStr + "T00:00:00").getDay(); }
+function compactIds(ids: (string | null | undefined)[]): string[] {
+  return ids.filter((id): id is string => !!id);
+}
 
 const STATUS_SWAP: Record<string,{label:string;cls:string}> = {
   pending:  { label:"รออนุมัติ",  cls:"bg-amber-50 text-amber-700 border-amber-300" },
@@ -404,13 +407,35 @@ function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academi
     })();
   }, [swapDate]);
 
+  // ── กลุ่มวิชาที่ให้นับเป็น "ใกล้เคียงกัน" ตอนหาครูสำรองขั้นที่ 3
+// match = คำที่เจอในชื่อวิชาของคาบที่ขอลา, related = คำที่ใช้ค้นหาครูสำรอง
+// useGradeBand = true → จำกัดเฉพาะครูที่สอนในช่วงชั้นเดียวกัน (ไม่ใช่ทั้งโรงเรียน)
+const SUBJECT_GROUP_RULES: { match: string[]; related: string[]; useGradeBand: boolean; groupLabel: string }[] = [
+  { match: ["วิทยาศาสตร์"], related: ["วิทยาศาสตร์", "เทคโนโลยี"], useGradeBand: true, groupLabel: "วิทยาศาสตร์/เทคโนโลยี" },
+  { match: ["คอมพิวเตอร์"], related: ["คอมพิวเตอร์"], useGradeBand: false, groupLabel: "คอมพิวเตอร์" },
+];
+
+function gradeBand(gradeGroup?: string | null): string {
+  const g = extractGradeOnly(gradeGroup);
+  if (["ป.1","ป.2","ป.3"].includes(g)) return "primary_lower";
+  if (["ป.4","ป.5","ป.6"].includes(g)) return "primary_upper";
+  if (["ม.1","ม.2","ม.3"].includes(g)) return "secondary_lower";
+  if (["ม.4","ม.5","ม.6"].includes(g)) return "secondary_upper";
+  if (g.startsWith("อ.")) return "kindergarten";
+  return "";
+}
+const GRADE_BAND_LABEL: Record<string,string> = {
+  primary_lower: "ประถมต้น", primary_upper: "ประถมปลาย",
+  secondary_lower: "มัธยมต้น", secondary_upper: "มัธยมปลาย", kindergarten: "อนุบาล",
+};
+
   // ★ รายชื่อครูที่ว่าง จัดเป็นชั้นลำดับความสำคัญตามกฎ
   const tiers = useMemo(() => {
     if (!selectedEntry || dow === null) return [] as { label: string; teachers: User[] }[];
     const startKey = (selectedEntry.start_time ?? "").slice(0, 5);
     const busyIds = new Set(
       allEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
-        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+        .flatMap(e => compactIds([e.teacher_id, e.teacher_id_2]))
     );
     const isEligible = (t: User) => t.id !== user.id && !busyIds.has(t.id) && !onLeaveIds.has(t.id);
     const scored = (list: User[]) => list
@@ -438,22 +463,41 @@ function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academi
     if (gradeOnly) {
       const gradeIds = new Set(
         allEntries.filter(e => extractGradeOnly(e.grade_group) === gradeOnly)
-          .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+          .flatMap(e => compactIds([e.teacher_id, e.teacher_id_2]))
       );
       const list = scored(allTeachers.filter(t => gradeIds.has(t.id) && !used.has(t.id)));
       if (list.length > 0) { result.push({ label: `🏫 สายชั้น ${gradeOnly}`, teachers: list }); list.forEach(t => used.add(t.id)); }
     }
 
-    // 3. วิชาเดียวกัน (ไม่จำกัดสายชั้น)
-    if (selectedEntry.subject_id) {
-      const subjIds = new Set(
-        allEntries.filter(e => e.subject_id === selectedEntry.subject_id)
-          .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-      );
-      const list = scored(allTeachers.filter(t => subjIds.has(t.id) && !used.has(t.id)));
-      if (list.length > 0) { result.push({ label: "📘 ครูวิชาเดียวกัน", teachers: list }); list.forEach(t => used.add(t.id)); }
-    }
+    // 3. วิชาเดียวกัน หรือ กลุ่มวิชาใกล้เคียง (ตามกฎพิเศษ)
+{
+  const subjectName = selectedEntry.subject_name ?? "";
+  const rule = SUBJECT_GROUP_RULES.find(r => r.match.some(k => subjectName.includes(k)));
+  const band = gradeBand(selectedEntry.grade_group);
 
+  let subjIds = new Set<string>();
+  let tierLabel = "📘 ครูวิชาเดียวกัน";
+
+  if (rule) {
+    subjIds = new Set(
+      allEntries.filter(e =>
+        rule.related.some(k => (e.subject_name ?? "").includes(k)) &&
+        (!rule.useGradeBand || gradeBand(e.grade_group) === band)
+      ).flatMap(e => compactIds([e.teacher_id, e.teacher_id_2]))
+    );
+    tierLabel = rule.useGradeBand
+      ? `📘 ครู${rule.groupLabel} (${GRADE_BAND_LABEL[band] ?? ""})`
+      : `📘 ครูวิชา${rule.groupLabel}`;
+  } else if (selectedEntry.subject_id) {
+    subjIds = new Set(
+      allEntries.filter(e => e.subject_id === selectedEntry.subject_id)
+        .flatMap(e => compactIds([e.teacher_id, e.teacher_id_2]))
+    );
+  }
+
+  const list = scored(allTeachers.filter(t => subjIds.has(t.id) && !used.has(t.id)));
+  if (list.length > 0) { result.push({ label: tierLabel, teachers: list }); list.forEach(t => used.add(t.id)); }
+}
     // 4. กรณีวิกฤต — ครูที่ว่างทั้งหมดที่เหลือ
     const rest = scored(allTeachers.filter(t => !used.has(t.id)));
     if (rest.length > 0) result.push({ label: "⚠️ ครูที่ว่างทั้งหมด (นอกสายชั้น/วิชา)", teachers: rest });
