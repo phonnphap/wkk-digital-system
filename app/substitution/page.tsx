@@ -81,6 +81,12 @@ function dowOf(dateStr: string): number { return new Date(dateStr + "T00:00:00")
 function compactIds(ids: (string | null | undefined)[]): string[] {
   return ids.filter((id): id is string => !!id);
 }
+// ★ หาครูอีกคนที่ยังสอนคู่อยู่ในคาบนี้ (ถ้ามี teacher_id_2) — ใช้เช็คว่าไม่ต้องจัดสอนแทน
+function coTeacherId(entry: { teacher_id: string; teacher_id_2?: string | null }, excludeId: string): string | null {
+  if (entry.teacher_id && entry.teacher_id !== excludeId) return entry.teacher_id;
+  if (entry.teacher_id_2 && entry.teacher_id_2 !== excludeId) return entry.teacher_id_2;
+  return null;
+}
 
 // ★ กันโรล staff/admin หลุดเข้ามาในรายชื่อครู (กันไว้อีกชั้น เผื่อ query หลักไม่ครอบคลุม)
 const EXCLUDED_TEACHER_ROLES = ["staff", "admin"];
@@ -135,14 +141,13 @@ function isHomeroomPriorityGrade(gradeGroup?: string | null): boolean {
   return g === "ป.1" || g === "ป.2";
 }
 
-// ★ หารายชื่อ id ครูที่สอนในสายชั้นเดียวกับ entry นี้ (ทั้งโรงเรียน ไม่ใช่แค่ห้องเดียวกัน)
-// ใช้เรียงลำดับ/สุ่มครูสอนแทนให้ได้ครูสายชั้นเดียวกับครูที่ลาก่อนเป็นอันดับแรก
-function sameGradeTeacherIds(entry: { grade_group?: string | null }, allEntries: TimetableEntry[]): Set<string> {
-  const gradeOnly = extractGradeOnly(entry.grade_group);
-  if (!gradeOnly) return new Set();
+// ★ หา id ครูที่มีสายชั้นเดียวกับ "ครูที่ลา" — อ้างอิงตรงจากคอลัมน์ users.grade_level
+function sameGradeTeacherIds(absentTeacher: User | null | undefined, allTeachers: User[]): Set<string> {
+  if (!absentTeacher?.grade_level) return new Set();
   return new Set(
-    allEntries.filter(e => extractGradeOnly(e.grade_group) === gradeOnly)
-      .flatMap(e => compactIds([e.teacher_id, e.teacher_id_2]))
+    allTeachers
+      .filter(t => t.grade_level && t.grade_level === absentTeacher.grade_level)
+      .map(t => t.id)
   );
 }
 
@@ -481,14 +486,14 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
 // 3) รายชื่อครูที่ว่าง เรียงตามกฎ: ครูประจำชั้น(ป.1/ป.2) -> สายชั้นเดียวกัน
 //    (คาบว่างเยอะสุดก่อน, เท่ากันดูสถิติสอนแทนน้อยสุดก่อน) -> วิชาเดียวกัน -> ที่เหลือ
 // ══════════════════════════════════════════════════════════
-function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academicYearId, onSave, onClose }: {
+function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academicYearId, initialReason, onSave, onClose }: {
   user: User; allEntries: TimetableEntry[]; allTeachers: User[]; allTimeSlots: any[]; academicYearId: string;
-  onSave: () => void; onClose: () => void;
+  initialReason?: string; onSave: () => void; onClose: () => void;
 }) {
   const [swapDate, setSwapDate] = useState(ymd(new Date()));
   const [selectedEntry, setSelectedEntry] = useState<TimetableEntry | null>(null);
   const [pickedTeacherId, setPickedTeacherId] = useState("");
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState(initialReason ?? "");
   const [saving, setSaving] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [onLeaveIds, setOnLeaveIds] = useState<Set<string>>(new Set());
@@ -772,6 +777,10 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
 }) {
   const absentId = leaveRequest.user_id;
   const absentEntries = entries.filter(e => e.teacher_id === absentId || e.teacher_id_2 === absentId);
+  const absentTeacher = useMemo(
+  () => teachers.find(t => t.id === absentId) ?? null,
+  [teachers, absentId]
+);
   const leaveDates: string[] = [];
   const start = new Date(leaveRequest.start_date+"T00:00:00");
   const end   = new Date(leaveRequest.end_date+"T00:00:00");
@@ -813,10 +822,11 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
       const dow = dowOf(date);
       const dayEntries = absentEntries.filter(e => e.day_of_week === dow && !e.is_break);
       for (const entry of dayEntries) {
-        const key = `${entry.id}_${date}`;
-        total++;
-        if (next[key]) continue; // ไม่แตะคาบที่จัดไว้เองแล้ว
-        const candidates = computeFreeTeachersForEntry(entry, date, entries, teachers, absentId);
+  const key = `${entry.id}_${date}`;
+  if (coTeacherId(entry, absentId)) continue; // ★ มีครูคู่สอนอยู่แล้ว ไม่ต้องจัด ไม่ต้องนับ
+  total++;
+  if (next[key]) continue;
+  const candidates = computeFreeTeachersForEntry(entry, date, entries, teachers, absentId);
         if (candidates.length === 0) { unfilled++; continue; }
         const scored = candidates.map(t => {
           const tKey = `${t.id}_${date}`;
@@ -915,26 +925,54 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
                     </h4>
                     <div className="space-y-2">
                       {dayEntries.map(entry => {
-                        const key = `${entry.id}_${date}`;
-                        return (
-                          <div key={key} className="flex items-center gap-3 bg-[#FDF2F8] rounded-xl px-4 py-3">
-                            <div className="shrink-0 text-center w-16">
-                              <div className="text-xs font-bold text-[#DB2777]">{entry.slot_label}</div>
-                              <div className="text-[10px] text-slate-400">{thaiTime(entry.start_time ?? undefined)}</div>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
-                              <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
-                            </div>
-                            <div className="shrink-0 w-72 sm:w-80">
-  <TeacherSearchSelect
-    teachers={computeFreeTeachersForEntry(entry, date, entries, teachers, absentId)}
-    value={assignments[key] || ""}
-    onChange={id => setAsgn(key, id)}
-    placeholder="— เลือกครูสอนแทน —"
-  />
-</div>
-                          </div>
+  const key = `${entry.id}_${date}`;
+  const coId = coTeacherId(entry, absentId);
+  const coTeacher = coId ? teachers.find(t => t.id === coId) : null;
+
+  // ★ มีครูอีกคนสอนคู่อยู่ในคาบนี้แล้ว — ไม่ต้องจัดสอนแทน แค่โชว์ให้เห็น
+  if (coTeacher) {
+    return (
+      <div key={key} className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+        <div className="shrink-0 text-center w-16">
+          <div className="text-xs font-bold text-emerald-600">{entry.slot_label}</div>
+          <div className="text-[10px] text-slate-400">{thaiTime(entry.start_time ?? undefined)}</div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
+          <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-[11px] font-bold text-emerald-600">👥 มีครูสอนคู่อยู่แล้ว</p>
+          <p className="text-sm font-bold text-emerald-800">{fullName(coTeacher)}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div key={key} className="flex items-center gap-3 bg-[#FDF2F8] rounded-xl px-4 py-3">
+      <div className="shrink-0 text-center w-16">
+        <div className="text-xs font-bold text-[#DB2777]">{entry.slot_label}</div>
+        <div className="text-[10px] text-slate-400">{thaiTime(entry.start_time ?? undefined)}</div>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
+        <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
+      </div>
+      <div className="shrink-0 w-72 sm:w-80">
+        <TeacherSearchSelect
+          teachers={sortTeachersByGrade(
+            computeFreeTeachersForEntry(entry, date, entries, teachers, absentId),
+            sameGradeTeacherIds(absentTeacher, teachers)
+          )}
+          value={assignments[key] || ""}
+          onChange={id => setAsgn(key, id)}
+          placeholder="— เลือกครูสอนแทน —"
+          loadMap={dayLoadMap(date, computeFreeTeachersForEntry(entry, date, entries, teachers, absentId))}
+        />
+      </div>
+    </div>
+
                         );
                       })}
                     </div>
@@ -969,11 +1007,13 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
   const [reason, setReason] = useState("");
   const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-
   const absentEntries = useMemo(() =>
-    absentTeacherId ? entries.filter(e => (e.teacher_id === absentTeacherId || e.teacher_id_2 === absentTeacherId) && !e.is_break) : []
-  , [entries, absentTeacherId]);
-
+  absentTeacherId ? entries.filter(e => (e.teacher_id === absentTeacherId || e.teacher_id_2 === absentTeacherId) && !e.is_break) : []
+, [entries, absentTeacherId]);
+const absentTeacher = useMemo(
+  () => allTeachers.find(t => t.id === absentTeacherId) ?? null,
+  [allTeachers, absentTeacherId]
+);
   const leaveDates = useMemo(() => {
     if (!absentTeacherId || !startDate || !endDate || startDate > endDate) return [] as string[];
     const dates: string[] = [];
@@ -998,7 +1038,7 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
     const dow = dowOf(date);
     const candidates = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId);
     if (candidates.length === 0) { alert("⚠️ ไม่มีครูว่างในคาบนี้"); return; }
-    const gradeIds = sameGradeTeacherIds(entry, entries);
+    const gradeIds = sameGradeTeacherIds(absentTeacher, allTeachers);
     let pool = candidates.filter(t => gradeIds.has(t.id));
     if (pool.length === 0) pool = candidates;
     const scored = pool.map(t => ({ t, load: computeTaughtPeriodsForDay(t.id, dow, entries) }));
@@ -1109,16 +1149,39 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
                       </h4>
                       <div className="space-y-2">
                         {dayEntries.map(entry => {
-                          const key = `${entry.id}_${date}`;
-                          const dow = dowOf(date);
-                          const candidates = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId);
-                          const gradeIds = sameGradeTeacherIds(entry, entries);
-                          const sortedCandidates = sortTeachersByGrade(candidates, gradeIds);
-                          const loadMap = Object.fromEntries(sortedCandidates.map(t => [t.id, computeTaughtPeriodsForDay(t.id, dow, entries)]));
-                          const pickedId = assignments[key] || "";
-                          const pickedLoad = pickedId ? computeTaughtPeriodsForDay(pickedId, dow, entries) : null;
-                          return (
-                            <div key={key} className="flex items-center gap-3 bg-[#FDF2F8] rounded-xl px-4 py-3">
+  const key = `${entry.id}_${date}`;
+  const coId = coTeacherId(entry, absentTeacherId);
+  const coTeacher = coId ? allTeachers.find(t => t.id === coId) : null;
+
+  // ★ มีครูอีกคนสอนคู่อยู่ในคาบนี้แล้ว — ไม่ต้องจัดสอนแทน แค่โชว์ให้เห็น
+  if (coTeacher) {
+    return (
+      <div key={key} className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+        <div className="shrink-0 text-center w-16">
+          <div className="text-xs font-bold text-emerald-600">{entry.slot_label}</div>
+          <div className="text-[10px] text-slate-400">{thaiTime(entry.start_time ?? undefined)}</div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
+          <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-[11px] font-bold text-emerald-600">👥 มีครูสอนคู่อยู่แล้ว</p>
+          <p className="text-sm font-bold text-emerald-800">{fullName(coTeacher)}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const dow = dowOf(date);
+  const candidates = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId);
+  const gradeIds = sameGradeTeacherIds(absentTeacher, allTeachers);
+  const sortedCandidates = sortTeachersByGrade(candidates, gradeIds);
+  const loadMap = Object.fromEntries(sortedCandidates.map(t => [t.id, computeTaughtPeriodsForDay(t.id, dow, entries)]));
+  const pickedId = assignments[key] || "";
+  const pickedLoad = pickedId ? computeTaughtPeriodsForDay(pickedId, dow, entries) : null;
+  return (
+    <div key={key} className="flex items-center gap-3 bg-[#FDF2F8] rounded-xl px-4 py-3">
                               <div className="shrink-0 text-center w-16">
                                 <div className="text-xs font-bold text-[#DB2777]">{entry.slot_label}</div>
                                 <div className="text-[10px] text-slate-400">{thaiTime(entry.start_time ?? undefined)}</div>
@@ -1188,6 +1251,8 @@ export default function SubstitutionPage() {
   const [showManualAssign, setShowManualAssign] = useState(false);
   const [filterDate, setFilterDate] = useState("");
   const [filterTeacher, setFilterTeacher] = useState("");
+  const [swapInitialReason, setSwapInitialReason] = useState<string | undefined>(undefined);
+  const [editingSub, setEditingSub] = useState<SubRecord|null>(null);
 
   const isAdmin = useMemo(() => ADMIN_ROLES.includes(user?.role ?? ""), [user]);
   // ★ ขยายสิทธิ์ "จัดสอนแทน" ให้หัวหน้าสายชั้น/หัวหน้าหมวด ไม่ใช่แค่แอดมิน
@@ -1351,6 +1416,69 @@ if (tchErr) {
     await supabase.from("substitution_records").update({ status: "cancelled" }).eq("id", id);
     await loadData();
   };
+  function EditSubModal({ record, allEntries, teachers, currentUser, onSave, onClose }: {
+  record: SubRecord; allEntries: TimetableEntry[]; teachers: User[]; currentUser: User;
+  onSave: () => void; onClose: () => void;
+}) {
+  const entry = allEntries.find(e => e.id === record.timetable_entry_id) ?? null;
+  const [newTeacherId, setNewTeacherId] = useState(record.substitute_teacher_id ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const candidates = useMemo(() => {
+    if (!entry) return teachers.filter(isSelectableTeacher);
+    const free = computeFreeTeachersForEntry(entry, record.substitute_date, allEntries, teachers, record.absent_teacher_id);
+    // เผื่อครูคนเดิมไม่โผล่ในลิสต์ว่าง (เช่นถูกจัดสอนแทนที่อื่นซ้อนพอดี) ให้ใส่กลับเข้าไปด้วยเสมอ
+    if (record.substitute_teacher_id && !free.some(t => t.id === record.substitute_teacher_id)) {
+      const old = teachers.find(t => t.id === record.substitute_teacher_id);
+      if (old) return [old, ...free];
+    }
+    return free;
+  }, [entry, allEntries, teachers, record]);
+
+  const handleSave = async () => {
+    if (!newTeacherId) { alert("กรุณาเลือกครูสอนแทนคนใหม่"); return; }
+    setSaving(true);
+    const { error } = await supabase.from("substitution_records").update({
+      substitute_teacher_id: newTeacherId,
+      assigned_by: currentUser.id,
+      note: `${record.note ?? ""}${record.note ? " " : ""}(แก้ไขครูสอนแทนโดยแอดมิน)`,
+    }).eq("id", record.id);
+    setSaving(false);
+    if (error) { alert("❌ "+error.message); return; }
+    onSave();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col" onClick={e=>e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between">
+          <h3 className="font-bold text-slate-800 text-base">✏️ แก้ไขครูสอนแทน</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#FCE7F3] flex items-center justify-center text-slate-500">✕</button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div className="bg-[#FDF2F8] rounded-xl px-4 py-3 text-sm">
+            <p><span className="text-slate-400">วันที่:</span> {thaiDate(record.substitute_date)} · {record.slot_label ?? "-"}</p>
+            <p><span className="text-slate-400">วิชา:</span> {record.subject_name ?? "-"} · {record.room_name ?? "-"}</p>
+            <p><span className="text-slate-400">ครูที่ลา:</span> {fullName(record.absent_teacher)}</p>
+            <p><span className="text-slate-400">ครูสอนแทนเดิม:</span> <span className="font-bold text-[#DB2777]">{fullName(record.substitute_teacher)}</span></p>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">เปลี่ยนเป็นครู *</label>
+            <TeacherSearchSelect teachers={candidates} value={newTeacherId} onChange={setNewTeacherId} placeholder="— เลือกครูสอนแทนคนใหม่ —" />
+            {candidates.length === 0 && <p className="text-xs text-red-500 font-bold mt-1">ไม่พบครูว่างในคาบนี้</p>}
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-[#FCE7F3] flex gap-2 justify-end bg-[#FDF2F8] rounded-b-2xl">
+          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#FBCFE8] text-slate-600 text-sm">ยกเลิก</button>
+          <button onClick={handleSave} disabled={saving || newTeacherId === record.substitute_teacher_id}
+            className="px-5 py-2.5 rounded-xl bg-[#DB2777] hover:bg-[#9D174D] text-white text-sm font-bold disabled:opacity-50">
+            {saving ? "กำลังบันทึก..." : "💾 บันทึกการแก้ไข"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
   // ── Filtered data ────────────────────────────────────────
   const mySwaps = useMemo(() =>
@@ -1680,6 +1808,17 @@ if (tchErr) {
         <tbody className="divide-y divide-[#FCE7F3]">
           {filteredSubs.map((r,i)=>{
             const src = sourceOf(r.note);
+            {r.absent_teacher_id === user?.id && r.status !== "cancelled" && (
+  <button
+    onClick={() => {
+      setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.substitute_teacher)} ที่เคยสอนแทนให้เมื่อ ${thaiDate(r.substitute_date)} (${r.slot_label ?? "-"})`);
+      setShowSwapModal(true);
+    }}
+    className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200 transition-colors ml-1.5"
+  >
+    🔄 แลกคาบคืน
+  </button>
+)}
             return (
               <tr key={r.id} className={`${i%2===0 ? "bg-[#FDF2F8]/50" : "bg-white"} hover:bg-[#FDF2F8]/40 transition-colors`}>
                 <td className="px-4 py-3.5 whitespace-nowrap text-xs sm:text-sm">{thaiDate(r.substitute_date)}</td>
@@ -1700,17 +1839,23 @@ if (tchErr) {
                   </span>
                 </td>
                 {canAssignSub && (
-                  <td className="px-4 py-3.5 whitespace-nowrap">
-                    {r.status !== "cancelled" ? (
-                      <button onClick={()=>handleSubCancel(r.id)}
-                        className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold border border-red-200 transition-colors">
-                        ✕ ยกเลิกสอนแทน
-                      </button>
-                    ) : (
-                      <span className="text-xs text-slate-300">—</span>
-                    )}
-                  </td>
-                )}
+  <td className="px-4 py-3.5 whitespace-nowrap">
+    {r.status !== "cancelled" ? (
+      <div className="flex gap-1.5">
+        <button onClick={()=>setEditingSub(r)}
+          className="px-2.5 py-1.5 rounded-lg bg-[#FDF2F8] hover:bg-[#FBCFE8] text-[#9D174D] text-xs font-bold border border-[#F9A8D4] transition-colors">
+          ✏️ แก้ไข
+        </button>
+        <button onClick={()=>handleSubCancel(r.id)}
+          className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold border border-red-200 transition-colors">
+          ✕ ยกเลิก
+        </button>
+      </div>
+    ) : (
+      <span className="text-xs text-slate-300">—</span>
+    )}
+  </td>
+)}
               </tr>
             );
           })}
@@ -1847,13 +1992,14 @@ if (tchErr) {
 
       {/* Modals */}
       {showSwapModal && academicYear && (
-        <SwapRequestModal
-          user={user} allEntries={allEntries} allTeachers={teachers} allTimeSlots={allTimeSlots}
-          academicYearId={academicYear.id}
-          onSave={async()=>{ setShowSwapModal(false); await loadData(); }}
-          onClose={()=>setShowSwapModal(false)}
-        />
-      )}
+  <SwapRequestModal
+    user={user} allEntries={allEntries} allTeachers={teachers} allTimeSlots={allTimeSlots}
+    academicYearId={academicYear.id}
+    initialReason={swapInitialReason}
+    onSave={async()=>{ setShowSwapModal(false); setSwapInitialReason(undefined); await loadData(); }}
+    onClose={()=>{ setShowSwapModal(false); setSwapInitialReason(undefined); }}
+  />
+)}
       {assignLeave && academicYear && (
         <AssignSubModal
           leaveRequest={assignLeave}
@@ -1864,6 +2010,16 @@ if (tchErr) {
           onClose={()=>setAssignLeave(null)}
         />
       )}
+      {editingSub && (
+  <EditSubModal
+    record={editingSub}
+    allEntries={allEntries}
+    teachers={teachers}
+    currentUser={user}
+    onSave={async()=>{ setEditingSub(null); await loadData(); }}
+    onClose={()=>setEditingSub(null)}
+  />
+)}
       {showManualAssign && academicYear && (
   <ManualAssignModal
     selectableTeachers={manualAssignTeachers}
