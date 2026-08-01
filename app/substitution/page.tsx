@@ -106,18 +106,18 @@ const STATUS_SWAP: Record<string,{label:string;cls:string}> = {
   pending:  { label:"รออนุมัติ",  cls:"bg-amber-50 text-amber-700 border-amber-300" },
   accepted: { label:"ตกลงแล้ว",  cls:"bg-emerald-50 text-emerald-700 border-emerald-300" },
   rejected: { label:"ปฏิเสธ",    cls:"bg-red-50 text-red-700 border-red-300" },
-  cancelled:{ label:"ยกเลิก",    cls:"bg-[#EEF2FF] text-slate-500 border-slate-300" },
+  cancelled:{ label:"ยกเลิก",    cls:"bg-[#FCE7F3] text-slate-500 border-slate-300" },
 };
 const STATUS_SUB: Record<string,{label:string;cls:string}> = {
-  assigned:  { label:"จัดแล้ว",  cls:"bg-[#EEF1F6] text-[#4F46E5] border-[#C7D2FE]" },
+  assigned:  { label:"จัดแล้ว",  cls:"bg-[#FCE7F3] text-[#DB2777] border-[#FBCFE8]" },
   confirmed: { label:"ยืนยัน",   cls:"bg-emerald-50 text-emerald-700 border-emerald-300" },
-  done:      { label:"เสร็จสิ้น",cls:"bg-[#EEF2FF] text-slate-600 border-slate-300" },
+  done:      { label:"เสร็จสิ้น",cls:"bg-[#FCE7F3] text-slate-600 border-slate-300" },
   cancelled: { label:"ยกเลิก",   cls:"bg-red-50 text-red-700 border-red-300" },
 };
 const SOURCE_LABEL: Record<string,{label:string;cls:string}> = {
   auto:      { label:"🤖 อัตโนมัติจากใบลา", cls:"bg-indigo-50 text-indigo-600 border-indigo-200" },
   specific:  { label:"🎯 เจาะจงจากใบลา",   cls:"bg-emerald-50 text-emerald-600 border-emerald-200" },
-  admin:     { label:"🏫 แอดมินจัดเอง",     cls:"bg-[#F5F7FF] text-slate-600 border-[#E0E7FF]" },
+  admin:     { label:"🏫 แอดมินจัดเอง",     cls:"bg-[#FDF2F8] text-slate-600 border-[#FBCFE8]" },
 };
 function sourceOf(note?: string | null): keyof typeof SOURCE_LABEL {
   if (note?.includes("อัตโนมัติ")) return "auto";
@@ -309,7 +309,7 @@ function printSubOrder(records: SubRecord[], periodLabel: string) {
     h2 { text-align:center; font-size:16pt; margin-bottom:2px; }
     h3 { text-align:center; font-size:14pt; margin-top:2px; margin-bottom:14px; }
     table { width:100%; border-collapse:collapse; font-size:12pt; }
-    th { background:#4F46E5; color:#fff; padding:6px 8px; font-size:11pt; text-align:left; }
+    th { background:#DB2777; color:#fff; padding:6px 8px; font-size:11pt; text-align:left; }
     td { padding:5px 8px; border-bottom:1px solid #e2e8f0; vertical-align:top; }
     tr:nth-child(even) td { background:#f8faff; }
     .sign-row { display:flex; justify-content:space-between; margin-top:40px; }
@@ -377,7 +377,7 @@ function printTeacherSubStat(records: SubRecord[], users: User[]) {
     body { font-family:'Sarabun','TH SarabunNew',sans-serif; font-size:14pt; }
     h2,h3 { text-align:center; }
     table { width:100%; border-collapse:collapse; font-size:12pt; margin-top:16px; }
-    th { background:#4F46E5; color:#fff; padding:6px 8px; }
+    th { background:#DB2777; color:#fff; padding:6px 8px; }
     td { padding:5px 8px; border-bottom:1px solid #e2e8f0; }
     tr:nth-child(even)td { background:#f8faff; }
     @media print { button{display:none} }
@@ -424,7 +424,7 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
     const overloaded = n >= warnAt;
     return (
       <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
-        overloaded ? "bg-red-50 text-red-600 border-red-200" : "bg-[#EEF2FF] text-[#64748B] border-transparent"
+        overloaded ? "bg-red-50 text-red-600 border-red-200" : "bg-[#FCE7F3] text-[#64748B] border-transparent"
       }`}>
         {overloaded ? `⚠️ สอน ${n} คาบ` : `${n} คาบ`}
       </span>
@@ -434,7 +434,7 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
   return (
     <div ref={ref} className="relative">
       <button type="button" onClick={() => setOpen(v => !v)}
-        className="w-full text-left border-2 border-[#DDE3FA] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#4F46E5] focus:outline-none flex items-center justify-between gap-2">
+        className="w-full text-left border-2 border-[#F9A8D4] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#DB2777] focus:outline-none flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 min-w-0">
           <span className={`truncate ${selected ? "font-bold text-slate-800" : "text-slate-400"}`}>
             {selected ? fullName(selected) : placeholder}
@@ -444,11 +444,11 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
         <span className="text-slate-400 text-xs shrink-0">{open ? "▲" : "▼"}</span>
       </button>
       {open && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border-2 border-[#DDE3FA] rounded-xl shadow-xl overflow-hidden">
-          <div className="px-3 py-2 border-b border-[#E5E9FA]">
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border-2 border-[#F9A8D4] rounded-xl shadow-xl overflow-hidden">
+          <div className="px-3 py-2 border-b border-[#FCE7F3]">
             <input type="text" value={search} onChange={e => setSearch(e.target.value)}
               placeholder="🔍 พิมพ์ชื่อ..." autoFocus onClick={e => e.stopPropagation()}
-              className="w-full bg-[#F5F7FF] border border-[#E0E7FF] rounded-lg px-3 py-2 text-sm focus:outline-none" />
+              className="w-full bg-[#FDF2F8] border border-[#FBCFE8] rounded-lg px-3 py-2 text-sm focus:outline-none" />
           </div>
           <div className="max-h-52 overflow-y-auto">
             {value && (
@@ -459,7 +459,7 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
               <div className="px-4 py-3 text-slate-400 text-sm text-center">ไม่พบชื่อ</div>
             ) : filtered.map(t => (
               <button key={t.id} type="button" onClick={() => { onChange(t.id); setOpen(false); setSearch(""); }}
-                className={`w-full px-4 py-2.5 text-left text-sm font-medium hover:bg-[#F5F7FF] flex items-center justify-between gap-2 ${t.id === value ? "bg-[#FEF3C7]" : ""}`}>
+                className={`w-full px-4 py-2.5 text-left text-sm font-medium hover:bg-[#FDF2F8] flex items-center justify-between gap-2 ${t.id === value ? "bg-[#FDF2F8]" : ""}`}>
                 <span className="min-w-0 truncate">
                   <span className="font-bold text-slate-800">{fullName(t)}</span>
                   {t.position && <span className="text-slate-400 text-xs ml-2">{t.position}</span>}
@@ -659,15 +659,15 @@ const GRADE_BAND_LABEL: Record<string,string> = {
 
   const iCls = (err?: boolean) =>
     `w-full border-2 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none transition-colors bg-white
-    ${err ? "border-red-400 bg-red-50" : "border-[#DDE3FA] focus:border-[#4F46E5] text-slate-800"}`;
+    ${err ? "border-red-400 bg-red-50" : "border-[#F9A8D4] focus:border-[#DB2777] text-slate-800"}`;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh]"
         onClick={e=>e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-[#E5E9FA] flex items-center justify-between shrink-0">
+        <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between shrink-0">
           <h3 className="font-bold text-slate-800 text-base">🔄 ขอแลกคาบสอน</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#EEF2FF] flex items-center justify-center text-slate-500">✕</button>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#FCE7F3] flex items-center justify-center text-slate-500">✕</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
           {/* ★ 1) วันที่ต้องการแลก — ช่องแรก */}
@@ -685,7 +685,7 @@ const GRADE_BAND_LABEL: Record<string,string> = {
                 คาบของฉันในวัน{TH_DAYS[dow!]} — กดเลือกคาบที่ต้องการแลก <span className="text-red-400">*</span>
               </label>
               {myDayEntries.length === 0 ? (
-                <p className="text-sm text-slate-400 py-4 text-center bg-[#F5F7FF] rounded-xl border border-[#E0E7FF]">ไม่มีคาบสอนของคุณในวันนี้</p>
+                <p className="text-sm text-slate-400 py-4 text-center bg-[#FDF2F8] rounded-xl border border-[#FBCFE8]">ไม่มีคาบสอนของคุณในวันนี้</p>
               ) : (
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                   {myDayEntries.map(e => {
@@ -694,7 +694,7 @@ const GRADE_BAND_LABEL: Record<string,string> = {
                       <button key={e.id} type="button"
                         onClick={() => { setSelectedEntry(e); setPickedTeacherId(""); }}
                         className={`p-2.5 rounded-xl border-2 text-[11px] font-bold text-left transition-all ${
-                          active ? "bg-[#4F46E5] border-[#4F46E5] text-white" : "bg-[#EEF2FF] border-[#E0E7FF] text-slate-600 hover:bg-[#E0E7FF]"
+                          active ? "bg-[#DB2777] border-[#DB2777] text-white" : "bg-[#FCE7F3] border-[#FBCFE8] text-slate-600 hover:bg-[#FBCFE8]"
                         }`}>
                         <div className="flex justify-between"><span>{e.slot_label}</span><span className="opacity-70">{e.start_time?.slice(0,5)}</span></div>
                         <div className="truncate mt-0.5">{e.subject_name ?? "ไม่ระบุวิชา"}</div>
@@ -729,7 +729,7 @@ const GRADE_BAND_LABEL: Record<string,string> = {
                           return (
                             <button key={t.id} type="button" onClick={() => setPickedTeacherId(t.id)}
                               className={`w-full text-left px-3 py-2 rounded-lg border-2 text-sm font-bold flex items-center justify-between transition-all ${
-                                active ? "bg-emerald-50 border-emerald-400 text-emerald-700" : "bg-white border-[#E0E7FF] text-slate-700 hover:bg-[#F5F7FF]"
+                                active ? "bg-emerald-50 border-emerald-400 text-emerald-700" : "bg-white border-[#FBCFE8] text-slate-700 hover:bg-[#FDF2F8]"
                               }`}>
                               <span>{fullName(t)}{t.position ? ` · ${t.position}` : ""}</span>
                               {active && <span>✓</span>}
@@ -752,10 +752,10 @@ const GRADE_BAND_LABEL: Record<string,string> = {
               placeholder="ระบุเหตุผลเพิ่มเติม (ถ้ามี)" className={iCls()+" resize-none"} />
           </div>
         </div>
-        <div className="px-6 py-4 border-t border-[#E5E9FA] flex gap-2 justify-end shrink-0 bg-[#F5F7FF] rounded-b-2xl">
-          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#E0E7FF] text-slate-600 text-sm font-medium">ยกเลิก</button>
+        <div className="px-6 py-4 border-t border-[#FCE7F3] flex gap-2 justify-end shrink-0 bg-[#FDF2F8] rounded-b-2xl">
+          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#FBCFE8] text-slate-600 text-sm font-medium">ยกเลิก</button>
           <button onClick={handleSave} disabled={saving}
-            className="px-5 py-2.5 rounded-xl bg-[#4F46E5] hover:bg-[#3730A3] text-white text-sm font-bold disabled:opacity-50">
+            className="px-5 py-2.5 rounded-xl bg-[#DB2777] hover:bg-[#9D174D] text-white text-sm font-bold disabled:opacity-50">
             {saving ? "กำลังส่ง..." : "📤 ส่งคำขอ"}
           </button>
         </div>
@@ -876,7 +876,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh]"
         onClick={e=>e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-[#E5E9FA] flex items-center justify-between gap-3 shrink-0">
+        <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <h3 className="font-bold text-slate-800 text-base">📋 จัดครูสอนแทน</h3>
             <p className="text-sm text-slate-500">{fullName(leaveRequest.user)} ลา {thaiDate(leaveRequest.start_date)}
@@ -887,11 +887,11 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
           <div className="flex items-center gap-2 shrink-0">
             {absentEntries.length > 0 && (
               <button onClick={autoAssignAll} disabled={autoRunning}
-                className="px-3 py-2 rounded-xl bg-[#F59E0B] hover:bg-[#D97706] text-[#3730A3] text-xs font-bold disabled:opacity-50 whitespace-nowrap">
+                className="px-3 py-2 rounded-xl bg-[#FB7185] hover:bg-[#BE185D] text-[#9D174D] text-xs font-bold disabled:opacity-50 whitespace-nowrap">
                 ⚡ จัดอัตโนมัติ
               </button>
             )}
-            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#EEF2FF] flex items-center justify-center text-slate-500 shrink-0">✕</button>
+            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#FCE7F3] flex items-center justify-center text-slate-500 shrink-0">✕</button>
           </div>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-4">
@@ -899,7 +899,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
             <div className="text-center py-12 text-slate-400">ไม่พบตารางสอนของครูคนนี้</div>
           ) : (
             <div className="space-y-6">
-              <p className="text-xs text-[#B45309] bg-[#FEF3C7] border border-[#FDE68A] rounded-xl px-3 py-2">
+              <p className="text-xs text-[#9D174D] bg-[#FDF2F8] border border-[#F9A8D4] rounded-xl px-3 py-2">
                 💡 ปุ่ม "⚡ จัดอัตโนมัติ" จะเลือกครูที่ว่างและมีคาบสอนวันนั้นน้อยที่สุดให้ทุกคาบที่ยังไม่ได้จัด — ตัวเลข "X คาบ" ข้างชื่อครูคือจำนวนคาบที่ครูสอนอยู่แล้วในวันนั้น ถ้าครบ {SUB_LOAD_WARN_AT} คาบจะมี ⚠️ เตือนให้พิจารณาก่อนเลือก
               </p>
               {leaveDates.map(date => {
@@ -910,16 +910,16 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
   if (dayEntries.length === 0) return null;
                 return (
                   <div key={date}>
-                    <h4 className="font-bold text-slate-700 text-sm mb-3 pb-2 border-b border-[#E0E7FF]">
+                    <h4 className="font-bold text-slate-700 text-sm mb-3 pb-2 border-b border-[#FBCFE8]">
                       📅 {TH_DAYS[dayOfWeek]} {thaiDate(date)}
                     </h4>
                     <div className="space-y-2">
                       {dayEntries.map(entry => {
                         const key = `${entry.id}_${date}`;
                         return (
-                          <div key={key} className="flex items-center gap-3 bg-[#F5F7FF] rounded-xl px-4 py-3">
+                          <div key={key} className="flex items-center gap-3 bg-[#FDF2F8] rounded-xl px-4 py-3">
                             <div className="shrink-0 text-center w-16">
-                              <div className="text-xs font-bold text-[#4F46E5]">{entry.slot_label}</div>
+                              <div className="text-xs font-bold text-[#DB2777]">{entry.slot_label}</div>
                               <div className="text-[10px] text-slate-400">{thaiTime(entry.start_time ?? undefined)}</div>
                             </div>
                             <div className="flex-1 min-w-0">
@@ -944,10 +944,10 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
             </div>
           )}
         </div>
-        <div className="px-6 py-4 border-t border-[#E5E9FA] flex gap-2 justify-end shrink-0 bg-[#F5F7FF] rounded-b-2xl">
-          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#E0E7FF] text-slate-600 text-sm">ยกเลิก</button>
+        <div className="px-6 py-4 border-t border-[#FCE7F3] flex gap-2 justify-end shrink-0 bg-[#FDF2F8] rounded-b-2xl">
+          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#FBCFE8] text-slate-600 text-sm">ยกเลิก</button>
           <button onClick={handleSave} disabled={saving}
-            className="px-5 py-2.5 rounded-xl bg-[#4F46E5] hover:bg-[#3730A3] text-white text-sm font-bold disabled:opacity-50">
+            className="px-5 py-2.5 rounded-xl bg-[#DB2777] hover:bg-[#9D174D] text-white text-sm font-bold disabled:opacity-50">
             {saving ? "กำลังบันทึก..." : "💾 บันทึกการสอนแทน"}
           </button>
         </div>
@@ -1045,12 +1045,12 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
   <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 sm:p-6" onClick={onClose}>
     <div className="bg-white w-full max-w-[96vw] h-full max-h-[95vh] rounded-2xl shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
       {/* Header */}
-      <div className="px-6 py-4 border-b border-[#E5E9FA] flex items-center justify-between shrink-0">
+      <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between shrink-0">
           <div>
             <h3 className="font-bold text-slate-800 text-base">⚡ จัดสอนแทนทันที (ไม่ต้องรอใบลา)</h3>
             <p className="text-sm text-slate-500">สำหรับกรณีลาผ่าตัด/ลายาว — เลือกครู + ช่วงวันที่แล้วจัดสอนแทนได้เลย</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#EEF2FF] flex items-center justify-center text-slate-500">✕</button>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#FCE7F3] flex items-center justify-center text-slate-500">✕</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1069,19 +1069,19 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">วันที่เริ่มลา *</label>
               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-                className="w-full border-2 border-[#DDE3FA] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#4F46E5] focus:outline-none" />
+                className="w-full border-2 border-[#F9A8D4] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#DB2777] focus:outline-none" />
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">วันที่สิ้นสุด *</label>
               <input type="date" value={endDate} min={startDate} onChange={e => setEndDate(e.target.value)}
-                className="w-full border-2 border-[#DDE3FA] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#4F46E5] focus:outline-none" />
+                className="w-full border-2 border-[#F9A8D4] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#DB2777] focus:outline-none" />
             </div>
           </div>
 
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">หมายเหตุ</label>
             <input type="text" value={reason} onChange={e => setReason(e.target.value)} placeholder="เช่น ลาผ่าตัด, ลาคลอด..."
-              className="w-full border-2 border-[#DDE3FA] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#4F46E5] focus:outline-none" />
+              className="w-full border-2 border-[#F9A8D4] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#DB2777] focus:outline-none" />
           </div>
 
           {absentTeacherId && leaveDates.length === 0 && (
@@ -1093,7 +1093,7 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
               <div className="text-center py-12 text-slate-400">ไม่พบตารางสอนของครูคนนี้</div>
             ) : (
               <div className="space-y-6">
-                <p className="text-xs text-[#B45309] bg-[#FEF3C7] border border-[#FDE68A] rounded-xl px-3 py-2">
+                <p className="text-xs text-[#9D174D] bg-[#FDF2F8] border border-[#F9A8D4] rounded-xl px-3 py-2">
                   💡 รายชื่อครูในช่อง "เลือกครูสอนแทน" จะเรียงครูสายชั้นเดียวกับครูที่ลาไว้ก่อน — ตัวเลข "X คาบ" ข้างชื่อครูคือจำนวนคาบที่ครูสอนอยู่แล้วในวันนั้น ถ้าครบ {SUB_LOAD_WARN_AT} คาบจะมี ⚠️ เตือน และกดปุ่ม 🎲 เพื่อสุ่มครูสายชั้นเดียวกันที่ว่างตรงคาบและมีคาบน้อยที่สุดให้อัตโนมัติ
                 </p>
                 {leaveDates.map(date => {
@@ -1104,7 +1104,7 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
   if (dayEntries.length === 0) return null;
                   return (
                     <div key={date}>
-                      <h4 className="font-bold text-slate-700 text-sm mb-3 pb-2 border-b border-[#E0E7FF]">
+                      <h4 className="font-bold text-slate-700 text-sm mb-3 pb-2 border-b border-[#FBCFE8]">
                         📅 {TH_DAYS[dayOfWeek]} {thaiDate(date)}
                       </h4>
                       <div className="space-y-2">
@@ -1118,9 +1118,9 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
                           const pickedId = assignments[key] || "";
                           const pickedLoad = pickedId ? computeTaughtPeriodsForDay(pickedId, dow, entries) : null;
                           return (
-                            <div key={key} className="flex items-center gap-3 bg-[#F5F7FF] rounded-xl px-4 py-3">
+                            <div key={key} className="flex items-center gap-3 bg-[#FDF2F8] rounded-xl px-4 py-3">
                               <div className="shrink-0 text-center w-16">
-                                <div className="text-xs font-bold text-[#4F46E5]">{entry.slot_label}</div>
+                                <div className="text-xs font-bold text-[#DB2777]">{entry.slot_label}</div>
                                 <div className="text-[10px] text-slate-400">{thaiTime(entry.start_time ?? undefined)}</div>
                               </div>
                               <div className="flex-1 min-w-0">
@@ -1142,7 +1142,7 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
   </div>
   <button type="button" onClick={() => randomAssignTeacher(key, entry, date)}
     title="สุ่มครูสายชั้นเดียวกันที่ว่างและมีคาบน้อยที่สุด"
-    className="shrink-0 w-9 h-9 rounded-xl bg-[#FEF3C7] hover:bg-[#FDE68A] border-2 border-[#FDE68A] flex items-center justify-center text-base">
+    className="shrink-0 w-9 h-9 rounded-xl bg-[#FDF2F8] hover:bg-[#F9A8D4] border-2 border-[#F9A8D4] flex items-center justify-center text-base">
     🎲
   </button>
 </div>
@@ -1158,10 +1158,10 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
           )}
         </div>
 
-        <div className="px-6 py-4 border-t border-[#E5E9FA] flex gap-2 justify-end shrink-0 bg-[#F5F7FF] rounded-b-2xl">
-          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#E0E7FF] text-slate-600 text-sm">ยกเลิก</button>
+        <div className="px-6 py-4 border-t border-[#FCE7F3] flex gap-2 justify-end shrink-0 bg-[#FDF2F8] rounded-b-2xl">
+          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#FBCFE8] text-slate-600 text-sm">ยกเลิก</button>
           <button onClick={handleSave} disabled={saving}
-            className="px-5 py-2.5 rounded-xl bg-[#4F46E5] hover:bg-[#3730A3] text-white text-sm font-bold disabled:opacity-50">
+            className="px-5 py-2.5 rounded-xl bg-[#DB2777] hover:bg-[#9D174D] text-white text-sm font-bold disabled:opacity-50">
             {saving ? "กำลังบันทึก..." : "💾 บันทึกการสอนแทน"}
           </button>
         </div>
@@ -1403,14 +1403,14 @@ if (tchErr) {
 
   // ── Render ───────────────────────────────────────────────
   if (loading) return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-[#F5F7FF]">
-      <div className="w-10 h-10 rounded-full border-[3px] border-[#DDE3FA] border-t-[#F59E0B] animate-spin" />
+    <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-[#FDF2F8]">
+      <div className="w-10 h-10 rounded-full border-[3px] border-[#F9A8D4] border-t-[#FB7185] animate-spin" />
       <p className="text-[#64748B] text-sm font-medium tracking-wide">กำลังโหลด...</p>
     </div>
   );
   if (!user) return (
-    <div className="min-h-screen flex items-center justify-center bg-[#F5F7FF]">
-      <div className="bg-white border border-[#E0E7FF] rounded-2xl px-8 py-7 shadow-sm text-center">
+    <div className="min-h-screen flex items-center justify-center bg-[#FDF2F8]">
+      <div className="bg-white border border-[#FBCFE8] rounded-2xl px-8 py-7 shadow-sm text-center">
         <p className="text-3xl mb-2">🔒</p>
         <p className="text-[#1E293B] text-base font-bold">กรุณาเข้าสู่ระบบ</p>
       </div>
@@ -1418,23 +1418,23 @@ if (tchErr) {
   );
 
   return (
-    <div className="min-h-screen bg-[#F5F7FF] flex flex-col" style={{fontFamily:"'Sarabun','Noto Sans Thai',sans-serif"}}>
+    <div className="min-h-screen bg-[#FDF2F8] flex flex-col" style={{fontFamily:"'Sarabun','Noto Sans Thai',sans-serif"}}>
       {/* Header */}
-      <div className="bg-gradient-to-r from-[#3730A3] via-[#4F46E5] to-[#6366F1] border-b-[3px] border-[#F59E0B] px-5 py-4 flex items-center gap-3 shadow-lg shrink-0 relative">
+      <div className="bg-gradient-to-r from-[#9D174D] via-[#DB2777] to-[#EC4899] border-b-[3px] border-[#FB7185] px-5 py-4 flex items-center gap-3 shadow-lg shrink-0 relative">
         <button onClick={() => router.push("/dashboard")}
   className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-white font-bold text-lg shrink-0 border border-white/10">
   🏠
 </button>
         {/* Signature seal — a small emblem echoing the school stamp on printed orders */}
-        <div className="w-11 h-11 rounded-full bg-[#F59E0B]/15 border-2 border-[#F59E0B] flex items-center justify-center shrink-0">
+        <div className="w-11 h-11 rounded-full bg-[#FB7185]/15 border-2 border-[#FB7185] flex items-center justify-center shrink-0">
           <span className="text-lg leading-none">🔄</span>
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-white font-extrabold text-lg leading-tight tracking-tight">แลกคาบ &amp; สอนแทน</h1>
-          <p className="text-[#C7D2FE] text-xs sm:text-sm font-medium">{fullName(user)} · ปีการศึกษา {academicYear?.year_name}</p>
+          <p className="text-[#FBCFE8] text-xs sm:text-sm font-medium">{fullName(user)} · ปีการศึกษา {academicYear?.year_name}</p>
         </div>
         <button onClick={() => setShowSwapModal(true)}
-          className="px-4 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-[#3730A3] text-sm font-bold rounded-xl shadow-sm transition-colors shrink-0">
+          className="px-4 py-2 bg-[#FB7185] hover:bg-[#BE185D] text-[#9D174D] text-sm font-bold rounded-xl shadow-sm transition-colors shrink-0">
           + ขอแลกคาบ
         </button>
       </div>
@@ -1448,7 +1448,7 @@ if (tchErr) {
       )}
 
       {/* Tabs */}
-      <div className="bg-white border-b border-[#E0E7FF] flex overflow-x-auto shrink-0">
+      <div className="bg-white border-b border-[#FBCFE8] flex overflow-x-auto shrink-0">
         {([
           ["swap",       "🔄 แลกคาบ"],
           ["substitute", "📋 สอนแทน"],
@@ -1456,10 +1456,10 @@ if (tchErr) {
         ] as const).map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`px-5 py-3.5 text-sm font-bold border-b-[3px] whitespace-nowrap transition-all
-              ${tab===k ? "border-[#F59E0B] text-[#3730A3]" : "border-transparent text-[#94A3B8] hover:text-[#1E293B]"}`}>
+              ${tab===k ? "border-[#FB7185] text-[#9D174D]" : "border-transparent text-[#94A3B8] hover:text-[#1E293B]"}`}>
             {l}
             {k==="swap" && incomingSwaps.length > 0 && (
-              <span className="ml-1.5 bg-[#F59E0B] text-[#3730A3] text-[10px] font-black px-1.5 py-0.5 rounded-full">{incomingSwaps.length}</span>
+              <span className="ml-1.5 bg-[#FB7185] text-[#9D174D] text-[10px] font-black px-1.5 py-0.5 rounded-full">{incomingSwaps.length}</span>
             )}
           </button>
         ))}
@@ -1472,7 +1472,7 @@ if (tchErr) {
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-slate-700 text-base">คำขอแลกคาบของฉัน</h2>
               <button onClick={() => setShowSwapModal(true)}
-                className="px-4 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-white text-sm font-bold rounded-xl">
+                className="px-4 py-2 bg-[#FB7185] hover:bg-[#BE185D] text-white text-sm font-bold rounded-xl">
                 + ขอแลกคาบใหม่
               </button>
             </div>
@@ -1515,20 +1515,20 @@ if (tchErr) {
   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">คำขอทั้งหมดของฉัน</h3>
   
   {mySwaps.length === 0 ? (
-    <div className="w-full text-center py-16 bg-white rounded-2xl border border-[#E0E7FF] text-slate-400 shadow-sm">
+    <div className="w-full text-center py-16 bg-white rounded-2xl border border-[#FBCFE8] text-slate-400 shadow-sm">
       <p className="text-5xl mb-3">🔄</p>
       <p className="text-base font-medium">ยังไม่มีคำขอแลกคาบ</p>
     </div>
   ) : (
     <div className="w-full grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
       {mySwaps.map(r => (
-        <div key={r.id} className="w-full bg-white rounded-2xl border border-[#E0E7FF] p-5 shadow-sm hover:shadow-md transition-shadow">
+        <div key={r.id} className="w-full bg-white rounded-2xl border border-[#FBCFE8] p-5 shadow-sm hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between gap-4 mb-2">
             <div className="min-w-0 flex-1">
               <p className="font-bold text-slate-800 text-base leading-snug">
                 {r.requester_id === user?.id
-                  ? <span>ขอแลกกับ <span className="text-[#4F46E5]">{fullName(r.target_teacher)}</span></span>
-                  : <span><span className="text-[#4F46E5]">{fullName(r.requester)}</span> ขอแลกกับคุณ</span>
+                  ? <span>ขอแลกกับ <span className="text-[#DB2777]">{fullName(r.target_teacher)}</span></span>
+                  : <span><span className="text-[#DB2777]">{fullName(r.requester)}</span> ขอแลกกับคุณ</span>
                 }
               </p>
               <p className="text-xs sm:text-sm text-slate-400 mt-1">📅 {thaiDate(r.swap_date)}</p>
@@ -1563,7 +1563,7 @@ if (tchErr) {
                   {leaveRequests.map(lr => {
                     const alreadyAssigned = subRecords.some(r => r.leave_request_id === lr.id);
                     return (
-                      <div key={lr.id} className={`rounded-2xl border p-4 ${alreadyAssigned ? "bg-emerald-50 border-emerald-200" : "bg-white border-[#E0E7FF]"}`}>
+                      <div key={lr.id} className={`rounded-2xl border p-4 ${alreadyAssigned ? "bg-emerald-50 border-emerald-200" : "bg-white border-[#FBCFE8]"}`}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="font-bold text-slate-800 text-sm truncate">{fullName(lr.user)}</p>
@@ -1574,7 +1574,7 @@ if (tchErr) {
                             <span className="text-xs font-bold px-2 py-1 rounded-lg border bg-emerald-50 text-emerald-700 border-emerald-300 shrink-0">จัดแล้ว ✓</span>
                           ) : (
                             <button onClick={() => setAssignLeave(lr)}
-                              className="px-3 py-1.5 bg-[#4F46E5] hover:bg-[#3730A3] text-white text-xs font-bold rounded-xl shrink-0">
+                              className="px-3 py-1.5 bg-[#DB2777] hover:bg-[#9D174D] text-white text-xs font-bold rounded-xl shrink-0">
                               จัดสอนแทน
                             </button>
                           )}
@@ -1590,15 +1590,15 @@ if (tchErr) {
             )}
 
             {canManualAssign && (
-  <div className="bg-[#FEF3C7] border-2 border-[#FDE68A] rounded-2xl p-4 flex items-center justify-between gap-3 flex-wrap">
+  <div className="bg-[#FDF2F8] border-2 border-[#F9A8D4] rounded-2xl p-4 flex items-center justify-between gap-3 flex-wrap">
     <div>
-      <p className="font-bold text-[#B45309] text-sm">⚡ จัดอัตโนมัติ (ไม่ต้องรอใบลา)</p>
-      <p className="text-xs text-[#D97706] mt-0.5">
+      <p className="font-bold text-[#9D174D] text-sm">⚡ จัดอัตโนมัติ (ไม่ต้องรอใบลา)</p>
+      <p className="text-xs text-[#BE185D] mt-0.5">
         {isAdmin ? "เลือกครูคนไหนก็ได้ทั้งโรงเรียน" : "เลือกได้เฉพาะครูในสายชั้นของคุณ"} — ใช้เมื่อครูลาผ่าตัด/ลายาวและยังไม่มีใบลาในระบบ
       </p>
     </div>
     <button onClick={() => setShowManualAssign(true)}
-      className="px-4 py-2.5 bg-[#F59E0B] hover:bg-[#D97706] text-white text-sm font-bold rounded-xl shrink-0">
+      className="px-4 py-2.5 bg-[#FB7185] hover:bg-[#BE185D] text-white text-sm font-bold rounded-xl shrink-0">
       ⚡ จัดอัตโนมัติ
     </button>
   </div>
@@ -1606,7 +1606,7 @@ if (tchErr) {
 
 
             {/* Filter + Print */}
-<div className="w-full bg-white rounded-2xl border border-[#E0E7FF] p-5 shadow-sm">
+<div className="w-full bg-white rounded-2xl border border-[#FBCFE8] p-5 shadow-sm">
   <div className="flex flex-wrap gap-4 items-end justify-between w-full">
     
     {/* ฝั่งตัวกรอง */}
@@ -1617,7 +1617,7 @@ if (tchErr) {
           type="date" 
           value={filterDate} 
           onChange={e=>setFilterDate(e.target.value)}
-          className="w-full border-2 border-[#DDE3FA] rounded-xl px-3.5 py-2.5 text-sm bg-white focus:border-[#4F46E5] focus:outline-none transition-colors" 
+          className="w-full border-2 border-[#F9A8D4] rounded-xl px-3.5 py-2.5 text-sm bg-white focus:border-[#DB2777] focus:outline-none transition-colors" 
         />
       </div>
 
@@ -1627,7 +1627,7 @@ if (tchErr) {
           <select 
             value={filterTeacher} 
             onChange={e=>setFilterTeacher(e.target.value)}
-            className="w-full border-2 border-[#DDE3FA] rounded-xl px-3.5 py-2.5 text-sm bg-white focus:border-[#4F46E5] focus:outline-none transition-colors"
+            className="w-full border-2 border-[#F9A8D4] rounded-xl px-3.5 py-2.5 text-sm bg-white focus:border-[#DB2777] focus:outline-none transition-colors"
           >
             <option value="">ทั้งหมด</option>
             {teachers.map(t=><option key={t.id} value={t.id}>{fullName(t)}</option>)}
@@ -1650,7 +1650,7 @@ if (tchErr) {
       <div className="flex gap-2 shrink-0">
         <button 
           onClick={()=>printSubOrder(filteredSubs, filterDate?thaiDate(filterDate):"ทั้งหมด")}
-          className="px-5 py-2.5 bg-[#4F46E5] hover:bg-[#3730A3] active:scale-95 text-white text-sm font-bold rounded-xl flex items-center gap-2 shadow-sm transition-all"
+          className="px-5 py-2.5 bg-[#DB2777] hover:bg-[#9D174D] active:scale-95 text-white text-sm font-bold rounded-xl flex items-center gap-2 shadow-sm transition-all"
         >
           🖨️ พิมพ์ใบคำสั่ง
         </button>
@@ -1660,8 +1660,8 @@ if (tchErr) {
   </div>
 </div>
 {/* Sub records table */}
-<div className="w-full bg-white rounded-2xl border border-[#E0E7FF] overflow-hidden shadow-sm">
-  <div className="px-6 py-4 border-b border-[#E5E9FA] flex items-center justify-between">
+<div className="w-full bg-white rounded-2xl border border-[#FBCFE8] overflow-hidden shadow-sm">
+  <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between">
     <h3 className="font-bold text-slate-700 text-base">รายการสอนแทน ({filteredSubs.length})</h3>
   </div>
   
@@ -1671,19 +1671,19 @@ if (tchErr) {
     <div className="w-full overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="bg-gradient-to-r from-[#3730A3] to-[#6366F1] text-white text-xs sm:text-sm">
+          <tr className="bg-gradient-to-r from-[#9D174D] to-[#EC4899] text-white text-xs sm:text-sm">
             {["วันที่","คาบ","ห้อง","วิชา","ครูเจ้าของคาบ","ครูสอนแทน","ชม.","ที่มา","สถานะ", ...(canAssignSub ? ["จัดการ"] : [])].map(h=>(
               <th key={h} className="px-4 py-3.5 text-left font-bold whitespace-nowrap">{h}</th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-[#E5E9FA]">
+        <tbody className="divide-y divide-[#FCE7F3]">
           {filteredSubs.map((r,i)=>{
             const src = sourceOf(r.note);
             return (
-              <tr key={r.id} className={`${i%2===0 ? "bg-[#F5F7FF]/50" : "bg-white"} hover:bg-[#F5F7FF]/40 transition-colors`}>
+              <tr key={r.id} className={`${i%2===0 ? "bg-[#FDF2F8]/50" : "bg-white"} hover:bg-[#FDF2F8]/40 transition-colors`}>
                 <td className="px-4 py-3.5 whitespace-nowrap text-xs sm:text-sm">{thaiDate(r.substitute_date)}</td>
-                <td className="px-4 py-3.5 whitespace-nowrap text-xs sm:text-sm font-bold text-[#4F46E5]">{r.slot_label??"-"}</td>
+                <td className="px-4 py-3.5 whitespace-nowrap text-xs sm:text-sm font-bold text-[#DB2777]">{r.slot_label??"-"}</td>
                 <td className="px-4 py-3.5 text-xs sm:text-sm whitespace-nowrap">{r.room_name??"-"}</td>
                 <td className="px-4 py-3.5 text-xs sm:text-sm font-medium">{r.subject_name??"-"}</td>
                 <td className="px-4 py-3.5 text-xs sm:text-sm font-medium whitespace-nowrap">{fullName(r.absent_teacher)}</td>
@@ -1729,7 +1729,7 @@ if (tchErr) {
               <h2 className="font-bold text-slate-700 text-base">📊 สถิติการสอนแทน</h2>
               {canAssignSub && (
                 <button onClick={()=>printTeacherSubStat(subRecords, teachers)}
-                  className="px-4 py-2 bg-[#4F46E5] hover:bg-[#3730A3] text-white text-sm font-bold rounded-xl flex items-center gap-1.5">
+                  className="px-4 py-2 bg-[#DB2777] hover:bg-[#9D174D] text-white text-sm font-bold rounded-xl flex items-center gap-1.5">
                   🖨️ พิมพ์สถิติ (คิดขั้นเงินเดือน)
                 </button>
               )}
@@ -1744,7 +1744,7 @@ if (tchErr) {
                   { label:"ชั่วโมงสอนแทน", value: subRecords.filter(r=>r.substitute_teacher_id===user.id && r.status!=="cancelled").reduce((s,r)=>s+Number(r.hours_count),0), color:"#2563eb", icon:"⏰" },
                   { label:"คำขอแลกคาบ", value: mySwaps.length, color:"#7c3aed", icon:"🔄" },
                 ].map(c=>(
-                  <div key={c.label} className="bg-white rounded-2xl border border-[#E0E7FF] p-4 flex items-center gap-3">
+                  <div key={c.label} className="bg-white rounded-2xl border border-[#FBCFE8] p-4 flex items-center gap-3">
                     <span className="text-3xl">{c.icon}</span>
                     <div>
                       <div className="text-2xl font-black" style={{color:c.color}}>{c.value}</div>
@@ -1757,8 +1757,8 @@ if (tchErr) {
 
             {/* All teachers stat table (admin/grade-head/dept-head) */}
             {canAssignSub && (
-              <div className="bg-white rounded-2xl border border-[#E0E7FF] overflow-hidden">
-                <div className="px-5 py-3 border-b border-[#E5E9FA]">
+              <div className="bg-white rounded-2xl border border-[#FBCFE8] overflow-hidden">
+                <div className="px-5 py-3 border-b border-[#FCE7F3]">
                   <h3 className="font-bold text-slate-700 text-sm">สรุปรายบุคคล</h3>
                 </div>
                 {statMap.length === 0 ? (
@@ -1767,7 +1767,7 @@ if (tchErr) {
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white text-xs">
+                        <tr className="bg-gradient-to-r from-[#EC4899] to-[#EC4899] text-white text-xs">
                           <th className="px-4 py-3 text-left">ชื่อ-นามสกุล</th>
                           <th className="px-3 py-3 text-center">ครั้งที่ขาด</th>
                           <th className="px-3 py-3 text-center">ครั้งสอนแทน</th>
@@ -1776,12 +1776,12 @@ if (tchErr) {
                       </thead>
                       <tbody>
                         {statMap.map(([id,s],i)=>(
-                          <tr key={id} className={i%2===0?"bg-[#F5F7FF]":"bg-white"}>
+                          <tr key={id} className={i%2===0?"bg-[#FDF2F8]":"bg-white"}>
                             <td className="px-4 py-3 font-medium text-slate-800">{s.name}</td>
                             <td className="px-3 py-3 text-center text-red-600 font-bold">{s.asAbsent}</td>
                             <td className="px-3 py-3 text-center text-emerald-600 font-bold">{s.asSub}</td>
                             <td className="px-3 py-3 text-center">
-                              <span className="font-black text-[#4F46E5] text-base">{s.hours}</span>
+                              <span className="font-black text-[#DB2777] text-base">{s.hours}</span>
                               <span className="text-slate-400 text-xs"> ชม.</span>
                             </td>
                           </tr>
@@ -1794,15 +1794,15 @@ if (tchErr) {
             )}
 
             {/* ประวัติการแลกคาบ/สอนแทน */}
-            <div className="bg-white rounded-2xl border border-[#E0E7FF] overflow-hidden">
-              <div className="px-5 py-3 border-b border-[#E5E9FA]">
+            <div className="bg-white rounded-2xl border border-[#FBCFE8] overflow-hidden">
+              <div className="px-5 py-3 border-b border-[#FCE7F3]">
                 <h3 className="font-bold text-slate-700 text-sm">🕘 ประวัติการแลกคาบ/สอนแทนล่าสุด</h3>
                 <p className="text-xs text-slate-400 mt-0.5">รวมทั้งคำขอแลกคาบที่ตกลงแล้ว และรายการสอนแทนทุกที่มา (สูงสุด 40 รายการล่าสุด)</p>
               </div>
               {combinedHistory.length === 0 ? (
                 <div className="text-center py-12 text-slate-400 text-sm">ยังไม่มีประวัติ</div>
               ) : (
-                <div className="divide-y divide-[#E5E9FA] max-h-[480px] overflow-y-auto">
+                <div className="divide-y divide-[#FCE7F3] max-h-[480px] overflow-y-auto">
                   {combinedHistory.map(item => {
                     if (item.kind === "swap") {
                       const r = item.data as SwapRequest;
