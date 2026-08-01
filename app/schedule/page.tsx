@@ -92,6 +92,7 @@ const SCHEDULE_TEMPLATES = [
 ];
 
 const ADMIN_ROLES    = ["admin", "director", "deputy_director"];
+const ADMIN_NOTIFY_EMAIL = "admin@khienkhet.ac.th";
 const APPROVER_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head", "subject_head"];
 const NON_TEACHING_ROLES = ["admin", "director", "deputy_director", "staff", "subject_teacher"];
 
@@ -1619,7 +1620,24 @@ useEffect(() => {
       setClassrooms(matched.length > 0 ? matched : allRooms);
     } else setClassrooms(allRooms);
   }
-
+  async function checkAndNotifyConflict(classroomId: string, dayOfWeek: number, timeSlotId: string) {
+    try {
+      const { data, error } = await supabase
+        .from("timetable_entries")
+        .select("id")
+        .eq("classroom_id", classroomId)
+        .eq("day_of_week", dayOfWeek)
+        .eq("time_slot_id", timeSlotId);
+      if (error) { console.warn("[checkAndNotifyConflict] query error:", error.message); return; }
+      if ((data ?? []).length > 1) {
+        const room = classrooms.find(c => c.id === classroomId) ?? allClassrooms.find(c => c.id === classroomId);
+        sendTeamsDM("academic", ADMIN_NOTIFY_EMAIL,
+          `🧹 พบคาบซ้ำ! ห้อง ${room?.grade_group ?? ""} ${room?.room_name ?? ""} วัน${DAYS[(dayOfWeek ?? 1) - 1]} มีการจัดคาบซ้อนกัน — เข้าไปตรวจสอบที่หน้าตารางสอน`);
+      }
+    } catch (err) {
+      console.warn("[checkAndNotifyConflict] error:", err);
+    }
+  }
   // ══════════════════════════════════════════════════════════════════════════
   // ✅ ใหม่: ensureRealTimeSlot — แก้ปัญหา "กดเพิ่มคาบแล้วไม่มีอะไรเกิดขึ้น"
   // สาเหตุ: บางคาบ (เช่นคาบเฉพาะของอนุบาล 09:30–09:50) เป็นแค่ "virtual slot" ที่สร้างจาก
@@ -1677,6 +1695,7 @@ useEffect(() => {
         if (error) throw error;
       }
       await loadEntries();
+      await checkAndNotifyConflict(data.classroom_id, data.day_of_week, realSlotId); // ★ เพิ่มบรรทัดนี้
     } catch (err: any) {
       console.error("[handleSaveDirect] error:", err);
       alert(
@@ -1749,6 +1768,7 @@ useEffect(() => {
         .eq("id", requestId);
       if (updErr) throw updErr;
       await Promise.all([loadEntries(), loadChangeRequests()]);
+      await checkAndNotifyConflict(req.classroom_id, req.day_of_week, req.time_slot_id); // ★ เพิ่มบรรทัดนี้
       if (req.requester?.email) {
         sendTeamsDM("academic", req.requester.email,
           `✅ คำขอแก้ไขตารางสอนของคุณได้รับการอนุมัติแล้ว (${DAYS[(req.day_of_week ?? 1) - 1]})`);
@@ -1804,6 +1824,9 @@ useEffect(() => {
         title: "📚 มีคำขอเพิ่มรายวิชาใหม่",
         message: `${fullName(user)} ขอเพิ่มวิชา ${d.subject_code} ${d.name_th} (ชั้น ${d.grade_level})`,
       });
+      // ★ เพิ่มใหม่: DM ส่วนตัวถึง admin
+      sendTeamsDM("academic", ADMIN_NOTIFY_EMAIL,
+        `📚 ${fullName(user)} ขอเพิ่มรายวิชาใหม่: ${d.subject_code} ${d.name_th} (ชั้น ${d.grade_level}) — เข้าไปตรวจสอบที่หน้าคำขอ`);
 
       alert("✅ ส่งคำขอเพิ่มรายวิชาแล้ว รอแอดมินอนุมัติ");
       await loadSubjectRequests();
@@ -1813,7 +1836,7 @@ useEffect(() => {
     }
   }
 
-  async function handleApproveSubjectRequest(requestId: string) {
+ async function handleApproveSubjectRequest(requestId: string) {
     if (!user) return;
     try {
       const req = subjectRequests.find(r => r.id === requestId);
@@ -1831,17 +1854,20 @@ useEffect(() => {
         .select("id,subject_code,name_th,subject_group").order("subject_code");
       setSubjects((subjectsData ?? []) as Subject[]);
       await loadSubjectRequests();
-      // ★ เพิ่มใหม่: แจ้งผู้ขอผ่าน Teams DM
+
+      // ★ เพิ่มใหม่: DM แจ้งผู้ขอ
       if (req.requester?.email) {
         sendTeamsDM("academic", req.requester.email,
           `✅ คำขอเพิ่มรายวิชา "${req.subject_code} ${req.name_th}" ของคุณได้รับการอนุมัติแล้ว`);
+      } else {
+        console.warn("[handleApproveSubjectRequest] ไม่มี email ผู้ขอ ส่ง DM ไม่ได้:", req.requester);
       }
+
       alert("✅ อนุมัติและเพิ่มรายวิชาใหม่เข้าระบบแล้ว");
     } catch (err: any) {
       console.error("[handleApproveSubjectRequest] error:", err);
       alert("❌ อนุมัติไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
     }
-    
   }
 
   async function handleRejectSubjectRequest(requestId: string, reason: string) {
@@ -1853,10 +1879,13 @@ useEffect(() => {
         .eq("id", requestId);
       if (error) throw error;
       await loadSubjectRequests();
-      // ★ เพิ่มใหม่: แจ้งผู้ขอผ่าน Teams DM
+
+      // ★ เพิ่มใหม่: DM แจ้งผู้ขอ
       if (req?.requester?.email) {
         sendTeamsDM("academic", req.requester.email,
           `❌ คำขอเพิ่มรายวิชา "${req.subject_code} ${req.name_th}" ของคุณถูกปฏิเสธ เหตุผล: ${reason}`);
+      } else {
+        console.warn("[handleRejectSubjectRequest] ไม่มี email ผู้ขอ ส่ง DM ไม่ได้:", req?.requester);
       }
     } catch (err: any) {
       console.error("[handleRejectSubjectRequest] error:", err);
