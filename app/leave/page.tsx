@@ -89,13 +89,29 @@ const DAY_NAME_TH = ["อาทิตย์","จันทร์","อังค�
 
 function eachDateInRange(start: string, end: string): string[] {
   if (!start || !end) return [];
+  const [sy, sm, sd] = start.split("-").map(Number);
+  const [ey, em, ed] = end.split("-").map(Number);
+  if (!sy || !sm || !sd || !ey || !em || !ed) return [];
+
   const out: string[] = [];
-  let cur = new Date(start + "T00:00:00");
-  const last = new Date(end + "T00:00:00");
-  while (cur <= last) { out.push(cur.toISOString().split("T")[0]); cur.setDate(cur.getDate() + 1); }
+  const cur = new Date(sy, sm - 1, sd);
+  const last = new Date(ey, em - 1, ed);
+  while (cur <= last) {
+    const yyyy = cur.getFullYear();
+    const mm = String(cur.getMonth() + 1).padStart(2, "0");
+    const dd = String(cur.getDate()).padStart(2, "0");
+    out.push(`${yyyy}-${mm}-${dd}`);
+    cur.setDate(cur.getDate() + 1);
+  }
   return out;
 }
-function dowOf(dateStr: string): number { return new Date(dateStr + "T00:00:00").getDay(); }
+
+function dowOf(dateStr: string): number {
+  if (!dateStr) return -1;               // ★ ป้องกันค่าว่างถูกตีความเป็น "วันนี้"
+  const [y, m, d] = dateStr.split("-").map(Number);
+  if (!y || !m || !d) return -1;
+  return new Date(y, m - 1, d).getDay();
+}
 function computeSlotHours(slot: any): number {
   if (!slot?.start_time || !slot?.end_time) return 1;
   const [sh, sm] = slot.start_time.split(":").map(Number);
