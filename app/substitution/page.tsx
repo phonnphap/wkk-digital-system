@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { addDays } from "date-fns";
@@ -80,6 +80,26 @@ function ymd(d: Date) {
 function dowOf(dateStr: string): number { return new Date(dateStr + "T00:00:00").getDay(); }
 function compactIds(ids: (string | null | undefined)[]): string[] {
   return ids.filter((id): id is string => !!id);
+}
+
+// ★ กันโรล staff/admin หลุดเข้ามาในรายชื่อครู (กันไว้อีกชั้น เผื่อ query หลักไม่ครอบคลุม)
+const EXCLUDED_TEACHER_ROLES = ["staff", "admin"];
+function isSelectableTeacher(t: User): boolean {
+  return !EXCLUDED_TEACHER_ROLES.includes(t.role);
+}
+
+// ★ หาครูที่ "ว่าง" ในวัน+คาบเวลาเดียวกับ entry นี้จริงๆ (เทียบ start_time ไม่เทียบ time_slot_id ดิบ)
+function computeFreeTeachersForEntry(
+  entry: TimetableEntry, date: string, allEntries: TimetableEntry[],
+  allTeachers: User[], excludeId: string
+): User[] {
+  const dow = dowOf(date);
+  const startKey = (entry.start_time ?? "").slice(0, 5);
+  const busyIds = new Set(
+    allEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
+      .flatMap(e => compactIds([e.teacher_id, e.teacher_id_2]))
+  );
+  return allTeachers.filter(t => t.id !== excludeId && !busyIds.has(t.id) && isSelectableTeacher(t));
 }
 
 const STATUS_SWAP: Record<string,{label:string;cls:string}> = {
@@ -342,6 +362,64 @@ function printTeacherSubStat(records: SubRecord[], users: User[]) {
     <script>window.onload=()=>window.print()<\/script>
   </body></html>`);
   w.document.close();
+}
+
+// ══════════════════════════════════════════════════════════
+// ── TeacherSearchSelect — เลือกครูแบบพิมพ์ค้นหาได้
+// ══════════════════════════════════════════════════════════
+function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เลือกครู —" }: {
+  teachers: User[]; value: string; onChange: (id: string) => void; placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selected = teachers.find(t => t.id === value);
+  const filtered = teachers.filter(t => fullName(t).toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen(v => !v)}
+        className="w-full text-left border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none flex items-center justify-between">
+        <span className={selected ? "font-bold text-slate-800" : "text-slate-400"}>
+          {selected ? fullName(selected) : placeholder}
+        </span>
+        <span className="text-slate-400 text-xs">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border-2 border-blue-200 rounded-xl shadow-xl overflow-hidden">
+          <div className="px-3 py-2 border-b border-slate-100">
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="🔍 พิมพ์ชื่อ..." autoFocus onClick={e => e.stopPropagation()}
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+          </div>
+          <div className="max-h-52 overflow-y-auto">
+            {value && (
+              <button type="button" onClick={() => { onChange(""); setOpen(false); setSearch(""); }}
+                className="w-full px-4 py-2 text-left text-xs text-red-500 font-bold hover:bg-red-50">✕ ล้างค่าที่เลือก</button>
+            )}
+            {filtered.length === 0 ? (
+              <div className="px-4 py-3 text-slate-400 text-sm text-center">ไม่พบชื่อ</div>
+            ) : filtered.map(t => (
+              <button key={t.id} type="button" onClick={() => { onChange(t.id); setOpen(false); setSearch(""); }}
+                className={`w-full px-4 py-2.5 text-left text-sm font-medium hover:bg-blue-50 ${t.id === value ? "bg-sky-50" : ""}`}>
+                <span className="font-bold text-slate-800">{fullName(t)}</span>
+                {t.position && <span className="text-slate-400 text-xs ml-2">{t.position}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ══════════════════════════════════════════════════════════
@@ -711,9 +789,11 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
           ) : (
             <div className="space-y-6">
               {leaveDates.map(date => {
-                const dayOfWeek = new Date(date+"T00:00:00").getDay();
-                const dayEntries = absentEntries.filter(e => e.day_of_week === dayOfWeek && !e.is_break);
-                if (dayEntries.length === 0) return null;
+  const dayOfWeek = new Date(date+"T00:00:00").getDay();
+  const dayEntries = absentEntries
+    .filter(e => e.day_of_week === dayOfWeek && !e.is_break)
+    .sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
+  if (dayEntries.length === 0) return null;
                 return (
                   <div key={date}>
                     <h4 className="font-bold text-slate-700 text-sm mb-3 pb-2 border-b border-slate-200">
@@ -732,15 +812,14 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
                               <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
                               <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
                             </div>
-                            <div className="shrink-0 w-48">
-                              <select value={assignments[key]||""} onChange={e=>setAsgn(key,e.target.value)}
-                                className="w-full border-2 border-blue-200 rounded-xl px-2 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none">
-                                <option value="">— เลือกครูสอนแทน —</option>
-                                {teachers.filter(t=>t.id!==absentId).map(t=>(
-                                  <option key={t.id} value={t.id}>{fullName(t)}</option>
-                                ))}
-                              </select>
-                            </div>
+                            <div className="shrink-0 w-56">
+  <TeacherSearchSelect
+    teachers={computeFreeTeachersForEntry(entry, date, entries, teachers, absentId)}
+    value={assignments[key] || ""}
+    onChange={id => setAsgn(key, id)}
+    placeholder="— เลือกครูสอนแทน —"
+  />
+</div>
                           </div>
                         );
                       })}
@@ -846,16 +925,17 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">ครูที่ลา *</label>
-              <select value={absentTeacherId} onChange={e => setAbsentTeacherId(e.target.value)}
-                className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none">
-                <option value="">— เลือกครู —</option>
-                {selectableTeachers.map(t => <option key={t.id} value={t.id}>{fullName(t)}</option>)}
-              </select>
-              {selectableTeachers.length === 0 && (
-                <p className="text-xs text-amber-600 font-bold mt-1">ไม่พบครูในสิทธิ์ของคุณ</p>
-              )}
-            </div>
+  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">ครูที่ลา *</label>
+  <TeacherSearchSelect
+    teachers={selectableTeachers.filter(isSelectableTeacher)}
+    value={absentTeacherId}
+    onChange={setAbsentTeacherId}
+    placeholder="— เลือกครู —"
+  />
+  {selectableTeachers.length === 0 && (
+    <p className="text-xs text-amber-600 font-bold mt-1">ไม่พบครูในสิทธิ์ของคุณ</p>
+  )}
+</div>
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">วันที่เริ่มลา *</label>
               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
@@ -884,9 +964,11 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
             ) : (
               <div className="space-y-6">
                 {leaveDates.map(date => {
-                  const dayOfWeek = new Date(date + "T00:00:00").getDay();
-                  const dayEntries = absentEntries.filter(e => e.day_of_week === dayOfWeek);
-                  if (dayEntries.length === 0) return null;
+  const dayOfWeek = new Date(date + "T00:00:00").getDay();
+  const dayEntries = absentEntries
+    .filter(e => e.day_of_week === dayOfWeek)
+    .sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
+  if (dayEntries.length === 0) return null;
                   return (
                     <div key={date}>
                       <h4 className="font-bold text-slate-700 text-sm mb-3 pb-2 border-b border-slate-200">
@@ -905,15 +987,14 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
                                 <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
                                 <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
                               </div>
-                              <div className="shrink-0 w-48">
-                                <select value={assignments[key] || ""} onChange={e => setAsgn(key, e.target.value)}
-                                  className="w-full border-2 border-blue-200 rounded-xl px-2 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none">
-                                  <option value="">— เลือกครูสอนแทน —</option>
-                                  {allTeachers.filter(t => t.id !== absentTeacherId).map(t => (
-                                    <option key={t.id} value={t.id}>{fullName(t)}</option>
-                                  ))}
-                                </select>
-                              </div>
+                              <div className="shrink-0 w-56">
+  <TeacherSearchSelect
+    teachers={computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId)}
+    value={assignments[key] || ""}
+    onChange={id => setAsgn(key, id)}
+    placeholder="— เลือกครูสอนแทน —"
+  />
+</div>
                             </div>
                           );
                         })}
@@ -969,10 +1050,11 @@ export default function SubstitutionPage() {
   // ★ รายชื่อครูที่เลือกได้ในโหมด "จัดอัตโนมัติ" — admin เลือกได้ทุกคน, หัวหน้าสายเลือกได้แค่สายชั้นตัวเอง
 const manualAssignTeachers = useMemo(() => {
   if (!user) return [];
-  if (isAdmin) return teachers;
+  const base = teachers.filter(isSelectableTeacher);
+  if (isAdmin) return base;
   const roles = user.extra_roles ?? [];
   if (roles.includes("grade_head") && user.grade_level) {
-    return teachers.filter(t => t.grade_level === user.grade_level);
+    return base.filter(t => t.grade_level === user.grade_level);
   }
   return [];
 }, [teachers, user, isAdmin]);
