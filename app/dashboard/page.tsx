@@ -33,7 +33,7 @@ function toThaiDateShort(iso: string) {
   } catch { return ""; }
 }
 
-type NotifSource = "leave_approval" | "leave_status" | "timetable_request" | "swap_request"
+type NotifSource = "leave_approval" | "leave_status" | "timetable_request" | "swap_request" | "swap_status" | "sub_assigned"
   | "subject_request" | "subject_status" | "timetable_status" | "schedule_conflict";
 type NotifItem = {
   id: string;
@@ -353,6 +353,55 @@ export default function DashboardPage() {
           });
         }
       }
+      // 9) สถานะคำขอแลกคาบของฉันเอง
+if (opts.profileId) {
+  const { data: mySwapReqs, error } = await supabase
+    .from("class_swap_requests")
+    .select("id, swap_date, status, responded_at, target_teacher:users!target_teacher_id(first_name,last_name)")
+    .eq("requester_id", opts.profileId)
+    .in("status", ["accepted", "rejected"])
+    .order("responded_at", { ascending: false })
+    .limit(3);
+  if (error) console.warn("[loadNotifications] my swap status query error:", error.message);
+  (mySwapReqs || []).forEach((r: any) => {
+    const u = r.target_teacher;
+    const name = `${u?.first_name ?? ""} ${u?.last_name ?? ""}`.trim() || "—";
+    items.push({
+      id: `myswap-${r.id}`,
+      source: "swap_status",
+      title: r.status === "accepted" ? "✅ คำขอแลกคาบของคุณได้รับการตอบรับ" : "❌ คำขอแลกคาบของคุณถูกปฏิเสธ",
+      detail: `${name} · วันที่ ${toThaiDateShort(r.swap_date)}`,
+      date: r.responded_at ?? new Date().toISOString(),
+      path: "/substitution",
+      urgent: true,
+    });
+  });
+}
+
+// 10) คุณถูกจัดให้สอนแทน
+if (opts.profileId) {
+  const { data: newSubs, error } = await supabase
+    .from("substitution_records")
+    .select("id, substitute_date, created_at, status, absent_teacher:users!absent_teacher_id(first_name,last_name)")
+    .eq("substitute_teacher_id", opts.profileId)
+    .neq("status", "cancelled")
+    .order("created_at", { ascending: false })
+    .limit(3);
+  if (error) console.warn("[loadNotifications] my sub assignment query error:", error.message);
+  (newSubs || []).forEach((r: any) => {
+    const u = r.absent_teacher;
+    const name = `${u?.first_name ?? ""} ${u?.last_name ?? ""}`.trim() || "—";
+    items.push({
+      id: `mysubassign-${r.id}`,
+      source: "sub_assigned",
+      title: "📋 คุณถูกจัดให้สอนแทน",
+      detail: `แทน ${name} วันที่ ${toThaiDateShort(r.substitute_date)}`,
+      date: r.created_at,
+      path: "/substitution",
+      urgent: true,
+    });
+  });
+}
 
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setNotifications(items);

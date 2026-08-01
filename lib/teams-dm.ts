@@ -45,11 +45,10 @@ async function getSenderToken(sender: Sender): Promise<string> {
   return result.accessToken;
 }
 
-export async function sendTeamsDM(sender: Sender, targetEmail: string, message: string) {
+export async function sendTeamsDM(sender: Sender, targetEmail: string, message: string): Promise<boolean> {
   try {
     const token = await getSenderToken(sender);
 
-    // หา/สร้างแชท 1:1 ระหว่างบัญชี sender กับผู้รับ (ใช้ email/UPN แทน user id ได้)
     const chatRes = await fetch("https://graph.microsoft.com/v1.0/chats", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -67,7 +66,7 @@ export async function sendTeamsDM(sender: Sender, targetEmail: string, message: 
 
     if (!chatRes.ok) {
       console.error("[sendTeamsDM] create chat failed:", await chatRes.text());
-      return;
+      return false; // ★ เดิมเป็น "return;" เฉยๆ แก้เป็น false
     }
     const chat = await chatRes.json();
 
@@ -77,9 +76,11 @@ export async function sendTeamsDM(sender: Sender, targetEmail: string, message: 
       body: JSON.stringify({ body: { content: message } }),
     });
 
-    if (!msgRes.ok) console.error("[sendTeamsDM] send message failed:", await msgRes.text());
+    if (!msgRes.ok) { console.error("[sendTeamsDM] send message failed:", await msgRes.text()); return false; }
+    return true;
   } catch (err) {
     // ไม่ throw ต่อ — ถ้าส่ง DM พลาด ไม่ควรทำให้การอนุมัติ/ปฏิเสธคำขอในระบบล้มเหลวไปด้วย
     console.error("[sendTeamsDM] error:", err);
+    return false; // ★ เดิมไม่มี return ตรงนี้เลย เป็นจุดหลักที่ทำให้ error ขึ้น
   }
 }
