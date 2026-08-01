@@ -135,6 +135,27 @@ function isHomeroomPriorityGrade(gradeGroup?: string | null): boolean {
   return g === "ป.1" || g === "ป.2";
 }
 
+// ★ หารายชื่อ id ครูที่สอนในสายชั้นเดียวกับ entry นี้ (ทั้งโรงเรียน ไม่ใช่แค่ห้องเดียวกัน)
+// ใช้เรียงลำดับ/สุ่มครูสอนแทนให้ได้ครูสายชั้นเดียวกับครูที่ลาก่อนเป็นอันดับแรก
+function sameGradeTeacherIds(entry: { grade_group?: string | null }, allEntries: TimetableEntry[]): Set<string> {
+  const gradeOnly = extractGradeOnly(entry.grade_group);
+  if (!gradeOnly) return new Set();
+  return new Set(
+    allEntries.filter(e => extractGradeOnly(e.grade_group) === gradeOnly)
+      .flatMap(e => compactIds([e.teacher_id, e.teacher_id_2]))
+  );
+}
+
+// ★ เรียงรายชื่อครู: สายชั้นเดียวกับครูที่ลาก่อน แล้วค่อยเรียงตามชื่อ
+function sortTeachersByGrade(candidates: User[], gradeIds: Set<string>): User[] {
+  return [...candidates].sort((a, b) => {
+    const aIn = gradeIds.has(a.id) ? 0 : 1;
+    const bIn = gradeIds.has(b.id) ? 0 : 1;
+    if (aIn !== bIn) return aIn - bIn;
+    return fullName(a).localeCompare(fullName(b), "th");
+  });
+}
+
 // ══════════════════════════════════════════════════════════
 // ── Schedule templates — ★ ต้องเหมือนกับหน้าใบลา (leave/page.tsx) เป๊ะ
 // ══════════════════════════════════════════════════════════
@@ -971,6 +992,22 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
     setAssignments(prev => ({ ...prev, [key]: val }));
   }
 
+  // ★ สุ่มเลือกครูสอนแทน — จากครูสายชั้นเดียวกับครูที่ลา ที่ว่างตรงคาบ และมีคาบสอนวันนั้นน้อยที่สุด
+  // ถ้าไม่มีครูสายชั้นเดียวกันว่างเลย จะสุ่มจากครูว่างทั้งหมดแทน (กันเคสไม่มีตัวเลือก)
+  function randomAssignTeacher(key: string, entry: TimetableEntry, date: string) {
+    const dow = dowOf(date);
+    const candidates = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId);
+    if (candidates.length === 0) { alert("⚠️ ไม่มีครูว่างในคาบนี้"); return; }
+    const gradeIds = sameGradeTeacherIds(entry, entries);
+    let pool = candidates.filter(t => gradeIds.has(t.id));
+    if (pool.length === 0) pool = candidates;
+    const scored = pool.map(t => ({ t, load: computeTaughtPeriodsForDay(t.id, dow, entries) }));
+    const minLoad = Math.min(...scored.map(s => s.load));
+    const minPool = scored.filter(s => s.load === minLoad).map(s => s.t);
+    const pick = minPool[Math.floor(Math.random() * minPool.length)];
+    setAsgn(key, pick.id);
+  }
+
   const handleSave = async () => {
     if (!absentTeacherId) { alert("กรุณาเลือกครูที่ลา"); return; }
     if (leaveDates.length === 0) { alert("กรุณาเลือกช่วงวันที่ให้ถูกต้อง"); return; }
@@ -1056,6 +1093,9 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
               <div className="text-center py-12 text-slate-400">ไม่พบตารางสอนของครูคนนี้</div>
             ) : (
               <div className="space-y-6">
+                <p className="text-xs text-[#B45309] bg-[#FEF3C7] border border-[#FDE68A] rounded-xl px-3 py-2">
+                  💡 รายชื่อครูในช่อง "เลือกครูสอนแทน" จะเรียงครูสายชั้นเดียวกับครูที่ลาไว้ก่อน — ตัวเลข "X คาบ" ข้างชื่อครูคือจำนวนคาบที่ครูสอนอยู่แล้วในวันนั้น ถ้าครบ {SUB_LOAD_WARN_AT} คาบจะมี ⚠️ เตือน และกดปุ่ม 🎲 เพื่อสุ่มครูสายชั้นเดียวกันที่ว่างตรงคาบและมีคาบน้อยที่สุดให้อัตโนมัติ
+                </p>
                 {leaveDates.map(date => {
   const dayOfWeek = new Date(date + "T00:00:00").getDay();
   const dayEntries = absentEntries
@@ -1070,6 +1110,13 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
                       <div className="space-y-2">
                         {dayEntries.map(entry => {
                           const key = `${entry.id}_${date}`;
+                          const dow = dowOf(date);
+                          const candidates = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId);
+                          const gradeIds = sameGradeTeacherIds(entry, entries);
+                          const sortedCandidates = sortTeachersByGrade(candidates, gradeIds);
+                          const loadMap = Object.fromEntries(sortedCandidates.map(t => [t.id, computeTaughtPeriodsForDay(t.id, dow, entries)]));
+                          const pickedId = assignments[key] || "";
+                          const pickedLoad = pickedId ? computeTaughtPeriodsForDay(pickedId, dow, entries) : null;
                           return (
                             <div key={key} className="flex items-center gap-3 bg-[#F5F7FF] rounded-xl px-4 py-3">
                               <div className="shrink-0 text-center w-16">
@@ -1079,14 +1126,25 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
                               <div className="flex-1 min-w-0">
                                 <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
                                 <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
+                                {pickedId && pickedLoad !== null && pickedLoad >= SUB_LOAD_WARN_AT && (
+                                  <div className="text-[11px] font-bold text-red-500 mt-0.5">⚠️ ครูคนนี้สอนวันนี้แล้ว {pickedLoad} คาบ — ควรพิจารณาก่อนยืนยัน</div>
+                                )}
                               </div>
-                              <div className="shrink-0 w-56">
-  <TeacherSearchSelect
-    teachers={computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId)}
-    value={assignments[key] || ""}
-    onChange={id => setAsgn(key, id)}
-    placeholder="— เลือกครูสอนแทน —"
-  />
+                              <div className="shrink-0 w-56 flex items-center gap-1.5">
+  <div className="flex-1 min-w-0">
+    <TeacherSearchSelect
+      teachers={sortedCandidates}
+      value={assignments[key] || ""}
+      onChange={id => setAsgn(key, id)}
+      placeholder="— เลือกครูสอนแทน —"
+      loadMap={loadMap}
+    />
+  </div>
+  <button type="button" onClick={() => randomAssignTeacher(key, entry, date)}
+    title="สุ่มครูสายชั้นเดียวกันที่ว่างและมีคาบน้อยที่สุด"
+    className="shrink-0 w-9 h-9 rounded-xl bg-[#FEF3C7] hover:bg-[#FDE68A] border-2 border-[#FDE68A] flex items-center justify-center text-base">
+    🎲
+  </button>
 </div>
                             </div>
                           );
