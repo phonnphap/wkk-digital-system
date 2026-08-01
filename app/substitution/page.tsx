@@ -1490,9 +1490,6 @@ if (tchErr) {
     loadMap={loadMap}
   />
   {candidates.length === 0 && <p className="text-xs text-red-500 font-bold mt-1">ไม่พบครูว่างในคาบนี้</p>}
-  {absentTeacher?.grade_level && (
-    <p className="text-[11px] text-slate-400 mt-1">💡 ครูสายชั้น {absentTeacher.grade_level} จะขึ้นก่อนในรายการ</p>
-  )}
 </div>
         </div>
         <div className="px-6 py-4 border-t border-[#FCE7F3] flex gap-2 justify-end bg-[#FDF2F8] rounded-b-2xl">
@@ -1827,7 +1824,7 @@ if (tchErr) {
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-gradient-to-r from-[#9D174D] to-[#EC4899] text-white text-xs sm:text-sm">
-            {["วันที่","คาบ","ห้อง","วิชา","ครูเจ้าของคาบ","ครูสอนแทน","ชม.","ที่มา","สถานะ", ...(canAssignSub ? ["จัดการ"] : [])].map(h=>(
+            {["วันที่","คาบ","ห้อง","วิชา","ครูเจ้าของคาบ","ครูสอนแทน","ชม.","ที่มา","สถานะ","แลกคาบคืน", ...(canAssignSub ? ["จัดการ"] : [])].map(h=>(
               <th key={h} className="px-4 py-3.5 text-left font-bold whitespace-nowrap">{h}</th>
             ))}
           </tr>
@@ -1865,6 +1862,21 @@ if (tchErr) {
                     {STATUS_SUB[r.status]?.label??r.status}
                   </span>
                 </td>
+                <td className="px-4 py-3.5 whitespace-nowrap">
+  {r.absent_teacher_id === user?.id && r.status !== "cancelled" ? (
+    <button
+      onClick={() => {
+        setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.substitute_teacher)} ที่เคยสอนแทนให้เมื่อ ${thaiDate(r.substitute_date)} (${r.slot_label ?? "-"})`);
+        setShowSwapModal(true);
+      }}
+      className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200 transition-colors"
+    >
+      🔄 แลกคาบคืน
+    </button>
+  ) : (
+    <span className="text-xs text-slate-300">—</span>
+  )}
+</td>
                 {canAssignSub && (
   <td className="px-4 py-3.5 whitespace-nowrap">
     {r.status !== "cancelled" ? (
