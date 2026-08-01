@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { format } from "date-fns";
 import { th } from "date-fns/locale";
 import { notifyTeams } from "../../lib/notify-teams";
-import { sendTeamsDM } from "@/lib/teams-dm";
+
 
 const supabase = createClient();
 
@@ -163,6 +163,22 @@ function displayName(u: any) {
   if (fn || ln) return `${fn} ${ln}`.trim();
   return u.full_name ?? "—";
 }
+async function sendTeamsDM(sender: "hr" | "general" | "academic", targetEmail: string, message: string) {
+  try {
+    const res = await fetch("/api/teams-dm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sender, targetEmail, message }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      console.error("[sendTeamsDM] API error:", body);
+    }
+  } catch (err) {
+    console.error("[sendTeamsDM] fetch error:", err);
+  }
+}
+
 function formatTime(t: string) { return t?.slice(0, 5) ?? ""; }
 // ★ แปลงรหัสวิชา (เช่น ว11282, ว31101) เป็นระดับชั้นเต็ม
 // [ตัวอักษรวิชา][กลุ่มระดับ 1 หลัก][ชั้นในกลุ่ม 1 หลัก][เลขลำดับ...]
