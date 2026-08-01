@@ -1424,7 +1424,13 @@ if (tchErr) {
   const [newTeacherId, setNewTeacherId] = useState(record.substitute_teacher_id ?? "");
   const [saving, setSaving] = useState(false);
 
-  const candidates = useMemo(() => {
+  // ★ ครูที่ลา (เจ้าของคาบเดิม) — ใช้หาสายชั้นเดียวกันจาก grade_level
+  const absentTeacher = useMemo(
+    () => teachers.find(t => t.id === record.absent_teacher_id) ?? null,
+    [teachers, record.absent_teacher_id]
+  );
+
+  const rawCandidates = useMemo(() => {
     if (!entry) return teachers.filter(isSelectableTeacher);
     const free = computeFreeTeachersForEntry(entry, record.substitute_date, allEntries, teachers, record.absent_teacher_id);
     // เผื่อครูคนเดิมไม่โผล่ในลิสต์ว่าง (เช่นถูกจัดสอนแทนที่อื่นซ้อนพอดี) ให้ใส่กลับเข้าไปด้วยเสมอ
@@ -1434,6 +1440,18 @@ if (tchErr) {
     }
     return free;
   }, [entry, allEntries, teachers, record]);
+
+  // ★ เรียงครูสายชั้นเดียวกับ "ครูที่ลา" ขึ้นก่อน
+  const candidates = useMemo(
+    () => sortTeachersByGrade(rawCandidates, sameGradeTeacherIds(absentTeacher, teachers)),
+    [rawCandidates, absentTeacher, teachers]
+  );
+
+  // ★ จำนวนคาบที่แต่ละคนสอนอยู่แล้วในวันนั้น — โชว์เป็น badge ข้างชื่อ
+  const loadMap = useMemo(() => {
+    const dow = dowOf(record.substitute_date);
+    return Object.fromEntries(candidates.map(t => [t.id, computeTaughtPeriodsForDay(t.id, dow, allEntries)]));
+  }, [candidates, allEntries, record.substitute_date]);
 
   const handleSave = async () => {
     if (!newTeacherId) { alert("กรุณาเลือกครูสอนแทนคนใหม่"); return; }
@@ -1450,7 +1468,7 @@ if (tchErr) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col" onClick={e=>e.stopPropagation()}>
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col" onClick={e=>e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between">
           <h3 className="font-bold text-slate-800 text-base">✏️ แก้ไขครูสอนแทน</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#FCE7F3] flex items-center justify-center text-slate-500">✕</button>
@@ -1463,10 +1481,19 @@ if (tchErr) {
             <p><span className="text-slate-400">ครูสอนแทนเดิม:</span> <span className="font-bold text-[#DB2777]">{fullName(record.substitute_teacher)}</span></p>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">เปลี่ยนเป็นครู *</label>
-            <TeacherSearchSelect teachers={candidates} value={newTeacherId} onChange={setNewTeacherId} placeholder="— เลือกครูสอนแทนคนใหม่ —" />
-            {candidates.length === 0 && <p className="text-xs text-red-500 font-bold mt-1">ไม่พบครูว่างในคาบนี้</p>}
-          </div>
+  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">เปลี่ยนเป็นครู *</label>
+  <TeacherSearchSelect
+    teachers={candidates}
+    value={newTeacherId}
+    onChange={setNewTeacherId}
+    placeholder="— เลือกครูสอนแทนคนใหม่ —"
+    loadMap={loadMap}
+  />
+  {candidates.length === 0 && <p className="text-xs text-red-500 font-bold mt-1">ไม่พบครูว่างในคาบนี้</p>}
+  {absentTeacher?.grade_level && (
+    <p className="text-[11px] text-slate-400 mt-1">💡 ครูสายชั้น {absentTeacher.grade_level} จะขึ้นก่อนในรายการ</p>
+  )}
+</div>
         </div>
         <div className="px-6 py-4 border-t border-[#FCE7F3] flex gap-2 justify-end bg-[#FDF2F8] rounded-b-2xl">
           <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#FBCFE8] text-slate-600 text-sm">ยกเลิก</button>
@@ -1884,7 +1911,7 @@ if (tchErr) {
             {!canAssignSub && (
               <div className="grid grid-cols-2 gap-4">
                 {[
-                  { label:"ครั้งที่ขาด/ลา", value: subRecords.filter(r=>r.absent_teacher_id===user.id && r.status!=="cancelled").length, color:"#dc2626", icon:"📋" },
+                  { label:"คาบที่ขาด/ลา", value: subRecords.filter(r=>r.absent_teacher_id===user.id && r.status!=="cancelled").length, color:"#dc2626", icon:"📋" },
                   { label:"ครั้งที่สอนแทน", value: subRecords.filter(r=>r.substitute_teacher_id===user.id && r.status!=="cancelled").length, color:"#16a34a", icon:"✅" },
                   { label:"ชั่วโมงสอนแทน", value: subRecords.filter(r=>r.substitute_teacher_id===user.id && r.status!=="cancelled").reduce((s,r)=>s+Number(r.hours_count),0), color:"#2563eb", icon:"⏰" },
                   { label:"คำขอแลกคาบ", value: mySwaps.length, color:"#7c3aed", icon:"🔄" },
@@ -1914,7 +1941,7 @@ if (tchErr) {
                       <thead>
                         <tr className="bg-gradient-to-r from-[#EC4899] to-[#EC4899] text-white text-xs">
                           <th className="px-4 py-3 text-left">ชื่อ-นามสกุล</th>
-                          <th className="px-3 py-3 text-center">ครั้งที่ขาด</th>
+                          <th className="px-3 py-3 text-center">คาบที่ขาด</th>
                           <th className="px-3 py-3 text-center">ครั้งสอนแทน</th>
                           <th className="px-3 py-3 text-center">รวมชั่วโมง</th>
                         </tr>
