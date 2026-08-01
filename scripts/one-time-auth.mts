@@ -1,12 +1,13 @@
 // scripts/one-time-auth.mts
-import "dotenv/config";
+import dotenv from "dotenv";
+dotenv.config({ path: ".env.local" });
 import { PublicClientApplication } from "@azure/msal-node";
 import { DeviceCodeResponse } from "@azure/msal-common";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
 async function loginAccount(label: "hr" | "general" | "academic") {
@@ -35,9 +36,9 @@ async function loginAccount(label: "hr" | "general" | "academic") {
 
 // รันทีละบัญชี — แก้ label แล้วรันใหม่ 3 รอบ
 async function main() {
-  await loginAccount("hr");
+  // await loginAccount("hr");
   // await loginAccount("general");
-  // await loginAccount("academic");
+   await loginAccount("academic");
 }
 
 main();

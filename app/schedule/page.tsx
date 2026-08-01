@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { format } from "date-fns";
 import { th } from "date-fns/locale";
 import { notifyTeams } from "../../lib/notify-teams";
+import { sendTeamsDM } from "@/lib/teams-dm";
 
 const supabase = createClient();
 
@@ -1547,7 +1548,7 @@ useEffect(() => {
     if (!user) return;
     const isApprover = isApproverUser(user);
     let query = (supabase.from("timetable_change_requests") as any)
-      .select("*, requester:users!timetable_change_requests_requester_id_fkey(id,first_name,last_name,full_name)")
+      .select("*, requester:users!timetable_change_requests_requester_id_fkey(id,first_name,last_name,full_name,email)")
       .order("created_at", { ascending: false });
     if (!isApprover) query = query.eq("requester_id", user.id);
     const { data } = await query;
@@ -1732,6 +1733,11 @@ useEffect(() => {
         .eq("id", requestId);
       if (updErr) throw updErr;
       await Promise.all([loadEntries(), loadChangeRequests()]);
+      // ★ แจ้งเตือนครูผู้ขอผ่าน Teams DM
+      if (req.requester?.email) {
+        sendTeamsDM("academic", req.requester.email,
+          `✅ คำขอแก้ไขตารางสอนของคุณได้รับการอนุมัติแล้ว (${DAYS[(req.day_of_week ?? 1) - 1]})`);
+      }
       alert("✅ อนุมัติและอัปเดตตารางสอนแล้ว");
     } catch (err: any) {
       console.error("[handleApproveRequest] error:", err);
@@ -1743,11 +1749,17 @@ useEffect(() => {
   async function handleRejectRequest(requestId: string, reason: string) {
     if (!user) return;
     try {
+      const req = changeRequests.find(r => r.id === requestId); 
       const { error } = await (supabase.from("timetable_change_requests") as any)
         .update({ status: "rejected", reject_reason: reason, reviewed_by: user.id, reviewed_at: new Date().toISOString() })
         .eq("id", requestId);
       if (error) throw error;
       await loadChangeRequests();
+      // ★ แจ้งเตือนครูผู้ขอผ่าน Teams DM
+      if (req?.requester?.email) {
+        sendTeamsDM("academic", req.requester.email,
+          `❌ คำขอแก้ไขตารางสอนของคุณถูกปฏิเสธ เหตุผล: ${reason}`);
+      }
     } catch (err: any) {
       console.error("[handleRejectRequest] error:", err);
       alert("❌ ปฏิเสธคำขอไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
@@ -1805,6 +1817,7 @@ useEffect(() => {
       console.error("[handleApproveSubjectRequest] error:", err);
       alert("❌ อนุมัติไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
     }
+    
   }
 
   async function handleRejectSubjectRequest(requestId: string, reason: string) {
