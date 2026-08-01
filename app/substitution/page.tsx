@@ -685,6 +685,7 @@ const GRADE_BAND_LABEL: Record<string,string> = {
     requester_id: user.id, target_teacher_id: targetId,
     requester_entry_id: selectedEntry!.id, target_entry_id: null,
     requester_slot_id: selectedEntry!.time_slot_id,
+    target_slot_id: selectedEntry!.time_slot_id,
     swap_date: swapDate, reason, status: "pending", academic_year_id: academicYearId,
   }]);
   setSaving(false);
@@ -728,7 +729,7 @@ const GRADE_BAND_LABEL: Record<string,string> = {
     {mode === "repay" ? (
       targetDayEntries.length === 0 ? (
         <p className="text-sm text-slate-400 py-4 text-center bg-[#FDF2F8] rounded-xl border border-[#FBCFE8]">
-          ครู{fullName(targetTeacher)}ไม่มีคาบสอนในวันนี้ ลองเปลี่ยนวันที่ดูครับ
+          ครู{fullName(targetTeacher)}ไม่มีคาบสอนในวันนี้ กรุณาเปลี่ยนวันที่
         </p>
       ) : (
         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -1466,7 +1467,7 @@ if (tchErr) {
     const to   = ymd(addDays(new Date(), 30));
     const { data: leaves } = await supabase.from("leave_requests")
       .select(`*,user:users!user_id(id,first_name,last_name,title,role)`)
-      .eq("status", "approved")
+      .in("status", ["pending", "approved"])
       .gte("end_date", from).lte("start_date", to)
       .order("start_date");
     setLeaveRequests((leaves ?? []) as LeaveRequest[]);
@@ -1797,6 +1798,11 @@ if (tchErr) {
                           <div className="min-w-0">
                             <p className="font-bold text-slate-800 text-sm truncate">{fullName(lr.user)}</p>
                             <p className="text-xs text-slate-400">{thaiDate(lr.start_date)} – {thaiDate(lr.end_date)} ({lr.days_count} วัน)</p>
+                            {lr.status === "pending" && (
+  <span className="inline-block mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-lg bg-amber-50 text-amber-600 border border-amber-200">
+    ⏳ ยังรออนุมัติ — จัดล่วงหน้าได้เลย
+  </span>
+)}
                             <p className="text-xs text-slate-400 mt-0.5">{{sick:"ลาป่วย",personal:"ลากิจ",official:"ลาราชการ",maternity:"ลาคลอด",ordination:"ลาอุปสมบท"}[lr.leave_type]??lr.leave_type}</p>
                           </div>
                           {alreadyAssigned ? (

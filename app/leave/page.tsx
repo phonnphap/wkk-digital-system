@@ -2,7 +2,7 @@
 "use client";
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -120,15 +120,97 @@ function computeSlotHours(slot: any): number {
   return diffMin > 0 ? Math.round((diffMin / 60) * 100) / 100 : 1;
 }
 
-function countFreePeriods(teacherId: string, dow: number, timetableEntries: any[]): number {
-  const daySlots = new Set(
-    timetableEntries.filter(e => e.day_of_week === dow && !e.is_break).map(e => (e.start_time ?? "").slice(0,5))
+function extractGradeOnly(gradeGroup?: string | null): string {
+  if (!gradeGroup) return "";
+  return gradeGroup.split("/")[0].trim();
+}
+function isHomeroomPriorityGrade(gradeGroup?: string | null): boolean {
+  const g = extractGradeOnly(gradeGroup);
+  return g === "ป.1" || g === "ป.2";
+}
+function gradeBand(gradeGroup?: string | null): string {
+  const g = extractGradeOnly(gradeGroup);
+  if (["ป.1","ป.2","ป.3"].includes(g)) return "primary_lower";
+  if (["ป.4","ป.5","ป.6"].includes(g)) return "primary_upper";
+  if (["ม.1","ม.2","ม.3"].includes(g)) return "secondary_lower";
+  if (["ม.4","ม.5","ม.6"].includes(g)) return "secondary_upper";
+  if (g.startsWith("อ.")) return "kindergarten";
+  return "";
+}
+const SUBJECT_GROUP_RULES: { match: string[]; related: string[]; useGradeBand: boolean; groupLabel: string }[] = [
+  { match: ["วิทยาศาสตร์"], related: ["วิทยาศาสตร์", "เทคโนโลยี"], useGradeBand: true, groupLabel: "วิทยาศาสตร์/เทคโนโลยี" },
+  { match: ["คอมพิวเตอร์"], related: ["คอมพิวเตอร์"], useGradeBand: false, groupLabel: "คอมพิวเตอร์" },
+];
+
+function computeFreePeriodsForDay(teacherId: string, dow: number, scheduleType: string | undefined, allEntries: any[], allTimeSlots: any[]): number {
+  const templateSlots = buildRoomSlots(scheduleType, allTimeSlots).filter((s: any) => !s.is_break);
+  const busyStartTimes = new Set(
+    allEntries.filter(e => e.day_of_week === dow && (e.teacher_id === teacherId || e.teacher_id_2 === teacherId))
+      .map(e => (e.start_time ?? "").slice(0, 5))
   );
-  const busySlots = new Set(
-    timetableEntries.filter(e => e.day_of_week === dow && !e.is_break && (e.teacher_id === teacherId || e.teacher_id_2 === teacherId))
-      .map(e => (e.start_time ?? "").slice(0,5))
-  );
-  return Math.max(daySlots.size - busySlots.size, 0);
+  return templateSlots.filter((s: any) => !busyStartTimes.has(s.start_time)).length;
+}
+
+function buildSubstituteTiers(
+  entry: any, dow: number, timetableEntries: any[], allTeachers: UserProfile[],
+  excludeId: string, onLeaveIds: Set<string>, subHistCounts: Record<string, number>,
+  busyIds: Set<string>, preUsedIds: Set<string> = new Set()
+): { label: string; teachers: UserProfile[] }[] {
+  const isEligible = (t: UserProfile) => t.id !== excludeId && !busyIds.has(t.id) && !onLeaveIds.has(t.id) && !preUsedIds.has(t.id);
+  const scored = (list: UserProfile[]) => list
+    .filter(isEligible)
+    .map(t => ({
+      teacher: t,
+      free: computeFreePeriodsForDay(t.id, dow, entry.schedule_type ?? undefined, timetableEntries, timetableEntries),
+      hist: subHistCounts[t.id] ?? 0,
+    }))
+    .sort((a, b) => b.free - a.free || a.hist - b.hist)
+    .map(x => x.teacher);
+
+  const result: { label: string; teachers: UserProfile[] }[] = [];
+  const used = new Set(preUsedIds);
+
+  if (isHomeroomPriorityGrade(entry.grade_group) && entry.homeroom_teacher_id) {
+    const hr = allTeachers.find(t => t.id === entry.homeroom_teacher_id);
+    if (hr && isEligible(hr)) { result.push({ label: "👩‍🏫 ครูประจำชั้น (สอนแทนก่อนเสมอ)", teachers: [hr] }); used.add(hr.id); }
+  }
+
+  const gradeOnly = extractGradeOnly(entry.grade_group);
+  if (gradeOnly) {
+    const gradeTeacherIds = new Set(
+      timetableEntries.filter(e => extractGradeOnly(e.grade_group) === gradeOnly)
+        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+    );
+    const list = scored(allTeachers.filter(t => gradeTeacherIds.has(t.id) && !used.has(t.id)));
+    if (list.length > 0) { result.push({ label: `🏫 สายชั้น ${gradeOnly}`, teachers: list }); list.forEach(t => used.add(t.id)); }
+  }
+
+  {
+    const subjectName = entry.subject_name ?? "";
+    const rule = SUBJECT_GROUP_RULES.find(r => r.match.some(k => subjectName.includes(k)));
+    const band = gradeBand(entry.grade_group);
+    let subjIds = new Set<string>();
+    let tierLabel = "📘 ครูวิชาเดียวกัน";
+    if (rule) {
+      subjIds = new Set(
+        timetableEntries.filter(e => rule.related.some(k => (e.subject_name ?? "").includes(k)) && (!rule.useGradeBand || gradeBand(e.grade_group) === band))
+          .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+      );
+      tierLabel = rule.useGradeBand ? `📘 ครู${rule.groupLabel}` : `📘 ครูวิชา${rule.groupLabel}`;
+    } else if (entry.subject_id) {
+      subjIds = new Set(
+        timetableEntries.filter(e => e.subject_id === entry.subject_id)
+          .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+      );
+    }
+    const list = scored(allTeachers.filter(t => subjIds.has(t.id) && !used.has(t.id)));
+    if (list.length > 0) { result.push({ label: tierLabel, teachers: list }); list.forEach(t => used.add(t.id)); }
+  }
+
+  const rest = scored(allTeachers.filter(t => !used.has(t.id)));
+  if (rest.length > 0) result.push({ label: "⚠️ ครูที่ว่างทั้งหมด (นอกสายชั้น/วิชา)", teachers: rest });
+
+  return result;
 }
 
 // ══════════════════════════════════════════════════════════
@@ -235,7 +317,8 @@ function enrichEntries(rawEntries: any[], classroomsMap: Record<string, any>, su
       is_break: slot?.is_break ?? false,
       room_name: room?.room_name ?? null,
       grade_group: room?.grade_group ?? null,
-      homeroom_teacher_id: room?.homeroom_teacher_id ?? null,   // ★ เพิ่มบรรทัดนี้
+      homeroom_teacher_id: room?.homeroom_teacher_id ?? null,
+      schedule_type: room?.schedule_type ?? null,   // ★ เพิ่มบรรทัดนี้
       subject_name: subject?.name_th ?? null,
       subject_code: subject?.subject_code ?? null,
     };
@@ -996,70 +1079,54 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
 }) {
   const [selectedDate, setSelectedDate] = useState(dates[0] ?? "");
   const [selectedEntry, setSelectedEntry] = useState<any>(null);
-  const [freeTeachers, setFreeTeachers] = useState<UserProfile[]>([]);
-  const [usingGradeFilter, setUsingGradeFilter] = useState(false);
   const [pickedTeacherId, setPickedTeacherId] = useState("");
   const [onLeaveIds, setOnLeaveIds] = useState<Set<string>>(new Set());
-  const [loadingFree, setLoadingFree] = useState(false);
-  const [subHistoryCounts, setSubHistoryCounts] = useState<Record<string, number>>({});
-useEffect(() => {
-  (async () => {
-    const { data } = await supabase.from("substitution_records").select("substitute_teacher_id");
-    const counts: Record<string, number> = {};
-    (data || []).forEach((r: any) => { counts[r.substitute_teacher_id] = (counts[r.substitute_teacher_id] ?? 0) + 1; });
-    setSubHistoryCounts(counts);
-  })();
-}, []);
+  const [subHistCounts, setSubHistCounts] = useState<Record<string, number>>({});
+  const [loadingMeta, setLoadingMeta] = useState(false);
+
   const dow = selectedDate ? dowOf(selectedDate) : null;
+
   const myEntries = (dow === null ? [] : timetableEntries.filter(e =>
     (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break
   )).sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
 
   useEffect(() => {
-    setSelectedEntry(null); setFreeTeachers([]); setPickedTeacherId("");
+    setSelectedEntry(null); setPickedTeacherId("");
     if (!selectedDate) return;
+    setLoadingMeta(true);
     (async () => {
-      const { data } = await supabase.from("leave_requests").select("user_id,start_date,end_date,status").in("status", ["pending","approved"]);
+      const [leavesRes, subHistRes] = await Promise.all([
+        supabase.from("leave_requests").select("user_id,start_date,end_date,status").in("status", ["pending","approved"]),
+        supabase.from("substitution_records").select("substitute_teacher_id"),
+      ]);
       const ids = new Set<string>();
-      (data || []).forEach((l: any) => { if (l.start_date <= selectedDate && l.end_date >= selectedDate) ids.add(l.user_id); });
+      (leavesRes.data || []).forEach((l: any) => { if (l.start_date <= selectedDate && l.end_date >= selectedDate) ids.add(l.user_id); });
       setOnLeaveIds(ids);
+      const counts: Record<string, number> = {};
+      (subHistRes.data || []).forEach((r: any) => { counts[r.substitute_teacher_id] = (counts[r.substitute_teacher_id] ?? 0) + 1; });
+      setSubHistCounts(counts);
+      setLoadingMeta(false);
     })();
   }, [selectedDate]);
 
   function pickEntry(entry: any) {
-  setSelectedEntry(entry); setPickedTeacherId(""); setLoadingFree(true);
-  const startKey = (entry.start_time ?? "").slice(0, 5);
-  const busyIds = new Set(
-    timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
-      .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-  );
-  const alreadyAssigned = new Set(
-    existingAssignments.filter(a => a.substitute_date === selectedDate && a.slot_number === entry.slot_number)
-      .map(a => a.substitute_teacher_id)
-  );
-  // ★ ตัดครูที่ลาในวันนั้นออกด้วย (onLeaveIds มีอยู่แล้ว)
-  const candidatesAll = allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id) && !onLeaveIds.has(t.id) && !alreadyAssigned.has(t.id));
+    setSelectedEntry(entry);
+    setPickedTeacherId("");
+  }
 
-  const gradeTeacherIds = new Set(
-    timetableEntries.filter(e => entry.grade_group && e.grade_group === entry.grade_group)
-      .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-  );
-  setUsingGradeFilter(candidatesAll.some(t => gradeTeacherIds.has(t.id)));
-
-  // ★ เรียง: สายชั้นเดียวกันก่อน → คาบว่างมากกว่าก่อน → สถิติสอนแทนน้อยกว่าก่อน
-  const sorted = [...candidatesAll].sort((a, b) => {
-    const aSame = gradeTeacherIds.has(a.id) ? 0 : 1;
-    const bSame = gradeTeacherIds.has(b.id) ? 0 : 1;
-    if (aSame !== bSame) return aSame - bSame;
-    const aFree = countFreePeriods(a.id, dow!, timetableEntries);
-    const bFree = countFreePeriods(b.id, dow!, timetableEntries);
-    if (aFree !== bFree) return bFree - aFree;
-    return (subHistoryCounts[a.id] ?? 0) - (subHistoryCounts[b.id] ?? 0);
-  });
-
-  setFreeTeachers(sorted);
-  setLoadingFree(false);
-}
+  const tiers = useMemo(() => {
+    if (!selectedEntry || dow === null) return [] as { label: string; teachers: UserProfile[] }[];
+    const startKey = (selectedEntry.start_time ?? "").slice(0, 5);
+    const busyIds = new Set(
+      timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
+        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+    );
+    const alreadyAssigned = new Set(
+      existingAssignments.filter(a => a.substitute_date === selectedDate && a.slot_number === selectedEntry.slot_number)
+        .map(a => a.substitute_teacher_id)
+    );
+    return buildSubstituteTiers(selectedEntry, dow, timetableEntries, allTeachers, user.id, onLeaveIds, subHistCounts, busyIds, alreadyAssigned);
+  }, [selectedEntry, dow, timetableEntries, allTeachers, onLeaveIds, subHistCounts, existingAssignments, selectedDate, user.id]);
 
   function confirmAdd() {
     if (!selectedEntry || !pickedTeacherId) return;
@@ -1070,7 +1137,7 @@ useEffect(() => {
       subject_name: selectedEntry.subject_name, grade_group: selectedEntry.grade_group,
       room_name: selectedEntry.room_name, slot_number: selectedEntry.slot_number,
     });
-    setSelectedEntry(null); setPickedTeacherId(""); setFreeTeachers([]);
+    setSelectedEntry(null); setPickedTeacherId("");
   }
 
   return (
@@ -1116,26 +1183,33 @@ useEffect(() => {
 
           {selectedEntry && (
             <div>
-              <label className="block text-sm font-bold text-slate-600 mb-1.5">
-                ครูที่ว่างในคาบนี้ {loadingFree ? "" : `(${freeTeachers.length} คน)`}
-              </label>
-              {!loadingFree && usingGradeFilter && (
-                <p className="text-xs text-emerald-600 font-bold mb-1.5">
-                  ★ แสดงเฉพาะครูที่สอนชั้น {selectedEntry.grade_group} เท่านั้น
-                </p>
-              )}
-              {!loadingFree && !usingGradeFilter && selectedEntry.grade_group && (
-                <p className="text-xs text-amber-600 font-bold mb-1.5">
-                  ⚠️ ไม่พบครูที่สอนชั้น {selectedEntry.grade_group} ที่ว่าง แสดงครูว่างทั้งหมดแทน
-                </p>
-              )}
-              {loadingFree ? <p className="text-xs text-slate-400">⏳ กำลังตรวจสอบ...</p>
-                : freeTeachers.length === 0 ? <p className="text-xs text-red-500 font-bold">ไม่พบครูที่ว่างในคาบนี้</p>
-                : (
-                <select value={pickedTeacherId} onChange={e => setPickedTeacherId(e.target.value)} className={sel()}>
-                  <option value="">— เลือกครู —</option>
-                  {freeTeachers.map(t => <option key={t.id} value={t.id}>{displayName(t)}{t.position?` · ${t.position}`:""}</option>)}
-                </select>
+              <label className="block text-sm font-bold text-slate-600 mb-1.5">เลือกครูที่จะขอให้สอนแทน</label>
+              {loadingMeta ? (
+                <p className="text-xs text-slate-400">⏳ กำลังตรวจสอบครูที่ว่าง...</p>
+              ) : tiers.length === 0 ? (
+                <p className="text-xs text-red-500 font-bold">ไม่พบครูที่ว่างในคาบนี้</p>
+              ) : (
+                <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                  {tiers.map(tier => (
+                    <div key={tier.label}>
+                      <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5">{tier.label}</p>
+                      <div className="space-y-1.5">
+                        {tier.teachers.map(t => {
+                          const active = pickedTeacherId === t.id;
+                          return (
+                            <button key={t.id} type="button" onClick={() => setPickedTeacherId(t.id)}
+                              className={`w-full text-left px-3 py-2 rounded-lg border-2 text-sm font-bold flex items-center justify-between ${
+                                active ? "bg-indigo-50 border-indigo-400 text-indigo-700" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                              }`}>
+                              <span>{displayName(t)}{t.position ? ` · ${t.position}` : ""}</span>
+                              {active && <span>✓</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           )}
@@ -1169,133 +1243,63 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
   }
 
   async function computeAssignments() {
-  setComputing(true);
-  try {
-    const { data: leaves } = await supabase.from("leave_requests").select("user_id,start_date,end_date,status").in("status", ["pending","approved"]);
-    const onLeaveByDate: Record<string, Set<string>> = {};
-    selectedDates.forEach(d => { onLeaveByDate[d] = new Set(); });
-    (leaves || []).forEach((l: any) => { selectedDates.forEach(d => { if (l.start_date <= d && l.end_date >= d) onLeaveByDate[d].add(l.user_id); }); });
+    setComputing(true);
+    try {
+      const { data: leaves } = await supabase.from("leave_requests").select("user_id,start_date,end_date,status").in("status", ["pending","approved"]);
+      const onLeaveByDate: Record<string, Set<string>> = {};
+      selectedDates.forEach(d => { onLeaveByDate[d] = new Set(); });
+      (leaves || []).forEach((l: any) => { selectedDates.forEach(d => { if (l.start_date <= d && l.end_date >= d) onLeaveByDate[d].add(l.user_id); }); });
 
-    const { data: subHistory } = await supabase.from("substitution_records").select("substitute_teacher_id");
-    const counts: Record<string, number> = {};
-    (subHistory || []).forEach((r: any) => { counts[r.substitute_teacher_id] = (counts[r.substitute_teacher_id] ?? 0) + 1; });
-    existingAssignments.forEach(a => { counts[a.substitute_teacher_id] = (counts[a.substitute_teacher_id] ?? 0) + 1; });
+      const { data: subHistory } = await supabase.from("substitution_records").select("substitute_teacher_id");
+      const counts: Record<string, number> = {};
+      (subHistory || []).forEach((r: any) => { counts[r.substitute_teacher_id] = (counts[r.substitute_teacher_id] ?? 0) + 1; });
+      existingAssignments.forEach(a => { counts[a.substitute_teacher_id] = (counts[a.substitute_teacher_id] ?? 0) + 1; });
 
-    const gradeTeacherMap: Record<string, Set<string>> = {};
-    const subjectTeacherMap: Record<string, Set<string>> = {}; // key = subject_name
-    timetableEntries.forEach(e => {
-      if (e.grade_group) {
-        if (!gradeTeacherMap[e.grade_group]) gradeTeacherMap[e.grade_group] = new Set();
-        if (e.teacher_id) gradeTeacherMap[e.grade_group].add(e.teacher_id);
-        if (e.teacher_id_2) gradeTeacherMap[e.grade_group].add(e.teacher_id_2);
-      }
-      if (e.subject_name) {
-        if (!subjectTeacherMap[e.subject_name]) subjectTeacherMap[e.subject_name] = new Set();
-        if (e.teacher_id) subjectTeacherMap[e.subject_name].add(e.teacher_id);
-        if (e.teacher_id_2) subjectTeacherMap[e.subject_name].add(e.teacher_id_2);
-      }
-    });
+      const usedThisRun: Record<string, Set<string>> = {};
+      const result: SwapAssignment[] = [];
 
-    // ★ วิชาที่เข้าเงื่อนไขพิเศษ: คอมพิวเตอร์ / วิทยาศาสตร์-เทคโนโลยี
-    function relatedSubjectTeacherIds(subjectName?: string | null): Set<string> {
-      if (!subjectName) return new Set();
-      const isComputer = /คอมพิวเตอร์/.test(subjectName);
-      const isScience  = /วิทยาศาสตร์|เทคโนโลยี/.test(subjectName);
-      const keys = Object.keys(subjectTeacherMap).filter(name =>
-        (isComputer && /คอมพิวเตอร์/.test(name)) || (isScience && /วิทยาศาสตร์|เทคโนโลยี/.test(name))
-      );
-      const out = new Set<string>();
-      keys.forEach(k => subjectTeacherMap[k].forEach(id => out.add(id)));
-      return out;
-    }
+      for (const date of selectedDates) {
+        const dow = dowOf(date);
+        const myEntries = timetableEntries
+          .filter(e => (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break);
 
-    function isLowerGrade(gradeGroup?: string | null): boolean {
-      return !!gradeGroup && /^ป\.?\s?1|^ป\.?\s?2/.test(gradeGroup);
-    }
+        for (const entry of myEntries) {
+          const startKey = (entry.start_time ?? "").slice(0, 5);
+          const key = `${date}|${startKey}`;
+          const busyIds = new Set(
+            timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
+              .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+          );
+          const alreadyPicked = new Set(
+            existingAssignments.filter(a => a.substitute_date === date && a.slot_number === entry.slot_number).map(a => a.substitute_teacher_id)
+          );
+          const usedNow = usedThisRun[key] ?? new Set<string>();
+          const onLeave = onLeaveByDate[date] ?? new Set<string>();
+          const preUsed = new Set([...usedNow, ...alreadyPicked]);
 
-    const usedThisRun: Record<string, Set<string>> = {};
-    const result: SwapAssignment[] = [];
+          const dayTiers = buildSubstituteTiers(entry, dow, timetableEntries, allTeachers, user.id, onLeave, counts, busyIds, preUsed);
+          const chosen = dayTiers.flatMap(t => t.teachers)[0] ?? null;
 
-    for (const date of selectedDates) {
-      const dow = dowOf(date);
-      const myEntries = timetableEntries
-        .filter(e => (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break);
-      const onLeave = onLeaveByDate[date] ?? new Set<string>();
+          const base = {
+            timetable_entry_id: entry.id, substitute_date: date,
+            time_slot_id: entry.time_slot_id, classroom_id: entry.classroom_id, subject_id: entry.subject_id,
+            hours_count: computeSlotHours(entry), academic_year_id: entry.academic_year_id ?? academicYearId, mode: "auto" as const,
+            subject_name: entry.subject_name, grade_group: entry.grade_group, room_name: entry.room_name, slot_number: entry.slot_number,
+          };
 
-      for (const entry of myEntries) {
-        const startKey = (entry.start_time ?? "").slice(0, 5);
-        const key = `${date}|${startKey}`;
-        const busyIds = new Set(
-          timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
-            .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-        );
-        const alreadyPicked = new Set(
-          existingAssignments.filter(a => a.substitute_date === date && a.slot_number === entry.slot_number).map(a => a.substitute_teacher_id)
-        );
-        const usedNow = usedThisRun[key] ?? new Set<string>();
-
-        // ★ ผู้สมัครที่ "ว่างจริง" ในคาบนี้เท่านั้น + ตัดครูที่ลาออกก่อนเสมอ
-        const availableNow = (ids: Iterable<string>) =>
-          [...ids].filter(id => id !== user.id && !busyIds.has(id) && !onLeave.has(id) && !usedNow.has(id) && !alreadyPicked.has(id));
-
-        const rank = (ids: string[]) => {
-          const teacherIds = ids.filter(id => allTeachers.some(t => t.id === id));
-          return teacherIds.sort((a, b) => {
-            const aFree = countFreePeriods(a, dow, timetableEntries);
-            const bFree = countFreePeriods(b, dow, timetableEntries);
-            if (aFree !== bFree) return bFree - aFree;              // คาบว่างเยอะกว่า มาก่อน
-            return (counts[a] ?? 0) - (counts[b] ?? 0);              // สอนแทนมาน้อยกว่า มาก่อน (แฟร์)
-          });
-        };
-
-        let chosenId: string | null = null;
-
-        // ── ลำดับที่ 1: ครูประจำชั้น (เฉพาะ ป.1 / ป.2) ──
-        if (isLowerGrade(entry.grade_group) && entry.homeroom_teacher_id) {
-          const cand = availableNow([entry.homeroom_teacher_id]);
-          if (cand.length) chosenId = cand[0];
-        }
-
-        // ── ลำดับที่ 2: ครูสายชั้นเดียวกันที่ว่าง (เรียงตามคาบว่าง/สถิติ) ──
-        if (!chosenId) {
-          const gradeIds = entry.grade_group ? (gradeTeacherMap[entry.grade_group] ?? new Set<string>()) : new Set<string>();
-          const cand = rank(availableNow(gradeIds));
-          if (cand.length) chosenId = cand[0];
-        }
-
-        // ── ลำดับที่ 3: ครูวิชาเดียวกัน/วิชาที่เกี่ยวข้อง (คอมพิวเตอร์ / วิทย์-เทคโน) ──
-        if (!chosenId) {
-          const subjIds = relatedSubjectTeacherIds(entry.subject_name);
-          const cand = rank(availableNow(subjIds));
-          if (cand.length) chosenId = cand[0];
-        }
-
-        // ── ลำดับที่ 4 (fallback): ครูคนอื่นที่ว่างทั้งหมด ──
-        if (!chosenId) {
-          const cand = rank(availableNow(allTeachers.map(t => t.id)));
-          if (cand.length) chosenId = cand[0];
-        }
-
-        const base = {
-          timetable_entry_id: entry.id, substitute_date: date,
-          time_slot_id: entry.time_slot_id, classroom_id: entry.classroom_id, subject_id: entry.subject_id,
-          hours_count: computeSlotHours(entry), academic_year_id: entry.academic_year_id ?? academicYearId, mode: "auto" as const,
-          subject_name: entry.subject_name, grade_group: entry.grade_group, room_name: entry.room_name, slot_number: entry.slot_number,
-        };
-
-        if (chosenId) {
-          usedNow.add(chosenId); usedThisRun[key] = usedNow;
-          counts[chosenId] = (counts[chosenId] ?? 0) + 1;
-          result.push({ ...base, substitute_teacher_id: chosenId });
-        } else {
-          result.push({ ...base, substitute_teacher_id: "" });
+          if (chosen) {
+            usedNow.add(chosen.id); usedThisRun[key] = usedNow;
+            counts[chosen.id] = (counts[chosen.id] ?? 0) + 1;
+            result.push({ ...base, substitute_teacher_id: chosen.id });
+          } else {
+            result.push({ ...base, substitute_teacher_id: "" });
+          }
         }
       }
-    }
-    setPreview(result); setComputed(true);
-  } catch (err: any) { alert("❌ คำนวณไม่สำเร็จ: " + err.message); }
-  setComputing(false);
-}
+      setPreview(result); setComputed(true);
+    } catch (err: any) { alert("❌ คำนวณไม่สำเร็จ: " + err.message); }
+    setComputing(false);
+  }
 
   function updatePreviewTeacher(idx: number, teacherId: string) {
     setPreview(prev => prev.map((p, i) => i === idx ? { ...p, substitute_teacher_id: teacherId } : p));
@@ -1887,7 +1891,7 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
             academic_year_id: a.academic_year_id ?? currentAcademicYearId,
             assigned_by: user.id,
             status: "assigned",
-            note: null,
+            note: a.mode === "auto" ? "จัดอัตโนมัติจากใบลา" : "แลกคาบแบบเจาะจงจากใบลา",
           }));
         if(rows.length){
   const {error:subErr} = await (supabase.from("substitution_records") as any).insert(rows);
