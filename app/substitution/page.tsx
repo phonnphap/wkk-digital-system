@@ -112,6 +112,7 @@ const STATUS_SUB: Record<string,{label:string;cls:string}> = {
   assigned:  { label:"จัดแล้ว",  cls:"bg-blue-50 text-blue-700 border-blue-300" },
   confirmed: { label:"ยืนยัน",   cls:"bg-emerald-50 text-emerald-700 border-emerald-300" },
   done:      { label:"เสร็จสิ้น",cls:"bg-slate-100 text-slate-600 border-slate-300" },
+  cancelled: { label:"ยกเลิก",   cls:"bg-red-50 text-red-700 border-red-300" },
 };
 const SOURCE_LABEL: Record<string,{label:string;cls:string}> = {
   auto:      { label:"🤖 อัตโนมัติจากใบลา", cls:"bg-indigo-50 text-indigo-600 border-indigo-200" },
@@ -323,6 +324,7 @@ function printSubOrder(records: SubRecord[], periodLabel: string) {
 function printTeacherSubStat(records: SubRecord[], users: User[]) {
   const map: Record<string,{name:string;hours:number;count:number}> = {};
   for (const r of records) {
+    if (r.status === "cancelled") continue;
     if (!r.substitute_teacher_id) continue;
     if (!map[r.substitute_teacher_id]) {
       map[r.substitute_teacher_id] = { name: fullName(r.substitute_teacher), hours:0, count:0 };
@@ -912,12 +914,8 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
   };
 
   return (
-    /* 1. ปรับ Outer Overlay ให้เหลือระยะขอบรอบๆ น้อยลง (p-2 หรือ p-4) */
   <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 sm:p-6" onClick={onClose}>
-    
-    /* 2. ปรับ Inner Modal ให้ขยายกว้าง w-full และใช้ max-w-[96vw] พร้อมสูง max-h-[95vh] */
     <div className="bg-white w-full max-w-[96vw] h-full max-h-[95vh] rounded-2xl shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
-      
       {/* Header */}
       <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
           <div>
@@ -926,7 +924,6 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">✕</button>
         </div>
-
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
@@ -1199,6 +1196,13 @@ if (tchErr) {
     await loadData();
   };
 
+  // ★ ยกเลิกรายการสอนแทน — รายการที่ยกเลิกจะถูกตัดออกจากสถิติทั้งหมดโดยอัตโนมัติ
+  const handleSubCancel = async (id: string) => {
+    if (!confirm("ยืนยันการยกเลิกรายการสอนแทนนี้? รายการนี้จะถูกตัดออกจากสถิติ")) return;
+    await supabase.from("substitution_records").update({ status: "cancelled" }).eq("id", id);
+    await loadData();
+  };
+
   // ── Filtered data ────────────────────────────────────────
   const mySwaps = useMemo(() =>
     swapRequests.filter(r => r.requester_id === user?.id || r.target_teacher_id === user?.id)
@@ -1222,6 +1226,7 @@ if (tchErr) {
   const statMap = useMemo(() => {
     const m: Record<string, { name: string; asAbsent: number; asSub: number; hours: number }> = {};
     for (const r of subRecords) {
+      if (r.status === "cancelled") continue;
       if (r.absent_teacher_id) {
         if (!m[r.absent_teacher_id]) m[r.absent_teacher_id] = { name: fullName(r.absent_teacher), asAbsent: 0, asSub: 0, hours: 0 };
         m[r.absent_teacher_id].asAbsent++;
@@ -1306,7 +1311,7 @@ if (tchErr) {
       <div className="flex-1 overflow-y-auto">
         {/* ── Tab: แลกคาบ ── */}
         {tab === "swap" && (
-          <div className="max-w-3xl mx-auto p-5 space-y-4">
+          <div className="w-full p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-slate-700 text-base">คำขอแลกคาบของฉัน</h2>
               <button onClick={() => setShowSwapModal(true)}
@@ -1358,7 +1363,7 @@ if (tchErr) {
       <p className="text-base font-medium">ยังไม่มีคำขอแลกคาบ</p>
     </div>
   ) : (
-    <div className="w-full space-y-3">
+    <div className="w-full grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
       {mySwaps.map(r => (
         <div key={r.id} className="w-full bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between gap-4 mb-2">
@@ -1390,14 +1395,14 @@ if (tchErr) {
 
         {/* ── Tab: สอนแทน ── */}
         {tab === "substitute" && (
-          <div className="max-w-4xl mx-auto p-5 space-y-5">
+          <div className="w-full p-5 space-y-5">
             {/* แอดมิน/หัวหน้าสายชั้น/หัวหน้าหมวด: จัดสอนแทนจากใบลา */}
             {canAssignSub && leaveRequests.length > 0 && (
               <div>
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
                   📋 ครูที่ลา (รอจัดสอนแทน) — {leaveRequests.length} คน
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {leaveRequests.map(lr => {
                     const alreadyAssigned = subRecords.some(r => r.leave_request_id === lr.id);
                     return (
@@ -1510,7 +1515,7 @@ if (tchErr) {
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-gradient-to-r from-blue-800 to-blue-600 text-white text-xs sm:text-sm">
-            {["วันที่","คาบ","ห้อง","วิชา","ครูเจ้าของคาบ","ครูสอนแทน","ชม.","ที่มา","สถานะ"].map(h=>(
+            {["วันที่","คาบ","ห้อง","วิชา","ครูเจ้าของคาบ","ครูสอนแทน","ชม.","ที่มา","สถานะ", ...(canAssignSub ? ["จัดการ"] : [])].map(h=>(
               <th key={h} className="px-4 py-3.5 text-left font-bold whitespace-nowrap">{h}</th>
             ))}
           </tr>
@@ -1537,6 +1542,18 @@ if (tchErr) {
                     {STATUS_SUB[r.status]?.label??r.status}
                   </span>
                 </td>
+                {canAssignSub && (
+                  <td className="px-4 py-3.5 whitespace-nowrap">
+                    {r.status !== "cancelled" ? (
+                      <button onClick={()=>handleSubCancel(r.id)}
+                        className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold border border-red-200 transition-colors">
+                        ✕ ยกเลิกสอนแทน
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -1565,9 +1582,9 @@ if (tchErr) {
             {!canAssignSub && (
               <div className="grid grid-cols-2 gap-4">
                 {[
-                  { label:"ครั้งที่ขาด/ลา", value: subRecords.filter(r=>r.absent_teacher_id===user.id).length, color:"#dc2626", icon:"📋" },
-                  { label:"ครั้งที่สอนแทน", value: subRecords.filter(r=>r.substitute_teacher_id===user.id).length, color:"#16a34a", icon:"✅" },
-                  { label:"ชั่วโมงสอนแทน", value: subRecords.filter(r=>r.substitute_teacher_id===user.id).reduce((s,r)=>s+Number(r.hours_count),0), color:"#2563eb", icon:"⏰" },
+                  { label:"ครั้งที่ขาด/ลา", value: subRecords.filter(r=>r.absent_teacher_id===user.id && r.status!=="cancelled").length, color:"#dc2626", icon:"📋" },
+                  { label:"ครั้งที่สอนแทน", value: subRecords.filter(r=>r.substitute_teacher_id===user.id && r.status!=="cancelled").length, color:"#16a34a", icon:"✅" },
+                  { label:"ชั่วโมงสอนแทน", value: subRecords.filter(r=>r.substitute_teacher_id===user.id && r.status!=="cancelled").reduce((s,r)=>s+Number(r.hours_count),0), color:"#2563eb", icon:"⏰" },
                   { label:"คำขอแลกคาบ", value: mySwaps.length, color:"#7c3aed", icon:"🔄" },
                 ].map(c=>(
                   <div key={c.label} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center gap-3">
