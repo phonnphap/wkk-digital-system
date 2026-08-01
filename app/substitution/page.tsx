@@ -684,6 +684,7 @@ const GRADE_BAND_LABEL: Record<string,string> = {
   const { error } = await supabase.from("class_swap_requests").insert([{
     requester_id: user.id, target_teacher_id: targetId,
     requester_entry_id: selectedEntry!.id, target_entry_id: null,
+    requester_slot_id: selectedEntry!.time_slot_id,
     swap_date: swapDate, reason, status: "pending", academic_year_id: academicYearId,
   }]);
   setSaving(false);
@@ -1908,17 +1909,6 @@ if (tchErr) {
         <tbody className="divide-y divide-[#FCE7F3]">
           {filteredSubs.map((r,i)=>{
             const src = sourceOf(r.note);
-            {r.absent_teacher_id === user?.id && r.status !== "cancelled" && (
-  <button
-    onClick={() => {
-      setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.substitute_teacher)} ที่เคยสอนแทนให้เมื่อ ${thaiDate(r.substitute_date)} (${r.slot_label ?? "-"})`);
-      setShowSwapModal(true);
-    }}
-    className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200 transition-colors ml-1.5"
-  >
-    🔄 แลกคาบคืน
-  </button>
-)}
             return (
               <tr key={r.id} className={`${i%2===0 ? "bg-[#FDF2F8]/50" : "bg-white"} hover:bg-[#FDF2F8]/40 transition-colors`}>
                 <td className="px-4 py-3.5 whitespace-nowrap text-xs sm:text-sm">{thaiDate(r.substitute_date)}</td>
