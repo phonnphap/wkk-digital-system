@@ -913,7 +913,7 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh]" onClick={e => e.stopPropagation()}>
+      <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh]" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
           <div>
             <h3 className="font-bold text-slate-800 text-base">⚡ จัดสอนแทนทันที (ไม่ต้องรอใบลา)</h3>
