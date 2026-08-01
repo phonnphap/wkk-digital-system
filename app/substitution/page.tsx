@@ -7,7 +7,7 @@ import { addDays } from "date-fns";
 
 const supabase = createClient();
 
-const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head"];
+const ADMIN_ROLES = ["admin", "director", "deputy_director", "grade_head"];
 
 // ══════════════════════════════════════════════════════════
 // ── Types ─────────────────────────────────────────────────
@@ -100,7 +100,7 @@ function coTeacherId(entry: { teacher_id: string; teacher_id_2?: string | null }
 }
 
 // ★ กันโรล staff/admin หลุดเข้ามาในรายชื่อครู (กันไว้อีกชั้น เผื่อ query หลักไม่ครอบคลุม)
-const EXCLUDED_TEACHER_ROLES = ["staff", "admin"];
+const EXCLUDED_TEACHER_ROLES = ["staff", "admin", "admin_hr", "director", "deputy_director", "admin_academic", "admin_general"];
 function isSelectableTeacher(t: User): boolean {
   return !EXCLUDED_TEACHER_ROLES.includes(t.role);
 }
