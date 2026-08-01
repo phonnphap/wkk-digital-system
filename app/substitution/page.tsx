@@ -874,7 +874,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh]"
+      <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh]"
         onClick={e=>e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between gap-3 shrink-0">
           <div className="min-w-0">
@@ -926,7 +926,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
                               <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
                               <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
                             </div>
-                            <div className="shrink-0 w-56">
+                            <div className="shrink-0 w-72 sm:w-80">
   <TeacherSearchSelect
     teachers={computeFreeTeachersForEntry(entry, date, entries, teachers, absentId)}
     value={assignments[key] || ""}
@@ -1130,7 +1130,7 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
                                   <div className="text-[11px] font-bold text-red-500 mt-0.5">⚠️ ครูคนนี้สอนวันนี้แล้ว {pickedLoad} คาบ — ควรพิจารณาก่อนยืนยัน</div>
                                 )}
                               </div>
-                              <div className="shrink-0 w-56 flex items-center gap-1.5">
+                              <div className="shrink-0 w-72 sm:w-80 flex items-center gap-1.5">
   <div className="flex-1 min-w-0">
     <TeacherSearchSelect
       teachers={sortedCandidates}
@@ -1724,7 +1724,7 @@ if (tchErr) {
 
         {/* ── Tab: สถิติ/ประวัติ ── */}
         {tab === "stat" && (
-          <div className="max-w-3xl mx-auto p-5 space-y-5">
+  <div className="w-full p-5 space-y-5">
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-slate-700 text-base">📊 สถิติการสอนแทน</h2>
               {canAssignSub && (
