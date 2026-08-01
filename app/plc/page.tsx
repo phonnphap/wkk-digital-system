@@ -99,6 +99,11 @@ const PLC_ONEDRIVE_FOLDER = "Plc";
 function attendsMeeting(teacherId: string, m: PLCMeeting): boolean {
   return m.facilitator_id === teacherId || !!m.participants?.includes(teacherId);
 }
+// ✅ ผู้เข้าร่วมของการประชุม โดยตัดวิทยากรออกเสมอ
+// (ป้องกันข้อมูลเก่าที่อาจมี id ของวิทยากรติดอยู่ใน participants ด้วย)
+function getParticipants(m: PLCMeeting, allTeachers: Teacher[]): Teacher[] {
+  return allTeachers.filter(t => m.participants?.includes(t.id) && t.id !== m.facilitator_id);
+}
 
 const GROUP_META: Record<string, { icon: string; color: string; textColor: string; borderColor: string; bgLight: string }> = {
   "ไทย ประถมต้น":            { icon:"📖", color:"bg-rose-500",    textColor:"text-rose-700",    borderColor:"border-rose-300",    bgLight:"bg-rose-50"    },
@@ -408,7 +413,7 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
   gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>;
   deputySignatureUrl?: string; directorSignatureUrl?: string;
 }) {
-  const participants = allTeachers.filter(t => meeting.participants?.includes(t.id));
+  const participants = getParticipants(meeting, allTeachers);
   const facilitator  = allTeachers.find(t => t.id === meeting.facilitator_id);
   const isGrade = meeting.meeting_scope === "grade";
   const [printing, setPrinting] = useState(false);
@@ -442,7 +447,7 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
 
   const participantSuggestionsList = Object.entries(meeting.participant_suggestions ?? {}).filter(([,v]) => (v||"").trim());
   const attendeesForSuggestions = useMemo(() => {
-    const ids = new Set([meeting.facilitator_id, ...(meeting.participants ?? [])]);
+  const ids = new Set((meeting.participants ?? []).filter(id => id !== meeting.facilitator_id));
     return Array.from(ids);
   }, [meeting.facilitator_id, meeting.participants]);
   const suggestionsFilledCount = attendeesForSuggestions.filter(id => (meeting.participant_suggestions?.[id] ?? "").trim()).length;
@@ -1293,7 +1298,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
     setPrintingId(m.id);
     try {
       const facilitator = allTeachers.find(t => t.id === m.facilitator_id);
-      const participants = allTeachers.filter(t => m.participants?.includes(t.id));
+      const participants = getParticipants(m, allTeachers);
       await printPLCReportAsync(m, facilitator, participants, facilitator?.signature_url, deputySignatureUrl, directorSignatureUrl, gradeLevelMap, subjectMap);
     } finally {
       setPrintingId(null);
@@ -1685,7 +1690,11 @@ setGradeLevelMap(glMap);
   // ✅ รายการประชุมที่ผู้ใช้ปัจจุบันเข้าร่วม (วิทยากรหรือผู้เข้าร่วม) แต่ยังไม่ได้กรอกข้อเสนอแนะรายบุคคลของตนเอง
   const pendingSuggestions = useMemo(() => {
     if (!user) return [];
-    return meetings.filter(m => attendsMeeting(user.id, m) && !(m.participant_suggestions?.[user.id] ?? "").trim());
+    return meetings.filter(m =>
+     m.facilitator_id !== user.id &&
+     attendsMeeting(user.id, m) &&
+     !(m.participant_suggestions?.[user.id] ?? "").trim()
+   );
   }, [meetings, user]);
 
   async function handleSave(data: any, isDraft: boolean) {
