@@ -256,6 +256,14 @@ function computeFreePeriodsForDay(teacherId: string, dow: number, scheduleType: 
   return templateSlots.filter((s: any) => !busyStartTimes.has(s.start_time)).length;
 }
 
+// ★ จำนวนคาบที่ครูคนนี้สอนอยู่แล้วในวันนั้น (ไม่นับคาบพัก) — ใช้เตือนถ้าครูสอนแทนจะแน่นเกินไป
+const SUB_LOAD_WARN_AT = 5;
+function computeTaughtPeriodsForDay(teacherId: string, dow: number, allEntries: TimetableEntry[]): number {
+  return allEntries.filter(e =>
+    e.day_of_week === dow && !e.is_break && (e.teacher_id === teacherId || e.teacher_id_2 === teacherId)
+  ).length;
+}
+
 // ── Print helpers ─────────────────────────────────────────
 function printSubOrder(records: SubRecord[], periodLabel: string) {
   const rows = records.map((r,i) => `
@@ -369,8 +377,10 @@ function printTeacherSubStat(records: SubRecord[], users: User[]) {
 // ══════════════════════════════════════════════════════════
 // ── TeacherSearchSelect — เลือกครูแบบพิมพ์ค้นหาได้
 // ══════════════════════════════════════════════════════════
-function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เลือกครู —" }: {
+function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เลือกครู —", loadMap, warnAt = SUB_LOAD_WARN_AT }: {
   teachers: User[]; value: string; onChange: (id: string) => void; placeholder?: string;
+  // ★ loadMap: teacherId -> จำนวนคาบที่สอนอยู่แล้วในวันนั้น (ถ้าไม่ส่งมาจะไม่แสดง badge)
+  loadMap?: Record<string, number>; warnAt?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -387,14 +397,30 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
   const selected = teachers.find(t => t.id === value);
   const filtered = teachers.filter(t => fullName(t).toLowerCase().includes(search.toLowerCase()));
 
+  function LoadBadge({ teacherId }: { teacherId: string }) {
+    if (!loadMap) return null;
+    const n = loadMap[teacherId] ?? 0;
+    const overloaded = n >= warnAt;
+    return (
+      <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+        overloaded ? "bg-red-50 text-red-600 border-red-200" : "bg-[#F1ECE1] text-[#6B6252] border-transparent"
+      }`}>
+        {overloaded ? `⚠️ สอน ${n} คาบ` : `${n} คาบ`}
+      </span>
+    );
+  }
+
   return (
     <div ref={ref} className="relative">
       <button type="button" onClick={() => setOpen(v => !v)}
-        className="w-full text-left border-2 border-[#E4DDD0] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#1D2F52] focus:outline-none flex items-center justify-between">
-        <span className={selected ? "font-bold text-slate-800" : "text-slate-400"}>
-          {selected ? fullName(selected) : placeholder}
+        className="w-full text-left border-2 border-[#E4DDD0] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#1D2F52] focus:outline-none flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className={`truncate ${selected ? "font-bold text-slate-800" : "text-slate-400"}`}>
+            {selected ? fullName(selected) : placeholder}
+          </span>
+          {selected && <LoadBadge teacherId={selected.id} />}
         </span>
-        <span className="text-slate-400 text-xs">{open ? "▲" : "▼"}</span>
+        <span className="text-slate-400 text-xs shrink-0">{open ? "▲" : "▼"}</span>
       </button>
       {open && (
         <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border-2 border-[#E4DDD0] rounded-xl shadow-xl overflow-hidden">
@@ -412,9 +438,12 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
               <div className="px-4 py-3 text-slate-400 text-sm text-center">ไม่พบชื่อ</div>
             ) : filtered.map(t => (
               <button key={t.id} type="button" onClick={() => { onChange(t.id); setOpen(false); setSearch(""); }}
-                className={`w-full px-4 py-2.5 text-left text-sm font-medium hover:bg-[#F6F3EC] ${t.id === value ? "bg-[#FBF3E2]" : ""}`}>
-                <span className="font-bold text-slate-800">{fullName(t)}</span>
-                {t.position && <span className="text-slate-400 text-xs ml-2">{t.position}</span>}
+                className={`w-full px-4 py-2.5 text-left text-sm font-medium hover:bg-[#F6F3EC] flex items-center justify-between gap-2 ${t.id === value ? "bg-[#FBF3E2]" : ""}`}>
+                <span className="min-w-0 truncate">
+                  <span className="font-bold text-slate-800">{fullName(t)}</span>
+                  {t.position && <span className="text-slate-400 text-xs ml-2">{t.position}</span>}
+                </span>
+                <LoadBadge teacherId={t.id} />
               </button>
             ))}
           </div>
@@ -735,9 +764,60 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
     ))
   );
   const [saving, setSaving] = useState(false);
+  const [autoRunning, setAutoRunning] = useState(false);
 
   function setAsgn(key: string, val: string) {
     setAssignments(prev => ({ ...prev, [key]: val }));
+  }
+
+  // ★ จำนวนคาบที่ครูแต่ละคนสอนอยู่แล้วในวันนั้น (นับตารางสอนจริง + คาบที่เพิ่งจัดในหน้าต่างนี้)
+  function dayLoadMap(date: string, candidates: User[]): Record<string, number> {
+    const dow = dowOf(date);
+    const map: Record<string, number> = {};
+    for (const t of candidates) {
+      const base = computeTaughtPeriodsForDay(t.id, dow, entries);
+      const extra = Object.entries(assignments).filter(([k, subId]) => subId === t.id && k.endsWith(`_${date}`)).length;
+      map[t.id] = base + extra;
+    }
+    return map;
+  }
+
+  // ★ จัดอัตโนมัติ — เลือกครูว่างที่มีภาระคาบวันนั้นน้อยที่สุดให้ทุกคาบที่ยังไม่ได้จัด
+  function autoAssignAll() {
+    setAutoRunning(true);
+    const next: Record<string, string> = { ...assignments };
+    const tally: Record<string, number> = {}; // `${teacherId}_${date}`
+    let total = 0, newlyFilled = 0, unfilled = 0;
+    for (const date of leaveDates) {
+      const dow = dowOf(date);
+      const dayEntries = absentEntries.filter(e => e.day_of_week === dow && !e.is_break);
+      for (const entry of dayEntries) {
+        const key = `${entry.id}_${date}`;
+        total++;
+        if (next[key]) continue; // ไม่แตะคาบที่จัดไว้เองแล้ว
+        const candidates = computeFreeTeachersForEntry(entry, date, entries, teachers, absentId);
+        if (candidates.length === 0) { unfilled++; continue; }
+        const scored = candidates.map(t => {
+          const tKey = `${t.id}_${date}`;
+          const load = computeTaughtPeriodsForDay(t.id, dow, entries) + (tally[tKey] ?? 0);
+          return { t, load };
+        }).sort((a, b) => a.load - b.load || fullName(a.t).localeCompare(fullName(b.t), "th"));
+        const pick = scored[0].t;
+        next[key] = pick.id;
+        const tKey = `${pick.id}_${date}`;
+        tally[tKey] = (tally[tKey] ?? 0) + 1;
+        newlyFilled++;
+      }
+    }
+    setAssignments(next);
+    setAutoRunning(false);
+    if (newlyFilled === 0 && unfilled === 0) {
+      alert("ทุกคาบถูกจัดครูไว้แล้ว");
+    } else if (unfilled > 0) {
+      alert(`⚡ จัดอัตโนมัติสำเร็จ ${newlyFilled} คาบ\n⚠️ เหลือ ${unfilled} คาบที่ไม่มีครูว่าง กรุณาเลือกเอง`);
+    } else {
+      alert(`⚡ จัดอัตโนมัติสำเร็จครบ ${newlyFilled} คาบ`);
+    }
   }
 
   const handleSave = async () => {
@@ -775,21 +855,32 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh]"
         onClick={e=>e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-[#EFEAE0] flex items-center justify-between shrink-0">
-          <div>
+        <div className="px-6 py-4 border-b border-[#EFEAE0] flex items-center justify-between gap-3 shrink-0">
+          <div className="min-w-0">
             <h3 className="font-bold text-slate-800 text-base">📋 จัดครูสอนแทน</h3>
             <p className="text-sm text-slate-500">{fullName(leaveRequest.user)} ลา {thaiDate(leaveRequest.start_date)}
               {leaveRequest.start_date !== leaveRequest.end_date ? ` – ${thaiDate(leaveRequest.end_date)}` : ""}
               {" "}({leaveRequest.days_count} วัน)
             </p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#F1ECE1] flex items-center justify-center text-slate-500">✕</button>
+          <div className="flex items-center gap-2 shrink-0">
+            {absentEntries.length > 0 && (
+              <button onClick={autoAssignAll} disabled={autoRunning}
+                className="px-3 py-2 rounded-xl bg-[#B8862E] hover:bg-[#96701F] text-[#16233F] text-xs font-bold disabled:opacity-50 whitespace-nowrap">
+                ⚡ จัดอัตโนมัติ
+              </button>
+            )}
+            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#F1ECE1] flex items-center justify-center text-slate-500 shrink-0">✕</button>
+          </div>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-4">
           {absentEntries.length === 0 ? (
             <div className="text-center py-12 text-slate-400">ไม่พบตารางสอนของครูคนนี้</div>
           ) : (
             <div className="space-y-6">
+              <p className="text-xs text-[#8F6A1F] bg-[#FBF3E2] border border-[#E9D3A0] rounded-xl px-3 py-2">
+                💡 ปุ่ม "⚡ จัดอัตโนมัติ" จะเลือกครูที่ว่างและมีคาบสอนวันนั้นน้อยที่สุดให้ทุกคาบที่ยังไม่ได้จัด — ตัวเลข "X คาบ" ข้างชื่อครูคือจำนวนคาบที่ครูสอนอยู่แล้วในวันนั้น ถ้าครบ {SUB_LOAD_WARN_AT} คาบจะมี ⚠️ เตือนให้พิจารณาก่อนเลือก
+              </p>
               {leaveDates.map(date => {
   const dayOfWeek = new Date(date+"T00:00:00").getDay();
   const dayEntries = absentEntries
