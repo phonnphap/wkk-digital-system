@@ -104,6 +104,17 @@ function computeSlotHours(slot: any): number {
   return diffMin > 0 ? Math.round((diffMin / 60) * 100) / 100 : 1;
 }
 
+function countFreePeriods(teacherId: string, dow: number, timetableEntries: any[]): number {
+  const daySlots = new Set(
+    timetableEntries.filter(e => e.day_of_week === dow && !e.is_break).map(e => (e.start_time ?? "").slice(0,5))
+  );
+  const busySlots = new Set(
+    timetableEntries.filter(e => e.day_of_week === dow && !e.is_break && (e.teacher_id === teacherId || e.teacher_id_2 === teacherId))
+      .map(e => (e.start_time ?? "").slice(0,5))
+  );
+  return Math.max(daySlots.size - busySlots.size, 0);
+}
+
 // ══════════════════════════════════════════════════════════
 // ── Schedule templates (ต้องตรงกับ /app/schedule/page.tsx เป๊ะ) ──
 // เพื่อให้ virtual slot id ตรงกัน ไม่งั้นจะ resolve คาบไม่เจอ
@@ -208,6 +219,7 @@ function enrichEntries(rawEntries: any[], classroomsMap: Record<string, any>, su
       is_break: slot?.is_break ?? false,
       room_name: room?.room_name ?? null,
       grade_group: room?.grade_group ?? null,
+      homeroom_teacher_id: room?.homeroom_teacher_id ?? null,   // ★ เพิ่มบรรทัดนี้
       subject_name: subject?.name_th ?? null,
       subject_code: subject?.subject_code ?? null,
     };
@@ -576,9 +588,9 @@ function buildLeaveHTML(
   const attachmentPage = documentUrl ? `
     <div style="page-break-before:always;padding:14mm 18mm 10mm">
       <div style="font-size:14pt;font-weight:900;margin-bottom:12px;border-bottom:2px solid #000;padding-bottom:8px">เอกสารแนบ</div>
-      ${/\.(jpg|jpeg|png|gif|webp)/i.test(documentUrl)
-        ? `<img src="${documentUrl}" style="max-width:100%;max-height:220mm;object-fit:contain;display:block;margin:0 auto"/>`
-        : `<iframe src="${documentUrl}" style="width:100%;height:220mm;border:1px solid #ccc"></iframe>`}
+      ${/\.(jpg|jpeg|png|gif|webp)/i.test(documentUrl) || documentUrl.startsWith("data:image")
+  ? `<img src="${documentUrl}" style="max-width:100%;max-height:220mm;object-fit:contain;display:block;margin:0 auto"/>`
+  : `<iframe src="${documentUrl}" style="width:100%;height:220mm;border:1px solid #ccc"></iframe>`}
     </div>` : '';
 
   return `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">
@@ -826,12 +838,13 @@ function CompanionSelector({ allTeachers, selected, onChange }: { allTeachers:Us
 // ══════════════════════════════════════════════════════════
 // ── LeavePDFPreview ────────────────────────────────────────
 // ══════════════════════════════════════════════════════════
-function LeavePDFPreview({ data, signatureUrl, onConfirm, onCancel, onUpdateSignature, leaveStats }: {
-  data:any; signatureUrl:string; onConfirm:(s:string)=>void; onCancel:()=>void; onUpdateSignature:()=>void; leaveStats?: LeaveStats;
+function LeavePDFPreview({ data, signatureUrl, onConfirm, onCancel, onUpdateSignature, leaveStats, documentUrl }: {
+  data:any; signatureUrl:string; onConfirm:(s:string)=>void; onCancel:()=>void; onUpdateSignature:()=>void;
+  leaveStats?: LeaveStats; documentUrl?: string | null;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
-  const html = buildLeaveHTML(data, signatureUrl, undefined, undefined, leaveStats);
+  const html = buildLeaveHTML(data, signatureUrl, undefined, documentUrl ?? undefined, leaveStats);
   useEffect(()=>{
     const iframe=iframeRef.current; if(!iframe) return;
     const doc=iframe.contentDocument; if(!doc) return;
@@ -849,7 +862,7 @@ function LeavePDFPreview({ data, signatureUrl, onConfirm, onCancel, onUpdateSign
             <p className="text-[11px] sm:text-xs text-slate-400">กรุณาตรวจสอบก่อนยืนยัน</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={()=>printLeave(data,signatureUrl,undefined,undefined,leaveStats)} className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl border-2 border-slate-200 bg-white text-slate-600 text-xs sm:text-sm font-bold hover:bg-slate-50">🖨️ พิมพ์</button>
+            <button onClick={()=>printLeave(data,signatureUrl,undefined,documentUrl ?? undefined,leaveStats)} className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl border-2 border-slate-200 bg-white text-slate-600 text-xs sm:text-sm font-bold hover:bg-slate-50">🖨️ พิมพ์</button>
             <button onClick={onCancel} className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg shrink-0">✕</button>
           </div>
         </div>
@@ -972,9 +985,16 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
   const [pickedTeacherId, setPickedTeacherId] = useState("");
   const [onLeaveIds, setOnLeaveIds] = useState<Set<string>>(new Set());
   const [loadingFree, setLoadingFree] = useState(false);
-
+  const [subHistoryCounts, setSubHistoryCounts] = useState<Record<string, number>>({});
+useEffect(() => {
+  (async () => {
+    const { data } = await supabase.from("substitution_records").select("substitute_teacher_id");
+    const counts: Record<string, number> = {};
+    (data || []).forEach((r: any) => { counts[r.substitute_teacher_id] = (counts[r.substitute_teacher_id] ?? 0) + 1; });
+    setSubHistoryCounts(counts);
+  })();
+}, []);
   const dow = selectedDate ? dowOf(selectedDate) : null;
-
   const myEntries = (dow === null ? [] : timetableEntries.filter(e =>
     (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break
   )).sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
@@ -991,31 +1011,39 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
   }, [selectedDate]);
 
   function pickEntry(entry: any) {
-    setSelectedEntry(entry); setPickedTeacherId(""); setLoadingFree(true);
+  setSelectedEntry(entry); setPickedTeacherId(""); setLoadingFree(true);
+  const startKey = (entry.start_time ?? "").slice(0, 5);
+  const busyIds = new Set(
+    timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
+      .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+  );
+  const alreadyAssigned = new Set(
+    existingAssignments.filter(a => a.substitute_date === selectedDate && a.slot_number === entry.slot_number)
+      .map(a => a.substitute_teacher_id)
+  );
+  // ★ ตัดครูที่ลาในวันนั้นออกด้วย (onLeaveIds มีอยู่แล้ว)
+  const candidatesAll = allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id) && !onLeaveIds.has(t.id) && !alreadyAssigned.has(t.id));
 
-    // ★ เทียบความว่างด้วย "วัน + เวลาเริ่มคาบ" ไม่ใช่ time_slot_id ดิบ
-    // เพราะห้องคนละ schedule_type อาจมี time_slot_id คนละตัวสำหรับเวลาเดียวกัน
-    const startKey = (entry.start_time ?? "").slice(0, 5);
-    const busyIds = new Set(
-      timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
-        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-    );
-    const alreadyAssigned = new Set(
-      existingAssignments.filter(a => a.substitute_date === selectedDate && (a.slot_number === entry.slot_number))
-        .map(a => a.substitute_teacher_id)
-    );
-    const candidatesAll = allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id) && !onLeaveIds.has(t.id) && !alreadyAssigned.has(t.id));
+  const gradeTeacherIds = new Set(
+    timetableEntries.filter(e => entry.grade_group && e.grade_group === entry.grade_group)
+      .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+  );
+  setUsingGradeFilter(candidatesAll.some(t => gradeTeacherIds.has(t.id)));
 
-    // ★ ถ้าคาบนี้สอนชั้นไหน (เช่น ป.1) ให้ดึงเฉพาะครูที่มีคาบสอนชั้นเดียวกันมาก่อนเสมอ
-    const gradeTeacherIds = new Set(
-      timetableEntries.filter(e => entry.grade_group && e.grade_group === entry.grade_group)
-        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-    );
-    const sameGrade = candidatesAll.filter(t => gradeTeacherIds.has(t.id));
-    setUsingGradeFilter(sameGrade.length > 0);
-    setFreeTeachers(sameGrade.length > 0 ? sameGrade : candidatesAll);
-    setLoadingFree(false);
-  }
+  // ★ เรียง: สายชั้นเดียวกันก่อน → คาบว่างมากกว่าก่อน → สถิติสอนแทนน้อยกว่าก่อน
+  const sorted = [...candidatesAll].sort((a, b) => {
+    const aSame = gradeTeacherIds.has(a.id) ? 0 : 1;
+    const bSame = gradeTeacherIds.has(b.id) ? 0 : 1;
+    if (aSame !== bSame) return aSame - bSame;
+    const aFree = countFreePeriods(a.id, dow!, timetableEntries);
+    const bFree = countFreePeriods(b.id, dow!, timetableEntries);
+    if (aFree !== bFree) return bFree - aFree;
+    return (subHistoryCounts[a.id] ?? 0) - (subHistoryCounts[b.id] ?? 0);
+  });
+
+  setFreeTeachers(sorted);
+  setLoadingFree(false);
+}
 
   function confirmAdd() {
     if (!selectedEntry || !pickedTeacherId) return;
@@ -1125,76 +1153,133 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
   }
 
   async function computeAssignments() {
-    setComputing(true);
-    try {
-      const { data: leaves } = await supabase.from("leave_requests").select("user_id,start_date,end_date,status").in("status", ["pending","approved"]);
-      const onLeaveByDate: Record<string, Set<string>> = {};
-      selectedDates.forEach(d => { onLeaveByDate[d] = new Set(); });
-      (leaves || []).forEach((l: any) => { selectedDates.forEach(d => { if (l.start_date <= d && l.end_date >= d) onLeaveByDate[d].add(l.user_id); }); });
+  setComputing(true);
+  try {
+    const { data: leaves } = await supabase.from("leave_requests").select("user_id,start_date,end_date,status").in("status", ["pending","approved"]);
+    const onLeaveByDate: Record<string, Set<string>> = {};
+    selectedDates.forEach(d => { onLeaveByDate[d] = new Set(); });
+    (leaves || []).forEach((l: any) => { selectedDates.forEach(d => { if (l.start_date <= d && l.end_date >= d) onLeaveByDate[d].add(l.user_id); }); });
 
-      const { data: subHistory } = await supabase.from("substitution_records").select("substitute_teacher_id");
-      const counts: Record<string, number> = {};
-      (subHistory || []).forEach((r: any) => { counts[r.substitute_teacher_id] = (counts[r.substitute_teacher_id] ?? 0) + 1; });
-      existingAssignments.forEach(a => { counts[a.substitute_teacher_id] = (counts[a.substitute_teacher_id] ?? 0) + 1; });
+    const { data: subHistory } = await supabase.from("substitution_records").select("substitute_teacher_id");
+    const counts: Record<string, number> = {};
+    (subHistory || []).forEach((r: any) => { counts[r.substitute_teacher_id] = (counts[r.substitute_teacher_id] ?? 0) + 1; });
+    existingAssignments.forEach(a => { counts[a.substitute_teacher_id] = (counts[a.substitute_teacher_id] ?? 0) + 1; });
 
-      // ★ ใครสอนชั้นไหนบ้าง อ้างอิงจากคาบสอนจริงในระบบ (ไม่ใช่ grade_level ของครูประจำชั้น)
-      const gradeTeacherMap: Record<string, Set<string>> = {};
-      timetableEntries.forEach(e => {
-        if (!e.grade_group) return;
+    const gradeTeacherMap: Record<string, Set<string>> = {};
+    const subjectTeacherMap: Record<string, Set<string>> = {}; // key = subject_name
+    timetableEntries.forEach(e => {
+      if (e.grade_group) {
         if (!gradeTeacherMap[e.grade_group]) gradeTeacherMap[e.grade_group] = new Set();
         if (e.teacher_id) gradeTeacherMap[e.grade_group].add(e.teacher_id);
         if (e.teacher_id_2) gradeTeacherMap[e.grade_group].add(e.teacher_id_2);
-      });
+      }
+      if (e.subject_name) {
+        if (!subjectTeacherMap[e.subject_name]) subjectTeacherMap[e.subject_name] = new Set();
+        if (e.teacher_id) subjectTeacherMap[e.subject_name].add(e.teacher_id);
+        if (e.teacher_id_2) subjectTeacherMap[e.subject_name].add(e.teacher_id_2);
+      }
+    });
 
-      const usedThisRun: Record<string, Set<string>> = {};
-      const result: SwapAssignment[] = [];
+    // ★ วิชาที่เข้าเงื่อนไขพิเศษ: คอมพิวเตอร์ / วิทยาศาสตร์-เทคโนโลยี
+    function relatedSubjectTeacherIds(subjectName?: string | null): Set<string> {
+      if (!subjectName) return new Set();
+      const isComputer = /คอมพิวเตอร์/.test(subjectName);
+      const isScience  = /วิทยาศาสตร์|เทคโนโลยี/.test(subjectName);
+      const keys = Object.keys(subjectTeacherMap).filter(name =>
+        (isComputer && /คอมพิวเตอร์/.test(name)) || (isScience && /วิทยาศาสตร์|เทคโนโลยี/.test(name))
+      );
+      const out = new Set<string>();
+      keys.forEach(k => subjectTeacherMap[k].forEach(id => out.add(id)));
+      return out;
+    }
 
-      for (const date of selectedDates) {
-        const dow = dowOf(date);
-        const myEntries = timetableEntries
-          .filter(e => (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break);
+    function isLowerGrade(gradeGroup?: string | null): boolean {
+      return !!gradeGroup && /^ป\.?\s?1|^ป\.?\s?2/.test(gradeGroup);
+    }
 
-        for (const entry of myEntries) {
-          const startKey = (entry.start_time ?? "").slice(0, 5);
-          const key = `${date}|${startKey}`;
-          const busyIds = new Set(
-            timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
-              .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-          );
-          const alreadyPicked = new Set(
-            existingAssignments.filter(a => a.substitute_date === date && a.slot_number === entry.slot_number).map(a => a.substitute_teacher_id)
-          );
-          const usedNow = usedThisRun[key] ?? new Set<string>();
-          const onLeave = onLeaveByDate[date] ?? new Set<string>();
+    const usedThisRun: Record<string, Set<string>> = {};
+    const result: SwapAssignment[] = [];
 
-          const candidatesAll = allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id) && !onLeave.has(t.id) && !usedNow.has(t.id) && !alreadyPicked.has(t.id));
-          // ★ ให้ครูที่สอนชั้นเดียวกับคาบนี้ก่อนเสมอ (สอน ป.1 → ดึงครู ป.1, สอน ป.3 → ดึงครู ป.3)
+    for (const date of selectedDates) {
+      const dow = dowOf(date);
+      const myEntries = timetableEntries
+        .filter(e => (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break);
+      const onLeave = onLeaveByDate[date] ?? new Set<string>();
+
+      for (const entry of myEntries) {
+        const startKey = (entry.start_time ?? "").slice(0, 5);
+        const key = `${date}|${startKey}`;
+        const busyIds = new Set(
+          timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
+            .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+        );
+        const alreadyPicked = new Set(
+          existingAssignments.filter(a => a.substitute_date === date && a.slot_number === entry.slot_number).map(a => a.substitute_teacher_id)
+        );
+        const usedNow = usedThisRun[key] ?? new Set<string>();
+
+        // ★ ผู้สมัครที่ "ว่างจริง" ในคาบนี้เท่านั้น + ตัดครูที่ลาออกก่อนเสมอ
+        const availableNow = (ids: Iterable<string>) =>
+          [...ids].filter(id => id !== user.id && !busyIds.has(id) && !onLeave.has(id) && !usedNow.has(id) && !alreadyPicked.has(id));
+
+        const rank = (ids: string[]) => {
+          const teacherIds = ids.filter(id => allTeachers.some(t => t.id === id));
+          return teacherIds.sort((a, b) => {
+            const aFree = countFreePeriods(a, dow, timetableEntries);
+            const bFree = countFreePeriods(b, dow, timetableEntries);
+            if (aFree !== bFree) return bFree - aFree;              // คาบว่างเยอะกว่า มาก่อน
+            return (counts[a] ?? 0) - (counts[b] ?? 0);              // สอนแทนมาน้อยกว่า มาก่อน (แฟร์)
+          });
+        };
+
+        let chosenId: string | null = null;
+
+        // ── ลำดับที่ 1: ครูประจำชั้น (เฉพาะ ป.1 / ป.2) ──
+        if (isLowerGrade(entry.grade_group) && entry.homeroom_teacher_id) {
+          const cand = availableNow([entry.homeroom_teacher_id]);
+          if (cand.length) chosenId = cand[0];
+        }
+
+        // ── ลำดับที่ 2: ครูสายชั้นเดียวกันที่ว่าง (เรียงตามคาบว่าง/สถิติ) ──
+        if (!chosenId) {
           const gradeIds = entry.grade_group ? (gradeTeacherMap[entry.grade_group] ?? new Set<string>()) : new Set<string>();
-          const sameGrade = candidatesAll.filter(t => gradeIds.has(t.id));
-          const pool = sameGrade.length > 0 ? sameGrade : candidatesAll;
-          pool.sort((a, b) => (counts[a.id] ?? 0) - (counts[b.id] ?? 0));
-          const chosen = pool[0];
+          const cand = rank(availableNow(gradeIds));
+          if (cand.length) chosenId = cand[0];
+        }
 
-          const base = {
-            timetable_entry_id: entry.id, substitute_date: date,
-            time_slot_id: entry.time_slot_id, classroom_id: entry.classroom_id, subject_id: entry.subject_id,
-            hours_count: computeSlotHours(entry), academic_year_id: entry.academic_year_id ?? academicYearId, mode: "auto" as const,
-            subject_name: entry.subject_name, grade_group: entry.grade_group, room_name: entry.room_name, slot_number: entry.slot_number,
-          };
+        // ── ลำดับที่ 3: ครูวิชาเดียวกัน/วิชาที่เกี่ยวข้อง (คอมพิวเตอร์ / วิทย์-เทคโน) ──
+        if (!chosenId) {
+          const subjIds = relatedSubjectTeacherIds(entry.subject_name);
+          const cand = rank(availableNow(subjIds));
+          if (cand.length) chosenId = cand[0];
+        }
 
-          if (chosen) {
-            usedNow.add(chosen.id); usedThisRun[key] = usedNow;
-            counts[chosen.id] = (counts[chosen.id] ?? 0) + 1;
-            result.push({ ...base, substitute_teacher_id: chosen.id });
-          } else {
-            result.push({ ...base, substitute_teacher_id: "" });
-          }
+        // ── ลำดับที่ 4 (fallback): ครูคนอื่นที่ว่างทั้งหมด ──
+        if (!chosenId) {
+          const cand = rank(availableNow(allTeachers.map(t => t.id)));
+          if (cand.length) chosenId = cand[0];
+        }
+
+        const base = {
+          timetable_entry_id: entry.id, substitute_date: date,
+          time_slot_id: entry.time_slot_id, classroom_id: entry.classroom_id, subject_id: entry.subject_id,
+          hours_count: computeSlotHours(entry), academic_year_id: entry.academic_year_id ?? academicYearId, mode: "auto" as const,
+          subject_name: entry.subject_name, grade_group: entry.grade_group, room_name: entry.room_name, slot_number: entry.slot_number,
+        };
+
+        if (chosenId) {
+          usedNow.add(chosenId); usedThisRun[key] = usedNow;
+          counts[chosenId] = (counts[chosenId] ?? 0) + 1;
+          result.push({ ...base, substitute_teacher_id: chosenId });
+        } else {
+          result.push({ ...base, substitute_teacher_id: "" });
         }
       }
-      setPreview(result); setComputed(true);
-    } catch (err: any) { alert("❌ คำนวณไม่สำเร็จ: " + err.message); }
-    setComputing(false);
-  }
+    }
+    setPreview(result); setComputed(true);
+  } catch (err: any) { alert("❌ คำนวณไม่สำเร็จ: " + err.message); }
+  setComputing(false);
+}
 
   function updatePreviewTeacher(idx: number, teacherId: string) {
     setPreview(prev => prev.map((p, i) => i === idx ? { ...p, substitute_teacher_id: teacherId } : p));
@@ -1423,6 +1508,7 @@ if (docFile) {
         <LeavePDFPreview
           data={{fullName:fullName(user),position:user.position??user.role,leaveType:pendingPayload.leave_type,leaveTypeName:LEAVE_TYPE_LIST.find(t=>t.key===pendingPayload.leave_type)?.label??"",otherLeaveName:pendingPayload.other_leave_name,startDate:pendingPayload.start_date,endDate:pendingPayload.end_date,days:pendingPayload.days_count,halfDay:pendingPayload.half_day,reason:pendingPayload.reason,phone:user.phone,contactInfo:pendingPayload.contact_info}}
           signatureUrl={sigUrl} leaveStats={leaveStats}
+          documentUrl={docPreview} 
           onConfirm={confirmSubmit} onCancel={()=>setShowPreview(false)}
           onUpdateSignature={()=>{setShowPreview(false);setShowSigPad(true);}}
         />
@@ -1729,7 +1815,7 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
       supabase.from("time_slots")
         .select("id,slot_number,start_time,end_time,slot_label,is_break,schedule_type")
         .order("slot_number", { ascending: true }),
-      supabase.from("classrooms").select("id,room_name,grade_group,schedule_type"),
+      supabase.from("classrooms").select("id,room_name,grade_group,schedule_type,homeroom_teacher_id"),
       supabase.from("subjects").select("id,subject_code,name_th"),
     ]);
 
@@ -2199,22 +2285,44 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
   const [rejectModal,setRejectModal]= useState<{id:string;slot:1|2|3}|null>(null);
   const [gradeLevelsMap, setGradeLevelsMap] = useState<Record<string,string>>({});
 
-  const loadAll = useCallback(async()=>{
-    setLoading(true);
-    const {data,error}=await supabase.from("leave_requests").select(`*, user:users!leave_requests_user_id_fkey(title,first_name,last_name,position,email,grade_level,phone,signature_url)`).order("created_at",{ascending:false});
-    if(error){
-      const {data:reqs}=await supabase.from("leave_requests").select("*").order("created_at",{ascending:false});
-      if(reqs){
-        const userIds=[...new Set(reqs.map(r=>r.user_id))];
-        const {data:users}=await supabase.from("users").select("id,title,first_name,last_name,position,email,grade_level,phone,signature_url").in("id",userIds);
-        const userMap=Object.fromEntries((users||[]).map(u=>[u.id,u]));
-        setRequests(reqs.map(r=>({...r,user:userMap[r.user_id]||null})) as LeaveRequest[]);
-      }
-      setLoading(false); return;
+  const loadPending = useCallback(async () => {
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .select(`*, user:users!leave_requests_user_id_fkey(title,first_name,last_name,position,email,grade_level,phone,signature_url)`)
+    .eq("status", "pending")
+    .order("created_at", { ascending: false });
+  if (!error && data) {
+    setRequests(prev => {
+      const others = prev.filter(r => r.status !== "pending");
+      const map = new Map([...others, ...(data as LeaveRequest[])].map(r => [r.id, r]));
+      return Array.from(map.values());
+    });
+  }
+}, []);
+
+  const loadAll = useCallback(async () => {
+  setLoading(true);
+  await loadPending();         // ★ แสดงรายการรออนุมัติให้เห็นก่อนไวๆ
+  setLoading(false);
+
+  // โหลดข้อมูลที่เหลือ (ทุกสถานะ สำหรับแท็บประวัติ/กราฟ/สรุป) ต่อแบบไม่บล็อก UI
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .select(`*, user:users!leave_requests_user_id_fkey(title,first_name,last_name,position,email,grade_level,phone,signature_url)`)
+    .order("created_at", { ascending: false });
+  if (!error && data) {
+    setRequests(data as LeaveRequest[]);
+  } else {
+    const { data: reqs } = await supabase.from("leave_requests").select("*").order("created_at", { ascending: false });
+    if (reqs) {
+      const userIds = [...new Set(reqs.map(r => r.user_id))];
+      const { data: users } = await supabase.from("users").select("id,title,first_name,last_name,position,email,grade_level,phone,signature_url").in("id", userIds);
+      const userMap = Object.fromEntries((users || []).map(u => [u.id, u]));
+      setRequests(reqs.map(r => ({ ...r, user: userMap[r.user_id] || null })) as LeaveRequest[]);
     }
-    setRequests((data as LeaveRequest[])||[]);
-    setLoading(false);
-  },[]);
+  }
+}, [loadPending]);
+
 
   useEffect(()=>{loadAll();},[loadAll]);
   useEffect(()=>{
