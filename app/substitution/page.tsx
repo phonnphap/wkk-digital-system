@@ -763,6 +763,181 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
   );
 }
 
+// ══════════════════════════════════════════════════════════
+// ── ManualAssignModal — จัดสอนแทนทันทีไม่ต้องรอใบลา (ลาผ่าตัด/ลายาว)
+// ══════════════════════════════════════════════════════════
+function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicYearId, currentUser, onSave, onClose }: {
+  selectableTeachers: User[]; allTeachers: User[]; entries: TimetableEntry[]; academicYearId: string;
+  currentUser: User; onSave: () => void; onClose: () => void;
+}) {
+  const [absentTeacherId, setAbsentTeacherId] = useState("");
+  const [startDate, setStartDate] = useState(ymd(new Date()));
+  const [endDate, setEndDate] = useState(ymd(new Date()));
+  const [reason, setReason] = useState("");
+  const [assignments, setAssignments] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  const absentEntries = useMemo(() =>
+    absentTeacherId ? entries.filter(e => (e.teacher_id === absentTeacherId || e.teacher_id_2 === absentTeacherId) && !e.is_break) : []
+  , [entries, absentTeacherId]);
+
+  const leaveDates = useMemo(() => {
+    if (!absentTeacherId || !startDate || !endDate || startDate > endDate) return [] as string[];
+    const dates: string[] = [];
+    let d = new Date(startDate + "T00:00:00");
+    const last = new Date(endDate + "T00:00:00");
+    while (d <= last) {
+      if (d.getDay() >= 1 && d.getDay() <= 5) dates.push(ymd(d));
+      d = addDays(d, 1);
+    }
+    return dates;
+  }, [absentTeacherId, startDate, endDate]);
+
+  useEffect(() => { setAssignments({}); }, [absentTeacherId, startDate, endDate]);
+
+  function setAsgn(key: string, val: string) {
+    setAssignments(prev => ({ ...prev, [key]: val }));
+  }
+
+  const handleSave = async () => {
+    if (!absentTeacherId) { alert("กรุณาเลือกครูที่ลา"); return; }
+    if (leaveDates.length === 0) { alert("กรุณาเลือกช่วงวันที่ให้ถูกต้อง"); return; }
+    setSaving(true);
+    const records = Object.entries(assignments)
+      .filter(([, v]) => v)
+      .map(([key, subId]) => {
+        const [entryId, date] = key.split("_");
+        const entry = absentEntries.find(e => e.id === entryId);
+        return {
+          leave_request_id: null,
+          original_teacher_id: absentTeacherId,
+          absent_teacher_id: absentTeacherId,
+          substitute_teacher_id: subId,
+          timetable_entry_id: entryId,
+          substitute_date: date,
+          time_slot_id: entry?.time_slot_id,
+          classroom_id: entry?.classroom_id,
+          subject_id: entry?.subject_id,
+          hours_count: computeSlotHours(entry),
+          assigned_by: currentUser.id,
+          status: "assigned",
+          academic_year_id: academicYearId,
+          note: `จัดโดยแอดมิน (ลาต่อเนื่อง/ไม่มีใบลาในระบบ)${reason ? " — " + reason : ""}`,
+        };
+      });
+    if (records.length === 0) { alert("กรุณาเลือกครูสอนแทนอย่างน้อย 1 คาบ"); setSaving(false); return; }
+    const { error } = await supabase.from("substitution_records").insert(records);
+    setSaving(false);
+    if (error) { alert("❌ " + error.message); return; }
+    onSave();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh]" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="font-bold text-slate-800 text-base">⚡ จัดสอนแทนทันที (ไม่ต้องรอใบลา)</h3>
+            <p className="text-sm text-slate-500">สำหรับกรณีลาผ่าตัด/ลายาว — เลือกครู + ช่วงวันที่แล้วจัดสอนแทนได้เลย</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">✕</button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">ครูที่ลา *</label>
+              <select value={absentTeacherId} onChange={e => setAbsentTeacherId(e.target.value)}
+                className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none">
+                <option value="">— เลือกครู —</option>
+                {selectableTeachers.map(t => <option key={t.id} value={t.id}>{fullName(t)}</option>)}
+              </select>
+              {selectableTeachers.length === 0 && (
+                <p className="text-xs text-amber-600 font-bold mt-1">ไม่พบครูในสิทธิ์ของคุณ</p>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">วันที่เริ่มลา *</label>
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">วันที่สิ้นสุด *</label>
+              <input type="date" value={endDate} min={startDate} onChange={e => setEndDate(e.target.value)}
+                className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">หมายเหตุ</label>
+            <input type="text" value={reason} onChange={e => setReason(e.target.value)} placeholder="เช่น ลาผ่าตัด, ลาคลอด..."
+              className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+          </div>
+
+          {absentTeacherId && leaveDates.length === 0 && (
+            <p className="text-xs text-red-500 font-bold">กรุณาเลือกช่วงวันที่ให้ถูกต้อง (วันสิ้นสุดต้องไม่ก่อนวันเริ่ม)</p>
+          )}
+
+          {absentTeacherId && leaveDates.length > 0 && (
+            absentEntries.length === 0 ? (
+              <div className="text-center py-12 text-slate-400">ไม่พบตารางสอนของครูคนนี้</div>
+            ) : (
+              <div className="space-y-6">
+                {leaveDates.map(date => {
+                  const dayOfWeek = new Date(date + "T00:00:00").getDay();
+                  const dayEntries = absentEntries.filter(e => e.day_of_week === dayOfWeek);
+                  if (dayEntries.length === 0) return null;
+                  return (
+                    <div key={date}>
+                      <h4 className="font-bold text-slate-700 text-sm mb-3 pb-2 border-b border-slate-200">
+                        📅 {TH_DAYS[dayOfWeek]} {thaiDate(date)}
+                      </h4>
+                      <div className="space-y-2">
+                        {dayEntries.map(entry => {
+                          const key = `${entry.id}_${date}`;
+                          return (
+                            <div key={key} className="flex items-center gap-3 bg-slate-50 rounded-xl px-4 py-3">
+                              <div className="shrink-0 text-center w-16">
+                                <div className="text-xs font-bold text-blue-700">{entry.slot_label}</div>
+                                <div className="text-[10px] text-slate-400">{thaiTime(entry.start_time ?? undefined)}</div>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
+                                <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
+                              </div>
+                              <div className="shrink-0 w-48">
+                                <select value={assignments[key] || ""} onChange={e => setAsgn(key, e.target.value)}
+                                  className="w-full border-2 border-blue-200 rounded-xl px-2 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none">
+                                  <option value="">— เลือกครูสอนแทน —</option>
+                                  {allTeachers.filter(t => t.id !== absentTeacherId).map(t => (
+                                    <option key={t.id} value={t.id}>{fullName(t)}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-slate-100 flex gap-2 justify-end shrink-0 bg-slate-50 rounded-b-2xl">
+          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 text-sm">ยกเลิก</button>
+          <button onClick={handleSave} disabled={saving}
+            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold disabled:opacity-50">
+            {saving ? "กำลังบันทึก..." : "💾 บันทึกการสอนแทน"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ────────────────────────────────────────────────
 export default function SubstitutionPage() {
   const router = useRouter();
@@ -778,6 +953,7 @@ export default function SubstitutionPage() {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [showSwapModal, setShowSwapModal] = useState(false);
   const [assignLeave, setAssignLeave] = useState<LeaveRequest|null>(null);
+  const [showManualAssign, setShowManualAssign] = useState(false);
   const [filterDate, setFilterDate] = useState("");
   const [filterTeacher, setFilterTeacher] = useState("");
 
@@ -790,6 +966,18 @@ export default function SubstitutionPage() {
     const roles = user.extra_roles ?? [];
     return roles.includes("grade_head") || roles.includes("dept_head");
   }, [user, isAdmin]);
+  // ★ รายชื่อครูที่เลือกได้ในโหมด "จัดอัตโนมัติ" — admin เลือกได้ทุกคน, หัวหน้าสายเลือกได้แค่สายชั้นตัวเอง
+const manualAssignTeachers = useMemo(() => {
+  if (!user) return [];
+  if (isAdmin) return teachers;
+  const roles = user.extra_roles ?? [];
+  if (roles.includes("grade_head") && user.grade_level) {
+    return teachers.filter(t => t.grade_level === user.grade_level);
+  }
+  return [];
+}, [teachers, user, isAdmin]);
+
+const canManualAssign = isAdmin || (user?.extra_roles ?? []).includes("grade_head");
 
   // ── Load user ────────────────────────────────────────────
   useEffect(() => {
@@ -989,9 +1177,9 @@ if (tchErr) {
       {/* Header */}
       <div className="bg-gradient-to-r from-pink-600 via-pink-500 to-rose-400 px-5 py-4 flex items-center gap-3 shadow-lg shrink-0">
         <button onClick={() => router.push("/dashboard")}
-          className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white font-bold text-lg shrink-0">
-          ←
-        </button>
+  className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white font-bold text-lg shrink-0">
+  🏠
+</button>
         <div className="flex-1 min-w-0">
           <h1 className="text-white font-bold text-lg leading-tight">🔄 แลกคาบ & สอนแทน</h1>
           <p className="text-pink-100 text-sm">{fullName(user)} · {academicYear?.year_name}</p>
@@ -1150,6 +1338,22 @@ if (tchErr) {
                 </p>
               </div>
             )}
+
+            {canManualAssign && (
+  <div className="bg-indigo-50 border-2 border-indigo-200 rounded-2xl p-4 flex items-center justify-between gap-3 flex-wrap">
+    <div>
+      <p className="font-bold text-indigo-700 text-sm">⚡ จัดอัตโนมัติ (ไม่ต้องรอใบลา)</p>
+      <p className="text-xs text-indigo-500 mt-0.5">
+        {isAdmin ? "เลือกครูคนไหนก็ได้ทั้งโรงเรียน" : "เลือกได้เฉพาะครูในสายชั้นของคุณ"} — ใช้เมื่อครูลาผ่าตัด/ลายาวและยังไม่มีใบลาในระบบ
+      </p>
+    </div>
+    <button onClick={() => setShowManualAssign(true)}
+      className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl shrink-0">
+      ⚡ จัดอัตโนมัติ
+    </button>
+  </div>
+)}
+
 
             {/* Filter + Print */}
             <div className="bg-white rounded-2xl border border-slate-200 p-4">
@@ -1378,6 +1582,17 @@ if (tchErr) {
           onClose={()=>setAssignLeave(null)}
         />
       )}
+      {showManualAssign && academicYear && (
+  <ManualAssignModal
+    selectableTeachers={manualAssignTeachers}
+    allTeachers={teachers}
+    entries={allEntries}
+    academicYearId={academicYear.id}
+    currentUser={user}
+    onSave={async()=>{ setShowManualAssign(false); await loadData(); }}
+    onClose={()=>setShowManualAssign(false)}
+  />
+)}
     </div>
   );
 }

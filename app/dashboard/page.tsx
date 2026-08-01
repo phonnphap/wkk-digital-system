@@ -33,7 +33,8 @@ function toThaiDateShort(iso: string) {
   } catch { return ""; }
 }
 
-type NotifSource = "leave_approval" | "leave_status" | "timetable_request" | "swap_request";
+type NotifSource = "leave_approval" | "leave_status" | "timetable_request" | "swap_request"
+  | "subject_request" | "subject_status" | "timetable_status" | "schedule_conflict";
 type NotifItem = {
   id: string;
   source: NotifSource;
@@ -151,7 +152,6 @@ export default function DashboardPage() {
   checkUserRole();
   setIsMounted(true);
 }, [supabase, router]);
-
   // ── ปิด dropdown แจ้งเตือนเมื่อคลิกนอกกล่อง ──────────────────
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -160,7 +160,6 @@ export default function DashboardPage() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
   // ══════════════════════════════════════════════════════════
   // ── โหลดการแจ้งเตือน — รวมจากหลายระบบที่มีตารางข้อมูลรองรับแล้ว
   // ปัจจุบันเชื่อมกับ: ใบลา/ไปราชการ (leave_requests) และ คำขอแก้ไขตารางสอน
@@ -206,7 +205,6 @@ export default function DashboardPage() {
           }
         });
       }
-
       // 2) คำขอแก้ไขตารางสอนที่ "รอฉันอนุมัติ" (แอดมิน/หัวหน้าสาย/หัวหน้าหมวด)
       if (isTimetableApprover) {
         const { data: ttReqs, error } = await supabase
@@ -228,7 +226,6 @@ export default function DashboardPage() {
           });
         });
       }
-
       // 3) สถานะใบลาของฉันเอง — อนุมัติ/ไม่อนุมัติล่าสุด (แจ้งผลให้เจ้าตัวรู้)
       if (opts.profileId) {
         const { data: myLeaves, error } = await supabase
@@ -250,11 +247,9 @@ export default function DashboardPage() {
           });
         });
       }
-
       // ── ตัวอย่างจุดที่จะเพิ่มระบบอื่นในอนาคต (แจ้งซ่อม/จองรถ/ขอออกนอกโรงเรียน) ──
       // เมื่อทราบชื่อตาราง+คอลัมน์สถานะแล้ว เพิ่ม query แบบเดียวกับด้านบน แล้ว push
       // เข้า items ได้เลย โครงสร้าง NotifItem รองรับ source ใหม่ได้ทันที (แค่เพิ่ม type)
-
       // 4) คำขอแลกคาบที่ "รอฉันตอบรับ"   ← เพิ่มบล็อกนี้ตรงนี้
       if (opts.profileId) {
         const { data: swapReqs, error } = await supabase
@@ -276,6 +271,95 @@ export default function DashboardPage() {
             urgent: true,
           });
         });
+      }
+      // 5) คำขอเพิ่มรายวิชาใหม่ที่ "รอแอดมินอนุมัติ" (เฉพาะ admin/director/deputy_director)
+      const isAdminApprover = ["admin", "director", "deputy_director"].includes(opts.role);
+      if (isAdminApprover) {
+        const { data: subjReqs, error } = await supabase
+          .from("subject_addition_requests")
+          .select("id, subject_code, name_th, created_at, requester:users!subject_addition_requests_requester_id_fkey(first_name,last_name,full_name)")
+          .eq("status", "pending");
+        if (error) console.warn("[loadNotifications] subject request query error:", error.message);
+        (subjReqs || []).forEach((r: any) => {
+          const u = r.requester;
+          const name = u?.full_name || `${u?.first_name ?? ""} ${u?.last_name ?? ""}`.trim() || "—";
+          items.push({
+            id: `subj-${r.id}`,
+            source: "subject_request",
+            title: "📚 คำขอเพิ่มรายวิชาใหม่",
+            detail: `${name} ขอเพิ่ม ${r.subject_code} ${r.name_th}`,
+            date: r.created_at,
+            path: "/schedule",
+            urgent: true,
+          });
+        });
+      }
+      // 6) สถานะคำขอเพิ่มรายวิชาของฉันเอง — อนุมัติ/ปฏิเสธล่าสุด
+      if (opts.profileId) {
+        const { data: mySubjReqs, error } = await supabase
+          .from("subject_addition_requests")
+          .select("id, subject_code, name_th, status, reject_reason, reviewed_at")
+          .eq("requester_id", opts.profileId)
+          .in("status", ["approved", "rejected"])
+          .order("reviewed_at", { ascending: false })
+          .limit(3);
+        if (error) console.warn("[loadNotifications] my subject request status query error:", error.message);
+        (mySubjReqs || []).forEach((r: any) => {
+          items.push({
+            id: `mysubj-${r.id}`,
+            source: "subject_status",
+            title: r.status === "approved" ? "✅ คำขอเพิ่มวิชาของคุณได้รับการอนุมัติ" : "❌ คำขอเพิ่มวิชาของคุณถูกปฏิเสธ",
+            detail: r.status === "rejected" && r.reject_reason ? r.reject_reason : `${r.subject_code} ${r.name_th}`,
+            date: r.reviewed_at ?? new Date().toISOString(),
+            path: "/schedule",
+          });
+        });
+      }
+      // 7) สถานะคำขอแก้ไขตารางสอนของฉันเอง — อนุมัติ/ปฏิเสธล่าสุด
+      if (opts.profileId) {
+        const { data: myTtReqs, error } = await supabase
+          .from("timetable_change_requests")
+          .select("id, status, reject_reason, reviewed_at, day_of_week")
+          .eq("requester_id", opts.profileId)
+          .in("status", ["approved", "rejected"])
+          .order("reviewed_at", { ascending: false })
+          .limit(3);
+        if (error) console.warn("[loadNotifications] my timetable status query error:", error.message);
+        (myTtReqs || []).forEach((r: any) => {
+          items.push({
+            id: `mytt-${r.id}`,
+            source: "timetable_status",
+            title: r.status === "approved" ? "✅ คำขอแก้ตารางสอนของคุณได้รับการอนุมัติ" : "❌ คำขอแก้ตารางสอนของคุณถูกปฏิเสธ",
+            detail: r.status === "rejected" && r.reject_reason ? r.reject_reason : "ตารางสอนถูกอัปเดตแล้ว",
+            date: r.reviewed_at ?? new Date().toISOString(),
+            path: "/schedule",
+          });
+        });
+      }
+
+      // 8) คาบซ้ำ/ครูสอนซ้อนคาบ — แจ้งเฉพาะแอดมิน
+      if (isAdminApprover) {
+        const { data: allEntries, error } = await supabase
+          .from("timetable_entries")
+          .select("id, classroom_id, day_of_week, time_slot_id, teacher_id, teacher_id_2");
+        if (error) console.warn("[loadNotifications] conflict check query error:", error.message);
+        const map = new Map<string, number>();
+        (allEntries || []).forEach((e: any) => {
+          const key = `${e.classroom_id}|${e.day_of_week}|${e.time_slot_id}`;
+          map.set(key, (map.get(key) ?? 0) + 1);
+        });
+        const dupCount = Array.from(map.values()).filter(c => c > 1).length;
+        if (dupCount > 0) {
+          items.push({
+            id: `conflict-summary`,
+            source: "schedule_conflict",
+            title: "🧹 พบคาบซ้ำในตารางสอน",
+            detail: `พบ ${dupCount} จุดที่มีคาบซ้ำ ต้องตรวจสอบ`,
+            date: new Date().toISOString(),
+            path: "/schedule",
+            urgent: true,
+          });
+        }
       }
 
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());

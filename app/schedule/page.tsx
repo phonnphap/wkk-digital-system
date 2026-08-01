@@ -1563,7 +1563,7 @@ useEffect(() => {
     if (!user) return;
     const isAdminUser = ADMIN_ROLES.includes(user.role);
     let query = (supabase.from("subject_addition_requests") as any)
-      .select("*, requester:users!subject_addition_requests_requester_id_fkey(id,first_name,last_name,full_name)")
+      .select("*, requester:users!subject_addition_requests_requester_id_fkey(id,first_name,last_name,full_name,email)")
       .order("created_at", { ascending: false });
     if (!isAdminUser) query = query.eq("requester_id", user.id);
     const { data } = await query;
@@ -1733,10 +1733,11 @@ useEffect(() => {
         .eq("id", requestId);
       if (updErr) throw updErr;
       await Promise.all([loadEntries(), loadChangeRequests()]);
-      // ★ แจ้งเตือนครูผู้ขอผ่าน Teams DM
       if (req.requester?.email) {
         sendTeamsDM("academic", req.requester.email,
           `✅ คำขอแก้ไขตารางสอนของคุณได้รับการอนุมัติแล้ว (${DAYS[(req.day_of_week ?? 1) - 1]})`);
+      } else {
+        console.warn("[handleApproveRequest] ไม่ส่ง DM เพราะไม่มี email ของผู้ขอ:", req.requester);
       }
       alert("✅ อนุมัติและอัปเดตตารางสอนแล้ว");
     } catch (err: any) {
@@ -1759,6 +1760,8 @@ useEffect(() => {
       if (req?.requester?.email) {
         sendTeamsDM("academic", req.requester.email,
           `❌ คำขอแก้ไขตารางสอนของคุณถูกปฏิเสธ เหตุผล: ${reason}`);
+      } else {
+        console.warn("[handleRejectRequest] ไม่ส่ง DM เพราะไม่มี email ของผู้ขอ:", req?.requester);
       }
     } catch (err: any) {
       console.error("[handleRejectRequest] error:", err);
@@ -1812,6 +1815,11 @@ useEffect(() => {
         .select("id,subject_code,name_th,subject_group").order("subject_code");
       setSubjects((subjectsData ?? []) as Subject[]);
       await loadSubjectRequests();
+      // ★ เพิ่มใหม่: แจ้งผู้ขอผ่าน Teams DM
+      if (req.requester?.email) {
+        sendTeamsDM("academic", req.requester.email,
+          `✅ คำขอเพิ่มรายวิชา "${req.subject_code} ${req.name_th}" ของคุณได้รับการอนุมัติแล้ว`);
+      }
       alert("✅ อนุมัติและเพิ่มรายวิชาใหม่เข้าระบบแล้ว");
     } catch (err: any) {
       console.error("[handleApproveSubjectRequest] error:", err);
@@ -1823,11 +1831,17 @@ useEffect(() => {
   async function handleRejectSubjectRequest(requestId: string, reason: string) {
     if (!user) return;
     try {
+      const req = subjectRequests.find(r => r.id === requestId);
       const { error } = await (supabase.from("subject_addition_requests") as any)
         .update({ status: "rejected", reject_reason: reason, reviewed_by: user.id, reviewed_at: new Date().toISOString() })
         .eq("id", requestId);
       if (error) throw error;
       await loadSubjectRequests();
+      // ★ เพิ่มใหม่: แจ้งผู้ขอผ่าน Teams DM
+      if (req?.requester?.email) {
+        sendTeamsDM("academic", req.requester.email,
+          `❌ คำขอเพิ่มรายวิชา "${req.subject_code} ${req.name_th}" ของคุณถูกปฏิเสธ เหตุผล: ${reason}`);
+      }
     } catch (err: any) {
       console.error("[handleRejectSubjectRequest] error:", err);
       alert("❌ ปฏิเสธคำขอไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
