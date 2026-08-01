@@ -66,7 +66,7 @@ const TH_MONTHS = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.",
 
 function fullName(u?: User|null) {
   if (!u) return "—";
-  return `${u.title??""} ${u.first_name} ${u.last_name}`.trim();
+  return `${u.title??""}${u.first_name} ${u.last_name}`.trim();
 }
 function thaiDate(s?: string) {
   if (!s) return "—";
@@ -78,6 +78,17 @@ function ymd(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 function dowOf(dateStr: string): number { return new Date(dateStr + "T00:00:00").getDay(); }
+function toMinutes(t?: string | null): number {
+  if (!t) return NaN;
+  const [h, m] = t.slice(0, 5).split(":").map(Number);
+  return h * 60 + m;
+}
+// ★ เทียบว่าสองช่วงเวลาทับกันจริงหรือไม่ (ไม่ใช่แค่ start_time ตรงกัน)
+function timeRangesOverlap(aStart?: string|null, aEnd?: string|null, bStart?: string|null, bEnd?: string|null): boolean {
+  const as = toMinutes(aStart), ae = toMinutes(aEnd), bs = toMinutes(bStart), be = toMinutes(bEnd);
+  if ([as, ae, bs, be].some(Number.isNaN)) return false;
+  return as < be && bs < ae;
+}
 function compactIds(ids: (string | null | undefined)[]): string[] {
   return ids.filter((id): id is string => !!id);
 }
@@ -100,9 +111,9 @@ function computeFreeTeachersForEntry(
   allTeachers: User[], excludeId: string
 ): User[] {
   const dow = dowOf(date);
-  const startKey = (entry.start_time ?? "").slice(0, 5);
   const busyIds = new Set(
-    allEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
+    allEntries
+      .filter(e => e.day_of_week === dow && timeRangesOverlap(entry.start_time, entry.end_time, e.start_time, e.end_time))
       .flatMap(e => compactIds([e.teacher_id, e.teacher_id_2]))
   );
   return allTeachers.filter(t => t.id !== excludeId && !busyIds.has(t.id) && isSelectableTeacher(t));
@@ -486,9 +497,10 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
 // 3) รายชื่อครูที่ว่าง เรียงตามกฎ: ครูประจำชั้น(ป.1/ป.2) -> สายชั้นเดียวกัน
 //    (คาบว่างเยอะสุดก่อน, เท่ากันดูสถิติสอนแทนน้อยสุดก่อน) -> วิชาเดียวกัน -> ที่เหลือ
 // ══════════════════════════════════════════════════════════
-function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academicYearId, initialReason, onSave, onClose }: {
+function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academicYearId, initialReason, mode = "normal", fixedTargetTeacherId, onSave, onClose }: {
   user: User; allEntries: TimetableEntry[]; allTeachers: User[]; allTimeSlots: any[]; academicYearId: string;
-  initialReason?: string; onSave: () => void; onClose: () => void;
+  initialReason?: string; mode?: "normal" | "repay"; fixedTargetTeacherId?: string;
+  onSave: () => void; onClose: () => void;
 }) {
   const [swapDate, setSwapDate] = useState(ymd(new Date()));
   const [selectedEntry, setSelectedEntry] = useState<TimetableEntry | null>(null);
@@ -500,15 +512,34 @@ function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academi
   const [subHistCounts, setSubHistCounts] = useState<Record<string, number>>({});
   const [homeroomMap, setHomeroomMap] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, boolean>>({});
-
   const dow = swapDate ? dowOf(swapDate) : null;
+  // ★ โหมด repay: หา user ของครูที่เราจะแลกคาบคืนให้ (ครูที่เคยสอนแทนเรา)
+const targetTeacher = useMemo(
+  () => (mode === "repay" ? allTeachers.find(t => t.id === fixedTargetTeacherId) ?? null : null),
+  [mode, allTeachers, fixedTargetTeacherId]
+);
+// ★ ตารางสอนของครูคนนั้นในวันที่เลือก (โหมด repay)
+const targetDayEntries = useMemo(() =>
+  (mode !== "repay" || dow === null || !fixedTargetTeacherId) ? [] : allEntries.filter(e =>
+    (e.teacher_id === fixedTargetTeacherId || e.teacher_id_2 === fixedTargetTeacherId) && e.day_of_week === dow && !e.is_break
+  ).sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0))
+, [mode, allEntries, dow, fixedTargetTeacherId]);
+// ★ คาบของเราเองในวันเดียวกัน (ใช้เช็คว่าง/ไม่ว่างจริง แบบเทียบเวลาทับกัน)
+const myBusyEntriesThatDay = useMemo(() =>
+  (dow === null) ? [] : allEntries.filter(e =>
+    (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break
+  )
+, [allEntries, dow, user.id]);
+
+function amIFreeAt(entry: TimetableEntry) {
+  return !myBusyEntriesThatDay.some(e => timeRangesOverlap(entry.start_time, entry.end_time, e.start_time, e.end_time));
+}
 
   const myDayEntries = useMemo(() =>
     (dow === null ? [] : allEntries.filter(e =>
       (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break
     )).sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0))
   , [allEntries, dow, user.id]);
-
   // ★ โหลดข้อมูลประกอบใหม่ทุกครั้งที่เปลี่ยนวันที่: ครูที่ลาวันนั้น + สถิติสอนแทนสะสม + ครูประจำชั้น
   useEffect(() => {
     setSelectedEntry(null); setPickedTeacherId("");
@@ -521,11 +552,9 @@ function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academi
         // ★ ครูประจำชั้น: fetch แยกแบบกันพัง เผื่อคอลัมน์ homeroom_teacher_id ยังไม่มีในตาราง classrooms
         supabase.from("classrooms").select("id,homeroom_teacher_id"),
       ]);
-
       const ids = new Set<string>();
       (leavesRes.data || []).forEach((l: any) => { if (l.start_date <= swapDate && l.end_date >= swapDate) ids.add(l.user_id); });
       setOnLeaveIds(ids);
-
       const counts: Record<string, number> = {};
       (subHistRes.data || []).forEach((r: any) => { counts[r.substitute_teacher_id] = (counts[r.substitute_teacher_id] ?? 0) + 1; });
       setSubHistCounts(counts);
@@ -567,11 +596,10 @@ const GRADE_BAND_LABEL: Record<string,string> = {
   // ★ รายชื่อครูที่ว่าง จัดเป็นชั้นลำดับความสำคัญตามกฎ
   const tiers = useMemo(() => {
     if (!selectedEntry || dow === null) return [] as { label: string; teachers: User[] }[];
-    const startKey = (selectedEntry.start_time ?? "").slice(0, 5);
     const busyIds = new Set(
-      allEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
-        .flatMap(e => compactIds([e.teacher_id, e.teacher_id_2]))
-    );
+  allEntries.filter(e => e.day_of_week === dow && timeRangesOverlap(selectedEntry.start_time, selectedEntry.end_time, e.start_time, e.end_time))
+    .flatMap(e => compactIds([e.teacher_id, e.teacher_id_2]))
+);
     const isEligible = (t: User) => t.id !== user.id && !busyIds.has(t.id) && !onLeaveIds.has(t.id);
     const scored = (list: User[]) => list
       .filter(isEligible)
@@ -641,26 +669,27 @@ const GRADE_BAND_LABEL: Record<string,string> = {
   }, [selectedEntry, dow, allEntries, allTeachers, allTimeSlots, onLeaveIds, subHistCounts, homeroomMap, user.id]);
 
   const validate = () => {
-    const e: Record<string,boolean> = {};
-    if (!swapDate) e.swapDate = true;
-    if (!selectedEntry) e.selectedEntry = true;
-    if (!pickedTeacherId) e.pickedTeacherId = true;
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
+  const e: Record<string,boolean> = {};
+  if (!swapDate) e.swapDate = true;
+  if (!selectedEntry) e.selectedEntry = true;
+  if (mode !== "repay" && !pickedTeacherId) e.pickedTeacherId = true;
+  setErrors(e);
+  return Object.keys(e).length === 0;
+};
 
   const handleSave = async () => {
-    if (!validate()) return;
-    setSaving(true);
-    const { error } = await supabase.from("class_swap_requests").insert([{
-      requester_id: user.id, target_teacher_id: pickedTeacherId,
-      requester_entry_id: selectedEntry!.id, target_entry_id: null,
-      swap_date: swapDate, reason, status: "pending", academic_year_id: academicYearId,
-    }]);
-    setSaving(false);
-    if (error) { alert("❌ "+error.message); return; }
-    onSave();
-  };
+  if (!validate()) return;
+  setSaving(true);
+  const targetId = mode === "repay" ? fixedTargetTeacherId! : pickedTeacherId;
+  const { error } = await supabase.from("class_swap_requests").insert([{
+    requester_id: user.id, target_teacher_id: targetId,
+    requester_entry_id: selectedEntry!.id, target_entry_id: null,
+    swap_date: swapDate, reason, status: "pending", academic_year_id: academicYearId,
+  }]);
+  setSaving(false);
+  if (error) { alert("❌ "+error.message); return; }
+  onSave();
+};
 
   const iCls = (err?: boolean) =>
     `w-full border-2 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none transition-colors bg-white
@@ -671,7 +700,9 @@ const GRADE_BAND_LABEL: Record<string,string> = {
       <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh]"
         onClick={e=>e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between shrink-0">
-          <h3 className="font-bold text-slate-800 text-base">🔄 ขอแลกคาบสอน</h3>
+          <h3 className="font-bold text-slate-800 text-base">
+  {mode === "repay" ? `🔄 ขอแลกคาบคืนให้ ${fullName(targetTeacher)}` : "🔄 ขอแลกคาบสอน"}
+</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#FCE7F3] flex items-center justify-center text-slate-500">✕</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
@@ -685,70 +716,113 @@ const GRADE_BAND_LABEL: Record<string,string> = {
 
           {/* ★ 2) คาบของฉันวันนั้น — ตารางกดเลือก เทา -> น้ำเงิน */}
           {swapDate && (
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                คาบของฉันในวัน{TH_DAYS[dow!]} — กดเลือกคาบที่ต้องการแลก <span className="text-red-400">*</span>
-              </label>
-              {myDayEntries.length === 0 ? (
-                <p className="text-sm text-slate-400 py-4 text-center bg-[#FDF2F8] rounded-xl border border-[#FBCFE8]">ไม่มีคาบสอนของคุณในวันนี้</p>
-              ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                  {myDayEntries.map(e => {
-                    const active = selectedEntry?.id === e.id;
-                    return (
-                      <button key={e.id} type="button"
-                        onClick={() => { setSelectedEntry(e); setPickedTeacherId(""); }}
-                        className={`p-2.5 rounded-xl border-2 text-[11px] font-bold text-left transition-all ${
-                          active ? "bg-[#DB2777] border-[#DB2777] text-white" : "bg-[#FCE7F3] border-[#FBCFE8] text-slate-600 hover:bg-[#FBCFE8]"
-                        }`}>
-                        <div className="flex justify-between"><span>{e.slot_label}</span><span className="opacity-70">{e.start_time?.slice(0,5)}</span></div>
-                        <div className="truncate mt-0.5">{e.subject_name ?? "ไม่ระบุวิชา"}</div>
-                        <div className={`truncate ${active ? "opacity-80" : "text-slate-400"}`}>{e.room_name ?? ""}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {errors.selectedEntry && <p className="text-xs text-red-500 mt-1">กรุณาเลือกคาบ</p>}
-            </div>
-          )}
+  <div>
+    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+      {mode === "repay"
+        ? `ตารางสอนของครู ${fullName(targetTeacher)} ในวัน${TH_DAYS[dow!]} — กดเลือกคาบที่คุณจะขอสอนแทน`
+        : `คาบของฉันในวัน${TH_DAYS[dow!]} — กดเลือกคาบที่ต้องการแลก`
+      } <span className="text-red-400">*</span>
+    </label>
 
+    {mode === "repay" ? (
+      targetDayEntries.length === 0 ? (
+        <p className="text-sm text-slate-400 py-4 text-center bg-[#FDF2F8] rounded-xl border border-[#FBCFE8]">
+          ครู{fullName(targetTeacher)}ไม่มีคาบสอนในวันนี้ ลองเปลี่ยนวันที่ดูครับ
+        </p>
+      ) : (
+        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+          {targetDayEntries.map(e => {
+            const free = amIFreeAt(e);
+            const active = selectedEntry?.id === e.id;
+            return (
+              <button key={e.id} type="button" disabled={!free}
+                onClick={() => { if (free) setSelectedEntry(e); }}
+                className={`p-2.5 rounded-xl border-2 text-[11px] font-bold text-left transition-all ${
+                  !free
+                    ? "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed"
+                    : active
+                      ? "bg-[#DB2777] border-[#DB2777] text-white"
+                      : "bg-white border-[#F9A8D4] text-slate-700 hover:bg-[#FDF2F8]"
+                }`}>
+                <div className="flex justify-between"><span>{e.slot_label}</span><span className="opacity-70">{e.start_time?.slice(0,5)}</span></div>
+                <div className="truncate mt-0.5">{e.subject_name ?? "ไม่ระบุวิชา"}</div>
+                <div className={`truncate ${active ? "opacity-80" : "text-slate-400"}`}>{e.room_name ?? ""}</div>
+                {!free && <div className="text-[10px] font-bold mt-0.5">🔒 คุณมีคาบสอนตรงนี้</div>}
+              </button>
+            );
+          })}
+        </div>
+      )
+    ) : (
+      myDayEntries.length === 0 ? (
+        <p className="text-sm text-slate-400 py-4 text-center bg-[#FDF2F8] rounded-xl border border-[#FBCFE8]">ไม่มีคาบสอนของคุณในวันนี้</p>
+      ) : (
+        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+          {myDayEntries.map(e => {
+            const active = selectedEntry?.id === e.id;
+            return (
+              <button key={e.id} type="button"
+                onClick={() => { setSelectedEntry(e); setPickedTeacherId(""); }}
+                className={`p-2.5 rounded-xl border-2 text-[11px] font-bold text-left transition-all ${
+                  active ? "bg-[#DB2777] border-[#DB2777] text-white" : "bg-[#FCE7F3] border-[#FBCFE8] text-slate-600 hover:bg-[#FBCFE8]"
+                }`}>
+                <div className="flex justify-between"><span>{e.slot_label}</span><span className="opacity-70">{e.start_time?.slice(0,5)}</span></div>
+                <div className="truncate mt-0.5">{e.subject_name ?? "ไม่ระบุวิชา"}</div>
+                <div className={`truncate ${active ? "opacity-80" : "text-slate-400"}`}>{e.room_name ?? ""}</div>
+              </button>
+            );
+          })}
+        </div>
+      )
+    )}
+    {errors.selectedEntry && <p className="text-xs text-red-500 mt-1">กรุณาเลือกคาบ</p>}
+  </div>
+)}
           {/* ★ 3) รายชื่อครูที่ว่าง เรียงตามกฎ */}
           {selectedEntry && (
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                เลือกครูที่จะขอให้สอนแทน <span className="text-red-400">*</span>
-              </label>
-              {loadingMeta ? (
-                <p className="text-xs text-slate-400">⏳ กำลังตรวจสอบครูที่ว่าง...</p>
-              ) : tiers.length === 0 ? (
-                <p className="text-xs text-red-500 font-bold">ไม่พบครูที่ว่างในคาบนี้</p>
-              ) : (
-                <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-                  {tiers.map(tier => (
-                    <div key={tier.label}>
-                      <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5">{tier.label}</p>
-                      <div className="space-y-1.5">
-                        {tier.teachers.map(t => {
-                          const active = pickedTeacherId === t.id;
-                          return (
-                            <button key={t.id} type="button" onClick={() => setPickedTeacherId(t.id)}
-                              className={`w-full text-left px-3 py-2 rounded-lg border-2 text-sm font-bold flex items-center justify-between transition-all ${
-                                active ? "bg-emerald-50 border-emerald-400 text-emerald-700" : "bg-white border-[#FBCFE8] text-slate-700 hover:bg-[#FDF2F8]"
-                              }`}>
-                              <span>{fullName(t)}{t.position ? ` · ${t.position}` : ""}</span>
-                              {active && <span>✓</span>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {errors.pickedTeacherId && <p className="text-xs text-red-500 mt-1">กรุณาเลือกครู</p>}
+  mode === "repay" ? (
+    <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+      <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-1.5">สรุปคำขอแลกคาบคืน</p>
+      <p className="text-sm text-slate-700">ครูเจ้าของคาบเดิม: <span className="font-bold text-[#DB2777]">{fullName(targetTeacher)}</span></p>
+      <p className="text-sm text-slate-700 mt-1">คุณจะสอนแทนคาบนี้เอง: <span className="font-bold text-emerald-700">{fullName(user)} (คุณ)</span></p>
+      <p className="text-xs text-slate-400 mt-2">💡 คำขอนี้จะถูกส่งไปให้ {fullName(targetTeacher)} กดยืนยันในแท็บ "🔄 แลกคาบ" ก่อน จึงจะมีผล</p>
+    </div>
+  ) : (
+    <div>
+      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+        เลือกครูที่จะขอให้สอนแทน <span className="text-red-400">*</span>
+      </label>
+      {loadingMeta ? (
+        <p className="text-xs text-slate-400">⏳ กำลังตรวจสอบครูที่ว่าง...</p>
+      ) : tiers.length === 0 ? (
+        <p className="text-xs text-red-500 font-bold">ไม่พบครูที่ว่างในคาบนี้</p>
+      ) : (
+        <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+          {tiers.map(tier => (
+            <div key={tier.label}>
+              <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5">{tier.label}</p>
+              <div className="space-y-1.5">
+                {tier.teachers.map(t => {
+                  const active = pickedTeacherId === t.id;
+                  return (
+                    <button key={t.id} type="button" onClick={() => setPickedTeacherId(t.id)}
+                      className={`w-full text-left px-3 py-2 rounded-lg border-2 text-sm font-bold flex items-center justify-between transition-all ${
+                        active ? "bg-emerald-50 border-emerald-400 text-emerald-700" : "bg-white border-[#FBCFE8] text-slate-700 hover:bg-[#FDF2F8]"
+                      }`}>
+                      <span>{fullName(t)}{t.position ? ` · ${t.position}` : ""}</span>
+                      {active && <span>✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          )}
+          ))}
+        </div>
+      )}
+      {errors.pickedTeacherId && <p className="text-xs text-red-500 mt-1">กรุณาเลือกครู</p>}
+    </div>
+  )
+)}
 
           {/* เหตุผล */}
           <div>
@@ -1252,6 +1326,8 @@ export default function SubstitutionPage() {
   const [filterDate, setFilterDate] = useState("");
   const [filterTeacher, setFilterTeacher] = useState("");
   const [swapInitialReason, setSwapInitialReason] = useState<string | undefined>(undefined);
+  const [swapMode, setSwapMode] = useState<"normal"|"repay">("normal");
+  const [swapFixedTargetTeacherId, setSwapFixedTargetTeacherId] = useState<string | undefined>(undefined);
   const [editingSub, setEditingSub] = useState<SubRecord|null>(null);
 
   const isAdmin = useMemo(() => ADMIN_ROLES.includes(user?.role ?? ""), [user]);
@@ -1585,7 +1661,7 @@ if (tchErr) {
           <h1 className="text-white font-extrabold text-lg leading-tight tracking-tight">แลกคาบ &amp; สอนแทน</h1>
           <p className="text-[#FBCFE8] text-xs sm:text-sm font-medium">{fullName(user)} · ปีการศึกษา {academicYear?.year_name}</p>
         </div>
-        <button onClick={() => setShowSwapModal(true)}
+        <button onClick={() => { setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); setShowSwapModal(true); }}
           className="px-4 py-2 bg-[#FB7185] hover:bg-[#BE185D] text-[#9D174D] text-sm font-bold rounded-xl shadow-sm transition-colors shrink-0">
           + ขอแลกคาบ
         </button>
@@ -1623,7 +1699,7 @@ if (tchErr) {
           <div className="w-full p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-slate-700 text-base">คำขอแลกคาบของฉัน</h2>
-              <button onClick={() => setShowSwapModal(true)}
+              <button onClick={() => { setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); setShowSwapModal(true); }}
                 className="px-4 py-2 bg-[#FB7185] hover:bg-[#BE185D] text-white text-sm font-bold rounded-xl">
                 + ขอแลกคาบใหม่
               </button>
@@ -1863,19 +1939,21 @@ if (tchErr) {
                   </span>
                 </td>
                 <td className="px-4 py-3.5 whitespace-nowrap">
-  {r.absent_teacher_id === user?.id && r.status !== "cancelled" ? (
-    <button
-      onClick={() => {
-        setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.substitute_teacher)} ที่เคยสอนแทนให้เมื่อ ${thaiDate(r.substitute_date)} (${r.slot_label ?? "-"})`);
-        setShowSwapModal(true);
-      }}
-      className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200 transition-colors"
-    >
-      🔄 แลกคาบคืน
-    </button>
-  ) : (
-    <span className="text-xs text-slate-300">—</span>
-  )}
+  {r.absent_teacher_id === user?.id && r.status !== "cancelled" && r.substitute_teacher_id ? (
+  <button
+    onClick={() => {
+      setSwapMode("repay");
+      setSwapFixedTargetTeacherId(r.substitute_teacher_id);
+      setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.substitute_teacher)} ที่เคยสอนแทนให้เมื่อ ${thaiDate(r.substitute_date)} (${r.slot_label ?? "-"})`);
+      setShowSwapModal(true);
+    }}
+    className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200 transition-colors"
+  >
+    🔄 แลกคาบคืน
+  </button>
+) : (
+  <span className="text-xs text-slate-300">—</span>
+)}
 </td>
                 {canAssignSub && (
   <td className="px-4 py-3.5 whitespace-nowrap">
@@ -2035,8 +2113,10 @@ if (tchErr) {
     user={user} allEntries={allEntries} allTeachers={teachers} allTimeSlots={allTimeSlots}
     academicYearId={academicYear.id}
     initialReason={swapInitialReason}
-    onSave={async()=>{ setShowSwapModal(false); setSwapInitialReason(undefined); await loadData(); }}
-    onClose={()=>{ setShowSwapModal(false); setSwapInitialReason(undefined); }}
+    mode={swapMode}
+    fixedTargetTeacherId={swapFixedTargetTeacherId}
+    onSave={async()=>{ setShowSwapModal(false); setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); await loadData(); }}
+    onClose={()=>{ setShowSwapModal(false); setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); }}
   />
 )}
       {assignLeave && academicYear && (
