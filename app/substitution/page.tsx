@@ -912,9 +912,14 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicY
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh]" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+    /* 1. ปรับ Outer Overlay ให้เหลือระยะขอบรอบๆ น้อยลง (p-2 หรือ p-4) */
+  <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 sm:p-6" onClick={onClose}>
+    
+    /* 2. ปรับ Inner Modal ให้ขยายกว้าง w-full และใช้ max-w-[96vw] พร้อมสูง max-h-[95vh] */
+    <div className="bg-white w-full max-w-[96vw] h-full max-h-[95vh] rounded-2xl shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+      
+      {/* Header */}
+      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
           <div>
             <h3 className="font-bold text-slate-800 text-base">⚡ จัดสอนแทนทันที (ไม่ต้องรอใบลา)</h3>
             <p className="text-sm text-slate-500">สำหรับกรณีลาผ่าตัด/ลายาว — เลือกครู + ช่วงวันที่แล้วจัดสอนแทนได้เลย</p>
@@ -1344,27 +1349,28 @@ if (tchErr) {
             )}
 
             {/* My requests */}
-            <div>
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">คำขอทั้งหมดของฉัน</h3>
-              {mySwaps.length === 0 ? (
-                <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 text-slate-400">
-                  <p className="text-4xl mb-2">🔄</p>
-                  <p className="text-sm">ยังไม่มีคำขอแลกคาบ</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {mySwaps.map(r => (
-                    <div key={r.id} className="bg-white rounded-2xl border border-slate-200 p-4">
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="min-w-0">
-                          <p className="font-bold text-slate-800 text-sm">
-                            {r.requester_id === user?.id
-                              ? <span>ขอแลกกับ <span className="text-blue-600">{fullName(r.target_teacher)}</span></span>
-                              : <span><span className="text-blue-600">{fullName(r.requester)}</span> ขอแลกกับคุณ</span>
-                            }
-                          </p>
-                          <p className="text-xs text-slate-400">📅 {thaiDate(r.swap_date)}</p>
-                        </div>
+            <div className="w-full max-w-none">
+  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">คำขอทั้งหมดของฉัน</h3>
+  
+  {mySwaps.length === 0 ? (
+    <div className="w-full text-center py-16 bg-white rounded-2xl border border-slate-200 text-slate-400 shadow-sm">
+      <p className="text-5xl mb-3">🔄</p>
+      <p className="text-base font-medium">ยังไม่มีคำขอแลกคาบ</p>
+    </div>
+  ) : (
+    <div className="w-full space-y-3">
+      {mySwaps.map(r => (
+        <div key={r.id} className="w-full bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between gap-4 mb-2">
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-slate-800 text-base leading-snug">
+                {r.requester_id === user?.id
+                  ? <span>ขอแลกกับ <span className="text-blue-600">{fullName(r.target_teacher)}</span></span>
+                  : <span><span className="text-blue-600">{fullName(r.requester)}</span> ขอแลกกับคุณ</span>
+                }
+              </p>
+              <p className="text-xs sm:text-sm text-slate-400 mt-1">📅 {thaiDate(r.swap_date)}</p>
+            </div>
                         <span className={`text-xs font-bold px-2 py-1 rounded-lg border shrink-0 ${STATUS_SWAP[r.status]?.cls}`}>
                           {STATUS_SWAP[r.status]?.label}
                         </span>
@@ -1438,82 +1444,102 @@ if (tchErr) {
 
 
             {/* Filter + Print */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-4">
-              <div className="flex flex-wrap gap-3 items-end justify-between">
-                <div className="flex gap-3 flex-wrap">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1">วันที่</label>
-                    <input type="date" value={filterDate} onChange={e=>setFilterDate(e.target.value)}
-                      className="border-2 border-blue-200 rounded-xl px-3 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-                  </div>
-                  {canAssignSub && (
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 mb-1">ครู</label>
-                      <select value={filterTeacher} onChange={e=>setFilterTeacher(e.target.value)}
-                        className="border-2 border-blue-200 rounded-xl px-3 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none">
-                        <option value="">ทั้งหมด</option>
-                        {teachers.map(t=><option key={t.id} value={t.id}>{fullName(t)}</option>)}
-                      </select>
-                    </div>
-                  )}
-                  {(filterDate||filterTeacher) && (
-                    <button onClick={()=>{setFilterDate("");setFilterTeacher("");}}
-                      className="px-3 py-2 text-xs text-slate-400 hover:text-slate-600 underline self-end">ล้างตัวกรอง</button>
-                  )}
-                </div>
-                {canAssignSub && filteredSubs.length > 0 && (
-                  <div className="flex gap-2">
-                    <button onClick={()=>printSubOrder(filteredSubs, filterDate?thaiDate(filterDate):"ทั้งหมด")}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5">
-                      🖨️ พิมพ์ใบคำสั่ง
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
+<div className="w-full bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+  <div className="flex flex-wrap gap-4 items-end justify-between w-full">
+    
+    {/* ฝั่งตัวกรอง */}
+    <div className="flex gap-4 flex-wrap items-end flex-1 min-w-[280px]">
+      <div className="flex-1 sm:flex-initial min-w-[160px]">
+        <label className="block text-xs font-bold text-slate-400 mb-1.5">วันที่</label>
+        <input 
+          type="date" 
+          value={filterDate} 
+          onChange={e=>setFilterDate(e.target.value)}
+          className="w-full border-2 border-blue-200 rounded-xl px-3.5 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none transition-colors" 
+        />
+      </div>
 
-            {/* Sub records table */}
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-              <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="font-bold text-slate-700 text-sm">รายการสอนแทน ({filteredSubs.length})</h3>
-              </div>
-              {filteredSubs.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 text-sm">ไม่มีข้อมูล</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm" style={{minWidth:820}}>
-                    <thead>
-                      <tr className="bg-gradient-to-r from-blue-800 to-blue-600 text-white text-xs">
-                        {["วันที่","คาบ","ห้อง","วิชา","ครูเจ้าของคาบ","ครูสอนแทน","ชม.","ที่มา","สถานะ"].map(h=>(
-                          <th key={h} className="px-3 py-3 text-left font-bold whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredSubs.map((r,i)=>{
-                        const src = sourceOf(r.note);
-                        return (
-                        <tr key={r.id} className={i%2===0?"bg-slate-50":"bg-white"}>
-                          <td className="px-3 py-2.5 whitespace-nowrap text-xs">{thaiDate(r.substitute_date)}</td>
-                          <td className="px-3 py-2.5 whitespace-nowrap text-xs font-bold text-blue-700">{r.slot_label??"-"}</td>
-                          <td className="px-3 py-2.5 text-xs">{r.room_name??"-"}</td>
-                          <td className="px-3 py-2.5 text-xs">{r.subject_name??"-"}</td>
-                          <td className="px-3 py-2.5 text-xs font-medium">{fullName(r.absent_teacher)}</td>
-                          <td className="px-3 py-2.5 text-xs font-medium text-emerald-700">{fullName(r.substitute_teacher)}</td>
-                          <td className="px-3 py-2.5 text-center text-xs font-bold">{r.hours_count}</td>
-                          <td className="px-3 py-2.5">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border whitespace-nowrap ${SOURCE_LABEL[src].cls}`}>
-                              {SOURCE_LABEL[src].label}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border ${STATUS_SUB[r.status]?.cls}`}>
-                              {STATUS_SUB[r.status]?.label??r.status}
-                            </span>
-                          </td>
-                        </tr>
-                        );
-                      })}
+      {canAssignSub && (
+        <div className="flex-1 sm:flex-initial min-w-[200px]">
+          <label className="block text-xs font-bold text-slate-400 mb-1.5">ครู</label>
+          <select 
+            value={filterTeacher} 
+            onChange={e=>setFilterTeacher(e.target.value)}
+            className="w-full border-2 border-blue-200 rounded-xl px-3.5 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none transition-colors"
+          >
+            <option value="">ทั้งหมด</option>
+            {teachers.map(t=><option key={t.id} value={t.id}>{fullName(t)}</option>)}
+          </select>
+        </div>
+      )}
+
+      {(filterDate||filterTeacher) && (
+        <button 
+          onClick={()=>{setFilterDate("");setFilterTeacher("");}}
+          className="px-3 py-2.5 text-xs font-bold text-slate-400 hover:text-red-500 hover:underline transition-colors mb-0.5"
+        >
+          ✕ ล้างตัวกรอง
+        </button>
+      )}
+    </div>
+
+    {/* ฝั่งปุ่มพิมพ์ */}
+    {canAssignSub && filteredSubs.length > 0 && (
+      <div className="flex gap-2 shrink-0">
+        <button 
+          onClick={()=>printSubOrder(filteredSubs, filterDate?thaiDate(filterDate):"ทั้งหมด")}
+          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-sm font-bold rounded-xl flex items-center gap-2 shadow-sm transition-all"
+        >
+          🖨️ พิมพ์ใบคำสั่ง
+        </button>
+      </div>
+    )}
+
+  </div>
+</div>
+{/* Sub records table */}
+<div className="w-full bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+  <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+    <h3 className="font-bold text-slate-700 text-base">รายการสอนแทน ({filteredSubs.length})</h3>
+  </div>
+  
+  {filteredSubs.length === 0 ? (
+    <div className="text-center py-16 text-slate-400 text-sm">ไม่มีข้อมูล</div>
+  ) : (
+    <div className="w-full overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-gradient-to-r from-blue-800 to-blue-600 text-white text-xs sm:text-sm">
+            {["วันที่","คาบ","ห้อง","วิชา","ครูเจ้าของคาบ","ครูสอนแทน","ชม.","ที่มา","สถานะ"].map(h=>(
+              <th key={h} className="px-4 py-3.5 text-left font-bold whitespace-nowrap">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {filteredSubs.map((r,i)=>{
+            const src = sourceOf(r.note);
+            return (
+              <tr key={r.id} className={`${i%2===0 ? "bg-slate-50/50" : "bg-white"} hover:bg-blue-50/40 transition-colors`}>
+                <td className="px-4 py-3.5 whitespace-nowrap text-xs sm:text-sm">{thaiDate(r.substitute_date)}</td>
+                <td className="px-4 py-3.5 whitespace-nowrap text-xs sm:text-sm font-bold text-blue-700">{r.slot_label??"-"}</td>
+                <td className="px-4 py-3.5 text-xs sm:text-sm whitespace-nowrap">{r.room_name??"-"}</td>
+                <td className="px-4 py-3.5 text-xs sm:text-sm font-medium">{r.subject_name??"-"}</td>
+                <td className="px-4 py-3.5 text-xs sm:text-sm font-medium whitespace-nowrap">{fullName(r.absent_teacher)}</td>
+                <td className="px-4 py-3.5 text-xs sm:text-sm font-semibold text-emerald-700 whitespace-nowrap">{fullName(r.substitute_teacher)}</td>
+                <td className="px-4 py-3.5 text-center text-xs sm:text-sm font-bold">{r.hours_count}</td>
+                <td className="px-4 py-3.5 whitespace-nowrap">
+                  <span className={`text-xs font-bold px-2.5 py-1 rounded-lg border inline-block ${SOURCE_LABEL[src].cls}`}>
+                    {SOURCE_LABEL[src].label}
+                  </span>
+                </td>
+                <td className="px-4 py-3.5 whitespace-nowrap">
+                  <span className={`text-xs font-bold px-2.5 py-1 rounded-lg border inline-block ${STATUS_SUB[r.status]?.cls}`}>
+                    {STATUS_SUB[r.status]?.label??r.status}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
                     </tbody>
                   </table>
                 </div>
