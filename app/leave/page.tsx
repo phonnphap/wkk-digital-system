@@ -154,8 +154,11 @@ function computeFreePeriodsForDay(teacherId: string, dow: number, scheduleType: 
 function buildSubstituteTiers(
   entry: any, dow: number, timetableEntries: any[], allTeachers: UserProfile[],
   excludeId: string, onLeaveIds: Set<string>, subHistCounts: Record<string, number>,
-  busyIds: Set<string>, preUsedIds: Set<string> = new Set()
-): { label: string; teachers: UserProfile[] }[] {
+  busyIds: Set<string>, preUsedIds: Set<string> = new Set(),
+  requesterGradeLevel?: string | null,
+  assignedCountMap: Record<string, number> = {}
+): { label: string; teachers: { teacher: UserProfile; free: number; assigned: number }[] }[] {
+
   const isEligible = (t: UserProfile) => t.id !== excludeId && !busyIds.has(t.id) && !onLeaveIds.has(t.id) && !preUsedIds.has(t.id);
   const scored = (list: UserProfile[]) => list
     .filter(isEligible)
@@ -163,16 +166,40 @@ function buildSubstituteTiers(
       teacher: t,
       free: computeFreePeriodsForDay(t.id, dow, entry.schedule_type ?? undefined, timetableEntries, timetableEntries),
       hist: subHistCounts[t.id] ?? 0,
+      assigned: assignedCountMap[t.id] ?? 0,
     }))
     .sort((a, b) => b.free - a.free || a.hist - b.hist)
-    .map(x => x.teacher);
+    .map(x => ({ teacher: x.teacher, free: x.free, assigned: x.assigned }));
 
-  const result: { label: string; teachers: UserProfile[] }[] = [];
+  const result: { label: string; teachers: { teacher: UserProfile; free: number; assigned: number }[] }[] = [];
   const used = new Set(preUsedIds);
+
+  // ★ ใหม่: ครูสายชั้นเดียวกับผู้ยื่นลา ให้ขึ้นก่อนสายชั้นอื่นเสมอ
+  if (requesterGradeLevel) {
+    const sameGradeIds = new Set(
+      timetableEntries.filter(e => extractGradeOnly(e.grade_group) === requesterGradeLevel)
+        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+    );
+    const list = scored(allTeachers.filter(t => sameGradeIds.has(t.id) && !used.has(t.id)));
+    if (list.length > 0) {
+      result.push({ label: `🏫 ครูสายชั้น ${requesterGradeLevel} (สายชั้นเดียวกับท่าน)`, teachers: list });
+      list.forEach(x => used.add(x.teacher.id));
+    }
+  }
 
   if (isHomeroomPriorityGrade(entry.grade_group) && entry.homeroom_teacher_id) {
     const hr = allTeachers.find(t => t.id === entry.homeroom_teacher_id);
-    if (hr && isEligible(hr)) { result.push({ label: "👩‍🏫 ครูประจำชั้น (สอนแทนก่อนเสมอ)", teachers: [hr] }); used.add(hr.id); }
+    if (hr && isEligible(hr) && !used.has(hr.id)) {
+      result.push({
+        label: "👩‍🏫 ครูประจำชั้น (สอนแทนก่อนเสมอ)",
+        teachers: [{
+          teacher: hr,
+          free: computeFreePeriodsForDay(hr.id, dow, entry.schedule_type ?? undefined, timetableEntries, timetableEntries),
+          assigned: assignedCountMap[hr.id] ?? 0,
+        }],
+      });
+      used.add(hr.id);
+    }
   }
 
   const gradeOnly = extractGradeOnly(entry.grade_group);
@@ -182,7 +209,7 @@ function buildSubstituteTiers(
         .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
     );
     const list = scored(allTeachers.filter(t => gradeTeacherIds.has(t.id) && !used.has(t.id)));
-    if (list.length > 0) { result.push({ label: `🏫 สายชั้น ${gradeOnly}`, teachers: list }); list.forEach(t => used.add(t.id)); }
+    if (list.length > 0) { result.push({ label: `🏫 สายชั้น ${gradeOnly}`, teachers: list }); list.forEach(x => used.add(x.teacher.id)); }
   }
 
   {
@@ -204,7 +231,7 @@ function buildSubstituteTiers(
       );
     }
     const list = scored(allTeachers.filter(t => subjIds.has(t.id) && !used.has(t.id)));
-    if (list.length > 0) { result.push({ label: tierLabel, teachers: list }); list.forEach(t => used.add(t.id)); }
+    if (list.length > 0) { result.push({ label: tierLabel, teachers: list }); list.forEach(x => used.add(x.teacher.id)); }
   }
 
   const rest = scored(allTeachers.filter(t => !used.has(t.id)));
@@ -1114,19 +1141,29 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
     setPickedTeacherId("");
   }
 
+  const requesterGrade = GRADE_LABEL[(user.grade_level as string) ?? ""] ?? user.grade_level ?? null;
+
+  const assignedCountMap = useMemo(() => {
+    const m: Record<string, number> = {};
+    existingAssignments.forEach(a => {
+      if (a.substitute_teacher_id) m[a.substitute_teacher_id] = (m[a.substitute_teacher_id] ?? 0) + 1;
+    });
+    return m;
+  }, [existingAssignments]);
+
   const tiers = useMemo(() => {
-    if (!selectedEntry || dow === null) return [] as { label: string; teachers: UserProfile[] }[];
+    if (!selectedEntry || dow === null) return [] as { label: string; teachers: { teacher: UserProfile; free: number; assigned: number }[] }[];
     const startKey = (selectedEntry.start_time ?? "").slice(0, 5);
     const busyIds = new Set(
       timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
         .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
     );
-    const alreadyAssigned = new Set(
+    const alreadyPicked = new Set(
       existingAssignments.filter(a => a.substitute_date === selectedDate && a.slot_number === selectedEntry.slot_number)
         .map(a => a.substitute_teacher_id)
     );
-    return buildSubstituteTiers(selectedEntry, dow, timetableEntries, allTeachers, user.id, onLeaveIds, subHistCounts, busyIds, alreadyAssigned);
-  }, [selectedEntry, dow, timetableEntries, allTeachers, onLeaveIds, subHistCounts, existingAssignments, selectedDate, user.id]);
+    return buildSubstituteTiers(selectedEntry, dow, timetableEntries, allTeachers, user.id, onLeaveIds, subHistCounts, busyIds, alreadyPicked, requesterGrade, assignedCountMap);
+  }, [selectedEntry, dow, timetableEntries, allTeachers, onLeaveIds, subHistCounts, existingAssignments, selectedDate, user.id, requesterGrade, assignedCountMap]);
 
   function confirmAdd() {
     if (!selectedEntry || !pickedTeacherId) return;
@@ -1194,15 +1231,19 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
                     <div key={tier.label}>
                       <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5">{tier.label}</p>
                       <div className="space-y-1.5">
-                        {tier.teachers.map(t => {
+                        {tier.teachers.map(({ teacher: t, free, assigned }) => {
                           const active = pickedTeacherId === t.id;
                           return (
                             <button key={t.id} type="button" onClick={() => setPickedTeacherId(t.id)}
-                              className={`w-full text-left px-3 py-2 rounded-lg border-2 text-sm font-bold flex items-center justify-between ${
+                              className={`w-full text-left px-3 py-2 rounded-lg border-2 text-sm font-bold flex items-center justify-between gap-2 ${
                                 active ? "bg-indigo-50 border-indigo-400 text-indigo-700" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
                               }`}>
-                              <span>{displayName(t)}{t.position ? ` · ${t.position}` : ""}</span>
-                              {active && <span>✓</span>}
+                              <span className="truncate">{displayName(t)}{t.position ? ` · ${t.position}` : ""}</span>
+                              <span className="flex items-center gap-1.5 shrink-0 text-[11px] font-bold">
+                                <span className="text-slate-400">ว่าง {free} คาบ</span>
+                                {assigned > 0 && <span className="text-amber-600">สอนแทนแล้ว {assigned} คาบ</span>}
+                                {active && <span>✓</span>}
+                              </span>
                             </button>
                           );
                         })}
@@ -1236,6 +1277,7 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
   const [computing, setComputing] = useState(false);
   const [preview, setPreview] = useState<SwapAssignment[]>([]);
   const [computed, setComputed] = useState(false);
+  const requesterGrade = GRADE_LABEL[(user.grade_level as string) ?? ""] ?? user.grade_level ?? null;
 
   function toggleDate(d: string) {
     setSelectedDates(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
@@ -1277,8 +1319,8 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
           const onLeave = onLeaveByDate[date] ?? new Set<string>();
           const preUsed = new Set([...usedNow, ...alreadyPicked]);
 
-          const dayTiers = buildSubstituteTiers(entry, dow, timetableEntries, allTeachers, user.id, onLeave, counts, busyIds, preUsed);
-          const chosen = dayTiers.flatMap(t => t.teachers)[0] ?? null;
+          const dayTiers = buildSubstituteTiers(entry, dow, timetableEntries, allTeachers, user.id, onLeave, counts, busyIds, preUsed, requesterGrade);
+          const chosen = dayTiers.flatMap(t => t.teachers)[0]?.teacher ?? null;
 
           const base = {
             timetable_entry_id: entry.id, substitute_date: date,
@@ -1762,7 +1804,12 @@ if (docFile) {
 // ── helper: print with stats for any request ──────────────
 // ══════════════════════════════════════════════════════════
 async function printFullLeave(r: any, userForPrint: UserProfile, savedSignature: string) {
-  const stats = await loadLeaveStats(r.user_id ?? userForPrint.id, r.id, r.start_date);
+  // ✅ resolve เอกสารแนบใหม่ทุกครั้งก่อนพิมพ์ ผ่าน document_path (path จริงใน OneDrive)
+  //    เพราะ document_url ที่เก็บไว้ตอนยื่นอาจเป็นลิงก์เก่า/หมดอายุ ทำให้รูปไม่ขึ้นตอนพิมพ์
+  const [stats, resolvedDocUrl] = await Promise.all([
+    loadLeaveStats(r.user_id ?? userForPrint.id, r.id, r.start_date),
+    resolveAttachmentUrl(r.document_path, r.document_url),
+  ]);
   printLeave(
     {
       fullName: fullName(r.user ?? userForPrint),
@@ -1781,7 +1828,7 @@ async function printFullLeave(r: any, userForPrint: UserProfile, savedSignature:
       { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล", signature_url:r.approver_2_signature, approved_at:r.approver_2_approved_at },
       { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต", signature_url:r.approver_3_signature, approved_at:r.approver_3_approved_at },
     ],
-    r.document_url ?? undefined,
+    resolvedDocUrl ?? undefined,
     stats
   );
 }
