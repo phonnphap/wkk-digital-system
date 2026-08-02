@@ -146,7 +146,10 @@ function sourceOf(note?: string | null): keyof typeof SOURCE_LABEL {
 // ── Teams DM helper — ยิงแจ้งเตือนผ่าน Teams จากบัญชี HR
 // ══════════════════════════════════════════════════════════
 async function notifyTeams(targetEmail: string | null | undefined, message: string) {
-  if (!targetEmail) return;
+  if (!targetEmail) {
+    console.warn("[notifyTeams] ไม่มี email ของผู้รับ — ข้ามการส่ง:", message);
+    return;
+  }
   try {
     const res = await fetch("/api/teams-dm", {
       method: "POST",
@@ -1265,6 +1268,8 @@ export default function SubstitutionPage() {
   const [swapMode, setSwapMode] = useState<"normal"|"repay">("normal");
   const [swapFixedTargetTeacherId, setSwapFixedTargetTeacherId] = useState<string | undefined>(undefined);
   const [editingSub, setEditingSub] = useState<SubRecord|null>(null);
+  const [adminSwapFilterStatus, setAdminSwapFilterStatus] = useState<"all"|"pending"|"accepted"|"rejected"|"cancelled">("all");
+const [adminSwapFilterTeacher, setAdminSwapFilterTeacher] = useState("");
   const isAdmin = useMemo(() => ADMIN_ROLES.includes(user?.role ?? ""), [user]);
   // ★ ขยายสิทธิ์ "จัดสอนแทน" ให้หัวหน้าสายชั้น/หัวหน้าหมวด ไม่ใช่แค่แอดมิน
   //   ต้องมีคอลัมน์ users.extra_roles (text[]) เก็บค่าเช่น 'grade_head', 'dept_head'
@@ -1375,10 +1380,10 @@ if (tchErr) {
 
     // Swap requests (แลกคาบระหว่างครู — เป็นคนละฟีเจอร์กับสอนแทนจากใบลา)
     const swapQ = supabase.from("class_swap_requests")
-      .select(`*,
-        requester:users!requester_id(id,first_name,last_name,title),
-        target_teacher:users!target_teacher_id(id,first_name,last_name,title)`)
-      .order("created_at", { ascending: false }).limit(100);
+  .select(`*,
+    requester:users!requester_id(id,first_name,last_name,title,email),
+    target_teacher:users!target_teacher_id(id,first_name,last_name,title,email)`)
+  .order("created_at", { ascending: false }).limit(100);
     const { data: swaps } = await swapQ;
     setSwapRequests((swaps ?? []) as SwapRequest[]);
 
@@ -1430,6 +1435,20 @@ if (tchErr) {
         ? `✅ คำขอแลกคาบวันที่ ${thaiDate(req.swap_date)} ของคุณได้รับการตอบรับแล้ว`
         : `❌ คำขอแลกคาบวันที่ ${thaiDate(req.swap_date)} ของคุณถูกปฏิเสธ`
     );
+  }
+  await loadData();
+};
+// ★ แอดมิน/ผอ./รองผอ. อนุมัติหรือปฏิเสธคำขอแลกคาบแทนใครก็ได้ (ไม่ต้องเป็นเจ้าของคาบ)
+const handleAdminSwapRespond = async (id: string, action: "accepted" | "rejected") => {
+  if (!confirm(action === "accepted" ? "ยืนยันอนุมัติคำขอแลกคาบนี้แทนครู?" : "ยืนยันปฏิเสธคำขอแลกคาบนี้แทนครู?")) return;
+  await supabase.from("class_swap_requests").update({ status: action, responded_at: new Date().toISOString() }).eq("id", id);
+  const req = swapRequests.find(r => r.id === id);
+  if (req) {
+    const msg = action === "accepted"
+      ? `✅ ผู้ดูแลระบบ (${fullName(user)}) อนุมัติคำขอแลกคาบวันที่ ${thaiDate(req.swap_date)} แทนแล้ว`
+      : `❌ ผู้ดูแลระบบ (${fullName(user)}) ปฏิเสธคำขอแลกคาบวันที่ ${thaiDate(req.swap_date)} แทนแล้ว`;
+    notifyTeams(req.requester?.email, msg);
+    notifyTeams(req.target_teacher?.email, msg);
   }
   await loadData();
 };
@@ -1542,6 +1561,36 @@ if (tchErr) {
   const incomingSwaps = useMemo(() =>
     swapRequests.filter(r => r.target_teacher_id === user?.id && r.status === "pending")
   , [swapRequests, user]);
+  // ── สรุปภาพรวมการแลกคาบทั้งโรงเรียน (สำหรับแอดมิน/ผอ./รองผอ.) ──
+const adminSwapStats = useMemo(() => {
+  const total = swapRequests.length;
+  const pending = swapRequests.filter(r => r.status === "pending").length;
+  const accepted = swapRequests.filter(r => r.status === "accepted").length;
+  const rejected = swapRequests.filter(r => r.status === "rejected").length;
+  const cancelled = swapRequests.filter(r => r.status === "cancelled").length;
+  return { total, pending, accepted, rejected, cancelled };
+}, [swapRequests]);
+
+const teacherSwapSummary = useMemo(() => {
+  const map: Record<string, { name: string; requested: number; covered: number }> = {};
+  swapRequests.forEach(r => {
+    if (r.status === "cancelled") return;
+    if (!map[r.requester_id]) map[r.requester_id] = { name: fullName(r.requester), requested: 0, covered: 0 };
+    map[r.requester_id].requested++;
+    if (r.status === "accepted" && r.target_teacher_id) {
+      if (!map[r.target_teacher_id]) map[r.target_teacher_id] = { name: fullName(r.target_teacher), requested: 0, covered: 0 };
+      map[r.target_teacher_id].covered++;
+    }
+  });
+  return Object.entries(map).sort((a, b) => (b[1].requested + b[1].covered) - (a[1].requested + a[1].covered));
+}, [swapRequests]);
+
+const adminFilteredSwaps = useMemo(() => {
+  let list = swapRequests;
+  if (adminSwapFilterStatus !== "all") list = list.filter(r => r.status === adminSwapFilterStatus);
+  if (adminSwapFilterTeacher) list = list.filter(r => r.requester_id === adminSwapFilterTeacher || r.target_teacher_id === adminSwapFilterTeacher);
+  return [...list].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+}, [swapRequests, adminSwapFilterStatus, adminSwapFilterTeacher]);
 
   const filteredSubs = useMemo(() => {
     let list = subRecords;
@@ -1703,6 +1752,107 @@ if (tchErr) {
                 + ขอแลกคาบใหม่
               </button>
             </div>
+            {isFullAdmin && (
+  <div className="space-y-4">
+    <h2 className="font-bold text-slate-700 text-base">🗂️ ภาพรวมการแลกคาบทั้งโรงเรียน (ผู้ดูแลระบบ)</h2>
+
+    {/* การ์ดสรุป */}
+    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      {[
+        { label: "คำขอทั้งหมด", value: adminSwapStats.total, color: "#1E293B", bg: "bg-white", border: "border-[#FBCFE8]" },
+        { label: "รอตอบรับ", value: adminSwapStats.pending, color: "#D97706", bg: "bg-amber-50", border: "border-amber-200" },
+        { label: "ตกลงแล้ว", value: adminSwapStats.accepted, color: "#059669", bg: "bg-emerald-50", border: "border-emerald-200" },
+        { label: "ปฏิเสธ", value: adminSwapStats.rejected, color: "#DC2626", bg: "bg-red-50", border: "border-red-200" },
+        { label: "ยกเลิก", value: adminSwapStats.cancelled, color: "#64748B", bg: "bg-slate-50", border: "border-slate-200" },
+      ].map(c => (
+        <div key={c.label} className={`${c.bg} border-2 ${c.border} rounded-2xl p-4 text-center shadow-sm`}>
+          <div className="text-2xl font-black" style={{ color: c.color }}>{c.value}</div>
+          <div className="text-xs text-slate-500 font-bold mt-1">{c.label}</div>
+        </div>
+      ))}
+    </div>
+
+    {/* สรุปรายครู */}
+    {teacherSwapSummary.length > 0 && (
+      <div className="bg-white rounded-2xl border border-[#FBCFE8] overflow-hidden shadow-sm">
+        <div className="px-5 py-3 border-b border-[#FCE7F3]">
+          <h3 className="font-bold text-slate-700 text-sm">👥 สรุปการแลกคาบรายครู</h3>
+          <p className="text-xs text-slate-400 mt-0.5">"ขอแลก" = จำนวนครั้งที่เป็นผู้ขอแลกคาบ · "รับแลกให้" = จำนวนครั้งที่ตอบรับสอนแทนให้ผู้อื่น</p>
+        </div>
+        <div className="overflow-x-auto max-h-72 overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0">
+              <tr className="bg-gradient-to-r from-[#9D174D] to-[#EC4899] text-white text-xs">
+                <th className="px-4 py-3 text-left">ชื่อ-นามสกุล</th>
+                <th className="px-3 py-3 text-center">ขอแลก</th>
+                <th className="px-3 py-3 text-center">รับแลกให้</th>
+              </tr>
+            </thead>
+            <tbody>
+              {teacherSwapSummary.map(([id, s], i) => (
+                <tr key={id} className={i % 2 === 0 ? "bg-[#FDF2F8]" : "bg-white"}>
+                  <td className="px-4 py-2.5 font-medium text-slate-800">{s.name}</td>
+                  <td className="px-3 py-2.5 text-center font-bold text-[#DB2777]">{s.requested || "-"}</td>
+                  <td className="px-3 py-2.5 text-center font-bold text-emerald-600">{s.covered || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )}
+
+    {/* รายการทั้งหมด + ปุ่มอนุมัติแทน */}
+    <div className="bg-white rounded-2xl border border-[#FBCFE8] overflow-hidden shadow-sm">
+      <div className="px-5 py-3 border-b border-[#FCE7F3] flex items-center justify-between gap-3 flex-wrap">
+        <h3 className="font-bold text-slate-700 text-sm">📋 คำขอแลกคาบทั้งหมด ({adminFilteredSwaps.length})</h3>
+        <div className="flex gap-2 flex-wrap">
+          <select value={adminSwapFilterStatus} onChange={e => setAdminSwapFilterStatus(e.target.value as any)}
+            className="border-2 border-[#F9A8D4] rounded-xl px-3 py-1.5 text-xs font-bold bg-white focus:outline-none">
+            <option value="all">ทุกสถานะ</option>
+            <option value="pending">รอตอบรับ</option>
+            <option value="accepted">ตกลงแล้ว</option>
+            <option value="rejected">ปฏิเสธ</option>
+            <option value="cancelled">ยกเลิก</option>
+          </select>
+          <select value={adminSwapFilterTeacher} onChange={e => setAdminSwapFilterTeacher(e.target.value)}
+            className="border-2 border-[#F9A8D4] rounded-xl px-3 py-1.5 text-xs font-bold bg-white focus:outline-none">
+            <option value="">ทุกคน</option>
+            {teachers.map(t => <option key={t.id} value={t.id}>{fullName(t)}</option>)}
+          </select>
+        </div>
+      </div>
+      {adminFilteredSwaps.length === 0 ? (
+        <div className="text-center py-10 text-slate-400 text-sm">ไม่มีข้อมูล</div>
+      ) : (
+        <div className="divide-y divide-[#FCE7F3] max-h-[480px] overflow-y-auto">
+          {adminFilteredSwaps.map(r => (
+            <div key={r.id} className="px-5 py-3 flex items-start justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-lg border ${STATUS_SWAP[r.status]?.cls}`}>{STATUS_SWAP[r.status]?.label}</span>
+                  <span className="text-xs text-slate-400">📅 {thaiDate(r.swap_date)}</span>
+                </div>
+                <p className="text-sm font-bold text-slate-800">
+                  {fullName(r.requester)} <span className="text-slate-400 font-normal">ขอแลกกับ</span> {fullName(r.target_teacher)}
+                </p>
+                {r.reason && <p className="text-xs text-slate-500 mt-1">{r.reason}</p>}
+              </div>
+              {r.status === "pending" && (
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={() => handleAdminSwapRespond(r.id, "accepted")}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold">✅ อนุมัติแทน</button>
+                  <button onClick={() => handleAdminSwapRespond(r.id, "rejected")}
+                    className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold">❌ ปฏิเสธแทน</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  </div>
+)}
 
             {/* Incoming */}
             {incomingSwaps.length > 0 && (
