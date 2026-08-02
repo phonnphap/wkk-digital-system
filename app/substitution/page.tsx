@@ -323,6 +323,41 @@ function computeTaughtPeriodsForDay(teacherId: string, dow: number, allEntries: 
     e.day_of_week === dow && !e.is_break && (e.teacher_id === teacherId || e.teacher_id_2 === teacherId)
   ).length;
 }
+// ★ จำนวนคาบที่ครูคนนี้ "ถูกจัดให้สอนแทน" ไปแล้วในวันนั้น (นับจาก substitution_records จริง ไม่รวมรายการที่ยกเลิก)
+function computeSubstituteCountForDay(teacherId: string, date: string, subRecords: SubRecord[]): number {
+  return subRecords.filter(r => r.status !== "cancelled" && r.substitute_teacher_id === teacherId && r.substitute_date === date).length;
+}
+
+// ★ ภาระรวมของครูในวันนั้น = คาบที่สอนประจำ (ตามตารางสอน) + คาบที่ถูกจัดให้สอนแทนไปแล้ว
+function computeTotalLoadForDay(teacherId: string, dow: number, date: string, allEntries: TimetableEntry[], subRecords: SubRecord[]): number {
+  return computeTaughtPeriodsForDay(teacherId, dow, allEntries) + computeSubstituteCountForDay(teacherId, date, subRecords);
+}
+
+// ★ หาว่าครูคนไหนบ้าง "กำลังสอนแทนคนอื่นอยู่แล้ว" ในวัน+เวลาที่ทับกับคาบนี้
+// คืนค่า map: teacherId -> ข้อความเตือน (สอนแทนใครอยู่)
+// excludeAbsentId: ไม่นับ record ของครูที่ลาคนเดียวกับที่กำลังจัดอยู่ตอนนี้ (กันเตือนซ้ำตัวเอง)
+function computeSubstituteConflictMap(
+  entry: TimetableEntry, date: string, subRecords: SubRecord[], allEntries: TimetableEntry[], excludeAbsentId?: string
+): Record<string, string> {
+  const namesByTeacher: Record<string, string[]> = {};
+  subRecords.forEach(r => {
+    if (r.status === "cancelled") return;
+    if (r.substitute_date !== date) return;
+    if (!r.substitute_teacher_id) return;
+    if (excludeAbsentId && r.absent_teacher_id === excludeAbsentId) return;
+    const linkedEntry = r.timetable_entry_id ? allEntries.find(e => e.id === r.timetable_entry_id) : null;
+    if (!linkedEntry) return;
+    if (!timeRangesOverlap(entry.start_time, entry.end_time, linkedEntry.start_time, linkedEntry.end_time)) return;
+    const absentName = fullName(r.absent_teacher);
+    if (!namesByTeacher[r.substitute_teacher_id]) namesByTeacher[r.substitute_teacher_id] = [];
+    if (!namesByTeacher[r.substitute_teacher_id].includes(absentName)) namesByTeacher[r.substitute_teacher_id].push(absentName);
+  });
+  const map: Record<string, string> = {};
+  Object.entries(namesByTeacher).forEach(([id, names]) => {
+    map[id] = `สอนแทน ${names.join(", ")} อยู่แล้ว (คาบทับกัน)`;
+  });
+  return map;
+}
 
 // ── Print helpers ─────────────────────────────────────────
 function printSubOrder(records: SubRecord[], periodLabel: string) {
@@ -444,10 +479,11 @@ function printTeacherSubStat(records: SubRecord[], users: User[]) {
 // ══════════════════════════════════════════════════════════
 // ── TeacherSearchSelect — เลือกครูแบบพิมพ์ค้นหาได้
 // ══════════════════════════════════════════════════════════
-function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เลือกครู —", loadMap, warnAt = SUB_LOAD_WARN_AT }: {
+function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เลือกครู —", loadMap, warnAt = SUB_LOAD_WARN_AT, conflictMap }: {
   teachers: User[]; value: string; onChange: (id: string) => void; placeholder?: string;
-  // ★ loadMap: teacherId -> จำนวนคาบที่สอนอยู่แล้วในวันนั้น (ถ้าไม่ส่งมาจะไม่แสดง badge)
   loadMap?: Record<string, number>; warnAt?: number;
+  // ★ conflictMap: teacherId -> ข้อความเตือนว่ากำลังสอนแทนคนอื่นอยู่แล้วในคาบที่ทับกัน
+  conflictMap?: Record<string, string>;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -472,15 +508,30 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
       <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
         overloaded ? "bg-red-50 text-red-600 border-red-200" : "bg-[#FCE7F3] text-[#64748B] border-transparent"
       }`}>
-        {overloaded ? `⚠️ สอน ${n} คาบ` : `${n} คาบ`}
+        {overloaded ? `⚠️ รวม ${n} คาบ` : `รวม ${n} คาบ`}
       </span>
     );
   }
 
+  function handlePick(t: User) {
+    const conflict = conflictMap?.[t.id];
+    if (conflict) {
+      const ok = confirm(`⚠️ ${fullName(t)} ${conflict}\n\nต้องการเลือกครูคนนี้ต่อไปหรือไม่?`);
+      if (!ok) return;
+    }
+    onChange(t.id);
+    setOpen(false);
+    setSearch("");
+  }
+
+  const selectedConflict = selected ? conflictMap?.[selected.id] : undefined;
+
   return (
     <div ref={ref} className="relative">
       <button type="button" onClick={() => setOpen(v => !v)}
-        className="w-full text-left border-2 border-[#F9A8D4] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#DB2777] focus:outline-none flex items-center justify-between gap-2">
+        className={`w-full text-left border-2 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none flex items-center justify-between gap-2 ${
+          selectedConflict ? "border-red-300 focus:border-red-500" : "border-[#F9A8D4] focus:border-[#DB2777]"
+        }`}>
         <span className="flex items-center gap-1.5 min-w-0">
           <span className={`truncate ${selected ? "font-bold text-slate-800" : "text-slate-400"}`}>
             {selected ? fullName(selected) : placeholder}
@@ -489,6 +540,9 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
         </span>
         <span className="text-slate-400 text-xs shrink-0">{open ? "▲" : "▼"}</span>
       </button>
+      {selectedConflict && (
+        <p className="text-[11px] text-red-600 font-bold mt-1">⚠️ {selectedConflict}</p>
+      )}
       {open && (
         <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border-2 border-[#F9A8D4] rounded-xl shadow-xl overflow-hidden">
           <div className="px-3 py-2 border-b border-[#FCE7F3]">
@@ -503,16 +557,20 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
             )}
             {filtered.length === 0 ? (
               <div className="px-4 py-3 text-slate-400 text-sm text-center">ไม่พบชื่อ</div>
-            ) : filtered.map(t => (
-              <button key={t.id} type="button" onClick={() => { onChange(t.id); setOpen(false); setSearch(""); }}
-                className={`w-full px-4 py-2.5 text-left text-sm font-medium hover:bg-[#FDF2F8] flex items-center justify-between gap-2 ${t.id === value ? "bg-[#FDF2F8]" : ""}`}>
-                <span className="min-w-0 truncate">
-                  <span className="font-bold text-slate-800">{fullName(t)}</span>
-                  {t.position && <span className="text-slate-400 text-xs ml-2">{t.position}</span>}
-                </span>
-                <LoadBadge teacherId={t.id} />
-              </button>
-            ))}
+            ) : filtered.map(t => {
+              const conflict = conflictMap?.[t.id];
+              return (
+                <button key={t.id} type="button" onClick={() => handlePick(t)}
+                  className={`w-full px-4 py-2.5 text-left text-sm font-medium hover:bg-[#FDF2F8] flex items-center justify-between gap-2 ${t.id === value ? "bg-[#FDF2F8]" : ""}`}>
+                  <span className="min-w-0 truncate">
+                    <span className="font-bold text-slate-800">{fullName(t)}</span>
+                    {t.position && <span className="text-slate-400 text-xs ml-2">{t.position}</span>}
+                    {conflict && <span className="block text-[10px] text-red-500 font-bold mt-0.5">⚠️ {conflict}</span>}
+                  </span>
+                  <LoadBadge teacherId={t.id} />
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -766,9 +824,9 @@ notifyTeams(targetT?.email, `🔄 ${fullName(user)} ขอแลกคาบก�
 }
 
 // ── AssignSubModal ──────────────────────────────────────────
-function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, currentUser, onSave, onClose }: {
+function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicYearId, currentUser, onSave, onClose }: {
   leaveRequest: LeaveRequest; teachers: User[];
-  entries: TimetableEntry[]; academicYearId: string;
+  entries: TimetableEntry[]; subRecords: SubRecord[]; academicYearId: string;
   currentUser: User; onSave: () => void; onClose: () => void;
 }) {
   const absentId = leaveRequest.user_id;
@@ -801,7 +859,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
     const dow = dowOf(date);
     const map: Record<string, number> = {};
     for (const t of candidates) {
-      const base = computeTaughtPeriodsForDay(t.id, dow, entries);
+      const base = computeTotalLoadForDay(t.id, dow, date, entries, subRecords);
       const extra = Object.entries(assignments).filter(([k, subId]) => subId === t.id && k.endsWith(`_${date}`)).length;
       map[t.id] = base + extra;
     }
@@ -822,11 +880,13 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
   if (coTeacherId(entry, absentId)) continue; // ★ มีครูคู่สอนอยู่แล้ว ไม่ต้องจัด ไม่ต้องนับ
   total++;
   if (next[key]) continue;
-  const candidates = computeFreeTeachersForEntry(entry, date, entries, teachers, absentId);
+  const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, entries, absentId);
+  const candidatesAll = computeFreeTeachersForEntry(entry, date, entries, teachers, absentId);
+  const candidates = candidatesAll.filter(t => !conflictMapForEntry[t.id]); // ★ กันจัดซ้ำ ครูที่สอนแทนคนอื่นอยู่แล้วในคาบทับกัน
         if (candidates.length === 0) { unfilled++; continue; }
         const scored = candidates.map(t => {
           const tKey = `${t.id}_${date}`;
-          const load = computeTaughtPeriodsForDay(t.id, dow, entries) + (tally[tKey] ?? 0);
+          const load = computeTotalLoadForDay(t.id, dow, date, entries, subRecords) + (tally[tKey] ?? 0);
           return { t, load };
         }).sort((a, b) => a.load - b.load || fullName(a.t).localeCompare(fullName(b.t), "th"));
         const pick = scored[0].t;
@@ -841,7 +901,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
     if (newlyFilled === 0 && unfilled === 0) {
       alert("ทุกคาบถูกจัดครูไว้แล้ว");
     } else if (unfilled > 0) {
-      alert(`⚡ จัดอัตโนมัติสำเร็จ ${newlyFilled} คาบ\n⚠️ เหลือ ${unfilled} คาบที่ไม่มีครูว่าง กรุณาเลือกเอง`);
+      alert(`⚡ จัดอัตโนมัติสำเร็จ ${newlyFilled} คาบ\n⚠️ เหลือ ${unfilled} คาบที่ไม่มีครูว่าง (หรือครูที่ว่างกำลังสอนแทนคนอื่นในคาบเดียวกันอยู่แล้ว) กรุณาเลือกเอง`);
     } else {
       alert(`⚡ จัดอัตโนมัติสำเร็จครบ ${newlyFilled} คาบ`);
     }
@@ -974,6 +1034,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
           onChange={id => setAsgn(key, id)}
           placeholder="— เลือกครูสอนแทน —"
           loadMap={dayLoadMap(date, computeFreeTeachersForEntry(entry, date, entries, teachers, absentId))}
+          conflictMap={computeSubstituteConflictMap(entry, date, subRecords, entries, absentId)}
         />
       </div>
     </div>
@@ -1002,8 +1063,8 @@ function AssignSubModal({ leaveRequest, teachers, entries, academicYearId, curre
 // ══════════════════════════════════════════════════════════
 // ── ManualAssignModal — จัดสอนแทนทันทีไม่ต้องรอใบลา (ลาผ่าตัด/ลายาว)
 // ══════════════════════════════════════════════════════════
-function ManualAssignModal({ selectableTeachers, allTeachers, entries, academicYearId, currentUser, onSave, onClose }: {
-  selectableTeachers: User[]; allTeachers: User[]; entries: TimetableEntry[]; academicYearId: string;
+function ManualAssignModal({ selectableTeachers, allTeachers, entries, subRecords, academicYearId, currentUser, onSave, onClose }: {
+  selectableTeachers: User[]; allTeachers: User[]; entries: TimetableEntry[]; subRecords: SubRecord[]; academicYearId: string;
   currentUser: User; onSave: () => void; onClose: () => void;
 }) {
   const [absentTeacherId, setAbsentTeacherId] = useState("");
@@ -1041,12 +1102,14 @@ const absentTeacher = useMemo(
   // ถ้าไม่มีครูสายชั้นเดียวกันว่างเลย จะสุ่มจากครูว่างทั้งหมดแทน (กันเคสไม่มีตัวเลือก)
   function randomAssignTeacher(key: string, entry: TimetableEntry, date: string) {
     const dow = dowOf(date);
-    const candidates = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId);
-    if (candidates.length === 0) { alert("⚠️ ไม่มีครูว่างในคาบนี้"); return; }
+    const candidatesAll = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId);
+    const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, entries, absentTeacherId);
+    const candidates = candidatesAll.filter(t => !conflictMapForEntry[t.id]);
+    if (candidates.length === 0) { alert("⚠️ ไม่มีครูว่างในคาบนี้ (หรือครูที่ว่างกำลังสอนแทนคนอื่นในคาบเดียวกันอยู่แล้ว)"); return; }
     const gradeIds = sameGradeTeacherIds(absentTeacher, allTeachers);
     let pool = candidates.filter(t => gradeIds.has(t.id));
     if (pool.length === 0) pool = candidates;
-    const scored = pool.map(t => ({ t, load: computeTaughtPeriodsForDay(t.id, dow, entries) }));
+    const scored = pool.map(t => ({ t, load: computeTotalLoadForDay(t.id, dow, date, entries, subRecords) }));
     const minLoad = Math.min(...scored.map(s => s.load));
     const minPool = scored.filter(s => s.load === minLoad).map(s => s.t);
     const pick = minPool[Math.floor(Math.random() * minPool.length)];
@@ -1188,9 +1251,10 @@ const absentTeacher = useMemo(
   const candidates = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId);
   const gradeIds = sameGradeTeacherIds(absentTeacher, allTeachers);
   const sortedCandidates = sortTeachersByGrade(candidates, gradeIds);
-  const loadMap = Object.fromEntries(sortedCandidates.map(t => [t.id, computeTaughtPeriodsForDay(t.id, dow, entries)]));
+  const loadMap = Object.fromEntries(sortedCandidates.map(t => [t.id, computeTotalLoadForDay(t.id, dow, date, entries, subRecords)]));
+  const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, entries, absentTeacherId);
   const pickedId = assignments[key] || "";
-  const pickedLoad = pickedId ? computeTaughtPeriodsForDay(pickedId, dow, entries) : null;
+  const pickedLoad = pickedId ? computeTotalLoadForDay(pickedId, dow, date, entries, subRecords) : null;
   return (
     <div key={key} className="flex items-center gap-3 bg-[#FDF2F8] rounded-xl px-4 py-3">
                               <div className="shrink-0 text-center w-16">
@@ -1201,17 +1265,21 @@ const absentTeacher = useMemo(
                                 <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
                                 <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
                                 {pickedId && pickedLoad !== null && pickedLoad >= SUB_LOAD_WARN_AT && (
-                                  <div className="text-[11px] font-bold text-red-500 mt-0.5">⚠️ ครูคนนี้สอนวันนี้แล้ว {pickedLoad} คาบ — ควรพิจารณาก่อนยืนยัน</div>
+                                  <div className="text-[11px] font-bold text-red-500 mt-0.5">⚠️ ครูคนนี้มีภาระรวมวันนี้แล้ว {pickedLoad} คาบ (สอน+สอนแทน) — ควรพิจารณาก่อนยืนยัน</div>
+                                )}
+                                {pickedId && conflictMapForEntry[pickedId] && (
+                                  <div className="text-[11px] font-bold text-red-600 mt-0.5">⚠️ {conflictMapForEntry[pickedId]}</div>
                                 )}
                               </div>
                               <div className="shrink-0 w-72 sm:w-80 flex items-center gap-1.5">
   <div className="flex-1 min-w-0">
-    <TeacherSearchSelect
+   <TeacherSearchSelect
       teachers={sortedCandidates}
       value={assignments[key] || ""}
       onChange={id => setAsgn(key, id)}
       placeholder="— เลือกครูสอนแทน —"
       loadMap={loadMap}
+      conflictMap={conflictMapForEntry}
     />
   </div>
   <button type="button" onClick={() => randomAssignTeacher(key, entry, date)}
@@ -1512,8 +1580,13 @@ const handleSubDeletePermanent = async (id: string) => {
   // ★ จำนวนคาบที่แต่ละคนสอนอยู่แล้วในวันนั้น — โชว์เป็น badge ข้างชื่อ
   const loadMap = useMemo(() => {
     const dow = dowOf(record.substitute_date);
-    return Object.fromEntries(candidates.map(t => [t.id, computeTaughtPeriodsForDay(t.id, dow, allEntries)]));
-  }, [candidates, allEntries, record.substitute_date]);
+    return Object.fromEntries(candidates.map(t => [t.id, computeTotalLoadForDay(t.id, dow, record.substitute_date, allEntries, subRecords)]));
+  }, [candidates, allEntries, record.substitute_date, subRecords]);
+
+  const conflictMapForEntry = useMemo(() => {
+    if (!entry) return {} as Record<string, string>;
+    return computeSubstituteConflictMap(entry, record.substitute_date, subRecords, allEntries, record.absent_teacher_id);
+  }, [entry, record.substitute_date, record.absent_teacher_id, subRecords, allEntries]);
 
   const handleSave = async () => {
     if (!newTeacherId) { alert("กรุณาเลือกครูสอนแทนคนใหม่"); return; }
@@ -1550,6 +1623,7 @@ const handleSubDeletePermanent = async (id: string) => {
     onChange={setNewTeacherId}
     placeholder="— เลือกครูสอนแทนคนใหม่ —"
     loadMap={loadMap}
+    conflictMap={conflictMapForEntry}
   />
   {candidates.length === 0 && <p className="text-xs text-red-500 font-bold mt-1">ไม่พบครูว่างในคาบนี้</p>}
 </div>
@@ -2319,15 +2393,15 @@ const adminFilteredSwaps = useMemo(() => {
   />
 )}
       {assignLeave && academicYear && (
-        <AssignSubModal
-          leaveRequest={assignLeave}
-          teachers={teachers} entries={allEntries}
-          academicYearId={academicYear.id}
-          currentUser={user}
-          onSave={async()=>{ setAssignLeave(null); await loadData(); }}
-          onClose={()=>setAssignLeave(null)}
-        />
-      )}
+  <AssignSubModal
+    leaveRequest={assignLeave}
+    teachers={teachers} entries={allEntries} subRecords={subRecords}
+    academicYearId={academicYear.id}
+    currentUser={user}
+    onSave={async()=>{ setAssignLeave(null); await loadData(); }}
+    onClose={()=>setAssignLeave(null)}
+  />
+)}
       {editingSub && (
   <EditSubModal
     record={editingSub}
@@ -2343,6 +2417,7 @@ const adminFilteredSwaps = useMemo(() => {
     selectableTeachers={manualAssignTeachers}
     allTeachers={teachers}
     entries={allEntries}
+    subRecords={subRecords}
     academicYearId={academicYear.id}
     currentUser={user}
     onSave={async()=>{ setShowManualAssign(false); await loadData(); }}

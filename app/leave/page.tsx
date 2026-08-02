@@ -65,11 +65,6 @@ function approverSlotByEmail(email: string): 1|2|3|null {
   if (e === APPROVER_3_EMAIL.toLowerCase()) return 3;
   return null;
 }
-// ★ สายชั้นของครู อ้างอิงจากคอลัมน์ users.grade_level โดยตรง (แม่นยำกว่าอิงจาก grade_group ของห้องที่สอนอยู่)
-function sameGradeTeacherIds(refTeacher: UserProfile | null | undefined, allTeachers: UserProfile[]): Set<string> {
-  if (!refTeacher?.grade_level) return new Set();
-  return new Set(allTeachers.filter(t => t.grade_level && t.grade_level === refTeacher.grade_level).map(t => t.id));
-}
 
 // ★ เรียงลิสต์ครูให้คนสายชั้นเดียวกับผู้ยื่นลาขึ้นก่อนเสมอ (คงลำดับเดิม เช่น คาบว่างเยอะสุด/ประวัติน้อยสุด ภายในกลุ่มเดียวกัน)
 function sortTeachersByGrade<T extends { teacher: UserProfile }>(list: T[], gradeIds: Set<string>): T[] {
@@ -79,16 +74,6 @@ function sortTeachersByGrade<T extends { teacher: UserProfile }>(list: T[], grad
     return aIn - bIn;
   });
 }
-
-// ★ จำนวนคาบที่ครูคนนี้ "สอนอยู่แล้วจริง" ในวันนั้น เช็คตรงจากตารางสอน (ไม่ใช่คำนวณจากคาบว่างของเทมเพลตซึ่งอาจไม่ตรง)
-function computeTaughtPeriodsForDay(teacherId: string, dow: number, allEntries: any[]): number {
-  return allEntries.filter(e =>
-    e.day_of_week === dow && !e.is_break && (e.teacher_id === teacherId || e.teacher_id_2 === teacherId)
-  ).length;
-}
-
-// ★ เกณฑ์เตือนภาระงานล้น — ให้ตรงกับหน้าสอนแทน
-const SUB_LOAD_WARN_AT = 5;
 
 // ══════════════════════════════════════════════════════════
 // ── Swap / Substitute helpers ──────────────────────────────
@@ -165,6 +150,51 @@ const SUBJECT_GROUP_RULES: { match: string[]; related: string[]; useGradeBand: b
   { match: ["วิทยาศาสตร์"], related: ["วิทยาศาสตร์", "เทคโนโลยี"], useGradeBand: true, groupLabel: "วิทยาศาสตร์/เทคโนโลยี" },
   { match: ["คอมพิวเตอร์"], related: ["คอมพิวเตอร์"], useGradeBand: false, groupLabel: "คอมพิวเตอร์" },
 ];
+// ★ เกณฑ์เตือนภาระงานล้น
+const SUB_LOAD_WARN_AT = 5;
+
+// ★ สายชั้นของครู อ้างอิงจากคอลัมน์ users.grade_level โดยตรง
+function sameGradeTeacherIds(refTeacher: UserProfile | null | undefined, allTeachers: UserProfile[]): Set<string> {
+  if (!refTeacher?.grade_level) return new Set();
+  return new Set(allTeachers.filter(t => t.grade_level && t.grade_level === refTeacher.grade_level).map(t => t.id));
+}
+
+// ★ จำนวนคาบที่ครูคนนี้ "สอนอยู่แล้วจริง" ในวันนั้น เช็คตรงจากตารางสอน
+function computeTaughtPeriodsForDay(teacherId: string, dow: number, allEntries: any[]): number {
+  return allEntries.filter(e =>
+    e.day_of_week === dow && !e.is_break && (e.teacher_id === teacherId || e.teacher_id_2 === teacherId)
+  ).length;
+}
+
+// ★ ดัชนี "ใครสอนแทนใครไปแล้วบ้าง" จาก substitution_records ที่มีอยู่ในระบบ (จากใบลาอื่น)
+//   ใช้เช็คว่าถ้าเลือกครู C มาสอนแทนอีกคาบ จะไปชนกับที่ C สอนแทนคนอื่นอยู่แล้วหรือไม่
+function buildConflictIndex(
+  dbSubs: any[], timetableEntries: any[]
+): Record<string, { slotNumber: number | null; absentTeacherId: string }[]> {
+  const entryMap = Object.fromEntries(timetableEntries.map((e: any) => [e.id, e]));
+  const map: Record<string, { slotNumber: number | null; absentTeacherId: string }[]> = {};
+  dbSubs.forEach((r: any) => {
+    if (!r.substitute_teacher_id) return;
+    const entry = r.timetable_entry_id ? entryMap[r.timetable_entry_id] : null;
+    const key = `${r.substitute_teacher_id}|${r.substitute_date}`;
+    if (!map[key]) map[key] = [];
+    map[key].push({
+      slotNumber: entry?.slot_number ?? null,
+      absentTeacherId: r.absent_teacher_id ?? r.original_teacher_id,
+    });
+  });
+  return map;
+}
+
+type TeacherTierItem = {
+  teacher: UserProfile;
+  free: number;
+  taught: number;
+  formAssigned: number;
+  dbAssigned: number;
+  total: number;
+  conflict: { absentTeacherId: string } | null;
+};
 
 function computeFreePeriodsForDay(teacherId: string, dow: number, scheduleType: string | undefined, allEntries: any[], allTimeSlots: any[]): number {
   const templateSlots = buildRoomSlots(scheduleType, allTimeSlots).filter((s: any) => !s.is_break);
@@ -175,70 +205,67 @@ function computeFreePeriodsForDay(teacherId: string, dow: number, scheduleType: 
   return templateSlots.filter((s: any) => !busyStartTimes.has(s.start_time)).length;
 }
 
+
 function buildSubstituteTiers(
-  entry: any, dow: number, timetableEntries: any[], allTeachers: UserProfile[],
+  entry: any, date: string, dow: number, timetableEntries: any[], allTeachers: UserProfile[],
   excludeId: string, onLeaveIds: Set<string>, subHistCounts: Record<string, number>,
   busyIds: Set<string>, preUsedIds: Set<string> = new Set(),
   requesterTeacher?: UserProfile | null,
-  assignedCountMap: Record<string, number> = {}
-): { label: string; teachers: { teacher: UserProfile; free: number; taught: number; assigned: number }[] }[] {
+  assignedCountMap: Record<string, number> = {},
+  conflictIndex: Record<string, { slotNumber: number | null; absentTeacherId: string }[]> = {}
+): { label: string; teachers: TeacherTierItem[] }[] {
   const isEligible = (t: UserProfile) => t.id !== excludeId && !busyIds.has(t.id) && !onLeaveIds.has(t.id) && !preUsedIds.has(t.id);
-  const gradeIds = sameGradeTeacherIds(requesterTeacher, allTeachers);
+  const gradeIds = sameGradeTeacherIds(requesterTeacher ?? null, allTeachers);
 
-  const scored = (list: UserProfile[]) => {
-    const items = list
+  const scored = (list: UserProfile[]): TeacherTierItem[] => {
+    return list
       .filter(isEligible)
-      .map(t => ({
-        teacher: t,
-        free: computeFreePeriodsForDay(t.id, dow, entry.schedule_type ?? undefined, timetableEntries, timetableEntries),
-        taught: computeTaughtPeriodsForDay(t.id, dow, timetableEntries),
-        hist: subHistCounts[t.id] ?? 0,
-        assigned: assignedCountMap[t.id] ?? 0,
-      }))
+      .map(t => {
+        const free = computeFreePeriodsForDay(t.id, dow, entry.schedule_type ?? undefined, timetableEntries, timetableEntries);
+        const taught = computeTaughtPeriodsForDay(t.id, dow, timetableEntries);
+        const formAssigned = assignedCountMap[t.id] ?? 0;
+        const dbList = conflictIndex[`${t.id}|${date}`] ?? [];
+        const dbAssigned = dbList.length;
+        const conflictRec = entry.slot_number != null ? (dbList.find(x => x.slotNumber === entry.slot_number) ?? null) : null;
+        const hist = subHistCounts[t.id] ?? 0;
+        return {
+          teacher: t, free, taught, formAssigned, dbAssigned,
+          total: taught + formAssigned + dbAssigned,
+          conflict: conflictRec ? { absentTeacherId: conflictRec.absentTeacherId } : null,
+          hist,
+        };
+      })
       .sort((a, b) => b.free - a.free || a.hist - b.hist)
-      .map(x => ({ teacher: x.teacher, free: x.free, taught: x.taught, assigned: x.assigned }));
-    // ★ ครูสายชั้นเดียวกับผู้ยื่นลา (อิง grade_level) ขึ้นก่อนเสมอ ภายในแต่ละกลุ่ม
-    return sortTeachersByGrade(items, gradeIds);
+      .map(({ hist, ...rest }) => rest);
   };
 
-  const result: { label: string; teachers: { teacher: UserProfile; free: number; taught: number; assigned: number }[] }[] = [];
+  const result: { label: string; teachers: TeacherTierItem[] }[] = [];
   const used = new Set(preUsedIds);
 
-  // 1) ครูสายชั้นเดียวกับผู้ยื่นลา (grade_level ตรงกัน) — ขึ้นเป็นกลุ่มแรกสุดเสมอ
-  if (requesterTeacher?.grade_level) {
-    const list = scored(allTeachers.filter(t => gradeIds.has(t.id) && !used.has(t.id)));
-    if (list.length > 0) {
-      result.push({ label: "🏫 ครูสายชั้นเดียวกับท่าน", teachers: list });
-      list.forEach(x => used.add(x.teacher.id));
-    }
-  }
-
-  // 2) ครูประจำชั้น (ป.1/ป.2 สอนแทนก่อนเสมอ)
+  // 1) ครูประจำชั้น (ป.1/ป.2 สอนแทนก่อนเสมอ)
   if (isHomeroomPriorityGrade(entry.grade_group) && entry.homeroom_teacher_id) {
     const hr = allTeachers.find(t => t.id === entry.homeroom_teacher_id);
     if (hr && isEligible(hr) && !used.has(hr.id)) {
-      result.push({
-        label: "👩‍🏫 ครูประจำชั้น (สอนแทนก่อนเสมอ)",
-        teachers: [{
-          teacher: hr,
-          free: computeFreePeriodsForDay(hr.id, dow, entry.schedule_type ?? undefined, timetableEntries, timetableEntries),
-          taught: computeTaughtPeriodsForDay(hr.id, dow, timetableEntries),
-          assigned: assignedCountMap[hr.id] ?? 0,
-        }],
-      });
-      used.add(hr.id);
+      const [item] = scored([hr]);
+      if (item) { result.push({ label: "👩‍🏫 ครูประจำชั้น (สอนแทนก่อนเสมอ)", teachers: [item] }); used.add(hr.id); }
     }
   }
 
-  // 3) ครูที่สอนสายชั้นเดียวกับคาบที่ขอลา (อิงห้องเรียนจริงที่มีเรียน)
-  const gradeOnly = extractGradeOnly(entry.grade_group);
-  if (gradeOnly) {
+  // 2) ★ ครูที่สอนสายชั้นเดียวกับ "คาบที่กำลังขอแลกนี้" (เช่น คาบนี้เป็น ม.2/3 → ครู ม.2/3 มาก่อน)
+  const entryGradeOnly = extractGradeOnly(entry.grade_group);
+  if (entryGradeOnly) {
     const gradeTeacherIds = new Set(
-      timetableEntries.filter(e => extractGradeOnly(e.grade_group) === gradeOnly)
-        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+      timetableEntries.filter((e: any) => extractGradeOnly(e.grade_group) === entryGradeOnly)
+        .flatMap((e: any) => [e.teacher_id, e.teacher_id_2].filter(Boolean))
     );
     const list = scored(allTeachers.filter(t => gradeTeacherIds.has(t.id) && !used.has(t.id)));
-    if (list.length > 0) { result.push({ label: `🏫 สายชั้น ${gradeOnly}`, teachers: list }); list.forEach(x => used.add(x.teacher.id)); }
+    if (list.length > 0) { result.push({ label: `🏫 สายชั้น ${entryGradeOnly} (ตรงกับคาบนี้)`, teachers: list }); list.forEach(x => used.add(x.teacher.id)); }
+  }
+
+  // 3) ★ ครูสายชั้นเดียวกับ "ผู้ยื่นลา" (grade_level เช่น ป.1)
+  if (requesterTeacher?.grade_level) {
+    const list = scored(allTeachers.filter(t => gradeIds.has(t.id) && !used.has(t.id)));
+    if (list.length > 0) { result.push({ label: "🏫 ครูสายชั้นเดียวกับท่าน", teachers: list }); list.forEach(x => used.add(x.teacher.id)); }
   }
 
   // 4) ครูวิชาเดียวกัน / กลุ่มวิชาใกล้เคียง
@@ -250,14 +277,14 @@ function buildSubstituteTiers(
     let tierLabel = "📘 ครูวิชาเดียวกัน";
     if (rule) {
       subjIds = new Set(
-        timetableEntries.filter(e => rule.related.some(k => (e.subject_name ?? "").includes(k)) && (!rule.useGradeBand || gradeBand(e.grade_group) === band))
-          .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+        timetableEntries.filter((e: any) => rule.related.some(k => (e.subject_name ?? "").includes(k)) && (!rule.useGradeBand || gradeBand(e.grade_group) === band))
+          .flatMap((e: any) => [e.teacher_id, e.teacher_id_2].filter(Boolean))
       );
       tierLabel = rule.useGradeBand ? `📘 ครู${rule.groupLabel}` : `📘 ครูวิชา${rule.groupLabel}`;
     } else if (entry.subject_id) {
       subjIds = new Set(
-        timetableEntries.filter(e => e.subject_id === entry.subject_id)
-          .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+        timetableEntries.filter((e: any) => e.subject_id === entry.subject_id)
+          .flatMap((e: any) => [e.teacher_id, e.teacher_id_2].filter(Boolean))
       );
     }
     const list = scored(allTeachers.filter(t => subjIds.has(t.id) && !used.has(t.id)));
@@ -1140,6 +1167,7 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
   const [pickedTeacherId, setPickedTeacherId] = useState("");
   const [onLeaveIds, setOnLeaveIds] = useState<Set<string>>(new Set());
   const [subHistCounts, setSubHistCounts] = useState<Record<string, number>>({});
+  const [dbSubs, setDbSubs] = useState<any[]>([]);
   const [loadingMeta, setLoadingMeta] = useState(false);
 
   const dow = selectedDate ? dowOf(selectedDate) : null;
@@ -1153,9 +1181,13 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
     if (!selectedDate) return;
     setLoadingMeta(true);
     (async () => {
-      const [leavesRes, subHistRes] = await Promise.all([
+      const [leavesRes, subHistRes, dbSubsRes] = await Promise.all([
         supabase.from("leave_requests").select("user_id,start_date,end_date,status").in("status", ["pending","approved"]),
         supabase.from("substitution_records").select("substitute_teacher_id"),
+        // ★ โหลดรายการสอนแทนที่มีอยู่แล้วในระบบของวันนี้ — เช็คว่าครูที่จะเลือก ไปสอนแทนคนอื่นในคาบเวลาเดียวกันอยู่แล้วหรือไม่
+        supabase.from("substitution_records")
+          .select("id,substitute_teacher_id,absent_teacher_id,original_teacher_id,substitute_date,timetable_entry_id,status")
+          .eq("substitute_date", selectedDate).neq("status","cancelled"),
       ]);
       const ids = new Set<string>();
       (leavesRes.data || []).forEach((l: any) => { if (l.start_date <= selectedDate && l.end_date >= selectedDate) ids.add(l.user_id); });
@@ -1163,6 +1195,7 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
       const counts: Record<string, number> = {};
       (subHistRes.data || []).forEach((r: any) => { counts[r.substitute_teacher_id] = (counts[r.substitute_teacher_id] ?? 0) + 1; });
       setSubHistCounts(counts);
+      setDbSubs(dbSubsRes.data || []);
       setLoadingMeta(false);
     })();
   }, [selectedDate]);
@@ -1180,19 +1213,21 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
     return m;
   }, [existingAssignments]);
 
+  const conflictIndex = useMemo(() => buildConflictIndex(dbSubs, timetableEntries), [dbSubs, timetableEntries]);
+
   const tiers = useMemo(() => {
-  if (!selectedEntry || dow === null) return [] as { label: string; teachers: { teacher: UserProfile; free: number; taught: number; assigned: number }[] }[];
-  const startKey = (selectedEntry.start_time ?? "").slice(0, 5);
-  const busyIds = new Set(
-    timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
-      .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-  );
-  const alreadyPicked = new Set(
-    existingAssignments.filter(a => a.substitute_date === selectedDate && a.slot_number === selectedEntry.slot_number)
-      .map(a => a.substitute_teacher_id)
-  );
-  return buildSubstituteTiers(selectedEntry, dow, timetableEntries, allTeachers, user.id, onLeaveIds, subHistCounts, busyIds, alreadyPicked, user, assignedCountMap);
-}, [selectedEntry, dow, timetableEntries, allTeachers, onLeaveIds, subHistCounts, existingAssignments, selectedDate, user, assignedCountMap]);
+    if (!selectedEntry || dow === null) return [] as { label: string; teachers: TeacherTierItem[] }[];
+    const startKey = (selectedEntry.start_time ?? "").slice(0, 5);
+    const busyIds = new Set(
+      timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
+        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+    );
+    const alreadyPicked = new Set(
+      existingAssignments.filter(a => a.substitute_date === selectedDate && a.slot_number === selectedEntry.slot_number)
+        .map(a => a.substitute_teacher_id)
+    );
+    return buildSubstituteTiers(selectedEntry, selectedDate, dow, timetableEntries, allTeachers, user.id, onLeaveIds, subHistCounts, busyIds, alreadyPicked, user, assignedCountMap, conflictIndex);
+  }, [selectedEntry, dow, timetableEntries, allTeachers, onLeaveIds, subHistCounts, existingAssignments, selectedDate, user, assignedCountMap, conflictIndex]);
 
   function confirmAdd() {
     if (!selectedEntry || !pickedTeacherId) return;
@@ -1255,28 +1290,36 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
               ) : tiers.length === 0 ? (
                 <p className="text-xs text-red-500 font-bold">ไม่พบครูที่ว่างในคาบนี้</p>
               ) : (
-                <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                   {tiers.map(tier => (
                     <div key={tier.label}>
                       <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5">{tier.label}</p>
                       <div className="space-y-1.5">
-                        {tier.teachers.map(({ teacher: t, taught, assigned }) => {
+                        {tier.teachers.map(({ teacher: t, total, conflict }) => {
                           const active = pickedTeacherId === t.id;
-                          const overloaded = taught >= SUB_LOAD_WARN_AT;
+                          const overloaded = total >= SUB_LOAD_WARN_AT;
+                          const conflictTeacherName = conflict ? displayName(allTeachers.find(x => x.id === conflict.absentTeacherId)) : null;
                           return (
-                            <button key={t.id} type="button" onClick={() => setPickedTeacherId(t.id)}
-                              className={`w-full text-left px-3 py-2 rounded-lg border-2 text-sm font-bold flex items-center justify-between gap-2 ${
-                                active ? "bg-indigo-50 border-indigo-400 text-indigo-700" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-                              }`}>
-                              <span className="truncate">{displayName(t)}{t.position ? ` · ${t.position}` : ""}</span>
-                              <span className="flex items-center gap-1.5 shrink-0 text-[11px] font-bold">
-                                <span className={overloaded ? "text-red-500" : "text-slate-400"}>
-                                  {overloaded ? `⚠️ สอนอยู่ ${taught} คาบ` : `สอนอยู่ ${taught} คาบ`}
+                            <div key={t.id} className="space-y-1">
+                              <button type="button" onClick={() => setPickedTeacherId(t.id)}
+                                className={`w-full text-left px-3 py-2 rounded-lg border-2 text-sm font-bold flex items-center justify-between gap-2 transition-all ${
+                                  active ? "bg-indigo-50 border-indigo-400 text-indigo-700"
+                                    : conflict ? "bg-red-50 border-red-200 text-slate-700 hover:bg-red-100"
+                                    : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                                }`}>
+                                <span className="truncate">{displayName(t)}{t.position ? ` · ${t.position}` : ""}</span>
+                                <span className="flex items-center gap-1.5 shrink-0 text-[11px] font-bold">
+                                  {conflict && <span className="text-red-600">⚠️ ชน</span>}
+                                  <span className={overloaded ? "text-red-500" : "text-slate-400"}>รวม {total} คาบ</span>
+                                  {active && <span>✓</span>}
                                 </span>
-                                {assigned > 0 && <span className="text-amber-600">สอนแทนแล้ว {assigned} คาบ</span>}
-                                {active && <span>✓</span>}
-                              </span>
-                            </button>
+                              </button>
+                              {active && conflict && (
+                                <p className="text-[11px] text-red-600 font-bold px-1">
+                                  ⚠️ ครู{displayName(t)} มีสอนแทนครู{conflictTeacherName ?? "ท่านอื่น"} ในคาบเวลาเดียวกันนี้อยู่แล้ว หากเลือกจะซ้อนกัน 2 งาน
+                                </p>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
@@ -1309,26 +1352,47 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
   const [computing, setComputing] = useState(false);
   const [preview, setPreview] = useState<SwapAssignment[]>([]);
   const [computed, setComputed] = useState(false);
+  const [conflictIndex, setConflictIndex] = useState<Record<string, { slotNumber: number | null; absentTeacherId: string }[]>>({});
+  const [onLeaveByDateState, setOnLeaveByDateState] = useState<Record<string, Set<string>>>({});
+  const [baseFormCounts, setBaseFormCounts] = useState<Record<string, number>>({});
 
   function toggleDate(d: string) {
     setSelectedDates(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
     setComputed(false); setPreview([]);
   }
 
-  async function computeAssignments() {
+  async function computeAssignments(randomize: boolean = false) {
     setComputing(true);
     try {
-      const { data: leaves } = await supabase.from("leave_requests").select("user_id,start_date,end_date,status").in("status", ["pending","approved"]);
+      const [leavesRes, subHistRes, dbSubsRes] = await Promise.all([
+        supabase.from("leave_requests").select("user_id,start_date,end_date,status").in("status", ["pending","approved"]),
+        supabase.from("substitution_records").select("substitute_teacher_id"),
+        // ★ โหลดรายการสอนแทนที่มีอยู่แล้วในระบบ (จากใบลาอื่น) ในช่วงวันที่เลือก — ใช้ตรวจชนกัน
+        selectedDates.length > 0
+          ? supabase.from("substitution_records")
+              .select("id,substitute_teacher_id,absent_teacher_id,original_teacher_id,substitute_date,timetable_entry_id,status")
+              .in("substitute_date", selectedDates).neq("status","cancelled")
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+
       const onLeaveByDate: Record<string, Set<string>> = {};
       selectedDates.forEach(d => { onLeaveByDate[d] = new Set(); });
-      (leaves || []).forEach((l: any) => { selectedDates.forEach(d => { if (l.start_date <= d && l.end_date >= d) onLeaveByDate[d].add(l.user_id); }); });
+      (leavesRes.data || []).forEach((l: any) => { selectedDates.forEach(d => { if (l.start_date <= d && l.end_date >= d) onLeaveByDate[d].add(l.user_id); }); });
+      setOnLeaveByDateState(onLeaveByDate);
 
-      const { data: subHistory } = await supabase.from("substitution_records").select("substitute_teacher_id");
-      const counts: Record<string, number> = {};
-      (subHistory || []).forEach((r: any) => { counts[r.substitute_teacher_id] = (counts[r.substitute_teacher_id] ?? 0) + 1; });
-      existingAssignments.forEach(a => { counts[a.substitute_teacher_id] = (counts[a.substitute_teacher_id] ?? 0) + 1; });
+      const histCounts: Record<string, number> = {};
+      (subHistRes.data || []).forEach((r: any) => { histCounts[r.substitute_teacher_id] = (histCounts[r.substitute_teacher_id] ?? 0) + 1; });
+
+      const dbSubs = (dbSubsRes as any).data || [];
+      const cIndex = buildConflictIndex(dbSubs, timetableEntries);
+      setConflictIndex(cIndex);
+
+      const baseCounts: Record<string, number> = {};
+      existingAssignments.forEach(a => { if (a.substitute_teacher_id) baseCounts[a.substitute_teacher_id] = (baseCounts[a.substitute_teacher_id] ?? 0) + 1; });
+      setBaseFormCounts(baseCounts);
 
       const usedThisRun: Record<string, Set<string>> = {};
+      const runFormCounts: Record<string, number> = { ...baseCounts };
       const result: SwapAssignment[] = [];
 
       for (const date of selectedDates) {
@@ -1350,8 +1414,9 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
           const onLeave = onLeaveByDate[date] ?? new Set<string>();
           const preUsed = new Set([...usedNow, ...alreadyPicked]);
 
-          const dayTiers = buildSubstituteTiers(entry, dow, timetableEntries, allTeachers, user.id, onLeave, counts, busyIds, preUsed, user);
-          const chosen = dayTiers.flatMap(t => t.teachers)[0]?.teacher ?? null;
+          const dayTiers = buildSubstituteTiers(entry, date, dow, timetableEntries, allTeachers, user.id, onLeave, histCounts, busyIds, preUsed, user, runFormCounts, cIndex);
+          const pool = dayTiers[0]?.teachers ?? [];
+          const chosenItem = pool.length === 0 ? null : (randomize ? pool[Math.floor(Math.random() * pool.length)] : pool[0]);
 
           const base = {
             timetable_entry_id: entry.id, substitute_date: date,
@@ -1360,10 +1425,10 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
             subject_name: entry.subject_name, grade_group: entry.grade_group, room_name: entry.room_name, slot_number: entry.slot_number,
           };
 
-          if (chosen) {
-            usedNow.add(chosen.id); usedThisRun[key] = usedNow;
-            counts[chosen.id] = (counts[chosen.id] ?? 0) + 1;
-            result.push({ ...base, substitute_teacher_id: chosen.id });
+          if (chosenItem) {
+            usedNow.add(chosenItem.teacher.id); usedThisRun[key] = usedNow;
+            runFormCounts[chosenItem.teacher.id] = (runFormCounts[chosenItem.teacher.id] ?? 0) + 1;
+            result.push({ ...base, substitute_teacher_id: chosenItem.teacher.id });
           } else {
             result.push({ ...base, substitute_teacher_id: "" });
           }
@@ -1374,16 +1439,62 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
     setComputing(false);
   }
 
+  // ★ สุ่มใหม่เฉพาะคาบเดียว — เลี่ยงไม่ให้ซ้ำกับครูที่ถูกจัดไปแล้วในคาบเวลาเดียวกันของวันนั้น
+  function rerollRow(idx: number) {
+    const row = preview[idx];
+    const entry = timetableEntries.find(e => e.id === row.timetable_entry_id);
+    if (!entry) return;
+    const dow = dowOf(row.substitute_date);
+    const startKey = (entry.start_time ?? "").slice(0, 5);
+    const busyIds = new Set(
+      timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
+        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+    );
+    const usedElsewhere = new Set<string>();
+    preview.forEach((p, i) => { if (i !== idx && p.substitute_date === row.substitute_date && p.slot_number === row.slot_number && p.substitute_teacher_id) usedElsewhere.add(p.substitute_teacher_id); });
+    existingAssignments.filter(a => a.substitute_date === row.substitute_date && a.slot_number === row.slot_number)
+      .forEach(a => { if (a.substitute_teacher_id) usedElsewhere.add(a.substitute_teacher_id); });
+
+    const runFormCounts: Record<string, number> = { ...baseFormCounts };
+    preview.forEach((p, i) => { if (i !== idx && p.substitute_teacher_id) runFormCounts[p.substitute_teacher_id] = (runFormCounts[p.substitute_teacher_id] ?? 0) + 1; });
+
+    const onLeave = onLeaveByDateState[row.substitute_date] ?? new Set<string>();
+    const excludeSelf = new Set(usedElsewhere); if (row.substitute_teacher_id) excludeSelf.add(row.substitute_teacher_id);
+
+    let dayTiers = buildSubstituteTiers(entry, row.substitute_date, dow, timetableEntries, allTeachers, user.id, onLeave, {}, busyIds, excludeSelf, user, runFormCounts, conflictIndex);
+    let pool = dayTiers[0]?.teachers ?? [];
+    if (pool.length === 0) {
+      // ไม่มีตัวเลือกอื่นเลย ยอมให้สุ่มซ้ำได้ (ยกเว้นคนที่ไปชนคาบเวลาเดียวกันจริงๆ)
+      dayTiers = buildSubstituteTiers(entry, row.substitute_date, dow, timetableEntries, allTeachers, user.id, onLeave, {}, busyIds, usedElsewhere, user, runFormCounts, conflictIndex);
+      pool = dayTiers[0]?.teachers ?? [];
+    }
+    if (pool.length === 0) { alert("⚠️ ไม่พบครูว่างในคาบนี้"); return; }
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    setPreview(prev => prev.map((p, i) => i === idx ? { ...p, substitute_teacher_id: pick.teacher.id } : p));
+  }
+
   function updatePreviewTeacher(idx: number, teacherId: string) {
     setPreview(prev => prev.map((p, i) => i === idx ? { ...p, substitute_teacher_id: teacherId } : p));
   }
+
+  // ★ สถิติของครูคนหนึ่งในวันนั้น: สอนอยู่แล้ว + สอนแทนที่อื่น(db) + สอนแทนใน preview นี้ = รวม
+  function statsFor(teacherId: string, date: string, slotNumber: number | null | undefined) {
+    if (!teacherId) return null;
+    const dow = dowOf(date);
+    const taught = computeTaughtPeriodsForDay(teacherId, dow, timetableEntries);
+    const dbList = conflictIndex[`${teacherId}|${date}`] ?? [];
+    const formCount = preview.filter(p => p.substitute_teacher_id === teacherId && p.substitute_date === date).length;
+    const conflict = slotNumber != null ? (dbList.find(x => x.slotNumber === slotNumber) ?? null) : null;
+    return { taught, dbAssigned: dbList.length, formCount, total: taught + dbList.length + formCount, conflict };
+  }
+
   const missingCount = preview.filter(p => !p.substitute_teacher_id).length;
 
   return (
     <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-          <div><h3 className="font-black text-slate-800">🤖 จัดสอนแทนอัตโนมัติ</h3><p className="text-xs text-slate-400">ให้ครูที่สอนชั้นเดียวกันมาก่อนเสมอ โดยเลือกคนที่เคยสอนแทนน้อยที่สุด</p></div>
+          <div><h3 className="font-black text-slate-800">🤖 จัดสอนแทนอัตโนมัติ</h3><p className="text-xs text-slate-400">ให้ครูที่สอนชั้นเดียวกันมาก่อนเสมอ โดยเลือกคนที่มีภาระงานวันนั้นน้อยที่สุด</p></div>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 font-bold">✕</button>
         </div>
         <div className="p-5 space-y-4 overflow-y-auto flex-1">
@@ -1403,12 +1514,19 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
           )}
 
           {!computed ? (
-            <button onClick={computeAssignments} disabled={computing || selectedDates.length===0}
+            <button onClick={() => computeAssignments(false)} disabled={computing || selectedDates.length===0}
               className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm disabled:opacity-50">
               {computing ? "⏳ กำลังคำนวณ..." : "⚡ คำนวณการจัดสอนแทน"}
             </button>
           ) : (
             <>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-slate-400 font-bold">ผลลัพธ์ {preview.length} คาบ</p>
+                <button type="button" onClick={() => computeAssignments(true)} disabled={computing}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 border-2 border-indigo-200 text-indigo-700 text-xs font-bold disabled:opacity-50">
+                  {computing ? "⏳ กำลังสุ่ม..." : "🎲 สุ่มใหม่ทั้งหมด"}
+                </button>
+              </div>
               {missingCount > 0 && (
                 <div className="bg-amber-50 border-2 border-amber-200 rounded-xl px-4 py-2.5 text-amber-700 text-xs font-bold">
                   ⚠️ มี {missingCount} คาบที่ไม่พบครูว่างมาสอนแทน กรุณาเลือกด้วยตนเอง
@@ -1421,19 +1539,47 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
                       .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
                   );
                   const options = allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id));
+                  const stats = statsFor(p.substitute_teacher_id, p.substitute_date, p.slot_number);
+                  const conflictTeacherName = stats?.conflict ? displayName(allTeachers.find(x => x.id === stats.conflict!.absentTeacherId)) : null;
                   return (
-                    <div key={i} className="border-2 border-slate-100 rounded-xl p-3 flex items-center gap-3 flex-wrap">
+                    <div key={i} className="border-2 border-slate-100 rounded-xl p-3 flex items-start gap-3 flex-wrap">
                       <div className="w-28 shrink-0 text-xs">
                         <p className="font-black text-slate-700">{toThaiDate(p.substitute_date)}</p>
                         <p className="text-slate-400">คาบ {p.slot_number ?? "-"}</p>
                         <p className="text-slate-500 font-bold truncate">{p.subject_name ?? ""}</p>
                         <p className="text-slate-400 truncate">{p.grade_group ?? ""} {p.room_name ?? ""}</p>
                       </div>
-                      <select value={p.substitute_teacher_id} onChange={e => updatePreviewTeacher(i, e.target.value)}
-                        className="flex-1 min-w-[160px] bg-white border-2 border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold">
-                        <option value="">— ไม่พบครูว่าง / เลือกเอง —</option>
-                        {options.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
-                      </select>
+                      <div className="flex-1 min-w-[220px] space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <select value={p.substitute_teacher_id} onChange={e => updatePreviewTeacher(i, e.target.value)}
+                            className="flex-1 min-w-[160px] bg-white border-2 border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold">
+                            <option value="">— ไม่พบครูว่าง / เลือกเอง —</option>
+                            {options.map(t => {
+                              const s = statsFor(t.id, p.substitute_date, p.slot_number);
+                              const warn = s ? s.total >= SUB_LOAD_WARN_AT : false;
+                              return (
+                                <option key={t.id} value={t.id}>
+                                  {displayName(t)}{s ? ` — รวม ${s.total} คาบ${warn ? " ⚠️" : ""}${s.conflict ? " (ชนกับงานอื่น)" : ""}` : ""}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          <button type="button" onClick={() => rerollRow(i)} title="สุ่มใหม่เฉพาะคาบนี้"
+                            className="shrink-0 w-8 h-8 rounded-lg bg-indigo-50 hover:bg-indigo-100 border-2 border-indigo-200 flex items-center justify-center text-sm">
+                            🎲
+                          </button>
+                        </div>
+                        {p.substitute_teacher_id && stats && (
+                          <div className="flex items-center gap-1.5 flex-wrap text-[11px] font-bold">
+                            <span className={stats.total >= SUB_LOAD_WARN_AT ? "text-red-500" : "text-slate-400"}>
+                              {stats.total >= SUB_LOAD_WARN_AT ? "⚠️ " : ""}สอนอยู่ {stats.taught} + สอนแทน {stats.dbAssigned + stats.formCount} = รวม {stats.total} คาบ
+                            </span>
+                            {stats.conflict && (
+                              <span className="text-red-600">⚠️ ชนกับสอนแทนครู{conflictTeacherName ?? "ท่านอื่น"} คาบนี้อยู่แล้ว</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
