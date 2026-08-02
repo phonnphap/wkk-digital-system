@@ -133,23 +133,117 @@ function extractGradeOnly(gradeGroup?: string | null): string {
   if (!gradeGroup) return "";
   return gradeGroup.split("/")[0].trim();
 }
-function isHomeroomPriorityGrade(gradeGroup?: string | null): boolean {
-  const g = extractGradeOnly(gradeGroup);
-  return g === "ป.1" || g === "ป.2";
+// ★ เวลาทับกันจริง — อ้างอิงวิธีเดียวกับหน้าแลกคาบ/สอนแทน
+function toMinutesLv(t?: string | null): number {
+  if (!t) return NaN;
+  const [h, m] = t.slice(0, 5).split(":").map(Number);
+  return h * 60 + m;
 }
-function gradeBand(gradeGroup?: string | null): string {
-  const g = extractGradeOnly(gradeGroup);
-  if (["ป.1","ป.2","ป.3"].includes(g)) return "primary_lower";
-  if (["ป.4","ป.5","ป.6"].includes(g)) return "primary_upper";
-  if (["ม.1","ม.2","ม.3"].includes(g)) return "secondary_lower";
-  if (["ม.4","ม.5","ม.6"].includes(g)) return "secondary_upper";
-  if (g.startsWith("อ.")) return "kindergarten";
-  return "";
+function timeRangesOverlapLv(aStart?: string|null, aEnd?: string|null, bStart?: string|null, bEnd?: string|null): boolean {
+  const as = toMinutesLv(aStart), ae = toMinutesLv(aEnd), bs = toMinutesLv(bStart), be = toMinutesLv(bEnd);
+  if ([as, ae, bs, be].some(Number.isNaN)) return false;
+  return as < be && bs < ae;
 }
-const SUBJECT_GROUP_RULES: { match: string[]; related: string[]; useGradeBand: boolean; groupLabel: string }[] = [
-  { match: ["วิทยาศาสตร์"], related: ["วิทยาศาสตร์", "เทคโนโลยี"], useGradeBand: true, groupLabel: "วิทยาศาสตร์/เทคโนโลยี" },
-  { match: ["คอมพิวเตอร์"], related: ["คอมพิวเตอร์"], useGradeBand: false, groupLabel: "คอมพิวเตอร์" },
-];
+
+// ★ ครูที่ "ว่างจริง" ในคาบนี้ — เทียบช่วงเวลาทับกัน (ไม่ใช่แค่ startKey ตรงกัน) เหมือนหน้าแลกคาบ/สอนแทน
+function getFreeTeachersForEntryLv(entry: any, timetableEntries: any[], allTeachers: UserProfile[], excludeId: string, dow: number): UserProfile[] {
+  const busyIds = new Set(
+    timetableEntries
+      .filter((e: any) => e.day_of_week === dow && timeRangesOverlapLv(entry.start_time, entry.end_time, e.start_time, e.end_time))
+      .flatMap((e: any) => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+  );
+  return allTeachers.filter(t => t.id !== excludeId && !busyIds.has(t.id));
+}
+
+// ★ สายชั้นของครู อ้างอิงคอลัมน์ grade_level ตรงๆ — เหมือนหน้าแลกคาบ/สอนแทน
+function sameGradeTeacherIdsLv(refTeacher: UserProfile | null | undefined, allTeachers: UserProfile[]): Set<string> {
+  if (!refTeacher?.grade_level) return new Set();
+  return new Set(allTeachers.filter(t => t.grade_level && t.grade_level === refTeacher.grade_level).map(t => t.id));
+}
+// ★ ลำดับความสำคัญของครูที่จะเลือกมาสอนแทน:
+// 0 = สายชั้นเดียวกับห้อง/คาบที่จะไปสอนแทน (เช่น ครู ป.1 ไปสอนแทนคาบของห้อง ป.3/3 → ดึงครู ป.3 ขึ้นก่อน)
+// 1 = สายชั้นเดียวกับครูที่ลา
+// 2 = สอนวิชาเดียวกับคาบนี้อยู่แล้ว
+// 3 = ที่เหลือ
+function roomGradeCodeLv(gradeGroup?: string | null): string | null {
+  const thaiGrade = extractGradeOnly(gradeGroup);
+  if (!thaiGrade) return null;
+  const found = Object.entries(GRADE_LABEL).find(([, label]) => label === thaiGrade);
+  return found ? found[0] : null;
+}
+function substitutePriorityLv(
+  candidate: UserProfile,
+  entry: { grade_group?: string | null; subject_id?: string } | null | undefined,
+  absentTeacher: UserProfile | null | undefined,
+  allEntries: any[]
+): number {
+  const roomGrade = entry ? roomGradeCodeLv(entry.grade_group) : null;
+  if (roomGrade && candidate.grade_level === roomGrade) return 0;
+  if (absentTeacher?.grade_level && candidate.grade_level === absentTeacher.grade_level) return 1;
+  const teachesSameSubject = entry?.subject_id
+    ? allEntries.some((e: any) => (e.teacher_id === candidate.id || e.teacher_id_2 === candidate.id) && e.subject_id === entry.subject_id)
+    : false;
+  if (teachesSameSubject) return 2;
+  return 3;
+}
+function sortCandidatesByPriority(
+  candidates: UserProfile[],
+  entry: { grade_group?: string | null; subject_id?: string } | null | undefined,
+  absentTeacher: UserProfile | null | undefined,
+  allEntries: any[],
+  secondaryCompare?: (a: UserProfile, b: UserProfile) => number
+): UserProfile[] {
+  return [...candidates].sort((a, b) => {
+    const pa = substitutePriorityLv(a, entry, absentTeacher, allEntries);
+    const pb = substitutePriorityLv(b, entry, absentTeacher, allEntries);
+    if (pa !== pb) return pa - pb;
+    return secondaryCompare ? secondaryCompare(a, b) : displayName(a).localeCompare(displayName(b), "th");
+  });
+}
+
+// ★ เรียง: สายชั้นเดียวกับผู้ยื่นลาก่อนเสมอ แล้วเรียงชื่อ — ไม่มี tier วิชา/ครูประจำชั้นซับซ้อนอีกต่อไป
+function sortTeachersByGradeLv(candidates: UserProfile[], gradeIds: Set<string>): UserProfile[] {
+  return [...candidates].sort((a, b) => {
+    const aIn = gradeIds.has(a.id) ? 0 : 1;
+    const bIn = gradeIds.has(b.id) ? 0 : 1;
+    if (aIn !== bIn) return aIn - bIn;
+    return displayName(a).localeCompare(displayName(b), "th");
+  });
+}
+
+type SortedCandidate = {
+  teacher: UserProfile;
+  taught: number;
+  dbAssigned: number;
+  formAssigned: number;
+  total: number;
+  conflictWith: string | null;
+};
+
+// ★ ฟังก์ชันหลัก — แทนที่ buildSubstituteTiers เดิมทั้งหมด คืนรายชื่อครูแบบ flat list เรียงตามสายชั้นแล้วชื่อ
+function getSortedSubstituteCandidates(
+  entry: any, date: string, dow: number, timetableEntries: any[], allTeachers: UserProfile[],
+  excludeId: string, onLeaveIds: Set<string>, preUsedIds: Set<string>,
+  requesterTeacher: UserProfile | null | undefined,
+  assignedCountMap: Record<string, number>,
+  conflictIndex: Record<string, { slotNumber: number | null; absentTeacherId: string }[]>
+): SortedCandidate[] {
+  const free = getFreeTeachersForEntryLv(entry, timetableEntries, allTeachers, excludeId, dow)
+    .filter(t => !onLeaveIds.has(t.id) && !preUsedIds.has(t.id));
+  const sorted = sortCandidatesByPriority(free, entry, requesterTeacher ?? null, timetableEntries);
+  return sorted.map(t => {
+    const taught = computeTaughtPeriodsForDay(t.id, dow, timetableEntries);
+    const dbList = conflictIndex[`${t.id}|${date}`] ?? [];
+    const dbAssigned = dbList.length;
+    const formAssigned = assignedCountMap[t.id] ?? 0;
+    const conflictRec = entry.slot_number != null ? (dbList.find(x => x.slotNumber === entry.slot_number) ?? null) : null;
+    return {
+      teacher: t, taught, dbAssigned, formAssigned,
+      total: taught + dbAssigned + formAssigned,
+      conflictWith: conflictRec ? conflictRec.absentTeacherId : null,
+    };
+  });
+}
 // ★ เกณฑ์เตือนภาระงานล้น
 const SUB_LOAD_WARN_AT = 5;
 
@@ -186,16 +280,6 @@ function buildConflictIndex(
   return map;
 }
 
-type TeacherTierItem = {
-  teacher: UserProfile;
-  free: number;
-  taught: number;
-  formAssigned: number;
-  dbAssigned: number;
-  total: number;
-  conflict: { absentTeacherId: string } | null;
-};
-
 function computeFreePeriodsForDay(teacherId: string, dow: number, scheduleType: string | undefined, allEntries: any[], allTimeSlots: any[]): number {
   const templateSlots = buildRoomSlots(scheduleType, allTimeSlots).filter((s: any) => !s.is_break);
   const busyStartTimes = new Set(
@@ -203,99 +287,6 @@ function computeFreePeriodsForDay(teacherId: string, dow: number, scheduleType: 
       .map(e => (e.start_time ?? "").slice(0, 5))
   );
   return templateSlots.filter((s: any) => !busyStartTimes.has(s.start_time)).length;
-}
-
-
-function buildSubstituteTiers(
-  entry: any, date: string, dow: number, timetableEntries: any[], allTeachers: UserProfile[],
-  excludeId: string, onLeaveIds: Set<string>, subHistCounts: Record<string, number>,
-  busyIds: Set<string>, preUsedIds: Set<string> = new Set(),
-  requesterTeacher?: UserProfile | null,
-  assignedCountMap: Record<string, number> = {},
-  conflictIndex: Record<string, { slotNumber: number | null; absentTeacherId: string }[]> = {}
-): { label: string; teachers: TeacherTierItem[] }[] {
-  const isEligible = (t: UserProfile) => t.id !== excludeId && !busyIds.has(t.id) && !onLeaveIds.has(t.id) && !preUsedIds.has(t.id);
-  const gradeIds = sameGradeTeacherIds(requesterTeacher ?? null, allTeachers);
-
-  const scored = (list: UserProfile[]): TeacherTierItem[] => {
-    return list
-      .filter(isEligible)
-      .map(t => {
-        const free = computeFreePeriodsForDay(t.id, dow, entry.schedule_type ?? undefined, timetableEntries, timetableEntries);
-        const taught = computeTaughtPeriodsForDay(t.id, dow, timetableEntries);
-        const formAssigned = assignedCountMap[t.id] ?? 0;
-        const dbList = conflictIndex[`${t.id}|${date}`] ?? [];
-        const dbAssigned = dbList.length;
-        const conflictRec = entry.slot_number != null ? (dbList.find(x => x.slotNumber === entry.slot_number) ?? null) : null;
-        const hist = subHistCounts[t.id] ?? 0;
-        return {
-          teacher: t, free, taught, formAssigned, dbAssigned,
-          total: taught + formAssigned + dbAssigned,
-          conflict: conflictRec ? { absentTeacherId: conflictRec.absentTeacherId } : null,
-          hist,
-        };
-      })
-      .sort((a, b) => b.free - a.free || a.hist - b.hist)
-      .map(({ hist, ...rest }) => rest);
-  };
-
-  const result: { label: string; teachers: TeacherTierItem[] }[] = [];
-  const used = new Set(preUsedIds);
-
-  // 1) ครูประจำชั้น (ป.1/ป.2 สอนแทนก่อนเสมอ)
-  if (isHomeroomPriorityGrade(entry.grade_group) && entry.homeroom_teacher_id) {
-    const hr = allTeachers.find(t => t.id === entry.homeroom_teacher_id);
-    if (hr && isEligible(hr) && !used.has(hr.id)) {
-      const [item] = scored([hr]);
-      if (item) { result.push({ label: "👩‍🏫 ครูประจำชั้น (สอนแทนก่อนเสมอ)", teachers: [item] }); used.add(hr.id); }
-    }
-  }
-
-  // 2) ★ ครูที่สอนสายชั้นเดียวกับ "คาบที่กำลังขอแลกนี้" (เช่น คาบนี้เป็น ม.2/3 → ครู ม.2/3 มาก่อน)
-  const entryGradeOnly = extractGradeOnly(entry.grade_group);
-  if (entryGradeOnly) {
-    const gradeTeacherIds = new Set(
-      timetableEntries.filter((e: any) => extractGradeOnly(e.grade_group) === entryGradeOnly)
-        .flatMap((e: any) => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-    );
-    const list = scored(allTeachers.filter(t => gradeTeacherIds.has(t.id) && !used.has(t.id)));
-    if (list.length > 0) { result.push({ label: `🏫 สายชั้น ${entryGradeOnly} (ตรงกับคาบนี้)`, teachers: list }); list.forEach(x => used.add(x.teacher.id)); }
-  }
-
-  // 3) ★ ครูสายชั้นเดียวกับ "ผู้ยื่นลา" (grade_level เช่น ป.1)
-  if (requesterTeacher?.grade_level) {
-    const list = scored(allTeachers.filter(t => gradeIds.has(t.id) && !used.has(t.id)));
-    if (list.length > 0) { result.push({ label: "🏫 ครูสายชั้นเดียวกับท่าน", teachers: list }); list.forEach(x => used.add(x.teacher.id)); }
-  }
-
-  // 4) ครูวิชาเดียวกัน / กลุ่มวิชาใกล้เคียง
-  {
-    const subjectName = entry.subject_name ?? "";
-    const rule = SUBJECT_GROUP_RULES.find(r => r.match.some(k => subjectName.includes(k)));
-    const band = gradeBand(entry.grade_group);
-    let subjIds = new Set<string>();
-    let tierLabel = "📘 ครูวิชาเดียวกัน";
-    if (rule) {
-      subjIds = new Set(
-        timetableEntries.filter((e: any) => rule.related.some(k => (e.subject_name ?? "").includes(k)) && (!rule.useGradeBand || gradeBand(e.grade_group) === band))
-          .flatMap((e: any) => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-      );
-      tierLabel = rule.useGradeBand ? `📘 ครู${rule.groupLabel}` : `📘 ครูวิชา${rule.groupLabel}`;
-    } else if (entry.subject_id) {
-      subjIds = new Set(
-        timetableEntries.filter((e: any) => e.subject_id === entry.subject_id)
-          .flatMap((e: any) => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-      );
-    }
-    const list = scored(allTeachers.filter(t => subjIds.has(t.id) && !used.has(t.id)));
-    if (list.length > 0) { result.push({ label: tierLabel, teachers: list }); list.forEach(x => used.add(x.teacher.id)); }
-  }
-
-  // 5) ที่เหลือทั้งหมด
-  const rest = scored(allTeachers.filter(t => !used.has(t.id)));
-  if (rest.length > 0) result.push({ label: "⚠️ ครูที่ว่างทั้งหมด (นอกสายชั้น/วิชา)", teachers: rest });
-
-  return result;
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1153,6 +1144,76 @@ async function loadLeaveStats(userId: string, excludeId?: string, beforeDate?: s
 
   return { sick, personal, maternity, lastLeave };
 }
+function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เลือกครู —", loadMap, warnAt = SUB_LOAD_WARN_AT, conflictMap }: {
+  teachers: UserProfile[]; value: string; onChange: (id: string) => void; placeholder?: string;
+  loadMap?: Record<string, number>; warnAt?: number; conflictMap?: Record<string, string>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function h(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  const selected = teachers.find(t => t.id === value);
+  const filtered = teachers.filter(t => displayName(t).toLowerCase().includes(search.toLowerCase()));
+
+  function LoadBadge({ teacherId }: { teacherId: string }) {
+    if (!loadMap) return null;
+    const n = loadMap[teacherId] ?? 0;
+    const overloaded = n >= warnAt;
+    return (
+      <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${overloaded ? "bg-red-50 text-red-600 border-red-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}>
+        {overloaded ? `⚠️ รวม ${n} คาบ` : `รวม ${n} คาบ`}
+      </span>
+    );
+  }
+  function handlePick(t: UserProfile) {
+    const conflict = conflictMap?.[t.id];
+    if (conflict) { if (!confirm(`⚠️ ${displayName(t)} ${conflict}\n\nต้องการเลือกครูคนนี้ต่อไปหรือไม่?`)) return; }
+    onChange(t.id); setOpen(false); setSearch("");
+  }
+  const selectedConflict = selected ? conflictMap?.[selected.id] : undefined;
+
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen(v => !v)}
+        className={`w-full text-left border-2 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none flex items-center justify-between gap-2 ${selectedConflict ? "border-red-300 focus:border-red-500" : "border-blue-200 focus:border-blue-500"}`}>
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className={`truncate ${selected ? "font-bold text-slate-800" : "text-slate-400"}`}>{selected ? displayName(selected) : placeholder}</span>
+          {selected && <LoadBadge teacherId={selected.id} />}
+        </span>
+        <span className="text-slate-400 text-xs shrink-0">{open ? "▲" : "▼"}</span>
+      </button>
+      {selectedConflict && <p className="text-[11px] text-red-600 font-bold mt-1">⚠️ {selectedConflict}</p>}
+      {open && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border-2 border-blue-200 rounded-xl shadow-xl overflow-hidden">
+          <div className="px-3 py-2 border-b border-slate-100">
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 พิมพ์ชื่อ..." autoFocus onClick={e => e.stopPropagation()}
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+          </div>
+          <div className="max-h-52 overflow-y-auto">
+            {filtered.length === 0 ? <div className="px-4 py-3 text-slate-400 text-sm text-center">ไม่พบชื่อ</div> : filtered.map(t => {
+              const conflict = conflictMap?.[t.id];
+              return (
+                <button key={t.id} type="button" onClick={() => handlePick(t)}
+                  className={`w-full px-4 py-2.5 text-left text-sm font-medium hover:bg-blue-50 flex items-center justify-between gap-2 ${t.id === value ? "bg-blue-50" : ""}`}>
+                  <span className="min-w-0 truncate">
+                    <span className="font-bold text-slate-800">{displayName(t)}</span>
+                    {t.position && <span className="text-slate-400 text-xs ml-2">{t.position}</span>}
+                    {conflict && <span className="block text-[10px] text-red-500 font-bold mt-0.5">⚠️ {conflict}</span>}
+                  </span>
+                  <LoadBadge teacherId={t.id} />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ══════════════════════════════════════════════════════════
 // ── SpecificSwapModal — แลกคาบแบบเจาะจง ──────────────────
@@ -1215,19 +1276,14 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
 
   const conflictIndex = useMemo(() => buildConflictIndex(dbSubs, timetableEntries), [dbSubs, timetableEntries]);
 
-  const tiers = useMemo(() => {
-    if (!selectedEntry || dow === null) return [] as { label: string; teachers: TeacherTierItem[] }[];
-    const startKey = (selectedEntry.start_time ?? "").slice(0, 5);
-    const busyIds = new Set(
-      timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
-        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-    );
+  const candidates = useMemo(() => {
+    if (!selectedEntry || dow === null) return [] as SortedCandidate[];
     const alreadyPicked = new Set(
       existingAssignments.filter(a => a.substitute_date === selectedDate && a.slot_number === selectedEntry.slot_number)
         .map(a => a.substitute_teacher_id)
     );
-    return buildSubstituteTiers(selectedEntry, selectedDate, dow, timetableEntries, allTeachers, user.id, onLeaveIds, subHistCounts, busyIds, alreadyPicked, user, assignedCountMap, conflictIndex);
-  }, [selectedEntry, dow, timetableEntries, allTeachers, onLeaveIds, subHistCounts, existingAssignments, selectedDate, user, assignedCountMap, conflictIndex]);
+    return getSortedSubstituteCandidates(selectedEntry, selectedDate, dow, timetableEntries, allTeachers, user.id, onLeaveIds, alreadyPicked, user, assignedCountMap, conflictIndex);
+  }, [selectedEntry, dow, timetableEntries, allTeachers, onLeaveIds, existingAssignments, selectedDate, user, assignedCountMap, conflictIndex]);
 
   function confirmAdd() {
     if (!selectedEntry || !pickedTeacherId) return;
@@ -1284,49 +1340,26 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
 
           {selectedEntry && (
             <div>
-              <label className="block text-sm font-bold text-slate-600 mb-1.5">เลือกครูที่จะขอให้สอนแทน</label>
-              {loadingMeta ? (
-                <p className="text-xs text-slate-400">⏳ กำลังตรวจสอบครูที่ว่าง...</p>
-              ) : tiers.length === 0 ? (
-                <p className="text-xs text-red-500 font-bold">ไม่พบครูที่ว่างในคาบนี้</p>
-              ) : (
-                <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
-                  {tiers.map(tier => (
-                    <div key={tier.label}>
-                      <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5">{tier.label}</p>
-                      <div className="space-y-1.5">
-                        {tier.teachers.map(({ teacher: t, total, conflict }) => {
-                          const active = pickedTeacherId === t.id;
-                          const overloaded = total >= SUB_LOAD_WARN_AT;
-                          const conflictTeacherName = conflict ? displayName(allTeachers.find(x => x.id === conflict.absentTeacherId)) : null;
-                          return (
-                            <div key={t.id} className="space-y-1">
-                              <button type="button" onClick={() => setPickedTeacherId(t.id)}
-                                className={`w-full text-left px-3 py-2 rounded-lg border-2 text-sm font-bold flex items-center justify-between gap-2 transition-all ${
-                                  active ? "bg-indigo-50 border-indigo-400 text-indigo-700"
-                                    : conflict ? "bg-red-50 border-red-200 text-slate-700 hover:bg-red-100"
-                                    : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-                                }`}>
-                                <span className="truncate">{displayName(t)}{t.position ? ` · ${t.position}` : ""}</span>
-                                <span className="flex items-center gap-1.5 shrink-0 text-[11px] font-bold">
-                                  {conflict && <span className="text-red-600">⚠️ ชน</span>}
-                                  <span className={overloaded ? "text-red-500" : "text-slate-400"}>รวม {total} คาบ</span>
-                                  {active && <span>✓</span>}
-                                </span>
-                              </button>
-                              {active && conflict && (
-                                <p className="text-[11px] text-red-600 font-bold px-1">
-                                  ⚠️ ครู{displayName(t)} มีสอนแทนครู{conflictTeacherName ?? "ท่านอื่น"} ในคาบเวลาเดียวกันนี้อยู่แล้ว หากเลือกจะซ้อนกัน 2 งาน
-                                </p>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <label className="block text-sm font-bold text-slate-600 mb-1.5">เลือกครูที่จะขอให้สอนแทน </label>
+    {loadingMeta ? (
+      <p className="text-xs text-slate-400">⏳ กำลังตรวจสอบครูที่ว่าง...</p>
+    ) : candidates.length === 0 ? (
+      <p className="text-xs text-red-500 font-bold">ไม่พบครูที่ว่างในคาบนี้</p>
+    ) : (
+      <TeacherSearchSelect
+        teachers={candidates.map(c => c.teacher)}
+        value={pickedTeacherId}
+        onChange={setPickedTeacherId}
+        placeholder="— เลือกครูที่จะขอให้สอนแทน —"
+        loadMap={Object.fromEntries(candidates.map(c => [c.teacher.id, c.total]))}
+        conflictMap={Object.fromEntries(
+          candidates.filter(c => c.conflictWith).map(c => [
+            c.teacher.id,
+            `สอนแทนครู${displayName(allTeachers.find(x => x.id === c.conflictWith))} ในคาบเวลาเดียวกันนี้อยู่แล้ว`,
+          ])
+        )}
+      />
+    )}
             </div>
           )}
         </div>
@@ -1337,7 +1370,7 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
         </div>
       </div>
     </div>
-  );
+        );
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1414,9 +1447,8 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
           const onLeave = onLeaveByDate[date] ?? new Set<string>();
           const preUsed = new Set([...usedNow, ...alreadyPicked]);
 
-          const dayTiers = buildSubstituteTiers(entry, date, dow, timetableEntries, allTeachers, user.id, onLeave, histCounts, busyIds, preUsed, user, runFormCounts, cIndex);
-          const pool = dayTiers[0]?.teachers ?? [];
-          const chosenItem = pool.length === 0 ? null : (randomize ? pool[Math.floor(Math.random() * pool.length)] : pool[0]);
+          const pool = getSortedSubstituteCandidates(entry, date, dow, timetableEntries, allTeachers, user.id, onLeave, preUsed, user, runFormCounts, cIndex);
+const chosenItem = pool.length === 0 ? null : (randomize ? pool[Math.floor(Math.random() * pool.length)] : pool[0]);
 
           const base = {
             timetable_entry_id: entry.id, substitute_date: date,
@@ -1445,11 +1477,7 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
     const entry = timetableEntries.find(e => e.id === row.timetable_entry_id);
     if (!entry) return;
     const dow = dowOf(row.substitute_date);
-    const startKey = (entry.start_time ?? "").slice(0, 5);
-    const busyIds = new Set(
-      timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
-        .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-    );
+
     const usedElsewhere = new Set<string>();
     preview.forEach((p, i) => { if (i !== idx && p.substitute_date === row.substitute_date && p.slot_number === row.slot_number && p.substitute_teacher_id) usedElsewhere.add(p.substitute_teacher_id); });
     existingAssignments.filter(a => a.substitute_date === row.substitute_date && a.slot_number === row.slot_number)
@@ -1461,12 +1489,10 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
     const onLeave = onLeaveByDateState[row.substitute_date] ?? new Set<string>();
     const excludeSelf = new Set(usedElsewhere); if (row.substitute_teacher_id) excludeSelf.add(row.substitute_teacher_id);
 
-    let dayTiers = buildSubstituteTiers(entry, row.substitute_date, dow, timetableEntries, allTeachers, user.id, onLeave, {}, busyIds, excludeSelf, user, runFormCounts, conflictIndex);
-    let pool = dayTiers[0]?.teachers ?? [];
+    let pool = getSortedSubstituteCandidates(entry, row.substitute_date, dow, timetableEntries, allTeachers, user.id, onLeave, excludeSelf, user, runFormCounts, conflictIndex);
     if (pool.length === 0) {
       // ไม่มีตัวเลือกอื่นเลย ยอมให้สุ่มซ้ำได้ (ยกเว้นคนที่ไปชนคาบเวลาเดียวกันจริงๆ)
-      dayTiers = buildSubstituteTiers(entry, row.substitute_date, dow, timetableEntries, allTeachers, user.id, onLeave, {}, busyIds, usedElsewhere, user, runFormCounts, conflictIndex);
-      pool = dayTiers[0]?.teachers ?? [];
+      pool = getSortedSubstituteCandidates(entry, row.substitute_date, dow, timetableEntries, allTeachers, user.id, onLeave, usedElsewhere, user, runFormCounts, conflictIndex);
     }
     if (pool.length === 0) { alert("⚠️ ไม่พบครูว่างในคาบนี้"); return; }
     const pick = pool[Math.floor(Math.random() * pool.length)];
@@ -1534,13 +1560,28 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
               )}
               <div className="space-y-2">
                 {preview.map((p, i) => {
+                  const entry = timetableEntries.find(e => e.id === p.timetable_entry_id) ?? null;
                   const busyIds = new Set(
                     timetableEntries.filter(e => e.day_of_week === dowOf(p.substitute_date) && e.slot_number === p.slot_number)
                       .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
                   );
-                  const options = allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id));
+                  const optionsRaw = allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id));
+                  // ★ เรียง: สายชั้นคาบนี้ -> สายชั้นผู้ลา -> วิชาเดียวกัน -> ที่เหลือ
+                  const options = sortCandidatesByPriority(optionsRaw, entry, user, timetableEntries);
                   const stats = statsFor(p.substitute_teacher_id, p.substitute_date, p.slot_number);
                   const conflictTeacherName = stats?.conflict ? displayName(allTeachers.find(x => x.id === stats.conflict!.absentTeacherId)) : null;
+                  const loadMapForRow = Object.fromEntries(options.map(t => {
+                    const s = statsFor(t.id, p.substitute_date, p.slot_number);
+                    return [t.id, s ? s.total : 0];
+                  }));
+                  const conflictMapForRow = Object.fromEntries(
+                    options.filter(t => statsFor(t.id, p.substitute_date, p.slot_number)?.conflict)
+                      .map(t => {
+                        const s = statsFor(t.id, p.substitute_date, p.slot_number)!;
+                        const name = displayName(allTeachers.find(x => x.id === s.conflict!.absentTeacherId));
+                        return [t.id, `ชนกับสอนแทนครู${name ?? "ท่านอื่น"} คาบนี้อยู่แล้ว`];
+                      })
+                  );
                   return (
                     <div key={i} className="border-2 border-slate-100 rounded-xl p-3 flex items-start gap-3 flex-wrap">
                       <div className="w-28 shrink-0 text-xs">
@@ -1551,19 +1592,16 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
                       </div>
                       <div className="flex-1 min-w-[220px] space-y-1.5">
                         <div className="flex items-center gap-1.5">
-                          <select value={p.substitute_teacher_id} onChange={e => updatePreviewTeacher(i, e.target.value)}
-                            className="flex-1 min-w-[160px] bg-white border-2 border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold">
-                            <option value="">— ไม่พบครูว่าง / เลือกเอง —</option>
-                            {options.map(t => {
-                              const s = statsFor(t.id, p.substitute_date, p.slot_number);
-                              const warn = s ? s.total >= SUB_LOAD_WARN_AT : false;
-                              return (
-                                <option key={t.id} value={t.id}>
-                                  {displayName(t)}{s ? ` — รวม ${s.total} คาบ${warn ? " ⚠️" : ""}${s.conflict ? " (ชนกับงานอื่น)" : ""}` : ""}
-                                </option>
-                              );
-                            })}
-                          </select>
+                          <div className="flex-1 min-w-[160px]">
+                            <TeacherSearchSelect
+                              teachers={options}
+                              value={p.substitute_teacher_id}
+                              onChange={id => updatePreviewTeacher(i, id)}
+                              placeholder="— ไม่พบครูว่าง / เลือกเอง —"
+                              loadMap={loadMapForRow}
+                              conflictMap={conflictMapForRow}
+                            />
+                          </div>
                           <button type="button" onClick={() => rerollRow(i)} title="สุ่มใหม่เฉพาะคาบนี้"
                             className="shrink-0 w-8 h-8 rounded-lg bg-indigo-50 hover:bg-indigo-100 border-2 border-indigo-200 flex items-center justify-center text-sm">
                             🎲

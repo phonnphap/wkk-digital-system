@@ -64,6 +64,16 @@ interface AcademicYear { id: string; year_name: string; is_current: boolean; }
 // ── Helpers ───────────────────────────────────────────────
 const TH_DAYS = ["อาทิตย์","จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์"];
 const TH_MONTHS = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+const GRADE_LABEL: Record<string, string> = {
+  "k2":"อ.2","k3":"อ.3","p1":"ป.1","p2":"ป.2","p3":"ป.3","p4":"ป.4","p5":"ป.5","p6":"ป.6",
+  "m1":"ม.1","m2":"ม.2","m3":"ม.3","m4":"ม.4","m5":"ม.5","m6":"ม.6",
+};
+function roomGradeCode(gradeGroup?: string | null): string | null {
+  const thaiGrade = extractGradeOnly(gradeGroup);
+  if (!thaiGrade) return null;
+  const found = Object.entries(GRADE_LABEL).find(([, label]) => label === thaiGrade);
+  return found ? found[0] : null;
+}
 
 function fullName(u?: User|null) {
   if (!u) return "—";
@@ -185,12 +195,33 @@ function sameGradeTeacherIds(absentTeacher: User | null | undefined, allTeachers
   );
 }
 
-// ★ เรียงรายชื่อครู: สายชั้นเดียวกับครูที่ลาก่อน แล้วค่อยเรียงตามชื่อ
-function sortTeachersByGrade(candidates: User[], gradeIds: Set<string>): User[] {
+// ★ ลำดับความสำคัญของครูที่จะเลือกมาสอนแทน:
+// 0 = สายชั้นเดียวกับห้อง/คาบที่จะไปสอนแทน  1 = สายชั้นเดียวกับครูที่ลา  2 = สอนวิชาเดียวกันอยู่แล้ว  3 = ที่เหลือ
+function substitutePriority(
+  candidate: User,
+  entry: { grade_group?: string | null; subject_id?: string } | null | undefined,
+  absentTeacher: User | null | undefined,
+  allEntries: TimetableEntry[]
+): number {
+  const roomGrade = entry ? roomGradeCode(entry.grade_group) : null;
+  if (roomGrade && candidate.grade_level === roomGrade) return 0;
+  if (absentTeacher?.grade_level && candidate.grade_level === absentTeacher.grade_level) return 1;
+  const teachesSameSubject = entry?.subject_id
+    ? allEntries.some(e => (e.teacher_id === candidate.id || e.teacher_id_2 === candidate.id) && e.subject_id === entry.subject_id)
+    : false;
+  if (teachesSameSubject) return 2;
+  return 3;
+}
+function sortTeachersByGrade(
+  candidates: User[],
+  entry: { grade_group?: string | null; subject_id?: string } | null | undefined,
+  absentTeacher: User | null | undefined,
+  allEntries: TimetableEntry[]
+): User[] {
   return [...candidates].sort((a, b) => {
-    const aIn = gradeIds.has(a.id) ? 0 : 1;
-    const bIn = gradeIds.has(b.id) ? 0 : 1;
-    if (aIn !== bIn) return aIn - bIn;
+    const pa = substitutePriority(a, entry, absentTeacher, allEntries);
+    const pb = substitutePriority(b, entry, absentTeacher, allEntries);
+    if (pa !== pb) return pa - pb;
     return fullName(a).localeCompare(fullName(b), "th");
   });
 }
@@ -651,7 +682,7 @@ function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academi
     if (!selectedEntry || dow === null) return [] as User[];
     const free = computeFreeTeachersForEntry(selectedEntry, swapDate, allEntries, allTeachers, user.id)
       .filter(t => !onLeaveIds.has(t.id));
-    return sortTeachersByGrade(free, sameGradeTeacherIds(user, allTeachers));
+    return sortTeachersByGrade(free, selectedEntry, user, allEntries);
   }, [selectedEntry, dow, swapDate, allEntries, allTeachers, user, onLeaveIds]);
 
   const candidateLoadMap = useMemo(() => {
@@ -887,8 +918,9 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
         const scored = candidates.map(t => {
           const tKey = `${t.id}_${date}`;
           const load = computeTotalLoadForDay(t.id, dow, date, entries, subRecords) + (tally[tKey] ?? 0);
-          return { t, load };
-        }).sort((a, b) => a.load - b.load || fullName(a.t).localeCompare(fullName(b.t), "th"));
+          const priority = substitutePriority(t, entry, absentTeacher, entries);
+          return { t, load, priority };
+        }).sort((a, b) => a.priority - b.priority || a.load - b.load || fullName(a.t).localeCompare(fullName(b.t), "th"));
         const pick = scored[0].t;
         next[key] = pick.id;
         const tKey = `${pick.id}_${date}`;
@@ -1028,7 +1060,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
         <TeacherSearchSelect
           teachers={sortTeachersByGrade(
             computeFreeTeachersForEntry(entry, date, entries, teachers, absentId),
-            sameGradeTeacherIds(absentTeacher, teachers)
+            entry, absentTeacher, entries
           )}
           value={assignments[key] || ""}
           onChange={id => setAsgn(key, id)}
@@ -1106,9 +1138,9 @@ const absentTeacher = useMemo(
     const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, entries, absentTeacherId);
     const candidates = candidatesAll.filter(t => !conflictMapForEntry[t.id]);
     if (candidates.length === 0) { alert("⚠️ ไม่มีครูว่างในคาบนี้ (หรือครูที่ว่างกำลังสอนแทนคนอื่นในคาบเดียวกันอยู่แล้ว)"); return; }
-    const gradeIds = sameGradeTeacherIds(absentTeacher, allTeachers);
-    let pool = candidates.filter(t => gradeIds.has(t.id));
-    if (pool.length === 0) pool = candidates;
+    // ★ เลือกจากกลุ่มความสำคัญสูงสุดก่อน (สายชั้นคาบนี้ -> สายชั้นผู้ลา -> วิชาเดียวกัน -> ที่เหลือ)
+    const bestPriority = Math.min(...candidates.map(t => substitutePriority(t, entry, absentTeacher, entries)));
+    const pool = candidates.filter(t => substitutePriority(t, entry, absentTeacher, entries) === bestPriority);
     const scored = pool.map(t => ({ t, load: computeTotalLoadForDay(t.id, dow, date, entries, subRecords) }));
     const minLoad = Math.min(...scored.map(s => s.load));
     const minPool = scored.filter(s => s.load === minLoad).map(s => s.t);
@@ -1249,8 +1281,7 @@ const absentTeacher = useMemo(
 
   const dow = dowOf(date);
   const candidates = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId);
-  const gradeIds = sameGradeTeacherIds(absentTeacher, allTeachers);
-  const sortedCandidates = sortTeachersByGrade(candidates, gradeIds);
+  const sortedCandidates = sortTeachersByGrade(candidates, entry, absentTeacher, entries);
   const loadMap = Object.fromEntries(sortedCandidates.map(t => [t.id, computeTotalLoadForDay(t.id, dow, date, entries, subRecords)]));
   const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, entries, absentTeacherId);
   const pickedId = assignments[key] || "";
@@ -1573,8 +1604,8 @@ const handleSubDeletePermanent = async (id: string) => {
 
   // ★ เรียงครูสายชั้นเดียวกับ "ครูที่ลา" ขึ้นก่อน
   const candidates = useMemo(
-    () => sortTeachersByGrade(rawCandidates, sameGradeTeacherIds(absentTeacher, teachers)),
-    [rawCandidates, absentTeacher, teachers]
+    () => sortTeachersByGrade(rawCandidates, entry, absentTeacher, allEntries),
+    [rawCandidates, absentTeacher, entry, allEntries]
   );
 
   // ★ จำนวนคาบที่แต่ละคนสอนอยู่แล้วในวันนั้น — โชว์เป็น badge ข้างชื่อ
