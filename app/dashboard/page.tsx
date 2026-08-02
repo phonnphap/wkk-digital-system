@@ -466,7 +466,7 @@ function StatusBadge({ status }: { status: ItemStatus }) {
     {
       title: "🏫 ระบบจัดการห้องเรียนและงานสอน",
       items: [
-        { name: "เช็คชื่อนักเรียน-ครูประจำวิชา", icon: <UserCheck className="w-6 h-6" />, color: "bg-emerald-500", path: "/attendance" },
+        { name: "Smart Class", icon: <UserCheck className="w-6 h-6" />, color: "bg-emerald-500", path: "/smartclass", status: "wip" as ItemStatus },
         { name: "ครูประจำชั้น", icon: <Users className="w-6 h-6" />, color: "bg-teal-500", path: "/homeroom", status: "live" as ItemStatus },
         { name: "ตารางสอน", icon: <Calendar className="w-6 h-6" />, color: "bg-purple-500", path: "/schedule", status: "live"  as ItemStatus },
         { name: "แลกคาบ & สอนแทน", icon: <RefreshCw className="w-6 h-6" />, color: "bg-pink-500", path: "/substitution", status: "live"  as ItemStatus },
