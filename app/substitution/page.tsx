@@ -612,12 +612,10 @@ function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academi
     setSaving(true);
     const targetId = mode === "repay" ? fixedTargetTeacherId! : pickedTeacherId;
     const { error } = await supabase.from("class_swap_requests").insert([{
-      requester_id: user.id, target_teacher_id: targetId,
-      requester_entry_id: selectedEntry!.id, target_entry_id: null,
-      requester_slot_id: selectedEntry!.time_slot_id,
-      target_slot_id: selectedEntry!.time_slot_id,
-      swap_date: swapDate, reason, status: "pending", academic_year_id: academicYearId,
-    }]);
+  requester_id: user.id, target_teacher_id: targetId,
+  requester_entry_id: selectedEntry!.id, target_entry_id: null,
+  swap_date: swapDate, reason, status: "pending", academic_year_id: academicYearId,
+}]);
     setSaving(false);
     if (error) { alert("❌ "+error.message); return; }
     const targetT = allTeachers.find(t => t.id === targetId);
