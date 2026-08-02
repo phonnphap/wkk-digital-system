@@ -34,7 +34,7 @@ type SubMenuItem = {
 
 // ★ เมนูย่อยทั้งหมดของครูประจำชั้น — เพิ่ม/ลบ/แก้ path ที่นี่ที่เดียว
 const SUBMENUS: SubMenuItem[] = [
-  { key: "students", name: "ทะเบียนนักเรียน", desc: "รายชื่อ ข้อมูลพื้นฐาน และผู้ปกครอง", icon: Users, color: "bg-blue-600", path: "/students", status: "in_progress" },
+  { key: "students", name: "ทะเบียนนักเรียน", desc: "รายชื่อ ข้อมูลพื้นฐาน และผู้ปกครอง", icon: Users, color: "bg-blue-600", path: "/students", status: "live" },
   { key: "attendance", name: "บันทึกเช็คชื่อ", desc: "มาเรียน / ขาด / ลา / มาสาย รายวัน", icon: ClipboardCheck, color: "bg-indigo-600", path: "/attendance", status: "in_progress" },
   { key: "homeroom-notes", name: "บันทึกโฮมรูม", desc: "ประเด็น/กิจกรรมโฮมรูมประจำวัน", icon: NotebookPen, color: "bg-violet-600", path: "/homeroom-notes", status: "in_progress" },
   { key: "meals", name: "บันทึกอาหารและนม", desc: "การรับอาหารกลางวัน/ดื่มนมรายวัน", icon: UtensilsCrossed, color: "bg-orange-500", path: "/meals", status: "in_progress" },
@@ -46,8 +46,8 @@ const SUBMENUS: SubMenuItem[] = [
 
 // ★ เมนูสำหรับผู้ดูแลระบบ (admin/director/deputy_director) เท่านั้น
 const ADMIN_SUBMENUS: SubMenuItem[] = [
-  { key: "attendance_overview", name: "สถิติการมาเรียนทั้งโรงเรียน", desc: "ภาพรวมการมา/ขาด/ลา/สาย ทุกห้องเรียน", icon: BarChart3, color: "bg-purple-600", path: "/admin/attendance-overview", status: "live" },
-  { key: "holidays", name: "จัดการวันหยุดเรียน", desc: "เพิ่ม/ลบวันหยุดที่ไม่ต้องเช็คชื่อ", icon: CalendarOff, color: "bg-slate-700", path: "/admin/holidays", status: "live" },
+  { key: "attendance_overview", name: "สถิติการมาเรียนทั้งโรงเรียน", desc: "ภาพรวมการมา/ขาด/ลา/สาย ทุกห้องเรียน", icon: BarChart3, color: "bg-purple-600", path: "/admin/attendance-overview", status: "in_progress" },
+  { key: "holidays", name: "จัดการวันหยุดเรียน", desc: "เพิ่ม/ลบวันหยุดที่ไม่ต้องเช็คชื่อ", icon: CalendarOff, color: "bg-slate-700", path: "/admin/holidays", status: "in_progress" },
 ];
 
 const STATUS_LABEL: Record<MenuStatus, { text: string; cls: string }> = {

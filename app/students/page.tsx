@@ -34,6 +34,7 @@ type Student = {
   guardian_relation: string | null;
   guardian_phone: string | null;
   address: string | null;
+  avatar_url: string | null;
 };
 
 type FormState = {
@@ -69,6 +70,10 @@ export default function StudentsPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+const [loginUsername, setLoginUsername] = useState("");
+const [loginPassword, setLoginPassword] = useState("");
 
   useEffect(() => {
     supabase.rpc("get_my_classrooms").then(({ data }: { data: Classroom[] | null }) => {
@@ -82,7 +87,7 @@ export default function StudentsPage() {
     supabase
       .from("students")
       .select(
-        "id, seat_number, student_code, prefix, first_name, last_name, nick_name, birth_date, gender, guardian_name, guardian_relation, guardian_phone, address"
+        "id, seat_number, student_code, prefix, first_name, last_name, nick_name, birth_date, gender, guardian_name, guardian_relation, guardian_phone, address, avatar_url"
       )
       .eq("classroom_id", cid)
       .order("seat_number")
@@ -102,7 +107,12 @@ export default function StudentsPage() {
     setForm(EMPTY_FORM);
     setSaveError("");
     setShowForm(true);
-  }
+    setAvatarFile(null);
+  setAvatarPreview(null);
+  setLoginUsername("");
+  setLoginPassword("");
+  setShowForm(true);
+}
 
   function openEditForm(s: Student) {
     setEditingId(s.id);
@@ -122,7 +132,13 @@ export default function StudentsPage() {
     });
     setSaveError("");
     setShowForm(true);
-  }
+    setAvatarFile(null);
+  setAvatarPreview((s as any).avatar_url ?? null);   // ★ ใหม่ — ต้องเพิ่ม avatar_url ใน select() ด้วย ดูจุดที่ 5
+  setLoginUsername("");
+  setLoginPassword("");
+  setShowForm(true);
+}
+  
 
   async function handleSave() {
     if (!selectedClass) return;
@@ -167,9 +183,34 @@ export default function StudentsPage() {
       return;
     }
 
-    setShowForm(false);
-    loadStudents(cid);
+    const savedId = editingId ?? savedRows[0]?.id;
+
+  // ★ อัปโหลด avatar ถ้ามีการเลือกไฟล์ใหม่
+  if (avatarFile && savedId) {
+    const fd = new FormData();
+    fd.append("file", avatarFile);
+    const res = await fetch(`/api/students/${savedId}/avatar`, { method: "POST", body: fd });
+    if (!res.ok) {
+      const j = await res.json();
+      alert("บันทึกข้อมูลนักเรียนสำเร็จ แต่อัปโหลดรูปไม่สำเร็จ: " + (j.error ?? ""));
+    }
   }
+
+  // ★ ตั้ง/เปลี่ยนรหัสผ่านผู้เรียน ถ้ากรอกทั้ง username และ password มา
+  if (loginUsername.trim() && loginPassword.trim() && savedId) {
+    const res = await fetch(`/api/students/${savedId}/credentials`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: loginUsername, password: loginPassword }),
+    });
+    if (!res.ok) {
+      const j = await res.json();
+      alert("บันทึกข้อมูลนักเรียนสำเร็จ แต่ตั้งรหัสผ่านไม่สำเร็จ: " + (j.error ?? ""));
+    }
+  }
+
+  setShowForm(false);
+  loadStudents(cid);
+}
 
   async function handleDelete(id: string) {
     if (!confirm("ยืนยันการลบนักเรียนคนนี้?")) return;
@@ -338,6 +379,26 @@ export default function StudentsPage() {
                     ⚠️ {saveError}
                   </div>
                 )}
+                {/* ★ Avatar picker */}
+<div className="mb-4 flex justify-center">
+  <label className="relative cursor-pointer group">
+    {avatarPreview ? (
+      <img src={avatarPreview} className="w-20 h-20 rounded-full object-cover border-4 border-slate-100" />
+    ) : (
+      <div className="w-20 h-20 rounded-full bg-slate-100 border-4 border-slate-100 flex items-center justify-center text-2xl text-slate-300">👤</div>
+    )}
+    <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] font-black">
+      เปลี่ยนรูป
+    </div>
+    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
+      onChange={(e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setAvatarFile(file);
+        setAvatarPreview(URL.createObjectURL(file));
+      }} />
+  </label>
+</div>
 
                 <p className="mb-2 text-xs font-bold uppercase tracking-wide text-indigo-500">ข้อมูลนักเรียน</p>
                 <div className="grid grid-cols-2 gap-3 text-sm">
@@ -384,6 +445,16 @@ export default function StudentsPage() {
                   <Field label="เบอร์โทรผู้ปกครอง" value={form.guardian_phone} onChange={(v) => setForm({ ...form, guardian_phone: v })} />
                   <Field label="ที่อยู่" value={form.address} onChange={(v) => setForm({ ...form, address: v })} full />
                 </div>
+                {/* ★ ตั้งบัญชีล็อกอินนักเรียน */}
+<div className="mt-5 rounded-xl border-2 border-amber-200 bg-amber-50 p-3 space-y-2">
+  <p className="text-xs font-bold text-amber-700">
+    🔑 {editingId ? "เปลี่ยนบัญชีล็อกอิน (เว้นว่างถ้าไม่ต้องการเปลี่ยน)" : "ตั้งบัญชีล็อกอินผู้เรียน (ไม่บังคับ)"}
+  </p>
+  <input value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="Username"
+    className="w-full rounded-xl border-2 border-amber-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-400" />
+  <input value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="รหัสผ่าน"
+    className="w-full rounded-xl border-2 border-amber-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-400" />
+</div>
 
                 <div className="mt-6 flex justify-end gap-2">
                   <button
