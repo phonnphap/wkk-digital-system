@@ -52,6 +52,7 @@ interface SubRecord {
   status: string; note?: string | null; academic_year_id?: string; created_at: string;
   absent_teacher?: User; substitute_teacher?: User;
   subject_name?: string | null; room_name?: string | null; slot_label?: string | null; grade_group?: string | null;
+  slot_number?: number | null; // ★ ใช้เรียงคาบ 1-6 ให้ถูกต้อง (slot_label เรียงตัวอักษรไม่แม่น)
 }
 interface LeaveRequest {
   id: string; user_id: string; leave_type: string; start_date: string;
@@ -383,6 +384,13 @@ function printSubOrder(records: SubRecord[], periodLabel: string) {
     <script>window.onload=()=>window.print()<\/script>
   </body></html>`);
   w.document.close();
+}
+// ★ ตอนพิมพ์ ต้องเรียงจากวันแรก→วันหลัง และคาบ 1-6 เสมอ ไม่ขึ้นกับที่ตารางตั้งไว้
+function sortSubsForPrint(records: SubRecord[]): SubRecord[] {
+  return [...records].sort((a, b) => {
+    if (a.substitute_date !== b.substitute_date) return a.substitute_date < b.substitute_date ? -1 : 1;
+    return (a.slot_number ?? 0) - (b.slot_number ?? 0);
+  });
 }
 
 function printTeacherSubStat(records: SubRecord[], users: User[]) {
@@ -1253,11 +1261,12 @@ export default function SubstitutionPage() {
   const [showManualAssign, setShowManualAssign] = useState(false);
   const [filterDate, setFilterDate] = useState("");
   const [filterTeacher, setFilterTeacher] = useState("");
+  const [subSortOrder, setSubSortOrder] = useState<"desc" | "asc">("desc"); // ★ ใหม่-เก่า (default) / เก่า-ใหม่
+  const [selectedSubIds, setSelectedSubIds] = useState<Set<string>>(new Set()); // ★ รายการที่ติ๊กเลือกไว้พิมพ์
   const [swapInitialReason, setSwapInitialReason] = useState<string | undefined>(undefined);
   const [swapMode, setSwapMode] = useState<"normal"|"repay">("normal");
   const [swapFixedTargetTeacherId, setSwapFixedTargetTeacherId] = useState<string | undefined>(undefined);
   const [editingSub, setEditingSub] = useState<SubRecord|null>(null);
-
   const isAdmin = useMemo(() => ADMIN_ROLES.includes(user?.role ?? ""), [user]);
   // ★ ขยายสิทธิ์ "จัดสอนแทน" ให้หัวหน้าสายชั้น/หัวหน้าหมวด ไม่ใช่แค่แอดมิน
   //   ต้องมีคอลัมน์ users.extra_roles (text[]) เก็บค่าเช่น 'grade_head', 'dept_head'
@@ -1388,13 +1397,13 @@ if (tchErr) {
     const enrichedSubs: SubRecord[] = (subs ?? []).map((r: any) => {
       const entry = r.timetable_entry_id ? entryMap[r.timetable_entry_id] : null;
       if (entry) {
-        return { ...r, subject_name: entry.subject_name, room_name: entry.room_name, grade_group: entry.grade_group, slot_label: entry.slot_label };
+        return { ...r, subject_name: entry.subject_name, room_name: entry.room_name, grade_group: entry.grade_group, slot_label: entry.slot_label, slot_number: entry.slot_number };
       }
       const subj = subjectsMap[r.subject_id];
       const room = classroomsMap[r.classroom_id];
       const roomSlots = buildRoomSlots(room?.schedule_type, timeSlots);
       const slot = roomSlots.find((s: any) => s.id === r.time_slot_id) ?? timeSlots.find((s: any) => s.id === r.time_slot_id);
-      return { ...r, subject_name: subj?.name_th ?? null, room_name: room?.room_name ?? null, grade_group: room?.grade_group ?? null, slot_label: slot?.slot_label ?? null };
+      return { ...r, subject_name: subj?.name_th ?? null, room_name: room?.room_name ?? null, grade_group: room?.grade_group ?? null, slot_label: slot?.slot_label ?? null, slot_number: slot?.slot_number ?? null };
     });
     setSubRecords(enrichedSubs);
 
@@ -1452,7 +1461,7 @@ if (tchErr) {
     () => teachers.find(t => t.id === record.absent_teacher_id) ?? null,
     [teachers, record.absent_teacher_id]
   );
-
+  
   const rawCandidates = useMemo(() => {
     if (!entry) return teachers.filter(isSelectableTeacher);
     const free = computeFreeTeachersForEntry(entry, record.substitute_date, allEntries, teachers, record.absent_teacher_id);
@@ -1543,8 +1552,29 @@ if (tchErr) {
       r.absent_teacher_id === filterTeacher || r.substitute_teacher_id === filterTeacher);
     if (!canAssignSub) list = list.filter(r =>
       r.absent_teacher_id === user?.id || r.substitute_teacher_id === user?.id);
-    return list;
-  }, [subRecords, filterDate, filterTeacher, canAssignSub, user]);
+    // ★ เรียงวันที่ตาม subSortOrder — วันเดียวกันเรียงคาบ 1-6 เสมอ ไม่กลับตามทิศทางวันที่
+    return [...list].sort((a, b) => {
+      const dateCmp = a.substitute_date < b.substitute_date ? -1 : a.substitute_date > b.substitute_date ? 1 : 0;
+      const primary = subSortOrder === "asc" ? dateCmp : -dateCmp;
+      if (primary !== 0) return primary;
+      return (a.slot_number ?? 0) - (b.slot_number ?? 0);
+    });
+  }, [subRecords, filterDate, filterTeacher, canAssignSub, user, subSortOrder]);
+  useEffect(() => { setSelectedSubIds(new Set()); }, [filterDate, filterTeacher]);
+  const toggleSelectSub = (id: string) => {
+    setSelectedSubIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAllSubs = () => {
+    setSelectedSubIds(prev => {
+      const allSelected = filteredSubs.length > 0 && filteredSubs.every(r => prev.has(r.id));
+      return allSelected ? new Set() : new Set(filteredSubs.map(r => r.id));
+    });
+  };
+  const isAllSubsSelected = filteredSubs.length > 0 && filteredSubs.every(r => selectedSubIds.has(r.id));
 
   // ── Stat ─────────────────────────────────────────────────
   const statMap = useMemo(() => {
@@ -1839,6 +1869,18 @@ if (tchErr) {
         </div>
       )}
 
+      <div className="flex-1 sm:flex-initial min-w-[160px]">
+        <label className="block text-xs font-bold text-slate-400 mb-1.5">เรียงลำดับ</label>
+        <select 
+          value={subSortOrder} 
+          onChange={e=>setSubSortOrder(e.target.value as "desc"|"asc")}
+          className="w-full border-2 border-[#F9A8D4] rounded-xl px-3.5 py-2.5 text-sm bg-white focus:border-[#DB2777] focus:outline-none transition-colors"
+        >
+          <option value="desc">📅 วันที่ใหม่ → เก่า</option>
+          <option value="asc">📅 วันที่เก่า → ใหม่</option>
+        </select>
+      </div>
+
       {(filterDate||filterTeacher) && (
         <button 
           onClick={()=>{setFilterDate("");setFilterTeacher("");}}
@@ -1852,11 +1894,22 @@ if (tchErr) {
     {/* ฝั่งปุ่มพิมพ์ */}
     {canAssignSub && filteredSubs.length > 0 && (
       <div className="flex gap-2 shrink-0">
+        {selectedSubIds.size > 0 && (
+          <button 
+            onClick={() => {
+              const selected = filteredSubs.filter(r => selectedSubIds.has(r.id));
+              printSubOrder(sortSubsForPrint(selected), `เฉพาะที่เลือก (${selected.length} รายการ)`);
+            }}
+            className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-sm font-bold rounded-xl flex items-center gap-2 shadow-sm transition-all"
+          >
+            🖨️ พิมพ์ที่เลือก ({selectedSubIds.size})
+          </button>
+        )}
         <button 
-          onClick={()=>printSubOrder(filteredSubs, filterDate?thaiDate(filterDate):"ทั้งหมด")}
+          onClick={()=>printSubOrder(sortSubsForPrint(filteredSubs), filterDate?thaiDate(filterDate):"ทั้งหมด")}
           className="px-5 py-2.5 bg-[#DB2777] hover:bg-[#9D174D] active:scale-95 text-white text-sm font-bold rounded-xl flex items-center gap-2 shadow-sm transition-all"
         >
-          🖨️ พิมพ์ใบคำสั่ง
+          🖨️ พิมพ์ทั้งหมด ({filteredSubs.length})
         </button>
       </div>
     )}
@@ -1876,6 +1929,12 @@ if (tchErr) {
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-gradient-to-r from-[#9D174D] to-[#EC4899] text-white text-xs sm:text-sm">
+            {canAssignSub && (
+              <th className="px-4 py-3.5 text-center whitespace-nowrap">
+                <input type="checkbox" checked={isAllSubsSelected} onChange={toggleSelectAllSubs}
+                  className="w-4 h-4 rounded cursor-pointer" title="เลือกทั้งหมด" />
+              </th>
+            )}
             {["วันที่","คาบ","ห้อง","วิชา","ครูเจ้าของคาบ","ครูสอนแทน","ชม.","ที่มา","สถานะ","แลกคาบคืน", ...(canAssignSub ? ["จัดการ"] : [])].map(h=>(
               <th key={h} className="px-4 py-3.5 text-left font-bold whitespace-nowrap">{h}</th>
             ))}
@@ -1886,6 +1945,12 @@ if (tchErr) {
             const src = sourceOf(r.note);
             return (
               <tr key={r.id} className={`${i%2===0 ? "bg-[#FDF2F8]/50" : "bg-white"} hover:bg-[#FDF2F8]/40 transition-colors`}>
+                {canAssignSub && (
+                  <td className="px-4 py-3.5 text-center">
+                    <input type="checkbox" checked={selectedSubIds.has(r.id)} onChange={() => toggleSelectSub(r.id)}
+                      className="w-4 h-4 rounded cursor-pointer accent-[#DB2777]" />
+                  </td>
+                )}
                 <td className="px-4 py-3.5 whitespace-nowrap text-xs sm:text-sm">{thaiDate(r.substitute_date)}</td>
                 <td className="px-4 py-3.5 whitespace-nowrap text-xs sm:text-sm font-bold text-[#DB2777]">{r.slot_label??"-"}</td>
                 <td className="px-4 py-3.5 text-xs sm:text-sm whitespace-nowrap">{r.room_name??"-"}</td>
