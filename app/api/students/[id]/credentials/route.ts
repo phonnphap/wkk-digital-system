@@ -4,8 +4,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 // POST /api/students/[id]/credentials — ตั้ง/เปลี่ยน username+password สำหรับล็อกอินของนักเรียน
 // แยกจาก endpoint แก้ข้อมูลทั่วไป เพื่อไม่ชนกับ logic เดิมของหน้า students/page.tsx ที่ update ตรงผ่าน supabase client อยู่แล้ว
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params; // ★ Next.js 15+/16: params เป็น Promise ต้อง await ก่อนใช้
+
     const { username, password } = await req.json();
     if (!username?.trim() || !password?.trim()) {
       return NextResponse.json({ error: "กรุณากรอก Username และรหัสผ่านให้ครบ" }, { status: 400 });
@@ -17,19 +19,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const { data: existing } = await admin
       .from("student_credentials")
       .select("student_id")
-      .eq("student_id", params.id)
+      .eq("student_id", id)
       .maybeSingle();
 
     if (existing) {
       const { error } = await admin
         .from("student_credentials")
         .update({ username: username.trim(), password_hash, password_reset_at: new Date().toISOString() })
-        .eq("student_id", params.id);
+        .eq("student_id", id);
       if (error) throw error;
     } else {
       const { error } = await admin
         .from("student_credentials")
-        .insert([{ student_id: params.id, username: username.trim(), password_hash }]);
+        .insert([{ student_id: id, username: username.trim(), password_hash }]);
       if (error) throw error;
     }
 

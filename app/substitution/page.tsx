@@ -1452,7 +1452,13 @@ const handleAdminSwapRespond = async (id: string, action: "accepted" | "rejected
   }
   await loadData();
 };
-
+// ★ ลบคำขอแลกคาบที่ยกเลิกแล้วออกจาก Supabase ถาวร
+const handleSwapDeletePermanent = async (id: string) => {
+  if (!confirm("⚠️ ลบคำขอแลกคาบนี้ถาวร?\nข้อมูลจะหายไปจากฐานข้อมูลทันทีและกู้คืนไม่ได้")) return;
+  const { error } = await supabase.from("class_swap_requests").delete().eq("id", id);
+  if (error) { alert("❌ ลบไม่สำเร็จ: " + error.message); return; }
+  await loadData();
+};
   const handleSwapCancel = async (id: string) => {
     if (!confirm("ยืนยันการยกเลิกคำขอ?")) return;
     await supabase.from("class_swap_requests").update({ status: "cancelled" }).eq("id", id);
@@ -1465,6 +1471,13 @@ const handleAdminSwapRespond = async (id: string, action: "accepted" | "rejected
     await supabase.from("substitution_records").update({ status: "cancelled" }).eq("id", id);
     await loadData();
   };
+  // ★ ลบรายการสอนแทนที่ยกเลิกแล้วออกจาก Supabase ถาวร (ใช้ได้เฉพาะรายการที่ status = cancelled เท่านั้น)
+const handleSubDeletePermanent = async (id: string) => {
+  if (!confirm("⚠️ ลบรายการนี้ถาวร?\nข้อมูลจะหายไปจากฐานข้อมูลทันทีและกู้คืนไม่ได้")) return;
+  const { error } = await supabase.from("substitution_records").delete().eq("id", id);
+  if (error) { alert("❌ ลบไม่สำเร็จ: " + error.message); return; }
+  await loadData();
+};
   function EditSubModal({ record, allEntries, teachers, currentUser, onSave, onClose }: {
   record: SubRecord; allEntries: TimetableEntry[]; teachers: User[]; currentUser: User;
   onSave: () => void; onClose: () => void;
@@ -1838,14 +1851,19 @@ const adminFilteredSwaps = useMemo(() => {
                 </p>
                 {r.reason && <p className="text-xs text-slate-500 mt-1">{r.reason}</p>}
               </div>
-              {r.status === "pending" && (
-                <div className="flex gap-2 shrink-0">
-                  <button onClick={() => handleAdminSwapRespond(r.id, "accepted")}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold">✅ อนุมัติแทน</button>
-                  <button onClick={() => handleAdminSwapRespond(r.id, "rejected")}
-                    className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold">❌ ปฏิเสธแทน</button>
-                </div>
-              )}
+              {r.status === "pending" ? (
+  <div className="flex gap-2 shrink-0">
+    <button onClick={() => handleAdminSwapRespond(r.id, "accepted")}
+      className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold">✅ อนุมัติแทน</button>
+    <button onClick={() => handleAdminSwapRespond(r.id, "rejected")}
+      className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold">❌ ปฏิเสธแทน</button>
+  </div>
+) : r.status === "cancelled" ? (
+  <button onClick={() => handleSwapDeletePermanent(r.id)}
+    className="px-3 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold border border-red-300 shrink-0">
+    🗑️ ลบถาวร
+  </button>
+) : null}
             </div>
           ))}
         </div>
@@ -2147,7 +2165,10 @@ const adminFilteredSwaps = useMemo(() => {
         </button>
       </div>
     ) : (
-      <span className="text-xs text-slate-300">—</span>
+      <button onClick={()=>handleSubDeletePermanent(r.id)}
+        className="px-2.5 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold border border-red-300 transition-colors">
+        🗑️ ลบถาวร
+      </button>
     )}
   </td>
 )}

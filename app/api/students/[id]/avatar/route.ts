@@ -7,8 +7,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params; // ★ Next.js 15+/16: params เป็น Promise ต้อง await ก่อนใช้ (เดิม params.id ตรงๆ ทำให้ 500)
+
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
 
@@ -22,7 +24,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const admin = createAdminClient();
     const ext = file.name.split(".").pop() || "png";
-    const path = `students/${params.id}-${Date.now()}.${ext}`;
+    const path = `students/${id}-${Date.now()}.${ext}`;
     const buffer = Buffer.from(await file.arrayBuffer());
 
     const { error: uploadErr } = await admin.storage.from("avatars").upload(path, buffer, {
@@ -34,7 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const { data: pub } = admin.storage.from("avatars").getPublicUrl(path);
     const avatar_url = pub.publicUrl;
 
-    const { error: updErr } = await admin.from("students").update({ avatar_url }).eq("id", params.id);
+    const { error: updErr } = await admin.from("students").update({ avatar_url }).eq("id", id);
     if (updErr) throw updErr;
 
     return NextResponse.json({ avatar_url });
