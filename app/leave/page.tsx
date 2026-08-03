@@ -1849,11 +1849,11 @@ if (docFile) {
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
           <div>
-            <label className="block text-sm font-bold text-slate-600 mb-1">
+            <label className="block text-sm font-bold text-slate-600 mb-1"> 
               {leaveType==="official"?"รายละเอียดการไปราชการ":"เหตุผลการลา"} <span className="text-red-500">*</span>
-              <span className="text-slate-400 font-normal ml-2">({reason.length}/50)</span>
+              <span className="text-slate-400 font-normal ml-2">({reason.length}/100)</span>
             </label>
-            <textarea value={reason} onChange={e=>e.target.value.length<=50&&setReason(e.target.value)} onBlur={()=>touch("reason")} rows={3} placeholder={leaveType==="official"?"ระบุวัตถุประสงค์...":"ระบุเหตุผล (ไม่เกิน 50 ตัวอักษร)"} className={inp(errors.reason)+" resize-none"}/>
+            <textarea value={reason} onChange={e=>e.target.value.length<=100&&setReason(e.target.value)} onBlur={()=>touch("reason")} rows={3} placeholder={leaveType==="official"?"ระบุวัตถุประสงค์...":"ระบุเหตุผล (ไม่เกิน 100 ตัวอักษร)"} className={inp(errors.reason)+" resize-none"}/>
             {errors.reason&&<p className="text-red-500 text-xs mt-1">กรุณากรอกเหตุผล</p>}
           </div>
           <div>
