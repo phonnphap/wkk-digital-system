@@ -33,12 +33,38 @@ const LEVELS: { key: LevelKey; label: string; order: number }[] = [
 function getLevel(gradeGroup?: string): { key: LevelKey; label: string; order: number } {
   const g = (gradeGroup ?? "").trim();
   if (!g) return LEVELS.find(l => l.key === "other")!;
+
+  // อนุบาล
   if (g.startsWith("อ")) return LEVELS.find(l => l.key === "kindergarten")!;
+
+  // ประถม
   if (g.startsWith("ป")) return LEVELS.find(l => l.key === "primary")!;
+
+  // มัธยม
   if (g.startsWith("ม")) {
-    const num = parseInt(g.match(/(\d+)/)?.[1] ?? "0", 10);
-    return LEVELS.find(l => l.key === (num >= 4 ? "upper_secondary" : "lower_secondary"))!;
+    // 1. เช็กคีย์เวิร์ด ม.ปลาย / มัธยมปลาย ก่อน
+    if (g.includes("ปลาย")) {
+      return LEVELS.find(l => l.key === "upper_secondary")!;
+    }
+
+    // 2. หาตัวเลขทั้งหมดในข้อความ
+    const numbers = g.match(/\d+/g)?.map(n => parseInt(n, 10)) ?? [];
+
+    if (numbers.length > 0) {
+      // ถ้าตัวเลข *ทั้งหมด* หรือตัวเลข *สูงสุด* อยู่ในช่วง 4-6 ให้ถือว่าเป็น ม.ปลาย
+      const maxNum = Math.max(...numbers);
+      const minNum = Math.min(...numbers);
+
+      // ถ้าเป็น ม.4-6 (หรือเริ่มต้นที่ ม.4 ขึ้นไป)
+      if (minNum >= 4 || maxNum >= 4) {
+        return LEVELS.find(l => l.key === "upper_secondary")!;
+      }
+    }
+
+    // Default สำหรับ ม.ต้น
+    return LEVELS.find(l => l.key === "lower_secondary")!;
   }
+
   return LEVELS.find(l => l.key === "other")!;
 }
 
