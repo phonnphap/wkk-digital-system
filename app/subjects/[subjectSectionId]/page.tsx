@@ -181,6 +181,16 @@ const [homeroomMap, setHomeroomMap] = useState<Record<string, { status: "present
 
 useEffect(() => {
   (async () => {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (authUser) {
+      const { data: profile } = await supabase.from("users").select("id").eq("auth_id", authUser.id).maybeSingle();
+      if (profile) setCurrentUserId(profile.id);
+    }
+  })();
+}, []);
+
+useEffect(() => {
+  (async () => {
     if (!section?.classroom_id || !selectedDate) { setHomeroomMap({}); return; }
     const { data } = await supabase
       .from("attendance_records")
@@ -195,15 +205,6 @@ useEffect(() => {
 
   const loadSection = useCallback(async () => {
     if (!sectionId) return;
-    useEffect(() => {
-  (async () => {
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (authUser) {
-      const { data: profile } = await supabase.from("users").select("id").eq("auth_id", authUser.id).maybeSingle();
-      if (profile) setCurrentUserId(profile.id);
-    }
-  })();
-}, []);
     const { data: sec } = await supabase.from("subject_sections").select("*").eq("id", sectionId).maybeSingle();
     if (!sec) { setLoading(false); return; }
     setSection(sec as SubjectSection);
