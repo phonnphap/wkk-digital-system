@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 function generateJoinCode(length = 6) {
@@ -8,8 +8,14 @@ function generateJoinCode(length = 6) {
   return code;
 }
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
+    const body = await req.json().catch(() => ({}));
+    const created_by = body?.created_by;
+    if (!created_by) {
+      return NextResponse.json({ error: "ไม่พบผู้ใช้งานที่สั่งซิงค์ กรุณาล็อกอินใหม่" }, { status: 400 });
+    }
+
     const admin = createAdminClient();
 
     const { data: entries, error: ttErr } = await admin
@@ -55,6 +61,7 @@ export async function POST() {
       rows.push({
         academic_year_id: g.academic_year_id, classroom_id: g.classroom_id, subject_id: g.subject_id,
         teacher_id, co_teacher_id, join_code: generateJoinCode(), is_active: true,
+        created_by,   // ★ เพิ่มบรรทัดนี้ — แก้ปัญหา NOT NULL constraint
       });
     }
 
@@ -62,15 +69,12 @@ export async function POST() {
       return NextResponse.json({ created: 0, skipped: existingKeys.size, message: "ไม่มีวิชาใหม่ที่ต้องสร้าง (ซิงค์ล่าสุดแล้ว)" });
     }
 
-    // ★ insert ทีเดียวทั้งหมด (batch) แทนการ loop ทีละแถว — เร็วกว่าเดิมมาก
-    // join_code อาจชนกันได้แต่โอกาสต่ำมาก (36^6 ความเป็นไปได้) ถ้าชนจริงจะ retry เฉพาะแถวที่พลาด
     const { data: inserted, error: insErr } = await admin
       .from("subject_sections")
       .insert(rows)
       .select("id");
 
     if (insErr) {
-      // ถ้าพลาดเพราะ join_code ชนกัน (unique constraint) ลอง retry ทั้งชุดใหม่ 1 ครั้ง ด้วย join_code ชุดใหม่
       if (insErr.code === "23505") {
         const retryRows = rows.map(r => ({ ...r, join_code: generateJoinCode() }));
         const { data: retryInserted, error: retryErr } = await admin

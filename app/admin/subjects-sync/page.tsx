@@ -17,36 +17,43 @@ export default function AdminSyncSubjectsPage() {
   const [syncing, setSyncing] = useState(false);
   const [result, setResult] = useState<SyncResult | null>(null);
   const [error, setError] = useState("");
+  const [currentUserId, setCurrentUserId] = useState("");
 
-  useEffect(() => {
-    (async () => {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) { setChecking(false); return; }
-      const { data: profile } = await supabase
-        .from("users").select("role").eq("auth_id", authUser.id).maybeSingle();
-      // ★ ปรับชื่อคอลัมน์/ค่า role ให้ตรงกับระบบจริงถ้าจำเป็น
-      if (profile?.role && ["admin", "executive"].includes(profile.role)) {
+useEffect(() => {
+  (async () => {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) { setChecking(false); return; }
+    const { data: profile } = await supabase
+      .from("users").select("id, role").eq("auth_id", authUser.id).maybeSingle();
+    if (profile) {
+      setCurrentUserId(profile.id);
+      if (profile.role && ["admin", "executive"].includes(profile.role)) {
         setAuthorized(true);
       }
-      setChecking(false);
-    })();
-  }, []);
+    }
+    setChecking(false);
+  })();
+}, []);
 
   async function handleSync() {
-    setSyncing(true);
-    setError("");
-    setResult(null);
-    try {
-      const res = await fetch("/api/subject-sections/sync-from-timetable", { method: "POST" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "ซิงค์ไม่สำเร็จ");
-      setResult(json);
-    } catch (err: any) {
-      setError(err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ");
-    } finally {
-      setSyncing(false);
-    }
+  setSyncing(true);
+  setError("");
+  setResult(null);
+  try {
+    const res = await fetch("/api/subject-sections/sync-from-timetable", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ created_by: currentUserId }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? "ซิงค์ไม่สำเร็จ");
+    setResult(json);
+  } catch (err: any) {
+    setError(err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ");
+  } finally {
+    setSyncing(false);
   }
+}
 
   if (checking) {
     return (
