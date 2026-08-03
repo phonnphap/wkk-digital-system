@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import AttendanceTool from "@/components/attendance/AttendanceTool";
 
 const supabase = createClient();
 
@@ -389,6 +390,12 @@ export default function SmartClassRosterPage() {
   const [showQr, setShowQr] = useState(false);
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<TabKey>("roster");
+  const [currentUserId, setCurrentUserId] = useState("");
+const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+type Period = { timetable_entry_id: string; slot_number?: number; start_time?: string; end_time?: string };
+const [periods, setPeriods] = useState<Period[]>([]);
+const [timetableEntryId, setTimetableEntryId] = useState("");
+const [homeroomMap, setHomeroomMap] = useState<Record<string, { status: "present" | "absent" | "late" | "leave" }>>({});
 
   useEffect(() => {
     (async () => {
@@ -420,6 +427,41 @@ export default function SmartClassRosterPage() {
       setLoading(false);
     })();
   }, [subjectId, sectionId]);
+
+  useEffect(() => {
+  (async () => {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (authUser) {
+      const { data: profile } = await supabase.from("users").select("id").eq("auth_id", authUser.id).maybeSingle();
+      if (profile) setCurrentUserId(profile.id);
+    }
+  })();
+}, []);
+
+useEffect(() => {
+  (async () => {
+    if (!section?.id || !selectedDate) { setPeriods([]); setTimetableEntryId(""); return; }
+    const res = await fetch(`/api/timetable/periods?subject_section_id=${section.id}&attendance_date=${selectedDate}`);
+    const json = await res.json();
+    const list = json.periods ?? [];
+    setPeriods(list);
+    setTimetableEntryId(list.length > 0 ? list[0].timetable_entry_id : "");
+  })();
+}, [section?.id, selectedDate]);
+
+useEffect(() => {
+  (async () => {
+    if (!section?.classroom_id || !selectedDate) { setHomeroomMap({}); return; }
+    const { data } = await supabase
+      .from("attendance_records")
+      .select("student_id, status")
+      .eq("classroom_id", section.classroom_id)
+      .eq("attendance_date", selectedDate);
+    const map: Record<string, { status: any }> = {};
+    (data ?? []).forEach((r: any) => { map[r.student_id] = { status: r.status }; });
+    setHomeroomMap(map);
+  })();
+}, [section?.classroom_id, selectedDate]);
 
   const inviteUrl = useMemo(() => {
     if (typeof window === "undefined" || !section) return "";
@@ -504,7 +546,35 @@ export default function SmartClassRosterPage() {
           </div>
         )}
 
-        {tab === "attendance" && <AttendanceTabStub />}
+        {tab === "attendance" && (
+  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+    <div className="px-4 pt-4 flex items-center gap-2 flex-wrap">
+      <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+        className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:outline-none" />
+      {periods.length > 1 && (
+        <select value={timetableEntryId} onChange={e => setTimetableEntryId(e.target.value)}
+          className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:outline-none">
+          {periods.map(p => (
+            <option key={p.timetable_entry_id} value={p.timetable_entry_id}>
+              คาบ {p.slot_number} · {p.start_time?.slice(0,5)}-{p.end_time?.slice(0,5)}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+    {periods.length === 0 ? (
+      <div className="p-10 text-center text-slate-400">
+        <p className="text-3xl mb-2">🗓️</p>
+        <p className="font-bold text-sm">วันนี้ไม่มีคาบเรียนวิชานี้ตามตารางสอน</p>
+      </div>
+    ) : (
+      <AttendanceTool
+        timetableEntryId={timetableEntryId} date={selectedDate} students={students} currentUserId={currentUserId}
+        referenceMap={homeroomMap} referenceLabel="โฮมรูม"
+      />
+    )}
+  </div>
+)}
         {tab === "random" && <RandomPickerTab students={students} />}
         {tab === "tools" && <ToolsTab students={students} />}
       </main>
