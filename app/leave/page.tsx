@@ -194,16 +194,16 @@ function substitutePriorityLv(
 ): number {
   // 0 = ครูประจำชั้นของห้องนี้โดยตรง
   if (entry?.homeroom_teacher_id && candidate.id === entry.homeroom_teacher_id) return 0;
-  // 1 = ครูสายชั้นเดียวกับห้อง/คาบที่จะไปสอนแทน
+  // 1 = ครูสายชั้นเดียวกับห้อง/คาบที่จะไปสอนแทน (เช่น ครู ม.3 ทุกคน)
   const roomGrade = entry ? roomGradeCodeLv(entry.grade_group) : null;
   if (roomGrade && candidate.grade_level === roomGrade) return 1;
-  // 2 = ครูสายชั้นเดียวกับครูที่ลา
-  if (absentTeacher?.grade_level && candidate.grade_level === absentTeacher.grade_level) return 2;
-  // 3 = ครูที่สอนวิชาเดียวกับคาบนี้อยู่แล้ว
+  // 2 = ครูที่สอนวิชาเดียวกับคาบนี้อยู่แล้ว
   const teachesSameSubject = entry?.subject_id
     ? allEntries.some((e: any) => (e.teacher_id === candidate.id || e.teacher_id_2 === candidate.id) && e.subject_id === entry.subject_id)
     : false;
-  if (teachesSameSubject) return 3;
+  if (teachesSameSubject) return 2;
+  // 3 = ครูสายชั้นเดียวกับครูที่ลา
+  if (absentTeacher?.grade_level && candidate.grade_level === absentTeacher.grade_level) return 3;
   // 4 = ที่เหลือ
   return 4;
 }
@@ -1639,11 +1639,12 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
                     timetableEntries.filter(e => e.day_of_week === dowOf(p.substitute_date) && e.slot_number === p.slot_number)
                       .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
                   );
+                  const onLeaveForRow = onLeaveByDateState[p.substitute_date] ?? new Set<string>();
                   const optionsRaw = allTeachers
-                    .filter(t => t.id !== user.id && !busyIds.has(t.id) && isSelectableTeacherLv(t))
+                    .filter(t => t.id !== user.id && !busyIds.has(t.id) && isSelectableTeacherLv(t) && !onLeaveForRow.has(t.id))
                     // ★ ตัดครูที่สอนแทนคนอื่นอยู่แล้วในคาบเวลาเดียวกันนี้ออกจากตัวเลือกไปเลย
                     .filter(t => !statsFor(t.id, p.substitute_date, p.slot_number)?.conflict);
-                  // ★ เรียง: ครูประจำชั้น -> สายชั้นคาบนี้ -> สายชั้นผู้ลา -> วิชาเดียวกัน -> ที่เหลือ
+                  // ★ เรียง: ครูประจำชั้น -> สายชั้นคาบนี้ -> วิชาเดียวกัน -> สายชั้นผู้ลา -> ที่เหลือ
                   const options = sortCandidatesByPriority(optionsRaw, entry, user, timetableEntries);
                   const stats = statsFor(p.substitute_teacher_id, p.substitute_date, p.slot_number);
                   const conflictTeacherName = stats?.conflict ? displayName(allTeachers.find(x => x.id === stats.conflict!.absentTeacherId)) : null;
@@ -1748,6 +1749,7 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
   const [docPreview,   setDocPreview]   = useState<string|null>(null);
   const [docMime,      setDocMime]      = useState<string>("");
   const [leaveStats,   setLeaveStats]   = useState<LeaveStats>({ sick:0, personal:0, maternity:0 });
+  const [conflictingSubDuties, setConflictingSubDuties] = useState<any[]>([]);   // ★ เพิ่ม
   const fileRef = useRef<HTMLInputElement>(null);
 
   const rawDays = startDate&&endDate ? daysBetween(startDate,endDate) : 0;
@@ -1763,6 +1765,22 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
 useEffect(()=>{
   loadLeaveStats(user.id, editData?.id, startDate || undefined).then(setLeaveStats);
 }, [user.id, editData?.id, startDate]);
+
+// ★ เช็คว่าครูที่กำลังลาคนนี้ มีคาบที่ถูกจัดให้ "ไปสอนแทนคนอื่น" อยู่แล้วในช่วงวันที่ลาหรือไม่
+  useEffect(() => {
+    if (!startDate || !endDate) { setConflictingSubDuties([]); return; }
+    (async () => {
+      const { data } = await supabase
+        .from("substitution_records")
+        .select(`id,substitute_date,timetable_entry_id,absent_teacher_id,status,
+          absent_teacher:users!absent_teacher_id(title,first_name,last_name)`)
+        .eq("substitute_teacher_id", user.id)
+        .neq("status", "cancelled")
+        .gte("substitute_date", startDate)
+        .lte("substitute_date", endDate);
+      setConflictingSubDuties(data || []);
+    })();
+  }, [startDate, endDate, user.id]);
 
   useEffect(()=>{
     if(!startDate){setDutyOfficer(null);setIsOwnDuty(false);return;}
@@ -1920,8 +1938,29 @@ if (docFile) {
               {sickTooFarAhead&&<span className="text-red-600 text-xs font-black bg-red-50 border border-red-300 px-2 py-1 rounded-lg">⚠️ ลาป่วยล่วงหน้าได้ไม่เกิน 1 วัน</span>}
             </div>
           )}
-          {dutyLoading&&startDate&&<p className="text-xs text-slate-400 animate-pulse">⏳ ตรวจสอบตารางเวร...</p>}
+         {dutyLoading&&startDate&&<p className="text-xs text-slate-400 animate-pulse">⏳ ตรวจสอบตารางเวร...</p>}
           {!dutyLoading&&<DutyOfficerAlert officer={dutyOfficer} isOwnDuty={isOwnDuty}/>}
+          {conflictingSubDuties.length > 0 && (
+            <div className="rounded-xl border-2 border-red-300 bg-red-50 px-4 py-3">
+              <p className="font-black text-red-700 text-sm mb-2">
+                ⚠️ คุณมีคาบที่ถูกจัดให้ไปสอนแทนครูท่านอื่นอยู่แล้ว {conflictingSubDuties.length} คาบ ในช่วงที่คุณจะลานี้
+              </p>
+              <div className="space-y-1">
+                {conflictingSubDuties.map((d: any) => {
+                  const entry = timetableEntries.find(e => e.id === d.timetable_entry_id);
+                  return (
+                    <p key={d.id} className="text-xs text-red-600 font-bold">
+                      📅 {toThaiDate(d.substitute_date)} {entry?.slot_label ?? ""} — สอนแทน {fullName(d.absent_teacher)}
+                      {entry?.subject_name ? ` (${entry.subject_name}${entry.room_name ? " " + entry.room_name : ""})` : ""}
+                    </p>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-red-500 mt-2 font-bold">
+                กรุณาแจ้งฝ่ายบุคคล/ผู้จัดสอนแทน ให้เลือกครูคนอื่นมาสอนแทนคาบเหล่านี้แทนคุณด้วย
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
