@@ -173,18 +173,24 @@ function roomGradeCodeLv(gradeGroup?: string | null): string | null {
 }
 function substitutePriorityLv(
   candidate: UserProfile,
-  entry: { grade_group?: string | null; subject_id?: string } | null | undefined,
+  entry: { grade_group?: string | null; subject_id?: string; homeroom_teacher_id?: string | null } | null | undefined,
   absentTeacher: UserProfile | null | undefined,
   allEntries: any[]
 ): number {
+  // 0 = ครูประจำชั้นของห้องนี้โดยตรง
+  if (entry?.homeroom_teacher_id && candidate.id === entry.homeroom_teacher_id) return 0;
+  // 1 = ครูสายชั้นเดียวกับห้อง/คาบที่จะไปสอนแทน
   const roomGrade = entry ? roomGradeCodeLv(entry.grade_group) : null;
-  if (roomGrade && candidate.grade_level === roomGrade) return 0;
-  if (absentTeacher?.grade_level && candidate.grade_level === absentTeacher.grade_level) return 1;
+  if (roomGrade && candidate.grade_level === roomGrade) return 1;
+  // 2 = ครูสายชั้นเดียวกับครูที่ลา
+  if (absentTeacher?.grade_level && candidate.grade_level === absentTeacher.grade_level) return 2;
+  // 3 = ครูที่สอนวิชาเดียวกับคาบนี้อยู่แล้ว
   const teachesSameSubject = entry?.subject_id
     ? allEntries.some((e: any) => (e.teacher_id === candidate.id || e.teacher_id_2 === candidate.id) && e.subject_id === entry.subject_id)
     : false;
-  if (teachesSameSubject) return 2;
-  return 3;
+  if (teachesSameSubject) return 3;
+  // 4 = ที่เหลือ
+  return 4;
 }
 function sortCandidatesByPriority(
   candidates: UserProfile[],
@@ -217,6 +223,7 @@ type SortedCandidate = {
   dbAssigned: number;
   formAssigned: number;
   total: number;
+  priority: number;       // ★ เพิ่ม
   conflictWith: string | null;
 };
 
@@ -231,18 +238,33 @@ function getSortedSubstituteCandidates(
   const free = getFreeTeachersForEntryLv(entry, timetableEntries, allTeachers, excludeId, dow)
     .filter(t => !onLeaveIds.has(t.id) && !preUsedIds.has(t.id));
   const sorted = sortCandidatesByPriority(free, entry, requesterTeacher ?? null, timetableEntries);
-  return sorted.map(t => {
-    const taught = computeTaughtPeriodsForDay(t.id, dow, timetableEntries);
-    const dbList = conflictIndex[`${t.id}|${date}`] ?? [];
-    const dbAssigned = dbList.length;
-    const formAssigned = assignedCountMap[t.id] ?? 0;
-    const conflictRec = entry.slot_number != null ? (dbList.find(x => x.slotNumber === entry.slot_number) ?? null) : null;
-    return {
-      teacher: t, taught, dbAssigned, formAssigned,
-      total: taught + dbAssigned + formAssigned,
-      conflictWith: conflictRec ? conflictRec.absentTeacherId : null,
-    };
-  });
+  return sorted
+    .map(t => {
+      const taught = computeTaughtPeriodsForDay(t.id, dow, timetableEntries);
+      const dbList = conflictIndex[`${t.id}|${date}`] ?? [];
+      const dbAssigned = dbList.length;
+      const formAssigned = assignedCountMap[t.id] ?? 0;
+      const conflictRec = entry.slot_number != null ? (dbList.find(x => x.slotNumber === entry.slot_number) ?? null) : null;
+      return {
+        teacher: t, taught, dbAssigned, formAssigned,
+        total: taught + dbAssigned + formAssigned,
+        priority: substitutePriorityLv(t, entry, requesterTeacher ?? null, timetableEntries),
+        conflictWith: conflictRec ? conflictRec.absentTeacherId : null,
+      };
+    })
+    // ★ ครูที่สอนแทนคนอื่นอยู่แล้วในคาบเวลาเดียวกันของวันนี้ → ตัดออกจากตัวเลือกไปเลย ไม่ให้เลือกซ้ำ
+    .filter(c => !c.conflictWith);
+}
+// ★ เลือกครู 1 คนจาก pool: เอากลุ่ม priority ดีที่สุดที่ "มีอยู่จริง" ก่อนเสมอ
+// แล้วในกลุ่มนั้นดูว่าใครมีภาระคาบรวมน้อยที่สุด — ถ้ามีหลายคนภาระเท่ากัน ให้สุ่ม 1 คนจากกลุ่มนั้น
+// (กระจายงานให้เป็นธรรม ไม่ใช่สุ่มมั่วจากทั้ง pool เหมือนเดิม)
+function pickCandidate(pool: SortedCandidate[]): SortedCandidate | null {
+  if (pool.length === 0) return null;
+  const bestPriority = Math.min(...pool.map(c => c.priority));
+  const topGroup = pool.filter(c => c.priority === bestPriority);
+  const minLoad = Math.min(...topGroup.map(c => c.total));
+  const minLoadGroup = topGroup.filter(c => c.total === minLoad);
+  return minLoadGroup[Math.floor(Math.random() * minLoadGroup.length)];
 }
 // ★ เกณฑ์เตือนภาระงานล้น
 const SUB_LOAD_WARN_AT = 5;
@@ -1394,7 +1416,7 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
     setComputed(false); setPreview([]);
   }
 
-  async function computeAssignments(randomize: boolean = false) {
+  async function computeAssignments() {
     setComputing(true);
     try {
       const [leavesRes, subHistRes, dbSubsRes] = await Promise.all([
@@ -1448,7 +1470,7 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
           const preUsed = new Set([...usedNow, ...alreadyPicked]);
 
           const pool = getSortedSubstituteCandidates(entry, date, dow, timetableEntries, allTeachers, user.id, onLeave, preUsed, user, runFormCounts, cIndex);
-const chosenItem = pool.length === 0 ? null : (randomize ? pool[Math.floor(Math.random() * pool.length)] : pool[0]);
+          const chosenItem = pickCandidate(pool);
 
           const base = {
             timetable_entry_id: entry.id, substitute_date: date,
@@ -1491,11 +1513,10 @@ const chosenItem = pool.length === 0 ? null : (randomize ? pool[Math.floor(Math.
 
     let pool = getSortedSubstituteCandidates(entry, row.substitute_date, dow, timetableEntries, allTeachers, user.id, onLeave, excludeSelf, user, runFormCounts, conflictIndex);
     if (pool.length === 0) {
-      // ไม่มีตัวเลือกอื่นเลย ยอมให้สุ่มซ้ำได้ (ยกเว้นคนที่ไปชนคาบเวลาเดียวกันจริงๆ)
       pool = getSortedSubstituteCandidates(entry, row.substitute_date, dow, timetableEntries, allTeachers, user.id, onLeave, usedElsewhere, user, runFormCounts, conflictIndex);
     }
-    if (pool.length === 0) { alert("⚠️ ไม่พบครูว่างในคาบนี้"); return; }
-    const pick = pool[Math.floor(Math.random() * pool.length)];
+    const pick = pickCandidate(pool);
+    if (!pick) { alert("⚠️ ไม่พบครูว่างในคาบนี้"); return; }
     setPreview(prev => prev.map((p, i) => i === idx ? { ...p, substitute_teacher_id: pick.teacher.id } : p));
   }
 
@@ -1540,7 +1561,7 @@ const chosenItem = pool.length === 0 ? null : (randomize ? pool[Math.floor(Math.
           )}
 
           {!computed ? (
-            <button onClick={() => computeAssignments(false)} disabled={computing || selectedDates.length===0}
+            <button onClick={() => computeAssignments()} disabled={computing || selectedDates.length===0}
               className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm disabled:opacity-50">
               {computing ? "⏳ กำลังคำนวณ..." : "⚡ คำนวณการจัดสอนแทน"}
             </button>
@@ -1548,7 +1569,7 @@ const chosenItem = pool.length === 0 ? null : (randomize ? pool[Math.floor(Math.
             <>
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs text-slate-400 font-bold">ผลลัพธ์ {preview.length} คาบ</p>
-                <button type="button" onClick={() => computeAssignments(true)} disabled={computing}
+                <button type="button" onClick={() => computeAssignments()} disabled={computing}
                   className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 border-2 border-indigo-200 text-indigo-700 text-xs font-bold disabled:opacity-50">
                   {computing ? "⏳ กำลังสุ่ม..." : "🎲 สุ่มใหม่ทั้งหมด"}
                 </button>
@@ -1565,8 +1586,10 @@ const chosenItem = pool.length === 0 ? null : (randomize ? pool[Math.floor(Math.
                     timetableEntries.filter(e => e.day_of_week === dowOf(p.substitute_date) && e.slot_number === p.slot_number)
                       .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
                   );
-                  const optionsRaw = allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id));
-                  // ★ เรียง: สายชั้นคาบนี้ -> สายชั้นผู้ลา -> วิชาเดียวกัน -> ที่เหลือ
+                  const optionsRaw = allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id))
+                    // ★ ตัดครูที่สอนแทนคนอื่นอยู่แล้วในคาบเวลาเดียวกันนี้ออกจากตัวเลือกไปเลย
+                    .filter(t => !statsFor(t.id, p.substitute_date, p.slot_number)?.conflict);
+                  // ★ เรียง: ครูประจำชั้น -> สายชั้นคาบนี้ -> สายชั้นผู้ลา -> วิชาเดียวกัน -> ที่เหลือ
                   const options = sortCandidatesByPriority(optionsRaw, entry, user, timetableEntries);
                   const stats = statsFor(p.substitute_teacher_id, p.substitute_date, p.slot_number);
                   const conflictTeacherName = stats?.conflict ? displayName(allTeachers.find(x => x.id === stats.conflict!.absentTeacherId)) : null;
