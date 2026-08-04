@@ -92,6 +92,8 @@ type SwapAssignment = {
   grade_group?: string | null;
   room_name?: string | null;
   slot_number?: number | null;
+  covered?: boolean;            // ★ true = มีครูคู่สอนอยู่แล้ว ไม่ต้องจัด
+  coTeacherName?: string | null;
 };
 
 const DAY_NAME_TH = ["อาทิตย์","จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์"];
@@ -152,13 +154,26 @@ function getFreeTeachersForEntryLv(entry: any, timetableEntries: any[], allTeach
       .filter((e: any) => e.day_of_week === dow && timeRangesOverlapLv(entry.start_time, entry.end_time, e.start_time, e.end_time))
       .flatMap((e: any) => [e.teacher_id, e.teacher_id_2].filter(Boolean))
   );
-  return allTeachers.filter(t => t.id !== excludeId && !busyIds.has(t.id));
+  return allTeachers.filter(t => t.id !== excludeId && !busyIds.has(t.id) && isSelectableTeacherLv(t));
 }
 
 // ★ สายชั้นของครู อ้างอิงคอลัมน์ grade_level ตรงๆ — เหมือนหน้าแลกคาบ/สอนแทน
 function sameGradeTeacherIdsLv(refTeacher: UserProfile | null | undefined, allTeachers: UserProfile[]): Set<string> {
   if (!refTeacher?.grade_level) return new Set();
   return new Set(allTeachers.filter(t => t.grade_level && t.grade_level === refTeacher.grade_level).map(t => t.id));
+}
+// ★ กันโรล staff / admin ทุกชนิด (admin, admin_hr, admin_academic, admin_general ฯลฯ) / ผอ. / รองผอ. ออกจากตัวเลือกครูสอนแทน
+function isSelectableTeacherLv(t: UserProfile): boolean {
+  const role = (t.role || "").toLowerCase();
+  if (role === "staff" || role === "director" || role === "deputy_director") return false;
+  if (role.includes("admin")) return false;   // ครอบคลุม admin, admin_hr, admin_academic, admin_general ฯลฯ
+  return true;
+}
+// ★ หาครูอีกคนที่สอนคู่อยู่ในคาบเดียวกัน (นอกเหนือจาก user ที่กำลังลา)
+function coTeacherIdLv(entry: { teacher_id: string; teacher_id_2?: string | null }, excludeId: string): string | null {
+  if (entry.teacher_id && entry.teacher_id !== excludeId) return entry.teacher_id;
+  if (entry.teacher_id_2 && entry.teacher_id_2 !== excludeId) return entry.teacher_id_2;
+  return null;
 }
 // ★ ลำดับความสำคัญของครูที่จะเลือกมาสอนแทน:
 // 0 = สายชั้นเดียวกับห้อง/คาบที่จะไปสอนแทน (เช่น ครู ป.1 ไปสอนแทนคาบของห้อง ป.3/3 → ดึงครู ป.3 ขึ้นก่อน)
@@ -1347,12 +1362,29 @@ function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academi
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {myEntries.map(e => {
                   const active = selectedEntry?.id === e.id;
+                  const coId = coTeacherIdLv(e, user.id);
+                  const coTeacherOnLeave = coId ? onLeaveIds.has(coId) : false;
+                  const coTeacher = coId ? allTeachers.find(t => t.id === coId) : null;
+
+                  // ★ มีครูคู่สอนอยู่แล้ว และไม่ได้ลาด้วย → ไม่ต้องจัดสอนแทน แค่โชว์ให้เห็น
+                  if (coId && coTeacher && !coTeacherOnLeave) {
+                    return (
+                      <div key={e.id} className="p-2.5 rounded-lg border-2 border-emerald-200 bg-emerald-50 text-[11px] font-bold text-left">
+                        <div className="flex justify-between text-emerald-700"><span>คาบ {e.slot_number ?? "-"}</span><span className="opacity-70">{e.start_time?.slice(0,5)}</span></div>
+                        <div className="truncate mt-0.5 text-emerald-700">{e.subject_name ?? "ไม่ระบุวิชา"}</div>
+                        <div className="truncate text-emerald-600">👥 {displayName(coTeacher)} สอนอยู่แล้ว</div>
+                      </div>
+                    );
+                  }
                   return (
                     <button key={e.id} onClick={() => pickEntry(e)}
                       className={`p-2.5 rounded-lg border-2 text-[11px] font-bold text-left ${active?"bg-indigo-500 border-indigo-500 text-white":"bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
                       <div className="flex justify-between"><span>คาบ {e.slot_number ?? "-"}</span><span className="opacity-70">{e.start_time?.slice(0,5)}</span></div>
                       <div className="truncate mt-0.5">{e.subject_name ?? "ไม่ระบุวิชา"}</div>
                       <div className={`truncate ${active?"opacity-80":"text-slate-400"}`}>{e.grade_group ?? ""} {e.room_name ?? ""}</div>
+                      {coId && coTeacherOnLeave && (
+                        <div className="mt-1 text-red-600">⚠️ ครูคู่สอนลาด้วย — ต้องจัดครูสอนแทน</div>
+                      )}
                     </button>
                   );
                 })}
@@ -1455,22 +1487,11 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
         const myEntries = timetableEntries
           .filter(e => (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break);
 
-        for (const entry of myEntries) {
-          const startKey = (entry.start_time ?? "").slice(0, 5);
-          const key = `${date}|${startKey}`;
-          const busyIds = new Set(
-            timetableEntries.filter(e => e.day_of_week === dow && (e.start_time ?? "").slice(0, 5) === startKey)
-              .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-          );
-          const alreadyPicked = new Set(
-            existingAssignments.filter(a => a.substitute_date === date && a.slot_number === entry.slot_number).map(a => a.substitute_teacher_id)
-          );
-          const usedNow = usedThisRun[key] ?? new Set<string>();
-          const onLeave = onLeaveByDate[date] ?? new Set<string>();
-          const preUsed = new Set([...usedNow, ...alreadyPicked]);
+        const onLeave = onLeaveByDate[date] ?? new Set<string>();
 
-          const pool = getSortedSubstituteCandidates(entry, date, dow, timetableEntries, allTeachers, user.id, onLeave, preUsed, user, runFormCounts, cIndex);
-          const chosenItem = pickCandidate(pool);
+        for (const entry of myEntries) {
+          const coId = coTeacherIdLv(entry, user.id);
+          const coOnLeave = coId ? onLeave.has(coId) : false;
 
           const base = {
             timetable_entry_id: entry.id, substitute_date: date,
@@ -1478,6 +1499,24 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
             hours_count: computeSlotHours(entry), academic_year_id: entry.academic_year_id ?? academicYearId, mode: "auto" as const,
             subject_name: entry.subject_name, grade_group: entry.grade_group, room_name: entry.room_name, slot_number: entry.slot_number,
           };
+
+          // ★ มีครูคู่สอนอยู่แล้ว และไม่ได้ลาด้วย → ข้ามไปเลย ไม่ต้องจัดสอนแทน
+          if (coId && !coOnLeave) {
+            const coTeacher = allTeachers.find(t => t.id === coId);
+            result.push({ ...base, substitute_teacher_id: "", covered: true, coTeacherName: coTeacher ? displayName(coTeacher) : null });
+            continue;
+          }
+
+          const startKey = (entry.start_time ?? "").slice(0, 5);
+          const key = `${date}|${startKey}`;
+          const alreadyPicked = new Set(
+            existingAssignments.filter(a => a.substitute_date === date && a.slot_number === entry.slot_number).map(a => a.substitute_teacher_id)
+          );
+          const usedNow = usedThisRun[key] ?? new Set<string>();
+          const preUsed = new Set([...usedNow, ...alreadyPicked]);
+
+          const pool = getSortedSubstituteCandidates(entry, date, dow, timetableEntries, allTeachers, user.id, onLeave, preUsed, user, runFormCounts, cIndex);
+          const chosenItem = pickCandidate(pool);
 
           if (chosenItem) {
             usedNow.add(chosenItem.teacher.id); usedThisRun[key] = usedNow;
@@ -1535,7 +1574,7 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
     return { taught, dbAssigned: dbList.length, formCount, total: taught + dbList.length + formCount, conflict };
   }
 
-  const missingCount = preview.filter(p => !p.substitute_teacher_id).length;
+ const missingCount = preview.filter(p => !p.covered && !p.substitute_teacher_id).length;
 
   return (
     <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4">
@@ -1581,12 +1620,27 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
               )}
               <div className="space-y-2">
                 {preview.map((p, i) => {
+                  if (p.covered) {
+                    return (
+                      <div key={i} className="border-2 border-emerald-200 bg-emerald-50 rounded-xl p-3 flex items-center gap-3 flex-wrap">
+                        <div className="w-28 shrink-0 text-xs">
+                          <p className="font-black text-emerald-700">{toThaiDate(p.substitute_date)}</p>
+                          <p className="text-emerald-500">คาบ {p.slot_number ?? "-"}</p>
+                          <p className="text-emerald-600 font-bold truncate">{p.subject_name ?? ""}</p>
+                        </div>
+                        <div className="flex-1 text-xs font-bold text-emerald-700">
+                          👥 {p.coTeacherName ?? "ครูอีกท่าน"} สอนคู่อยู่แล้ว — ไม่ต้องจัดครูสอนแทน
+                        </div>
+                      </div>
+                    );
+                  }
                   const entry = timetableEntries.find(e => e.id === p.timetable_entry_id) ?? null;
                   const busyIds = new Set(
                     timetableEntries.filter(e => e.day_of_week === dowOf(p.substitute_date) && e.slot_number === p.slot_number)
                       .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
                   );
-                  const optionsRaw = allTeachers.filter(t => t.id !== user.id && !busyIds.has(t.id))
+                  const optionsRaw = allTeachers
+                    .filter(t => t.id !== user.id && !busyIds.has(t.id) && isSelectableTeacherLv(t))
                     // ★ ตัดครูที่สอนแทนคนอื่นอยู่แล้วในคาบเวลาเดียวกันนี้ออกจากตัวเลือกไปเลย
                     .filter(t => !statsFor(t.id, p.substitute_date, p.slot_number)?.conflict);
                   // ★ เรียง: ครูประจำชั้น -> สายชั้นคาบนี้ -> สายชั้นผู้ลา -> วิชาเดียวกัน -> ที่เหลือ
