@@ -1893,7 +1893,7 @@ if (docFile) {
 
       <div className="flex-1 px-4 py-5 max-w-4xl w-full mx-auto space-y-5">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-          <label className="block text-sm font-bold text-slate-600 mb-3">ประเภทการลา (เช่น ลากรณีฉุกเฉิน) <span className="text-red-500">*</span></label>
+          <label className="block text-sm font-bold text-slate-600 mb-3">ประเภทการลา (เช่น ลากรณีฉุกเฉิน<span className="text-red-500">*</span></label>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
             {LEAVE_TYPE_LIST.map(({key,label,icon})=>{
               const c=COLORS[key]??COLORS.other; const active=leaveType===key;

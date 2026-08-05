@@ -17,7 +17,7 @@ type SubjectSection = {
   id: string; subject_id: string; classroom_id: string; academic_year_id: string;
   teacher_id: string; co_teacher_id?: string; join_code: string; is_active: boolean;
 };
-type EnrolledStudent = { id: string; title?: string; first_name: string; last_name: string; student_number: number; avatar_url?: string };
+type EnrolledStudent = { id: string; title?: string; first_name: string; last_name: string; seat_number: number; avatar_url?: string };
 
 function displayName(u?: Teacher | null) {
   if (!u) return "—";
@@ -80,7 +80,7 @@ function RandomizerTool({ students }: { students: EnrolledStudent[] }) {
         {picked ? (
           <div>
             <p className="text-3xl font-black text-blue-700">{picked.title} {picked.first_name} {picked.last_name}</p>
-            <p className="text-slate-400 font-bold mt-1">เลขที่ {picked.student_number}</p>
+            <p className="text-slate-400 font-bold mt-1">เลขที่ {picked.seat_number}</p>
           </div>
         ) : (
           <p className="text-slate-300 font-bold">กดปุ่มด้านล่างเพื่อสุ่มชื่อ</p>
@@ -230,8 +230,8 @@ useEffect(() => {
     const studentIds = (enrollments ?? []).map((e: any) => e.student_id);
     if (studentIds.length > 0) {
       const { data: studentsData } = await supabase
-        .from("students").select("id,title,first_name,last_name,student_number,avatar_url")
-        .in("id", studentIds).order("student_number");
+        .from("students").select("id,title,first_name,last_name,seat_number,avatar_url")
+.in("id", studentIds).order("seat_number");
       setStudents((studentsData ?? []) as EnrolledStudent[]);
     } else {
       setStudents([]);
@@ -368,7 +368,7 @@ useEffect(() => {
                     )}
                     <div className="min-w-0">
                       <p className="text-xs font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
-                      <p className="text-[10px] text-slate-400">เลขที่ {s.student_number}</p>
+                      <p className="text-[10px] text-slate-400">เลขที่ {s.seat_number}</p>
                     </div>
                   </div>
                 ))}

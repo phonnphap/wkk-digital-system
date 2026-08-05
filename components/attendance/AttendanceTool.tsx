@@ -6,7 +6,7 @@ type Status = "present" | "absent" | "late" | "leave";
 
 type Student = {
   id: string; title?: string; first_name: string; last_name: string;
-  student_number: number; avatar_url?: string;
+  seat_number: number; avatar_url?: string;
 };
 
 type ReferenceInfo = { status: Status };
@@ -168,7 +168,7 @@ export default function AttendanceTool({
                   </span>
                 )}
               </p>
-              <p className="text-[10px] text-slate-400">เลขที่ {s.student_number}</p>
+              <p className="text-[10px] text-slate-400">เลขที่ {s.seat_number}</p>
             </div>
             <div className="flex gap-1 shrink-0">
               {(Object.keys(STATUS_CONFIG) as Status[]).map(st => {

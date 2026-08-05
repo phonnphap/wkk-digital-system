@@ -38,8 +38,8 @@ type Profile = {
 
 type LeaveSummaryRow = { leave_type: string; total_days: number; used_days: number; remaining_days: number };
 type Training = { id: string; title: string; organizer: string | null; hours: number | null; training_date: string | null; certificate_url: string | null };
-type Award = { id: string; title: string; level: string | null; award_date: string | null; image_url: string | null };
-type Material = { id: string; title: string; subject: string | null; submitted_at: string };
+type Award = { id: string; title: string; award_level: string | null; date_received: string | null; image_cover: string | null };
+type Material = { id: string; title: string; subject_group: string | null; created_at: string };
 type PendingTask = { id: string; label: string; path: string };
 type AttendanceRow = { work_date: string; status: string; late_minutes: number; early_leave_minutes: number; eval_round: number };
 
@@ -130,8 +130,8 @@ export default function TeacherPortfolioPage() {
         supabase.from("v_leave_summary").select("leave_type,total_days,used_days,remaining_days").eq("user_id", me.id).eq("fiscal_year", fy),
         supabase.from("v_leave_count_summary").select("used_count,remaining_count").eq("user_id", me.id).eq("fiscal_year", fy).maybeSingle(),
         supabase.from("trainings").select("id,title,organizer,hours,training_date,certificate_url").eq("user_id", me.id).order("training_date", { ascending: false }).limit(10),
-        supabase.from("awards").select("id,title,level,award_date,image_url").eq("user_id", me.id).order("award_date", { ascending: false }).limit(10),
-        supabase.from("teaching_materials").select("id,title,subject,submitted_at").eq("user_id", me.id).order("submitted_at", { ascending: false }).limit(10),
+        supabase.from("awards").select("id,title,award_level,date_received,image_cover").eq("created_by", me.id).order("date_received", { ascending: false }).limit(10),
+supabase.from("teaching_materials").select("id,title,subject_group,created_at").eq("uploaded_by", me.id).order("created_at", { ascending: false }).limit(10),
         supabase.from("v_attendance_enriched").select("work_date,status,late_minutes,early_leave_minutes,eval_round").eq("user_id", me.id).eq("fiscal_year", fy),
       ]);
       setLeaveSummary(quotaRows || []);
@@ -442,15 +442,33 @@ export default function TeacherPortfolioPage() {
           title="🏆 รางวัลและความภาคภูมิใจ"
           emptyText="ยังไม่มีรางวัลที่บันทึกไว้"
           items={awards}
-          renderItem={(a: Award) => (
-            <div key={a.id} className="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
-              <div className="w-9 h-9 rounded-lg bg-yellow-100 text-yellow-600 flex items-center justify-center shrink-0"><Trophy className="w-4 h-4" /></div>
-              <div>
-                <p className="text-sm font-bold text-slate-800">{a.title}</p>
-                <p className="text-xs text-slate-400">{a.level || "—"}</p>
-              </div>
-            </div>
-          )}
+// Awards section — เดิมใช้ a.level, ให้เปลี่ยนเป็น a.award_level
+renderItem={(a: Award) => (
+  <div key={a.id} className="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
+    <div className="w-9 h-9 rounded-lg bg-yellow-100 text-yellow-600 flex items-center justify-center shrink-0"><Trophy className="w-4 h-4" /></div>
+    <div>
+      <p className="text-sm font-bold text-slate-800">{a.title}</p>
+      <p className="text-xs text-slate-400">{a.award_level || "—"}</p>
+    </div>
+  </div>
+)}
+        />
+
+        {/* Materials */}
+        <SectionList
+          title="📁 สื่อการสอนที่อัปโหลด"
+          emptyText="ยังไม่มีสื่อการสอนที่อัปโหลด"
+          items={materials}
+// Materials section — เดิมใช้ m.subject, ให้เปลี่ยนเป็น m.subject_group
+renderItem={(m: Material) => (
+  <div key={m.id} className="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
+    <div className="w-9 h-9 rounded-lg bg-cyan-100 text-cyan-600 flex items-center justify-center shrink-0"><FolderOpen className="w-4 h-4" /></div>
+    <div>
+      <p className="text-sm font-bold text-slate-800">{m.title}</p>
+      <p className="text-xs text-slate-400">{m.subject_group || "—"}</p>
+    </div>
+  </div>
+)}
         />
 
         {/* Teaching materials */}
@@ -463,7 +481,7 @@ export default function TeacherPortfolioPage() {
               <div className="w-9 h-9 rounded-lg bg-cyan-100 text-cyan-600 flex items-center justify-center shrink-0"><FolderOpen className="w-4 h-4" /></div>
               <div>
                 <p className="text-sm font-bold text-slate-800">{m.title}</p>
-                <p className="text-xs text-slate-400">{m.subject || "—"}</p>
+                <p className="text-xs text-slate-400">{m.subject_group || "—"}</p>
               </div>
             </div>
           )}

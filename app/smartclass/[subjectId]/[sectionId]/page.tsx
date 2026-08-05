@@ -12,7 +12,7 @@ const supabase = createClient();
 type Subject = { id: string; subject_code: string; name_th: string };
 type Classroom = { id: string; room_name?: string; grade_group?: string };
 type SectionRow = { id: string; join_code: string; classroom_id: string };
-type Student = { id: string; title?: string; first_name: string; last_name: string; student_number: number; avatar_url?: string };
+type Student = { id: string; title?: string; first_name: string; last_name: string; seat_number: number; avatar_url?: string };
 
 type TabKey = "roster" | "attendance" | "random" | "tools";
 
@@ -149,7 +149,7 @@ function RandomPickerTab({ students }: { students: Student[] }) {
               </div>
             )}
             <p className="mt-3 text-xl font-black text-emerald-700">{winner.first_name} {winner.last_name}</p>
-            <p className="text-slate-400 text-xs font-bold">เลขที่ {winner.student_number}</p>
+            <p className="text-slate-400 text-xs font-bold">เลขที่ {winner.seat_number}</p>
           </div>
         ) : (
           <div className="w-full">
@@ -418,9 +418,9 @@ const [homeroomMap, setHomeroomMap] = useState<Record<string, { status: "present
       if (sec?.classroom_id) {
         const { data: studentsData } = await supabase
           .from("students")
-          .select("id, title, first_name, last_name, student_number, avatar_url")
-          .eq("classroom_id", sec.classroom_id)
-          .order("student_number");
+          .select("id, title, first_name, last_name, seat_number, avatar_url")
+.eq("classroom_id", sec.classroom_id)
+.order("seat_number");
         setStudents((studentsData ?? []) as Student[]);
       }
 
@@ -537,7 +537,7 @@ useEffect(() => {
                     )}
                     <div className="min-w-0">
                       <p className="text-xs font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
-                      <p className="text-[10px] text-slate-400">เลขที่ {s.student_number}</p>
+                      <p className="text-[10px] text-slate-400">เลขที่ {s.seat_number}</p>
                     </div>
                   </div>
                 ))}
