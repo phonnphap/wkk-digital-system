@@ -7,7 +7,9 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   LayoutDashboard, UserCheck, CalendarDays, FileText,
-  Wrench, Car, Monitor, FolderOpen, FileEdit, Trophy, Calendar, RefreshCw, Users, LogOut, Bell, Settings
+  Wrench, Car, Monitor, FolderOpen, FileEdit, Trophy, Calendar, RefreshCw, Users, LogOut, Bell, Settings,
+  User,
+  GraduationCap
 } from "lucide-react";
 
 // ══════════════════════════════════════════════════════════
@@ -461,6 +463,7 @@ function StatusBadge({ status }: { status: ItemStatus }) {
         { name: "เลขเกียรติบัตร/คำสั่ง/บันทึก", icon: <FileText className="w-6 h-6" />, color: "bg-indigo-500", path: "/document-reg" },
         { name: "รายงานการอบรมรายบุคคล", icon: <FolderOpen className="w-6 h-6" />, color: "bg-violet-500", path: "/training" },
         { name: "คลังเกียรติยศและผลงาน", icon: <Trophy className="w-6 h-6" />, color: "bg-yellow-500", path: "/honor/awards", status: "live" as ItemStatus },
+        { name: "ประวัติและผลการปฏิบัติงาน", icon: <User className="w-6 h-6" />, color: "bg-sky-500", path: "/portfolio", status: "wip" as ItemStatus },
       ]
     },
     {
@@ -774,6 +777,13 @@ return (
                 </div>
                 <span className="text-sm font-extrabold text-slate-700 group-hover:text-rose-600">จัดการข้อมูลผู้ใช้</span>
               </button>
+              <button onClick={() => handleAdminMenuClick("/admin/teachers")}
+  className="flex items-center gap-4 p-4 rounded-xl border border-rose-100 bg-white hover:border-rose-400 hover:shadow-md transition-all group text-left">
+  <div className="w-11 h-11 rounded-xl bg-rose-500 text-white flex items-center justify-center shadow-sm shrink-0 group-hover:scale-105 transition-transform">
+    <GraduationCap className="w-6 h-6" />
+  </div>
+  <span className="text-sm font-extrabold text-slate-700 group-hover:text-rose-600">ข้อมูลครูทั้งหมด</span>
+</button>
               <button onClick={() => handleAdminMenuClick("/admin/settings")}
                 className="flex items-center gap-4 p-4 rounded-xl border border-rose-100 bg-white hover:border-rose-400 hover:shadow-md transition-all group text-left">
                 <div className="w-11 h-11 rounded-xl bg-rose-600 text-white flex items-center justify-center shadow-sm shrink-0 group-hover:scale-105 transition-transform">
