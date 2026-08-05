@@ -88,6 +88,17 @@ function thaiTime(t?: string) { return t ? t.slice(0,5)+" น." : "—"; }
 function ymd(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
+// ★ หาวันจันทร์-ศุกร์ทั้งหมดในช่วงใบลา ใช้เทียบว่าจัดสอนแทนครบทุกวันหรือยัง
+function getLeaveWeekdayDates(lr: { start_date: string; end_date: string }): string[] {
+  const dates: string[] = [];
+  let d = new Date(lr.start_date + "T00:00:00");
+  const last = new Date(lr.end_date + "T00:00:00");
+  while (d <= last) {
+    if (d.getDay() >= 1 && d.getDay() <= 5) dates.push(ymd(d));
+    d = addDays(d, 1);
+  }
+  return dates;
+}
 function dowOf(dateStr: string): number { return new Date(dateStr + "T00:00:00").getDay(); }
 function toMinutes(t?: string | null): number {
   if (!t) return NaN;
@@ -139,7 +150,7 @@ const STATUS_SWAP: Record<string,{label:string;cls:string}> = {
 const STATUS_SUB: Record<string,{label:string;cls:string}> = {
   assigned:  { label:"จัดแล้ว",  cls:"bg-[#FCE7F3] text-[#DB2777] border-[#FBCFE8]" },
   confirmed: { label:"ยืนยัน",   cls:"bg-emerald-50 text-emerald-700 border-emerald-300" },
-  done:      { label:"เสร็จสิ้น",cls:"bg-[#FCE7F3] text-slate-600 border-slate-300" },
+  done:      { label:"สอนแทนเรียบร้อย",cls:"bg-slate-100 text-slate-600 border-slate-300" },
   cancelled: { label:"ยกเลิก",   cls:"bg-red-50 text-red-700 border-red-300" },
 };
 const SOURCE_LABEL: Record<string,{label:string;cls:string}> = {
@@ -199,28 +210,36 @@ function sameGradeTeacherIds(absentTeacher: User | null | undefined, allTeachers
 // 0 = สายชั้นเดียวกับห้อง/คาบที่จะไปสอนแทน  1 = สายชั้นเดียวกับครูที่ลา  2 = สอนวิชาเดียวกันอยู่แล้ว  3 = ที่เหลือ
 function substitutePriority(
   candidate: User,
-  entry: { grade_group?: string | null; subject_id?: string } | null | undefined,
+  entry: { classroom_id?: string; grade_group?: string | null; subject_id?: string } | null | undefined,
   absentTeacher: User | null | undefined,
-  allEntries: TimetableEntry[]
+  allEntries: TimetableEntry[],
+  homeroomMap: Record<string, string>
 ): number {
+  // 0 = ครูประจำชั้นของห้องที่จะไปสอนแทน
+  if (entry?.classroom_id && homeroomMap[entry.classroom_id] === candidate.id) return 0;
+  // 1 = สายชั้นเดียวกับคาบที่กำลังจะไปสอนแทน
   const roomGrade = entry ? roomGradeCode(entry.grade_group) : null;
-  if (roomGrade && candidate.grade_level === roomGrade) return 0;
-  if (absentTeacher?.grade_level && candidate.grade_level === absentTeacher.grade_level) return 1;
+  if (roomGrade && candidate.grade_level === roomGrade) return 1;
+  // 2 = สายชั้นเดียวกับครูที่ลา
+  if (absentTeacher?.grade_level && candidate.grade_level === absentTeacher.grade_level) return 2;
+  // 3 = หมวดวิชาเดียวกัน (สอนวิชาเดียวกันอยู่แล้ว)
   const teachesSameSubject = entry?.subject_id
     ? allEntries.some(e => (e.teacher_id === candidate.id || e.teacher_id_2 === candidate.id) && e.subject_id === entry.subject_id)
     : false;
-  if (teachesSameSubject) return 2;
-  return 3;
+  if (teachesSameSubject) return 3;
+  // 4 = อื่นๆ
+  return 4;
 }
 function sortTeachersByGrade(
   candidates: User[],
-  entry: { grade_group?: string | null; subject_id?: string } | null | undefined,
+  entry: { classroom_id?: string; grade_group?: string | null; subject_id?: string } | null | undefined,
   absentTeacher: User | null | undefined,
-  allEntries: TimetableEntry[]
+  allEntries: TimetableEntry[],
+  homeroomMap: Record<string, string>
 ): User[] {
   return [...candidates].sort((a, b) => {
-    const pa = substitutePriority(a, entry, absentTeacher, allEntries);
-    const pb = substitutePriority(b, entry, absentTeacher, allEntries);
+    const pa = substitutePriority(a, entry, absentTeacher, allEntries, homeroomMap);
+    const pb = substitutePriority(b, entry, absentTeacher, allEntries, homeroomMap);
     if (pa !== pb) return pa - pb;
     return fullName(a).localeCompare(fullName(b), "th");
   });
@@ -461,6 +480,17 @@ function sortSubsForPrint(records: SubRecord[]): SubRecord[] {
     return (a.slot_number ?? 0) - (b.slot_number ?? 0);
   });
 }
+// ★ ถ้าวันที่สอนแทนผ่านไปแล้ว และยังเป็น "จัดแล้ว" ให้เปลี่ยนเป็น "สอนแทนเรียบร้อย" อัตโนมัติ
+// คืนค่ารายการที่อัปเดตแล้ว (สำหรับใช้ใน state ทันที) และยิง update ไป Supabase แบบไม่บล็อก UI
+function markPastAssignedAsDone(records: SubRecord[]): SubRecord[] {
+  const today = ymd(new Date());
+  const idsToMark = records.filter(r => r.status === "assigned" && r.substitute_date < today).map(r => r.id);
+  if (idsToMark.length > 0) {
+    supabase.from("substitution_records").update({ status: "done" }).in("id", idsToMark)
+      .then(({ error }) => { if (error) console.error("[markPastAssignedAsDone] error:", error.message); });
+  }
+  return records.map(r => (r.status === "assigned" && r.substitute_date < today) ? { ...r, status: "done" } : r);
+}
 
 function printTeacherSubStat(records: SubRecord[], users: User[]) {
   const map: Record<string,{name:string;hours:number;count:number}> = {};
@@ -616,8 +646,9 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
 // 3) รายชื่อครูที่ว่าง เรียงตามกฎ: ครูประจำชั้น(ป.1/ป.2) -> สายชั้นเดียวกัน
 //    (คาบว่างเยอะสุดก่อน, เท่ากันดูสถิติสอนแทนน้อยสุดก่อน) -> วิชาเดียวกัน -> ที่เหลือ
 // ══════════════════════════════════════════════════════════
-function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academicYearId, initialReason, mode = "normal", fixedTargetTeacherId, onSave, onClose }: {
+function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academicYearId, homeroomMap, initialReason, mode = "normal", fixedTargetTeacherId, onSave, onClose }: {
   user: User; allEntries: TimetableEntry[]; allTeachers: User[]; allTimeSlots: any[]; academicYearId: string;
+  homeroomMap: Record<string, string>;
   initialReason?: string; mode?: "normal" | "repay"; fixedTargetTeacherId?: string;
   onSave: () => void; onClose: () => void;
 }) {
@@ -682,8 +713,8 @@ function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academi
     if (!selectedEntry || dow === null) return [] as User[];
     const free = computeFreeTeachersForEntry(selectedEntry, swapDate, allEntries, allTeachers, user.id)
       .filter(t => !onLeaveIds.has(t.id));
-    return sortTeachersByGrade(free, selectedEntry, user, allEntries);
-  }, [selectedEntry, dow, swapDate, allEntries, allTeachers, user, onLeaveIds]);
+    return sortTeachersByGrade(free, selectedEntry, user, allEntries, homeroomMap);
+  }, [selectedEntry, dow, swapDate, allEntries, allTeachers, user, onLeaveIds, homeroomMap]);
 
   const candidateLoadMap = useMemo(() => {
     if (dow === null) return {} as Record<string, number>;
@@ -855,10 +886,11 @@ notifyTeams(targetT?.email, `🔄 ${fullName(user)} ขอแลกคาบก�
 }
 
 // ── AssignSubModal ──────────────────────────────────────────
-function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicYearId, currentUser, onSave, onClose }: {
+function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicYearId, currentUser, homeroomMap, restrictDates, onSave, onClose }: {
   leaveRequest: LeaveRequest; teachers: User[];
   entries: TimetableEntry[]; subRecords: SubRecord[]; academicYearId: string;
-  currentUser: User; onSave: () => void; onClose: () => void;
+  currentUser: User; homeroomMap: Record<string, string>; restrictDates?: string[];
+  onSave: () => void; onClose: () => void;
 }) {
   const absentId = leaveRequest.user_id;
   const absentEntries = entries.filter(e => e.teacher_id === absentId || e.teacher_id_2 === absentId);
@@ -866,12 +898,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
   () => teachers.find(t => t.id === absentId) ?? null,
   [teachers, absentId]
 );
-  const leaveDates: string[] = [];
-  const start = new Date(leaveRequest.start_date+"T00:00:00");
-  const end   = new Date(leaveRequest.end_date+"T00:00:00");
-  for (let d=new Date(start); d<=end; d=addDays(d,1)) {
-    if (d.getDay()>=1&&d.getDay()<=5) leaveDates.push(ymd(d));
-  }
+  const leaveDates: string[] = (restrictDates && restrictDates.length > 0) ? restrictDates : getLeaveWeekdayDates(leaveRequest);
 
   const [assignments, setAssignments] = useState<Record<string, string>>(
     () => Object.fromEntries(absentEntries.flatMap(e =>
@@ -918,7 +945,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
         const scored = candidates.map(t => {
           const tKey = `${t.id}_${date}`;
           const load = computeTotalLoadForDay(t.id, dow, date, entries, subRecords) + (tally[tKey] ?? 0);
-          const priority = substitutePriority(t, entry, absentTeacher, entries);
+          const priority = substitutePriority(t, entry, absentTeacher, entries, homeroomMap);
           return { t, load, priority };
         }).sort((a, b) => a.priority - b.priority || a.load - b.load || fullName(a.t).localeCompare(fullName(b.t), "th"));
         const pick = scored[0].t;
@@ -1060,7 +1087,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
         <TeacherSearchSelect
           teachers={sortTeachersByGrade(
             computeFreeTeachersForEntry(entry, date, entries, teachers, absentId),
-            entry, absentTeacher, entries
+            entry, absentTeacher, entries, homeroomMap
           )}
           value={assignments[key] || ""}
           onChange={id => setAsgn(key, id)}
@@ -1095,9 +1122,9 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
 // ══════════════════════════════════════════════════════════
 // ── ManualAssignModal — จัดสอนแทนทันทีไม่ต้องรอใบลา (ลาผ่าตัด/ลายาว)
 // ══════════════════════════════════════════════════════════
-function ManualAssignModal({ selectableTeachers, allTeachers, entries, subRecords, academicYearId, currentUser, onSave, onClose }: {
+function ManualAssignModal({ selectableTeachers, allTeachers, entries, subRecords, academicYearId, currentUser, homeroomMap, onSave, onClose }: {
   selectableTeachers: User[]; allTeachers: User[]; entries: TimetableEntry[]; subRecords: SubRecord[]; academicYearId: string;
-  currentUser: User; onSave: () => void; onClose: () => void;
+  currentUser: User; homeroomMap: Record<string, string>; onSave: () => void; onClose: () => void;
 }) {
   const [absentTeacherId, setAbsentTeacherId] = useState("");
   const [startDate, setStartDate] = useState(ymd(new Date()));
@@ -1130,18 +1157,29 @@ const absentTeacher = useMemo(
     setAssignments(prev => ({ ...prev, [key]: val }));
   }
 
-  // ★ สุ่มเลือกครูสอนแทน — จากครูสายชั้นเดียวกับครูที่ลา ที่ว่างตรงคาบ และมีคาบสอนวันนั้นน้อยที่สุด
-  // ถ้าไม่มีครูสายชั้นเดียวกันว่างเลย จะสุ่มจากครูว่างทั้งหมดแทน (กันเคสไม่มีตัวเลือก)
+  // ★ จำนวนคาบรวมของครู = ตารางสอนจริง + สอนแทนไปแล้วใน subRecords + คาบที่กำลังจัดในเซสชันนี้ (ยังไม่กดบันทึก)
+  function sessionExtraLoad(teacherId: string, date: string): number {
+    return Object.entries(assignments).filter(([k, subId]) => subId === teacherId && k.endsWith(`_${date}`)).length;
+  }
+  function dayLoadMapManual(date: string, candidates: User[]): Record<string, number> {
+    const dow = dowOf(date);
+    const map: Record<string, number> = {};
+    for (const t of candidates) {
+      map[t.id] = computeTotalLoadForDay(t.id, dow, date, entries, subRecords) + sessionExtraLoad(t.id, date);
+    }
+    return map;
+  }
+
+  // ★ สุ่มเลือกครูสอนแทน — จากครูสายชั้นเดียวกับครูที่ลา ที่ว่างตรงคาบ และมีคาบสอนวันนั้นน้อยที่สุด (นับรวมคาบที่กำลังจัดในเซสชันนี้ด้วย)
   function randomAssignTeacher(key: string, entry: TimetableEntry, date: string) {
     const dow = dowOf(date);
     const candidatesAll = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId);
     const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, entries, absentTeacherId);
     const candidates = candidatesAll.filter(t => !conflictMapForEntry[t.id]);
     if (candidates.length === 0) { alert("⚠️ ไม่มีครูว่างในคาบนี้ (หรือครูที่ว่างกำลังสอนแทนคนอื่นในคาบเดียวกันอยู่แล้ว)"); return; }
-    // ★ เลือกจากกลุ่มความสำคัญสูงสุดก่อน (สายชั้นคาบนี้ -> สายชั้นผู้ลา -> วิชาเดียวกัน -> ที่เหลือ)
-    const bestPriority = Math.min(...candidates.map(t => substitutePriority(t, entry, absentTeacher, entries)));
-    const pool = candidates.filter(t => substitutePriority(t, entry, absentTeacher, entries) === bestPriority);
-    const scored = pool.map(t => ({ t, load: computeTotalLoadForDay(t.id, dow, date, entries, subRecords) }));
+    const bestPriority = Math.min(...candidates.map(t => substitutePriority(t, entry, absentTeacher, entries, homeroomMap)));
+    const pool = candidates.filter(t => substitutePriority(t, entry, absentTeacher, entries, homeroomMap) === bestPriority);
+    const scored = pool.map(t => ({ t, load: computeTotalLoadForDay(t.id, dow, date, entries, subRecords) + sessionExtraLoad(t.id, date) }));
     const minLoad = Math.min(...scored.map(s => s.load));
     const minPool = scored.filter(s => s.load === minLoad).map(s => s.t);
     const pick = minPool[Math.floor(Math.random() * minPool.length)];
@@ -1281,11 +1319,11 @@ const absentTeacher = useMemo(
 
   const dow = dowOf(date);
   const candidates = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId);
-  const sortedCandidates = sortTeachersByGrade(candidates, entry, absentTeacher, entries);
-  const loadMap = Object.fromEntries(sortedCandidates.map(t => [t.id, computeTotalLoadForDay(t.id, dow, date, entries, subRecords)]));
+  const sortedCandidates = sortTeachersByGrade(candidates, entry, absentTeacher, entries, homeroomMap);
+  const loadMap = dayLoadMapManual(date, sortedCandidates);
   const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, entries, absentTeacherId);
   const pickedId = assignments[key] || "";
-  const pickedLoad = pickedId ? computeTotalLoadForDay(pickedId, dow, date, entries, subRecords) : null;
+  const pickedLoad = pickedId ? (loadMap[pickedId] ?? null) : null;
   return (
     <div key={key} className="flex items-center gap-3 bg-[#FDF2F8] rounded-xl px-4 py-3">
                               <div className="shrink-0 text-center w-16">
@@ -1351,6 +1389,7 @@ export default function SubstitutionPage() {
   const [tab, setTab] = useState<"swap"|"substitute"|"stat">("swap");
   const [academicYear, setAcademicYear] = useState<AcademicYear|null>(null);
   const [teachers, setTeachers] = useState<User[]>([]);
+  const [homeroomMap, setHomeroomMap] = useState<Record<string, string>>({});
   const [allEntries, setAllEntries] = useState<TimetableEntry[]>([]);
   const [allTimeSlots, setAllTimeSlots] = useState<any[]>([]);
   const [swapRequests, setSwapRequests] = useState<SwapRequest[]>([]);
@@ -1358,6 +1397,7 @@ export default function SubstitutionPage() {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [showSwapModal, setShowSwapModal] = useState(false);
   const [assignLeave, setAssignLeave] = useState<LeaveRequest|null>(null);
+  const [assignRestrictDates, setAssignRestrictDates] = useState<string[] | undefined>(undefined);
   const [showManualAssign, setShowManualAssign] = useState(false);
   const [filterDate, setFilterDate] = useState("");
   const [filterTeacher, setFilterTeacher] = useState("");
@@ -1465,7 +1505,7 @@ if (tchErr) {
       supabase.from("time_slots")
         .select("id,slot_number,start_time,end_time,slot_label,is_break,schedule_type")
         .order("slot_number", { ascending: true }),
-      supabase.from("classrooms").select("id,room_name,grade_group,schedule_type"),
+      supabase.from("classrooms").select("id,room_name,grade_group,schedule_type,homeroom_teacher_id"),
       supabase.from("subjects").select("id,subject_code,name_th"),
     ]);
 
@@ -1473,6 +1513,9 @@ if (tchErr) {
     setAllTimeSlots(timeSlots);
     const classroomsMap = Object.fromEntries((classroomsRes.data || []).map((c: any) => [c.id, c]));
     const subjectsMap = Object.fromEntries((subjectsRes.data || []).map((s: any) => [s.id, s]));
+    const hrMap: Record<string, string> = {};
+    (classroomsRes.data || []).forEach((c: any) => { if (c.homeroom_teacher_id) hrMap[c.id] = c.homeroom_teacher_id; });
+    setHomeroomMap(hrMap);
 
     const allE = enrichEntries(entriesRes.data || [], classroomsMap, subjectsMap, timeSlots) as TimetableEntry[];
     setAllEntries(allE);
@@ -1507,7 +1550,7 @@ if (tchErr) {
       const slot = roomSlots.find((s: any) => s.id === r.time_slot_id) ?? timeSlots.find((s: any) => s.id === r.time_slot_id);
       return { ...r, subject_name: subj?.name_th ?? null, room_name: room?.room_name ?? null, grade_group: room?.grade_group ?? null, slot_label: slot?.slot_label ?? null, slot_number: slot?.slot_number ?? null };
     });
-    setSubRecords(enrichedSubs);
+    setSubRecords(markPastAssignedAsDone(enrichedSubs));
 
     // Leave requests (approved, within next 30 days)
     const from = ymd(new Date());
@@ -1519,6 +1562,7 @@ if (tchErr) {
       .order("start_date");
     setLeaveRequests((leaves ?? []) as LeaveRequest[]);
   }, [user]);
+  
 
   useEffect(() => { if (!loading && user) loadData(); }, [loading, user, loadData]);
 
@@ -1604,8 +1648,8 @@ const handleSubDeletePermanent = async (id: string) => {
 
   // ★ เรียงครูสายชั้นเดียวกับ "ครูที่ลา" ขึ้นก่อน
   const candidates = useMemo(
-    () => sortTeachersByGrade(rawCandidates, entry, absentTeacher, allEntries),
-    [rawCandidates, absentTeacher, entry, allEntries]
+    () => sortTeachersByGrade(rawCandidates, entry, absentTeacher, allEntries, homeroomMap),
+    [rawCandidates, absentTeacher, entry, allEntries, homeroomMap]
   );
 
   // ★ จำนวนคาบที่แต่ละคนสอนอยู่แล้วในวันนั้น — โชว์เป็น badge ข้างชื่อ
@@ -2061,9 +2105,15 @@ const adminFilteredSwaps = useMemo(() => {
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {leaveRequests.map(lr => {
-                    const alreadyAssigned = subRecords.some(r => r.leave_request_id === lr.id);
+                    const expectedDates = getLeaveWeekdayDates(lr);
+                    const assignedDates = new Set(
+                      subRecords.filter(r => r.leave_request_id === lr.id && r.status !== "cancelled").map(r => r.substitute_date)
+                    );
+                    const missingDates = expectedDates.filter(d => !assignedDates.has(d));
+                    const fullyAssigned = expectedDates.length > 0 && missingDates.length === 0;
+                    const partiallyAssigned = assignedDates.size > 0 && missingDates.length > 0;
                     return (
-                      <div key={lr.id} className={`rounded-2xl border p-4 ${alreadyAssigned ? "bg-emerald-50 border-emerald-200" : "bg-white border-[#FBCFE8]"}`}>
+                      <div key={lr.id} className={`rounded-2xl border p-4 ${fullyAssigned ? "bg-emerald-50 border-emerald-200" : partiallyAssigned ? "bg-amber-50 border-amber-300" : "bg-white border-[#FBCFE8]"}`}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="font-bold text-slate-800 text-sm truncate">{fullName(lr.user)}</p>
@@ -2073,12 +2123,22 @@ const adminFilteredSwaps = useMemo(() => {
     ⏳ ยังรออนุมัติ — จัดล่วงหน้าได้เลย
   </span>
 )}
+                            {partiallyAssigned && (
+                              <span className="block mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-lg bg-amber-100 text-amber-700 border border-amber-300 w-fit">
+                                ⚠️ ใบลาแก้ไขเพิ่ม — ยังขาด {missingDates.length} วัน
+                              </span>
+                            )}
                             <p className="text-xs text-slate-400 mt-0.5">{{sick:"ลาป่วย",personal:"ลากิจ",official:"ลาราชการ",maternity:"ลาคลอด",ordination:"ลาอุปสมบท"}[lr.leave_type]??lr.leave_type}</p>
                           </div>
-                          {alreadyAssigned ? (
+                          {fullyAssigned ? (
                             <span className="text-xs font-bold px-2 py-1 rounded-lg border bg-emerald-50 text-emerald-700 border-emerald-300 shrink-0">จัดแล้ว ✓</span>
+                          ) : partiallyAssigned ? (
+                            <button onClick={() => { setAssignLeave(lr); setAssignRestrictDates(missingDates); }}
+                              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shrink-0">
+                              จัดวันที่เพิ่ม
+                            </button>
                           ) : (
-                            <button onClick={() => setAssignLeave(lr)}
+                            <button onClick={() => { setAssignLeave(lr); setAssignRestrictDates(undefined); }}
                               className="px-3 py-1.5 bg-[#DB2777] hover:bg-[#9D174D] text-white text-xs font-bold rounded-xl shrink-0">
                               จัดสอนแทน
                             </button>
@@ -2258,7 +2318,14 @@ const adminFilteredSwaps = useMemo(() => {
 </td>
                 {canAssignSub && (
   <td className="px-4 py-3.5 whitespace-nowrap">
-    {r.status !== "cancelled" ? (
+    {r.status === "cancelled" ? (
+      <button onClick={()=>handleSubDeletePermanent(r.id)}
+        className="px-2.5 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold border border-red-300 transition-colors">
+        🗑️ ลบถาวร
+      </button>
+    ) : r.status === "done" ? (
+      <span className="text-xs text-slate-400 font-bold">🔒 ผ่านไปแล้ว แก้ไขไม่ได้</span>
+    ) : (
       <div className="flex gap-1.5">
         <button onClick={()=>setEditingSub(r)}
           className="px-2.5 py-1.5 rounded-lg bg-[#FDF2F8] hover:bg-[#FBCFE8] text-[#9D174D] text-xs font-bold border border-[#F9A8D4] transition-colors">
@@ -2269,11 +2336,6 @@ const adminFilteredSwaps = useMemo(() => {
           ✕ ยกเลิก
         </button>
       </div>
-    ) : (
-      <button onClick={()=>handleSubDeletePermanent(r.id)}
-        className="px-2.5 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold border border-red-300 transition-colors">
-        🗑️ ลบถาวร
-      </button>
     )}
   </td>
 )}
@@ -2415,7 +2477,7 @@ const adminFilteredSwaps = useMemo(() => {
       {showSwapModal && academicYear && (
   <SwapRequestModal
     user={user} allEntries={allEntries} allTeachers={teachers} allTimeSlots={allTimeSlots}
-    academicYearId={academicYear.id}
+    academicYearId={academicYear.id} homeroomMap={homeroomMap}
     initialReason={swapInitialReason}
     mode={swapMode}
     fixedTargetTeacherId={swapFixedTargetTeacherId}
@@ -2428,9 +2490,9 @@ const adminFilteredSwaps = useMemo(() => {
     leaveRequest={assignLeave}
     teachers={teachers} entries={allEntries} subRecords={subRecords}
     academicYearId={academicYear.id}
-    currentUser={user}
-    onSave={async()=>{ setAssignLeave(null); await loadData(); }}
-    onClose={()=>setAssignLeave(null)}
+    currentUser={user} homeroomMap={homeroomMap} restrictDates={assignRestrictDates}
+    onSave={async()=>{ setAssignLeave(null); setAssignRestrictDates(undefined); await loadData(); }}
+    onClose={()=>{ setAssignLeave(null); setAssignRestrictDates(undefined); }}
   />
 )}
       {editingSub && (
@@ -2450,7 +2512,7 @@ const adminFilteredSwaps = useMemo(() => {
     entries={allEntries}
     subRecords={subRecords}
     academicYearId={academicYear.id}
-    currentUser={user}
+    currentUser={user} homeroomMap={homeroomMap}
     onSave={async()=>{ setShowManualAssign(false); await loadData(); }}
     onClose={()=>setShowManualAssign(false)}
   />
