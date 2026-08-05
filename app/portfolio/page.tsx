@@ -2,21 +2,19 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   User, Phone, MessageCircle, GraduationCap, Pencil, X, Check,
   CalendarDays, Trophy, FolderOpen, FileText, AlertCircle, Send, Loader2,
+  ClipboardList, ArrowRight,
 } from "lucide-react";
 
-// ═══════════════════════════════════════════════════════════════════
-// ปีงบประมาณปัจจุบัน (พ.ศ.) — ต.ค.–ก.ย. นับปีงบประมาณไทย
-// ═══════════════════════════════════════════════════════════════════
 function currentFiscalYear() {
   const now = new Date();
   const beYear = now.getFullYear() + 543;
-  return now.getMonth() >= 9 ? beYear + 1 : beYear; // เดือน >= ต.ค. (index 9) นับปีงบถัดไป
+  return now.getMonth() >= 9 ? beYear + 1 : beYear;
 }
 
 type Profile = {
@@ -31,6 +29,11 @@ type Profile = {
   education_major: string | null;
   education_school: string | null;
   subject_group: string | null;
+  position: string | null;
+  department_id: string | null;
+  department?: { name: string } | null;
+  homeroom?: { room_name: string } | null;
+  homeroom_teacher_2?: { room_name: string } | null;    
 };
 
 type LeaveSummaryRow = { leave_type: string; total_days: number; used_days: number; remaining_days: number };
@@ -38,6 +41,7 @@ type Training = { id: string; title: string; organizer: string | null; hours: nu
 type Award = { id: string; title: string; level: string | null; award_date: string | null; image_url: string | null };
 type Material = { id: string; title: string; subject: string | null; submitted_at: string };
 type PendingTask = { id: string; label: string; path: string };
+type AttendanceRow = { work_date: string; status: string; late_minutes: number; early_leave_minutes: number; eval_round: number };
 
 const LEAVE_LABEL: Record<string, string> = { sick: "ลาป่วย", personal: "ลากิจ", maternity: "ลาคลอด" };
 
@@ -58,6 +62,7 @@ export default function TeacherPortfolioPage() {
   const [awards, setAwards] = useState<Award[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
 
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportForm, setSupportForm] = useState({ category: "edit_locked_field", subject: "", message: "" });
@@ -67,6 +72,28 @@ export default function TeacherPortfolioPage() {
   useEffect(() => {
     loadAll();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── สรุปการลงเวลาตามช่วงที่เลือก (day/month/term/year) ──
+  const attendanceStats = useMemo(() => {
+    const now = new Date();
+    const filtered = attendance.filter(r => {
+      const d = new Date(r.work_date);
+      if (period === "day") return d.toDateString() === now.toDateString();
+      if (period === "month") return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      if (period === "term") {
+        const round = (now.getMonth() >= 9 || now.getMonth() <= 2) ? 1 : 2;
+        return r.eval_round === round;
+      }
+      return true; // year = ทั้งปีงบ
+    });
+    const cnt = (s: string) => filtered.filter(r => r.status === s).length;
+    return {
+      present: cnt("present"),
+      late: cnt("late") + cnt("late_and_left_early"),
+      leftEarly: cnt("left_early") + cnt("late_and_left_early"),
+      absent: cnt("absent"),
+    };
+  }, [attendance, period]);
 
   async function loadAll() {
     setLoading(true);
@@ -78,15 +105,19 @@ export default function TeacherPortfolioPage() {
 
     const { data: me } = await supabase
       .from("users")
-      .select("id, first_name, last_name, role, phone, line_id, avatar_url, education_level, education_major, education_school, subject_group")
+      .select(`
+        id, first_name, last_name, role, phone, line_id, avatar_url,
+        education_level, education_major, education_school, subject_group, position, department_id,
+        department:departments(name),
+        homeroom:classrooms!classrooms_homeroom_teacher_id_fkey(room_name), homeroom_teacher_2:classrooms!classrooms_homeroom_teacher_2_id_fkey(room_name)
+      `)
       .eq("auth_id", user.id)
       .maybeSingle();
 
     if (me) {
-      setProfile(me as Profile);
-      setForm(me as Profile);
+      setProfile(me as unknown as Profile);
+      setForm(me as unknown as Profile);
 
-      // ── real-time: ฟัง UPDATE ของแถวตัวเองในตาราง users ──
       supabase
         .channel(`profile-${me.id}`)
         .on("postgres_changes", { event: "UPDATE", schema: "public", table: "users", filter: `id=eq.${me.id}` }, (payload) => {
@@ -95,21 +126,21 @@ export default function TeacherPortfolioPage() {
         .subscribe();
 
       const fy = currentFiscalYear();
-      const [{ data: quotaRows }, { data: countRow }, { data: tr }, { data: aw }, { data: mat }] = await Promise.all([
+      const [{ data: quotaRows }, { data: countRow }, { data: tr }, { data: aw }, { data: mat }, { data: att }] = await Promise.all([
         supabase.from("v_leave_summary").select("leave_type,total_days,used_days,remaining_days").eq("user_id", me.id).eq("fiscal_year", fy),
         supabase.from("v_leave_count_summary").select("used_count,remaining_count").eq("user_id", me.id).eq("fiscal_year", fy).maybeSingle(),
         supabase.from("trainings").select("id,title,organizer,hours,training_date,certificate_url").eq("user_id", me.id).order("training_date", { ascending: false }).limit(10),
         supabase.from("awards").select("id,title,level,award_date,image_url").eq("user_id", me.id).order("award_date", { ascending: false }).limit(10),
         supabase.from("teaching_materials").select("id,title,subject,submitted_at").eq("user_id", me.id).order("submitted_at", { ascending: false }).limit(10),
+        supabase.from("v_attendance_enriched").select("work_date,status,late_minutes,early_leave_minutes,eval_round").eq("user_id", me.id).eq("fiscal_year", fy),
       ]);
       setLeaveSummary(quotaRows || []);
       setLeaveCount(countRow || null);
       setTrainings(tr || []);
       setAwards(aw || []);
       setMaterials(mat || []);
+      setAttendance(att || []);
 
-      // ── งานค้าง: ปรับ query ให้ตรงตารางจริงของระบบเมื่อพร้อม (attendance / scores) ──
-      const today = new Date().toISOString().split("T")[0];
       const tasks: PendingTask[] = [];
       const { count: myPendingLeave } = await supabase
         .from("leave_requests")
@@ -125,7 +156,6 @@ export default function TeacherPortfolioPage() {
         .eq("status", "pending");
       if ((myPendingSupport ?? 0) > 0) tasks.push({ id: "t-support", label: "คำร้องถึงแอดมินยังรอดำเนินการ", path: "/portfolio" });
 
-      void today; // เผื่อผูก attendance/scores เพิ่มด้วยวันปัจจุบันภายหลัง
       setPendingTasks(tasks);
     }
     setLoading(false);
@@ -148,7 +178,17 @@ export default function TeacherPortfolioPage() {
     setSaving(false);
     if (!error) setEditing(false);
     else alert("บันทึกไม่สำเร็จ: " + error.message);
-    // ค่าบนหน้าจะอัปเดตอัตโนมัติจาก realtime subscription ด้านบน
+  }
+
+  // ตำแหน่ง — บันทึกทันทีที่แก้ ไม่ต้องรอกดปุ่มบันทึกรวม
+  async function savePositionNow(value: string) {
+    if (!profile) return;
+    setForm(f => ({ ...f, position: value }));
+    const { error } = await supabase
+      .from("users")
+      .update({ position: value })
+      .eq("id", profile.id);
+    if (error) alert("บันทึกตำแหน่งไม่สำเร็จ: " + error.message);
   }
 
   async function sendSupportRequest() {
@@ -179,12 +219,16 @@ export default function TeacherPortfolioPage() {
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
       <main className="w-full p-4 md:p-8 lg:p-10 space-y-8 max-w-5xl mx-auto">
 
-        <div className="text-sm text-slate-500 font-bold flex items-center gap-2">
-          <span>แดชบอร์ด</span><span className="text-slate-300">/</span>
-          <span className="text-slate-800 font-extrabold">ประวัติส่วนตัวและผลการปฏิบัติงาน</span>
+        {/* Header */}
+        <div className="flex items-center gap-2">
+          <button onClick={() => router.push("/dashboard")}
+            className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg transition-colors"
+            title="ไปหน้าแดชบอร์ด">🏠</button>
+          <span className="text-slate-300">/</span>
+          <span className="text-sm text-slate-800 font-extrabold">ประวัติส่วนตัวและผลการปฏิบัติงาน</span>
         </div>
 
-        {/* Pending tasks widget */}
+        {/* Pending tasks */}
         {pendingTasks.length > 0 && (
           <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col gap-2">
             <div className="flex items-center gap-2 text-amber-700 font-black text-sm">
@@ -192,9 +236,7 @@ export default function TeacherPortfolioPage() {
             </div>
             {pendingTasks.map(t => (
               <button key={t.id} onClick={() => router.push(t.path)}
-                className="text-left text-sm font-bold text-amber-800 hover:underline">
-                • {t.label}
-              </button>
+                className="text-left text-sm font-bold text-amber-800 hover:underline">• {t.label}</button>
             ))}
           </div>
         )}
@@ -212,7 +254,7 @@ export default function TeacherPortfolioPage() {
               </div>
               <div>
                 <h1 className="text-xl font-black text-slate-900">{profile.first_name} {profile.last_name}</h1>
-                <p className="text-sm text-slate-400 font-bold">{profile.subject_group || "ยังไม่ระบุกลุ่มสาระฯ"}</p>
+                <p className="text-sm text-slate-400 font-bold">{profile.position || "ยังไม่ระบุตำแหน่ง"}</p>
               </div>
             </div>
             {!editing ? (
@@ -235,6 +277,22 @@ export default function TeacherPortfolioPage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* ตำแหน่ง — บันทึกทันทีตอนออกจากช่อง ไม่ผูกปุ่มบันทึกรวม */}
+            <div>
+              <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
+                <User className="w-4 h-4" /> ตำแหน่ง
+              </p>
+              {editing ? (
+                <input
+                  defaultValue={profile.position ?? ""}
+                  onBlur={(e) => savePositionNow(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-700"
+                />
+              ) : (
+                <p className="text-sm font-bold text-slate-700">{profile.position ?? "—"}</p>
+              )}
+            </div>
+
             <Field icon={<Phone className="w-4 h-4" />} label="เบอร์โทร" editing={editing}
               value={editing ? form.phone ?? "" : profile.phone ?? "—"}
               onChange={(v) => setForm(f => ({ ...f, phone: v }))} />
@@ -247,13 +305,56 @@ export default function TeacherPortfolioPage() {
             <Field icon={<GraduationCap className="w-4 h-4" />} label="สาขา / สถาบัน" editing={editing}
               value={editing ? form.education_major ?? "" : [profile.education_major, profile.education_school].filter(Boolean).join(" · ") || "—"}
               onChange={(v) => setForm(f => ({ ...f, education_major: v }))} />
+
+            {/* อ่านอย่างเดียว — ครูแก้ไม่ได้ */}
+            <div>
+              <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
+                <GraduationCap className="w-4 h-4" /> กลุ่มสาระการเรียนรู้
+              </p>
+              <p className="text-sm font-bold text-slate-700">{profile.department?.name ?? profile.subject_group ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
+                <CalendarDays className="w-4 h-4" /> ประจำชั้น
+              </p>
+              <p className="text-sm font-bold text-slate-700">{profile.homeroom?.room_name ?? "—"}</p>
+            </div>
           </div>
           <p className="text-[11px] text-slate-400">
-            ต้องการแก้ไขข้อมูลที่ถูกล็อก (เช่น ชื่อ-สกุล, บทบาท) ให้ส่งคำร้องด้านล่างถึงแอดมิน
+            ต้องการแก้ไขข้อมูลที่ถูกล็อก (เช่น ชื่อ-สกุล, บทบาท, กลุ่มสาระ, ประจำชั้น) ให้ส่งคำร้องด้านล่างถึงแอดมิน
           </p>
         </div>
 
-        {/* Performance period + leave summary */}
+        {/* Quick links: การลา / การสอนแทน — พร้อมเลขสรุป */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button onClick={() => router.push("/leave")}
+            className="bg-white border border-slate-200 rounded-2xl p-4 text-left hover:border-blue-300 hover:shadow-sm transition-all flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0"><CalendarDays className="w-5 h-5" /></div>
+              <div>
+                <p className="text-sm font-extrabold text-slate-800">ข้อมูลการลา</p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {leaveCount ? `เหลือ ${leaveCount.remaining_count} / 6 ครั้ง` : "ดูสิทธิ์ / ยื่นใบลา"}
+                </p>
+              </div>
+            </div>
+            <ArrowRight className="w-4 h-4 text-slate-300 shrink-0" />
+          </button>
+
+          <button onClick={() => router.push("/substitution")}
+            className="bg-white border border-slate-200 rounded-2xl p-4 text-left hover:border-purple-300 hover:shadow-sm transition-all flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center shrink-0"><FileText className="w-5 h-5" /></div>
+              <div>
+                <p className="text-sm font-extrabold text-slate-800">ข้อมูลการสอนแทน</p>
+                <p className="text-xs text-slate-400 mt-0.5">ดูประวัติ / ตารางสอนแทน</p>
+              </div>
+            </div>
+            <ArrowRight className="w-4 h-4 text-slate-300 shrink-0" />
+          </button>
+        </div>
+
+        {/* Performance period + leave + attendance summary */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <h3 className="text-sm font-extrabold text-slate-800">📊 สรุปผลการปฏิบัติงาน</h3>
@@ -269,6 +370,20 @@ export default function TeacherPortfolioPage() {
             </div>
           </div>
 
+          {/* การลงเวลาปฏิบัติงาน */}
+          <div>
+            <p className="text-xs font-bold text-slate-500 flex items-center gap-1.5 mb-2">
+              <ClipboardList className="w-3.5 h-3.5" /> การลงเวลาปฏิบัติงาน
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <StatBox label="มาปฏิบัติงาน" value={attendanceStats.present} color="emerald" />
+              <StatBox label="มาสาย" value={attendanceStats.late} color="amber" />
+              <StatBox label="กลับก่อน" value={attendanceStats.leftEarly} color="orange" />
+              <StatBox label="ขาด" value={attendanceStats.absent} color="rose" />
+            </div>
+          </div>
+
+          {/* สรุปวันลาแยกประเภท */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {["sick", "personal", "maternity"].map(type => {
               const row = leaveSummary.find(r => r.leave_type === type);
@@ -285,16 +400,13 @@ export default function TeacherPortfolioPage() {
             })}
           </div>
 
-          {/* สิทธิ์รวมทุกประเภท: ไม่เกิน 6 ครั้ง/ปีงบประมาณ */}
           {leaveCount && (
             <div className={`rounded-xl p-4 border flex items-center justify-between ${
               leaveCount.remaining_count <= 1 ? "bg-rose-50 border-rose-200" : "bg-blue-50 border-blue-100"
             }`}>
               <div>
                 <p className="text-xs font-bold text-slate-500">สิทธิ์การลารวมทุกประเภท (ปีงบประมาณ)</p>
-                <p className="text-sm font-black text-slate-800 mt-0.5">
-                  ใช้ไปแล้ว {leaveCount.used_count} / 6 ครั้ง
-                </p>
+                <p className="text-sm font-black text-slate-800 mt-0.5">ใช้ไปแล้ว {leaveCount.used_count} / 6 ครั้ง</p>
               </div>
               <span className={`text-xs font-black px-3 py-1.5 rounded-full ${
                 leaveCount.remaining_count <= 1 ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"
@@ -416,6 +528,21 @@ function SectionList<T>({ title, emptyText, items, renderItem }: { title: string
       ) : (
         <div>{items.map(renderItem)}</div>
       )}
+    </div>
+  );
+}
+
+function StatBox({ label, value, color }: { label: string; value: number; color: "emerald" | "amber" | "orange" | "rose" }) {
+  const colorMap = {
+    emerald: "bg-emerald-50 text-emerald-600",
+    amber: "bg-amber-50 text-amber-600",
+    orange: "bg-orange-50 text-orange-600",
+    rose: "bg-rose-50 text-rose-600",
+  };
+  return (
+    <div className={`rounded-xl p-4 ${colorMap[color]}`}>
+      <p className="text-2xl font-black">{value}</p>
+      <p className="text-xs font-bold mt-1">{label}</p>
     </div>
   );
 }
