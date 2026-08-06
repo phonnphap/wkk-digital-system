@@ -32,8 +32,8 @@ type Profile = {
   position: string | null;
   department_id: string | null;
   department?: { name: string } | null;
-  homeroom?: { room_name: string } | null;
-  homeroom_teacher_2?: { room_name: string } | null;    
+  homeroom?: { room_name: string }[] | null;
+  homeroom_teacher_2?: { room_name: string }[] | null; 
 };
 
 type LeaveSummaryRow = { leave_type: string; total_days: number; used_days: number; remaining_days: number };
@@ -317,7 +317,7 @@ supabase.from("teaching_materials").select("id,title,subject_group,created_at").
               <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
                 <CalendarDays className="w-4 h-4" /> ประจำชั้น
               </p>
-              <p className="text-sm font-bold text-slate-700">{profile.homeroom?.room_name ?? "—"}</p>
+              <p className="text-sm font-bold text-slate-700">{profile.homeroom?.[0]?.room_name ?? "—"}</p>
             </div>
           </div>
           <p className="text-[11px] text-slate-400">

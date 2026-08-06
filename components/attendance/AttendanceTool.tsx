@@ -5,7 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 type Status = "present" | "absent" | "late" | "leave";
 
 type Student = {
-  id: string; title?: string; first_name: string; last_name: string;
+  id: string; prefix?: string; first_name: string; last_name: string;
   seat_number: number; avatar_url?: string;
 };
 
@@ -157,7 +157,7 @@ export default function AttendanceTool({
             )}
             <div className="min-w-0 flex-1">
               <p className="text-xs font-black text-slate-700 truncate flex items-center gap-1">
-                {s.title} {s.first_name} {s.last_name}
+                {s.prefix}{s.first_name} {s.last_name}
                 {referenceMap?.[s.id] && (
                   <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold shrink-0 ${
                     referenceMap[s.id].status === "absent" ? "bg-red-100 text-red-600" :

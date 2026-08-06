@@ -17,7 +17,7 @@ type SubjectSection = {
   id: string; subject_id: string; classroom_id: string; academic_year_id: string;
   teacher_id: string; co_teacher_id?: string; join_code: string; is_active: boolean;
 };
-type EnrolledStudent = { id: string; title?: string; first_name: string; last_name: string; seat_number: number; avatar_url?: string };
+type EnrolledStudent = { id: string; prefix?: string; first_name: string; last_name: string; seat_number: number; avatar_url?: string };
 
 function displayName(u?: Teacher | null) {
   if (!u) return "—";
@@ -79,7 +79,7 @@ function RandomizerTool({ students }: { students: EnrolledStudent[] }) {
       <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-2xl border-2 border-blue-200 p-8 mb-4 min-h-[140px] flex items-center justify-center">
         {picked ? (
           <div>
-            <p className="text-3xl font-black text-blue-700">{picked.title} {picked.first_name} {picked.last_name}</p>
+            <p className="text-3xl font-black text-blue-700">{picked.prefix} {picked.first_name} {picked.last_name}</p>
             <p className="text-slate-400 font-bold mt-1">เลขที่ {picked.seat_number}</p>
           </div>
         ) : (
@@ -230,7 +230,7 @@ useEffect(() => {
     const studentIds = (enrollments ?? []).map((e: any) => e.student_id);
     if (studentIds.length > 0) {
       const { data: studentsData } = await supabase
-        .from("students").select("id,title,first_name,last_name,seat_number,avatar_url")
+        .from("students").select("id,prefix,first_name,last_name,seat_number,avatar_url")
 .in("id", studentIds).order("seat_number");
       setStudents((studentsData ?? []) as EnrolledStudent[]);
     } else {

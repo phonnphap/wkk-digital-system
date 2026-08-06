@@ -68,7 +68,7 @@ export default function SmartClassRoomsPage() {
         setClassrooms((rooms ?? []) as Classroom[]);
 
         const { data: studentsData } = await supabase
-          .from("students").select("id, classroom_id").in("classroom_id", classroomIds);
+          .from("students").select("id,first_name,last_name,seat_number,avatar_url")
         const counts: Record<string, number> = {};
         (studentsData ?? []).forEach((s: any) => { counts[s.classroom_id] = (counts[s.classroom_id] ?? 0) + 1; });
         setStudentCounts(counts);

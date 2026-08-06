@@ -12,7 +12,7 @@ const supabase = createClient();
 type Subject = { id: string; subject_code: string; name_th: string };
 type Classroom = { id: string; room_name?: string; grade_group?: string };
 type SectionRow = { id: string; join_code: string; classroom_id: string };
-type Student = { id: string; title?: string; first_name: string; last_name: string; seat_number: number; avatar_url?: string };
+type Student = { id: string; prefix?: string; first_name: string; last_name: string; seat_number: number; avatar_url?: string };
 
 type TabKey = "roster" | "attendance" | "random" | "tools";
 
@@ -418,7 +418,7 @@ const [homeroomMap, setHomeroomMap] = useState<Record<string, { status: "present
       if (sec?.classroom_id) {
         const { data: studentsData } = await supabase
           .from("students")
-          .select("id, title, first_name, last_name, seat_number, avatar_url")
+          .select("id, prefix, first_name, last_name, seat_number, avatar_url")
 .eq("classroom_id", sec.classroom_id)
 .order("seat_number");
         setStudents((studentsData ?? []) as Student[]);
