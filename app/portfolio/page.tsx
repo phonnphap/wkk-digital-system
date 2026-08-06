@@ -95,6 +95,36 @@ export default function TeacherPortfolioPage() {
     };
   }, [attendance, period]);
 
+  const MONTH_LABEL: Record<number, string> = {
+  1: "ม.ค.", 2: "ก.พ.", 3: "มี.ค.", 4: "เม.ย.", 5: "พ.ค.", 6: "มิ.ย.",
+  7: "ก.ค.", 8: "ส.ค.", 9: "ก.ย.", 10: "ต.ค.", 11: "พ.ย.", 12: "ธ.ค.",
+};
+const FY_MONTHS = [10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+const monthlyAttendance = useMemo(() => {
+  const now = new Date();
+  let months: number[];
+  if (period === "month") months = [now.getMonth() + 1];
+  else if (period === "term") {
+    const round = (now.getMonth() >= 9 || now.getMonth() <= 2) ? 1 : 2;
+    months = round === 1 ? [10, 11, 12, 1, 2, 3] : [4, 5, 6, 7, 8, 9];
+  } else {
+    months = FY_MONTHS;
+  }
+  return months.map(m => {
+    const rows = attendance.filter(r => new Date(r.work_date).getMonth() + 1 === m);
+    const cnt = (s: string) => rows.filter(r => r.status === s).length;
+    return {
+      month: m,
+      label: MONTH_LABEL[m],
+      present: cnt("present"),
+      late: cnt("late") + cnt("late_and_left_early"),
+      leftEarly: cnt("left_early") + cnt("late_and_left_early"),
+      absent: cnt("absent"),
+    };
+  });
+}, [attendance, period]);
+
   async function loadAll() {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -317,7 +347,10 @@ supabase.from("teaching_materials").select("id,title,subject_group,created_at").
               <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
                 <CalendarDays className="w-4 h-4" /> ประจำชั้น
               </p>
-              <p className="text-sm font-bold text-slate-700">{profile.homeroom?.[0]?.room_name ?? "—"}</p>
+              <p className="text-sm font-bold text-slate-700">
+  {[...(profile.homeroom ?? []), ...(profile.homeroom_teacher_2 ?? [])]
+    .map(h => h.room_name).join(", ") || "—"}
+</p>
             </div>
           </div>
           <p className="text-[11px] text-slate-400">
@@ -334,7 +367,9 @@ supabase.from("teaching_materials").select("id,title,subject_group,created_at").
               <div>
                 <p className="text-sm font-extrabold text-slate-800">ข้อมูลการลา</p>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {leaveCount ? `เหลือ ${leaveCount.remaining_count} / 6 ครั้ง` : "ดูสิทธิ์ / ยื่นใบลา"}
+                  {leaveCount
+                    ? `สิทธิ์การลารวมทุกประเภท (ปีงบ ${currentFiscalYear()}) ใช้ไปแล้ว ${leaveCount.used_count} / 6 ครั้ง เหลือ ${leaveCount.remaining_count} ครั้ง`
+                    : "ดูสิทธิ์ / ยื่นใบลา"}
                 </p>
               </div>
             </div>
@@ -375,46 +410,40 @@ supabase.from("teaching_materials").select("id,title,subject_group,created_at").
             <p className="text-xs font-bold text-slate-500 flex items-center gap-1.5 mb-2">
               <ClipboardList className="w-3.5 h-3.5" /> การลงเวลาปฏิบัติงาน
             </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <StatBox label="มาปฏิบัติงาน" value={attendanceStats.present} color="emerald" />
-              <StatBox label="มาสาย" value={attendanceStats.late} color="amber" />
-              <StatBox label="กลับก่อน" value={attendanceStats.leftEarly} color="orange" />
-              <StatBox label="ขาด" value={attendanceStats.absent} color="rose" />
-            </div>
-          </div>
-
-          {/* สรุปวันลาแยกประเภท */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {["sick", "personal", "maternity"].map(type => {
-              const row = leaveSummary.find(r => r.leave_type === type);
-              return (
-                <div key={type} className="bg-slate-50 border border-slate-100 rounded-xl p-4">
-                  <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5"><CalendarDays className="w-3.5 h-3.5" /> {LEAVE_LABEL[type]}</p>
-                  <p className="text-2xl font-black text-slate-800 mt-1">
-                    {row ? row.used_days : 0}
-                    <span className="text-xs font-bold text-slate-400"> / {row ? row.total_days : 0} วัน</span>
-                  </p>
-                  <p className="text-xs font-bold text-emerald-600 mt-0.5">เหลือ {row ? row.remaining_days : 0} วัน</p>
-                </div>
-              );
-            })}
-          </div>
-
-          {leaveCount && (
-            <div className={`rounded-xl p-4 border flex items-center justify-between ${
-              leaveCount.remaining_count <= 1 ? "bg-rose-50 border-rose-200" : "bg-blue-50 border-blue-100"
-            }`}>
-              <div>
-                <p className="text-xs font-bold text-slate-500">สิทธิ์การลารวมทุกประเภท (ปีงบประมาณ)</p>
-                <p className="text-sm font-black text-slate-800 mt-0.5">ใช้ไปแล้ว {leaveCount.used_count} / 6 ครั้ง</p>
+            {period === "day" ? (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <StatBox label="มาปฏิบัติงาน" value={attendanceStats.present} color="emerald" />
+                <StatBox label="มาสาย" value={attendanceStats.late} color="amber" />
+                <StatBox label="กลับก่อน" value={attendanceStats.leftEarly} color="orange" />
+                <StatBox label="ขาด" value={attendanceStats.absent} color="rose" />
               </div>
-              <span className={`text-xs font-black px-3 py-1.5 rounded-full ${
-                leaveCount.remaining_count <= 1 ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"
-              }`}>
-                เหลือ {leaveCount.remaining_count} ครั้ง
-              </span>
-            </div>
-          )}
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-100">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100">
+                      <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">เดือน</th>
+                      <th className="text-center px-3 py-2 font-bold text-emerald-600 text-xs">มาปฏิบัติงาน</th>
+                      <th className="text-center px-3 py-2 font-bold text-amber-600 text-xs">มาสาย</th>
+                      <th className="text-center px-3 py-2 font-bold text-orange-600 text-xs">กลับก่อน</th>
+                      <th className="text-center px-3 py-2 font-bold text-rose-600 text-xs">ขาด</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {monthlyAttendance.map(m => (
+                      <tr key={m.month}>
+                        <td className="px-3 py-2 font-bold text-slate-700">{m.label}</td>
+                        <td className="px-3 py-2 text-center font-black text-emerald-600">{m.present || "-"}</td>
+                        <td className="px-3 py-2 text-center font-black text-amber-600">{m.late || "-"}</td>
+                        <td className="px-3 py-2 text-center font-black text-orange-600">{m.leftEarly || "-"}</td>
+                        <td className="px-3 py-2 text-center font-black text-rose-600">{m.absent || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
           <p className="text-[11px] text-slate-400">มุมมองที่เลือก: {{ day: "รายวัน", month: "รายเดือน", term: "รายเทอม", year: "ปีงบประมาณ" }[period]} — ปีงบประมาณ {currentFiscalYear()}</p>
         </div>
 

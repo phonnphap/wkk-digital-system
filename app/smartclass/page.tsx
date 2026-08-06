@@ -19,14 +19,22 @@ const CARD_ACCENTS = [
   { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700" },
   { bg: "bg-purple-50", border: "border-purple-200", text: "text-purple-700" },
 ];
-const CLASSROOM_GRADIENTS = [
-  "from-blue-500 to-cyan-400",
-  "from-purple-500 to-pink-400",
-  "from-emerald-500 to-teal-400",
-  "from-orange-500 to-amber-400",
-  "from-rose-500 to-fuchsia-400",
-  "from-indigo-500 to-blue-400",
-];
+const ROOM_NUMBER_GRADIENTS: Record<string, string> = {
+  "1": "from-yellow-400 to-amber-300",   // เหลือง
+  "2": "from-pink-500 to-rose-400",      // ชมพู
+  "3": "from-emerald-500 to-green-400",  // เขียว
+  "4": "from-red-500 to-rose-600",       // แดง
+  "5": "from-sky-400 to-cyan-300",       // ฟ้า
+  "6": "from-orange-500 to-amber-400",   // ส้ม
+  "7": "from-blue-700 to-indigo-600",    // น้ำเงิน
+};
+const DEFAULT_GRADIENT = "from-slate-500 to-slate-400";
+
+function getRoomGradient(roomName?: string) {
+  const match = (roomName ?? "").match(/\/(\d+)\s*$/); // จับเลขหลัง "/" ท้ายสุด เช่น "อ.2/1" -> "1"
+  const num = match ? match[1] : null;
+  return (num && ROOM_NUMBER_GRADIENTS[num]) || DEFAULT_GRADIENT;
+}
 
 /* ---------- ตัวจำแนกสายชั้น ---------- */
 type LevelKey = "kindergarten" | "primary" | "lower_secondary" | "upper_secondary" | "other";
@@ -114,7 +122,7 @@ export default function SmartClassSubjectsPage() {
   if (roomIds.length > 0) {
     const { data: studentsData } = await supabase
       .from("students").select("id, classroom_id")
-      .in("classroom_id", roomIds).eq("is_active", true);
+      .in("classroom_id", roomIds);
     const counts: Record<string, number> = {};
     (studentsData ?? []).forEach((s: any) => { counts[s.classroom_id] = (counts[s.classroom_id] ?? 0) + 1; });
     setStudentCounts(counts);
@@ -201,40 +209,40 @@ export default function SmartClassSubjectsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm px-4 py-3">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.push("/dashboard")}
-            className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 text-lg shrink-0">🏠</button>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-base font-black text-slate-800 leading-none">📚 Smart Class</h1>
-            <p className="text-slate-400 text-xs">
-              {isAdmin
-                ? `แสดงทุกชั้นเรียน (สิทธิ์แอดมิน/ผู้บริหาร) · ${filteredClassrooms.length} ห้อง`
-                : `วิชาที่คุณสอน · ${filteredSubjects.length} วิชา`}
-            </p>
-          </div>
-        </div>
-        <input value={search} onChange={e => setSearch(e.target.value)}
-          placeholder={isAdmin ? "🔍 ค้นหาชื่อห้อง/สายชั้น..." : "🔍 ค้นหาชื่อ/รหัสวิชา..."}
-          className="w-full mt-3 bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:outline-none" />
+      <div className="sticky top-0 z-30 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 shadow-md px-4 py-3">
+  <div className="flex items-center gap-3">
+    <button onClick={() => router.push("/dashboard")}
+      className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white text-lg shrink-0">🏠</button>
+    <div className="flex-1 min-w-0">
+      <h1 className="text-base font-black text-white leading-none">📚 Smart Class</h1>
+      <p className="text-white/70 text-xs">
+        {isAdmin
+          ? `แสดงทุกชั้นเรียน (สิทธิ์แอดมิน/ผู้บริหาร) · ${filteredClassrooms.length} ห้อง`
+          : `วิชาที่คุณสอน · ${filteredSubjects.length} วิชา`}
+      </p>
+    </div>
+  </div>
+  <input value={search} onChange={e => setSearch(e.target.value)}
+    placeholder={isAdmin ? "🔍 ค้นหาชื่อห้อง/สายชั้น..." : "🔍 ค้นหาชื่อ/รหัสวิชา..."}
+    className="w-full mt-3 bg-white/90 border-2 border-white/40 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 placeholder:text-slate-400 focus:border-white focus:outline-none" />
 
-        {isAdmin && (
-          <div className="flex items-center gap-2 mt-3 overflow-x-auto pb-1">
-            <button onClick={() => setLevelFilter("all")}
-              className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-black ${
-                levelFilter === "all" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"
-              }`}>ทั้งหมด</button>
-            {LEVELS.filter(l => l.key !== "other").map(l => (
-              <button key={l.key} onClick={() => setLevelFilter(l.key)}
-                className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-black ${
-                  levelFilter === l.key ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"
-                }`}>{l.label}</button>
-            ))}
-          </div>
-        )}
-      </div>
+  {isAdmin && (
+    <div className="flex items-center gap-2 mt-3 overflow-x-auto pb-1">
+      <button onClick={() => setLevelFilter("all")}
+        className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-black ${
+          levelFilter === "all" ? "bg-white text-purple-600" : "bg-white/20 text-white"
+        }`}>ทั้งหมด</button>
+      {LEVELS.filter(l => l.key !== "other").map(l => (
+        <button key={l.key} onClick={() => setLevelFilter(l.key)}
+          className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-black ${
+            levelFilter === l.key ? "bg-white text-purple-600" : "bg-white/20 text-white"
+          }`}>{l.label}</button>
+      ))}
+    </div>
+  )}
+</div>
 
-      <main className="p-4 max-w-5xl mx-auto">
+      <main className="p-4 w-full">
         {isAdmin ? (
           filteredClassrooms.length === 0 ? (
             <div className="text-center py-20 text-slate-400 bg-white rounded-2xl border border-slate-200">
@@ -252,16 +260,16 @@ export default function SmartClassSubjectsPage() {
                       <span className="text-slate-300 font-bold">({items.length})</span>
                     </h2>
                   )}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                  <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
                     {items.map(({ classroom }, i) => {
-  const gradient = CLASSROOM_GRADIENTS[i % CLASSROOM_GRADIENTS.length];
+  const gradient = getRoomGradient(classroom.room_name);
   const label = `${classroom.grade_group ?? ""} ${classroom.room_name ?? ""}`.trim();
   const count = studentCounts[classroom.id] ?? 0;
   return (
     <button key={classroom.id} onClick={() => router.push(`/smartclass/room/${classroom.id}`)}
       className="text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden">
       <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
-        <span className="text-[10px] font-black bg-amber-300 text-amber-900 px-2.5 py-1 rounded-full tracking-wide">
+        <span className="text-[10px] font-black bg-white/95 text-slate-700 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
           CLASSROOM
         </span>
         <span className="text-white/60 text-lg leading-none">⠿</span>
