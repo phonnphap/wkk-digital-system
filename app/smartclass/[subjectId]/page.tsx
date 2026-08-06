@@ -12,12 +12,22 @@ type Subject = { id: string; subject_code: string; name_th: string };
 type Classroom = { id: string; room_name?: string; grade_group?: string };
 type SectionRow = { id: string; classroom_id: string; teacher_id: string; co_teacher_id?: string; join_code: string };
 
-const CARD_ACCENTS = [
-  { bg: "bg-blue-50", border: "border-blue-200", text: "text-blue-700" },
-  { bg: "bg-pink-50", border: "border-pink-200", text: "text-pink-700" },
-  { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700" },
-  { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700" },
-];
+const ROOM_NUMBER_GRADIENTS: Record<string, string> = {
+  "1": "from-yellow-400 to-amber-300",
+  "2": "from-pink-500 to-rose-400",
+  "3": "from-emerald-500 to-green-400",
+  "4": "from-red-500 to-rose-600",
+  "5": "from-sky-400 to-cyan-300",
+  "6": "from-orange-500 to-amber-400",
+  "7": "from-blue-700 to-indigo-600",
+};
+const DEFAULT_GRADIENT = "from-slate-500 to-slate-400";
+
+function getRoomGradient(roomName?: string) {
+  const match = (roomName ?? "").match(/\/(\d+)\s*$/);
+  const num = match ? match[1] : null;
+  return (num && ROOM_NUMBER_GRADIENTS[num]) || DEFAULT_GRADIENT;
+}
 
 export default function SmartClassRoomsPage() {
   const router = useRouter();
@@ -119,24 +129,37 @@ export default function SmartClassRoomsPage() {
             <p className="font-bold">ไม่พบห้องที่สอนวิชานี้</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {sortedSections.map((sec, i) => {
-              const room = classroomOf(sec.classroom_id);
-              const accent = CARD_ACCENTS[i % CARD_ACCENTS.length];
-              const count = studentCounts[sec.classroom_id] ?? 0;
-              return (
-                <button key={sec.id} onClick={() => router.push(`/smartclass/${subjectId}/${sec.id}`)}
-                  className={`text-left rounded-2xl border-2 ${accent.border} ${accent.bg} p-4 hover:shadow-md hover:-translate-y-0.5 transition-all`}>
-                  <p className={`font-black text-lg ${accent.text}`}>{room?.grade_group} {room?.room_name}</p>
-                  <div className="mt-3">
-                    <span className="text-[10px] font-black bg-white/70 px-2 py-1 rounded-lg text-slate-600">
-                      👥 {count} คน
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
+  {sortedSections.map((sec) => {
+    const room = classroomOf(sec.classroom_id);
+    const gradient = getRoomGradient(room?.room_name);
+    const label = `${room?.grade_group ?? ""} ${room?.room_name ?? ""}`.trim();
+    const count = studentCounts[sec.classroom_id] ?? 0;
+    return (
+      <button
+        key={sec.id}
+        onClick={() => router.push(`/smartclass/${subjectId}/${sec.id}`)}
+        className="text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
+      >
+        <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
+          <span className="text-[10px] font-black bg-white/95 text-slate-700 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
+            CLASSROOM
+          </span>
+          <span className="text-white/60 text-lg leading-none">⠿</span>
+        </div>
+        <div className="p-4">
+          <p className="font-black text-lg text-slate-800 leading-tight">{label}</p>
+          <p className="text-slate-400 text-xs font-bold mt-1">รายชื่อ - {label}</p>
+          <div className="mt-3">
+            <span className="text-[11px] font-black bg-slate-100 px-2.5 py-1.5 rounded-lg text-slate-600 inline-flex items-center gap-1">
+              👥 {count} คน
+            </span>
           </div>
+        </div>
+      </button>
+    );
+  })}
+</div>
         )}
       </main>
     </div>

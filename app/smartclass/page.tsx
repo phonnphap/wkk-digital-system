@@ -12,12 +12,13 @@ type Subject = { id: string; subject_code: string; name_th: string };
 type SectionRow = { id: string; subject_id: string; classroom_id: string; teacher_id: string; co_teacher_id?: string };
 type Classroom = { id: string; room_name?: string; grade_group?: string };
 
-const CARD_ACCENTS = [
-  { bg: "bg-blue-50", border: "border-blue-200", text: "text-blue-700" },
-  { bg: "bg-pink-50", border: "border-pink-200", text: "text-pink-700" },
-  { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700" },
-  { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700" },
-  { bg: "bg-purple-50", border: "border-purple-200", text: "text-purple-700" },
+const SUBJECT_GRADIENTS = [
+  "from-sky-500 to-blue-400",
+  "from-pink-500 to-rose-400",
+  "from-emerald-500 to-teal-400",
+  "from-orange-500 to-amber-400",
+  "from-purple-500 to-fuchsia-400",
+  "from-cyan-500 to-sky-400",
 ];
 const ROOM_NUMBER_GRADIENTS: Record<string, string> = {
   "1": "from-yellow-400 to-amber-300",   // เหลือง
@@ -307,23 +308,36 @@ if (roomIds.length > 0) {
             <p className="font-bold">{search ? "ไม่พบวิชาตามที่ค้นหา" : "คุณยังไม่มีวิชาที่สอน"}</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filteredSubjects.map((g, i) => {
-              const accent = CARD_ACCENTS[i % CARD_ACCENTS.length];
-              return (
-                <button key={g.subject.id} onClick={() => router.push(`/smartclass/${g.subject.id}`)}
-                  className={`text-left rounded-2xl border-2 ${accent.border} ${accent.bg} p-4 hover:shadow-md hover:-translate-y-0.5 transition-all`}>
-                  <p className={`font-black text-base ${accent.text} leading-tight`}>{g.subject.name_th}</p>
-                  <p className="text-slate-400 text-xs font-bold mt-0.5">{g.subject.subject_code}</p>
-                  <div className="mt-3">
-                    <span className="text-[10px] font-black bg-white/70 px-2 py-1 rounded-lg text-slate-600">
-                      🏫 {g.roomCount} ห้อง
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
+  {filteredSubjects.map((g, i) => {
+    const gradient = SUBJECT_GRADIENTS[i % SUBJECT_GRADIENTS.length];
+    return (
+      <button
+        key={g.subject.id}
+        onClick={() => router.push(`/smartclass/${g.subject.id}`)}
+        className="text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
+      >
+        <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
+          <span className="text-[10px] font-black bg-white/95 text-slate-700 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
+            SUBJECT
+          </span>
+          <span className="text-white/60 text-lg leading-none">⠿</span>
+        </div>
+        <div className="p-4">
+          <p className="font-black text-base text-slate-800 leading-tight truncate">
+            {g.subject.name_th}
+          </p>
+          <p className="text-slate-400 text-xs font-bold mt-1">{g.subject.subject_code}</p>
+          <div className="mt-3">
+            <span className="text-[11px] font-black bg-slate-100 px-2.5 py-1.5 rounded-lg text-slate-600 inline-flex items-center gap-1">
+              🏫 {g.roomCount} ห้อง
+            </span>
           </div>
+        </div>
+      </button>
+    );
+  })}
+</div>
         )}
       </main>
     </div>
