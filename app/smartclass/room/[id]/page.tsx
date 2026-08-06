@@ -16,15 +16,21 @@ type SectionRow = {
   classroom_id: string;
   teacher_id: string;
   co_teacher_id?: string | null;
+  // อาจมีคอลัมน์เหล่านี้จากฐานข้อมูลจริง ถ้ามีจะถูกใช้แทนค่าที่คำนวณ default ไว้
+  academic_year?: number | string | null;
+  semester?: number | string | null;
+  term?: number | string | null;
 };
 type TeacherLite = { id: string; name: string };
 
-const CARD_ACCENTS = [
-  { bg: "bg-blue-50", border: "border-blue-200", text: "text-blue-700" },
-  { bg: "bg-pink-50", border: "border-pink-200", text: "text-pink-700" },
-  { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700" },
-  { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700" },
-  { bg: "bg-purple-50", border: "border-purple-200", text: "text-purple-700" },
+// การ์ดวิชาแต่ละใบไล่สีตามลำดับ (วนซ้ำ)
+const SUBJECT_GRADIENTS = [
+  "from-sky-500 to-blue-400",
+  "from-pink-500 to-rose-400",
+  "from-emerald-500 to-teal-400",
+  "from-orange-500 to-amber-400",
+  "from-purple-500 to-fuchsia-400",
+  "from-cyan-500 to-sky-400",
 ];
 
 const ROOM_NUMBER_GRADIENTS: Record<string, string> = {
@@ -42,6 +48,23 @@ function getRoomGradient(roomName?: string) {
   const match = (roomName ?? "").match(/\/(\d+)\s*$/);
   const num = match ? match[1] : null;
   return (num && ROOM_NUMBER_GRADIENTS[num]) || DEFAULT_GRADIENT;
+}
+
+// อนุบาล/ประถม -> โชว์แค่ปี, มัธยม (และอื่นๆ) -> โชว์เทอม/ปี
+function isPrePrimaryLevel(gradeGroup?: string) {
+  const g = (gradeGroup ?? "").trim();
+  return g.startsWith("อ") || g.startsWith("ป");
+}
+
+// ปี/เทอมปัจจุบัน แบบ default เผื่อไม่มีคอลัมน์ academic_year/semester ในฐานข้อมูล
+// ปรับปีเป็น พ.ศ. ได้โดยบวก 543 หากต้องการ
+function getCurrentAcademicPeriod(): { year: number; semester: number } {
+  const now = new Date();
+  const month = now.getMonth(); // 0 = ม.ค.
+  const semester = month >= 4 && month <= 9 ? 1 : 2; // พ.ค.-ต.ค. = เทอม 1, พ.ย.-เม.ย. = เทอม 2
+  let year = now.getFullYear();
+  if (semester === 2 && month <= 3) year -= 1; // ม.ค.-เม.ย. นับเป็นปีการศึกษาก่อนหน้า
+  return { year, semester };
 }
 
 // รวมชื่อครูจากคอลัมน์ที่เป็นไปได้หลายแบบ เผื่อสคีมาต่างจากที่คาดไว้
@@ -94,9 +117,10 @@ export default function SmartClassRoomPage() {
         .eq("classroom_id", roomId);
       setStudentCount(count ?? 0);
 
+      // select("*") ไว้เผื่อมีคอลัมน์ academic_year / semester / term ในตารางจริง
       const { data: secRows } = await supabase
         .from("subject_sections")
-        .select("id, subject_id, classroom_id, teacher_id, co_teacher_id")
+        .select("*")
         .eq("classroom_id", roomId)
         .eq("is_active", true);
 
@@ -178,6 +202,8 @@ export default function SmartClassRoomPage() {
 
   const gradient = getRoomGradient(classroom.room_name);
   const roomLabel = `${classroom.grade_group ?? ""} ${classroom.room_name ?? ""}`.trim();
+  const prePrimary = isPrePrimaryLevel(classroom.grade_group);
+  const defaultPeriod = getCurrentAcademicPeriod();
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -221,33 +247,68 @@ export default function SmartClassRoomPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filteredSubjectCards.map(({ subject, teacherNames }, i) => {
-              const accent = CARD_ACCENTS[i % CARD_ACCENTS.length];
+            {filteredSubjectCards.map(({ subject, section, teacherNames }, i) => {
+              const cardGradient = SUBJECT_GRADIENTS[i % SUBJECT_GRADIENTS.length];
+
+              const year = section?.academic_year ?? defaultPeriod.year;
+              const semester = section?.semester ?? section?.term ?? defaultPeriod.semester;
+              const periodText = prePrimary ? `${year}` : `${semester}/${year}`;
+
               return (
-                <button
+                <div
                   key={subject.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => router.push(`/smartclass/${subject.id}/${roomId}`)}
-                  className={`text-left rounded-2xl border-2 ${accent.border} ${accent.bg} p-4 hover:shadow-md hover:-translate-y-0.5 transition-all`}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" || e.key === " ") router.push(`/smartclass/${subject.id}/${roomId}`);
+                  }}
+                  className="text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden cursor-pointer"
                 >
-                  <p className={`font-black text-base ${accent.text} leading-tight`}>{subject.name_th}</p>
-                  <p className="text-slate-400 text-xs font-bold mt-0.5">{subject.subject_code}</p>
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {teacherNames.length > 0 ? (
-                      teacherNames.map((name, idx) => (
-                        <span
-                          key={idx}
-                          className="text-[10px] font-black bg-white/70 px-2 py-1 rounded-lg text-slate-600"
-                        >
-                          👤 {name}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-[10px] font-black bg-white/70 px-2 py-1 rounded-lg text-slate-400">
-                        ไม่ระบุครูผู้สอน
+                  <div className={`bg-gradient-to-r ${cardGradient} px-4 pt-3 pb-4`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black bg-orange-500 text-white px-2.5 py-1 rounded-full tracking-wide shadow-sm">
+                        SUBJECT
                       </span>
-                    )}
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-6 h-6 rounded-md bg-white/25 flex items-center justify-center text-white text-xs">
+                          ⠿
+                        </span>
+                      </div>
+                    </div>
+                    <p className="font-black text-lg text-white leading-tight mt-2 truncate">
+                      {subject.name_th}
+                    </p>
                   </div>
-                </button>
+
+                  <div className="px-4 py-3">
+                    <p className="text-slate-500 text-xs font-bold pb-2.5 border-b border-slate-100">
+                      ปีการศึกษา {periodText}
+                    </p>
+                    <p className="text-slate-700 text-sm font-black py-2.5 border-b border-slate-100">
+                      {subject.subject_code}
+                    </p>
+                    <div className="pt-2.5 space-y-1.5">
+                      {teacherNames.length > 0 ? (
+                        teacherNames.map((name, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <span className="w-7 h-7 shrink-0 rounded-full bg-slate-400 text-white text-xs font-black flex items-center justify-center">
+                              {name.trim().charAt(0) || "?"}
+                            </span>
+                            <span className="text-slate-600 text-xs font-bold truncate">{name}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="w-7 h-7 shrink-0 rounded-full bg-slate-200 text-slate-400 text-xs font-black flex items-center justify-center">
+                            ?
+                          </span>
+                          <span className="text-slate-400 text-xs font-bold">ไม่ระบุครูผู้สอน</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               );
             })}
           </div>

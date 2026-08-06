@@ -19,6 +19,7 @@ function currentFiscalYear() {
 
 type Profile = {
   id: string;
+  title: string;
   first_name: string;
   last_name: string;
   role: string;
@@ -136,7 +137,7 @@ const monthlyAttendance = useMemo(() => {
     const { data: me } = await supabase
       .from("users")
       .select(`
-        id, first_name, last_name, role, phone, line_id, avatar_url,
+        id, title, first_name, last_name, role, phone, line_id, avatar_url,
         education_level, education_major, education_school, subject_group, position, department_id,
         department:departments(name),
         homeroom:classrooms!classrooms_homeroom_teacher_id_fkey(room_name), homeroom_teacher_2:classrooms!classrooms_homeroom_teacher_2_id_fkey(room_name)
@@ -291,7 +292,7 @@ setAwards(awardRows);
                 )}
               </div>
               <div>
-                <h1 className="text-xl font-black text-slate-900">{profile.first_name} {profile.last_name}</h1>
+                <h1 className="text-xl font-black text-slate-900">{profile.title}{profile.first_name} {profile.last_name}</h1>
                 <p className="text-sm text-slate-400 font-bold">{profile.position || "ยังไม่ระบุตำแหน่ง"}</p>
               </div>
             </div>
