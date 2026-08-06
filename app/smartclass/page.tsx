@@ -19,6 +19,14 @@ const CARD_ACCENTS = [
   { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700" },
   { bg: "bg-purple-50", border: "border-purple-200", text: "text-purple-700" },
 ];
+const CLASSROOM_GRADIENTS = [
+  "from-blue-500 to-cyan-400",
+  "from-purple-500 to-pink-400",
+  "from-emerald-500 to-teal-400",
+  "from-orange-500 to-amber-400",
+  "from-rose-500 to-fuchsia-400",
+  "from-indigo-500 to-blue-400",
+];
 
 /* ---------- ตัวจำแนกสายชั้น ---------- */
 type LevelKey = "kindergarten" | "primary" | "lower_secondary" | "upper_secondary" | "other";
@@ -83,6 +91,7 @@ export default function SmartClassSubjectsPage() {
   // ---- ข้อมูลสำหรับแอดมิน/ผู้บริหาร (มุมมองใหม่: ชั้นเรียน) ----
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [levelFilter, setLevelFilter] = useState<LevelKey | "all">("all");
+  const [studentCounts, setStudentCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     (async () => {
@@ -96,11 +105,21 @@ export default function SmartClassSubjectsPage() {
       setIsAdmin(admin);
 
       if (admin) {
-        // แอดมิน/ผู้บริหาร: เห็นชั้นเรียนทั้งหมด
-        const { data: rooms } = await supabase
-          .from("classrooms").select("id, room_name, grade_group");
-        setClassrooms((rooms ?? []) as Classroom[]);
-      } else {
+  // แอดมิน/ผู้บริหาร: เห็นชั้นเรียนทั้งหมด
+  const { data: rooms } = await supabase
+    .from("classrooms").select("id, room_name, grade_group");
+  setClassrooms((rooms ?? []) as Classroom[]);
+
+  const roomIds = (rooms ?? []).map((r: any) => r.id);
+  if (roomIds.length > 0) {
+    const { data: studentsData } = await supabase
+      .from("students").select("id, classroom_id")
+      .in("classroom_id", roomIds).eq("is_active", true);
+    const counts: Record<string, number> = {};
+    (studentsData ?? []).forEach((s: any) => { counts[s.classroom_id] = (counts[s.classroom_id] ?? 0) + 1; });
+    setStudentCounts(counts);
+  }
+} else {
         // ครูรายวิชา: เห็นเฉพาะวิชาที่ตัวเองสอน (มุมมองเดิม)
         const { data: secRows } = await supabase
           .from("subject_sections")
@@ -235,16 +254,30 @@ export default function SmartClassSubjectsPage() {
                   )}
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                     {items.map(({ classroom }, i) => {
-                      const accent = CARD_ACCENTS[i % CARD_ACCENTS.length];
-                      return (
-                        <button key={classroom.id} onClick={() => router.push(`/smartclass/room/${classroom.id}`)}
-                          className={`text-left rounded-2xl border-2 ${accent.border} ${accent.bg} p-4 hover:shadow-md hover:-translate-y-0.5 transition-all`}>
-                          <p className={`font-black text-lg ${accent.text} leading-tight`}>
-                            {classroom.grade_group} {classroom.room_name}
-                          </p>
-                        </button>
-                      );
-                    })}
+  const gradient = CLASSROOM_GRADIENTS[i % CLASSROOM_GRADIENTS.length];
+  const label = `${classroom.grade_group ?? ""} ${classroom.room_name ?? ""}`.trim();
+  const count = studentCounts[classroom.id] ?? 0;
+  return (
+    <button key={classroom.id} onClick={() => router.push(`/smartclass/room/${classroom.id}`)}
+      className="text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden">
+      <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
+        <span className="text-[10px] font-black bg-amber-300 text-amber-900 px-2.5 py-1 rounded-full tracking-wide">
+          CLASSROOM
+        </span>
+        <span className="text-white/60 text-lg leading-none">⠿</span>
+      </div>
+      <div className="p-4">
+        <p className="font-black text-lg text-slate-800 leading-tight">{label}</p>
+        <p className="text-slate-400 text-xs font-bold mt-1">รายชื่อ - {label}</p>
+        <div className="mt-3">
+          <span className="text-[11px] font-black bg-slate-100 px-2.5 py-1.5 rounded-lg text-slate-600 inline-flex items-center gap-1">
+            👥 {count} Students
+          </span>
+        </div>
+      </div>
+    </button>
+  );
+})}
                   </div>
                 </div>
               ))}
