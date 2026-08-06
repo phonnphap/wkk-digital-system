@@ -160,14 +160,22 @@ const monthlyAttendance = useMemo(() => {
         supabase.from("v_leave_summary").select("leave_type,total_days,used_days,remaining_days").eq("user_id", me.id).eq("fiscal_year", fy),
         supabase.from("v_leave_count_summary").select("used_count,remaining_count").eq("user_id", me.id).eq("fiscal_year", fy).maybeSingle(),
         supabase.from("trainings").select("id,title,organizer,hours,training_date,certificate_url").eq("user_id", me.id).order("training_date", { ascending: false }).limit(10),
-        supabase.from("awards").select("id,title,award_level,date_received,image_cover").eq("created_by", me.id).order("date_received", { ascending: false }).limit(10),
+        supabase
+  .from("award_recipients")
+  .select("award:awards(id,title,award_level,date_received,image_cover)")
+  .eq("recipient_user_id", me.id)
+  .order("created_at", { ascending: false })
+  .limit(10),
 supabase.from("teaching_materials").select("id,title,subject_group,created_at").eq("uploaded_by", me.id).order("created_at", { ascending: false }).limit(10),
         supabase.from("v_attendance_enriched").select("work_date,status,late_minutes,early_leave_minutes,eval_round").eq("user_id", me.id).eq("fiscal_year", fy),
       ]);
       setLeaveSummary(quotaRows || []);
       setLeaveCount(countRow || null);
       setTrainings(tr || []);
-      setAwards(aw || []);
+      const awardRows = (aw || [])
+  .map((r: any) => r.award)
+  .filter(Boolean) as Award[];
+setAwards(awardRows);
       setMaterials(mat || []);
       setAttendance(att || []);
 

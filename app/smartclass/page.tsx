@@ -119,14 +119,24 @@ export default function SmartClassSubjectsPage() {
   setClassrooms((rooms ?? []) as Classroom[]);
 
   const roomIds = (rooms ?? []).map((r: any) => r.id);
-  if (roomIds.length > 0) {
-    const { data: studentsData } = await supabase
-      .from("students").select("id, classroom_id")
-      .in("classroom_id", roomIds);
-    const counts: Record<string, number> = {};
-    (studentsData ?? []).forEach((s: any) => { counts[s.classroom_id] = (counts[s.classroom_id] ?? 0) + 1; });
-    setStudentCounts(counts);
+if (roomIds.length > 0) {
+  let allStudents: { classroom_id: string }[] = [];
+  let from = 0;
+  const pageSize = 1000;
+  while (true) {
+    const { data: page, error } = await supabase
+      .from("students").select("classroom_id")
+      .in("classroom_id", roomIds)
+      .range(from, from + pageSize - 1);
+    if (error || !page || page.length === 0) break;
+    allStudents = allStudents.concat(page as { classroom_id: string }[]);
+    if (page.length < pageSize) break; // ถึงหน้าสุดท้ายแล้ว
+    from += pageSize;
   }
+  const counts: Record<string, number> = {};
+  allStudents.forEach(s => { counts[s.classroom_id] = (counts[s.classroom_id] ?? 0) + 1; });
+  setStudentCounts(counts);
+}
 } else {
         // ครูรายวิชา: เห็นเฉพาะวิชาที่ตัวเองสอน (มุมมองเดิม)
         const { data: secRows } = await supabase
