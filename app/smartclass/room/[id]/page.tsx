@@ -246,72 +246,64 @@ export default function SmartClassRoomPage() {
             <p className="font-bold">{search ? "ไม่พบวิชาตามที่ค้นหา" : "ยังไม่มีวิชาที่สอนในห้องนี้"}</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filteredSubjectCards.map(({ subject, section, teacherNames }, i) => {
-              const cardGradient = SUBJECT_GRADIENTS[i % SUBJECT_GRADIENTS.length];
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
+  {filteredSubjectCards.map(({ subject, section, teacherNames }, i) => {
+    const cardGradient = SUBJECT_GRADIENTS[i % SUBJECT_GRADIENTS.length];
 
-              const year = section?.academic_year ?? defaultPeriod.year;
-              const semester = section?.semester ?? section?.term ?? defaultPeriod.semester;
-              const periodText = prePrimary ? `${year}` : `${semester}/${year}`;
+    const year = section?.academic_year ?? defaultPeriod.year;
+    const semester = section?.semester ?? section?.term ?? defaultPeriod.semester;
+    const periodText = prePrimary ? `${year}` : `${semester}/${year}`;
 
-              return (
-                <div
-                  key={subject.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => router.push(`/smartclass/${subject.id}/${roomId}`)}
-                  onKeyDown={e => {
-                    if (e.key === "Enter" || e.key === " ") router.push(`/smartclass/${subject.id}/${roomId}`);
-                  }}
-                  className="text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden cursor-pointer"
-                >
-                  <div className={`bg-gradient-to-r ${cardGradient} px-4 pt-3 pb-4`}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black bg-orange-500 text-white px-2.5 py-1 rounded-full tracking-wide shadow-sm">
-                        SUBJECT
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-6 h-6 rounded-md bg-white/25 flex items-center justify-center text-white text-xs">
-                          ⠿
-                        </span>
-                      </div>
-                    </div>
-                    <p className="font-black text-lg text-white leading-tight mt-2 truncate">
-                      {subject.name_th}
-                    </p>
-                  </div>
+    return (
+      <div
+        key={subject.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => router.push(`/smartclass/${subject.id}/${roomId}`)}
+        onKeyDown={e => {
+          if (e.key === "Enter" || e.key === " ") router.push(`/smartclass/${subject.id}/${roomId}`);
+        }}
+        className="text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden cursor-pointer"
+      >
+        <div className={`h-14 bg-gradient-to-r ${cardGradient} px-4 flex items-center justify-between`}>
+          <span className="text-[10px] font-black bg-white/95 text-slate-700 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
+            SUBJECT
+          </span>
+          <span className="text-white/60 text-lg leading-none">⠿</span>
+        </div>
 
-                  <div className="px-4 py-3">
-                    <p className="text-slate-500 text-xs font-bold pb-2.5 border-b border-slate-100">
-                      ปีการศึกษา {periodText}
-                    </p>
-                    <p className="text-slate-700 text-sm font-black py-2.5 border-b border-slate-100">
-                      {subject.subject_code}
-                    </p>
-                    <div className="pt-2.5 space-y-1.5">
-                      {teacherNames.length > 0 ? (
-                        teacherNames.map((name, idx) => (
-                          <div key={idx} className="flex items-center gap-2">
-                            <span className="w-7 h-7 shrink-0 rounded-full bg-slate-400 text-white text-xs font-black flex items-center justify-center">
-                              {name.trim().charAt(0) || "?"}
-                            </span>
-                            <span className="text-slate-600 text-xs font-bold truncate">{name}</span>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className="w-7 h-7 shrink-0 rounded-full bg-slate-200 text-slate-400 text-xs font-black flex items-center justify-center">
-                            ?
-                          </span>
-                          <span className="text-slate-400 text-xs font-bold">ไม่ระบุครูผู้สอน</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+        <div className="p-4">
+          <p className="font-black text-base text-slate-800 leading-tight truncate">
+            {subject.name_th}
+          </p>
+          <p className="text-slate-400 text-xs font-bold mt-1">
+            {subject.subject_code} · ปีการศึกษา {periodText}
+          </p>
+
+          <div className="mt-3 space-y-1.5">
+            {teacherNames.length > 0 ? (
+              teacherNames.map((name, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <span className="w-6 h-6 shrink-0 rounded-full bg-slate-400 text-white text-[10px] font-black flex items-center justify-center">
+                    {name.trim().charAt(0) || "?"}
+                  </span>
+                  <span className="text-slate-600 text-xs font-bold truncate">{name}</span>
                 </div>
-              );
-            })}
+              ))
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 shrink-0 rounded-full bg-slate-200 text-slate-400 text-[10px] font-black flex items-center justify-center">
+                  ?
+                </span>
+                <span className="text-slate-400 text-xs font-bold">ไม่ระบุครูผู้สอน</span>
+              </div>
+            )}
           </div>
+        </div>
+      </div>
+    );
+  })}
+</div>
         )}
       </main>
     </div>
