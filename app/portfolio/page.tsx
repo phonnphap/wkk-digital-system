@@ -46,6 +46,27 @@ type AttendanceRow = { work_date: string; status: string; late_minutes: number; 
 
 const LEAVE_LABEL: Record<string, string> = { sick: "ลาป่วย", personal: "ลากิจ", maternity: "ลาคลอด" };
 
+const MONTH_LABEL: Record<number, string> = {
+  1: "ม.ค.", 2: "ก.พ.", 3: "มี.ค.", 4: "เม.ย.", 5: "พ.ค.", 6: "มิ.ย.",
+  7: "ก.ค.", 8: "ส.ค.", 9: "ก.ย.", 10: "ต.ค.", 11: "พ.ย.", 12: "ธ.ค.",
+};
+const FY_MONTHS = [10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+const STATUS_META: Record<string, { label: string; color: string }> = {
+  present: { label: "มาปฏิบัติงาน", color: "text-emerald-600 bg-emerald-50" },
+  late: { label: "มาสาย", color: "text-amber-600 bg-amber-50" },
+  left_early: { label: "กลับก่อน", color: "text-orange-600 bg-orange-50" },
+  late_and_left_early: { label: "สาย+กลับก่อน", color: "text-orange-600 bg-orange-50" },
+  absent: { label: "ขาด", color: "text-rose-600 bg-rose-50" },
+};
+
+// คำนวณปี ค.ศ. ของ "เดือนปีงบ" (10-12 อยู่ปีก่อนหน้าของ Jan-Sep) โดยอิงจากปีงบปัจจุบัน
+function calendarYearForFiscalMonth(month: number) {
+  const fy = currentFiscalYear();
+  const baseYear = fy - 543; // ปี ค.ศ. ของช่วง ม.ค.-ก.ย. ของปีงบนี้
+  return month >= 10 ? baseYear - 1 : baseYear;
+}
+
 export default function TeacherPortfolioPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -57,6 +78,7 @@ export default function TeacherPortfolioPage() {
   const [form, setForm] = useState<Partial<Profile>>({});
 
   const [period, setPeriod] = useState<"day" | "month" | "term" | "year">("month");
+  const [selectedMonth, setSelectedMonth] = useState<number>(() => new Date().getMonth() + 1);
   const [leaveSummary, setLeaveSummary] = useState<LeaveSummaryRow[]>([]);
   const [leaveCount, setLeaveCount] = useState<{ used_count: number; remaining_count: number } | null>(null);
   const [trainings, setTrainings] = useState<Training[]>([]);
@@ -96,35 +118,57 @@ export default function TeacherPortfolioPage() {
     };
   }, [attendance, period]);
 
-  const MONTH_LABEL: Record<number, string> = {
-  1: "ม.ค.", 2: "ก.พ.", 3: "มี.ค.", 4: "เม.ย.", 5: "พ.ค.", 6: "มิ.ย.",
-  7: "ก.ค.", 8: "ส.ค.", 9: "ก.ย.", 10: "ต.ค.", 11: "พ.ย.", 12: "ธ.ค.",
-};
-const FY_MONTHS = [10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+  const monthlyAttendance = useMemo(() => {
+    const now = new Date();
+    let months: number[];
+    if (period === "month") months = [now.getMonth() + 1];
+    else if (period === "term") {
+      const round = (now.getMonth() >= 9 || now.getMonth() <= 2) ? 1 : 2;
+      months = round === 1 ? [10, 11, 12, 1, 2, 3] : [4, 5, 6, 7, 8, 9];
+    } else {
+      months = FY_MONTHS;
+    }
+    return months.map(m => {
+      const rows = attendance.filter(r => new Date(r.work_date).getMonth() + 1 === m);
+      const cnt = (s: string) => rows.filter(r => r.status === s).length;
+      return {
+        month: m,
+        label: MONTH_LABEL[m],
+        present: cnt("present"),
+        late: cnt("late") + cnt("late_and_left_early"),
+        leftEarly: cnt("left_early") + cnt("late_and_left_early"),
+        absent: cnt("absent"),
+      };
+    });
+  }, [attendance, period]);
 
-const monthlyAttendance = useMemo(() => {
-  const now = new Date();
-  let months: number[];
-  if (period === "month") months = [now.getMonth() + 1];
-  else if (period === "term") {
-    const round = (now.getMonth() >= 9 || now.getMonth() <= 2) ? 1 : 2;
-    months = round === 1 ? [10, 11, 12, 1, 2, 3] : [4, 5, 6, 7, 8, 9];
-  } else {
-    months = FY_MONTHS;
-  }
-  return months.map(m => {
-    const rows = attendance.filter(r => new Date(r.work_date).getMonth() + 1 === m);
-    const cnt = (s: string) => rows.filter(r => r.status === s).length;
-    return {
-      month: m,
-      label: MONTH_LABEL[m],
-      present: cnt("present"),
-      late: cnt("late") + cnt("late_and_left_early"),
-      leftEarly: cnt("left_early") + cnt("late_and_left_early"),
-      absent: cnt("absent"),
-    };
-  });
-}, [attendance, period]);
+  // ── ตารางรายวันของเดือนที่เลือก (ใช้ตอน period === "month") ──
+  const dailyAttendance = useMemo(() => {
+    const year = calendarYearForFiscalMonth(selectedMonth);
+    const daysInMonth = new Date(year, selectedMonth, 0).getDate();
+
+    const rowsByDay = new Map<number, AttendanceRow>();
+    attendance.forEach(r => {
+      const d = new Date(r.work_date);
+      if (d.getFullYear() === year && d.getMonth() + 1 === selectedMonth) {
+        rowsByDay.set(d.getDate(), r);
+      }
+    });
+
+    return Array.from({ length: daysInMonth }, (_, i) => {
+      const day = i + 1;
+      const row = rowsByDay.get(day);
+      return {
+        day,
+        date: new Date(year, selectedMonth - 1, day),
+        status: row?.status ?? null,
+        late_minutes: row?.late_minutes ?? 0,
+        early_leave_minutes: row?.early_leave_minutes ?? 0,
+      };
+    });
+  }, [attendance, selectedMonth]);
+
+  const WEEKDAY_LABEL = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
 
   async function loadAll() {
     setLoading(true);
@@ -416,15 +460,65 @@ setAwards(awardRows);
 
           {/* การลงเวลาปฏิบัติงาน */}
           <div>
-            <p className="text-xs font-bold text-slate-500 flex items-center gap-1.5 mb-2">
-              <ClipboardList className="w-3.5 h-3.5" /> การลงเวลาปฏิบัติงาน
-            </p>
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <p className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
+                <ClipboardList className="w-3.5 h-3.5" /> การลงเวลาปฏิบัติงาน
+              </p>
+              {period === "month" && (
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                  className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-600 bg-white"
+                >
+                  {FY_MONTHS.map(m => (
+                    <option key={m} value={m}>{MONTH_LABEL[m]} {calendarYearForFiscalMonth(m) + 543}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
             {period === "day" ? (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <StatBox label="มาปฏิบัติงาน" value={attendanceStats.present} color="emerald" />
                 <StatBox label="มาสาย" value={attendanceStats.late} color="amber" />
                 <StatBox label="กลับก่อน" value={attendanceStats.leftEarly} color="orange" />
                 <StatBox label="ขาด" value={attendanceStats.absent} color="rose" />
+              </div>
+            ) : period === "month" ? (
+              <div className="overflow-x-auto rounded-xl border border-slate-100 max-h-[420px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-slate-50">
+                    <tr className="border-b border-slate-100">
+                      <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">วันที่</th>
+                      <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">สถานะ</th>
+                      <th className="text-center px-3 py-2 font-bold text-amber-600 text-xs">สาย (นาที)</th>
+                      <th className="text-center px-3 py-2 font-bold text-orange-600 text-xs">ออกก่อน (นาที)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {dailyAttendance.map(d => {
+                      const dow = d.date.getDay();
+                      const isWeekend = dow === 0 || dow === 6;
+                      const meta = d.status ? STATUS_META[d.status] : null;
+                      return (
+                        <tr key={d.day} className={isWeekend ? "bg-slate-50/60" : ""}>
+                          <td className="px-3 py-2 font-bold text-slate-700">
+                            {d.day} {WEEKDAY_LABEL[dow]}
+                          </td>
+                          <td className="px-3 py-2">
+                            {meta ? (
+                              <span className={`inline-block px-2 py-0.5 rounded-md text-xs font-bold ${meta.color}`}>{meta.label}</span>
+                            ) : (
+                              <span className="text-xs text-slate-300">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-center font-black text-amber-600">{d.late_minutes || "-"}</td>
+                          <td className="px-3 py-2 text-center font-black text-orange-600">{d.early_leave_minutes || "-"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-slate-100">
@@ -453,7 +547,9 @@ setAwards(awardRows);
               </div>
             )}
           </div>
-          <p className="text-[11px] text-slate-400">มุมมองที่เลือก: {{ day: "รายวัน", month: "รายเดือน", term: "รายเทอม", year: "ปีงบประมาณ" }[period]} — ปีงบประมาณ {currentFiscalYear()}</p>
+          <p className="text-[11px] text-slate-400">
+            มุมมองที่เลือก: {{ day: "รายวัน", month: `รายเดือน (${MONTH_LABEL[selectedMonth]})`, term: "รายเทอม", year: "ปีงบประมาณ" }[period]} — ปีงบประมาณ {currentFiscalYear()}
+          </p>
         </div>
 
         {/* Trainings */}
