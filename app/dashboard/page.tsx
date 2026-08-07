@@ -458,12 +458,12 @@ function StatusBadge({ status }: { status: ItemStatus }) {
     {
       title: "📅 ระบบลางานและสารบรรณ",
       items: [
+        { name: "ประวัติและผลการปฏิบัติงาน", icon: <User className="w-6 h-6" />, color: "bg-sky-500", path: "/portfolio", status: "wip" as ItemStatus },
         { name: "ใบลา/ ไปราชการ", icon: <CalendarDays className="w-6 h-6" />, color: "bg-blue-500", path: "/leave", status: "live" as ItemStatus },
         { name: "ขอออกนอกโรงเรียน", icon: <LogOut className="w-6 h-6" />, color: "bg-amber-500", path: "/gate-pass" },
         { name: "เลขเกียรติบัตร/คำสั่ง/บันทึก", icon: <FileText className="w-6 h-6" />, color: "bg-indigo-500", path: "/document-reg" },
         { name: "รายงานการอบรมรายบุคคล", icon: <FolderOpen className="w-6 h-6" />, color: "bg-violet-500", path: "/training" },
-        { name: "คลังเกียรติยศและผลงาน", icon: <Trophy className="w-6 h-6" />, color: "bg-yellow-500", path: "/honor/awards", status: "live" as ItemStatus },
-        { name: "ประวัติและผลการปฏิบัติงาน", icon: <User className="w-6 h-6" />, color: "bg-sky-500", path: "/portfolio", status: "wip" as ItemStatus },
+        { name: "คลังเกียรติยศและผลงาน", icon: <Trophy className="w-6 h-6" />, color: "bg-yellow-500", path: "/honor/awards", status: "live" as ItemStatus },        
       ]
     },
     {

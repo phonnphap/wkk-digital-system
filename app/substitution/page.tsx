@@ -646,21 +646,40 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
 // 3) รายชื่อครูที่ว่าง เรียงตามกฎ: ครูประจำชั้น(ป.1/ป.2) -> สายชั้นเดียวกัน
 //    (คาบว่างเยอะสุดก่อน, เท่ากันดูสถิติสอนแทนน้อยสุดก่อน) -> วิชาเดียวกัน -> ที่เหลือ
 // ══════════════════════════════════════════════════════════
-function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academicYearId, homeroomMap, initialReason, mode = "normal", fixedTargetTeacherId, onSave, onClose }: {
+function SwapRequestModal({
+  user, allEntries, allTeachers, allTimeSlots, academicYearId, homeroomMap,
+  initialReason: initialReasonProp, mode: modeProp = "normal",
+  fixedTargetTeacherId: fixedTargetTeacherIdProp,
+  editingRequest, onSave, onClose,
+}: {
   user: User; allEntries: TimetableEntry[]; allTeachers: User[]; allTimeSlots: any[]; academicYearId: string;
   homeroomMap: Record<string, string>;
   initialReason?: string; mode?: "normal" | "repay"; fixedTargetTeacherId?: string;
+  editingRequest?: SwapRequest | null;
   onSave: () => void; onClose: () => void;
 }) {
-  const [swapDate, setSwapDate] = useState(ymd(new Date()));
-  const [selectedEntry, setSelectedEntry] = useState<TimetableEntry | null>(null);
-  const [pickedTeacherId, setPickedTeacherId] = useState("");
+  const isEditing = !!editingRequest;
+  // ★ ถ้าเป็นแก้ไข ให้เดา mode/target จาก record เดิม (เจาะจงกลับให้/ปกติ เก็บอยู่ในตารางเดียวกัน)
+  const mode: "normal" | "repay" = isEditing
+    ? (editingRequest!.reason?.includes("ขอแลกคาบคืนให้") ? "repay" : "normal")
+    : modeProp;
+  const fixedTargetTeacherId = isEditing ? editingRequest!.target_teacher_id : fixedTargetTeacherIdProp;
+  const initialReason = isEditing ? (editingRequest!.reason ?? "") : initialReasonProp;
+
+  const [swapDate, setSwapDate] = useState(() => editingRequest?.swap_date ?? ymd(new Date()));
+  const [selectedEntry, setSelectedEntry] = useState<TimetableEntry | null>(() =>
+    editingRequest ? allEntries.find(e => e.id === editingRequest.requester_entry_id) ?? null : null
+  );
+  const [pickedTeacherId, setPickedTeacherId] = useState(() =>
+    editingRequest && mode === "normal" ? editingRequest.target_teacher_id : ""
+  );
   const [reason, setReason] = useState(initialReason ?? "");
   const [saving, setSaving] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [onLeaveIds, setOnLeaveIds] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const dow = swapDate ? dowOf(swapDate) : null;
+  const didInitRef = useRef(false); // ★ กันไม่ให้ useEffect ล้างค่าที่โหลดมาแก้ไขตอน mount ครั้งแรก
 
   // ★ โหมด repay: หา user ของครูที่เราจะแลกคาบคืนให้ (ครูที่เคยสอนแทนเรา)
   const targetTeacher = useMemo(
@@ -694,19 +713,23 @@ function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academi
 
   // ★ โหลดครูที่ลาวันนั้น ทุกครั้งที่เปลี่ยนวันที่
   useEffect(() => {
+  const isFirstRun = !didInitRef.current;
+  didInitRef.current = true;
+  if (!(isEditing && isFirstRun)) {
     setSelectedEntry(null); setPickedTeacherId("");
-    if (!swapDate) return;
-    setLoadingMeta(true);
-    (async () => {
-      const { data: leaves } = await supabase.from("leave_requests")
-        .select("user_id,start_date,end_date,status")
-        .in("status", ["pending", "approved"]);
-      const ids = new Set<string>();
-      (leaves || []).forEach((l: any) => { if (l.start_date <= swapDate && l.end_date >= swapDate) ids.add(l.user_id); });
-      setOnLeaveIds(ids);
-      setLoadingMeta(false);
-    })();
-  }, [swapDate]);
+  }
+  if (!swapDate) return;
+  setLoadingMeta(true);
+  (async () => {
+    const { data: leaves } = await supabase.from("leave_requests")
+      .select("user_id,start_date,end_date,status")
+      .in("status", ["pending", "approved"]);
+    const ids = new Set<string>();
+    (leaves || []).forEach((l: any) => { if (l.start_date <= swapDate && l.end_date >= swapDate) ids.add(l.user_id); });
+    setOnLeaveIds(ids);
+    setLoadingMeta(false);
+  })();
+}, [swapDate]);
 
   // ★ ครูที่ว่าง — เรียงลำดับแบบเดียวกับตอนแอดมินจัดสอนแทน (สายชั้นเดียวกันก่อน) + โชว์จำนวนคาบ
   const candidateTeachers = useMemo(() => {
@@ -731,20 +754,39 @@ function SwapRequestModal({ user, allEntries, allTeachers, allTimeSlots, academi
   };
 
   const handleSave = async () => {
-    if (!validate()) return;
-    setSaving(true);
-    const targetId = mode === "repay" ? fixedTargetTeacherId! : pickedTeacherId;
-    const { error } = await supabase.from("class_swap_requests").insert([{
-  requester_id: user.id, target_teacher_id: targetId,
-  requester_entry_id: selectedEntry!.id, target_entry_id: null,
-  swap_date: swapDate, reason, status: "pending", academic_year_id: academicYearId,
-}]);
+  if (!validate()) return;
+  setSaving(true);
+  const targetId = mode === "repay" ? fixedTargetTeacherId! : pickedTeacherId;
+
+  if (isEditing) {
+    // ★ แก้ไขคำขอเดิม — เปลี่ยนกลับเป็น pending ให้อีกฝ่ายคอนเฟิร์มใหม่เสมอ เพราะเนื้อหาเปลี่ยน
+    const { error } = await supabase.from("class_swap_requests").update({
+      target_teacher_id: targetId,
+      requester_entry_id: selectedEntry!.id,
+      swap_date: swapDate,
+      reason,
+      status: "pending",
+      responded_at: null,
+    }).eq("id", editingRequest!.id);
     setSaving(false);
     if (error) { alert("❌ "+error.message); return; }
     const targetT = allTeachers.find(t => t.id === targetId);
-notifyTeams(targetT?.email, `🔄 ${fullName(user)} ขอแลกคาบกับคุณ วันที่ ${thaiDate(swapDate)} คาบ ${selectedEntry?.slot_label ?? "-"} — กรุณาเข้าไปตอบรับในระบบ`);
+    notifyTeams(targetT?.email, `✏️ ${fullName(user)} แก้ไขคำขอแลกคาบ วันที่ ${thaiDate(swapDate)} คาบ ${selectedEntry?.slot_label ?? "-"} — กรุณาตรวจสอบและตอบรับอีกครั้ง`);
     onSave();
-  };
+    return;
+  }
+
+  const { error } = await supabase.from("class_swap_requests").insert([{
+    requester_id: user.id, target_teacher_id: targetId,
+    requester_entry_id: selectedEntry!.id, target_entry_id: null,
+    swap_date: swapDate, reason, status: "pending", academic_year_id: academicYearId,
+  }]);
+  setSaving(false);
+  if (error) { alert("❌ "+error.message); return; }
+  const targetT = allTeachers.find(t => t.id === targetId);
+  notifyTeams(targetT?.email, `🔄 ${fullName(user)} ขอแลกคาบกับคุณ วันที่ ${thaiDate(swapDate)} คาบ ${selectedEntry?.slot_label ?? "-"} — กรุณาเข้าไปตอบรับในระบบ`);
+  onSave();
+};
 
   const iCls = (err?: boolean) =>
     `w-full border-2 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none transition-colors bg-white
@@ -756,8 +798,10 @@ notifyTeams(targetT?.email, `🔄 ${fullName(user)} ขอแลกคาบก�
         onClick={e=>e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between shrink-0">
           <h3 className="font-bold text-slate-800 text-base">
-            {mode === "repay" ? `🔄 ขอแลกคาบคืนให้ ${fullName(targetTeacher)}` : "🔄 ขอแลกคาบสอน"}
-          </h3>
+  {isEditing
+    ? "✏️ แก้ไขคำขอแลกคาบ"
+    : mode === "repay" ? `🔄 ขอแลกคาบคืนให้ ${fullName(targetTeacher)}` : "🔄 ขอแลกคาบสอน"}
+</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#FCE7F3] flex items-center justify-center text-slate-500">✕</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
@@ -1441,6 +1485,13 @@ const manualAssignTeachers = useMemo(() => {
 }, [teachers, user, isAdmin]);
 
 const canManualAssign = isAdmin || (user?.extra_roles ?? []).includes("grade_head");
+const isSpecificAdmin = useMemo(() => user?.email === "admin@khienkhet.ac.th", [user]);
+const canEditSwap = useCallback((r: SwapRequest) => {
+  if (isSpecificAdmin && r.status !== "cancelled") return true;
+  return r.requester_id === user?.id && r.status === "pending";
+}, [isSpecificAdmin, user]);
+
+const [editingSwap, setEditingSwap] = useState<SwapRequest | null>(null);
 
   // ── Load user ────────────────────────────────────────────
   useEffect(() => {
@@ -2006,11 +2057,20 @@ const adminFilteredSwaps = useMemo(() => {
       className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold">✅ อนุมัติแทน</button>
     <button onClick={() => handleAdminSwapRespond(r.id, "rejected")}
       className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold">❌ ปฏิเสธแทน</button>
+    {isSpecificAdmin && (
+      <button onClick={() => { setEditingSwap(r); setShowSwapModal(true); }}
+        className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold border border-blue-200">✏️ แก้ไข</button>
+    )}
   </div>
 ) : r.status === "cancelled" ? (
   <button onClick={() => handleSwapDeletePermanent(r.id)}
     className="px-3 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold border border-red-300 shrink-0">
     🗑️ ลบถาวร
+  </button>
+) : isSpecificAdmin ? (
+  <button onClick={() => { setEditingSwap(r); setShowSwapModal(true); }}
+    className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold border border-blue-200 shrink-0">
+    ✏️ แก้ไข
   </button>
 ) : null}
             </div>
@@ -2056,50 +2116,53 @@ const adminFilteredSwaps = useMemo(() => {
 
             {/* My requests */}
             <div className="w-full max-w-none">
-  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">คำขอทั้งหมดของฉัน</h3>
-  
-  {mySwaps.length === 0 ? (
-    <div className="w-full text-center py-16 bg-white rounded-2xl border border-[#FBCFE8] text-slate-400 shadow-sm">
-      <p className="text-5xl mb-3">🔄</p>
-      <p className="text-base font-medium">ยังไม่มีคำขอแลกคาบ</p>
-    </div>
-  ) : (
-    <div className="w-full grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-      {mySwaps.map(r => (
-        <div key={r.id} className="w-full bg-white rounded-2xl border border-[#FBCFE8] p-5 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between gap-4 mb-2">
-            <div className="min-w-0 flex-1">
-              <p className="font-bold text-slate-800 text-base leading-snug">
-                {r.requester_id === user?.id
-                  ? <span>ขอแลกกับ <span className="text-[#DB2777]">{fullName(r.target_teacher)}</span></span>
-                  : <span><span className="text-[#DB2777]">{fullName(r.requester)}</span> ขอแลกกับคุณ</span>
-                }
-              </p>
-              <p className="text-xs sm:text-sm text-slate-400 mt-1">📅 {thaiDate(r.swap_date)}</p>
-            </div>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">คำขอทั้งหมดของฉัน</h3>
+
+              {mySwaps.length === 0 ? (
+                <div className="w-full text-center py-16 bg-white rounded-2xl border border-[#FBCFE8] text-slate-400 shadow-sm">
+                  <p className="text-5xl mb-3">🔄</p>
+                  <p className="text-base font-medium">ยังไม่มีคำขอแลกคาบ</p>
+                </div>
+              ) : (
+                <div className="w-full grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {mySwaps.map(r => (
+                    <div key={r.id} className="w-full bg-white rounded-2xl border border-[#FBCFE8] p-5 shadow-sm hover:shadow-md transition-shadow">
+                      <div className="flex items-center justify-between gap-4 mb-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold text-slate-800 text-base leading-snug">
+                            {r.requester_id === user?.id
+                              ? <span>ขอแลกกับ <span className="text-[#DB2777]">{fullName(r.target_teacher)}</span></span>
+                              : <span><span className="text-[#DB2777]">{fullName(r.requester)}</span> ขอแลกกับคุณ</span>
+                            }
+                          </p>
+                          <p className="text-xs sm:text-sm text-slate-400 mt-1">📅 {thaiDate(r.swap_date)}</p>
+                        </div>
                         <span className={`text-xs font-bold px-2 py-1 rounded-lg border shrink-0 ${STATUS_SWAP[r.status]?.cls}`}>
                           {STATUS_SWAP[r.status]?.label}
                         </span>
                       </div>
                       {r.reason && <p className="text-xs text-slate-500 mb-2">{r.reason}</p>}
-                      {r.requester_id === user?.id && r.status === "pending" && (
-                        <button onClick={() => handleSwapCancel(r.id)}
-                          className="text-xs text-red-500 hover:text-red-700 font-bold underline">ยกเลิกคำขอ</button>
-                      )}
-                      {/* ★ ใหม่: requester ติดหนี้บุญคุณ target_teacher ที่รับแลกคาบให้แล้ว (accepted) — เปิดโหมด repay เหมือนหน้าสอนแทน */}
-{r.requester_id === user?.id && r.status === "accepted" && (
-  <button
-    onClick={() => {
-      setSwapMode("repay");
-      setSwapFixedTargetTeacherId(r.target_teacher_id);
-      setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.target_teacher)} ที่เคยรับแลกคาบให้เมื่อ ${thaiDate(r.swap_date)} (${r.requester_entry?.slot_label ?? "-"})`);
-      setShowSwapModal(true);
-    }}
-    className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200 transition-colors"
-  >
-    🔄 แลกคาบคืน
-  </button>
-)}
+                      <div className="flex items-center gap-3">
+                        {r.requester_id === user?.id && r.status === "pending" && (
+                          <button onClick={() => handleSwapCancel(r.id)}
+                            className="text-xs text-red-500 hover:text-red-700 font-bold underline">ยกเลิกคำขอ</button>
+                        )}
+                        {r.requester_id === user?.id && r.status === "accepted" && (
+                          <button onClick={() => {
+                            setSwapMode("repay");
+                            setSwapFixedTargetTeacherId(r.target_teacher_id);
+                            setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.target_teacher)} ที่เคยรับแลกคาบให้เมื่อ ${thaiDate(r.swap_date)} (${r.requester_entry?.slot_label ?? "-"})`);
+                            setShowSwapModal(true);
+                          }}
+                            className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200">
+                            🔄 แลกคาบคืน
+                          </button>
+                        )}
+                        {canEditSwap(r) && (
+                          <button onClick={() => { setEditingSwap(r); setShowSwapModal(true); }}
+                            className="text-xs text-blue-500 hover:text-blue-700 font-bold underline">✏️ แก้ไข</button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2495,8 +2558,9 @@ const adminFilteredSwaps = useMemo(() => {
     initialReason={swapInitialReason}
     mode={swapMode}
     fixedTargetTeacherId={swapFixedTargetTeacherId}
-    onSave={async()=>{ setShowSwapModal(false); setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); await loadData(); }}
-    onClose={()=>{ setShowSwapModal(false); setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); }}
+    editingRequest={editingSwap}
+    onSave={async()=>{ setShowSwapModal(false); setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); setEditingSwap(null); await loadData(); }}
+    onClose={()=>{ setShowSwapModal(false); setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); setEditingSwap(null); }}
   />
 )}
       {assignLeave && academicYear && (

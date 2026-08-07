@@ -13,6 +13,7 @@ type Subject = { id: string; subject_code: string; name_th: string };
 type Classroom = { id: string; room_name?: string; grade_group?: string };
 type SectionRow = { id: string; join_code: string; classroom_id: string };
 type Student = { id: string; prefix?: string; first_name: string; last_name: string; seat_number: number; avatar_url?: string };
+type ScorePreset = { id: string; label: string; points: number; emoji: string; sort_order: number };
 
 type TabKey = "roster" | "attendance" | "random" | "tools";
 
@@ -21,6 +22,17 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: "attendance", label: "เช็กชื่อ", icon: "✅" },
   { key: "random", label: "สุ่มชื่อ", icon: "🎲" },
   { key: "tools", label: "เครื่องมือ", icon: "🧰" },
+];
+
+// Fallback presets shown even before the teacher has saved any of their own
+// (used purely client-side until the teacher actually taps one, at which
+// point it gets written to score_presets so it becomes "real" and reusable).
+const DEFAULT_PRESETS: Omit<ScorePreset, "id">[] = [
+  { label: "Keep It Up", points: 1, emoji: "😌", sort_order: 0 },
+  { label: "Good Job", points: 1, emoji: "😄", sort_order: 1 },
+  { label: "Needs Improvement", points: -1, emoji: "😟", sort_order: 2 },
+  { label: "Excellent", points: 1, emoji: "🙂", sort_order: 3 },
+  { label: "Well Done", points: 1, emoji: "😎", sort_order: 4 },
 ];
 
 function QrCodeModal({ inviteUrl, onClose }: { inviteUrl: string; onClose: () => void }) {
@@ -32,6 +44,215 @@ function QrCodeModal({ inviteUrl, onClose }: { inviteUrl: string; onClose: () =>
         <img src={qrSrc} alt="QR Code" className="mx-auto rounded-xl border-2 border-slate-100" width={260} height={260} />
         <p className="text-slate-400 text-xs mt-3">สแกนเพื่อเข้าร่วมวิชานี้</p>
         <button onClick={onClose} className="mt-4 w-full py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">ปิด</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- การ์ดนักเรียน (ตามภาพต้นแบบ) ---------------- */
+
+function StudentCard({
+  student,
+  score,
+  selectMode,
+  selected,
+  onClick,
+}: {
+  student: Student;
+  score: number;
+  selectMode: boolean;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`relative rounded-2xl border-2 bg-white pt-7 pb-4 px-3 text-center transition-all hover:shadow-lg hover:-translate-y-0.5 ${
+        selected ? "border-emerald-400 ring-2 ring-emerald-100" : "border-slate-200"
+      }`}
+    >
+      {/* badge คะแนนรวม */}
+      <div className="absolute -top-3 left-1/2 -translate-x-1/2 min-w-[30px] h-7 px-2 rounded-full bg-gradient-to-r from-sky-500 to-blue-400 text-white text-xs font-black flex items-center justify-center shadow">
+        {score}
+      </div>
+
+      {/* จุดจับ / checkbox ตอนเลือกหลายคน */}
+      {selectMode ? (
+        <div
+          className={`absolute top-2 right-2 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-black ${
+            selected ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 bg-white text-transparent"
+          }`}
+        >
+          ✓
+        </div>
+      ) : (
+        <span className="absolute top-2 right-2 text-slate-300 text-sm leading-none">⠿</span>
+      )}
+
+      {student.avatar_url ? (
+        <img src={student.avatar_url} className="w-16 h-16 rounded-full object-cover mx-auto border-2 border-slate-100" />
+      ) : (
+        <div className="w-16 h-16 rounded-full bg-emerald-400 text-white text-2xl font-black flex items-center justify-center mx-auto">
+          {student.first_name[0]}
+        </div>
+      )}
+
+      {student.prefix && <p className="text-slate-400 text-[11px] font-bold mt-2">{student.prefix}</p>}
+      <p className="text-sky-700 font-black text-sm mt-0.5 truncate">{student.first_name} {student.last_name}</p>
+      <p className="text-slate-400 text-[11px] font-bold">Number {student.seat_number}</p>
+    </button>
+  );
+}
+
+/* ---------------- ป๊อปอัพให้/หักคะแนน ---------------- */
+
+function ScoreModal({
+  students,
+  presets,
+  usageCounts,
+  onClose,
+  onGiveScore,
+  onAddPreset,
+}: {
+  students: Student[];
+  presets: ScorePreset[];
+  usageCounts: Record<string, number>;
+  onClose: () => void;
+  onGiveScore: (preset: ScorePreset | null, customPoints?: number) => void;
+  onAddPreset: (label: string, points: number, emoji: string) => void;
+}) {
+  const [customPoints, setCustomPoints] = useState(0);
+  const [addingPreset, setAddingPreset] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [newPoints, setNewPoints] = useState(1);
+  const [newEmoji, setNewEmoji] = useState("🙂");
+  const single = students.length === 1 ? students[0] : null;
+
+  function submitNewPreset() {
+    if (!newLabel.trim()) return;
+    onAddPreset(newLabel.trim(), newPoints, newEmoji);
+    setNewLabel("");
+    setNewPoints(1);
+    setNewEmoji("🙂");
+    setAddingPreset(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col sm:flex-row"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* ซ้าย: ข้อมูลนักเรียน */}
+        <div className="sm:w-52 shrink-0 bg-slate-50 p-5 flex flex-col items-center text-center border-b sm:border-b-0 sm:border-r border-slate-100">
+          {single ? (
+            <>
+              <div className="w-full rounded-t-xl bg-gradient-to-r from-sky-500 to-blue-400 text-white font-black text-sm py-1.5 mb-3">
+                {usageCounts[single.id] ?? 0}
+              </div>
+              {single.avatar_url ? (
+                <img src={single.avatar_url} className="w-20 h-20 rounded-full object-cover border-2 border-white shadow" />
+              ) : (
+                <div className="w-20 h-20 rounded-full bg-emerald-400 text-white text-2xl font-black flex items-center justify-center">
+                  {single.first_name[0]}
+                </div>
+              )}
+              <p className="mt-3 text-sky-700 font-black text-sm">{single.first_name} {single.last_name}</p>
+              <p className="text-slate-400 text-xs font-bold">Number {single.seat_number}</p>
+            </>
+          ) : (
+            <>
+              <p className="text-4xl mb-2">👥</p>
+              <p className="text-slate-700 font-black text-sm">เลือกไว้ {students.length} คน</p>
+              <p className="text-slate-400 text-xs font-bold mt-1">คะแนนจะถูกให้กับทุกคนที่เลือก</p>
+            </>
+          )}
+        </div>
+
+        {/* ขวา: ให้คะแนน */}
+        <div className="flex-1 p-5 max-h-[80vh] overflow-y-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-black text-slate-800 text-lg">Give Your Student A Score!</h3>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+          </div>
+
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+            {/* ปุ่มเพิ่มพรีเซ็ตใหม่ */}
+            <button
+              onClick={() => setAddingPreset(true)}
+              className="rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-emerald-400 hover:text-emerald-500 flex flex-col items-center justify-center py-4 gap-1"
+            >
+              <span className="text-2xl leading-none">+</span>
+            </button>
+
+            {presets.map(p => (
+              <button
+                key={p.id}
+                onClick={() => onGiveScore(p)}
+                className="relative rounded-xl border-2 border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 flex flex-col items-center justify-center py-4 gap-1 transition-colors"
+              >
+                <span
+                  className={`absolute -top-2 -right-2 w-5 h-5 rounded-full text-[10px] font-black text-white flex items-center justify-center ${
+                    p.points >= 0 ? "bg-emerald-500" : "bg-red-500"
+                  }`}
+                >
+                  {p.points >= 0 ? `+${p.points}` : p.points}
+                </span>
+                <span className="text-2xl leading-none">{p.emoji}</span>
+                <span className="text-[11px] font-black text-slate-600 text-center leading-tight px-1">{p.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {addingPreset && (
+            <div className="mt-4 rounded-xl border-2 border-slate-200 p-3 space-y-2">
+              <p className="font-black text-slate-700 text-xs">เพิ่มการ์ดให้คะแนนใหม่</p>
+              <div className="flex gap-2">
+                <input
+                  value={newEmoji}
+                  onChange={e => setNewEmoji(e.target.value)}
+                  className="w-12 text-center border-2 border-slate-200 rounded-lg py-1.5 text-lg"
+                  maxLength={2}
+                />
+                <input
+                  value={newLabel}
+                  onChange={e => setNewLabel(e.target.value)}
+                  placeholder="เช่น ตอบคำถาม, พูดคำหยาบ"
+                  className="flex-1 border-2 border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold"
+                />
+                <input
+                  type="number"
+                  value={newPoints}
+                  onChange={e => setNewPoints(Number(e.target.value))}
+                  className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={submitNewPreset} className="flex-1 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs">
+                  บันทึกการ์ด
+                </button>
+                <button onClick={() => setAddingPreset(false)} className="px-3 py-2 rounded-lg bg-slate-100 text-slate-500 font-black text-xs">
+                  ยกเลิก
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 mt-5">
+            <input
+              type="number"
+              value={customPoints}
+              onChange={e => setCustomPoints(Number(e.target.value))}
+              className="w-24 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-center"
+            />
+            <button
+              onClick={() => onGiveScore(null, customPoints)}
+              className="flex-1 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-black text-sm"
+            >
+              Give Score ★
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -359,21 +580,6 @@ function ToolsTab({ students }: { students: Student[] }) {
   );
 }
 
-/* ---------------- แท็บ เช็กชื่อ (placeholder — รอ schema ตารางสอน/เช็กชื่อโฮมรูม) ---------------- */
-
-function AttendanceTabStub() {
-  return (
-    <div className="bg-white rounded-2xl border-2 border-dashed border-slate-200 p-8 text-center">
-      <p className="text-4xl mb-3">🚧</p>
-      <p className="font-black text-slate-600 mb-1">แท็บเช็กชื่อกำลังจะมา</p>
-      <p className="text-slate-400 text-xs max-w-xs mx-auto">
-        ต้องการชื่อตาราง/คอลัมน์ของ "ตารางสอน" (เพื่อดูว่าวันนี้มีกี่คาบ) และ
-        "ข้อมูลเช็กชื่อครูประจำชั้น" (เพื่อโชว์ badge โฮมรูม) ก่อนถึงจะต่อระบบให้ครบ
-      </p>
-    </div>
-  );
-}
-
 /* ---------------- หน้าเพจหลัก ---------------- */
 
 export default function SmartClassRosterPage() {
@@ -391,11 +597,18 @@ export default function SmartClassRosterPage() {
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<TabKey>("roster");
   const [currentUserId, setCurrentUserId] = useState("");
-const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
-type Period = { timetable_entry_id: string; slot_number?: number; start_time?: string; end_time?: string };
-const [periods, setPeriods] = useState<Period[]>([]);
-const [timetableEntryId, setTimetableEntryId] = useState("");
-const [homeroomMap, setHomeroomMap] = useState<Record<string, { status: "present" | "absent" | "late" | "leave" }>>({});
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+  type Period = { timetable_entry_id: string; slot_number?: number; start_time?: string; end_time?: string };
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [timetableEntryId, setTimetableEntryId] = useState("");
+  const [homeroomMap, setHomeroomMap] = useState<Record<string, { status: "present" | "absent" | "late" | "leave" }>>({});
+
+  // --- คะแนน ---
+  const [presets, setPresets] = useState<ScorePreset[]>([]);
+  const [studentScores, setStudentScores] = useState<Record<string, number>>({});
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [scoreTargets, setScoreTargets] = useState<Student[] | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -419,9 +632,32 @@ const [homeroomMap, setHomeroomMap] = useState<Record<string, { status: "present
         const { data: studentsData } = await supabase
           .from("students")
           .select("id, prefix, first_name, last_name, seat_number, avatar_url")
-.eq("classroom_id", sec.classroom_id)
-.order("seat_number");
+          .eq("classroom_id", sec.classroom_id)
+          .order("seat_number");
         setStudents((studentsData ?? []) as Student[]);
+      }
+
+      // โหลดพรีเซ็ตคะแนนของวิชานี้ + ผลรวมคะแนนของแต่ละคน (ถ้ายังไม่มีตาราง จะเงียบและใช้ค่า default แทน)
+      if (sec?.id) {
+        try {
+          const { data: presetRows } = await supabase
+            .from("score_presets").select("id, label, points, emoji, sort_order")
+            .eq("subject_section_id", sec.id).order("sort_order");
+          if (presetRows && presetRows.length > 0) {
+            setPresets(presetRows as ScorePreset[]);
+          } else {
+            setPresets(DEFAULT_PRESETS.map((p, i) => ({ ...p, id: `local-${i}` })));
+          }
+
+          const { data: eventRows } = await supabase
+            .from("score_events").select("student_id, points")
+            .eq("subject_section_id", sec.id);
+          const totals: Record<string, number> = {};
+          (eventRows ?? []).forEach((r: any) => { totals[r.student_id] = (totals[r.student_id] ?? 0) + r.points; });
+          setStudentScores(totals);
+        } catch {
+          setPresets(DEFAULT_PRESETS.map((p, i) => ({ ...p, id: `local-${i}` })));
+        }
       }
 
       setLoading(false);
@@ -429,39 +665,39 @@ const [homeroomMap, setHomeroomMap] = useState<Record<string, { status: "present
   }, [subjectId, sectionId]);
 
   useEffect(() => {
-  (async () => {
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (authUser) {
-      const { data: profile } = await supabase.from("users").select("id").eq("auth_id", authUser.id).maybeSingle();
-      if (profile) setCurrentUserId(profile.id);
-    }
-  })();
-}, []);
+    (async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (authUser) {
+        const { data: profile } = await supabase.from("users").select("id").eq("auth_id", authUser.id).maybeSingle();
+        if (profile) setCurrentUserId(profile.id);
+      }
+    })();
+  }, []);
 
-useEffect(() => {
-  (async () => {
-    if (!section?.id || !selectedDate) { setPeriods([]); setTimetableEntryId(""); return; }
-    const res = await fetch(`/api/timetable/periods?subject_section_id=${section.id}&attendance_date=${selectedDate}`);
-    const json = await res.json();
-    const list = json.periods ?? [];
-    setPeriods(list);
-    setTimetableEntryId(list.length > 0 ? list[0].timetable_entry_id : "");
-  })();
-}, [section?.id, selectedDate]);
+  useEffect(() => {
+    (async () => {
+      if (!section?.id || !selectedDate) { setPeriods([]); setTimetableEntryId(""); return; }
+      const res = await fetch(`/api/timetable/periods?subject_section_id=${section.id}&attendance_date=${selectedDate}`);
+      const json = await res.json();
+      const list = json.periods ?? [];
+      setPeriods(list);
+      setTimetableEntryId(list.length > 0 ? list[0].timetable_entry_id : "");
+    })();
+  }, [section?.id, selectedDate]);
 
-useEffect(() => {
-  (async () => {
-    if (!section?.classroom_id || !selectedDate) { setHomeroomMap({}); return; }
-    const { data } = await supabase
-      .from("attendance_records")
-      .select("student_id, status")
-      .eq("classroom_id", section.classroom_id)
-      .eq("attendance_date", selectedDate);
-    const map: Record<string, { status: any }> = {};
-    (data ?? []).forEach((r: any) => { map[r.student_id] = { status: r.status }; });
-    setHomeroomMap(map);
-  })();
-}, [section?.classroom_id, selectedDate]);
+  useEffect(() => {
+    (async () => {
+      if (!section?.classroom_id || !selectedDate) { setHomeroomMap({}); return; }
+      const { data } = await supabase
+        .from("attendance_records")
+        .select("student_id, status")
+        .eq("classroom_id", section.classroom_id)
+        .eq("attendance_date", selectedDate);
+      const map: Record<string, { status: any }> = {};
+      (data ?? []).forEach((r: any) => { map[r.student_id] = { status: r.status }; });
+      setHomeroomMap(map);
+    })();
+  }, [section?.classroom_id, selectedDate]);
 
   const inviteUrl = useMemo(() => {
     if (typeof window === "undefined" || !section) return "";
@@ -472,6 +708,93 @@ useEffect(() => {
     await navigator.clipboard.writeText(inviteUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  // --- helpers คะแนน ---
+  function toggleSelectMode() {
+    setSelectMode(v => !v);
+    setSelectedIds(new Set());
+  }
+  function toggleStudentSelected(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAll() {
+    setSelectedIds(prev => (prev.size === students.length ? new Set() : new Set(students.map(s => s.id))));
+  }
+  function handleCardClick(student: Student) {
+    if (selectMode) {
+      toggleStudentSelected(student.id);
+    } else {
+      setScoreTargets([student]);
+    }
+  }
+  function openScoreForSelected() {
+    const chosen = students.filter(s => selectedIds.has(s.id));
+    if (chosen.length > 0) setScoreTargets(chosen);
+  }
+
+  async function handleGiveScore(preset: ScorePreset | null, customPoints?: number) {
+    if (!scoreTargets || !section?.id) return;
+    const points = preset ? preset.points : (customPoints ?? 0);
+    if (points === 0) return;
+
+    let presetId: string | null = preset?.id ?? null;
+    // ถ้าเป็นพรีเซ็ตค่า default ที่ยังไม่เคยบันทึกลงฐานข้อมูล (id ขึ้นต้นด้วย local-) ให้บันทึกจริงก่อน
+    if (preset && preset.id.startsWith("local-")) {
+      try {
+        const { data } = await supabase
+          .from("score_presets")
+          .insert({ subject_section_id: section.id, label: preset.label, points: preset.points, emoji: preset.emoji, sort_order: preset.sort_order })
+          .select().maybeSingle();
+        if (data) {
+          presetId = data.id;
+          setPresets(prev => prev.map(p => (p.id === preset.id ? (data as ScorePreset) : p)));
+        }
+      } catch {
+        // เก็บ event ต่อได้แม้บันทึกพรีเซ็ตไม่สำเร็จ แค่ไม่ผูก preset_id
+        presetId = null;
+      }
+    }
+
+    const rows = scoreTargets.map(s => ({
+      student_id: s.id,
+      subject_section_id: section.id,
+      preset_id: presetId,
+      points,
+      created_by: currentUserId || null,
+    }));
+
+    try {
+      await supabase.from("score_events").insert(rows);
+    } catch {
+      // ถ้าตาราง score_events ยังไม่ถูกสร้าง ให้ยังอัปเดตหน้าจอไว้ก่อนเพื่อไม่บล็อกครู
+    }
+
+    setStudentScores(prev => {
+      const next = { ...prev };
+      scoreTargets.forEach(s => { next[s.id] = (next[s.id] ?? 0) + points; });
+      return next;
+    });
+    setScoreTargets(null);
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+
+  async function handleAddPreset(label: string, points: number, emoji: string) {
+    if (!section?.id) return;
+    try {
+      const { data } = await supabase
+        .from("score_presets")
+        .insert({ subject_section_id: section.id, label, points, emoji, sort_order: presets.length })
+        .select().maybeSingle();
+      if (data) setPresets(prev => [...prev, data as ScorePreset]);
+    } catch {
+      setPresets(prev => [...prev, { id: `local-${prev.length}`, label, points, emoji, sort_order: prev.length }]);
+    }
   }
 
   if (loading) {
@@ -490,8 +813,18 @@ useEffect(() => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-20">
+    <div className="min-h-screen bg-slate-50 pb-24">
       {showQr && <QrCodeModal inviteUrl={inviteUrl} onClose={() => setShowQr(false)} />}
+      {scoreTargets && (
+        <ScoreModal
+          students={scoreTargets}
+          presets={presets}
+          usageCounts={studentScores}
+          onClose={() => setScoreTargets(null)}
+          onGiveScore={handleGiveScore}
+          onAddPreset={handleAddPreset}
+        />
+      )}
 
       <div className="bg-gradient-to-br from-emerald-600 to-teal-600 px-4 pt-4 pb-6">
         <button onClick={() => router.push(`/smartclass/${subjectId}`)}
@@ -515,31 +848,49 @@ useEffect(() => {
         </div>
       </div>
 
-      <main className="p-4 max-w-4xl mx-auto">
+      <main className={`p-4 mx-auto ${tab === "roster" ? "max-w-7xl" : "max-w-4xl"}`}>
         {tab === "roster" && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-            <h2 className="font-black text-slate-700 text-sm mb-4">👥 รายชื่อนักเรียน</h2>
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+              <h2 className="font-black text-slate-700 text-sm">👥 รายชื่อนักเรียน</h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                {selectMode && (
+                  <button onClick={toggleSelectAll} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-bold text-xs">
+                    {selectedIds.size === students.length ? "ยกเลิกเลือกทั้งหมด" : "เลือกทั้งหมด"}
+                  </button>
+                )}
+                {selectMode && selectedIds.size > 0 && (
+                  <button onClick={openScoreForSelected} className="px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-black text-xs">
+                    ⭐ ให้คะแนนที่เลือก ({selectedIds.size})
+                  </button>
+                )}
+                <button
+                  onClick={toggleSelectMode}
+                  className={`px-3 py-1.5 rounded-lg font-black text-xs ${
+                    selectMode ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {selectMode ? "✓ กำลังเลือกการ์ด" : "เลือกการ์ดนักเรียน"}
+                </button>
+              </div>
+            </div>
+
             {students.length === 0 ? (
               <div className="text-center py-10 text-slate-400">
                 <p className="text-3xl mb-2">📭</p>
                 <p className="font-bold text-sm">ยังไม่มีนักเรียนในห้องนี้</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
                 {students.map(s => (
-                  <div key={s.id} className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2">
-                    {s.avatar_url ? (
-                      <img src={s.avatar_url} className="w-8 h-8 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-emerald-400 text-white text-xs font-black flex items-center justify-center">
-                        {s.first_name[0]}
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-xs font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
-                      <p className="text-[10px] text-slate-400">เลขที่ {s.seat_number}</p>
-                    </div>
-                  </div>
+                  <StudentCard
+                    key={s.id}
+                    student={s}
+                    score={studentScores[s.id] ?? 0}
+                    selectMode={selectMode}
+                    selected={selectedIds.has(s.id)}
+                    onClick={() => handleCardClick(s)}
+                  />
                 ))}
               </div>
             )}
@@ -547,34 +898,34 @@ useEffect(() => {
         )}
 
         {tab === "attendance" && (
-  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
-    <div className="px-4 pt-4 flex items-center gap-2 flex-wrap">
-      <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
-        className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:outline-none" />
-      {periods.length > 1 && (
-        <select value={timetableEntryId} onChange={e => setTimetableEntryId(e.target.value)}
-          className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:outline-none">
-          {periods.map(p => (
-            <option key={p.timetable_entry_id} value={p.timetable_entry_id}>
-              คาบ {p.slot_number} · {p.start_time?.slice(0,5)}-{p.end_time?.slice(0,5)}
-            </option>
-          ))}
-        </select>
-      )}
-    </div>
-    {periods.length === 0 ? (
-      <div className="p-10 text-center text-slate-400">
-        <p className="text-3xl mb-2">🗓️</p>
-        <p className="font-bold text-sm">วันนี้ไม่มีคาบเรียนวิชานี้ตามตารางสอน</p>
-      </div>
-    ) : (
-      <AttendanceTool
-        timetableEntryId={timetableEntryId} date={selectedDate} students={students} currentUserId={currentUserId}
-        referenceMap={homeroomMap} referenceLabel="โฮมรูม"
-      />
-    )}
-  </div>
-)}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+            <div className="px-4 pt-4 flex items-center gap-2 flex-wrap">
+              <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+                className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:outline-none" />
+              {periods.length > 1 && (
+                <select value={timetableEntryId} onChange={e => setTimetableEntryId(e.target.value)}
+                  className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:outline-none">
+                  {periods.map(p => (
+                    <option key={p.timetable_entry_id} value={p.timetable_entry_id}>
+                      คาบ {p.slot_number} · {p.start_time?.slice(0,5)}-{p.end_time?.slice(0,5)}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {periods.length === 0 ? (
+              <div className="p-10 text-center text-slate-400">
+                <p className="text-3xl mb-2">🗓️</p>
+                <p className="font-bold text-sm">วันนี้ไม่มีคาบเรียนวิชานี้ตามตารางสอน</p>
+              </div>
+            ) : (
+              <AttendanceTool
+                timetableEntryId={timetableEntryId} date={selectedDate} students={students} currentUserId={currentUserId}
+                referenceMap={homeroomMap} referenceLabel="โฮมรูม"
+              />
+            )}
+          </div>
+        )}
         {tab === "random" && <RandomPickerTab students={students} />}
         {tab === "tools" && <ToolsTab students={students} />}
       </main>
