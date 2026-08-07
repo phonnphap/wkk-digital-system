@@ -50,6 +50,45 @@ function avatarGradient(seed: number) {
   return AVATAR_GRADIENTS[seed % AVATAR_GRADIENTS.length];
 }
 
+// อีโมจิที่เลือกใช้บ่อยสำหรับการ์ดให้คะแนน
+const EMOJI_CHOICES = [
+  "🙂", "😄", "😆", "😎", "🤩", "😍", "🥳", "👍", "👏", "💯",
+  "⭐", "🌟", "🏆", "🎉", "✅", "💪", "🔥", "😌", "🤝", "📚",
+  "😟", "😢", "😠", "👎", "⚠️", "🙄", "😴", "🤫", "❌", "🚫",
+];
+
+function EmojiPicker({ value, onChange }: { value: string; onChange: (emoji: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-12 h-11 text-center border-2 border-slate-200 rounded-lg text-lg bg-white hover:border-fuchsia-300"
+      >
+        {value}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute z-20 top-full left-0 mt-1 w-56 bg-white rounded-xl border border-slate-200 shadow-xl p-2 grid grid-cols-6 gap-1">
+            {EMOJI_CHOICES.map(e => (
+              <button
+                key={e}
+                type="button"
+                onClick={() => { onChange(e); setOpen(false); }}
+                className="text-lg rounded-lg hover:bg-fuchsia-50 py-1"
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function QrCodeModal({ inviteUrl, onClose }: { inviteUrl: string; onClose: () => void }) {
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(inviteUrl)}`;
   return (
@@ -86,25 +125,23 @@ function StudentCard({
     <button
       onClick={onClick}
       className={`relative rounded-2xl border-2 bg-white pt-7 pb-4 px-3 text-center transition-all hover:shadow-lg hover:-translate-y-1 ${
-        selected ? "border-teal-400 ring-4 ring-teal-100 bg-teal-50/40" : "border-slate-100 shadow-sm"
+        selected ? "border-fuchsia-400 ring-4 ring-fuchsia-100 bg-fuchsia-50/40" : "border-slate-100 shadow-sm"
       }`}
     >
       {/* badge คะแนนรวม */}
-      <div className="absolute -top-3 left-1/2 -translate-x-1/2 min-w-[30px] h-7 px-2 rounded-full bg-gradient-to-r from-cyan-500 to-sky-400 text-white text-xs font-black flex items-center justify-center shadow-md ring-2 ring-white">
+      <div className="absolute -top-3 left-1/2 -translate-x-1/2 min-w-[30px] h-7 px-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white text-xs font-black flex items-center justify-center shadow-md ring-2 ring-white">
         {score}
       </div>
 
-      {/* จุดจับ / checkbox ตอนเลือกหลายคน */}
-      {selectMode ? (
+      {/* checkbox ตอนเลือกหลายคน */}
+      {selectMode && (
         <div
           className={`absolute top-2 right-2 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-black transition-colors ${
-            selected ? "bg-teal-500 border-teal-500 text-white" : "border-slate-200 bg-white text-transparent"
+            selected ? "bg-fuchsia-500 border-fuchsia-500 text-white" : "border-slate-200 bg-white text-transparent"
           }`}
         >
           ✓
         </div>
-      ) : (
-        <span className="absolute top-2 right-2 text-slate-300 text-sm leading-none">⠿</span>
       )}
 
       {student.avatar_url ? (
@@ -117,7 +154,7 @@ function StudentCard({
 
       {student.prefix && <p className="text-slate-400 text-[11px] font-bold mt-2">{student.prefix}</p>}
       <p className="text-slate-700 font-black text-sm mt-0.5 truncate">{student.first_name} {student.last_name}</p>
-      <p className="text-teal-500 text-[11px] font-black">Number {student.seat_number}</p>
+      <p className="text-fuchsia-500 text-[11px] font-black">Number {student.seat_number}</p>
     </button>
   );
 }
@@ -131,6 +168,7 @@ function ScoreModal({
   onClose,
   onGiveScore,
   onAddPreset,
+  onDeletePreset,
 }: {
   students: Student[];
   presets: ScorePreset[];
@@ -138,6 +176,7 @@ function ScoreModal({
   onClose: () => void;
   onGiveScore: (preset: ScorePreset | null, customPoints?: number) => void;
   onAddPreset: (label: string, points: number, emoji: string) => void;
+  onDeletePreset: (presetId: string) => void;
 }) {
   const [customPoints, setCustomPoints] = useState(0);
   const [addingPreset, setAddingPreset] = useState(false);
@@ -165,18 +204,18 @@ function ScoreModal({
         <div className="sm:w-52 shrink-0 bg-slate-50 p-5 flex flex-col items-center text-center border-b sm:border-b-0 sm:border-r border-slate-100">
           {single ? (
             <>
-              <div className="w-full rounded-t-xl bg-gradient-to-r from-cyan-500 to-sky-400 text-white font-black text-sm py-1.5 mb-3 shadow">
+              <div className="w-full rounded-t-xl bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white font-black text-sm py-1.5 mb-3 shadow">
                 {usageCounts[single.id] ?? 0}
               </div>
               {single.avatar_url ? (
                 <img src={single.avatar_url} className="w-20 h-20 rounded-full object-cover border-2 border-white shadow" />
               ) : (
-                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-teal-400 to-emerald-400 text-white text-2xl font-black flex items-center justify-center shadow-inner">
+                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-fuchsia-400 to-purple-400 text-white text-2xl font-black flex items-center justify-center shadow-inner">
                   {single.first_name[0]}
                 </div>
               )}
               <p className="mt-3 text-slate-700 font-black text-sm">{single.first_name} {single.last_name}</p>
-              <p className="text-teal-500 text-xs font-black">Number {single.seat_number}</p>
+              <p className="text-fuchsia-500 text-xs font-black">Number {single.seat_number}</p>
             </>
           ) : (
             <>
@@ -198,17 +237,24 @@ function ScoreModal({
             {/* ปุ่มเพิ่มพรีเซ็ตใหม่ */}
             <button
               onClick={() => setAddingPreset(true)}
-              className="rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-teal-400 hover:text-teal-500 hover:bg-teal-50/60 flex flex-col items-center justify-center py-4 gap-1 transition-colors"
+              className="rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-fuchsia-400 hover:text-fuchsia-500 hover:bg-fuchsia-50/60 flex flex-col items-center justify-center py-4 gap-1 transition-colors"
             >
               <span className="text-2xl leading-none">+</span>
             </button>
 
             {presets.map(p => (
-              <button
+              <div
                 key={p.id}
-                onClick={() => onGiveScore(p)}
-                className="relative rounded-xl border-2 border-slate-200 hover:border-teal-400 hover:bg-teal-50/60 flex flex-col items-center justify-center py-4 gap-1 transition-colors"
+                className="group relative rounded-xl border-2 border-slate-200 hover:border-fuchsia-400 hover:bg-fuchsia-50/60 flex flex-col items-center justify-center py-4 gap-1 transition-colors"
               >
+                <button
+                  type="button"
+                  onClick={e => { e.stopPropagation(); onDeletePreset(p.id); }}
+                  title="ลบการ์ดนี้"
+                  className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-white border border-slate-200 text-slate-400 hover:bg-red-500 hover:border-red-500 hover:text-white flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                >
+                  🗑
+                </button>
                 <span
                   className={`absolute -top-2 -right-2 w-5 h-5 rounded-full text-[10px] font-black text-white flex items-center justify-center shadow ${
                     p.points >= 0 ? "bg-emerald-500" : "bg-rose-500"
@@ -216,22 +262,19 @@ function ScoreModal({
                 >
                   {p.points >= 0 ? `+${p.points}` : p.points}
                 </span>
-                <span className="text-2xl leading-none">{p.emoji}</span>
-                <span className="text-[11px] font-black text-slate-600 text-center leading-tight px-1">{p.label}</span>
-              </button>
+                <button onClick={() => onGiveScore(p)} className="flex flex-col items-center gap-1 w-full">
+                  <span className="text-2xl leading-none">{p.emoji}</span>
+                  <span className="text-[11px] font-black text-slate-600 text-center leading-tight px-1">{p.label}</span>
+                </button>
+              </div>
             ))}
           </div>
 
           {addingPreset && (
-            <div className="mt-4 rounded-xl border-2 border-teal-200 bg-teal-50/40 p-3 space-y-2">
-              <p className="font-black text-teal-700 text-xs">เพิ่มการ์ดให้คะแนนใหม่</p>
+            <div className="mt-4 rounded-xl border-2 border-fuchsia-200 bg-fuchsia-50/40 p-3 space-y-2">
+              <p className="font-black text-fuchsia-700 text-xs">เพิ่มการ์ดให้คะแนนใหม่</p>
               <div className="flex gap-2">
-                <input
-                  value={newEmoji}
-                  onChange={e => setNewEmoji(e.target.value)}
-                  className="w-12 text-center border-2 border-slate-200 rounded-lg py-1.5 text-lg bg-white"
-                  maxLength={2}
-                />
+                <EmojiPicker value={newEmoji} onChange={setNewEmoji} />
                 <input
                   value={newLabel}
                   onChange={e => setNewLabel(e.target.value)}
@@ -246,7 +289,7 @@ function ScoreModal({
                 />
               </div>
               <div className="flex gap-2">
-                <button onClick={submitNewPreset} className="flex-1 py-2 rounded-lg bg-teal-500 hover:bg-teal-600 text-white font-black text-xs">
+                <button onClick={submitNewPreset} className="flex-1 py-2 rounded-lg bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-black text-xs">
                   บันทึกการ์ด
                 </button>
                 <button onClick={() => setAddingPreset(false)} className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-500 font-black text-xs">
@@ -265,7 +308,7 @@ function ScoreModal({
             />
             <button
               onClick={() => onGiveScore(null, customPoints)}
-              className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-600 hover:to-sky-600 text-white font-black text-sm shadow"
+              className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 text-white font-black text-sm shadow"
             >
               Give Score ★
             </button>
@@ -815,23 +858,34 @@ export default function SmartClassRosterPage() {
     }
   }
 
+  async function handleDeletePreset(presetId: string) {
+    setPresets(prev => prev.filter(p => p.id !== presetId));
+    if (!presetId.startsWith("local-")) {
+      try {
+        await supabase.from("score_presets").delete().eq("id", presetId);
+      } catch {
+        // เงียบไว้ก่อนถ้าลบในฐานข้อมูลไม่สำเร็จ การ์ดยังคงถูกซ่อนออกจากหน้าจอ
+      }
+    }
+  }
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="text-emerald-500 font-black text-lg animate-pulse">กำลังโหลดรายชื่อ...</div>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center font-['TH_Sarabun_New',_sans-serif]">
+        <div className="text-fuchsia-500 font-black text-lg animate-pulse">กำลังโหลดรายชื่อ...</div>
       </div>
     );
   }
   if (!section || !subject) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center font-['TH_Sarabun_New',_sans-serif]">
         <p className="text-red-500 font-black">❌ ไม่พบข้อมูลห้องนี้</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24">
+    <div className="min-h-screen bg-slate-50 pb-24 font-['TH_Sarabun_New',_sans-serif]">
       {showQr && <QrCodeModal inviteUrl={inviteUrl} onClose={() => setShowQr(false)} />}
       {scoreTargets && (
         <ScoreModal
@@ -841,29 +895,36 @@ export default function SmartClassRosterPage() {
           onClose={() => setScoreTargets(null)}
           onGiveScore={handleGiveScore}
           onAddPreset={handleAddPreset}
+          onDeletePreset={handleDeletePreset}
         />
       )}
 
-      <div className="bg-gradient-to-br from-teal-500 via-cyan-500 to-sky-500 px-4 pt-4 pb-6">
-        <div className="flex items-center gap-2 mb-3">
-          <button onClick={() => router.push(`/smartclass/${subjectId}`)}
-            title="กลับหน้ารายห้องของวิชานี้"
-            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">←</button>
-          <button onClick={() => router.push("/dashboard")}
-            title="กลับแดชบอร์ด"
-            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">🏠</button>
+      <div className="bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-4 pt-4 pb-6">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <button onClick={() => router.push("/dashboard")}
+              title="กลับแดชบอร์ด"
+              className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">🏠</button>
+            <button onClick={() => router.push(`/smartclass/${subjectId}`)}
+              title="กลับหน้ารายห้องของวิชานี้"
+              className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">←</button>
+          </div>
+          <div className="w-9 sm:hidden" />
         </div>
-        <h1 className="text-xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
-        <p className="text-white/80 text-sm font-bold">
-          {subject.subject_code} · {classroom?.grade_group} {classroom?.room_name} · 👥 {students.length} คน
-        </p>
 
-        <div className="flex items-center gap-2 flex-wrap mt-4">
+        <div className="text-center px-2">
+          <h1 className="text-xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
+          <p className="text-white/80 text-sm font-bold">
+            {subject.subject_code} · {classroom?.grade_group} {classroom?.room_name} · 👥 {students.length} คน
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-end mt-4">
           <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-2 flex items-center gap-2">
             <span className="text-white/80 text-xs font-bold">รหัสเข้าวิชา</span>
             <span className="font-black text-white font-mono tracking-widest">{section.join_code}</span>
           </div>
-          <button onClick={copyInvite} className="px-3 py-2 rounded-xl bg-white text-teal-700 font-black text-xs hover:bg-amber-50 shadow-sm transition-colors">
+          <button onClick={copyInvite} className="px-3 py-2 rounded-xl bg-white text-fuchsia-700 font-black text-xs hover:bg-pink-50 shadow-sm transition-colors">
             {copied ? "✅ คัดลอกแล้ว" : "📋 คัดลอกลิงก์เชิญ"}
           </button>
           <button onClick={() => setShowQr(true)} className="px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-xs transition-colors">
@@ -884,14 +945,14 @@ export default function SmartClassRosterPage() {
                   </button>
                 )}
                 {selectMode && selectedIds.size > 0 && (
-                  <button onClick={openScoreForSelected} className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-600 hover:to-sky-600 text-white font-black text-xs shadow-sm transition-colors">
+                  <button onClick={openScoreForSelected} className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 text-white font-black text-xs shadow-sm transition-colors">
                     ⭐ ให้คะแนนที่เลือก ({selectedIds.size})
                   </button>
                 )}
                 <button
                   onClick={toggleSelectMode}
                   className={`px-3 py-1.5 rounded-lg font-black text-xs shadow-sm transition-colors ${
-                    selectMode ? "bg-teal-500 hover:bg-teal-600 text-white" : "bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-200"
+                    selectMode ? "bg-fuchsia-500 hover:bg-fuchsia-600 text-white" : "bg-purple-50 hover:bg-purple-100 text-purple-600 border border-purple-200"
                   }`}
                 >
                   {selectMode ? "✓ กำลังเลือกการ์ด" : "เลือกการ์ดนักเรียน"}
@@ -905,7 +966,7 @@ export default function SmartClassRosterPage() {
                 <p className="font-bold text-sm">ยังไม่มีนักเรียนในห้องนี้</p>
               </div>
             ) : (
-              <div className="grid gap-3 sm:gap-4 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
+              <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
                 {students.map((s, i) => (
                   <StudentCard
                     key={s.id}
@@ -961,7 +1022,7 @@ export default function SmartClassRosterPage() {
           {TABS.map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-black ${
-                tab === t.key ? "text-emerald-600" : "text-slate-400"
+                tab === t.key ? "text-fuchsia-600" : "text-slate-400"
               }`}>
               <span className="text-lg leading-none">{t.icon}</span>
               {t.label}

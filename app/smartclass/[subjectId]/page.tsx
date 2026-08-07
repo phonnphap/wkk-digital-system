@@ -13,13 +13,13 @@ type Classroom = { id: string; room_name?: string; grade_group?: string };
 type SectionRow = { id: string; classroom_id: string; teacher_id: string; co_teacher_id?: string; join_code: string };
 
 const ROOM_NUMBER_GRADIENTS: Record<string, string> = {
-  "1": "from-yellow-400 to-amber-300",
-  "2": "from-pink-500 to-rose-400",
-  "3": "from-emerald-500 to-green-400",
-  "4": "from-red-500 to-rose-600",
-  "5": "from-sky-400 to-cyan-300",
-  "6": "from-orange-500 to-amber-400",
-  "7": "from-blue-700 to-indigo-600",
+  "1": "from-fuchsia-500 to-pink-400",
+  "2": "from-purple-500 to-fuchsia-400",
+  "3": "from-pink-500 to-rose-400",
+  "4": "from-violet-500 to-purple-400",
+  "5": "from-rose-500 to-pink-400",
+  "6": "from-purple-600 to-fuchsia-500",
+  "7": "from-fuchsia-600 to-purple-500",
 };
 const DEFAULT_GRADIENT = "from-slate-500 to-slate-400";
 
@@ -77,8 +77,11 @@ export default function SmartClassRoomsPage() {
           .from("classrooms").select("id, room_name, grade_group").in("id", classroomIds);
         setClassrooms((rooms ?? []) as Classroom[]);
 
+        // แก้บั๊ก: เดิมไม่ได้ select/กรอง classroom_id ทำให้นับจำนวน นร. ต่อห้องไม่ได้ (ขึ้น 0 เสมอ)
         const { data: studentsData } = await supabase
-          .from("students").select("id,first_name,last_name,seat_number,avatar_url")
+          .from("students")
+          .select("id, classroom_id")
+          .in("classroom_id", classroomIds);
         const counts: Record<string, number> = {};
         (studentsData ?? []).forEach((s: any) => { counts[s.classroom_id] = (counts[s.classroom_id] ?? 0) + 1; });
         setStudentCounts(counts);
@@ -100,39 +103,46 @@ export default function SmartClassRoomsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="text-emerald-500 font-black text-lg animate-pulse">กำลังโหลดข้อมูล...</div>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center font-['TH_Sarabun_New',_sans-serif]">
+        <div className="text-fuchsia-500 font-black text-lg animate-pulse">กำลังโหลดข้อมูล...</div>
       </div>
     );
   }
   if (!subject) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center font-['TH_Sarabun_New',_sans-serif]">
         <p className="text-red-500 font-black">❌ ไม่พบวิชานี้</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="bg-gradient-to-br from-emerald-600 to-teal-600 px-4 pt-4 pb-6">
-        <button onClick={() => router.push("/smartclass")}
-          className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center text-white text-lg mb-3">←</button>
-        <button onClick={() => router.push("/dashboard")}
+    <div className="min-h-screen bg-slate-50 font-['TH_Sarabun_New',_sans-serif]">
+      <div className="bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-4 pt-4 pb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <button onClick={() => router.push("/dashboard")}
             title="กลับแดชบอร์ด"
-            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">🏠</button>  
-        <h1 className="text-xl font-black text-white leading-tight">{subject.name_th}</h1>
-        <p className="text-white/70 text-sm font-bold">{subject.subject_code} · {sections.length} ห้อง{isAdmin ? " (มุมมองแอดมิน)" : ""}</p>
+            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">🏠</button>
+          <button onClick={() => router.push("/smartclass")}
+            title="กลับหน้ารายวิชา"
+            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">←</button>
+        </div>
+        <div className="text-center px-2">
+          <h1 className="text-xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
+          <p className="text-white/80 text-sm font-bold">
+            {subject.subject_code} · {sections.length} ห้อง{isAdmin ? " (มุมมองแอดมิน)" : ""}
+          </p>
+        </div>
       </div>
 
-      <main className="p-4 max-w-5xl mx-auto">
+      <main className="p-4 lg:p-6 w-full max-w-[1600px]">
         {sortedSections.length === 0 ? (
           <div className="text-center py-20 text-slate-400 bg-white rounded-2xl border border-slate-200">
             <p className="text-4xl mb-3">🏫</p>
             <p className="font-bold">ไม่พบห้องที่สอนวิชานี้</p>
           </div>
         ) : (
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
   {sortedSections.map((sec) => {
     const room = classroomOf(sec.classroom_id);
     const gradient = getRoomGradient(room?.room_name);
@@ -142,7 +152,7 @@ export default function SmartClassRoomsPage() {
       <button
         key={sec.id}
         onClick={() => router.push(`/smartclass/${subjectId}/${sec.id}`)}
-        className="text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
+        className="text-left rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
       >
         <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
           <span className="text-[10px] font-black bg-white/95 text-slate-700 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
@@ -154,7 +164,7 @@ export default function SmartClassRoomsPage() {
           <p className="font-black text-lg text-slate-800 leading-tight">{label}</p>
           <p className="text-slate-400 text-xs font-bold mt-1">รายชื่อ - {label}</p>
           <div className="mt-3">
-            <span className="text-[11px] font-black bg-slate-100 px-2.5 py-1.5 rounded-lg text-slate-600 inline-flex items-center gap-1">
+            <span className="text-[11px] font-black bg-fuchsia-50 px-2.5 py-1.5 rounded-lg text-fuchsia-600 inline-flex items-center gap-1">
               👥 {count} คน
             </span>
           </div>
