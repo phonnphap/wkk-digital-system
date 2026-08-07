@@ -118,6 +118,9 @@ export default function SmartClassRoomsPage() {
       <div className="bg-gradient-to-br from-emerald-600 to-teal-600 px-4 pt-4 pb-6">
         <button onClick={() => router.push("/smartclass")}
           className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center text-white text-lg mb-3">←</button>
+        <button onClick={() => router.push("/dashboard")}
+            title="กลับแดชบอร์ด"
+            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">🏠</button>  
         <h1 className="text-xl font-black text-white leading-tight">{subject.name_th}</h1>
         <p className="text-white/70 text-sm font-bold">{subject.subject_code} · {sections.length} ห้อง{isAdmin ? " (มุมมองแอดมิน)" : ""}</p>
       </div>

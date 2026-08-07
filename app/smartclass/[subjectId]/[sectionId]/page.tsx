@@ -35,6 +35,21 @@ const DEFAULT_PRESETS: Omit<ScorePreset, "id">[] = [
   { label: "Well Done", points: 1, emoji: "😎", sort_order: 4 },
 ];
 
+// ชุดสีสดใส สบายตา สำหรับวนใช้เป็นพื้นหลังอวาตาร์ตัวอักษรของ นร. แต่ละคน
+const AVATAR_GRADIENTS = [
+  "from-teal-400 to-emerald-400",
+  "from-sky-400 to-blue-400",
+  "from-violet-400 to-purple-400",
+  "from-amber-400 to-orange-400",
+  "from-pink-400 to-rose-400",
+  "from-cyan-400 to-teal-400",
+  "from-fuchsia-400 to-pink-400",
+  "from-lime-400 to-green-400",
+];
+function avatarGradient(seed: number) {
+  return AVATAR_GRADIENTS[seed % AVATAR_GRADIENTS.length];
+}
+
 function QrCodeModal({ inviteUrl, onClose }: { inviteUrl: string; onClose: () => void }) {
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(inviteUrl)}`;
   return (
@@ -53,34 +68,37 @@ function QrCodeModal({ inviteUrl, onClose }: { inviteUrl: string; onClose: () =>
 
 function StudentCard({
   student,
+  index,
   score,
   selectMode,
   selected,
   onClick,
 }: {
   student: Student;
+  index: number;
   score: number;
   selectMode: boolean;
   selected: boolean;
   onClick: () => void;
 }) {
+  const gradient = avatarGradient(index);
   return (
     <button
       onClick={onClick}
-      className={`relative rounded-2xl border-2 bg-white pt-7 pb-4 px-3 text-center transition-all hover:shadow-lg hover:-translate-y-0.5 ${
-        selected ? "border-emerald-400 ring-2 ring-emerald-100" : "border-slate-200"
+      className={`relative rounded-2xl border-2 bg-white pt-7 pb-4 px-3 text-center transition-all hover:shadow-lg hover:-translate-y-1 ${
+        selected ? "border-teal-400 ring-4 ring-teal-100 bg-teal-50/40" : "border-slate-100 shadow-sm"
       }`}
     >
       {/* badge คะแนนรวม */}
-      <div className="absolute -top-3 left-1/2 -translate-x-1/2 min-w-[30px] h-7 px-2 rounded-full bg-gradient-to-r from-sky-500 to-blue-400 text-white text-xs font-black flex items-center justify-center shadow">
+      <div className="absolute -top-3 left-1/2 -translate-x-1/2 min-w-[30px] h-7 px-2 rounded-full bg-gradient-to-r from-cyan-500 to-sky-400 text-white text-xs font-black flex items-center justify-center shadow-md ring-2 ring-white">
         {score}
       </div>
 
       {/* จุดจับ / checkbox ตอนเลือกหลายคน */}
       {selectMode ? (
         <div
-          className={`absolute top-2 right-2 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-black ${
-            selected ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 bg-white text-transparent"
+          className={`absolute top-2 right-2 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-black transition-colors ${
+            selected ? "bg-teal-500 border-teal-500 text-white" : "border-slate-200 bg-white text-transparent"
           }`}
         >
           ✓
@@ -90,16 +108,16 @@ function StudentCard({
       )}
 
       {student.avatar_url ? (
-        <img src={student.avatar_url} className="w-16 h-16 rounded-full object-cover mx-auto border-2 border-slate-100" />
+        <img src={student.avatar_url} className="w-16 h-16 rounded-full object-cover mx-auto border-2 border-white shadow" />
       ) : (
-        <div className="w-16 h-16 rounded-full bg-emerald-400 text-white text-2xl font-black flex items-center justify-center mx-auto">
+        <div className={`w-16 h-16 rounded-full bg-gradient-to-br ${gradient} text-white text-2xl font-black flex items-center justify-center mx-auto shadow-inner`}>
           {student.first_name[0]}
         </div>
       )}
 
       {student.prefix && <p className="text-slate-400 text-[11px] font-bold mt-2">{student.prefix}</p>}
-      <p className="text-sky-700 font-black text-sm mt-0.5 truncate">{student.first_name} {student.last_name}</p>
-      <p className="text-slate-400 text-[11px] font-bold">Number {student.seat_number}</p>
+      <p className="text-slate-700 font-black text-sm mt-0.5 truncate">{student.first_name} {student.last_name}</p>
+      <p className="text-teal-500 text-[11px] font-black">Number {student.seat_number}</p>
     </button>
   );
 }
@@ -147,18 +165,18 @@ function ScoreModal({
         <div className="sm:w-52 shrink-0 bg-slate-50 p-5 flex flex-col items-center text-center border-b sm:border-b-0 sm:border-r border-slate-100">
           {single ? (
             <>
-              <div className="w-full rounded-t-xl bg-gradient-to-r from-sky-500 to-blue-400 text-white font-black text-sm py-1.5 mb-3">
+              <div className="w-full rounded-t-xl bg-gradient-to-r from-cyan-500 to-sky-400 text-white font-black text-sm py-1.5 mb-3 shadow">
                 {usageCounts[single.id] ?? 0}
               </div>
               {single.avatar_url ? (
                 <img src={single.avatar_url} className="w-20 h-20 rounded-full object-cover border-2 border-white shadow" />
               ) : (
-                <div className="w-20 h-20 rounded-full bg-emerald-400 text-white text-2xl font-black flex items-center justify-center">
+                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-teal-400 to-emerald-400 text-white text-2xl font-black flex items-center justify-center shadow-inner">
                   {single.first_name[0]}
                 </div>
               )}
-              <p className="mt-3 text-sky-700 font-black text-sm">{single.first_name} {single.last_name}</p>
-              <p className="text-slate-400 text-xs font-bold">Number {single.seat_number}</p>
+              <p className="mt-3 text-slate-700 font-black text-sm">{single.first_name} {single.last_name}</p>
+              <p className="text-teal-500 text-xs font-black">Number {single.seat_number}</p>
             </>
           ) : (
             <>
@@ -180,7 +198,7 @@ function ScoreModal({
             {/* ปุ่มเพิ่มพรีเซ็ตใหม่ */}
             <button
               onClick={() => setAddingPreset(true)}
-              className="rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-emerald-400 hover:text-emerald-500 flex flex-col items-center justify-center py-4 gap-1"
+              className="rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-teal-400 hover:text-teal-500 hover:bg-teal-50/60 flex flex-col items-center justify-center py-4 gap-1 transition-colors"
             >
               <span className="text-2xl leading-none">+</span>
             </button>
@@ -189,11 +207,11 @@ function ScoreModal({
               <button
                 key={p.id}
                 onClick={() => onGiveScore(p)}
-                className="relative rounded-xl border-2 border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 flex flex-col items-center justify-center py-4 gap-1 transition-colors"
+                className="relative rounded-xl border-2 border-slate-200 hover:border-teal-400 hover:bg-teal-50/60 flex flex-col items-center justify-center py-4 gap-1 transition-colors"
               >
                 <span
-                  className={`absolute -top-2 -right-2 w-5 h-5 rounded-full text-[10px] font-black text-white flex items-center justify-center ${
-                    p.points >= 0 ? "bg-emerald-500" : "bg-red-500"
+                  className={`absolute -top-2 -right-2 w-5 h-5 rounded-full text-[10px] font-black text-white flex items-center justify-center shadow ${
+                    p.points >= 0 ? "bg-emerald-500" : "bg-rose-500"
                   }`}
                 >
                   {p.points >= 0 ? `+${p.points}` : p.points}
@@ -205,33 +223,33 @@ function ScoreModal({
           </div>
 
           {addingPreset && (
-            <div className="mt-4 rounded-xl border-2 border-slate-200 p-3 space-y-2">
-              <p className="font-black text-slate-700 text-xs">เพิ่มการ์ดให้คะแนนใหม่</p>
+            <div className="mt-4 rounded-xl border-2 border-teal-200 bg-teal-50/40 p-3 space-y-2">
+              <p className="font-black text-teal-700 text-xs">เพิ่มการ์ดให้คะแนนใหม่</p>
               <div className="flex gap-2">
                 <input
                   value={newEmoji}
                   onChange={e => setNewEmoji(e.target.value)}
-                  className="w-12 text-center border-2 border-slate-200 rounded-lg py-1.5 text-lg"
+                  className="w-12 text-center border-2 border-slate-200 rounded-lg py-1.5 text-lg bg-white"
                   maxLength={2}
                 />
                 <input
                   value={newLabel}
                   onChange={e => setNewLabel(e.target.value)}
                   placeholder="เช่น ตอบคำถาม, พูดคำหยาบ"
-                  className="flex-1 border-2 border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold"
+                  className="flex-1 border-2 border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold bg-white"
                 />
                 <input
                   type="number"
                   value={newPoints}
                   onChange={e => setNewPoints(Number(e.target.value))}
-                  className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center"
+                  className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center bg-white"
                 />
               </div>
               <div className="flex gap-2">
-                <button onClick={submitNewPreset} className="flex-1 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs">
+                <button onClick={submitNewPreset} className="flex-1 py-2 rounded-lg bg-teal-500 hover:bg-teal-600 text-white font-black text-xs">
                   บันทึกการ์ด
                 </button>
-                <button onClick={() => setAddingPreset(false)} className="px-3 py-2 rounded-lg bg-slate-100 text-slate-500 font-black text-xs">
+                <button onClick={() => setAddingPreset(false)} className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-500 font-black text-xs">
                   ยกเลิก
                 </button>
               </div>
@@ -247,7 +265,7 @@ function ScoreModal({
             />
             <button
               onClick={() => onGiveScore(null, customPoints)}
-              className="flex-1 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-black text-sm"
+              className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-600 hover:to-sky-600 text-white font-black text-sm shadow"
             >
               Give Score ★
             </button>
@@ -826,48 +844,54 @@ export default function SmartClassRosterPage() {
         />
       )}
 
-      <div className="bg-gradient-to-br from-emerald-600 to-teal-600 px-4 pt-4 pb-6">
-        <button onClick={() => router.push(`/smartclass/${subjectId}`)}
-          className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center text-white text-lg mb-3">←</button>
-        <h1 className="text-xl font-black text-white leading-tight">{subject.name_th}</h1>
-        <p className="text-white/70 text-sm font-bold">
+      <div className="bg-gradient-to-br from-teal-500 via-cyan-500 to-sky-500 px-4 pt-4 pb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <button onClick={() => router.push(`/smartclass/${subjectId}`)}
+            title="กลับหน้ารายห้องของวิชานี้"
+            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">←</button>
+          <button onClick={() => router.push("/dashboard")}
+            title="กลับแดชบอร์ด"
+            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">🏠</button>
+        </div>
+        <h1 className="text-xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
+        <p className="text-white/80 text-sm font-bold">
           {subject.subject_code} · {classroom?.grade_group} {classroom?.room_name} · 👥 {students.length} คน
         </p>
 
         <div className="flex items-center gap-2 flex-wrap mt-4">
-          <div className="bg-white/15 rounded-xl px-3 py-2 flex items-center gap-2">
-            <span className="text-white/70 text-xs font-bold">รหัสเข้าวิชา</span>
+          <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-2 flex items-center gap-2">
+            <span className="text-white/80 text-xs font-bold">รหัสเข้าวิชา</span>
             <span className="font-black text-white font-mono tracking-widest">{section.join_code}</span>
           </div>
-          <button onClick={copyInvite} className="px-3 py-2 rounded-xl bg-white text-emerald-700 font-black text-xs hover:bg-emerald-50">
+          <button onClick={copyInvite} className="px-3 py-2 rounded-xl bg-white text-teal-700 font-black text-xs hover:bg-amber-50 shadow-sm transition-colors">
             {copied ? "✅ คัดลอกแล้ว" : "📋 คัดลอกลิงก์เชิญ"}
           </button>
-          <button onClick={() => setShowQr(true)} className="px-3 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white font-black text-xs">
+          <button onClick={() => setShowQr(true)} className="px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-xs transition-colors">
             📷 QR
           </button>
         </div>
       </div>
 
-      <main className={`p-4 mx-auto ${tab === "roster" ? "max-w-7xl" : "max-w-4xl"}`}>
+      <main className={`p-4 lg:p-6 mx-auto w-full ${tab === "roster" ? "max-w-[1600px]" : "max-w-4xl"}`}>
         {tab === "roster" && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-            <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
-              <h2 className="font-black text-slate-700 text-sm">👥 รายชื่อนักเรียน</h2>
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 w-full">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-5">
+              <h2 className="font-black text-slate-700 text-sm flex items-center gap-1.5">👥 รายชื่อนักเรียน</h2>
               <div className="flex items-center gap-2 flex-wrap">
                 {selectMode && (
-                  <button onClick={toggleSelectAll} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-bold text-xs">
+                  <button onClick={toggleSelectAll} className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs transition-colors">
                     {selectedIds.size === students.length ? "ยกเลิกเลือกทั้งหมด" : "เลือกทั้งหมด"}
                   </button>
                 )}
                 {selectMode && selectedIds.size > 0 && (
-                  <button onClick={openScoreForSelected} className="px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-black text-xs">
+                  <button onClick={openScoreForSelected} className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-600 hover:to-sky-600 text-white font-black text-xs shadow-sm transition-colors">
                     ⭐ ให้คะแนนที่เลือก ({selectedIds.size})
                   </button>
                 )}
                 <button
                   onClick={toggleSelectMode}
-                  className={`px-3 py-1.5 rounded-lg font-black text-xs ${
-                    selectMode ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-600"
+                  className={`px-3 py-1.5 rounded-lg font-black text-xs shadow-sm transition-colors ${
+                    selectMode ? "bg-teal-500 hover:bg-teal-600 text-white" : "bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-200"
                   }`}
                 >
                   {selectMode ? "✓ กำลังเลือกการ์ด" : "เลือกการ์ดนักเรียน"}
@@ -881,11 +905,12 @@ export default function SmartClassRosterPage() {
                 <p className="font-bold text-sm">ยังไม่มีนักเรียนในห้องนี้</p>
               </div>
             ) : (
-              <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
-                {students.map(s => (
+              <div className="grid gap-3 sm:gap-4 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
+                {students.map((s, i) => (
                   <StudentCard
                     key={s.id}
                     student={s}
+                    index={i}
                     score={studentScores[s.id] ?? 0}
                     selectMode={selectMode}
                     selected={selectedIds.has(s.id)}

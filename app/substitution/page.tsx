@@ -357,6 +357,18 @@ function computeSlotHours(slot: any): number {
   return diffMin > 0 ? Math.round((diffMin / 60) * 100) / 100 : 1;
 }
 
+// ★ แปลงชั่วโมง (ทศนิยม) → ข้อความอ่านง่าย: คาบ 50 นาทีแสดง "50 นาที" แทน "0.83 ชม."
+// เก็บ hours_count เป็นทศนิยมในฐานข้อมูลเหมือนเดิม (ใช้รวมยอด/คิดเงินได้ถูกต้อง) เปลี่ยนแค่การแสดงผล
+function formatHoursDisplay(hours: number): string {
+  if (!Number.isFinite(hours) || hours <= 0) return "-";
+  const totalMinutes = Math.round(hours * 60);
+  if (totalMinutes % 60 === 0) return `${totalMinutes / 60} ชม.`;
+  if (totalMinutes < 60) return `${totalMinutes} นาที`;
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h} ชม. ${m} นาที`;
+}
+
 function computeFreePeriodsForDay(teacherId: string, dow: number, scheduleType: string | undefined, allEntries: TimetableEntry[], allTimeSlots: any[]): number {
   const templateSlots = buildRoomSlots(scheduleType, allTimeSlots).filter((s: any) => !s.is_break);
   const busyStartTimes = new Set(
@@ -420,7 +432,7 @@ function printSubOrder(records: SubRecord[], periodLabel: string) {
       <td>${r.subject_name ?? "—"}</td>
       <td>${fullName(r.absent_teacher)}</td>
       <td>${fullName(r.substitute_teacher)}</td>
-      <td style="text-align:center">${r.hours_count}</td>
+      <td style="text-align:center">${formatHoursDisplay(Number(r.hours_count))}</td>
       <td>${r.note ?? ""}</td>
     </tr>`).join("");
 
@@ -508,7 +520,7 @@ function printTeacherSubStat(records: SubRecord[], users: User[]) {
       <td style="text-align:center">${i+1}</td>
       <td>${t.name}</td>
       <td style="text-align:center">${t.count}</td>
-      <td style="text-align:center">${t.hours}</td>
+      <td style="text-align:center">${formatHoursDisplay(t.hours)}</td>
     </tr>`).join("");
 
   const w = window.open("","_blank","width=800,height=640");
@@ -1468,10 +1480,29 @@ const isGradeHeadUser = useMemo(() => {
   if (user.role === "grade_head") return true;
   return (user.extra_roles ?? []).includes("grade_head");
 }, [user]);
+// ★ true เฉพาะ "หัวหน้าสายชั้น" ที่ไม่ใช่แอดมิน/ผอ./รองผอ. — ใช้จำกัดให้เห็นแค่สายชั้นตัวเอง
+const restrictToOwnGrade = useMemo(() => isGradeHeadUser && !isFullAdmin, [isGradeHeadUser, isFullAdmin]);
+
+// ★ ต้องประกาศตัวนี้ก่อน เพราะตัวถัดไปเรียกใช้
 const teacherGradeLevelMap = useMemo(
   () => Object.fromEntries(teachers.map(t => [t.id, t.grade_level ?? null])),
   [teachers]
 );
+
+// ★ ใบลาที่เห็นได้ — หัวหน้าสายชั้นเห็นเฉพาะครูสายชั้นตัวเอง
+const visibleLeaveRequests = useMemo(() => {
+  if (!restrictToOwnGrade || !user?.grade_level) return leaveRequests;
+  return leaveRequests.filter(lr => teacherGradeLevelMap[lr.user_id] === user.grade_level);
+}, [leaveRequests, restrictToOwnGrade, user, teacherGradeLevelMap]);
+
+// ★ รายการสอนแทนที่เห็นได้ — หัวหน้าสายชั้นเห็นเฉพาะที่เกี่ยวข้องกับสายชั้นตัวเอง
+const visibleSubRecords = useMemo(() => {
+  if (!restrictToOwnGrade || !user?.grade_level) return subRecords;
+  return subRecords.filter(r =>
+    (!!r.absent_teacher_id && teacherGradeLevelMap[r.absent_teacher_id] === user.grade_level) ||
+    (!!r.substitute_teacher_id && teacherGradeLevelMap[r.substitute_teacher_id] === user.grade_level)
+  );
+}, [subRecords, restrictToOwnGrade, user, teacherGradeLevelMap]);
   // ★ รายชื่อครูที่เลือกได้ในโหมด "จัดอัตโนมัติ" — admin เลือกได้ทุกคน, หัวหน้าสายเลือกได้แค่สายชั้นตัวเอง
 const manualAssignTeachers = useMemo(() => {
   if (!user) return [];
@@ -1492,6 +1523,7 @@ const canEditSwap = useCallback((r: SwapRequest) => {
 }, [isSpecificAdmin, user]);
 
 const [editingSwap, setEditingSwap] = useState<SwapRequest | null>(null);
+const [editingSwapDate, setEditingSwapDate] = useState<SwapRequest | null>(null); // ★ ใหม่
 
   // ── Load user ────────────────────────────────────────────
   useEffect(() => {
@@ -1653,6 +1685,19 @@ const handleSwapDeletePermanent = async (id: string) => {
   if (error) { alert("❌ ลบไม่สำเร็จ: " + error.message); return; }
   await loadData();
 };
+const handleAdminSwapDateSave = async (id: string, newDate: string) => {
+  const { error } = await supabase.from("class_swap_requests").update({ swap_date: newDate }).eq("id", id);
+  if (error) { alert("❌ " + error.message); return; }
+  setEditingSwapDate(null);
+  await loadData();
+};
+const handleAdminSwapDeleteAny = async (id: string) => {
+  if (!confirm("⚠️ ลบคำขอแลกคาบนี้ถาวร?\nข้อมูลจะหายไปจากฐานข้อมูลทันทีและกู้คืนไม่ได้")) return;
+  const { error } = await supabase.from("class_swap_requests").delete().eq("id", id);
+  if (error) { alert("❌ ลบไม่สำเร็จ: " + error.message); return; }
+  setEditingSwapDate(null);
+  await loadData();
+};
   const handleSwapCancel = async (id: string) => {
     if (!confirm("ยืนยันการยกเลิกคำขอ?")) return;
     await supabase.from("class_swap_requests").update({ status: "cancelled" }).eq("id", id);
@@ -1766,6 +1811,69 @@ const handleSubDeletePermanent = async (id: string) => {
   );
 }
 
+// ══════════════════════════════════════════════════════════
+// ── EditSwapDateModal — เฉพาะ admin@khienkhet.ac.th แก้วันที่/ลบได้ทุกสถานะ
+// ══════════════════════════════════════════════════════════
+function EditSwapDateModal({ record, onSave, onDelete, onClose }: {
+  record: SwapRequest;
+  onSave: (id: string, newDate: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [date, setDate] = useState(record.swap_date);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleSave = async () => {
+    if (!date) { alert("กรุณาเลือกวันที่"); return; }
+    setSaving(true);
+    await onSave(record.id, date);
+    setSaving(false);
+  };
+  const handleDelete = async () => {
+    setDeleting(true);
+    await onDelete(record.id);
+    setDeleting(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between">
+          <h3 className="font-bold text-slate-800 text-base">✏️ แก้ไขคำขอแลกคาบ (แอดมิน)</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#FCE7F3] flex items-center justify-center text-slate-500">✕</button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div className="bg-[#FDF2F8] rounded-xl px-4 py-3 text-sm space-y-1">
+            <p><span className="text-slate-400">ผู้ขอ:</span> <span className="font-bold text-slate-800">{fullName(record.requester)}</span></p>
+            <p><span className="text-slate-400">ขอแลกกับ:</span> <span className="font-bold text-[#DB2777]">{fullName(record.target_teacher)}</span></p>
+            <p><span className="text-slate-400">สถานะ:</span> <span className={`text-xs font-bold px-2 py-0.5 rounded-lg border ${STATUS_SWAP[record.status]?.cls}`}>{STATUS_SWAP[record.status]?.label}</span></p>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">วันที่แลกคาบ *</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              className="w-full border-2 border-[#F9A8D4] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#DB2777] focus:outline-none" />
+          </div>
+          <p className="text-xs text-slate-400">💡 แก้ไขเฉพาะวันที่เท่านั้น ไม่กระทบสถานะหรือคาบที่เลือกไว้เดิม</p>
+        </div>
+        <div className="px-6 py-4 border-t border-[#FCE7F3] flex items-center justify-between gap-2 bg-[#FDF2F8] rounded-b-2xl">
+          <button onClick={handleDelete} disabled={deleting}
+            className="px-4 py-2.5 rounded-xl bg-red-100 hover:bg-red-200 text-red-700 text-sm font-bold border border-red-300 disabled:opacity-50">
+            {deleting ? "กำลังลบ..." : "🗑️ ลบรายการนี้"}
+          </button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#FBCFE8] text-slate-600 text-sm font-medium">ยกเลิก</button>
+            <button onClick={handleSave} disabled={saving || date === record.swap_date}
+              className="px-5 py-2.5 rounded-xl bg-[#DB2777] hover:bg-[#9D174D] text-white text-sm font-bold disabled:opacity-50">
+              {saving ? "กำลังบันทึก..." : "💾 บันทึก"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
   // ── Filtered data ────────────────────────────────────────
   const mySwaps = useMemo(() =>
     swapRequests.filter(r => r.requester_id === user?.id || r.target_teacher_id === user?.id)
@@ -1806,7 +1914,7 @@ const adminFilteredSwaps = useMemo(() => {
 }, [swapRequests, adminSwapFilterStatus, adminSwapFilterTeacher]);
 
   const filteredSubs = useMemo(() => {
-    let list = subRecords;
+    let list = visibleSubRecords;
     if (filterDate) list = list.filter(r => r.substitute_date === filterDate);
     if (filterTeacher) list = list.filter(r =>
       r.absent_teacher_id === filterTeacher || r.substitute_teacher_id === filterTeacher);
@@ -1839,7 +1947,7 @@ const adminFilteredSwaps = useMemo(() => {
   // ── Stat ─────────────────────────────────────────────────
   const statMap = useMemo(() => {
     const m: Record<string, { name: string; asAbsent: number; asSub: number; hours: number }> = {};
-    for (const r of subRecords) {
+    for (const r of visibleSubRecords) {
       if (r.status === "cancelled") continue;
       if (r.absent_teacher_id) {
         if (!m[r.absent_teacher_id]) m[r.absent_teacher_id] = { name: fullName(r.absent_teacher), asAbsent: 0, asSub: 0, hours: 0 };
@@ -2058,19 +2166,19 @@ const adminFilteredSwaps = useMemo(() => {
     <button onClick={() => handleAdminSwapRespond(r.id, "rejected")}
       className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold">❌ ปฏิเสธแทน</button>
     {isSpecificAdmin && (
-      <button onClick={() => { setEditingSwap(r); setShowSwapModal(true); }}
+      <button onClick={() => setEditingSwapDate(r)}
         className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold border border-blue-200">✏️ แก้ไข</button>
     )}
   </div>
+) : isSpecificAdmin ? (
+  <button onClick={() => setEditingSwapDate(r)}
+    className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold border border-blue-200 shrink-0">
+    ✏️ แก้ไข
+  </button>
 ) : r.status === "cancelled" ? (
   <button onClick={() => handleSwapDeletePermanent(r.id)}
     className="px-3 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold border border-red-300 shrink-0">
     🗑️ ลบถาวร
-  </button>
-) : isSpecificAdmin ? (
-  <button onClick={() => { setEditingSwap(r); setShowSwapModal(true); }}
-    className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold border border-blue-200 shrink-0">
-    ✏️ แก้ไข
   </button>
 ) : null}
             </div>
@@ -2175,13 +2283,13 @@ const adminFilteredSwaps = useMemo(() => {
         {tab === "substitute" && (
           <div className="w-full p-5 space-y-5">
             {/* แอดมิน/หัวหน้าสายชั้น/หัวหน้าหมวด: จัดสอนแทนจากใบลา */}
-            {canAssignSub && leaveRequests.length > 0 && (
-              <div>
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
-                  📋 ครูที่ลา (รอจัดสอนแทน) — {leaveRequests.length} คน
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {leaveRequests.map(lr => {
+            {canAssignSub && visibleLeaveRequests.length > 0 && (
+  <div>
+    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+      📋 ครูที่ลา (รอจัดสอนแทน) — {visibleLeaveRequests.length} คน
+    </h3>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {visibleLeaveRequests.map(lr => {
                     const expectedDates = getLeaveWeekdayDates(lr);
                     const assignedDates = new Set(
                       subRecords.filter(r => r.leave_request_id === lr.id && r.status !== "cancelled").map(r => r.substitute_date)
@@ -2365,7 +2473,7 @@ const adminFilteredSwaps = useMemo(() => {
                 <td className="px-4 py-3.5 text-xs sm:text-sm font-medium">{r.subject_name??"-"}</td>
                 <td className="px-4 py-3.5 text-xs sm:text-sm font-medium whitespace-nowrap">{fullName(r.absent_teacher)}</td>
                 <td className="px-4 py-3.5 text-xs sm:text-sm font-semibold text-emerald-700 whitespace-nowrap">{fullName(r.substitute_teacher)}</td>
-                <td className="px-4 py-3.5 text-center text-xs sm:text-sm font-bold">{r.hours_count}</td>
+                <td className="px-4 py-3.5 text-center text-xs sm:text-sm font-bold">{formatHoursDisplay(Number(r.hours_count))}</td>
                 <td className="px-4 py-3.5 whitespace-nowrap">
                   <span className={`text-xs font-bold px-2.5 py-1 rounded-lg border inline-block ${SOURCE_LABEL[src].cls}`}>
                     {SOURCE_LABEL[src].label}
@@ -2433,7 +2541,7 @@ const adminFilteredSwaps = useMemo(() => {
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-slate-700 text-base">📊 สถิติการสอนแทน</h2>
               {canAssignSub && (
-                <button onClick={()=>printTeacherSubStat(subRecords, teachers)}
+                <button onClick={()=>printTeacherSubStat(visibleSubRecords, teachers)}
                   className="px-4 py-2 bg-[#DB2777] hover:bg-[#9D174D] text-white text-sm font-bold rounded-xl flex items-center gap-1.5">
                   🖨️ พิมพ์สถิติ (คิดขั้นเงินเดือน)
                 </button>
@@ -2446,7 +2554,7 @@ const adminFilteredSwaps = useMemo(() => {
                 {[
                   { label:"คาบที่ขาด/ลา", value: subRecords.filter(r=>r.absent_teacher_id===user.id && r.status!=="cancelled").length, color:"#dc2626", icon:"📋" },
                   { label:"ครั้งที่สอนแทน", value: subRecords.filter(r=>r.substitute_teacher_id===user.id && r.status!=="cancelled").length, color:"#16a34a", icon:"✅" },
-                  { label:"ชั่วโมงสอนแทน", value: subRecords.filter(r=>r.substitute_teacher_id===user.id && r.status!=="cancelled").reduce((s,r)=>s+Number(r.hours_count),0), color:"#2563eb", icon:"⏰" },
+                  { label:"ชั่วโมงสอนแทน", value: formatHoursDisplay(subRecords.filter(r=>r.substitute_teacher_id===user.id && r.status!=="cancelled").reduce((s,r)=>s+Number(r.hours_count),0)), color:"#2563eb", icon:"⏰" },
                   { label:"คำขอแลกคาบ", value: mySwaps.length, color:"#7c3aed", icon:"🔄" },
                 ].map(c=>(
                   <div key={c.label} className="bg-white rounded-2xl border border-[#FBCFE8] p-4 flex items-center gap-3">
@@ -2486,8 +2594,7 @@ const adminFilteredSwaps = useMemo(() => {
                             <td className="px-3 py-3 text-center text-red-600 font-bold">{s.asAbsent}</td>
                             <td className="px-3 py-3 text-center text-emerald-600 font-bold">{s.asSub}</td>
                             <td className="px-3 py-3 text-center">
-                              <span className="font-black text-[#DB2777] text-base">{s.hours}</span>
-                              <span className="text-slate-400 text-xs"> ชม.</span>
+                              <span className="font-black text-[#DB2777] text-base">{formatHoursDisplay(s.hours)}</span>
                             </td>
                           </tr>
                         ))}
@@ -2538,7 +2645,7 @@ const adminFilteredSwaps = useMemo(() => {
                           <p className="text-sm font-bold text-slate-800 mt-1">
                             {fullName(r.absent_teacher)} <span className="text-slate-400 font-normal">→ สอนแทนโดย</span> {fullName(r.substitute_teacher)}
                           </p>
-                          <p className="text-xs text-slate-400 mt-0.5">{r.subject_name ?? "ไม่ระบุวิชา"} · {r.room_name ?? ""} · {r.hours_count} ชม.</p>
+                          <p className="text-xs text-slate-400 mt-0.5">{r.subject_name ?? "ไม่ระบุวิชา"} · {r.room_name ?? ""} · {formatHoursDisplay(Number(r.hours_count))}</p>
                         </div>
                       </div>
                     );
@@ -2581,6 +2688,14 @@ const adminFilteredSwaps = useMemo(() => {
     currentUser={user}
     onSave={async()=>{ setEditingSub(null); await loadData(); }}
     onClose={()=>setEditingSub(null)}
+  />
+)}
+{editingSwapDate && (
+  <EditSwapDateModal
+    record={editingSwapDate}
+    onSave={handleAdminSwapDateSave}
+    onDelete={handleAdminSwapDeleteAny}
+    onClose={() => setEditingSwapDate(null)}
   />
 )}
       {showManualAssign && academicYear && (
