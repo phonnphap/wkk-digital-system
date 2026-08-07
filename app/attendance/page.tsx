@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Save } from "lucide-react";
+import { Save, Home, ArrowLeft, Calendar, TrendingUp, Users } from "lucide-react";
 
 const supabase = createClient();
 
@@ -36,41 +36,94 @@ const STATUS_OPTIONS: { value: AttendanceStatus; label: string; activeCls: strin
   { value: "absent",  label: "ขาด",  activeCls: "bg-rose-500 text-white",    barColor: "bg-rose-500",    textColor: "text-rose-600" },
 ];
 
-function getTodayISO() {
-  return new Date().toISOString().slice(0, 10);
+/* ------------------------------------------------------------------ */
+/* Thai date helpers                                                   */
+/* ------------------------------------------------------------------ */
+
+const THAI_WEEKDAYS_FULL = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+const THAI_MONTHS_FULL = [
+  "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+];
+const THAI_MONTHS_SHORT = [
+  "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+  "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
+];
+
+// สร้าง Date จาก ISO string แบบ local time (กันปัญหา timezone เลื่อนวัน)
+function parseISODateLocal(iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
 }
 
-// คำนวณวันแรกของเดือนถัดไป (สำหรับ query แบบ >= เดือนนี้ < เดือนหน้า)
-function getNextMonthStartISO(dateISO: string) {
-  const [y, m] = dateISO.slice(0, 7).split("-").map(Number);
-  const next = new Date(y, m, 1); // m คือเดือนถัดไปแบบ 0-index อยู่แล้ว เพราะ m จาก slice เป็น 1-based
-  return next.toISOString().slice(0, 10);
+function toBuddhistYear(gregorianYear: number) {
+  return gregorianYear + 543;
 }
+
+// "วันศุกร์ที่ 7 สิงหาคม 2569"
+function formatThaiDateFull(iso: string) {
+  const dt = parseISODateLocal(iso);
+  const weekday = THAI_WEEKDAYS_FULL[dt.getDay()];
+  const day = dt.getDate();
+  const month = THAI_MONTHS_FULL[dt.getMonth()];
+  const year = toBuddhistYear(dt.getFullYear());
+  return `วัน${weekday}ที่ ${day} ${month} ${year}`;
+}
+
+// "จันทร์ ที่ 8 ส.ค.69" — ใช้ในตารางสถิติรายเดือน
+function formatThaiDateRow(iso: string) {
+  const dt = parseISODateLocal(iso);
+  const weekday = THAI_WEEKDAYS_FULL[dt.getDay()];
+  const day = dt.getDate();
+  const monthShort = THAI_MONTHS_SHORT[dt.getMonth()];
+  const yearShort = String(toBuddhistYear(dt.getFullYear())).slice(-2);
+  return `วัน${weekday} ที่ ${day} ${monthShort}${yearShort}`;
+}
+
+// วันนี้แบบ local time (ไม่ใช้ toISOString ที่อิง UTC เพราะจะเลื่อนวันได้ในบางช่วงเวลา)
+function getTodayISO() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function getMonthStartISO(dateISO: string) {
   return dateISO.slice(0, 7) + "-01";
 }
 
-type MonthStats = Record<AttendanceStatus, number> & { totalRecords: number; schoolDays: number };
-
-// แถบเปอร์เซ็นต์แบบง่าย ไม่พึ่งพา library ภายนอก
-function StatBar({ label, count, total, colorCls, textCls }: { label: string; count: number; total: number; colorCls: string; textCls: string }) {
-  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-  return (
-    <div>
-      <div className="flex items-center justify-between text-xs mb-1">
-        <span className={`font-semibold ${textCls}`}>{label}</span>
-        <span className="text-slate-500 font-medium">{count} คน ({pct}%)</span>
-      </div>
-      <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-        <div className={`h-full ${colorCls} rounded-full transition-all`} style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  );
+function getNextMonthStartISO(dateISO: string) {
+  const [y, m] = dateISO.slice(0, 7).split("-").map(Number);
+  const next = new Date(y, m, 1); // m คือเดือนถัดไปแบบ 0-index อยู่แล้ว เพราะ m จาก slice เป็น 1-based
+  const ny = next.getFullYear();
+  const nm = String(next.getMonth() + 1).padStart(2, "0");
+  return `${ny}-${nm}-01`;
 }
 
-// กราฟแท่งสรุปมา/ขาด/ลา/สาย แยกชาย-หญิง + รวมทั้งหมด
+// รายการวันที่ทั้งหมดในเดือนของ dateISO เช่น 2026-08-01 ... 2026-08-31
+function getDaysInMonth(dateISO: string) {
+  const [y, m] = dateISO.slice(0, 7).split("-").map(Number);
+  const lastDay = new Date(y, m, 0).getDate(); // Date(y, m, 0) = วันสุดท้ายของเดือน m (1-based)
+  const days: string[] = [];
+  for (let d = 1; d <= lastDay; d++) {
+    days.push(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+  }
+  return days;
+}
+
+/* ------------------------------------------------------------------ */
+
+type DayStat = {
+  date: string;
+  presentMale: number;
+  presentFemale: number;
+  presentTotal: number;
+};
+
+// กราฟแท่งสรุปมา/ขาด/ลา/สาย แยกชาย-หญิง + รวมทั้งหมด (ของวันที่กำลังเลือก)
 function GenderAttendanceChart({ students, statusMap }: { students: Student[]; statusMap: Record<string, AttendanceStatus> }) {
-  const groups: { key: "male" | "female" | "unknown"; label: string; icon: string }[] = [
+  const groups: { key: "male" | "female"; label: string; icon: string }[] = [
     { key: "male", label: "ชาย", icon: "👦" },
     { key: "female", label: "หญิง", icon: "👧" },
   ];
@@ -96,7 +149,6 @@ function GenderAttendanceChart({ students, statusMap }: { students: Student[]; s
     absent: counts.male.absent + counts.female.absent + counts.unknown.absent,
   };
   const grandTotal = students.length;
-
   const maxForBars = Math.max(1, students.length);
 
   return (
@@ -105,13 +157,20 @@ function GenderAttendanceChart({ students, statusMap }: { students: Student[]; s
         const groupTotal = Object.values(counts[g.key]).reduce((a, b) => a + b, 0);
         return (
           <div key={g.key}>
-            <p className="text-xs font-black text-slate-600 mb-1.5">{g.icon} {g.label} <span className="text-slate-400 font-normal">({groupTotal} คน)</span></p>
+            <p className="text-xs font-black text-slate-600 mb-1.5">
+              {g.icon} {g.label} <span className="text-slate-400 font-normal">({groupTotal} คน)</span>
+            </p>
             <div className="flex h-5 w-full overflow-hidden rounded-lg bg-slate-100">
               {STATUS_OPTIONS.map((opt) => {
                 const c = counts[g.key][opt.value];
                 const widthPct = maxForBars > 0 ? (c / maxForBars) * 100 : 0;
                 return c > 0 ? (
-                  <div key={opt.value} className={`${opt.barColor} h-full flex items-center justify-center transition-all`} style={{ width: `${widthPct}%` }} title={`${opt.label}: ${c}`}>
+                  <div
+                    key={opt.value}
+                    className={`${opt.barColor} h-full flex items-center justify-center transition-all`}
+                    style={{ width: `${widthPct}%` }}
+                    title={`${opt.label}: ${c}`}
+                  >
                     {widthPct > 8 && <span className="text-[10px] font-bold text-white">{c}</span>}
                   </div>
                 ) : null;
@@ -125,7 +184,7 @@ function GenderAttendanceChart({ students, statusMap }: { students: Student[]; s
         <p className="text-xs font-black text-slate-700 mb-2">📊 รวมทั้งหมด ({grandTotal} คน)</p>
         <div className="grid grid-cols-2 gap-2">
           {STATUS_OPTIONS.map((opt) => (
-            <div key={opt.value} className="flex items-center gap-2 bg-slate-50 rounded-lg px-2.5 py-1.5">
+            <div key={opt.value} className="flex items-center gap-2 bg-slate-50 rounded-xl px-2.5 py-1.5">
               <span className={`w-2.5 h-2.5 rounded-full ${opt.barColor}`} />
               <span className={`text-xs font-bold ${opt.textColor}`}>{opt.label}</span>
               <span className="ml-auto text-xs font-black text-slate-700">{totalByStatus[opt.value]}</span>
@@ -133,6 +192,74 @@ function GenderAttendanceChart({ students, statusMap }: { students: Student[]; s
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ตารางสถิติมาเรียนรายวันทั้งเดือน
+function MonthlyStatsTable({
+  dayStats,
+  enrolledCounts,
+  selectedDate,
+}: {
+  dayStats: DayStat[];
+  enrolledCounts: { male: number; female: number; total: number };
+  selectedDate: string;
+}) {
+  if (dayStats.length === 0) {
+    return <p className="text-xs text-slate-400 py-8 text-center">ยังไม่มีข้อมูลสำหรับเดือนนี้</p>;
+  }
+
+  return (
+    <div className="max-h-[420px] overflow-y-auto rounded-2xl ring-1 ring-slate-100">
+      <table className="w-full text-xs">
+        <thead className="sticky top-0 z-10 bg-slate-50">
+          <tr className="text-slate-500">
+            <th rowSpan={2} className="px-2.5 py-2 text-left font-semibold border-b border-slate-200 align-bottom">
+              วันที่
+            </th>
+            <th colSpan={3} className="px-2 py-1.5 text-center font-semibold border-b border-l border-slate-200">
+              นักเรียนเต็ม
+            </th>
+            <th colSpan={3} className="px-2 py-1.5 text-center font-semibold border-b border-l border-slate-200">
+              มาเรียนวันนี้
+            </th>
+          </tr>
+          <tr className="text-slate-400">
+            <th className="px-1.5 py-1 text-center font-medium border-l border-slate-200">ชาย</th>
+            <th className="px-1.5 py-1 text-center font-medium">หญิง</th>
+            <th className="px-1.5 py-1 text-center font-medium">รวม</th>
+            <th className="px-1.5 py-1 text-center font-medium border-l border-slate-200">ชาย</th>
+            <th className="px-1.5 py-1 text-center font-medium">หญิง</th>
+            <th className="px-1.5 py-1 text-center font-medium">รวม</th>
+          </tr>
+        </thead>
+        <tbody>
+          {dayStats.map((d) => {
+            const dt = parseISODateLocal(d.date);
+            const isWeekend = dt.getDay() === 0 || dt.getDay() === 6;
+            const isSelected = d.date === selectedDate;
+            return (
+              <tr
+                key={d.date}
+                className={`border-b border-slate-50 last:border-0 ${isWeekend ? "bg-slate-50/70" : ""} ${
+                  isSelected ? "bg-indigo-50/80" : ""
+                }`}
+              >
+                <td className={`px-2.5 py-1.5 whitespace-nowrap ${isSelected ? "font-bold text-indigo-700" : "text-slate-600"}`}>
+                  {formatThaiDateRow(d.date)}
+                </td>
+                <td className="px-1.5 py-1.5 text-center text-slate-500 border-l border-slate-50">{enrolledCounts.male}</td>
+                <td className="px-1.5 py-1.5 text-center text-slate-500">{enrolledCounts.female}</td>
+                <td className="px-1.5 py-1.5 text-center text-slate-600 font-semibold">{enrolledCounts.total}</td>
+                <td className="px-1.5 py-1.5 text-center text-emerald-600 border-l border-slate-50">{d.presentMale}</td>
+                <td className="px-1.5 py-1.5 text-center text-emerald-600">{d.presentFemale}</td>
+                <td className="px-1.5 py-1.5 text-center text-emerald-700 font-bold">{d.presentTotal}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -147,7 +274,7 @@ export default function AttendancePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
-  const [monthStats, setMonthStats] = useState<MonthStats | null>(null);
+  const [dayStats, setDayStats] = useState<DayStat[]>([]);
 
   // โหลดห้องที่ครูดูแล
   useEffect(() => {
@@ -189,32 +316,61 @@ export default function AttendancePage() {
     });
   }, [selectedClass, date]);
 
-  // โหลดสถิติการมาเรียนรายเดือนของห้องนี้ (ตามเดือนของวันที่เลือก)
+  // โหลดสถิติการมาเรียนรายวันทั้งเดือนของห้องนี้ (แยกชาย/หญิง)
+  // หมายเหตุ: ต้องมี foreign key จาก attendance_records.student_id -> students.id
+  // ให้ Supabase join ตาราง students(gender) ได้ ถ้ายังไม่มีให้เพิ่ม FK ก่อน
   useEffect(() => {
-    if (!selectedClass) { setMonthStats(null); return; }
+    if (!selectedClass) { setDayStats([]); return; }
     const cid = selectedClass.classroom_id;
     const start = getMonthStartISO(date);
     const end = getNextMonthStartISO(date);
 
     supabase
       .from("attendance_records")
-      .select("status, attendance_date")
+      .select("status, attendance_date, students(gender)")
       .eq("classroom_id", cid)
       .gte("attendance_date", start)
       .lt("attendance_date", end)
-      .then(({ data }: { data: { status: AttendanceStatus; attendance_date: string }[] | null }) => {
-        const rows = data ?? [];
-        const counts: MonthStats = { present: 0, late: 0, leave: 0, absent: 0, totalRecords: 0, schoolDays: 0 };
-        const daySet = new Set<string>();
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("month stats error:", error);
+          setDayStats([]);
+          return;
+        }
+        type Row = { status: AttendanceStatus; attendance_date: string; students: { gender: string | null } | { gender: string | null }[] | null };
+        const rows = (data ?? []) as unknown as Row[];
+
+        const byDate = new Map<string, { male: number; female: number; total: number }>();
         rows.forEach((r) => {
-          counts[r.status] = (counts[r.status] ?? 0) + 1;
-          counts.totalRecords += 1;
-          daySet.add(r.attendance_date);
+          // "มาเรียน" นับสถานะ present + late (มาโรงเรียนจริง แค่มาสาย) — ปรับได้ตามนโยบายโรงเรียน
+          const attended = r.status === "present" || r.status === "late";
+          if (!attended) return;
+          const genderInfo = Array.isArray(r.students) ? r.students[0] : r.students;
+          const g = genderInfo?.gender;
+          const cur = byDate.get(r.attendance_date) ?? { male: 0, female: 0, total: 0 };
+          if (g === "male") cur.male += 1;
+          else if (g === "female") cur.female += 1;
+          cur.total += 1;
+          byDate.set(r.attendance_date, cur);
         });
-        counts.schoolDays = daySet.size;
-        setMonthStats(counts);
+
+        const days: DayStat[] = getDaysInMonth(date).map((iso) => {
+          const d = byDate.get(iso) ?? { male: 0, female: 0, total: 0 };
+          return { date: iso, presentMale: d.male, presentFemale: d.female, presentTotal: d.total };
+        });
+        setDayStats(days);
       });
   }, [selectedClass, date]);
+
+  // จำนวนนักเรียนทั้งหมดในห้อง แยกชาย/หญิง ("นักเรียนเต็ม")
+  const enrolledCounts = useMemo(() => {
+    let male = 0, female = 0;
+    students.forEach((s) => {
+      if (s.gender === "male") male += 1;
+      else if (s.gender === "female") female += 1;
+    });
+    return { male, female, total: students.length };
+  }, [students]);
 
   function setStatus(studentId: string, status: AttendanceStatus) {
     setStatusMap((prev) => ({ ...prev, [studentId]: status }));
@@ -238,8 +394,7 @@ export default function AttendancePage() {
       status: statusMap[s.id] ?? "present",
     }));
 
-    // ✅ เพิ่ม .select() เพื่อตรวจว่าบันทึกจริงกี่แถว
-    // หมายเหตุ: หากขึ้น error ประมาณ "no unique or exclusion constraint matching the ON CONFLICT specification"
+    // หมายเหตุ: ถ้าขึ้น error "no unique or exclusion constraint matching the ON CONFLICT specification"
     // แปลว่าตาราง attendance_records ยังไม่มี UNIQUE constraint บน (student_id, attendance_date)
     // ให้รันคำสั่ง SQL นี้ในฐานข้อมูลก่อน:
     //   ALTER TABLE attendance_records ADD CONSTRAINT attendance_records_student_date_unique UNIQUE (student_id, attendance_date);
@@ -277,182 +432,180 @@ export default function AttendancePage() {
   );
 
   return (
-    // ✅ ขยายให้เต็มหน้าจอ (ตัด mx-auto max-w-3xl ออก)
-    <div className="w-full px-4 sm:px-6 py-6 lg:px-8">
-      {/* แถบนำทางด้านบน: กลับแดชบอร์ด + ย้อนกลับไปครูประจำชั้น (ชิดซ้ายทั้งคู่) */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => router.push(DASHBOARD_PATH)}
-          className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg"
-        >
-          🏠
-        </button>
-        <button
-          onClick={() => router.push(HOMEROOM_PATH)}
-          className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg"
-        >
-          ←
-        </button>
-      </div>
-
-      <h1 className="mt-4 text-lg font-bold text-slate-800">บันทึกเช็คชื่อ</h1>
-      <p className="mt-1 text-sm text-slate-500">บันทึกการมาเรียนของนักเรียนรายวัน</p>
-
-      {/* เลือกห้อง + วันที่ */}
-      <div className="mt-4 flex flex-wrap items-end gap-3">
-        {classrooms.length > 1 && (
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">ห้องเรียน</label>
-            <select
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              value={selectedClass?.classroom_id ?? ""}
-              onChange={(e) => setSelectedClass(classrooms.find((c) => c.classroom_id === e.target.value) ?? null)}
-            >
-              {classrooms.map((c) => (
-                <option key={c.classroom_id} value={c.classroom_id}>{c.room_name}</option>
-              ))}
-            </select>
-          </div>
-        )}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">วันที่</label>
-          <input
-            type="date"
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </div>
-        {date !== getTodayISO() && (
+    <div className="min-h-screen w-full bg-gradient-to-br from-sky-50 via-white to-violet-50">
+      <div className="w-full px-4 sm:px-6 py-6 lg:px-8">
+        {/* แถบนำทางด้านบน */}
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => setDate(getTodayISO())}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+            onClick={() => router.push(DASHBOARD_PATH)}
+            className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-slate-500 shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-0.5 hover:text-indigo-600 hover:shadow-md"
           >
-            กลับไปวันนี้
+            <Home className="h-4.5 w-4.5" />
           </button>
-        )}
-      </div>
+          <button
+            onClick={() => router.push(HOMEROOM_PATH)}
+            className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-slate-500 shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-0.5 hover:text-indigo-600 hover:shadow-md"
+          >
+            <ArrowLeft className="h-4.5 w-4.5" />
+          </button>
+        </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* คอลัมน์ซ้าย: รายชื่อ + ปุ่มบันทึก (กินพื้นที่ 2 ส่วน) */}
-        <div className="lg:col-span-2 space-y-3">
-          {/* ปุ่มตั้งค่าทั้งห้องอย่างเร็ว */}
-          <div className="flex flex-wrap gap-2">
-            <span className="self-center text-xs text-slate-400">ตั้งค่าทั้งห้อง:</span>
-            {STATUS_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setAllStatus(opt.value)}
-                className="rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+        <div className="mt-6">
+          <p className="text-xs font-bold uppercase tracking-wider text-indigo-500">ระบบดูแลนักเรียน</p>
+          <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-800 sm:text-3xl">บันทึกเช็คชื่อ</h1>
+          <p className="mt-1 text-sm text-slate-500">บันทึกการมาเรียนของนักเรียนรายวัน</p>
+        </div>
+
+        {/* เลือกห้อง + วันที่ */}
+        <div className="mt-5 flex flex-wrap items-end gap-3">
+          {classrooms.length > 1 && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-500">ห้องเรียน</label>
+              <select
+                className="rounded-2xl border-2 border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                value={selectedClass?.classroom_id ?? ""}
+                onChange={(e) => setSelectedClass(classrooms.find((c) => c.classroom_id === e.target.value) ?? null)}
               >
-                ทุกคน{opt.label}
-              </button>
-            ))}
-          </div>
-
-          {/* สรุปตัวเลขวันนี้ */}
-          {!loading && students.length > 0 && (
-            <div className="flex flex-wrap gap-2 text-xs">
-              {STATUS_OPTIONS.map((opt) => (
-                <span key={opt.value} className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">
-                  {opt.label} {summary[opt.value] ?? 0} คน
-                </span>
-              ))}
+                {classrooms.map((c) => (
+                  <option key={c.classroom_id} value={c.classroom_id}>{c.room_name}</option>
+                ))}
+              </select>
             </div>
           )}
 
-          {/* รายชื่อนักเรียน */}
-          <div className="space-y-2">
-            {loading ? (
-              <p className="py-10 text-center text-sm text-slate-400">กำลังโหลด...</p>
-            ) : students.length === 0 ? (
-              <p className="py-10 text-center text-sm text-slate-400">ไม่พบนักเรียนในห้องนี้</p>
-            ) : (
-              students.map((s) => {
-                const current = statusMap[s.id] ?? "present";
-                return (
-                  <div key={s.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
-                    <div className="flex items-center gap-3">
-                      <span className="grid h-8 w-8 place-items-center rounded-full bg-blue-50 text-xs font-bold text-blue-700">
-                        {s.seat_number}
-                      </span>
-                      <p className="text-sm font-semibold text-slate-800">
-                        {s.prefix ?? ""}{s.first_name} {s.last_name}
-                        {s.nick_name && <span className="ml-1 font-normal text-slate-400">({s.nick_name})</span>}
-                      </p>
-                    </div>
-                    <div className="flex gap-1.5">
-                      {STATUS_OPTIONS.map((opt) => (
-                        <button
-                          key={opt.value}
-                          onClick={() => setStatus(s.id, opt.value)}
-                          className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
-                            current === opt.value ? opt.activeCls : "bg-slate-100 text-slate-400 hover:bg-slate-200"
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })
-            )}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">วันที่</label>
+            {/* แสดงวันที่แบบไทยเต็มรูปแบบ กันสับสน DD/MM กับ MM/DD ของ input วันที่ตามเบราว์เซอร์ */}
+            <div className="relative inline-block">
+              <div className="pointer-events-none flex items-center gap-2 rounded-2xl border-2 border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm">
+                <Calendar className="h-4 w-4 text-indigo-500" />
+                {formatThaiDateFull(date)}
+              </div>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              />
+            </div>
           </div>
 
-          {/* ปุ่มบันทึก */}
-          {!loading && students.length > 0 && (
-            <div className="sticky bottom-4 flex items-center justify-end gap-3">
-              {savedMsg && <span className="text-sm font-semibold text-emerald-600">{savedMsg}</span>}
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg disabled:opacity-50"
-              >
-                <Save className="h-4 w-4" />
-                {saving ? "กำลังบันทึก..." : "บันทึกการเช็คชื่อ"}
-              </button>
-            </div>
+          {date !== getTodayISO() && (
+            <button
+              onClick={() => setDate(getTodayISO())}
+              className="rounded-2xl border-2 border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-500 shadow-sm transition hover:bg-slate-50"
+            >
+              กลับไปวันนี้
+            </button>
           )}
         </div>
 
-        {/* คอลัมน์ขวา: สถิติมาเรียน + กราฟสรุป ช/ญ */}
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-black text-slate-700 mb-3">📈 สถิติมาเรียนประจำเดือน</h3>
-            {monthStats ? (
-              monthStats.totalRecords === 0 ? (
-                <p className="text-xs text-slate-400 py-4 text-center">ยังไม่มีข้อมูลการเช็คชื่อในเดือนนี้</p>
+        {/* ★ จำกัดให้ฝั่งรายชื่อ+สถานะ ไม่เกินครึ่งหนึ่งของพื้นที่เว็บ (grid 2 คอลัมน์เท่ากัน) */}
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {/* ฝั่งซ้าย: รายชื่อ + ปุ่มบันทึก */}
+          <div className="space-y-3">
+            {/* ปุ่มตั้งค่าทั้งห้องอย่างเร็ว */}
+            <div className="flex flex-wrap gap-2">
+              <span className="self-center text-xs text-slate-400">ตั้งค่าทั้งห้อง:</span>
+              {STATUS_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setAllStatus(opt.value)}
+                  className="rounded-full border-2 border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50"
+                >
+                  ทุกคน{opt.label}
+                </button>
+              ))}
+            </div>
+
+            {/* สรุปตัวเลขวันนี้ */}
+            {!loading && students.length > 0 && (
+              <div className="flex flex-wrap gap-2 text-xs">
+                {STATUS_OPTIONS.map((opt) => (
+                  <span key={opt.value} className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">
+                    {opt.label} {summary[opt.value] ?? 0} คน
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* รายชื่อนักเรียน */}
+            <div className="space-y-2">
+              {loading ? (
+                <p className="py-10 text-center text-sm text-slate-400">กำลังโหลด...</p>
+              ) : students.length === 0 ? (
+                <p className="py-10 text-center text-sm text-slate-400">ไม่พบนักเรียนในห้องนี้</p>
               ) : (
-                <div className="space-y-3">
-                  <p className="text-xs text-slate-400">
-                    บันทึกแล้ว <span className="font-bold text-slate-600">{monthStats.schoolDays}</span> วัน ·
-                    รวม <span className="font-bold text-slate-600">{monthStats.totalRecords}</span> รายการ
-                  </p>
-                  {STATUS_OPTIONS.map((opt) => (
-                    <StatBar
-                      key={opt.value}
-                      label={opt.label}
-                      count={monthStats[opt.value] ?? 0}
-                      total={monthStats.totalRecords}
-                      colorCls={opt.barColor}
-                      textCls={opt.textColor}
-                    />
-                  ))}
-                </div>
-              )
-            ) : (
-              <p className="text-xs text-slate-400 py-4 text-center">กำลังโหลดสถิติ...</p>
+                students.map((s) => {
+                  const current = statusMap[s.id] ?? "present";
+                  return (
+                    <div
+                      key={s.id}
+                      className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-2.5 shadow-sm ring-1 ring-slate-100 transition hover:shadow-md"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-indigo-500 to-sky-400 text-xs font-bold text-white shadow-sm">
+                          {s.seat_number}
+                        </span>
+                        <p className="truncate text-sm font-semibold text-slate-800">
+                          {s.prefix ?? ""}{s.first_name} {s.last_name}
+                          {s.nick_name && <span className="ml-1 font-normal text-slate-400">({s.nick_name})</span>}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-1.5">
+                        {STATUS_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.value}
+                            onClick={() => setStatus(s.id, opt.value)}
+                            className={`rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
+                              current === opt.value ? opt.activeCls : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* ปุ่มบันทึก */}
+            {!loading && students.length > 0 && (
+              <div className="sticky bottom-4 flex items-center justify-end gap-3">
+                {savedMsg && <span className="text-sm font-semibold text-emerald-600">{savedMsg}</span>}
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:shadow-xl disabled:translate-y-0 disabled:opacity-50 disabled:shadow-none"
+                >
+                  <Save className="h-4 w-4" />
+                  {saving ? "กำลังบันทึก..." : "บันทึกการเช็คชื่อ"}
+                </button>
+              </div>
             )}
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-black text-slate-700 mb-3">👦👧 สรุปการมาเรียนวันนี้ แยกชาย/หญิง</h3>
-            {!loading && students.length > 0 ? (
-              <GenderAttendanceChart students={students} statusMap={statusMap} />
-            ) : (
-              <p className="text-xs text-slate-400 py-4 text-center">ไม่มีข้อมูลนักเรียน</p>
-            )}
+          {/* ฝั่งขวา: ตารางสถิติรายเดือน + กราฟสรุป ช/ญ ของวันนี้ */}
+          <div className="space-y-4">
+            <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+              <h3 className="mb-3 flex items-center gap-1.5 text-sm font-black text-slate-700">
+                <TrendingUp className="h-4 w-4 text-indigo-500" /> สถิติมาเรียนประจำเดือน
+              </h3>
+              <MonthlyStatsTable dayStats={dayStats} enrolledCounts={enrolledCounts} selectedDate={date} />
+            </div>
+
+            <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+              <h3 className="mb-3 flex items-center gap-1.5 text-sm font-black text-slate-700">
+                <Users className="h-4 w-4 text-indigo-500" /> สรุปการมาเรียนวันนี้ แยกชาย/หญิง
+              </h3>
+              {!loading && students.length > 0 ? (
+                <GenderAttendanceChart students={students} statusMap={statusMap} />
+              ) : (
+                <p className="py-4 text-center text-xs text-slate-400">ไม่มีข้อมูลนักเรียน</p>
+              )}
+            </div>
           </div>
         </div>
       </div>

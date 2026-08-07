@@ -231,7 +231,8 @@ const [loginPassword, setLoginPassword] = useState("");
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-sky-50 via-white to-violet-50">
-      <div className="mx-auto w-full max-w-6xl px-6 py-8 lg:px-10 xl:max-w-7xl">
+      {/* ★ ปรับ padding ให้เท่ากับหน้าเช็คชื่อ (w-full px-4 sm:px-6 py-6 lg:px-8, ไม่มี mx-auto/max-w ครอบ) */}
+      <div className="w-full px-4 sm:px-6 py-6 lg:px-8">
         {/* แถบนำทางด้านบน: กลับแดชบอร์ด + ย้อนกลับไปครูประจำชั้น */}
         <div className="flex items-center gap-2">
           <button
