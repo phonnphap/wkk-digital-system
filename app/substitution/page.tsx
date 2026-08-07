@@ -2086,6 +2086,20 @@ const adminFilteredSwaps = useMemo(() => {
                         <button onClick={() => handleSwapCancel(r.id)}
                           className="text-xs text-red-500 hover:text-red-700 font-bold underline">ยกเลิกคำขอ</button>
                       )}
+                      {/* ★ ใหม่: requester ติดหนี้บุญคุณ target_teacher ที่รับแลกคาบให้แล้ว (accepted) — เปิดโหมด repay เหมือนหน้าสอนแทน */}
+{r.requester_id === user?.id && r.status === "accepted" && (
+  <button
+    onClick={() => {
+      setSwapMode("repay");
+      setSwapFixedTargetTeacherId(r.target_teacher_id);
+      setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.target_teacher)} ที่เคยรับแลกคาบให้เมื่อ ${thaiDate(r.swap_date)} (${r.requester_entry?.slot_label ?? "-"})`);
+      setShowSwapModal(true);
+    }}
+    className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200 transition-colors"
+  >
+    🔄 แลกคาบคืน
+  </button>
+)}
                     </div>
                   ))}
                 </div>
