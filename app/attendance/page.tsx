@@ -1,7 +1,7 @@
 // app/attendance/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Save, Home, ArrowLeft, Calendar, TrendingUp, Users } from "lucide-react";
@@ -28,6 +28,8 @@ type Student = {
 };
 
 type AttendanceStatus = "present" | "absent" | "leave" | "late";
+// ตัวกรองรายชื่อด้านล่างชิปสรุป: สถานะเดี่ยว หรือ "attended" (มา+สาย รวมกัน)
+type SummaryFilter = AttendanceStatus | "attended";
 
 const STATUS_OPTIONS: { value: AttendanceStatus; label: string; activeCls: string; barColor: string; textColor: string }[] = [
   { value: "present", label: "มา",   activeCls: "bg-emerald-600 text-white", barColor: "bg-emerald-500", textColor: "text-emerald-600" },
@@ -196,15 +198,17 @@ function GenderAttendanceChart({ students, statusMap }: { students: Student[]; s
   );
 }
 
-// ตารางสถิติมาเรียนรายวันทั้งเดือน
+// ตารางสถิติมาเรียนรายวันทั้งเดือน — คลิกแถวเพื่อเปลี่ยนวันที่ที่กำลังเช็คชื่อได้เลย
 function MonthlyStatsTable({
   dayStats,
   enrolledCounts,
   selectedDate,
+  onSelectDate,
 }: {
   dayStats: DayStat[];
   enrolledCounts: { male: number; female: number; total: number };
   selectedDate: string;
+  onSelectDate: (iso: string) => void;
 }) {
   if (dayStats.length === 0) {
     return <p className="text-xs text-slate-400 py-8 text-center">ยังไม่มีข้อมูลสำหรับเดือนนี้</p>;
@@ -212,7 +216,17 @@ function MonthlyStatsTable({
 
   return (
     <div className="max-h-[420px] overflow-y-auto rounded-2xl ring-1 ring-slate-100">
-      <table className="w-full text-xs">
+      {/* table-fixed + colgroup กันไม่ให้คอลัมน์ "วันที่" กินพื้นที่ว่างเกินจำเป็น */}
+      <table className="w-full table-fixed text-xs">
+        <colgroup>
+          <col className="w-[34%]" />
+          <col className="w-[11%]" />
+          <col className="w-[11%]" />
+          <col className="w-[11%]" />
+          <col className="w-[11%]" />
+          <col className="w-[11%]" />
+          <col className="w-[11%]" />
+        </colgroup>
         <thead className="sticky top-0 z-10 bg-slate-50">
           <tr className="text-slate-500">
             <th rowSpan={2} className="px-2.5 py-2 text-left font-semibold border-b border-slate-200 align-bottom">
@@ -242,9 +256,11 @@ function MonthlyStatsTable({
             return (
               <tr
                 key={d.date}
-                className={`border-b border-slate-50 last:border-0 ${isWeekend ? "bg-slate-50/70" : ""} ${
-                  isSelected ? "bg-indigo-50/80" : ""
-                }`}
+                onClick={() => onSelectDate(d.date)}
+                title="คลิกเพื่อดูข้อมูลวันนี้"
+                className={`cursor-pointer border-b border-slate-50 last:border-0 transition-colors ${
+                  isWeekend ? "bg-slate-200/70" : ""
+                } ${isSelected ? "bg-indigo-50/80" : "hover:bg-indigo-50/40"}`}
               >
                 <td className={`px-2.5 py-1.5 whitespace-nowrap ${isSelected ? "font-bold text-indigo-700" : "text-slate-600"}`}>
                   {formatThaiDateRow(d.date)}
@@ -275,6 +291,22 @@ export default function AttendancePage() {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
   const [dayStats, setDayStats] = useState<DayStat[]>([]);
+  // ตัวกรองรายชื่อใต้ชิปสรุป (คลิกชิปเพื่อดูรายชื่อ เลขที่ + ชื่อ)
+  const [summaryFilter, setSummaryFilter] = useState<SummaryFilter | null>(null);
+
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
+  function openDatePicker() {
+    const el = dateInputRef.current;
+    if (!el) return;
+    // showPicker() เปิด native date picker ได้ตรง ๆ แม่นยำกว่า overlay input แบบเดิมที่กดยาก
+    if (typeof (el as unknown as { showPicker?: () => void }).showPicker === "function") {
+      (el as unknown as { showPicker: () => void }).showPicker();
+    } else {
+      el.focus();
+      el.click();
+    }
+  }
 
   // โหลดห้องที่ครูดูแล
   useEffect(() => {
@@ -288,6 +320,7 @@ export default function AttendancePage() {
   useEffect(() => {
     if (!selectedClass) return;
     setLoading(true);
+    setSummaryFilter(null); // เปลี่ยนวัน/ห้อง แล้วรีเซ็ตตัวกรองรายชื่อที่เปิดค้างไว้
     const cid = selectedClass.classroom_id;
 
     Promise.all([
@@ -430,6 +463,23 @@ export default function AttendancePage() {
     },
     {} as Record<AttendanceStatus, number>
   );
+  const attendedCount = (summary.present ?? 0) + (summary.late ?? 0);
+
+  // รายชื่อนักเรียนตามตัวกรองที่เลือก (สำหรับแสดงใต้ชิปสรุป)
+  const filteredStudents = useMemo(() => {
+    if (!summaryFilter) return [];
+    return students
+      .filter((s) => {
+        const st = statusMap[s.id] ?? "present";
+        return summaryFilter === "attended" ? st === "present" || st === "late" : st === summaryFilter;
+      })
+      .sort((a, b) => (a.seat_number ?? 0) - (b.seat_number ?? 0));
+  }, [students, statusMap, summaryFilter]);
+
+  const summaryFilterLabel =
+    summaryFilter === "attended"
+      ? "มาเรียน (มา+สาย)"
+      : STATUS_OPTIONS.find((o) => o.value === summaryFilter)?.label ?? "";
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-sky-50 via-white to-violet-50">
@@ -450,54 +500,61 @@ export default function AttendancePage() {
           </button>
         </div>
 
-        <div className="mt-6">
-          <p className="text-xs font-bold uppercase tracking-wider text-indigo-500">ระบบดูแลนักเรียน</p>
-          <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-800 sm:text-3xl">บันทึกเช็คชื่อ</h1>
-          <p className="mt-1 text-sm text-slate-500">บันทึกการมาเรียนของนักเรียนรายวัน</p>
-        </div>
-
-        {/* เลือกห้อง + วันที่ */}
-        <div className="mt-5 flex flex-wrap items-end gap-3">
-          {classrooms.length > 1 && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500">ห้องเรียน</label>
-              <select
-                className="rounded-2xl border-2 border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
-                value={selectedClass?.classroom_id ?? ""}
-                onChange={(e) => setSelectedClass(classrooms.find((c) => c.classroom_id === e.target.value) ?? null)}
-              >
-                {classrooms.map((c) => (
-                  <option key={c.classroom_id} value={c.classroom_id}>{c.room_name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
+        {/* หัวข้อ + วันที่ อยู่แถวเดียวกัน (วันที่ย้ายมาไว้ต่อจากหัวข้อ "บันทึกเช็คชื่อ") */}
+        <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">วันที่</label>
-            {/* แสดงวันที่แบบไทยเต็มรูปแบบ กันสับสน DD/MM กับ MM/DD ของ input วันที่ตามเบราว์เซอร์ */}
-            <div className="relative inline-block">
-              <div className="pointer-events-none flex items-center gap-2 rounded-2xl border-2 border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wider text-indigo-500">ระบบดูแลนักเรียน</p>
+            <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-800 sm:text-3xl">บันทึกเช็คชื่อ</h1>
+            <p className="mt-1 text-sm text-slate-500">บันทึกการมาเรียนของนักเรียนรายวัน</p>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            {classrooms.length > 1 && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500">ห้องเรียน</label>
+                <select
+                  className="rounded-2xl border-2 border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                  value={selectedClass?.classroom_id ?? ""}
+                  onChange={(e) => setSelectedClass(classrooms.find((c) => c.classroom_id === e.target.value) ?? null)}
+                >
+                  {classrooms.map((c) => (
+                    <option key={c.classroom_id} value={c.classroom_id}>{c.room_name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-500">วันที่</label>
+              {/* ปุ่มจริงที่กดง่าย + เรียก showPicker() ตรง ๆ แทน overlay input แบบเดิมที่กดพลาดง่าย */}
+              <button
+                type="button"
+                onClick={openDatePicker}
+                className="flex items-center gap-2 rounded-2xl border-2 border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md active:translate-y-0 active:scale-[0.98]"
+              >
                 <Calendar className="h-4 w-4 text-indigo-500" />
                 {formatThaiDateFull(date)}
-              </div>
+              </button>
               <input
+                ref={dateInputRef}
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                tabIndex={-1}
+                aria-hidden="true"
+                className="sr-only"
               />
             </div>
-          </div>
 
-          {date !== getTodayISO() && (
-            <button
-              onClick={() => setDate(getTodayISO())}
-              className="rounded-2xl border-2 border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-500 shadow-sm transition hover:bg-slate-50"
-            >
-              กลับไปวันนี้
-            </button>
-          )}
+            {date !== getTodayISO() && (
+              <button
+                onClick={() => setDate(getTodayISO())}
+                className="rounded-2xl border-2 border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-500 shadow-sm transition hover:bg-slate-50"
+              >
+                กลับไปวันนี้
+              </button>
+            )}
+          </div>
         </div>
 
         {/* ★ จำกัดให้ฝั่งรายชื่อ+สถานะ ไม่เกินครึ่งหนึ่งของพื้นที่เว็บ (grid 2 คอลัมน์เท่ากัน) */}
@@ -518,14 +575,54 @@ export default function AttendancePage() {
               ))}
             </div>
 
-            {/* สรุปตัวเลขวันนี้ */}
+            {/* สรุปตัวเลขวันนี้ — คลิกชิปเพื่อดูรายชื่อ เลขที่ + ชื่อ ของกลุ่มนั้น */}
             {!loading && students.length > 0 && (
-              <div className="flex flex-wrap gap-2 text-xs">
-                {STATUS_OPTIONS.map((opt) => (
-                  <span key={opt.value} className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">
-                    {opt.label} {summary[opt.value] ?? 0} คน
-                  </span>
-                ))}
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <button
+                    onClick={() => setSummaryFilter((prev) => (prev === "attended" ? null : "attended"))}
+                    className={`rounded-full px-3 py-1 font-semibold shadow-sm transition ${
+                      summaryFilter === "attended"
+                        ? "bg-indigo-600 text-white"
+                        : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
+                    }`}
+                  >
+                    มาเรียน (มา+สาย) {attendedCount} คน
+                  </button>
+                  {STATUS_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setSummaryFilter((prev) => (prev === opt.value ? null : opt.value))}
+                      className={`rounded-full px-3 py-1 font-semibold shadow-sm transition ${
+                        summaryFilter === opt.value ? opt.activeCls : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      {opt.label} {summary[opt.value] ?? 0} คน
+                    </button>
+                  ))}
+                </div>
+
+                {summaryFilter && (
+                  <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
+                    <p className="mb-2 text-xs font-bold text-slate-500">
+                      รายชื่อนักเรียน{summaryFilterLabel} ({filteredStudents.length} คน)
+                    </p>
+                    {filteredStudents.length === 0 ? (
+                      <p className="text-xs text-slate-400">ไม่มีนักเรียนในกลุ่มนี้</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {filteredStudents.map((s) => (
+                          <span
+                            key={s.id}
+                            className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200"
+                          >
+                            {s.seat_number}. {s.prefix ?? ""}{s.first_name} {s.last_name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -593,7 +690,12 @@ export default function AttendancePage() {
               <h3 className="mb-3 flex items-center gap-1.5 text-sm font-black text-slate-700">
                 <TrendingUp className="h-4 w-4 text-indigo-500" /> สถิติมาเรียนประจำเดือน
               </h3>
-              <MonthlyStatsTable dayStats={dayStats} enrolledCounts={enrolledCounts} selectedDate={date} />
+              <MonthlyStatsTable
+                dayStats={dayStats}
+                enrolledCounts={enrolledCounts}
+                selectedDate={date}
+                onSelectDate={setDate}
+              />
             </div>
 
             <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
