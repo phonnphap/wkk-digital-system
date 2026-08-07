@@ -13,13 +13,13 @@ type Classroom = { id: string; room_name?: string; grade_group?: string };
 type SectionRow = { id: string; classroom_id: string; teacher_id: string; co_teacher_id?: string; join_code: string };
 
 const ROOM_NUMBER_GRADIENTS: Record<string, string> = {
-  "1": "from-fuchsia-500 to-pink-400",
-  "2": "from-purple-500 to-fuchsia-400",
-  "3": "from-pink-500 to-rose-400",
-  "4": "from-violet-500 to-purple-400",
-  "5": "from-rose-500 to-pink-400",
-  "6": "from-purple-600 to-fuchsia-500",
-  "7": "from-fuchsia-600 to-purple-500",
+  "1": "from-yellow-400 to-amber-300",
+  "2": "from-pink-500 to-rose-400",
+  "3": "from-emerald-500 to-green-400",
+  "4": "from-red-500 to-rose-600",
+  "5": "from-sky-400 to-cyan-300",
+  "6": "from-orange-500 to-amber-400",
+  "7": "from-blue-700 to-indigo-600",
 };
 const DEFAULT_GRADIENT = "from-slate-500 to-slate-400";
 
