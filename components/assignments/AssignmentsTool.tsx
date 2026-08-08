@@ -464,183 +464,227 @@ function removeFile(index: number) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-white overflow-y-auto">
-  <div className="max-w-4xl mx-auto p-5 sm:p-8 space-y-5 pb-24">
-        <h2 className="font-black text-slate-800 text-lg">{existing ? "แก้ไขชิ้นงาน" : "สร้างชิ้นงานใหม่"}</h2>
-        <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+    <div className="fixed inset-0 z-50 bg-slate-50 overflow-y-auto">
+      {/* Header แบบ sticky */}
+      <div className="sticky top-0 z-20 bg-white border-b border-slate-100 px-4 sm:px-8 py-4 flex items-center justify-between">
+        <h2 className="font-black text-slate-800 text-lg sm:text-xl">
+          {existing ? "แก้ไขชิ้นงาน" : "สร้างชิ้นงานใหม่"}
+        </h2>
+        <button
+          onClick={onCancel}
+          className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-base font-black transition-colors"
+        >
+          ✕
+        </button>
       </div>
 
-      <div>
-        <label className="text-xs font-black text-slate-500">ชื่องาน</label>
-        <input
-          value={title}
-          onChange={e => setTitle(e.target.value)}
-          placeholder="เช่น ใบงานที่ 1: การบวกลบเลข"
-          className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-        />
-      </div>
-
-      <div>
-        <label className="text-xs font-black text-slate-500">คำอธิบาย</label>
-        <textarea
-          value={description}
-          onChange={e => setDescription(e.target.value)}
-          rows={4}
-          placeholder="รายละเอียด/คำสั่งของชิ้นงาน"
-          className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none resize-none"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {/* เนื้อหาฟอร์ม — จำกัดความกว้างและจัดกึ่งกลาง ไม่ให้ชิดขอบจอ */}
+      <div className="max-w-3xl mx-auto px-4 sm:px-8 py-6 space-y-6 pb-28">
         <div>
-  <label className="text-xs font-black text-slate-500">แนบไฟล์ / รูปภาพ (แนบได้หลายไฟล์)</label>
-  <input
-    type="file"
-    multiple
-    onChange={e => { addFiles(e.target.files); e.target.value = ""; }}
-    className="mt-1 w-full text-xs font-bold border-2 border-dashed border-slate-200 rounded-xl px-3 py-2.5"
-  />
-  {previews.length > 0 && (
-    <div className="mt-2 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-      {previews.map((p, i) => (
-        <div key={i} className="relative rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square">
-          {p.isImage ? (
-            <img src={p.url} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
-              <span className="text-2xl">📄</span>
-              <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{p.file.name}</span>
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => removeFile(i)}
-            className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-xs flex items-center justify-center hover:bg-black/70"
-          >
-            ✕
-          </button>
+          <label className="text-xs font-black text-slate-500">ชื่องาน</label>
+          <input
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            placeholder="เช่น ใบงานที่ 1: การบวกลบเลข"
+            className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+          />
         </div>
-      ))}
-    </div>
-  )}
-</div>
+
         <div>
-          <label className="text-xs font-black text-slate-500">แนบลิงก์</label>
-          <div className="mt-1 flex gap-2">
+          <label className="text-xs font-black text-slate-500">คำอธิบาย</label>
+          <textarea
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            rows={4}
+            placeholder="รายละเอียด/คำสั่งของชิ้นงาน"
+            className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none resize-none"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* แนบไฟล์ — ทำเป็นกล่อง dropzone แทน input ดิบๆ */}
+          <div>
+            <label className="text-xs font-black text-slate-500">แนบไฟล์ / รูปภาพ (แนบได้หลายไฟล์)</label>
+            <label
+              htmlFor="assignment-file-input"
+              className="mt-1.5 flex items-center justify-center gap-2 w-full border-2 border-dashed border-slate-200 rounded-xl px-4 py-3.5 text-xs font-bold text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50/40 cursor-pointer transition-colors"
+            >
+              <span className="text-base">📎</span>
+              <span>คลิกเพื่อเลือกไฟล์ (เลือกได้หลายไฟล์)</span>
+            </label>
             <input
-              value={linkUrl}
-              onChange={e => setLinkUrl(e.target.value)}
-              placeholder="https://..."
-              className="flex-1 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+              id="assignment-file-input"
+              type="file"
+              multiple
+              onChange={e => { addFiles(e.target.files); e.target.value = ""; }}
+              className="hidden"
             />
-            <button onClick={addLink} type="button" className="px-3 rounded-xl bg-slate-100 text-slate-600 font-black text-xs">เพิ่ม</button>
+
+            {previews.length > 0 && (
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                {previews.map((p, i) => (
+                  <div key={i} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white aspect-square">
+                    {p.isImage ? (
+                      <img src={p.url} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
+                        <span className="text-xl">📄</span>
+                        <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{p.file.name}</span>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeFile(i)}
+                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-[10px] flex items-center justify-center hover:bg-black/70"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          {links.length > 0 && (
-            <ul className="mt-1.5 space-y-1">
-              {links.map((l, i) => (
-                <li key={i} className="text-[11px] text-indigo-500 font-bold truncate flex items-center gap-1.5">
-                  🔗 {l}
-                  <button onClick={() => setLinks(prev => prev.filter((_, idx) => idx !== i))} className="text-slate-300 hover:text-rose-500">✕</button>
-                </li>
+
+          {/* แนบลิงก์ */}
+          <div>
+            <label className="text-xs font-black text-slate-500">แนบลิงก์</label>
+            <div className="mt-1.5 flex gap-2">
+              <input
+                value={linkUrl}
+                onChange={e => setLinkUrl(e.target.value)}
+                placeholder="https://..."
+                className="flex-1 border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+              />
+              <button
+                onClick={addLink}
+                type="button"
+                className="px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs shrink-0"
+              >
+                เพิ่ม
+              </button>
+            </div>
+            {links.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {links.map((l, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1.5 text-[11px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full pl-3 pr-1.5 py-1 max-w-full"
+                  >
+                    <span className="truncate max-w-[160px]">🔗 {l}</span>
+                    <button
+                      onClick={() => setLinks(prev => prev.filter((_, idx) => idx !== i))}
+                      className="w-4 h-4 rounded-full bg-indigo-100 hover:bg-rose-100 hover:text-rose-500 flex items-center justify-center shrink-0"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-black text-slate-500">เลือกประเภทชิ้นงาน</label>
+            <select
+              value={type}
+              onChange={e => setType(e.target.value as AssignmentType)}
+              className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none bg-white"
+            >
+              {Object.entries(TYPE_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
               ))}
-            </ul>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-black text-slate-500">คะแนนเต็ม</label>
+            <input
+              type="number"
+              value={maxScore}
+              onChange={e => setMaxScore(Number(e.target.value))}
+              className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-black text-slate-500">มอบหมายเมื่อ</label>
+            <input
+              type="datetime-local"
+              value={assignedAt}
+              onChange={e => setAssignedAt(e.target.value)}
+              className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-black text-slate-500">กำหนดส่ง</label>
+            <input
+              type="datetime-local"
+              value={dueDate}
+              onChange={e => setDueDate(e.target.value)}
+              className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+            />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border-2 border-slate-100 bg-white p-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-black text-slate-600">อนุญาตให้มีน้ำหนักชิ้นงาน</p>
+            <button
+              type="button"
+              onClick={() => setAllowWeight(v => !v)}
+              className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${allowWeight ? "bg-indigo-500" : "bg-slate-200"}`}
+            >
+              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${allowWeight ? "translate-x-5" : "translate-x-0.5"}`} />
+            </button>
+          </div>
+          {allowWeight && (
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-black text-slate-400">เปอร์เซ็นต์น้ำหนักของชิ้นงาน (ไม่บังคับ)</label>
+                <input
+                  type="number"
+                  value={weightPercent}
+                  onChange={e => setWeightPercent(e.target.value === "" ? "" : Number(e.target.value))}
+                  placeholder="เช่น 10"
+                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-black text-slate-400">เกณฑ์การให้คะแนน (ไม่บังคับ)</label>
+                <input
+                  value={gradingNote}
+                  onChange={e => setGradingNote(e.target.value)}
+                  placeholder="พิมพ์เกณฑ์ หรือเลือกจากที่ตั้งไว้"
+                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                />
+              </div>
+            </div>
           )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs font-black text-slate-500">เลือกประเภทชิ้นงาน</label>
-          <select
-            value={type}
-            onChange={e => setType(e.target.value as AssignmentType)}
-            className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none bg-white"
-          >
-            {Object.entries(TYPE_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-black text-slate-500">คะแนนเต็ม</label>
-          <input
-            type="number"
-            value={maxScore}
-            onChange={e => setMaxScore(Number(e.target.value))}
-            className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs font-black text-slate-500">มอบหมายเมื่อ</label>
-          <input
-            type="datetime-local"
-            value={assignedAt}
-            onChange={e => setAssignedAt(e.target.value)}
-            className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-          />
-        </div>
-        <div>
-          <label className="text-xs font-black text-slate-500">กำหนดส่ง</label>
-          <input
-            type="datetime-local"
-            value={dueDate}
-            onChange={e => setDueDate(e.target.value)}
-            className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-          />
-        </div>
-      </div>
-
-      <div className="rounded-xl border-2 border-slate-100 p-3">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-black text-slate-600">อนุญาตให้มีน้ำหนักชิ้นงาน</p>
+      {/* Footer แบบ sticky — ปุ่มบันทึก */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 px-4 sm:px-8 py-3 z-10">
+        <div className="max-w-3xl mx-auto flex gap-3">
           <button
-            type="button"
-            onClick={() => setAllowWeight(v => !v)}
-            className={`w-11 h-6 rounded-full transition-colors relative ${allowWeight ? "bg-indigo-500" : "bg-slate-200"}`}
+            onClick={() => save("draft")}
+            disabled={saving !== null}
+            className="flex-1 py-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm disabled:opacity-50"
           >
-            <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${allowWeight ? "translate-x-5" : "translate-x-0.5"}`} />
+            {saving === "draft" ? "กำลังบันทึก..." : "บันทึกแบบร่าง"}
+          </button>
+          <button
+            onClick={() => save("published")}
+            disabled={saving !== null}
+            className="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50"
+          >
+            {saving === "publish" ? "กำลังเผยแพร่..." : "เผยแพร่"}
           </button>
         </div>
-        {allowWeight && (
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-black text-slate-400">เปอร์เซ็นต์น้ำหนักของชิ้นงาน (ไม่บังคับ)</label>
-              <input
-                type="number"
-                value={weightPercent}
-                onChange={e => setWeightPercent(e.target.value === "" ? "" : Number(e.target.value))}
-                placeholder="เช่น 10"
-                className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] font-black text-slate-400">เกณฑ์การให้คะแนน (ไม่บังคับ)</label>
-              <input
-                value={gradingNote}
-                onChange={e => setGradingNote(e.target.value)}
-                placeholder="พิมพ์เกณฑ์ หรือเลือกจากที่ตั้งไว้"
-                className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-              />
-            </div>
-          </div>
-        )}
       </div>
-
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 p-3 sm:px-8 z-10">
-  <div className="max-w-4xl mx-auto flex gap-2">
-    <button onClick={() => save("draft")} disabled={saving !== null}
-      className="flex-1 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm disabled:opacity-50">
-      {saving === "draft" ? "กำลังบันทึก..." : "บันทึกแบบร่าง"}
-    </button>
-    <button onClick={() => save("published")} disabled={saving !== null}
-      className="flex-1 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50">
-      {saving === "publish" ? "กำลังเผยแพร่..." : "เผยแพร่"}
-    </button>
-  </div>
-</div>
     </div>
   );
 }
@@ -859,7 +903,7 @@ function SubmissionsTab({
                 )}
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
-                  <p className="text-[10px] text-slate-400 font-bold">Number {s.seat_number}</p>
+                  <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                 </div>
                 <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${STATUS_COLORS[status]}`}>{STATUS_LABELS[status]}</span>
               </button>
@@ -882,7 +926,7 @@ function SubmissionsTab({
               )}
               <div>
                 <p className="font-black text-slate-800">{selectedStudent.first_name} {selectedStudent.last_name}</p>
-                <p className="text-slate-400 text-xs font-bold">Number {selectedStudent.seat_number}</p>
+                <p className="text-slate-400 text-xs font-bold">เลขที่ {selectedStudent.seat_number}</p>
               </div>
             </div>
 

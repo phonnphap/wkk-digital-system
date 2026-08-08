@@ -9,7 +9,8 @@ import {
   LayoutDashboard, UserCheck, CalendarDays, FileText,
   Wrench, Car, Monitor, FolderOpen, FileEdit, Trophy, Calendar, RefreshCw, Users, LogOut, Bell, Settings,
   User,
-  GraduationCap
+  GraduationCap,
+  UploadCloud   // ★ เพิ่มบรรทัดนี้
 } from "lucide-react";
 
 // ══════════════════════════════════════════════════════════
@@ -784,6 +785,13 @@ return (
   </div>
   <span className="text-sm font-extrabold text-slate-700 group-hover:text-rose-600">ข้อมูลครูทั้งหมด</span>
 </button>
+<button onClick={() => handleAdminMenuClick("/admin/attendance-import")}
+                className="flex items-center gap-4 p-4 rounded-xl border border-rose-100 bg-white hover:border-rose-400 hover:shadow-md transition-all group text-left">
+                <div className="w-11 h-11 rounded-xl bg-rose-500 text-white flex items-center justify-center shadow-sm shrink-0 group-hover:scale-105 transition-transform">
+                  <UploadCloud className="w-6 h-6" />
+                </div>
+                <span className="text-sm font-extrabold text-slate-700 group-hover:text-rose-600">นำเข้าข้อมูล</span>
+              </button>
               <button onClick={() => handleAdminMenuClick("/admin/settings")}
                 className="flex items-center gap-4 p-4 rounded-xl border border-rose-100 bg-white hover:border-rose-400 hover:shadow-md transition-all group text-left">
                 <div className="w-11 h-11 rounded-xl bg-rose-600 text-white flex items-center justify-center shadow-sm shrink-0 group-hover:scale-105 transition-transform">

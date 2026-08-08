@@ -12,6 +12,7 @@
 // ══════════════════════════════════════════════════════════
 
 import { useState, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -146,6 +147,7 @@ async function parseFile(file: File): Promise<string[][]> {
 }
 
 export default function AttendanceImportPage() {
+  const router = useRouter();
   const supabase = createClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -254,6 +256,13 @@ export default function AttendanceImportPage() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
       <main className="w-full p-4 md:p-8 max-w-4xl mx-auto space-y-6">
+        <div className="flex items-center gap-2">
+          <button onClick={()=>router.push("/dashboard")}
+            className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 text-lg shrink-0">🏠</button>
+          <span className="text-slate-300">/</span>
+          <span className="text-sm text-slate-800 font-extrabold">นำเข้าข้อมูลลงเวลาครูรายวัน</span>
+        </div>
+
         <div>
           <h1 className="text-xl font-black text-slate-900">นำเข้าข้อมูลลงเวลาครูรายวัน</h1>
           <p className="text-sm text-slate-400 mt-1">วางข้อมูลที่ copy จาก Excel หรืออัปโหลดไฟล์ .csv / .xlsx</p>
