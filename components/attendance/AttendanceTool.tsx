@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 
-type Status = "present" | "absent" | "late" | "leave";
+type Status = "present" | "absent" | "late" | "leave" | "excused";
 
 type Student = {
   id: string; prefix?: string; first_name: string; last_name: string;
@@ -11,18 +11,28 @@ type Student = {
 
 type ReferenceInfo = { status: Status };
 
-const STATUS_CONFIG: Record<Status, { label: string; emoji: string; bg: string; text: string; ring: string }> = {
-  present: { label: "มา", emoji: "✅", bg: "bg-emerald-500", text: "text-white", ring: "ring-emerald-300" },
-  late: { label: "สาย", emoji: "⏰", bg: "bg-amber-500", text: "text-white", ring: "ring-amber-300" },
-  leave: { label: "ลา", emoji: "📄", bg: "bg-blue-500", text: "text-white", ring: "ring-blue-300" },
-  absent: { label: "ขาด", emoji: "❌", bg: "bg-red-500", text: "text-white", ring: "ring-red-300" },
+const STATUS_CONFIG: Record<Status, { label: string; emoji: string; dot: string; ring: string; chipBg: string; chipText: string }> = {
+  present: { label: "มา", emoji: "✅", dot: "bg-emerald-500", ring: "ring-emerald-300", chipBg: "bg-emerald-50", chipText: "text-emerald-700" },
+  late: { label: "สาย", emoji: "⏰", dot: "bg-amber-500", ring: "ring-amber-300", chipBg: "bg-amber-50", chipText: "text-amber-700" },
+  leave: { label: "ลา", emoji: "📄", dot: "bg-violet-500", ring: "ring-violet-300", chipBg: "bg-violet-50", chipText: "text-violet-700" },
+  excused: { label: "ไปกิจกรรม", emoji: "🏃", dot: "bg-sky-500", ring: "ring-sky-300", chipBg: "bg-sky-50", chipText: "text-sky-700" },
+  absent: { label: "ขาด", emoji: "❌", dot: "bg-red-500", ring: "ring-red-300", chipBg: "bg-red-50", chipText: "text-red-700" },
 };
+const STATUS_ORDER: Status[] = ["absent", "present", "late", "excused", "leave"]; // เรียงให้ใกล้เคียงภาพต้นแบบ (ขาด-มา-สาย-กิจกรรม-ลา)
+
+const AVATAR_GRADIENTS = [
+  "from-teal-400 to-emerald-400",
+  "from-sky-400 to-blue-400",
+  "from-violet-400 to-purple-400",
+  "from-amber-400 to-orange-400",
+  "from-pink-400 to-rose-400",
+];
 
 export default function AttendanceTool({
   timetableEntryId, date, students, currentUserId,
   referenceMap, referenceLabel = "โฮมรูม",
 }: {
-  timetableEntryId: string;   // ★ เปลี่ยนจาก sectionId — ต้องได้มาจากการเลือกคาบแล้วเท่านั้น
+  timetableEntryId: string;
   date: string;
   students: Student[];
   currentUserId?: string;
@@ -30,6 +40,10 @@ export default function AttendanceTool({
   referenceLabel?: string;
 }) {
   const [statusMap, setStatusMap] = useState<Record<string, Status>>({});
+  const [noteMap, setNoteMap] = useState<Record<string, string>>({});
+  const [showNoteCol, setShowNoteCol] = useState(true);
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -43,8 +57,13 @@ export default function AttendanceTool({
       const res = await fetch(`/api/subject-attendance?timetable_entry_id=${timetableEntryId}&attendance_date=${date}`);
       const json = await res.json();
       const map: Record<string, Status> = {};
-      (json.records ?? []).forEach((r: any) => { map[r.student_id] = r.status; });
+      const notes: Record<string, string> = {};
+      (json.records ?? []).forEach((r: any) => {
+        map[r.student_id] = r.status;
+        if (r.notes) notes[r.student_id] = r.notes;
+      });
       setStatusMap(map);
+      setNoteMap(notes);
     } catch {
       // โหลดไม่ได้ ปล่อยว่างให้ครูเช็กใหม่
     } finally {
@@ -55,8 +74,11 @@ export default function AttendanceTool({
   useEffect(() => { loadAttendance(); }, [loadAttendance]);
 
   function setStatus(studentId: string, status: Status) {
-    setStatusMap(prev => ({ ...prev, [studentId]: status }));
+    setStatusMap(prev => ({ ...prev, [studentId]: prev[studentId] === status ? (undefined as any) : status }));
     setSaved(false);
+  }
+  function setNote(studentId: string, value: string) {
+    setNoteMap(prev => ({ ...prev, [studentId]: value }));
   }
 
   function markAllPresent() {
@@ -88,7 +110,7 @@ export default function AttendanceTool({
     }
     setSaving(true);
     try {
-      const records = students.map(s => ({ student_id: s.id, status: statusMap[s.id] }));
+      const records = students.map(s => ({ student_id: s.id, status: statusMap[s.id], note: noteMap[s.id] || undefined }));
       const res = await fetch("/api/subject-attendance", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ timetable_entry_id: timetableEntryId, attendance_date: date, records, created_by: currentUserId }),
@@ -103,6 +125,7 @@ export default function AttendanceTool({
     }
   }
 
+  const markedCount = useMemo(() => students.filter(s => statusMap[s.id]).length, [students, statusMap]);
   const summary = students.reduce((acc, s) => {
     const st = statusMap[s.id];
     if (st) acc[st] = (acc[st] ?? 0) + 1;
@@ -122,11 +145,50 @@ export default function AttendanceTool({
   }
 
   return (
-    <div className="p-4">
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-        <div className="flex gap-2 text-xs font-bold flex-wrap">
-          {(Object.keys(STATUS_CONFIG) as Status[]).map(st => (
-            <span key={st} className={`px-2 py-1 rounded-lg ${STATUS_CONFIG[st].bg} ${STATUS_CONFIG[st].text}`}>
+    <div className="rounded-2xl overflow-hidden">
+      {/* หัวการ์ด */}
+      <div className="flex items-start justify-between gap-3 px-5 pt-5 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-sky-50 flex items-center justify-center text-lg shrink-0">✨</div>
+          <div>
+            <h2 className="font-black text-slate-800 text-lg leading-none">เช็คชื่อ</h2>
+            <p className="text-slate-400 text-xs italic mt-1">ตารางเช็คชื่อสำหรับคาบเรียนนี้</p>
+          </div>
+        </div>
+        <button
+          onClick={() => setShowNoteCol(v => !v)}
+          className="shrink-0 px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-600 font-black text-xs flex items-center gap-1.5 transition-colors"
+        >
+          📝 {showNoteCol ? "ซ่อนโน้ต" : "เพิ่มโน้ต"}
+        </button>
+      </div>
+
+      <div className="px-5 mt-4">
+        <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500 text-white text-xs font-black">Default</span>
+      </div>
+
+      {/* ช่วงเวลา (แสดงผลอย่างเดียว ยังไม่ส่งเข้า API) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 px-5 mt-4">
+        <div>
+          <p className="text-xs font-bold text-slate-500 mb-1 flex items-center gap-1.5">📅 เลือกเวลาเริ่ม</p>
+          <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
+            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-sky-400 focus:outline-none" />
+        </div>
+        <div>
+          <p className="text-xs font-bold text-slate-500 mb-1 flex items-center gap-1.5">🕐 เลือกเวลาจบ</p>
+          <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
+            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-sky-400 focus:outline-none" />
+        </div>
+      </div>
+
+      {/* ตัวนับ + สรุปยอด + ปุ่มลัด */}
+      <div className="flex items-center justify-between flex-wrap gap-2 px-5 mt-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1.5 text-xs font-black text-sky-600 bg-sky-50 px-3 py-1.5 rounded-full">
+            <span className="w-2 h-2 rounded-full bg-sky-500" /> {markedCount} / {students.length} marked
+          </span>
+          {STATUS_ORDER.map(st => (
+            <span key={st} className={`px-2.5 py-1 rounded-full text-[11px] font-black ${STATUS_CONFIG[st].chipBg} ${STATUS_CONFIG[st].chipText}`}>
               {STATUS_CONFIG[st].emoji} {STATUS_CONFIG[st].label} {summary[st] ?? 0}
             </span>
           ))}
@@ -145,55 +207,93 @@ export default function AttendanceTool({
         </div>
       </div>
 
-      <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
-        {students.map(s => (
-          <div key={s.id} className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2">
-            {s.avatar_url ? (
-              <img src={s.avatar_url} className="w-8 h-8 rounded-full object-cover shrink-0" />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-blue-400 text-white text-xs font-black flex items-center justify-center shrink-0">
-                {s.first_name[0]}
-              </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-black text-slate-700 truncate flex items-center gap-1">
-                {s.prefix}{s.first_name} {s.last_name}
-                {referenceMap?.[s.id] && (
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold shrink-0 ${
-                    referenceMap[s.id].status === "absent" ? "bg-red-100 text-red-600" :
-                    referenceMap[s.id].status === "present" ? "bg-emerald-100 text-emerald-600" :
-                    "bg-amber-100 text-amber-600"
-                  }`}>
-                    {referenceLabel}: {STATUS_CONFIG[referenceMap[s.id].status].label}
+      {/* ตาราง */}
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full min-w-[640px] border-collapse">
+          <thead>
+            <tr className="bg-slate-50">
+              <th className="text-left text-[11px] font-black text-slate-500 tracking-wide px-5 py-3 sticky left-0 bg-slate-50">STUDENT</th>
+              {STATUS_ORDER.map(st => (
+                <th key={st} className="px-2 py-3">
+                  <span className={`inline-flex items-center gap-1.5 text-[11px] font-black ${STATUS_CONFIG[st].chipText} ${STATUS_CONFIG[st].chipBg} px-2.5 py-1 rounded-full`}>
+                    <span className={`w-2 h-2 rounded-full ${STATUS_CONFIG[st].dot}`} /> {STATUS_CONFIG[st].label}
                   </span>
-                )}
-              </p>
-              <p className="text-[10px] text-slate-400">เลขที่ {s.seat_number}</p>
-            </div>
-            <div className="flex gap-1 shrink-0">
-              {(Object.keys(STATUS_CONFIG) as Status[]).map(st => {
-                const active = statusMap[s.id] === st;
-                const cfg = STATUS_CONFIG[st];
-                return (
-                  <button key={st} onClick={() => setStatus(s.id, st)} title={cfg.label}
-                    className={`w-8 h-8 rounded-lg text-sm flex items-center justify-center transition-all ${
-                      active ? `${cfg.bg} ${cfg.text} scale-110 ring-2 ${cfg.ring}` : "bg-white border-2 border-slate-200 grayscale opacity-60 hover:opacity-100"
-                    }`}>
-                    {cfg.emoji}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+                </th>
+              ))}
+              {showNoteCol && <th className="text-left text-[11px] font-black text-slate-500 tracking-wide px-5 py-3">NOTE</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {students.map((s, i) => {
+              const gradient = AVATAR_GRADIENTS[i % AVATAR_GRADIENTS.length];
+              const ref = referenceMap?.[s.id];
+              return (
+                <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                  <td className="px-5 py-3 sticky left-0 bg-white">
+                    <div className="flex items-center gap-2.5 min-w-[190px] flex-wrap">
+                      {s.avatar_url ? (
+                        <img src={s.avatar_url} className="w-9 h-9 rounded-full object-cover shrink-0" />
+                      ) : (
+                        <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${gradient} text-white text-sm font-black flex items-center justify-center shrink-0`}>
+                          {s.first_name[0]}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-sm font-black text-slate-700 truncate">{s.prefix}{s.first_name} {s.last_name}</p>
+                        <p className="text-[11px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
+                      </div>
+                      {ref && (
+                        <span className={`shrink-0 text-[9px] px-1.5 py-0.5 rounded-md font-black ${STATUS_CONFIG[ref.status].chipBg} ${STATUS_CONFIG[ref.status].chipText}`}>
+                          {referenceLabel}: {STATUS_CONFIG[ref.status].label}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+
+                  {STATUS_ORDER.map(st => {
+                    const active = statusMap[s.id] === st;
+                    const cfg = STATUS_CONFIG[st];
+                    return (
+                      <td key={st} className="text-center px-2 py-3">
+                        <button
+                          onClick={() => setStatus(s.id, st)}
+                          title={cfg.label}
+                          className={`w-6 h-6 rounded-full border-2 mx-auto flex items-center justify-center transition-all ${
+                            active ? `${cfg.dot} border-transparent ring-4 ${cfg.ring}` : "border-slate-200 bg-white hover:border-slate-300"
+                          }`}
+                        >
+                          {active && <span className="w-2 h-2 rounded-full bg-white" />}
+                        </button>
+                      </td>
+                    );
+                  })}
+
+                  {showNoteCol && (
+                    <td className="px-5 py-3">
+                      <input
+                        value={noteMap[s.id] ?? ""}
+                        onChange={e => setNote(s.id, e.target.value)}
+                        placeholder="เพิ่มโน้ต..."
+                        className="w-full min-w-[140px] border-2 border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold focus:border-sky-400 focus:outline-none"
+                      />
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
-      {error && <p className="text-red-600 text-xs font-bold bg-red-50 border-2 border-red-200 rounded-xl px-3 py-2 mt-3">❌ {error}</p>}
+      {error && <p className="text-red-600 text-xs font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-2 mx-5 mt-3">❌ {error}</p>}
 
-      <button onClick={handleSave} disabled={saving}
-        className="mt-4 w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm disabled:opacity-50">
-        {saving ? "⏳ กำลังบันทึก..." : saved ? "✅ บันทึกแล้ว — กดซ้ำเพื่ออัปเดต" : "💾 บันทึกการเช็กชื่อ"}
-      </button>
+      {/* ปุ่มบันทึก */}
+      <div className="px-5 py-4 mt-3 border-t border-slate-100">
+        <button onClick={handleSave} disabled={saving}
+          className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+          {saving ? "⏳ กำลังบันทึก..." : saved ? "✅ บันทึกแล้ว — กดซ้ำเพื่ออัปเดต" : "✏️ สร้าง"}
+        </button>
+      </div>
     </div>
   );
 }
