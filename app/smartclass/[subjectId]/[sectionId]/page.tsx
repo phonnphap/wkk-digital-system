@@ -1006,38 +1006,40 @@ export default function SmartClassRosterPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-end mt-4">
-          <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-2 flex items-center gap-2">
-            <span className="text-white/80 text-xs font-bold">รหัสเข้าวิชา</span>
-            <span className="font-black text-white font-mono tracking-widest">{section.join_code}</span>
+        {/* แถวรวม: เมนูมุมซ้าย (มอบหมายงาน/ข้อมูลเช็กชื่อ/คะแนนรวม/ตั้งค่ารายวิชา) + ฝั่งขวา (รหัสเข้าวิชา/คัดลอกลิงก์/QR) */}
+        <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-between mt-4">
+          <div className="flex items-center gap-2 flex-wrap justify-center">
+            {BANNER_MENU.map(m => (
+              <button
+                key={m.key}
+                onClick={() => handleBannerMenuClick(m.key)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs backdrop-blur-sm transition-colors ${
+                  bannerMenu === m.key
+                    ? "bg-white text-fuchsia-700 shadow-sm"
+                    : "bg-white/20 hover:bg-white/30 text-white"
+                }`}
+              >
+                <span>{m.icon}</span>{m.label}
+              </button>
+            ))}
           </div>
-          <button onClick={copyInvite} className="px-3 py-2 rounded-xl bg-white text-fuchsia-700 font-black text-xs hover:bg-pink-50 shadow-sm transition-colors">
-            {copied ? "✅ คัดลอกแล้ว" : "📋 คัดลอกลิงก์เชิญ"}
-          </button>
-          <button onClick={() => setShowQr(true)} className="px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-xs transition-colors">
-            📷 QR
-          </button>
-        </div>
 
-        {/* เมนูมุมซ้ายล่างของแบนเนอร์: มอบหมายงาน / ข้อมูลเช็กชื่อ / คะแนนรวม / ตั้งค่ารายวิชา */}
-        <div className="flex items-center gap-2 flex-wrap mt-5">
-          {BANNER_MENU.map(m => (
-            <button
-              key={m.key}
-              onClick={() => handleBannerMenuClick(m.key)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs backdrop-blur-sm transition-colors ${
-                bannerMenu === m.key
-                  ? "bg-white text-fuchsia-700 shadow-sm"
-                  : "bg-white/20 hover:bg-white/30 text-white"
-              }`}
-            >
-              <span>{m.icon}</span>{m.label}
+          <div className="flex items-center gap-2 flex-wrap justify-center">
+            <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-2 flex items-center gap-2">
+              <span className="text-white/80 text-xs font-bold">รหัสเข้าวิชา</span>
+              <span className="font-black text-white font-mono tracking-widest">{section.join_code}</span>
+            </div>
+            <button onClick={copyInvite} className="px-3 py-2 rounded-xl bg-white text-fuchsia-700 font-black text-xs hover:bg-pink-50 shadow-sm transition-colors">
+              {copied ? "✅ คัดลอกแล้ว" : "📋 คัดลอกลิงก์เชิญ"}
             </button>
-          ))}
+            <button onClick={() => setShowQr(true)} className="px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-xs transition-colors">
+              📷 QR
+            </button>
+          </div>
         </div>
       </div>
 
-      <main className={`p-4 lg:p-6 mx-auto w-full ${bannerMenu === "assignments" ? "max-w-[1600px]" : tab === "roster" || tab === "attendance" ? "max-w-[1600px]" : "max-w-4xl"}`}>
+        <main className={`p-4 lg:p-6 mx-auto w-full ${bannerMenu === "assignments" ? "max-w-[1600px]" : tab === "roster" || tab === "attendance" ? "max-w-[1600px]" : "max-w-4xl"}`}>
         {bannerMenu === "assignments" && section && (
           <AssignmentsTool sectionId={section.id} subjectId={subjectId} students={students} currentUserId={currentUserId} />
         )}
@@ -1047,7 +1049,6 @@ export default function SmartClassRosterPage() {
         {bannerMenu === "settings" && (
           <SubjectSettingsTab subject={subject} classroom={classroom} />
         )}
-
         {!bannerMenu && tab === "roster" && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 w-full">
             <div className="flex items-center justify-between flex-wrap gap-2 mb-5">

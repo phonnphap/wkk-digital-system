@@ -179,7 +179,6 @@ export default function AdminAttendanceOverviewPage() {
   const [summaryRows, setSummaryRows] = useState<SummaryRow[]>([]);
 
   const [q, setQ] = useState("");
-  const [subjectFilter, setSubjectFilter] = useState("all");
   const [gradeFilter, setGradeFilter] = useState("all");
 
   // เมื่อเปลี่ยนปี/เทอม ให้รีเซ็ตช่วงวันที่เริ่มต้นของเทอมนั้นให้อัตโนมัติ (ยังแก้เองได้ด้านล่าง)
@@ -350,10 +349,6 @@ export default function AdminAttendanceOverviewPage() {
     setLoading(false);
   }
 
-  const subjectGroups = useMemo(
-    () => Array.from(new Set(teachers.map((t) => t.subject_group).filter(Boolean))) as string[],
-    [teachers]
-  );
   const gradeLevels = useMemo(
     () =>
       Array.from(
@@ -369,7 +364,6 @@ export default function AdminAttendanceOverviewPage() {
   function matchesFilters(t: TeacherBase) {
     const name = `${t.first_name} ${t.last_name}`.toLowerCase();
     if (q && !name.includes(q.toLowerCase())) return false;
-    if (subjectFilter !== "all" && t.subject_group !== subjectFilter) return false;
     if (gradeFilter !== "all" && t.grade_level_id !== gradeFilter) return false;
     return true;
   }
@@ -386,6 +380,12 @@ export default function AdminAttendanceOverviewPage() {
 
   const notCheckedInCount = filteredDaily.filter((r) => !r.check_in_time && !r.on_leave).length;
   const onLeaveCount = filteredDaily.filter((r) => r.on_leave).length;
+
+  // ── สรุปยอดของวันนี้: มา / สาย / กลับก่อน / กลับตรงเวลา ──
+  const dailyPresentCount = filteredDaily.filter((r) => !!r.check_in_time).length;
+  const dailyLateCount = filteredDaily.filter((r) => r.is_late).length;
+  const dailyEarlyLeaveCount = filteredDaily.filter((r) => r.is_early_leave).length;
+  const dailyOnTimeLeaveCount = filteredDaily.filter((r) => r.check_out_time && !r.is_early_leave).length;
 
   const totalPresent = filteredSummary.reduce((sum, r) => sum + r.present_count, 0);
   const totalLate = filteredSummary.reduce((sum, r) => sum + r.late_count, 0);
@@ -554,6 +554,10 @@ export default function AdminAttendanceOverviewPage() {
               <StatCard label="ครูทั้งหมด" value={filteredDaily.length} color="text-slate-700" bg="bg-slate-100" />
               <StatCard label="ยังไม่ลงเวลาวันนี้" value={notCheckedInCount} color="text-rose-600" bg="bg-rose-100" />
               <StatCard label="ลาวันนี้" value={onLeaveCount} color="text-amber-600" bg="bg-amber-100" />
+              <StatCard label="มาทำงาน" value={dailyPresentCount} color="text-emerald-600" bg="bg-emerald-100" />
+              <StatCard label="มาสาย" value={dailyLateCount} color="text-orange-600" bg="bg-orange-100" />
+              <StatCard label="กลับก่อนเวลา" value={dailyEarlyLeaveCount} color="text-rose-600" bg="bg-rose-100" />
+              <StatCard label="กลับตรงเวลา" value={dailyOnTimeLeaveCount} color="text-blue-600" bg="bg-blue-100" />
             </>
           ) : (
             <>
@@ -576,18 +580,6 @@ export default function AdminAttendanceOverviewPage() {
               className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm font-bold"
             />
           </div>
-          <select
-            value={subjectFilter}
-            onChange={(e) => setSubjectFilter(e.target.value)}
-            className="px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-600"
-          >
-            <option value="all">ทุกกลุ่มสาระฯ</option>
-            {subjectGroups.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
           <select
             value={gradeFilter}
             onChange={(e) => setGradeFilter(e.target.value)}
@@ -659,26 +651,29 @@ export default function AdminAttendanceOverviewPage() {
                               <LogIn className="w-3 h-3" />
                               {t.is_late ? "สาย" : "มา"} {formatTime(t.check_in_time)}
                             </span>
-                            {t.check_out_time && (
+                            {t.check_out_time ? (
                               <span
                                 className={`flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full border ${
                                   t.is_early_leave
                                     ? "bg-rose-100 text-rose-700 border-rose-200"
-                                    : "bg-slate-100 text-slate-600 border-slate-200"
+                                    : "bg-blue-100 text-blue-700 border-blue-200"
                                 }`}
                               >
                                 <LogOut className="w-3 h-3" />
-                                {t.is_early_leave ? "กลับก่อน" : "กลับ"} {formatTime(t.check_out_time)}
+                                {t.is_early_leave ? "กลับก่อน" : "กลับตรงเวลา"} {formatTime(t.check_out_time)}
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full border bg-slate-100 text-slate-500 border-slate-200">
+                                <LogOut className="w-3 h-3" />
+                                ยังไม่กลับ
                               </span>
                             )}
                           </>
                         )}
                       </div>
-                      {t.note && (
-                        <p className="text-[10px] text-slate-400 max-w-[200px] truncate" title={t.note}>
-                          หมายเหตุ: {t.note}
-                        </p>
-                      )}
+                      <p className="text-[10px] text-slate-400 max-w-[200px] truncate">
+                        หมายเหตุ: {t.note || "—"}
+                      </p>
                     </div>
                   </button>
                 ))}
