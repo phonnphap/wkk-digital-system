@@ -341,11 +341,54 @@ function AssignmentForm({
   const [weightPercent, setWeightPercent] = useState<number | "">(existing?.weight_percent ?? "");
   const [gradingNote, setGradingNote] = useState(existing?.grading_criteria_note ?? "");
   const [linkUrl, setLinkUrl] = useState("");
-  const [links, setLinks] = useState<string[]>([]);
+  const [links, setLinks] = useState<{ id?: string; url: string }[]>([]);
   const [files, setFiles] = useState<File[]>([]);
 const [previews, setPreviews] = useState<{ file: File; url: string; isImage: boolean }[]>([]);
   const [saving, setSaving] = useState<"draft" | "publish" | null>(null);
   const [teacherEmail, setTeacherEmail] = useState<string | null>(null);
+  const [existingAttachments, setExistingAttachments] = useState<AssignmentAttachment[]>([]);
+
+useEffect(() => {
+  if (!existing) return;
+  supabase
+    .from("assignment_attachments")
+    .select("*")
+    .eq("assignment_id", existing.id)
+    .then(({ data }) => {
+      const rows = (data ?? []) as AssignmentAttachment[];
+      setExistingAttachments(rows.filter(a => a.kind === "file"));
+      setLinks(rows.filter(a => a.kind === "link").map(a => ({ id: a.id, url: a.url })));
+    });
+}, [existing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+function addLink() {
+  if (!linkUrl.trim()) return;
+  setLinks(prev => [...prev, { url: linkUrl.trim() }]);
+  setLinkUrl("");
+}
+
+async function removeLink(index: number) {
+  const item = links[index];
+  if (item.id) {
+    if (!confirm("ลบลิงก์นี้ออกจากชิ้นงาน?")) return;
+    try { await supabase.from("assignment_attachments").delete().eq("id", item.id); } catch {}
+  }
+  setLinks(prev => prev.filter((_, i) => i !== index));
+}
+
+function isImageFile(name?: string | null) {
+  return !!name && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
+}
+
+async function removeExistingAttachment(att: AssignmentAttachment) {
+  if (!confirm(`ลบไฟล์ "${att.file_name || "ไฟล์นี้"}" ออกจากชิ้นงาน?`)) return;
+  try {
+    await supabase.from("assignment_attachments").delete().eq("id", att.id);
+    setExistingAttachments(prev => prev.filter(a => a.id !== att.id));
+  } catch (e: any) {
+    alert("ลบไฟล์ไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+  }
+}
 
   useEffect(() => {
   const next = files.map(f => ({
@@ -370,12 +413,6 @@ function removeFile(index: number) {
     setTeacherEmail(data.user?.email ?? null);
   });
 }, []);
-
-  function addLink() {
-    if (!linkUrl.trim()) return;
-    setLinks(prev => [...prev, linkUrl.trim()]);
-    setLinkUrl("");
-  }
 
   async function save(status: AssignmentStatus) {
     if (!title.trim()) {
@@ -442,11 +479,12 @@ function removeFile(index: number) {
           }
         }
       }
-      // แนบลิงก์
-      if (links.length > 0) {
+      // แนบลิงก์ — insert เฉพาะลิงก์ใหม่ที่ยังไม่มีในฐานข้อมูล
+      const newLinks = links.filter(l => !l.id);
+      if (newLinks.length > 0) {
         try {
           await supabase.from("assignment_attachments").insert(
-            links.map(url => ({ assignment_id: assignmentId, kind: "link" as const, url }))
+            newLinks.map(l => ({ assignment_id: assignmentId, kind: "link" as const, url: l.url }))
           );
         } catch {}
       }
@@ -520,29 +558,48 @@ function removeFile(index: number) {
               className="hidden"
             />
 
-            {previews.length > 0 && (
-              <div className="mt-2 grid grid-cols-3 gap-2">
-                {previews.map((p, i) => (
-                  <div key={i} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white aspect-square">
-                    {p.isImage ? (
-                      <img src={p.url} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
-                        <span className="text-xl">📄</span>
-                        <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{p.file.name}</span>
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => removeFile(i)}
-                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-[10px] flex items-center justify-center hover:bg-black/70"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+            {(existingAttachments.length > 0 || previews.length > 0) && (
+  <div className="mt-2 grid grid-cols-3 gap-2">
+    {existingAttachments.map(att => (
+      <div key={att.id} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white aspect-square">
+        {isImageFile(att.file_name) ? (
+          <img src={att.url} className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
+            <span className="text-xl">📄</span>
+            <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{att.file_name}</span>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => removeExistingAttachment(att)}
+          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-[10px] flex items-center justify-center hover:bg-black/70"
+        >
+          ✕
+        </button>
+      </div>
+    ))}
+    {previews.map((p, i) => (
+      <div key={i} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white aspect-square">
+        {p.isImage ? (
+          <img src={p.url} className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
+            <span className="text-xl">📄</span>
+            <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{p.file.name}</span>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => removeFile(i)}
+          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-[10px] flex items-center justify-center hover:bg-black/70"
+        >
+          ✕
+        </button>
+      </div>
+    ))}
+  </div>
+)}
           </div>
 
           {/* แนบลิงก์ */}
@@ -566,19 +623,11 @@ function removeFile(index: number) {
             {links.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {links.map((l, i) => (
-                  <span
-                    key={i}
-                    className="inline-flex items-center gap-1.5 text-[11px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full pl-3 pr-1.5 py-1 max-w-full"
-                  >
-                    <span className="truncate max-w-[160px]">🔗 {l}</span>
-                    <button
-                      onClick={() => setLinks(prev => prev.filter((_, idx) => idx !== i))}
-                      className="w-4 h-4 rounded-full bg-indigo-100 hover:bg-rose-100 hover:text-rose-500 flex items-center justify-center shrink-0"
-                    >
-                      ✕
-                    </button>
-                  </span>
-                ))}
+  <span key={i} className="inline-flex items-center gap-1.5 text-[11px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full pl-3 pr-1.5 py-1 max-w-full">
+    <span className="truncate max-w-[160px]">🔗 {l.url}</span>
+    <button onClick={() => removeLink(i)} className="w-4 h-4 rounded-full bg-indigo-100 hover:bg-rose-100 hover:text-rose-500 flex items-center justify-center shrink-0">✕</button>
+  </span>
+))}
               </div>
             )}
           </div>
@@ -719,6 +768,24 @@ function AssignmentDetail({
   // ถ้าเพิ่งกดเผยแพร่มาใหม่ ๆ ให้เปิดแท็บ "การมอบหมาย" ไว้ก่อนเลย
   const [tab, setTab] = useState<DetailTab>(studentLinks.length === 0 ? "assign" : "submissions");
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+  if (!confirm(`ต้องการลบชิ้นงาน "${assignment.title}" ใช่หรือไม่?\nการลบนี้ไม่สามารถย้อนกลับได้ และจะลบข้อมูลการส่งงาน/คะแนนของนักเรียนทั้งหมดที่ผูกกับชิ้นงานนี้ด้วย`)) return;
+  setDeleting(true);
+  try {
+    // ลบข้อมูลที่เกี่ยวข้องก่อน เผื่อ DB ยังไม่ได้ตั้ง ON DELETE CASCADE
+    await supabase.from("assignment_submissions").delete().eq("assignment_id", assignment.id);
+    await supabase.from("assignment_students").delete().eq("assignment_id", assignment.id);
+    await supabase.from("assignment_attachments").delete().eq("assignment_id", assignment.id);
+    await supabase.from("assignment_cross_sections").delete().eq("source_assignment_id", assignment.id);
+    await supabase.from("assignments").delete().eq("id", assignment.id);
+    onBack();
+  } catch (e: any) {
+    alert("ลบชิ้นงานไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+  }
+  setDeleting(false);
+}
 
   const DETAIL_TABS: { key: DetailTab; label: string }[] = [
     { key: "info", label: "ชิ้นงาน" },
@@ -752,6 +819,13 @@ function AssignmentDetail({
         </div>
         <button onClick={() => setEditing(true)} className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs">✏️ แก้ไขชิ้นงาน</button>
       </div>
+
+      <div className="flex items-center gap-2">
+  <button onClick={() => setEditing(true)} className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs">✏️ แก้ไขชิ้นงาน</button>
+  <button onClick={handleDelete} disabled={deleting} className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-black text-xs disabled:opacity-50">
+    {deleting ? "กำลังลบ..." : "🗑️ ลบชิ้นงาน"}
+  </button>
+</div>
 
       <div className="flex gap-1 bg-white rounded-xl border border-slate-100 p-1 overflow-x-auto">
         {DETAIL_TABS.map(t => (
