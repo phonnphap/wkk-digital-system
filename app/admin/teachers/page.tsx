@@ -27,8 +27,10 @@ type Period = "daily" | "monthly" | "term" | "fiscal";
 
 type TeacherBase = {
   id: string;
+  prefix: string | null;
   first_name: string;
   last_name: string;
+  position: string | null;
   subject_group: string | null;
   grade_level_id: string | null;
   grade_level_name: string | null;
@@ -49,6 +51,30 @@ type SummaryRow = TeacherBase & {
   early_leave_count: number;
   leave_count: number;
 };
+
+// ── เวลาตัดสาย/กลับก่อน: ตาราง teacher_attendance_records ไม่มีคอลัมน์ is_late/is_early_leave
+// ให้ระบบคำนวณเองจากเวลาเข้า-ออกเทียบกับเวลามาตรฐานนี้ ปรับให้ตรงกับกฎของโรงเรียนได้ ──
+const LATE_CUTOFF_TIME = "07:45:00"; // มาหลังเวลานี้ถือว่า "สาย"
+const EARLY_LEAVE_CUTOFF_TIME = "16:00:00"; // กลับก่อนเวลานี้ถือว่า "กลับก่อน"
+
+function isLate(checkInTime: string | null) {
+  return !!checkInTime && checkInTime > LATE_CUTOFF_TIME;
+}
+function isEarlyLeave(checkOutTime: string | null) {
+  return !!checkOutTime && checkOutTime < EARLY_LEAVE_CUTOFF_TIME;
+}
+
+// ── ลำดับสายชั้นสำหรับเรียงรายชื่อ: ผู้บริหาร -> อนุบาล -> ป.1-6 -> ม.1-6 -> อื่น ๆ ──
+function gradeLevelRank(name: string | null): number {
+  if (!name) return 900;
+  const n = name.trim();
+  const num = parseInt(n.replace(/[^\d]/g, ""), 10) || 0;
+  if (n.includes("ผู้บริหาร")) return 0;
+  if (n.includes("อนุบาล")) return 100 + num;
+  if (n.startsWith("ป.") || n.includes("ประถม")) return 200 + num;
+  if (n.startsWith("ม.") || n.includes("มัธยม")) return 300 + num;
+  return 900;
+}
 
 /* ──────────────────────────────────────────────────────────────
    ตัวช่วยเรื่องวันที่ / เวลา
@@ -197,8 +223,7 @@ export default function AdminAttendanceOverviewPage() {
   async function loadTeachers() {
     const { data: teacherRows } = await supabase
       .from("users")
-      .select("id, first_name, last_name, subject_group, grade_level, avatar_url")
-      .neq("role", "admin")
+      .select("id, prefix, first_name, last_name, position, subject_group, grade_level, avatar_url, role")
       .order("first_name");
 
     // ── ตารางสายชั้น: ปรับชื่อตาราง/คอลัมน์ให้ตรงกับระบบจริง (คาดว่าเป็น grade_levels: id, name) ──
@@ -210,15 +235,20 @@ export default function AdminAttendanceOverviewPage() {
       // ตาราง grade_levels ยังไม่มี — จะแสดง id เดิมไปก่อนจนกว่าจะเชื่อมตารางจริง
     }
 
-    const mapped: TeacherBase[] = (teacherRows || []).map((t: any) => ({
-      id: t.id,
-      first_name: t.first_name,
-      last_name: t.last_name,
-      subject_group: t.subject_group,
-      grade_level_id: t.grade_level,
-      grade_level_name: t.grade_level ? gradeLevelMap.get(t.grade_level) || t.grade_level : null,
-      avatar_url: t.avatar_url,
-    }));
+    const mapped: TeacherBase[] = (teacherRows || [])
+      // ตัดทุก role ที่มีคำว่า "admin" อยู่ในชื่อออก ไม่ใช่แค่ role ที่ตรงกับ "admin" เป๊ะ ๆ
+      .filter((t: any) => !String(t.role || "").toLowerCase().includes("admin"))
+      .map((t: any) => ({
+        id: t.id,
+        prefix: t.prefix,
+        first_name: t.first_name,
+        last_name: t.last_name,
+        position: t.position,
+        subject_group: t.subject_group,
+        grade_level_id: t.grade_level,
+        grade_level_name: t.grade_level ? gradeLevelMap.get(t.grade_level) || t.grade_level : null,
+        avatar_url: t.avatar_url,
+      }));
 
     setTeachers(mapped);
   }
@@ -235,12 +265,12 @@ export default function AdminAttendanceOverviewPage() {
       .gte("end_date", date);
     const onLeaveIds = new Set((leaveToday || []).map((r: any) => r.user_id));
 
-    // ── ตารางลงเวลา: ปรับชื่อตาราง/คอลัมน์ (check_in_time, check_out_time, is_late, is_early_leave) ให้ตรงกับระบบจริง ──
+    // ── ตารางลงเวลา: ปรับชื่อคอลัมน์ (check_in_time, check_out_time, attendance_date) ให้ตรงกับระบบจริงหากจำเป็น ──
     let attendanceMap = new Map<string, any>();
     try {
       const { data: attendanceToday } = await supabase
         .from("teacher_attendance_records")
-        .select("user_id, check_in_time, check_out_time, is_late, is_early_leave")
+        .select("user_id, check_in_time, check_out_time")
         .eq("attendance_date", date);
       attendanceMap = new Map((attendanceToday || []).map((r: any) => [r.user_id, r]));
     } catch {
@@ -249,13 +279,15 @@ export default function AdminAttendanceOverviewPage() {
 
     const rows: DailyRow[] = teachers.map((t) => {
       const att = attendanceMap.get(t.id);
+      const checkIn = att?.check_in_time || null;
+      const checkOut = att?.check_out_time || null;
       return {
         ...t,
         on_leave: onLeaveIds.has(t.id),
-        check_in_time: att?.check_in_time || null,
-        check_out_time: att?.check_out_time || null,
-        is_late: !!att?.is_late,
-        is_early_leave: !!att?.is_early_leave,
+        check_in_time: checkIn,
+        check_out_time: checkOut,
+        is_late: isLate(checkIn),
+        is_early_leave: isEarlyLeave(checkOut),
       };
     });
 
@@ -278,7 +310,7 @@ export default function AdminAttendanceOverviewPage() {
     try {
       const { data } = await supabase
         .from("teacher_attendance_records")
-        .select("user_id, is_late, is_early_leave")
+        .select("user_id, check_in_time, check_out_time")
         .gte("attendance_date", start)
         .lte("attendance_date", end);
       attendanceInRange = data || [];
@@ -292,8 +324,8 @@ export default function AdminAttendanceOverviewPage() {
       return {
         ...t,
         present_count: attRows.length,
-        late_count: attRows.filter((a) => a.is_late).length,
-        early_leave_count: attRows.filter((a) => a.is_early_leave).length,
+        late_count: attRows.filter((a) => isLate(a.check_in_time)).length,
+        early_leave_count: attRows.filter((a) => isEarlyLeave(a.check_out_time)).length,
         leave_count: leaveCount,
       };
     });
@@ -314,7 +346,7 @@ export default function AdminAttendanceOverviewPage() {
             .filter((t) => t.grade_level_id)
             .map((t) => [t.grade_level_id as string, t.grade_level_name || (t.grade_level_id as string)])
         ).entries()
-      ),
+      ).sort((a, b) => gradeLevelRank(a[1]) - gradeLevelRank(b[1])),
     [teachers]
   );
 
@@ -326,8 +358,15 @@ export default function AdminAttendanceOverviewPage() {
     return true;
   }
 
-  const filteredDaily = dailyRows.filter(matchesFilters);
-  const filteredSummary = summaryRows.filter(matchesFilters);
+  // เรียงลำดับ: สายชั้น (ผู้บริหาร > อนุบาล > ป.1-6 > ม.1-6) ก่อน แล้วค่อยเรียงชื่อ
+  function byGradeThenName(a: TeacherBase, b: TeacherBase) {
+    const rankDiff = gradeLevelRank(a.grade_level_name) - gradeLevelRank(b.grade_level_name);
+    if (rankDiff !== 0) return rankDiff;
+    return `${a.first_name}${a.last_name}`.localeCompare(`${b.first_name}${b.last_name}`, "th");
+  }
+
+  const filteredDaily = dailyRows.filter(matchesFilters).sort(byGradeThenName);
+  const filteredSummary = summaryRows.filter(matchesFilters).sort(byGradeThenName);
 
   const notCheckedInCount = filteredDaily.filter((r) => !r.check_in_time && !r.on_leave).length;
   const onLeaveCount = filteredDaily.filter((r) => r.on_leave).length;
@@ -572,11 +611,10 @@ export default function AdminAttendanceOverviewPage() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm font-bold text-slate-800 truncate">
-                          {t.first_name} {t.last_name}
+                          {t.prefix ? `${t.prefix}` : ""}{t.first_name} {t.last_name}
                         </p>
                         <p className="text-xs text-slate-400 truncate">
-                          {t.subject_group || "—"}
-                          {t.grade_level_name ? ` · ${t.grade_level_name}` : ""}
+                          {[t.position, t.grade_level_name].filter(Boolean).join(" - ") || "—"}
                         </p>
                       </div>
                     </div>
@@ -641,11 +679,10 @@ export default function AdminAttendanceOverviewPage() {
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-slate-800 truncate">
-                        {t.first_name} {t.last_name}
+                        {t.prefix ? `${t.prefix}` : ""}{t.first_name} {t.last_name}
                       </p>
                       <p className="text-xs text-slate-400 truncate">
-                        {t.subject_group || "—"}
-                        {t.grade_level_name ? ` · ${t.grade_level_name}` : ""}
+                        {[t.position, t.grade_level_name].filter(Boolean).join(" - ") || "—"}
                       </p>
                     </div>
                   </div>
