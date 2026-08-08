@@ -342,9 +342,28 @@ function AssignmentForm({
   const [gradingNote, setGradingNote] = useState(existing?.grading_criteria_note ?? "");
   const [linkUrl, setLinkUrl] = useState("");
   const [links, setLinks] = useState<string[]>([]);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+const [previews, setPreviews] = useState<{ file: File; url: string; isImage: boolean }[]>([]);
   const [saving, setSaving] = useState<"draft" | "publish" | null>(null);
   const [teacherEmail, setTeacherEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+  const next = files.map(f => ({
+    file: f,
+    url: URL.createObjectURL(f),
+    isImage: f.type.startsWith("image/"),
+  }));
+  setPreviews(next);
+  return () => next.forEach(p => URL.revokeObjectURL(p.url));
+}, [files]);
+
+function addFiles(list: FileList | null) {
+  if (!list) return;
+  setFiles(prev => [...prev, ...Array.from(list)]);
+}
+function removeFile(index: number) {
+  setFiles(prev => prev.filter((_, i) => i !== index));
+}
 
   useEffect(() => {
   supabase.auth.getUser().then(({ data }) => {
@@ -392,35 +411,34 @@ function AssignmentForm({
         assignmentId = data.id;
       }
 
-      // แนบไฟล์
-      // แนบไฟล์ — เดิม: อัปโหลดขึ้น Supabase storage
-      // ใหม่: อัปโหลดขึ้น OneDrive ของครูที่สร้างชิ้นงาน (currentUserId) แทน
       // แนบไฟล์ → อัปโหลดขึ้น OneDrive ของ "ครูที่สร้างชิ้นงาน" ผ่าน /api/upload-onedrive
-      if (file) {
+      if (files.length > 0) {
         if (!teacherEmail) {
-          alert("ไม่พบอีเมลของครูผู้สอน จึงไม่สามารถแนบไฟล์ขึ้น OneDrive ได้ กรุณาลองใหม่อีกครั้ง");
+          alert("ไม่พบอีเมลของครูผู้สอน จึงไม่สามารถแนบไฟล์ขึ้น OneDrive ได้");
         } else {
-          try {
-            const fd = new FormData();
-            fd.append("file", file);
-            fd.append("account", teacherEmail); // ไฟล์จะไปอยู่ใน OneDrive ของอีเมลนี้
-            fd.append("path", `Assignments/${assignmentId}/${Date.now()}-${file.name}`);
+          for (const f of files) {
+            try {
+              const fd = new FormData();
+              fd.append("file", f);
+              fd.append("account", teacherEmail);
+              fd.append("path", `Assignments/${assignmentId}/${Date.now()}-${f.name}`);
 
-            const res = await fetch("/api/upload-onedrive", { method: "POST", body: fd });
-            const result = await res.json();
+              const res = await fetch("/api/upload-onedrive", { method: "POST", body: fd });
+              const result = await res.json();
 
-            if (result.ok && result.url) {
-              await supabase.from("assignment_attachments").insert({
-                assignment_id: assignmentId,
-                kind: "file",
-                url: result.url, // ลิงก์ proxy จาก /api/onedrive-file — เปิดดูได้เสมอ ไม่หมดอายุ
-                file_name: result.fileName || file.name,
-              });
-            } else {
-              alert("แนบไฟล์ไป OneDrive ไม่สำเร็จ: " + JSON.stringify(result.error ?? "unknown error"));
+              if (result.ok && result.url) {
+                await supabase.from("assignment_attachments").insert({
+                  assignment_id: assignmentId,
+                  kind: "file",
+                  url: result.url,
+                  file_name: result.fileName || f.name,
+                });
+              } else {
+                alert(`แนบไฟล์ "${f.name}" ไม่สำเร็จ: ` + JSON.stringify(result.error ?? "unknown error"));
+              }
+            } catch (e: any) {
+              alert(`แนบไฟล์ "${f.name}" ไม่สำเร็จ: ` + (e?.message ?? "unknown error"));
             }
-          } catch (e: any) {
-            alert("แนบไฟล์ไป OneDrive ไม่สำเร็จ: " + (e?.message ?? "unknown error"));
           }
         }
       }
@@ -446,8 +464,8 @@ function AssignmentForm({
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 max-w-3xl mx-auto space-y-5">
-      <div className="flex items-center justify-between">
+    <div className="fixed inset-0 z-50 bg-white overflow-y-auto">
+  <div className="max-w-4xl mx-auto p-5 sm:p-8 space-y-5 pb-24">
         <h2 className="font-black text-slate-800 text-lg">{existing ? "แก้ไขชิ้นงาน" : "สร้างชิ้นงานใหม่"}</h2>
         <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
       </div>
@@ -475,13 +493,37 @@ function AssignmentForm({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="text-xs font-black text-slate-500">แนบไฟล์</label>
-          <input
-            type="file"
-            onChange={e => setFile(e.target.files?.[0] ?? null)}
-            className="mt-1 w-full text-xs font-bold border-2 border-dashed border-slate-200 rounded-xl px-3 py-2.5"
-          />
+  <label className="text-xs font-black text-slate-500">แนบไฟล์ / รูปภาพ (แนบได้หลายไฟล์)</label>
+  <input
+    type="file"
+    multiple
+    onChange={e => { addFiles(e.target.files); e.target.value = ""; }}
+    className="mt-1 w-full text-xs font-bold border-2 border-dashed border-slate-200 rounded-xl px-3 py-2.5"
+  />
+  {previews.length > 0 && (
+    <div className="mt-2 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+      {previews.map((p, i) => (
+        <div key={i} className="relative rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square">
+          {p.isImage ? (
+            <img src={p.url} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
+              <span className="text-2xl">📄</span>
+              <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{p.file.name}</span>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => removeFile(i)}
+            className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-xs flex items-center justify-center hover:bg-black/70"
+          >
+            ✕
+          </button>
         </div>
+      ))}
+    </div>
+  )}
+</div>
         <div>
           <label className="text-xs font-black text-slate-500">แนบลิงก์</label>
           <div className="mt-1 flex gap-2">
@@ -587,22 +629,18 @@ function AssignmentForm({
         )}
       </div>
 
-      <div className="flex gap-2 pt-2">
-        <button
-          onClick={() => save("draft")}
-          disabled={saving !== null}
-          className="flex-1 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm disabled:opacity-50"
-        >
-          {saving === "draft" ? "กำลังบันทึก..." : "บันทึกแบบร่าง"}
-        </button>
-        <button
-          onClick={() => save("published")}
-          disabled={saving !== null}
-          className="flex-1 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50"
-        >
-          {saving === "publish" ? "กำลังเผยแพร่..." : "เผยแพร่"}
-        </button>
-      </div>
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 p-3 sm:px-8 z-10">
+  <div className="max-w-4xl mx-auto flex gap-2">
+    <button onClick={() => save("draft")} disabled={saving !== null}
+      className="flex-1 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm disabled:opacity-50">
+      {saving === "draft" ? "กำลังบันทึก..." : "บันทึกแบบร่าง"}
+    </button>
+    <button onClick={() => save("published")} disabled={saving !== null}
+      className="flex-1 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50">
+      {saving === "publish" ? "กำลังเผยแพร่..." : "เผยแพร่"}
+    </button>
+  </div>
+</div>
     </div>
   );
 }
@@ -1041,39 +1079,44 @@ function CrossSectionTab({
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      // ⚠️ สมมติว่าตาราง subjects มีคอลัมน์ created_by อ้างถึงครูเจ้าของวิชา
-      // ถ้าคอลัมน์จริงของคุณชื่ออื่น (เช่น teacher_id) ให้แก้ตรงนี้
-      try {
-        const { data: mySubjects } = await supabase
-          .from("subjects")
-          .select("id, subject_code, name_th")
-          .eq("created_by", currentUserId);
+  (async () => {
+    try {
+      // หาว่าครูคนนี้สอนวิชาไหนบ้าง จากตารางสอน (เช็คทั้ง teacher_id และ teacher_id_2 เพราะบางคาบมีครูคู่)
+      const { data: entries } = await supabase
+        .from("timetable_entries")
+        .select("subject_id")
+        .or(`teacher_id.eq.${currentUserId},teacher_id_2.eq.${currentUserId}`);
 
-        const subjectIds = (mySubjects ?? []).map((s: any) => s.id);
-        if (subjectIds.length === 0) {
-          setSections([]);
-          setLoading(false);
-          return;
-        }
-        const { data: allSections } = await supabase
-          .from("subject_sections")
-          .select("id, subject_id, join_code")
-          .in("subject_id", subjectIds);
-
-        const list: TeacherSection[] = (allSections ?? [])
-          .filter((sec: any) => sec.id !== sectionId)
-          .map((sec: any) => {
-            const subj = (mySubjects ?? []).find((s: any) => s.id === sec.subject_id);
-            return { id: sec.id, label: subj ? `${subj.subject_code} · ${subj.name_th}` : sec.join_code };
-          });
-        setSections(list);
-      } catch {
+      const subjectIds = Array.from(new Set((entries ?? []).map((e: any) => e.subject_id).filter(Boolean)));
+      if (subjectIds.length === 0) {
         setSections([]);
+        setLoading(false);
+        return;
       }
-      setLoading(false);
-    })();
-  }, [currentUserId, sectionId]);
+
+      const { data: mySubjects } = await supabase
+        .from("subjects")
+        .select("id, subject_code, name_th")
+        .in("id", subjectIds);
+
+      const { data: allSections } = await supabase
+        .from("subject_sections")
+        .select("id, subject_id, join_code")
+        .in("subject_id", subjectIds);
+
+      const list: TeacherSection[] = (allSections ?? [])
+        .filter((sec: any) => sec.id !== sectionId)
+        .map((sec: any) => {
+          const subj = (mySubjects ?? []).find((s: any) => s.id === sec.subject_id);
+          return { id: sec.id, label: subj ? `${subj.subject_code} · ${subj.name_th}` : sec.join_code };
+        });
+      setSections(list);
+    } catch {
+      setSections([]);
+    }
+    setLoading(false);
+  })();
+}, [currentUserId, sectionId]);
 
   function toggle(id: string) {
     setSelected(prev => {

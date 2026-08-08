@@ -164,7 +164,7 @@ function StudentCard({
       {student.prefix && <p className="text-slate-400 text-[11px] font-bold mt-2">{student.prefix}</p>}
       <p className="text-slate-700 font-black text-sm mt-0.5 truncate">{student.first_name} {student.last_name}</p>
       {student.nick_name && <p className="text-slate-400 text-[11px] font-bold mt-0.5">({student.nick_name})</p>}
-      <p className="text-fuchsia-500 text-[11px] font-black">Number {student.seat_number}</p>
+      <p className="text-fuchsia-500 text-[11px] font-black">เลขที่ {student.seat_number}</p>
     </button>
   );
 }
