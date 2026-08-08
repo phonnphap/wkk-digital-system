@@ -6,22 +6,31 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import AttendanceTool from "@/components/attendance/AttendanceTool";
+import AssignmentsTool from "@/components/assignments/AssignmentsTool";
 
 const supabase = createClient();
 
 type Subject = { id: string; subject_code: string; name_th: string };
 type Classroom = { id: string; room_name?: string; grade_group?: string };
 type SectionRow = { id: string; join_code: string; classroom_id: string };
-type Student = { id: string; prefix?: string; first_name: string; last_name: string; seat_number: number; avatar_url?: string };
+type Student = { id: string; prefix?: string; first_name: string; last_name: string; nickname?: string; seat_number: number; avatar_url?: string };
 type ScorePreset = { id: string; label: string; points: number; emoji: string; sort_order: number };
 
 type TabKey = "roster" | "attendance" | "random" | "tools";
+type BannerMenuKey = "assignments" | "attendanceInfo" | "totalScore" | "settings";
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: "roster", label: "รายชื่อ", icon: "👥" },
   { key: "attendance", label: "เช็กชื่อ", icon: "✅" },
   { key: "random", label: "สุ่มชื่อ", icon: "🎲" },
   { key: "tools", label: "เครื่องมือ", icon: "🧰" },
+];
+
+const BANNER_MENU: { key: BannerMenuKey; label: string; icon: string }[] = [
+  { key: "assignments", label: "มอบหมายงาน", icon: "📌" },
+  { key: "attendanceInfo", label: "ข้อมูลเช็กชื่อ", icon: "🗓️" },
+  { key: "totalScore", label: "คะแนนรวม", icon: "⭐" },
+  { key: "settings", label: "ตั้งค่ารายวิชา", icon: "⚙️" },
 ];
 
 // Fallback presets shown even before the teacher has saved any of their own
@@ -154,6 +163,7 @@ function StudentCard({
 
       {student.prefix && <p className="text-slate-400 text-[11px] font-bold mt-2">{student.prefix}</p>}
       <p className="text-slate-700 font-black text-sm mt-0.5 truncate">{student.first_name} {student.last_name}</p>
+      {student.nickname && <p className="text-slate-400 text-[11px] font-bold mt-0.5">({student.nickname})</p>}
       <p className="text-fuchsia-500 text-[11px] font-black">Number {student.seat_number}</p>
     </button>
   );
@@ -215,7 +225,8 @@ function ScoreModal({
                 </div>
               )}
               <p className="mt-3 text-slate-700 font-black text-sm">{single.first_name} {single.last_name}</p>
-              <p className="text-fuchsia-500 text-xs font-black">Number {single.seat_number}</p>
+              {single.nickname && <p className="text-slate-400 text-[11px] font-bold mt-0.5">({single.nickname})</p>}
+              <p className="text-fuchsia-500 text-xs font-black">เลขที่ {single.seat_number}</p>
             </>
           ) : (
             <>
@@ -641,6 +652,70 @@ function ToolsTab({ students }: { students: Student[] }) {
   );
 }
 
+/* ---------------- แท็บ คะแนนรวม (จากเมนูมุมซ้ายล่างของแบนเนอร์) ---------------- */
+
+function TotalScoreTab({ students, studentScores }: { students: Student[]; studentScores: Record<string, number> }) {
+  const sorted = [...students].sort((a, b) => (studentScores[b.id] ?? 0) - (studentScores[a.id] ?? 0));
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6">
+      <h2 className="font-black text-slate-700 text-sm flex items-center gap-1.5 mb-4">⭐ คะแนนรวมของนักเรียน</h2>
+      {sorted.length === 0 ? (
+        <p className="text-center text-slate-400 font-bold text-sm py-8">ยังไม่มีนักเรียนในวิชานี้</p>
+      ) : (
+        <div className="divide-y divide-slate-50">
+          {sorted.map((s, i) => (
+            <div key={s.id} className="flex items-center gap-3 py-2.5">
+              <span className="w-6 text-center text-xs font-black text-slate-300">{i + 1}</span>
+              {s.avatar_url ? (
+                <img src={s.avatar_url} className="w-9 h-9 rounded-full object-cover" />
+              ) : (
+                <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${avatarGradient(i)} text-white text-xs font-black flex items-center justify-center`}>
+                  {s.first_name[0]}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
+                <p className="text-[11px] text-slate-400 font-bold">Number {s.seat_number}</p>
+              </div>
+              <span className="px-3 py-1 rounded-full bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white text-xs font-black shrink-0">
+                {studentScores[s.id] ?? 0} คะแนน
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- แท็บ ตั้งค่ารายวิชา (จากเมนูมุมซ้ายล่างของแบนเนอร์) ---------------- */
+
+function SubjectSettingsTab({ subject, classroom }: { subject: Subject | null; classroom: Classroom | null }) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6">
+      <h2 className="font-black text-slate-700 text-sm flex items-center gap-1.5 mb-4">⚙️ ตั้งค่ารายวิชา</h2>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+        <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+          <p className="text-[10px] font-black text-slate-400">รหัสวิชา</p>
+          <p className="text-sm font-black text-slate-700 mt-0.5">{subject?.subject_code ?? "-"}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+          <p className="text-[10px] font-black text-slate-400">ชื่อวิชา</p>
+          <p className="text-sm font-black text-slate-700 mt-0.5">{subject?.name_th ?? "-"}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+          <p className="text-[10px] font-black text-slate-400">ห้องเรียน</p>
+          <p className="text-sm font-black text-slate-700 mt-0.5">{classroom?.grade_group} {classroom?.room_name}</p>
+        </div>
+      </div>
+      <div className="rounded-xl border-2 border-dashed border-slate-200 p-6 text-center text-slate-400">
+        <p className="text-2xl mb-1">🚧</p>
+        <p className="font-bold text-xs">ฟีเจอร์ตั้งค่ารายวิชา (แก้ไขชื่อวิชา / ลบวิชา / จัดการผู้ช่วยสอน ฯลฯ) จะเปิดใช้งานเร็ว ๆ นี้</p>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- หน้าเพจหลัก ---------------- */
 
 export default function SmartClassRosterPage() {
@@ -657,6 +732,7 @@ export default function SmartClassRosterPage() {
   const [showQr, setShowQr] = useState(false);
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<TabKey>("roster");
+  const [bannerMenu, setBannerMenu] = useState<BannerMenuKey | null>(null);
   const [currentUserId, setCurrentUserId] = useState("");
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   type Period = { timetable_entry_id: string; slot_number?: number; start_time?: string; end_time?: string };
@@ -691,10 +767,10 @@ export default function SmartClassRosterPage() {
       // ดึงรายชื่อ นร. ตรงจาก classroom_id ทันที ไม่ต้องรอ join code / subject_enrollments
       if (sec?.classroom_id) {
         const { data: studentsData } = await supabase
-          .from("students")
-          .select("id, prefix, first_name, last_name, seat_number, avatar_url")
-          .eq("classroom_id", sec.classroom_id)
-          .order("seat_number");
+  .from("students")
+  .select("id, prefix, first_name, last_name, nickname, seat_number, avatar_url")
+  .eq("classroom_id", sec.classroom_id)
+  .order("seat_number");
         setStudents((studentsData ?? []) as Student[]);
       }
 
@@ -796,6 +872,17 @@ export default function SmartClassRosterPage() {
   function openScoreForSelected() {
     const chosen = students.filter(s => selectedIds.has(s.id));
     if (chosen.length > 0) setScoreTargets(chosen);
+  }
+
+  // --- เมนูมุมซ้ายล่างของแบนเนอร์ ---
+  function handleBannerMenuClick(key: BannerMenuKey) {
+    if (key === "attendanceInfo") {
+      // ใช้แท็บเช็กชื่อที่มีอยู่แล้วโดยตรง แทนการสร้างหน้าซ้ำ
+      setBannerMenu(null);
+      setTab("attendance");
+      return;
+    }
+    setBannerMenu(key);
   }
 
   async function handleGiveScore(preset: ScorePreset | null, customPoints?: number) {
@@ -931,10 +1018,37 @@ export default function SmartClassRosterPage() {
             📷 QR
           </button>
         </div>
+
+        {/* เมนูมุมซ้ายล่างของแบนเนอร์: มอบหมายงาน / ข้อมูลเช็กชื่อ / คะแนนรวม / ตั้งค่ารายวิชา */}
+        <div className="flex items-center gap-2 flex-wrap mt-5">
+          {BANNER_MENU.map(m => (
+            <button
+              key={m.key}
+              onClick={() => handleBannerMenuClick(m.key)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs backdrop-blur-sm transition-colors ${
+                bannerMenu === m.key
+                  ? "bg-white text-fuchsia-700 shadow-sm"
+                  : "bg-white/20 hover:bg-white/30 text-white"
+              }`}
+            >
+              <span>{m.icon}</span>{m.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <main className={`p-4 lg:p-6 mx-auto w-full ${tab === "roster" || tab === "attendance" ? "max-w-[1600px]" : "max-w-4xl"}`}>
-        {tab === "roster" && (
+      <main className={`p-4 lg:p-6 mx-auto w-full ${bannerMenu === "assignments" ? "max-w-[1600px]" : tab === "roster" || tab === "attendance" ? "max-w-[1600px]" : "max-w-4xl"}`}>
+        {bannerMenu === "assignments" && section && (
+          <AssignmentsTool sectionId={section.id} subjectId={subjectId} students={students} currentUserId={currentUserId} />
+        )}
+        {bannerMenu === "totalScore" && (
+          <TotalScoreTab students={students} studentScores={studentScores} />
+        )}
+        {bannerMenu === "settings" && (
+          <SubjectSettingsTab subject={subject} classroom={classroom} />
+        )}
+
+        {!bannerMenu && tab === "roster" && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 w-full">
             <div className="flex items-center justify-between flex-wrap gap-2 mb-5">
               <h2 className="font-black text-slate-700 text-sm flex items-center gap-1.5">👥 รายชื่อนักเรียน</h2>
@@ -983,7 +1097,7 @@ export default function SmartClassRosterPage() {
           </div>
         )}
 
-        {tab === "attendance" && (
+        {!bannerMenu && tab === "attendance" && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
             <div className="px-4 pt-4 flex items-center gap-2 flex-wrap">
               <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
@@ -1012,17 +1126,17 @@ export default function SmartClassRosterPage() {
             )}
           </div>
         )}
-        {tab === "random" && <RandomPickerTab students={students} />}
-        {tab === "tools" && <ToolsTab students={students} />}
+        {!bannerMenu && tab === "random" && <RandomPickerTab students={students} />}
+        {!bannerMenu && tab === "tools" && <ToolsTab students={students} />}
       </main>
 
       {/* แท็บด้านล่าง */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-2px_8px_rgba(0,0,0,0.04)] z-40">
         <div className="max-w-4xl mx-auto grid grid-cols-4">
           {TABS.map(t => (
-            <button key={t.key} onClick={() => setTab(t.key)}
+            <button key={t.key} onClick={() => { setBannerMenu(null); setTab(t.key); }}
               className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-black ${
-                tab === t.key ? "text-fuchsia-600" : "text-slate-400"
+                !bannerMenu && tab === t.key ? "text-fuchsia-600" : "text-slate-400"
               }`}>
               <span className="text-lg leading-none">{t.icon}</span>
               {t.label}

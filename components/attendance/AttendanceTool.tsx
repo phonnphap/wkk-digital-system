@@ -5,7 +5,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 type Status = "present" | "absent" | "late" | "leave" | "excused";
 
 type Student = {
-  id: string; prefix?: string; first_name: string; last_name: string;
+  id: string; prefix?: string; first_name: string; last_name: string; nickname?: string;
   seat_number: number; avatar_url?: string;
 };
 
@@ -239,7 +239,7 @@ export default function AttendanceTool({
                           {s.first_name[0]}
                         </div>
                       )}
-                      <p className="text-sm font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name}</p>
+                      <p className="text-sm font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nickname})</p>
                       <div className="flex items-center gap-1.5 whitespace-nowrap">
                         <p className="text-[11px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                         {ref && (
