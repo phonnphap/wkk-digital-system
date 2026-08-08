@@ -344,6 +344,13 @@ function AssignmentForm({
   const [links, setLinks] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState<"draft" | "publish" | null>(null);
+  const [teacherEmail, setTeacherEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+  supabase.auth.getUser().then(({ data }) => {
+    setTeacherEmail(data.user?.email ?? null);
+  });
+}, []);
 
   function addLink() {
     if (!linkUrl.trim()) return;
@@ -386,21 +393,35 @@ function AssignmentForm({
       }
 
       // แนบไฟล์
+      // แนบไฟล์ — เดิม: อัปโหลดขึ้น Supabase storage
+      // ใหม่: อัปโหลดขึ้น OneDrive ของครูที่สร้างชิ้นงาน (currentUserId) แทน
+      // แนบไฟล์ → อัปโหลดขึ้น OneDrive ของ "ครูที่สร้างชิ้นงาน" ผ่าน /api/upload-onedrive
       if (file) {
-        try {
-          const path = `${assignmentId}/${Date.now()}-${file.name}`;
-          const { error: upErr } = await supabase.storage.from("assignment-attachments").upload(path, file);
-          if (!upErr) {
-            const { data: pub } = supabase.storage.from("assignment-attachments").getPublicUrl(path);
-            await supabase.from("assignment_attachments").insert({
-              assignment_id: assignmentId,
-              kind: "file",
-              url: pub.publicUrl,
-              file_name: file.name,
-            });
+        if (!teacherEmail) {
+          alert("ไม่พบอีเมลของครูผู้สอน จึงไม่สามารถแนบไฟล์ขึ้น OneDrive ได้ กรุณาลองใหม่อีกครั้ง");
+        } else {
+          try {
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("account", teacherEmail); // ไฟล์จะไปอยู่ใน OneDrive ของอีเมลนี้
+            fd.append("path", `Assignments/${assignmentId}/${Date.now()}-${file.name}`);
+
+            const res = await fetch("/api/upload-onedrive", { method: "POST", body: fd });
+            const result = await res.json();
+
+            if (result.ok && result.url) {
+              await supabase.from("assignment_attachments").insert({
+                assignment_id: assignmentId,
+                kind: "file",
+                url: result.url, // ลิงก์ proxy จาก /api/onedrive-file — เปิดดูได้เสมอ ไม่หมดอายุ
+                file_name: result.fileName || file.name,
+              });
+            } else {
+              alert("แนบไฟล์ไป OneDrive ไม่สำเร็จ: " + JSON.stringify(result.error ?? "unknown error"));
+            }
+          } catch (e: any) {
+            alert("แนบไฟล์ไป OneDrive ไม่สำเร็จ: " + (e?.message ?? "unknown error"));
           }
-        } catch {
-          // เงียบไว้ก่อนถ้า bucket ยังไม่ถูกสร้าง ไม่บล็อกการบันทึกชิ้นงาน
         }
       }
       // แนบลิงก์

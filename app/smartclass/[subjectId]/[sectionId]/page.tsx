@@ -13,7 +13,7 @@ const supabase = createClient();
 type Subject = { id: string; subject_code: string; name_th: string };
 type Classroom = { id: string; room_name?: string; grade_group?: string };
 type SectionRow = { id: string; join_code: string; classroom_id: string };
-type Student = { id: string; prefix?: string; first_name: string; last_name: string; nickname?: string; seat_number: number; avatar_url?: string };
+type Student = { id: string; prefix?: string; first_name: string; last_name: string; nick_name?: string; seat_number: number; avatar_url?: string };
 type ScorePreset = { id: string; label: string; points: number; emoji: string; sort_order: number };
 
 type TabKey = "roster" | "attendance" | "random" | "tools";
@@ -163,7 +163,7 @@ function StudentCard({
 
       {student.prefix && <p className="text-slate-400 text-[11px] font-bold mt-2">{student.prefix}</p>}
       <p className="text-slate-700 font-black text-sm mt-0.5 truncate">{student.first_name} {student.last_name}</p>
-      {student.nickname && <p className="text-slate-400 text-[11px] font-bold mt-0.5">({student.nickname})</p>}
+      {student.nick_name && <p className="text-slate-400 text-[11px] font-bold mt-0.5">({student.nick_name})</p>}
       <p className="text-fuchsia-500 text-[11px] font-black">Number {student.seat_number}</p>
     </button>
   );
@@ -225,7 +225,7 @@ function ScoreModal({
                 </div>
               )}
               <p className="mt-3 text-slate-700 font-black text-sm">{single.first_name} {single.last_name}</p>
-              {single.nickname && <p className="text-slate-400 text-[11px] font-bold mt-0.5">({single.nickname})</p>}
+              {single.nick_name && <p className="text-slate-400 text-[11px] font-bold mt-0.5">({single.nick_name})</p>}
               <p className="text-fuchsia-500 text-xs font-black">เลขที่ {single.seat_number}</p>
             </>
           ) : (
@@ -675,7 +675,7 @@ function TotalScoreTab({ students, studentScores }: { students: Student[]; stude
               )}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
-                <p className="text-[11px] text-slate-400 font-bold">Number {s.seat_number}</p>
+                <p className="text-[11px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
               </div>
               <span className="px-3 py-1 rounded-full bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white text-xs font-black shrink-0">
                 {studentScores[s.id] ?? 0} คะแนน
@@ -768,7 +768,7 @@ export default function SmartClassRosterPage() {
       if (sec?.classroom_id) {
         const { data: studentsData } = await supabase
   .from("students")
-  .select("id, prefix, first_name, last_name, nickname, seat_number, avatar_url")
+  .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url")
   .eq("classroom_id", sec.classroom_id)
   .order("seat_number");
         setStudents((studentsData ?? []) as Student[]);
