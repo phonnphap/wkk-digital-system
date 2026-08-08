@@ -221,10 +221,22 @@ export default function AdminAttendanceOverviewPage() {
 
   /* ── โหลดรายชื่อครู + สายชั้น (แปลงเป็นชื่อ ไม่ใช่ id) ── */
   async function loadTeachers() {
-    const { data: teacherRows } = await supabase
-      .from("users")
-      .select("id, prefix, first_name, last_name, position, subject_group, grade_level, avatar_url, role")
-      .order("first_name");
+    // ── คำนำหน้าชื่อ/ตำแหน่ง: ลองดึงคอลัมน์ title, position ก่อน ถ้าตาราง users ยังไม่มีคอลัมน์นี้ ให้ตัดออกแล้วลองใหม่ ──
+    let teacherRows: any[] | null = null;
+    try {
+      const { data, error } = await supabase
+        .from("users")
+        .select("id, title, first_name, last_name, position, subject_group, grade_level, avatar_url, role")
+        .order("first_name");
+      if (error) throw error;
+      teacherRows = data;
+    } catch {
+      const { data } = await supabase
+        .from("users")
+        .select("id, first_name, last_name, subject_group, grade_level, avatar_url, role")
+        .order("first_name");
+      teacherRows = data;
+    }
 
     // ── ตารางสายชั้น: ปรับชื่อตาราง/คอลัมน์ให้ตรงกับระบบจริง (คาดว่าเป็น grade_levels: id, name) ──
     let gradeLevelMap = new Map<string, string>();
@@ -240,10 +252,10 @@ export default function AdminAttendanceOverviewPage() {
       .filter((t: any) => !String(t.role || "").toLowerCase().includes("admin"))
       .map((t: any) => ({
         id: t.id,
-        prefix: t.prefix,
+        prefix: t.title ?? null,
         first_name: t.first_name,
         last_name: t.last_name,
-        position: t.position,
+        position: t.position ?? null,
         subject_group: t.subject_group,
         grade_level_id: t.grade_level,
         grade_level_name: t.grade_level ? gradeLevelMap.get(t.grade_level) || t.grade_level : null,
