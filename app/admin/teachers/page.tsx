@@ -277,13 +277,13 @@ export default function AdminAttendanceOverviewPage() {
       .gte("end_date", date);
     const onLeaveIds = new Set((leaveToday || []).map((r: any) => r.user_id));
 
-    // ── ตารางลงเวลา: ปรับชื่อคอลัมน์ (check_in_time, check_out_time, attendance_date) ให้ตรงกับระบบจริงหากจำเป็น ──
+    // ── ตารางลงเวลา: ปรับชื่อคอลัมน์ (check_in_time, check_out_time, work_date) ให้ตรงกับระบบจริงหากจำเป็น ──
     let attendanceMap = new Map<string, any>();
     try {
       const { data: attendanceToday } = await supabase
         .from("teacher_attendance_records")
         .select("user_id, check_in_time, check_out_time")
-        .eq("attendance_date", date);
+        .eq("work_date", date);
       attendanceMap = new Map((attendanceToday || []).map((r: any) => [r.user_id, r]));
     } catch {
       // ตาราง teacher_attendance_records ยังไม่มี — ข้ามไปก่อน
@@ -323,8 +323,8 @@ export default function AdminAttendanceOverviewPage() {
       const { data } = await supabase
         .from("teacher_attendance_records")
         .select("user_id, check_in_time, check_out_time")
-        .gte("attendance_date", start)
-        .lte("attendance_date", end);
+        .gte("work_date", start)
+        .lte("work_date", end);
       attendanceInRange = data || [];
     } catch {
       // ตาราง teacher_attendance_records ยังไม่มี
