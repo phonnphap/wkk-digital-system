@@ -20,6 +20,10 @@ import {
 const LEAVE_APPROVER_1_EMAIL = "phansa@khienkhet.ac.th";
 const LEAVE_APPROVER_2_EMAIL = "titima@khienkhet.ac.th";
 const LEAVE_APPROVER_3_EMAIL = "thananut@khienkhet.ac.th";
+const ATTENDANCE_IMPORT_ALLOWED_EMAILS = [
+  "sumalin@khienkhet.ac.th",
+  // เพิ่มอีเมลคนอื่นที่ต้องการให้สิทธิ์ได้ที่นี่
+];
 
 function leaveApproverSlotByEmail(email: string): 1 | 2 | 3 | null {
   const e = (email || "").toLowerCase().trim();
@@ -51,14 +55,11 @@ type NotifItem = {
 export default function DashboardPage() {
   const router = useRouter();
   const supabase = createClient();
-
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
-
   const [userPrefix, setUserPrefix] = useState<string>("");
+  const [userEmail, setUserEmail] = useState<string>("");
   const [userName, setUserName] = useState<string>("");
-
   const [isMounted, setIsMounted] = useState<boolean>(false);
-
   // ── การแจ้งเตือน ──────────────────────────────────────────
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifLoading, setNotifLoading] = useState(false);
@@ -74,6 +75,7 @@ export default function DashboardPage() {
         router.push("/login");
         return;
       }
+      setUserEmail((user.email || user.user_metadata?.email || "").toLowerCase());
 
       // 1. ดึง first_name และ last_name เพิ่มเติมจากตาราง users
       // ✅ เพิ่ม id, extra_roles, grade_level เข้ามาด้วย — ใช้ตอนดึงการแจ้งเตือนที่เกี่ยวกับผู้ใช้คนนี้
@@ -415,6 +417,16 @@ if (opts.profileId) {
   }
 
   const urgentCount = notifications.filter(n => n.urgent).length;
+  const canImportAttendance =
+  isAdmin || ATTENDANCE_IMPORT_ALLOWED_EMAILS.includes(userEmail);
+
+const handleAttendanceImportClick = () => {
+  if (canImportAttendance) {
+    router.push("/admin/attendance-import");
+  } else {
+    alert("🔒 ขออภัย คุณไม่มีสิทธิ์นำเข้าข้อมูลลงเวลา");
+  }
+};
 
   // ✅ ฟังก์ชันเหล่านี้ต้องอยู่นอก useEffect
   const handleAdminMenuClick = (targetPath: string) => {
@@ -785,7 +797,7 @@ return (
   </div>
   <span className="text-sm font-extrabold text-slate-700 group-hover:text-rose-600">ข้อมูลครูทั้งหมด</span>
 </button>
-<button onClick={() => handleAdminMenuClick("/admin/attendance-import")}
+<button onClick={handleAttendanceImportClick}
                 className="flex items-center gap-4 p-4 rounded-xl border border-rose-100 bg-white hover:border-rose-400 hover:shadow-md transition-all group text-left">
                 <div className="w-11 h-11 rounded-xl bg-rose-500 text-white flex items-center justify-center shadow-sm shrink-0 group-hover:scale-105 transition-transform">
                   <UploadCloud className="w-6 h-6" />

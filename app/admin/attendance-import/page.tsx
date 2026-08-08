@@ -11,7 +11,7 @@
 //   3) ปรับ path "@/lib/supabase/client" ให้ตรงกับโปรเจกต์ของคุณ
 // ══════════════════════════════════════════════════════════
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
@@ -39,6 +39,12 @@ type ImportResult = {
 };
 
 const UUID_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
+
+// ★ อีเมลที่ได้รับอนุญาตให้นำเข้าข้อมูลลงเวลา นอกเหนือจาก role admin
+//   (แก้ไขรายชื่อได้ตรงนี้จุดเดียว)
+const ATTENDANCE_IMPORT_ALLOWED_EMAILS = [
+  "sumalin@khienkhet.ac.th",
+];
 
 // พยายามหา uuid ในข้อความ ตัดขยะที่เครื่องสแกนแปะไว้ (เช่น "Not Found" ปนหน้า uuid)
 function cleanId(raw: string): string | null {
@@ -151,6 +157,37 @@ export default function AttendanceImportPage() {
   const supabase = createClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── ตรวจสอบสิทธิ์เข้าใช้งานหน้านี้ (admin หรืออีเมลที่อนุญาตพิเศษ) ──
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authorized, setAuthorized] = useState(false);
+
+  useEffect(() => {
+    async function checkAccess() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+      const email = (user.email || user.user_metadata?.email || "").toLowerCase();
+
+      const { data: profile } = await supabase
+        .from("users")
+        .select("role")
+        .eq("auth_id", user.id)
+        .maybeSingle();
+
+      const isAllowed = profile?.role === "admin" || ATTENDANCE_IMPORT_ALLOWED_EMAILS.includes(email);
+      setAuthorized(isAllowed);
+      setAuthChecked(true);
+
+      if (!isAllowed) {
+        alert("🔒 ขออภัย คุณไม่มีสิทธิ์นำเข้าข้อมูลลงเวลา");
+        router.push("/dashboard");
+      }
+    }
+    checkAccess();
+  }, [supabase, router]);
+
   const [rawText, setRawText] = useState("");
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [deviceCode, setDeviceCode] = useState("IMPORT");
@@ -252,6 +289,15 @@ export default function AttendanceImportPage() {
     setResult({ totalRows: rows.length, imported, notFoundInUsers, invalidRows });
     setImporting(false);
   }
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-slate-400 bg-slate-50">
+        <Loader2 className="w-6 h-6 animate-spin" />
+      </div>
+    );
+  }
+  if (!authorized) return null;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
