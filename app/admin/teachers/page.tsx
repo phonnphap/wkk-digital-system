@@ -43,6 +43,7 @@ type DailyRow = TeacherBase & {
   check_out_time: string | null; // "16:30:00"
   is_late: boolean;
   is_early_leave: boolean;
+  note: string | null;
 };
 
 type SummaryRow = TeacherBase & {
@@ -64,13 +65,15 @@ function isEarlyLeave(checkOutTime: string | null) {
   return !!checkOutTime && checkOutTime < EARLY_LEAVE_CUTOFF_TIME;
 }
 
-// ── ลำดับสายชั้นสำหรับเรียงรายชื่อ: ผู้บริหาร -> อนุบาล -> ป.1-6 -> ม.1-6 -> อื่น ๆ ──
+// ── ลำดับสายชั้นสำหรับเรียงรายชื่อ: ผอ -> รองผอ -> อนุบาล(อ.) -> ป.1-6 -> ม.1-6 -> อื่น ๆ ──
 function gradeLevelRank(name: string | null): number {
   if (!name) return 900;
   const n = name.trim();
   const num = parseInt(n.replace(/[^\d]/g, ""), 10) || 0;
-  if (n.includes("ผู้บริหาร")) return 0;
-  if (n.includes("อนุบาล")) return 100 + num;
+  // เช็ค "รองผอ" ก่อน เพราะข้อความมีคำว่า "ผอ" ปนอยู่ด้วย
+  if (n.includes("รองผู้อำนวยการ") || n.includes("รองผอ")) return 10;
+  if (n.includes("ผู้อำนวยการ") || n.startsWith("ผอ") || n.includes("ผู้บริหาร")) return 0;
+  if (n.startsWith("อ.") || n.includes("อนุบาล")) return 100 + num;
   if (n.startsWith("ป.") || n.includes("ประถม")) return 200 + num;
   if (n.startsWith("ม.") || n.includes("มัธยม")) return 300 + num;
   return 900;
@@ -277,12 +280,12 @@ export default function AdminAttendanceOverviewPage() {
       .gte("end_date", date);
     const onLeaveIds = new Set((leaveToday || []).map((r: any) => r.user_id));
 
-    // ── ตารางลงเวลา: ปรับชื่อคอลัมน์ (check_in_time, check_out_time, work_date) ให้ตรงกับระบบจริงหากจำเป็น ──
+    // ── ตารางลงเวลา: ปรับชื่อคอลัมน์ (check_in_time, check_out_time, work_date, note) ให้ตรงกับระบบจริงหากจำเป็น ──
     let attendanceMap = new Map<string, any>();
     try {
       const { data: attendanceToday } = await supabase
         .from("teacher_attendance_records")
-        .select("user_id, check_in_time, check_out_time")
+        .select("user_id, check_in_time, check_out_time, note")
         .eq("work_date", date);
       attendanceMap = new Map((attendanceToday || []).map((r: any) => [r.user_id, r]));
     } catch {
@@ -298,6 +301,7 @@ export default function AdminAttendanceOverviewPage() {
         on_leave: onLeaveIds.has(t.id),
         check_in_time: checkIn,
         check_out_time: checkOut,
+        note: att?.note || null,
         is_late: isLate(checkIn),
         is_early_leave: isEarlyLeave(checkOut),
       };
@@ -383,6 +387,7 @@ export default function AdminAttendanceOverviewPage() {
   const notCheckedInCount = filteredDaily.filter((r) => !r.check_in_time && !r.on_leave).length;
   const onLeaveCount = filteredDaily.filter((r) => r.on_leave).length;
 
+  const totalPresent = filteredSummary.reduce((sum, r) => sum + r.present_count, 0);
   const totalLate = filteredSummary.reduce((sum, r) => sum + r.late_count, 0);
   const totalEarlyLeave = filteredSummary.reduce((sum, r) => sum + r.early_leave_count, 0);
   const totalLeave = filteredSummary.reduce((sum, r) => sum + r.leave_count, 0);
@@ -543,7 +548,7 @@ export default function AdminAttendanceOverviewPage() {
         )}
 
         {/* สรุปตัวเลข */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {period === "daily" ? (
             <>
               <StatCard label="ครูทั้งหมด" value={filteredDaily.length} color="text-slate-700" bg="bg-slate-100" />
@@ -552,6 +557,7 @@ export default function AdminAttendanceOverviewPage() {
             </>
           ) : (
             <>
+              <StatCard label="มาทำงาน (ครั้ง)" value={totalPresent} color="text-emerald-600" bg="bg-emerald-100" />
               <StatCard label="มาสาย (ครั้ง)" value={totalLate} color="text-orange-600" bg="bg-orange-100" />
               <StatCard label="กลับก่อนเวลา (ครั้ง)" value={totalEarlyLeave} color="text-rose-600" bg="bg-rose-100" />
               <StatCard label="ลา (ครั้ง)" value={totalLeave} color="text-amber-600" bg="bg-amber-100" />
@@ -631,40 +637,47 @@ export default function AdminAttendanceOverviewPage() {
                       </div>
                     </div>
 
-                    <div className="flex gap-2 shrink-0 items-center">
-                      {t.on_leave ? (
-                        <span className="flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
-                          <CalendarDays className="w-3 h-3" /> ลาวันนี้
-                        </span>
-                      ) : !t.check_in_time ? (
-                        <span className="text-[10px] font-black px-2 py-1 rounded-full bg-rose-100 text-rose-700 border border-rose-200">
-                          ยังไม่ลงเวลา
-                        </span>
-                      ) : (
-                        <>
-                          <span
-                            className={`flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full border ${
-                              t.is_late
-                                ? "bg-orange-100 text-orange-700 border-orange-200"
-                                : "bg-emerald-100 text-emerald-700 border-emerald-200"
-                            }`}
-                          >
-                            <LogIn className="w-3 h-3" />
-                            {t.is_late ? "สาย" : "มา"} {formatTime(t.check_in_time)}
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <div className="flex gap-2 items-center">
+                        {t.on_leave ? (
+                          <span className="flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                            <CalendarDays className="w-3 h-3" /> ลาวันนี้
                           </span>
-                          {t.check_out_time && (
+                        ) : !t.check_in_time ? (
+                          <span className="text-[10px] font-black px-2 py-1 rounded-full bg-rose-100 text-rose-700 border border-rose-200">
+                            ยังไม่ลงเวลา
+                          </span>
+                        ) : (
+                          <>
                             <span
                               className={`flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full border ${
-                                t.is_early_leave
-                                  ? "bg-rose-100 text-rose-700 border-rose-200"
-                                  : "bg-slate-100 text-slate-600 border-slate-200"
+                                t.is_late
+                                  ? "bg-orange-100 text-orange-700 border-orange-200"
+                                  : "bg-emerald-100 text-emerald-700 border-emerald-200"
                               }`}
                             >
-                              <LogOut className="w-3 h-3" />
-                              {t.is_early_leave ? "กลับก่อน" : "กลับ"} {formatTime(t.check_out_time)}
+                              <LogIn className="w-3 h-3" />
+                              {t.is_late ? "สาย" : "มา"} {formatTime(t.check_in_time)}
                             </span>
-                          )}
-                        </>
+                            {t.check_out_time && (
+                              <span
+                                className={`flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full border ${
+                                  t.is_early_leave
+                                    ? "bg-rose-100 text-rose-700 border-rose-200"
+                                    : "bg-slate-100 text-slate-600 border-slate-200"
+                                }`}
+                              >
+                                <LogOut className="w-3 h-3" />
+                                {t.is_early_leave ? "กลับก่อน" : "กลับ"} {formatTime(t.check_out_time)}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      {t.note && (
+                        <p className="text-[10px] text-slate-400 max-w-[200px] truncate" title={t.note}>
+                          หมายเหตุ: {t.note}
+                        </p>
                       )}
                     </div>
                   </button>
