@@ -933,7 +933,7 @@ export default function SmartClassRosterPage() {
         </div>
       </div>
 
-      <main className={`p-4 lg:p-6 mx-auto w-full ${tab === "roster" ? "max-w-[1600px]" : "max-w-4xl"}`}>
+      <main className={`p-4 lg:p-6 mx-auto w-full ${tab === "roster" || tab === "attendance" ? "max-w-[1600px]" : "max-w-4xl"}`}>
         {tab === "roster" && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 w-full">
             <div className="flex items-center justify-between flex-wrap gap-2 mb-5">

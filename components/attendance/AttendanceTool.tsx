@@ -18,7 +18,7 @@ const STATUS_CONFIG: Record<Status, { label: string; emoji: string; dot: string;
   excused: { label: "ไปกิจกรรม", emoji: "🏃", dot: "bg-sky-500", ring: "ring-sky-300", chipBg: "bg-sky-50", chipText: "text-sky-700" },
   absent: { label: "ขาด", emoji: "❌", dot: "bg-red-500", ring: "ring-red-300", chipBg: "bg-red-50", chipText: "text-red-700" },
 };
-const STATUS_ORDER: Status[] = ["absent", "present", "late", "excused", "leave"]; // เรียงให้ใกล้เคียงภาพต้นแบบ (ขาด-มา-สาย-กิจกรรม-ลา)
+const STATUS_ORDER: Status[] = ["present", "late", "excused", "leave", "absent"]; // มา-สาย-ไปกิจกรรม-ลา-ขาด
 
 const AVATAR_GRADIENTS = [
   "from-teal-400 to-emerald-400",
@@ -81,9 +81,9 @@ export default function AttendanceTool({
     setNoteMap(prev => ({ ...prev, [studentId]: value }));
   }
 
-  function markAllPresent() {
+  function markAll(status: Status) {
     const map: Record<string, Status> = {};
-    students.forEach(s => { map[s.id] = "present"; });
+    students.forEach(s => { map[s.id] = status; });
     setStatusMap(map);
     setSaved(false);
   }
@@ -200,10 +200,6 @@ export default function AttendanceTool({
               📥 ดึงจาก{referenceLabel}
             </button>
           )}
-          <button onClick={markAllPresent}
-            className="px-3 py-1.5 rounded-xl border-2 border-emerald-200 bg-emerald-50 text-emerald-700 font-black text-xs">
-            ✅ มาทั้งหมด
-          </button>
         </div>
       </div>
 
@@ -215,9 +211,14 @@ export default function AttendanceTool({
               <th className="text-left text-[11px] font-black text-slate-500 tracking-wide px-5 py-3 sticky left-0 bg-slate-50">STUDENT</th>
               {STATUS_ORDER.map(st => (
                 <th key={st} className="px-2 py-3">
-                  <span className={`inline-flex items-center gap-1.5 text-[11px] font-black ${STATUS_CONFIG[st].chipText} ${STATUS_CONFIG[st].chipBg} px-2.5 py-1 rounded-full`}>
+                  <button
+                    type="button"
+                    onClick={() => markAll(st)}
+                    title={`ตั้งค่าทุกคนเป็น "${STATUS_CONFIG[st].label}"`}
+                    className={`inline-flex items-center gap-1.5 text-[11px] font-black ${STATUS_CONFIG[st].chipText} ${STATUS_CONFIG[st].chipBg} px-2.5 py-1 rounded-full hover:brightness-95 active:scale-95 transition-all cursor-pointer`}
+                  >
                     <span className={`w-2 h-2 rounded-full ${STATUS_CONFIG[st].dot}`} /> {STATUS_CONFIG[st].label}
-                  </span>
+                  </button>
                 </th>
               ))}
               {showNoteCol && <th className="text-left text-[11px] font-black text-slate-500 tracking-wide px-5 py-3">NOTE</th>}
@@ -229,8 +230,8 @@ export default function AttendanceTool({
               const ref = referenceMap?.[s.id];
               return (
                 <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                  <td className="px-5 py-3 sticky left-0 bg-white">
-                    <div className="flex items-center gap-2.5 min-w-[190px] flex-wrap">
+                  <td className="px-5 py-3 sticky left-0 bg-white align-top">
+                    <div className="flex flex-col gap-1 w-max">
                       {s.avatar_url ? (
                         <img src={s.avatar_url} className="w-9 h-9 rounded-full object-cover shrink-0" />
                       ) : (
@@ -238,15 +239,15 @@ export default function AttendanceTool({
                           {s.first_name[0]}
                         </div>
                       )}
-                      <div className="min-w-0">
-                        <p className="text-sm font-black text-slate-700 truncate">{s.prefix}{s.first_name} {s.last_name}</p>
+                      <p className="text-sm font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name}</p>
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
                         <p className="text-[11px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
+                        {ref && (
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-black ${STATUS_CONFIG[ref.status].chipBg} ${STATUS_CONFIG[ref.status].chipText}`}>
+                            {referenceLabel}: {STATUS_CONFIG[ref.status].label}
+                          </span>
+                        )}
                       </div>
-                      {ref && (
-                        <span className={`shrink-0 text-[9px] px-1.5 py-0.5 rounded-md font-black ${STATUS_CONFIG[ref.status].chipBg} ${STATUS_CONFIG[ref.status].chipText}`}>
-                          {referenceLabel}: {STATUS_CONFIG[ref.status].label}
-                        </span>
-                      )}
                     </div>
                   </td>
 
