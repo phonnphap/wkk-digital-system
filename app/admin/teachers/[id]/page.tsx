@@ -374,12 +374,20 @@ export default function AdminTeacherDetailPage() {
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800 font-sans antialiased">
       <main className="w-full px-4 py-6 md:px-8 md:py-8 lg:px-12 lg:py-10 space-y-6 max-w-[1600px] mx-auto">
         {/* Header */}
-        <button
-          onClick={() => router.push("/admin/teachers")}
-          className="flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-slate-700"
-        >
-          <ArrowLeft className="w-4 h-4" /> กลับไปหน้ารวมข้อมูลครู
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg"
+          >
+            🏠
+          </button>
+          <button
+            onClick={() => router.push("/admin/teachers")}
+            className="flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-slate-700"
+          >
+            <ArrowLeft className="w-4 h-4" /> กลับไปหน้ารวมข้อมูลครู
+          </button>
+        </div>
 
         {/* Profile card */}
         <div className="relative bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">

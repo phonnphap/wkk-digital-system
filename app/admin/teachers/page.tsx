@@ -432,10 +432,18 @@ export default function AdminAttendanceOverviewPage() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
       <main className="w-full p-4 md:p-8 lg:p-10 space-y-6 max-w-6xl mx-auto">
-        <div className="text-sm text-slate-500 font-bold flex items-center gap-2">
-          <span>ผู้ดูแลระบบ</span>
-          <span className="text-slate-300">/</span>
-          <span className="text-slate-800 font-extrabold">การลงเวลาปฏิบัติงาน</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg"
+          >
+            🏠
+          </button>
+          <div className="text-sm text-slate-500 font-bold flex items-center gap-2">
+            <span>ผู้ดูแลระบบ</span>
+            <span className="text-slate-300">/</span>
+            <span className="text-slate-800 font-extrabold">การลงเวลาปฏิบัติงาน</span>
+          </div>
         </div>
 
         {/* แถบเมนูช่วงเวลา: รายวัน / รายเดือน / รายเทอม / ปีงบประมาณ */}
