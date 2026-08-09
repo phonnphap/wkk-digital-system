@@ -246,8 +246,9 @@ export default function TeacherPortfolioPage() {
   .order("created_at", { ascending: false })
   .limit(10),
 supabase.from("teaching_materials").select("id,title,subject_group,created_at").eq("uploaded_by", me.id).order("created_at", { ascending: false }).limit(10),
-        // NOTE: เพิ่ม check_in_time, check_out_time, note เข้าไปใน select — ปรับชื่อคอลัมน์ให้ตรงกับ view จริง
-        supabase.from("v_attendance_enriched").select("work_date,status,late_minutes,early_leave_minutes,eval_round,check_in_time,check_out_time,note").eq("user_id", me.id).eq("fiscal_year", fy),
+        // NOTE: check_in_time / check_out_time / note ยังไม่มีอยู่จริงใน view นี้ — เอาออกชั่วคราวเพื่อไม่ให้ query error
+        // เมื่อทราบชื่อคอลัมน์จริงที่เก็บเวลาเข้า-ออกแล้ว ให้เพิ่มกลับเข้าไปใน select ด้านล่างนี้
+        supabase.from("v_attendance_enriched").select("work_date,status,late_minutes,early_leave_minutes,eval_round").eq("user_id", me.id).eq("fiscal_year", fy),
       ]);
       setLeaveSummary(quotaRows || []);
       setLeaveCount(countRow || null);
