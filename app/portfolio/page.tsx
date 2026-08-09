@@ -48,8 +48,7 @@ type AttendanceRow = {
   late_minutes: number;
   early_leave_minutes: number;
   eval_round: number;
-  // NOTE: ชื่อคอลัมน์ 3 ตัวนี้เป็นการ "สมมติ" ตามข้อมูลที่ควรมีใน v_attendance_enriched
-  // ถ้าฐานข้อมูลจริงใช้ชื่ออื่น (เช่น time_in / time_out / remark) ให้แก้ชื่อ field ในทั้งไฟล์นี้ให้ตรงกัน
+  // ชื่อคอลัมน์ 3 ตัวนี้เป็นการ "สมมติ" — ถ้า view จริงใช้ชื่ออื่น ให้แก้ในฟังก์ชัน fetchAttendanceRows()
   check_in_time?: string | null;   // เวลาเข้า เช่น "07:42:00"
   check_out_time?: string | null;  // เวลาออก เช่น "16:31:00"
   note?: string | null;            // หมายเหตุ เช่น "ลาป่วย"
@@ -62,14 +61,6 @@ const MONTH_LABEL: Record<number, string> = {
   7: "ก.ค.", 8: "ส.ค.", 9: "ก.ย.", 10: "ต.ค.", 11: "พ.ย.", 12: "ธ.ค.",
 };
 const FY_MONTHS = [10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-
-const STATUS_META: Record<string, { label: string; color: string }> = {
-  present: { label: "มาปฏิบัติงาน", color: "text-emerald-600 bg-emerald-50" },
-  late: { label: "มาสาย", color: "text-amber-600 bg-amber-50" },
-  left_early: { label: "กลับก่อน", color: "text-orange-600 bg-orange-50" },
-  late_and_left_early: { label: "สาย+กลับก่อน", color: "text-orange-600 bg-orange-50" },
-  absent: { label: "ขาด", color: "text-rose-600 bg-rose-50" },
-};
 
 // คำนวณปี ค.ศ. ของ "เดือนปีงบ" (10-12 อยู่ปีก่อนหน้าของ Jan-Sep) โดยอิงจากปีงบปัจจุบัน
 function calendarYearForFiscalMonth(month: number) {
@@ -93,6 +84,106 @@ function toDateInputValue(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
+// สีตามสถานะ: เขียว = ปกติ, ส้ม = สาย/กลับก่อน, แดง = ไม่ได้ลงเวลา/ขาด, เทา = เป็นกลาง
+type Tone = "green" | "orange" | "red" | "slate";
+const TONE_CLASSES: Record<Tone, { bg: string; text: string; iconBg: string }> = {
+  green: { bg: "bg-emerald-50", text: "text-emerald-600", iconBg: "bg-emerald-100 text-emerald-600" },
+  orange: { bg: "bg-orange-50", text: "text-orange-600", iconBg: "bg-orange-100 text-orange-600" },
+  red: { bg: "bg-rose-50", text: "text-rose-600", iconBg: "bg-rose-100 text-rose-600" },
+  slate: { bg: "bg-slate-50", text: "text-slate-500", iconBg: "bg-slate-100 text-slate-500" },
+};
+
+// ── ดึงข้อมูลลงเวลา: ลอง select คอลัมน์เวลาเข้า/ออก/หมายเหตุก่อน ถ้า view ยังไม่มีคอลัมน์เหล่านี้
+// จะ fallback ไป select เฉพาะคอลัมน์พื้นฐานอัตโนมัติ (กัน error 42703 ไม่ให้หน้าเว็บพังอีก) ──
+async function fetchAttendanceRows(supabase: any, userId: string, fy: number): Promise<AttendanceRow[]> {
+  const extended = await supabase
+    .from("v_attendance_enriched")
+    .select("work_date,status,late_minutes,early_leave_minutes,eval_round,check_in_time,check_out_time,note")
+    .eq("user_id", userId)
+    .eq("fiscal_year", fy);
+  if (!extended.error) return (extended.data as AttendanceRow[]) || [];
+
+  const basic = await supabase
+    .from("v_attendance_enriched")
+    .select("work_date,status,late_minutes,early_leave_minutes,eval_round")
+    .eq("user_id", userId)
+    .eq("fiscal_year", fy);
+  return (basic.data as AttendanceRow[]) || [];
+}
+
+// ── ดึงวันที่ที่มีใบลาอนุมัติแล้ว เพื่อใช้ตัดสินว่าวันที่ไม่ลงเวลาเป็น "ลาในระบบแล้ว" ไม่ใช่ "ขาดงาน"
+// สมมติว่าตาราง leave_requests มีคอลัมน์ start_date, end_date, status ('approved')
+// ถ้าโครงสร้างจริงต่างจากนี้ ฟังก์ชันนี้จะ fail แบบเงียบและคืนค่าว่าง ไม่ทำให้หน้าเว็บพัง ──
+async function fetchApprovedLeaveDates(supabase: any, userId: string): Promise<Set<string>> {
+  try {
+    const { data, error } = await supabase
+      .from("leave_requests")
+      .select("start_date,end_date,status")
+      .eq("user_id", userId)
+      .eq("status", "approved");
+    if (error || !data) return new Set();
+    const set = new Set<string>();
+    data.forEach((r: any) => {
+      if (!r.start_date || !r.end_date) return;
+      const cursor = new Date(r.start_date);
+      const end = new Date(r.end_date);
+      while (cursor <= end) {
+        set.add(toDateInputValue(cursor));
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    });
+    return set;
+  } catch {
+    return new Set();
+  }
+}
+
+// ── รวมข้อความหมายเหตุ + สถานะการลาในระบบ ──
+function buildRemark(note: string | null | undefined, onLeave: boolean): string | null {
+  const parts: string[] = [];
+  if (note) parts.push(note);
+  if (onLeave) parts.push("ลาในระบบแล้ว");
+  return parts.length ? parts.join(" · ") : null;
+}
+
+// ── สถานะกล่อง "มา" มุมมองรายวัน ──
+function dayCheckInInfo(row: AttendanceRow | null | undefined) {
+  if (!row?.check_in_time) return { time: null as string | null, label: "ไม่ได้ลงเวลาเข้า", tone: "red" as Tone };
+  const isLate = row.status === "late" || row.status === "late_and_left_early";
+  return {
+    time: formatTimeHHmm(row.check_in_time),
+    label: isLate ? `มาปฏิบัติงานสาย${row.late_minutes ? ` (${row.late_minutes} นาที)` : ""}` : "มาปฏิบัติงาน",
+    tone: (isLate ? "orange" : "green") as Tone,
+  };
+}
+
+// ── สถานะกล่อง "กลับ" มุมมองรายวัน ──
+function dayCheckOutInfo(row: AttendanceRow | null | undefined) {
+  if (!row?.check_out_time) return { time: null as string | null, label: "ไม่ได้ลงเวลากลับ", tone: "red" as Tone };
+  const isEarly = row.status === "left_early" || row.status === "late_and_left_early";
+  return {
+    time: formatTimeHHmm(row.check_out_time),
+    label: isEarly ? `กลับก่อนเวลา${row.early_leave_minutes ? ` (${row.early_leave_minutes} นาที)` : ""}` : "กลับตรงเวลา",
+    tone: (isEarly ? "orange" : "green") as Tone,
+  };
+}
+
+// ── สถานะ "เวลาเข้า" มุมมองรายเดือน ──
+function monthlyCheckInStatus(row: { check_in_time: string | null; status: string | null; late_minutes: number }) {
+  if (!row.check_in_time) return { text: "ไม่ลงเวลา", tone: "red" as Tone };
+  const isLate = row.status === "late" || row.status === "late_and_left_early";
+  if (isLate) return { text: `สาย${row.late_minutes ? ` ${row.late_minutes} นาที` : ""}`, tone: "orange" as Tone };
+  return { text: "มาปฏิบัติงาน", tone: "green" as Tone };
+}
+
+// ── สถานะ "เวลาออก" มุมมองรายเดือน ──
+function monthlyCheckOutStatus(row: { check_out_time: string | null; status: string | null }) {
+  if (!row.check_out_time) return { text: "ยังไม่ออกงาน", tone: "slate" as Tone };
+  const isEarly = row.status === "left_early" || row.status === "late_and_left_early";
+  if (isEarly) return { text: "กลับก่อนเวลา", tone: "orange" as Tone };
+  return { text: "ออกงานแล้ว", tone: "green" as Tone };
+}
+
 export default function TeacherPortfolioPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -113,11 +204,14 @@ export default function TeacherPortfolioPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
+  const [onLeaveDates, setOnLeaveDates] = useState<Set<string>>(new Set());
 
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportForm, setSupportForm] = useState({ category: "edit_locked_field", subject: "", message: "" });
   const [supportSending, setSupportSending] = useState(false);
   const [supportSent, setSupportSent] = useState(false);
+
+  const todayStr = useMemo(() => toDateInputValue(new Date()), []);
 
   useEffect(() => {
     loadAll();
@@ -128,26 +222,11 @@ export default function TeacherPortfolioPage() {
     return attendance.find(r => r.work_date?.slice(0, 10) === selectedDay) ?? null;
   }, [attendance, selectedDay]);
 
-  // ── สรุปการลงเวลาตามช่วงที่เลือก (month/term/year ใช้กับตารางสรุป) ──
-  const attendanceStats = useMemo(() => {
-    const now = new Date();
-    const filtered = attendance.filter(r => {
-      const d = new Date(r.work_date);
-      if (period === "month") return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-      if (period === "term") {
-        const round = (now.getMonth() >= 9 || now.getMonth() <= 2) ? 1 : 2;
-        return r.eval_round === round;
-      }
-      return true; // year = ทั้งปีงบ
-    });
-    const cnt = (s: string) => filtered.filter(r => r.status === s).length;
-    return {
-      present: cnt("present"),
-      late: cnt("late") + cnt("late_and_left_early"),
-      leftEarly: cnt("left_early") + cnt("late_and_left_early"),
-      absent: cnt("absent"),
-    };
-  }, [attendance, period]);
+  const selectedOnLeave = onLeaveDates.has(selectedDay);
+  const selectedHasIn = !!selectedDayRow?.check_in_time;
+  const selectedHasOut = !!selectedDayRow?.check_out_time;
+  const selectedDayIsAbsent = !selectedHasIn && !selectedHasOut && !selectedOnLeave;
+  const selectedRemark = buildRemark(selectedDayRow?.note, selectedOnLeave);
 
   const monthlyAttendance = useMemo(() => {
     const now = new Date();
@@ -162,16 +241,19 @@ export default function TeacherPortfolioPage() {
     return months.map(m => {
       const rows = attendance.filter(r => new Date(r.work_date).getMonth() + 1 === m);
       const cnt = (s: string) => rows.filter(r => r.status === s).length;
+      const noteCount = rows.filter(r => r.note || onLeaveDates.has(r.work_date?.slice(0, 10))).length;
       return {
         month: m,
         label: MONTH_LABEL[m],
         present: cnt("present"),
         late: cnt("late") + cnt("late_and_left_early"),
+        onTimeReturn: cnt("present") + cnt("late"),
         leftEarly: cnt("left_early") + cnt("late_and_left_early"),
         absent: cnt("absent"),
+        noteCount,
       };
     });
-  }, [attendance, period]);
+  }, [attendance, period, onLeaveDates]);
 
   // ── ตารางรายวันของเดือนที่เลือก (ใช้ตอน period === "month") ──
   const dailyAttendance = useMemo(() => {
@@ -235,7 +317,7 @@ export default function TeacherPortfolioPage() {
         .subscribe();
 
       const fy = currentFiscalYear();
-      const [{ data: quotaRows }, { data: countRow }, { data: tr }, { data: aw }, { data: mat }, { data: att }] = await Promise.all([
+      const [{ data: quotaRows }, { data: countRow }, { data: tr }, { data: aw }, { data: mat }, att, onLeaveSet] = await Promise.all([
         supabase.from("v_leave_summary").select("leave_type,total_days,used_days,remaining_days").eq("user_id", me.id).eq("fiscal_year", fy),
         supabase.from("v_leave_count_summary").select("used_count,remaining_count").eq("user_id", me.id).eq("fiscal_year", fy).maybeSingle(),
         supabase.from("trainings").select("id,title,organizer,hours,training_date,certificate_url").eq("user_id", me.id).order("training_date", { ascending: false }).limit(10),
@@ -246,9 +328,8 @@ export default function TeacherPortfolioPage() {
   .order("created_at", { ascending: false })
   .limit(10),
 supabase.from("teaching_materials").select("id,title,subject_group,created_at").eq("uploaded_by", me.id).order("created_at", { ascending: false }).limit(10),
-        // NOTE: check_in_time / check_out_time / note ยังไม่มีอยู่จริงใน view นี้ — เอาออกชั่วคราวเพื่อไม่ให้ query error
-        // เมื่อทราบชื่อคอลัมน์จริงที่เก็บเวลาเข้า-ออกแล้ว ให้เพิ่มกลับเข้าไปใน select ด้านล่างนี้
-        supabase.from("v_attendance_enriched").select("work_date,status,late_minutes,early_leave_minutes,eval_round").eq("user_id", me.id).eq("fiscal_year", fy),
+        fetchAttendanceRows(supabase, me.id, fy),
+        fetchApprovedLeaveDates(supabase, me.id),
       ]);
       setLeaveSummary(quotaRows || []);
       setLeaveCount(countRow || null);
@@ -259,6 +340,7 @@ supabase.from("teaching_materials").select("id,title,subject_group,created_at").
 setAwards(awardRows);
       setMaterials(mat || []);
       setAttendance(att || []);
+      setOnLeaveDates(onLeaveSet || new Set());
 
       const tasks: PendingTask[] = [];
       const { count: myPendingLeave } = await supabase
@@ -338,8 +420,8 @@ setAwards(awardRows);
   }
   if (!profile) return null;
 
-  const isLateStatus = selectedDayRow?.status === "late" || selectedDayRow?.status === "late_and_left_early";
-  const isEarlyStatus = selectedDayRow?.status === "left_early" || selectedDayRow?.status === "late_and_left_early";
+  const checkInInfo = dayCheckInInfo(selectedDayRow);
+  const checkOutInfo = dayCheckOutInfo(selectedDayRow);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800 font-sans antialiased">
@@ -539,60 +621,56 @@ setAwards(awardRows);
                   {new Date(selectedDay + "T00:00:00").toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
                 </p>
 
-                {!selectedDayRow ? (
-                  <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400 font-bold">
-                    ไม่มีข้อมูลการลงเวลาในวันที่เลือก
-                  </div>
-                ) : selectedDayRow.status === "absent" ? (
+                {selectedDayIsAbsent ? (
                   <div className="rounded-2xl bg-rose-50 border border-rose-100 p-5 flex items-center justify-between flex-wrap gap-3">
                     <div className="flex items-center gap-3">
                       <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
                         <AlertCircle className="w-5 h-5" />
                       </div>
                       <div>
-                        <p className="text-sm font-black text-rose-600">ขาด</p>
-                        <p className="text-xs text-rose-400 font-bold mt-0.5">1 วัน</p>
+                        <p className="text-sm font-black text-rose-600">ขาดงาน</p>
+                        <p className="text-xs text-rose-400 font-bold mt-0.5">ไม่มีการลงเวลาเข้า-ออกในวันนี้</p>
                       </div>
                     </div>
-                    {selectedDayRow.note && (
+                    {selectedRemark && (
                       <div className="text-xs font-bold text-rose-600 bg-white rounded-lg px-3 py-2 border border-rose-100">
-                        หมายเหตุ: {selectedDayRow.note}
+                        หมายเหตุ: {selectedRemark}
                       </div>
                     )}
                   </div>
                 ) : (
                   <div className="space-y-3">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className={`rounded-2xl p-4 flex items-center gap-3 ${isLateStatus ? "bg-amber-50" : "bg-emerald-50"}`}>
-                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${isLateStatus ? "bg-amber-100 text-amber-600" : "bg-emerald-100 text-emerald-600"}`}>
+                      <div className={`rounded-2xl p-4 flex items-center gap-3 ${TONE_CLASSES[checkInInfo.tone].bg}`}>
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${TONE_CLASSES[checkInInfo.tone].iconBg}`}>
                           <Clock className="w-5 h-5" />
                         </div>
                         <div>
-                          <p className={`text-2xl font-black ${isLateStatus ? "text-amber-600" : "text-emerald-600"}`}>
-                            {formatTimeHHmm(selectedDayRow.check_in_time) ?? "-"}
+                          <p className={`text-2xl font-black ${TONE_CLASSES[checkInInfo.tone].text}`}>
+                            {checkInInfo.time ?? "-"}
                           </p>
-                          <p className={`text-xs font-bold ${isLateStatus ? "text-amber-500" : "text-emerald-500"}`}>
-                            {isLateStatus ? `มาสาย${selectedDayRow.late_minutes ? ` (${selectedDayRow.late_minutes} นาที)` : ""}` : "มาปฏิบัติงาน"}
+                          <p className={`text-xs font-bold ${TONE_CLASSES[checkInInfo.tone].text}`}>
+                            {checkInInfo.label}
                           </p>
                         </div>
                       </div>
-                      <div className={`rounded-2xl p-4 flex items-center gap-3 ${isEarlyStatus ? "bg-orange-50" : "bg-emerald-50"}`}>
-                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${isEarlyStatus ? "bg-orange-100 text-orange-600" : "bg-emerald-100 text-emerald-600"}`}>
+                      <div className={`rounded-2xl p-4 flex items-center gap-3 ${TONE_CLASSES[checkOutInfo.tone].bg}`}>
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${TONE_CLASSES[checkOutInfo.tone].iconBg}`}>
                           <Clock className="w-5 h-5" />
                         </div>
                         <div>
-                          <p className={`text-2xl font-black ${isEarlyStatus ? "text-orange-600" : "text-emerald-600"}`}>
-                            {formatTimeHHmm(selectedDayRow.check_out_time) ?? "-"}
+                          <p className={`text-2xl font-black ${TONE_CLASSES[checkOutInfo.tone].text}`}>
+                            {checkOutInfo.time ?? "-"}
                           </p>
-                          <p className={`text-xs font-bold ${isEarlyStatus ? "text-orange-500" : "text-emerald-500"}`}>
-                            {isEarlyStatus ? `กลับก่อนเวลา${selectedDayRow.early_leave_minutes ? ` (${selectedDayRow.early_leave_minutes} นาที)` : ""}` : "กลับตรงเวลา"}
+                          <p className={`text-xs font-bold ${TONE_CLASSES[checkOutInfo.tone].text}`}>
+                            {checkOutInfo.label}
                           </p>
                         </div>
                       </div>
                     </div>
-                    {selectedDayRow.note && (
+                    {selectedRemark && (
                       <div className="text-xs font-bold text-slate-500 bg-slate-50 rounded-xl px-3 py-2.5">
-                        หมายเหตุ: {selectedDayRow.note}
+                        หมายเหตุ: {selectedRemark}
                       </div>
                     )}
                   </div>
@@ -604,7 +682,6 @@ setAwards(awardRows);
                   <thead className="sticky top-0 bg-slate-50">
                     <tr className="border-b border-slate-100">
                       <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">วันที่</th>
-                      <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">สถานะ</th>
                       <th className="text-center px-3 py-2 font-bold text-slate-500 text-xs">เวลาเข้า</th>
                       <th className="text-center px-3 py-2 font-bold text-slate-500 text-xs">เวลาออก</th>
                       <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">หมายเหตุ</th>
@@ -614,26 +691,50 @@ setAwards(awardRows);
                     {dailyAttendance.map(d => {
                       const dow = d.date.getDay();
                       const isWeekend = dow === 0 || dow === 6;
-                      const meta = d.status ? STATUS_META[d.status] : null;
+                      const dateStr = toDateInputValue(d.date);
+                      const isFuture = dateStr > todayStr;
+                      const onLeave = onLeaveDates.has(dateStr);
+                      const hasIn = !!d.check_in_time;
+                      const hasOut = !!d.check_out_time;
+                      const remark = buildRemark(d.note, onLeave);
+                      const isAbsentRow = !isWeekend && !isFuture && !hasIn && !hasOut && !onLeave;
+                      const inStatus = monthlyCheckInStatus(d);
+                      const outStatus = monthlyCheckOutStatus(d);
+
                       return (
                         <tr key={d.day} className={isWeekend ? "bg-slate-50/60" : "hover:bg-slate-50/60"}>
-                          <td className="px-3 py-2 font-bold text-slate-700">
+                          <td className="px-3 py-2 font-bold text-slate-700 whitespace-nowrap">
                             {d.day} {WEEKDAY_LABEL[dow]}
                           </td>
-                          <td className="px-3 py-2">
-                            {meta ? (
-                              <span className={`inline-block px-2 py-0.5 rounded-md text-xs font-bold ${meta.color}`}>{meta.label}</span>
-                            ) : (
-                              <span className="text-xs text-slate-300">—</span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2 text-center font-black text-slate-600">
-                            {d.status === "absent" ? "-" : formatTimeHHmm(d.check_in_time) ?? "-"}
-                          </td>
-                          <td className="px-3 py-2 text-center font-black text-slate-600">
-                            {d.status === "absent" ? "-" : formatTimeHHmm(d.check_out_time) ?? "-"}
-                          </td>
-                          <td className="px-3 py-2 text-xs text-slate-400 font-bold">{d.note || "—"}</td>
+                          {isWeekend || isFuture ? (
+                            <td colSpan={2} className="px-3 py-2 text-center text-xs text-slate-300 font-bold">
+                              {isWeekend ? "วันหยุด" : "—"}
+                            </td>
+                          ) : isAbsentRow ? (
+                            <td colSpan={2} className="px-3 py-2 text-center">
+                              <span className="inline-block px-2.5 py-1 rounded-md text-xs font-bold text-rose-600 bg-rose-50">ขาดงาน</span>
+                            </td>
+                          ) : (
+                            <>
+                              <td className="px-3 py-2 text-center">
+                                <div className="flex flex-col items-center gap-1">
+                                  <span className="font-black text-slate-700">{formatTimeHHmm(d.check_in_time) ?? "-"}</span>
+                                  <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${TONE_CLASSES[inStatus.tone].bg} ${TONE_CLASSES[inStatus.tone].text}`}>
+                                    {inStatus.text}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <div className="flex flex-col items-center gap-1">
+                                  <span className="font-black text-slate-700">{formatTimeHHmm(d.check_out_time) ?? "-"}</span>
+                                  <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${TONE_CLASSES[outStatus.tone].bg} ${TONE_CLASSES[outStatus.tone].text}`}>
+                                    {outStatus.text}
+                                  </span>
+                                </div>
+                              </td>
+                            </>
+                          )}
+                          <td className="px-3 py-2 text-xs text-slate-500 font-bold">{remark || "—"}</td>
                         </tr>
                       );
                     })}
@@ -648,8 +749,10 @@ setAwards(awardRows);
                       <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">เดือน</th>
                       <th className="text-center px-3 py-2 font-bold text-emerald-600 text-xs">มาปฏิบัติงาน</th>
                       <th className="text-center px-3 py-2 font-bold text-amber-600 text-xs">มาสาย</th>
+                      <th className="text-center px-3 py-2 font-bold text-emerald-600 text-xs">กลับตรงเวลา</th>
                       <th className="text-center px-3 py-2 font-bold text-orange-600 text-xs">กลับก่อน</th>
                       <th className="text-center px-3 py-2 font-bold text-rose-600 text-xs">ขาด</th>
+                      <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">หมายเหตุ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
@@ -658,8 +761,10 @@ setAwards(awardRows);
                         <td className="px-3 py-2 font-bold text-slate-700">{m.label}</td>
                         <td className="px-3 py-2 text-center font-black text-emerald-600">{m.present || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-amber-600">{m.late || "-"}</td>
+                        <td className="px-3 py-2 text-center font-black text-emerald-600">{m.onTimeReturn || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-orange-600">{m.leftEarly || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-rose-600">{m.absent || "-"}</td>
+                        <td className="px-3 py-2 text-xs text-slate-500 font-bold">{m.noteCount > 0 ? `${m.noteCount} วัน` : "—"}</td>
                       </tr>
                     ))}
                   </tbody>
