@@ -72,10 +72,14 @@ const STATUS_COLORS: Record<SubmissionStatus, string> = {
   failed: "bg-rose-100 text-rose-700",
 };
 
-function fmtDateTime(iso: string | null) {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  return d.toLocaleString("th-TH", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+function DateTimeText({ iso }: { iso: string | null }) {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    if (!iso) { setText("-"); return; }
+    const d = new Date(iso);
+    setText(d.toLocaleString("th-TH", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }));
+  }, [iso]);
+  return <span suppressHydrationWarning>{text || "-"}</span>;
 }
 function toLocalInput(iso: string | null) {
   if (!iso) return "";
@@ -279,8 +283,9 @@ function AssignmentList({
                         <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 text-[10px] font-black">{TYPE_LABELS[a.type]}</span>
                       </div>
                       <p className="text-slate-400 text-xs font-bold mt-0.5">
-                        มอบหมายเมื่อ {fmtDateTime(a.assigned_at)} {a.due_date ? `· กำหนดส่ง ${fmtDateTime(a.due_date)}` : ""}
-                      </p>
+  มอบหมายเมื่อ <DateTimeText iso={a.assigned_at} />
+  {a.due_date && <> · กำหนดส่ง <DateTimeText iso={a.due_date} /></>}
+</p>
                     </div>
                   </div>
 
@@ -814,8 +819,8 @@ function AssignmentDetail({
         <div className="flex-1 min-w-0">
           <p className="font-black text-slate-800 truncate">{assignment.title}</p>
           <p className="text-slate-400 text-xs font-bold">
-            {assignment.status === "draft" ? "แบบร่าง" : `เผยแพร่แล้ว · ${fmtDateTime(assignment.published_at)}`}
-          </p>
+  {assignment.status === "draft" ? "แบบร่าง" : <>เผยแพร่แล้ว · <DateTimeText iso={assignment.published_at} /></>}
+</p>
         </div>
         <button onClick={() => setEditing(true)} className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs">✏️ แก้ไขชิ้นงาน</button>
       </div>
@@ -871,11 +876,11 @@ function AssignmentInfoTab({ assignment }: { assignment: Assignment }) {
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-5 space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <InfoBox label="ประเภท" value={TYPE_LABELS[assignment.type]} />
-        <InfoBox label="คะแนนเต็ม" value={String(assignment.max_score)} />
-        <InfoBox label="มอบหมายเมื่อ" value={fmtDateTime(assignment.assigned_at)} />
-        <InfoBox label="กำหนดส่ง" value={fmtDateTime(assignment.due_date)} />
-      </div>
+  <InfoBox label="ประเภท" value={TYPE_LABELS[assignment.type]} />
+  <InfoBox label="คะแนนเต็ม" value={String(assignment.max_score)} />
+  <InfoBox label="มอบหมายเมื่อ" value={<DateTimeText iso={assignment.assigned_at} />} />
+  <InfoBox label="กำหนดส่ง" value={<DateTimeText iso={assignment.due_date} />} />
+</div>
       {assignment.allow_weight && (
         <div className="grid grid-cols-2 gap-3">
           <InfoBox label="น้ำหนักชิ้นงาน" value={assignment.weight_percent ? `${assignment.weight_percent}%` : "-"} />
@@ -889,7 +894,7 @@ function AssignmentInfoTab({ assignment }: { assignment: Assignment }) {
     </div>
   );
 }
-function InfoBox({ label, value }: { label: string; value: string }) {
+function InfoBox({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
       <p className="text-[10px] font-black text-slate-400">{label}</p>

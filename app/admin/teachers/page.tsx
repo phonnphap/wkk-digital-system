@@ -116,6 +116,27 @@ function addDays(dateStr: string, delta: number) {
   return toISODate(d);
 }
 
+// ── Supabase/PostgREST จำกัดผลลัพธ์สูงสุด 1000 แถวต่อ query โดยอัตโนมัติ
+// ถ้าข้อมูลในช่วงที่เลือกมีมากกว่านั้น (เช่นลงเวลาทั้งเดือนของทุกคนรวมกัน) ต้องวนดึงเป็นหน้า ๆ
+// ไม่งั้นแถวที่เกิน 1000 แรกจะหายไปเงียบ ๆ ทำให้ยอดรวมนับได้ไม่ครบ ──
+async function fetchAllRows<T = any>(
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
+  pageSize = 1000
+): Promise<T[]> {
+  let all: T[] = [];
+  let from = 0;
+  // ป้องกันลูปไม่รู้จบถ้าเกิด error ผิดปกติ
+  for (let guard = 0; guard < 1000; guard++) {
+    const { data, error } = await buildQuery(from, from + pageSize - 1);
+    if (error) break;
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 // รายการวันที่ทั้งหมดในเดือนที่เลือก (ไว้กดดูเวลาของแต่ละวันโดยตรง)
 function getDaysInMonth(monthStr: string) {
   const [y, m] = monthStr.split("-").map(Number);
@@ -280,13 +301,17 @@ export default function AdminAttendanceOverviewPage() {
     const onLeaveIds = new Set((leaveToday || []).map((r: any) => r.user_id));
 
     // ── ตารางลงเวลา: ปรับชื่อคอลัมน์ (check_in_time, check_out_time, work_date, note) ให้ตรงกับระบบจริงหากจำเป็น ──
+    // ใช้ fetchAllRows กันไว้เผื่อวันเดียวมีมากกว่า 1000 แถว (ปกติไม่ควรถึง แต่กันไว้ก่อน)
     let attendanceMap = new Map<string, any>();
     try {
-      const { data: attendanceToday } = await supabase
-        .from("teacher_attendance_records")
-        .select("user_id, check_in_time, check_out_time, note")
-        .eq("work_date", date);
-      attendanceMap = new Map((attendanceToday || []).map((r: any) => [r.user_id, r]));
+      const attendanceToday = await fetchAllRows((from, to) =>
+        supabase
+          .from("teacher_attendance_records")
+          .select("user_id, check_in_time, check_out_time, note")
+          .eq("work_date", date)
+          .range(from, to)
+      );
+      attendanceMap = new Map(attendanceToday.map((r: any) => [r.user_id, r]));
     } catch {
       // ตาราง teacher_attendance_records ยังไม่มี — ข้ามไปก่อน
     }
@@ -321,14 +346,19 @@ export default function AdminAttendanceOverviewPage() {
       .lte("start_date", end)
       .gte("end_date", start);
 
+    // ── จุดสำคัญ: ช่วงเวลาแบบเดือน/เทอม/ปีงบ มักมีแถวรวมกันเกิน 1000 แถว (เช่น 2,000+ แถวใน 1 เดือน)
+    // ถ้า query ครั้งเดียวไม่ใส่ range จะได้แค่ 1000 แถวแรกจาก PostgREST แล้วยอดรวมของครูบางคนจะหายไปเงียบ ๆ
+    // ต้องวนดึงให้ครบทุกแถวด้วย fetchAllRows ──
     let attendanceInRange: any[] = [];
     try {
-      const { data } = await supabase
-        .from("teacher_attendance_records")
-        .select("user_id, check_in_time, check_out_time")
-        .gte("work_date", start)
-        .lte("work_date", end);
-      attendanceInRange = data || [];
+      attendanceInRange = await fetchAllRows((from, to) =>
+        supabase
+          .from("teacher_attendance_records")
+          .select("user_id, check_in_time, check_out_time")
+          .gte("work_date", start)
+          .lte("work_date", end)
+          .range(from, to)
+      );
     } catch {
       // ตาราง teacher_attendance_records ยังไม่มี
     }
