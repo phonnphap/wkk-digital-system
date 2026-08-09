@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   User, Phone, MessageCircle, GraduationCap, Pencil, X, Check,
   CalendarDays, Trophy, FolderOpen, FileText, AlertCircle, Send, Loader2,
-  ClipboardList, ArrowRight,
+  ClipboardList, ArrowRight, Clock,
 } from "lucide-react";
 
 function currentFiscalYear() {
@@ -42,7 +42,18 @@ type Training = { id: string; title: string; organizer: string | null; hours: nu
 type Award = { id: string; title: string; award_level: string | null; date_received: string | null; image_cover: string | null };
 type Material = { id: string; title: string; subject_group: string | null; created_at: string };
 type PendingTask = { id: string; label: string; path: string };
-type AttendanceRow = { work_date: string; status: string; late_minutes: number; early_leave_minutes: number; eval_round: number };
+type AttendanceRow = {
+  work_date: string;
+  status: string;
+  late_minutes: number;
+  early_leave_minutes: number;
+  eval_round: number;
+  // NOTE: ชื่อคอลัมน์ 3 ตัวนี้เป็นการ "สมมติ" ตามข้อมูลที่ควรมีใน v_attendance_enriched
+  // ถ้าฐานข้อมูลจริงใช้ชื่ออื่น (เช่น time_in / time_out / remark) ให้แก้ชื่อ field ในทั้งไฟล์นี้ให้ตรงกัน
+  check_in_time?: string | null;   // เวลาเข้า เช่น "07:42:00"
+  check_out_time?: string | null;  // เวลาออก เช่น "16:31:00"
+  note?: string | null;            // หมายเหตุ เช่น "ลาป่วย"
+};
 
 const LEAVE_LABEL: Record<string, string> = { sick: "ลาป่วย", personal: "ลากิจ", maternity: "ลาคลอด" };
 
@@ -67,6 +78,21 @@ function calendarYearForFiscalMonth(month: number) {
   return month >= 10 ? baseYear - 1 : baseYear;
 }
 
+// แปลงเวลาแบบ "07:42:00" หรือ "07:42" -> "07.42"
+function formatTimeHHmm(t?: string | null): string | null {
+  if (!t) return null;
+  const parts = t.split(":");
+  if (parts.length < 2) return t;
+  return `${parts[0].padStart(2, "0")}.${parts[1].padStart(2, "0")}`;
+}
+
+function toDateInputValue(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export default function TeacherPortfolioPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -79,6 +105,7 @@ export default function TeacherPortfolioPage() {
 
   const [period, setPeriod] = useState<"day" | "month" | "term" | "year">("month");
   const [selectedMonth, setSelectedMonth] = useState<number>(() => new Date().getMonth() + 1);
+  const [selectedDay, setSelectedDay] = useState<string>(() => toDateInputValue(new Date()));
   const [leaveSummary, setLeaveSummary] = useState<LeaveSummaryRow[]>([]);
   const [leaveCount, setLeaveCount] = useState<{ used_count: number; remaining_count: number } | null>(null);
   const [trainings, setTrainings] = useState<Training[]>([]);
@@ -96,12 +123,16 @@ export default function TeacherPortfolioPage() {
     loadAll();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── สรุปการลงเวลาตามช่วงที่เลือก (day/month/term/year) ──
+  // ── แถวข้อมูลของ "วันที่เลือก" สำหรับมุมมองรายวัน ──
+  const selectedDayRow = useMemo(() => {
+    return attendance.find(r => r.work_date?.slice(0, 10) === selectedDay) ?? null;
+  }, [attendance, selectedDay]);
+
+  // ── สรุปการลงเวลาตามช่วงที่เลือก (month/term/year ใช้กับตารางสรุป) ──
   const attendanceStats = useMemo(() => {
     const now = new Date();
     const filtered = attendance.filter(r => {
       const d = new Date(r.work_date);
-      if (period === "day") return d.toDateString() === now.toDateString();
       if (period === "month") return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
       if (period === "term") {
         const round = (now.getMonth() >= 9 || now.getMonth() <= 2) ? 1 : 2;
@@ -164,6 +195,9 @@ export default function TeacherPortfolioPage() {
         status: row?.status ?? null,
         late_minutes: row?.late_minutes ?? 0,
         early_leave_minutes: row?.early_leave_minutes ?? 0,
+        check_in_time: row?.check_in_time ?? null,
+        check_out_time: row?.check_out_time ?? null,
+        note: row?.note ?? null,
       };
     });
   }, [attendance, selectedMonth]);
@@ -212,7 +246,8 @@ export default function TeacherPortfolioPage() {
   .order("created_at", { ascending: false })
   .limit(10),
 supabase.from("teaching_materials").select("id,title,subject_group,created_at").eq("uploaded_by", me.id).order("created_at", { ascending: false }).limit(10),
-        supabase.from("v_attendance_enriched").select("work_date,status,late_minutes,early_leave_minutes,eval_round").eq("user_id", me.id).eq("fiscal_year", fy),
+        // NOTE: เพิ่ม check_in_time, check_out_time, note เข้าไปใน select — ปรับชื่อคอลัมน์ให้ตรงกับ view จริง
+        supabase.from("v_attendance_enriched").select("work_date,status,late_minutes,early_leave_minutes,eval_round,check_in_time,check_out_time,note").eq("user_id", me.id).eq("fiscal_year", fy),
       ]);
       setLeaveSummary(quotaRows || []);
       setLeaveCount(countRow || null);
@@ -294,18 +329,25 @@ setAwards(awardRows);
   }
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-slate-400"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100 text-slate-400">
+        <Loader2 className="w-6 h-6 animate-spin" />
+      </div>
+    );
   }
   if (!profile) return null;
 
+  const isLateStatus = selectedDayRow?.status === "late" || selectedDayRow?.status === "late_and_left_early";
+  const isEarlyStatus = selectedDayRow?.status === "left_early" || selectedDayRow?.status === "late_and_left_early";
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
-      <main className="w-full p-4 md:p-8 lg:p-10 space-y-8 max-w-5xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800 font-sans antialiased">
+      <main className="w-full px-4 py-6 md:px-8 md:py-8 lg:px-12 lg:py-10 space-y-6 max-w-[1600px] mx-auto">
 
         {/* Header */}
         <div className="flex items-center gap-2">
           <button onClick={() => router.push("/dashboard")}
-            className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg transition-colors"
+            className="w-9 h-9 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 flex items-center justify-center text-slate-600 font-bold text-lg transition-colors shadow-sm"
             title="ไปหน้าแดชบอร์ด">🏠</button>
           <span className="text-slate-300">/</span>
           <span className="text-sm text-slate-800 font-extrabold">ประวัติส่วนตัวและผลการปฏิบัติงาน</span>
@@ -325,98 +367,103 @@ setAwards(awardRows);
         )}
 
         {/* Profile card */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-2xl bg-blue-600 text-white flex items-center justify-center overflow-hidden shrink-0">
-                {profile.avatar_url ? (
-                  <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+        <div className="relative bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
+          <div className="h-20 bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-500" />
+          <div className="px-6 pb-6 -mt-10 space-y-5">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-4">
+                <div className="w-20 h-20 rounded-2xl bg-blue-600 text-white flex items-center justify-center overflow-hidden shrink-0 ring-4 ring-white shadow-md">
+                  {profile.avatar_url ? (
+                    <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-8 h-8" />
+                  )}
+                </div>
+                <div className="pt-9">
+                  <h1 className="text-xl font-black text-slate-900">{profile.title}{profile.first_name} {profile.last_name}</h1>
+                  <p className="text-sm text-slate-400 font-bold">{profile.position || "ยังไม่ระบุตำแหน่ง"}</p>
+                </div>
+              </div>
+              <div className="pt-9">
+                {!editing ? (
+                  <button onClick={() => setEditing(true)}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-bold text-blue-600 hover:bg-blue-50 border border-blue-100 transition-colors">
+                    <Pencil className="w-4 h-4" /> แก้ไขข้อมูลส่วนตัว
+                  </button>
                 ) : (
-                  <User className="w-7 h-7" />
+                  <div className="flex gap-2">
+                    <button onClick={saveProfile} disabled={saving}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 shadow-sm">
+                      {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} บันทึก
+                    </button>
+                    <button onClick={() => { setEditing(false); setForm(profile); }}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 border border-slate-200">
+                      <X className="w-4 h-4" /> ยกเลิก
+                    </button>
+                  </div>
                 )}
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* ตำแหน่ง — บันทึกทันทีตอนออกจากช่อง ไม่ผูกปุ่มบันทึกรวม */}
               <div>
-                <h1 className="text-xl font-black text-slate-900">{profile.title}{profile.first_name} {profile.last_name}</h1>
-                <p className="text-sm text-slate-400 font-bold">{profile.position || "ยังไม่ระบุตำแหน่ง"}</p>
+                <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
+                  <User className="w-4 h-4" /> ตำแหน่ง
+                </p>
+                {editing ? (
+                  <input
+                    defaultValue={profile.position ?? ""}
+                    onBlur={(e) => savePositionNow(e.target.value)}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-300"
+                  />
+                ) : (
+                  <p className="text-sm font-bold text-slate-700">{profile.position ?? "—"}</p>
+                )}
+              </div>
+
+              <Field icon={<Phone className="w-4 h-4" />} label="เบอร์โทร" editing={editing}
+                value={editing ? form.phone ?? "" : profile.phone ?? "—"}
+                onChange={(v) => setForm(f => ({ ...f, phone: v }))} />
+              <Field icon={<MessageCircle className="w-4 h-4" />} label="ไลน์ไอดี" editing={editing}
+                value={editing ? form.line_id ?? "" : profile.line_id ?? "—"}
+                onChange={(v) => setForm(f => ({ ...f, line_id: v }))} />
+              <Field icon={<GraduationCap className="w-4 h-4" />} label="วุฒิการศึกษา" editing={editing}
+                value={editing ? form.education_level ?? "" : profile.education_level ?? "—"}
+                onChange={(v) => setForm(f => ({ ...f, education_level: v }))} />
+              <Field icon={<GraduationCap className="w-4 h-4" />} label="สาขา / สถาบัน" editing={editing}
+                value={editing ? form.education_major ?? "" : [profile.education_major, profile.education_school].filter(Boolean).join(" · ") || "—"}
+                onChange={(v) => setForm(f => ({ ...f, education_major: v }))} />
+
+              {/* อ่านอย่างเดียว — ครูแก้ไม่ได้ */}
+              <div>
+                <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
+                  <GraduationCap className="w-4 h-4" /> กลุ่มสาระการเรียนรู้
+                </p>
+                <p className="text-sm font-bold text-slate-700">{profile.department?.name ?? profile.subject_group ?? "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
+                  <CalendarDays className="w-4 h-4" /> ประจำชั้น
+                </p>
+                <p className="text-sm font-bold text-slate-700">
+    {[...(profile.homeroom ?? []), ...(profile.homeroom_teacher_2 ?? [])]
+      .map(h => h.room_name).join(", ") || "—"}
+  </p>
               </div>
             </div>
-            {!editing ? (
-              <button onClick={() => setEditing(true)}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-bold text-blue-600 hover:bg-blue-50 border border-blue-100">
-                <Pencil className="w-4 h-4" /> แก้ไขข้อมูลส่วนตัว
-              </button>
-            ) : (
-              <div className="flex gap-2">
-                <button onClick={saveProfile} disabled={saving}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} บันทึก
-                </button>
-                <button onClick={() => { setEditing(false); setForm(profile); }}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 border border-slate-200">
-                  <X className="w-4 h-4" /> ยกเลิก
-                </button>
-              </div>
-            )}
+            <p className="text-[11px] text-slate-400">
+              ต้องการแก้ไขข้อมูลที่ถูกล็อก (เช่น ชื่อ-สกุล, บทบาท, กลุ่มสาระ, ประจำชั้น) ให้ส่งคำร้องด้านล่างถึงแอดมิน
+            </p>
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* ตำแหน่ง — บันทึกทันทีตอนออกจากช่อง ไม่ผูกปุ่มบันทึกรวม */}
-            <div>
-              <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
-                <User className="w-4 h-4" /> ตำแหน่ง
-              </p>
-              {editing ? (
-                <input
-                  defaultValue={profile.position ?? ""}
-                  onBlur={(e) => savePositionNow(e.target.value)}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-700"
-                />
-              ) : (
-                <p className="text-sm font-bold text-slate-700">{profile.position ?? "—"}</p>
-              )}
-            </div>
-
-            <Field icon={<Phone className="w-4 h-4" />} label="เบอร์โทร" editing={editing}
-              value={editing ? form.phone ?? "" : profile.phone ?? "—"}
-              onChange={(v) => setForm(f => ({ ...f, phone: v }))} />
-            <Field icon={<MessageCircle className="w-4 h-4" />} label="ไลน์ไอดี" editing={editing}
-              value={editing ? form.line_id ?? "" : profile.line_id ?? "—"}
-              onChange={(v) => setForm(f => ({ ...f, line_id: v }))} />
-            <Field icon={<GraduationCap className="w-4 h-4" />} label="วุฒิการศึกษา" editing={editing}
-              value={editing ? form.education_level ?? "" : profile.education_level ?? "—"}
-              onChange={(v) => setForm(f => ({ ...f, education_level: v }))} />
-            <Field icon={<GraduationCap className="w-4 h-4" />} label="สาขา / สถาบัน" editing={editing}
-              value={editing ? form.education_major ?? "" : [profile.education_major, profile.education_school].filter(Boolean).join(" · ") || "—"}
-              onChange={(v) => setForm(f => ({ ...f, education_major: v }))} />
-
-            {/* อ่านอย่างเดียว — ครูแก้ไม่ได้ */}
-            <div>
-              <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
-                <GraduationCap className="w-4 h-4" /> กลุ่มสาระการเรียนรู้
-              </p>
-              <p className="text-sm font-bold text-slate-700">{profile.department?.name ?? profile.subject_group ?? "—"}</p>
-            </div>
-            <div>
-              <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
-                <CalendarDays className="w-4 h-4" /> ประจำชั้น
-              </p>
-              <p className="text-sm font-bold text-slate-700">
-  {[...(profile.homeroom ?? []), ...(profile.homeroom_teacher_2 ?? [])]
-    .map(h => h.room_name).join(", ") || "—"}
-</p>
-            </div>
-          </div>
-          <p className="text-[11px] text-slate-400">
-            ต้องการแก้ไขข้อมูลที่ถูกล็อก (เช่น ชื่อ-สกุล, บทบาท, กลุ่มสาระ, ประจำชั้น) ให้ส่งคำร้องด้านล่างถึงแอดมิน
-          </p>
         </div>
 
         {/* Quick links: การลา / การสอนแทน — พร้อมเลขสรุป */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button onClick={() => router.push("/leave")}
-            className="bg-white border border-slate-200 rounded-2xl p-4 text-left hover:border-blue-300 hover:shadow-sm transition-all flex items-center justify-between gap-3">
+            className="bg-white border border-slate-200 rounded-3xl p-4 text-left hover:border-blue-300 hover:shadow-md transition-all flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0"><CalendarDays className="w-5 h-5" /></div>
+              <div className="w-11 h-11 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0"><CalendarDays className="w-5 h-5" /></div>
               <div>
                 <p className="text-sm font-extrabold text-slate-800">ข้อมูลการลา</p>
                 <p className="text-xs text-slate-400 mt-0.5">
@@ -430,9 +477,9 @@ setAwards(awardRows);
           </button>
 
           <button onClick={() => router.push("/substitution")}
-            className="bg-white border border-slate-200 rounded-2xl p-4 text-left hover:border-purple-300 hover:shadow-sm transition-all flex items-center justify-between gap-3">
+            className="bg-white border border-slate-200 rounded-3xl p-4 text-left hover:border-purple-300 hover:shadow-md transition-all flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center shrink-0"><FileText className="w-5 h-5" /></div>
+              <div className="w-11 h-11 rounded-2xl bg-purple-100 text-purple-600 flex items-center justify-center shrink-0"><FileText className="w-5 h-5" /></div>
               <div>
                 <p className="text-sm font-extrabold text-slate-800">ข้อมูลการสอนแทน</p>
                 <p className="text-xs text-slate-400 mt-0.5">ดูประวัติ / ตารางสอนแทน</p>
@@ -443,7 +490,7 @@ setAwards(awardRows);
         </div>
 
         {/* Performance period + leave + attendance summary */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <h3 className="text-sm font-extrabold text-slate-800">📊 สรุปผลการปฏิบัติงาน</h3>
             <div className="flex gap-1.5 bg-slate-100 rounded-xl p-1">
@@ -451,7 +498,7 @@ setAwards(awardRows);
                 ["day", "รายวัน"], ["month", "รายเดือน"], ["term", "รายเทอม"], ["year", "ปีงบประมาณ"],
               ] as const).map(([key, label]) => (
                 <button key={key} onClick={() => setPeriod(key)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${period === key ? "bg-white shadow-sm text-blue-600" : "text-slate-500"}`}>
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${period === key ? "bg-white shadow-sm text-blue-600" : "text-slate-500 hover:text-slate-700"}`}>
                   {label}
                 </button>
               ))}
@@ -468,31 +515,98 @@ setAwards(awardRows);
                 <select
                   value={selectedMonth}
                   onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                  className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-600 bg-white"
+                  className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-600 bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
                 >
                   {FY_MONTHS.map(m => (
                     <option key={m} value={m}>{MONTH_LABEL[m]} {calendarYearForFiscalMonth(m) + 543}</option>
                   ))}
                 </select>
               )}
+              {period === "day" && (
+                <input
+                  type="date"
+                  value={selectedDay}
+                  onChange={(e) => setSelectedDay(e.target.value)}
+                  className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-600 bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              )}
             </div>
 
             {period === "day" ? (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <StatBox label="มาปฏิบัติงาน" value={attendanceStats.present} color="emerald" />
-                <StatBox label="มาสาย" value={attendanceStats.late} color="amber" />
-                <StatBox label="กลับก่อน" value={attendanceStats.leftEarly} color="orange" />
-                <StatBox label="ขาด" value={attendanceStats.absent} color="rose" />
+              <div className="space-y-3">
+                <p className="text-xs text-slate-400 font-bold">
+                  {new Date(selectedDay + "T00:00:00").toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                </p>
+
+                {!selectedDayRow ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400 font-bold">
+                    ไม่มีข้อมูลการลงเวลาในวันที่เลือก
+                  </div>
+                ) : selectedDayRow.status === "absent" ? (
+                  <div className="rounded-2xl bg-rose-50 border border-rose-100 p-5 flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                        <AlertCircle className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-black text-rose-600">ขาด</p>
+                        <p className="text-xs text-rose-400 font-bold mt-0.5">1 วัน</p>
+                      </div>
+                    </div>
+                    {selectedDayRow.note && (
+                      <div className="text-xs font-bold text-rose-600 bg-white rounded-lg px-3 py-2 border border-rose-100">
+                        หมายเหตุ: {selectedDayRow.note}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className={`rounded-2xl p-4 flex items-center gap-3 ${isLateStatus ? "bg-amber-50" : "bg-emerald-50"}`}>
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${isLateStatus ? "bg-amber-100 text-amber-600" : "bg-emerald-100 text-emerald-600"}`}>
+                          <Clock className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className={`text-2xl font-black ${isLateStatus ? "text-amber-600" : "text-emerald-600"}`}>
+                            {formatTimeHHmm(selectedDayRow.check_in_time) ?? "-"}
+                          </p>
+                          <p className={`text-xs font-bold ${isLateStatus ? "text-amber-500" : "text-emerald-500"}`}>
+                            {isLateStatus ? `มาสาย${selectedDayRow.late_minutes ? ` (${selectedDayRow.late_minutes} นาที)` : ""}` : "มาปฏิบัติงาน"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className={`rounded-2xl p-4 flex items-center gap-3 ${isEarlyStatus ? "bg-orange-50" : "bg-emerald-50"}`}>
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${isEarlyStatus ? "bg-orange-100 text-orange-600" : "bg-emerald-100 text-emerald-600"}`}>
+                          <Clock className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className={`text-2xl font-black ${isEarlyStatus ? "text-orange-600" : "text-emerald-600"}`}>
+                            {formatTimeHHmm(selectedDayRow.check_out_time) ?? "-"}
+                          </p>
+                          <p className={`text-xs font-bold ${isEarlyStatus ? "text-orange-500" : "text-emerald-500"}`}>
+                            {isEarlyStatus ? `กลับก่อนเวลา${selectedDayRow.early_leave_minutes ? ` (${selectedDayRow.early_leave_minutes} นาที)` : ""}` : "กลับตรงเวลา"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    {selectedDayRow.note && (
+                      <div className="text-xs font-bold text-slate-500 bg-slate-50 rounded-xl px-3 py-2.5">
+                        หมายเหตุ: {selectedDayRow.note}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : period === "month" ? (
-              <div className="overflow-x-auto rounded-xl border border-slate-100 max-h-[420px] overflow-y-auto">
+              <div className="overflow-x-auto rounded-2xl border border-slate-100 max-h-[480px] overflow-y-auto">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-slate-50">
                     <tr className="border-b border-slate-100">
                       <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">วันที่</th>
                       <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">สถานะ</th>
-                      <th className="text-center px-3 py-2 font-bold text-amber-600 text-xs">สาย (นาที)</th>
-                      <th className="text-center px-3 py-2 font-bold text-orange-600 text-xs">ออกก่อน (นาที)</th>
+                      <th className="text-center px-3 py-2 font-bold text-slate-500 text-xs">เวลาเข้า</th>
+                      <th className="text-center px-3 py-2 font-bold text-slate-500 text-xs">เวลาออก</th>
+                      <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">หมายเหตุ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
@@ -501,7 +615,7 @@ setAwards(awardRows);
                       const isWeekend = dow === 0 || dow === 6;
                       const meta = d.status ? STATUS_META[d.status] : null;
                       return (
-                        <tr key={d.day} className={isWeekend ? "bg-slate-50/60" : ""}>
+                        <tr key={d.day} className={isWeekend ? "bg-slate-50/60" : "hover:bg-slate-50/60"}>
                           <td className="px-3 py-2 font-bold text-slate-700">
                             {d.day} {WEEKDAY_LABEL[dow]}
                           </td>
@@ -512,8 +626,13 @@ setAwards(awardRows);
                               <span className="text-xs text-slate-300">—</span>
                             )}
                           </td>
-                          <td className="px-3 py-2 text-center font-black text-amber-600">{d.late_minutes || "-"}</td>
-                          <td className="px-3 py-2 text-center font-black text-orange-600">{d.early_leave_minutes || "-"}</td>
+                          <td className="px-3 py-2 text-center font-black text-slate-600">
+                            {d.status === "absent" ? "-" : formatTimeHHmm(d.check_in_time) ?? "-"}
+                          </td>
+                          <td className="px-3 py-2 text-center font-black text-slate-600">
+                            {d.status === "absent" ? "-" : formatTimeHHmm(d.check_out_time) ?? "-"}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-slate-400 font-bold">{d.note || "—"}</td>
                         </tr>
                       );
                     })}
@@ -521,7 +640,7 @@ setAwards(awardRows);
                 </table>
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-slate-100">
+              <div className="overflow-x-auto rounded-2xl border border-slate-100">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-100">
@@ -534,7 +653,7 @@ setAwards(awardRows);
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {monthlyAttendance.map(m => (
-                      <tr key={m.month}>
+                      <tr key={m.month} className="hover:bg-slate-50/60">
                         <td className="px-3 py-2 font-bold text-slate-700">{m.label}</td>
                         <td className="px-3 py-2 text-center font-black text-emerald-600">{m.present || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-amber-600">{m.late || "-"}</td>
@@ -576,33 +695,15 @@ setAwards(awardRows);
           title="🏆 รางวัลและความภาคภูมิใจ"
           emptyText="ยังไม่มีรางวัลที่บันทึกไว้"
           items={awards}
-// Awards section — เดิมใช้ a.level, ให้เปลี่ยนเป็น a.award_level
-renderItem={(a: Award) => (
-  <div key={a.id} className="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
-    <div className="w-9 h-9 rounded-lg bg-yellow-100 text-yellow-600 flex items-center justify-center shrink-0"><Trophy className="w-4 h-4" /></div>
-    <div>
-      <p className="text-sm font-bold text-slate-800">{a.title}</p>
-      <p className="text-xs text-slate-400">{a.award_level || "—"}</p>
-    </div>
-  </div>
-)}
-        />
-
-        {/* Materials */}
-        <SectionList
-          title="📁 สื่อการสอนที่อัปโหลด"
-          emptyText="ยังไม่มีสื่อการสอนที่อัปโหลด"
-          items={materials}
-// Materials section — เดิมใช้ m.subject, ให้เปลี่ยนเป็น m.subject_group
-renderItem={(m: Material) => (
-  <div key={m.id} className="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
-    <div className="w-9 h-9 rounded-lg bg-cyan-100 text-cyan-600 flex items-center justify-center shrink-0"><FolderOpen className="w-4 h-4" /></div>
-    <div>
-      <p className="text-sm font-bold text-slate-800">{m.title}</p>
-      <p className="text-xs text-slate-400">{m.subject_group || "—"}</p>
-    </div>
-  </div>
-)}
+          renderItem={(a: Award) => (
+            <div key={a.id} className="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
+              <div className="w-9 h-9 rounded-lg bg-yellow-100 text-yellow-600 flex items-center justify-center shrink-0"><Trophy className="w-4 h-4" /></div>
+              <div>
+                <p className="text-sm font-bold text-slate-800">{a.title}</p>
+                <p className="text-xs text-slate-400">{a.award_level || "—"}</p>
+              </div>
+            </div>
+          )}
         />
 
         {/* Teaching materials */}
@@ -622,7 +723,7 @@ renderItem={(m: Material) => (
         />
 
         {/* Support request to admin */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2"><FileText className="w-4 h-4" /> แจ้งเรื่อง / ขอแก้ไขข้อมูลถึงแอดมิน</h3>
             {!supportOpen && (
@@ -632,19 +733,19 @@ renderItem={(m: Material) => (
           {supportOpen && (
             <div className="space-y-3">
               <select value={supportForm.category} onChange={e => setSupportForm(f => ({ ...f, category: e.target.value }))}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700">
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-200">
                 <option value="edit_locked_field">ขอแก้ไขข้อมูลที่ถูกล็อก</option>
                 <option value="bug_report">แจ้งปัญหาการใช้งาน</option>
                 <option value="other">อื่นๆ</option>
               </select>
               <input value={supportForm.subject} onChange={e => setSupportForm(f => ({ ...f, subject: e.target.value }))}
-                placeholder="หัวข้อ" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm" />
+                placeholder="หัวข้อ" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
               <textarea value={supportForm.message} onChange={e => setSupportForm(f => ({ ...f, message: e.target.value }))}
-                placeholder="รายละเอียด" rows={3} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm" />
+                placeholder="รายละเอียด" rows={3} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
               <div className="flex justify-end gap-2">
                 <button onClick={() => setSupportOpen(false)} className="px-4 py-2 rounded-xl text-sm font-bold text-slate-500">ยกเลิก</button>
                 <button onClick={sendSupportRequest} disabled={supportSending}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 shadow-sm">
                   {supportSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   {supportSent ? "ส่งแล้ว ✓" : "ส่งคำร้อง"}
                 </button>
@@ -663,7 +764,7 @@ function Field({ icon, label, value, editing, onChange }: { icon: React.ReactNod
       <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">{icon} {label}</p>
       {editing ? (
         <input value={value} onChange={e => onChange(e.target.value)}
-          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-700" />
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-300" />
       ) : (
         <p className="text-sm font-bold text-slate-700">{value}</p>
       )}
@@ -673,28 +774,13 @@ function Field({ icon, label, value, editing, onChange }: { icon: React.ReactNod
 
 function SectionList<T>({ title, emptyText, items, renderItem }: { title: string; emptyText: string; items: T[]; renderItem: (item: T) => React.ReactNode }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+    <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
       <h3 className="text-sm font-extrabold text-slate-800 mb-2">{title}</h3>
       {items.length === 0 ? (
         <p className="text-sm text-slate-400 py-4 text-center">{emptyText}</p>
       ) : (
         <div>{items.map(renderItem)}</div>
       )}
-    </div>
-  );
-}
-
-function StatBox({ label, value, color }: { label: string; value: number; color: "emerald" | "amber" | "orange" | "rose" }) {
-  const colorMap = {
-    emerald: "bg-emerald-50 text-emerald-600",
-    amber: "bg-amber-50 text-amber-600",
-    orange: "bg-orange-50 text-orange-600",
-    rose: "bg-rose-50 text-rose-600",
-  };
-  return (
-    <div className={`rounded-xl p-4 ${colorMap[color]}`}>
-      <p className="text-2xl font-black">{value}</p>
-      <p className="text-xs font-bold mt-1">{label}</p>
     </div>
   );
 }
