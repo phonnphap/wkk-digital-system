@@ -2616,47 +2616,52 @@ function AnnouncementModal({
   }
 
   async function post() {
-    const content = editorRef.current?.innerHTML ?? "";
-    if (!title.trim()) {
-      alert("กรุณาใส่หัวข้อประกาศ");
-      return;
-    }
-    setPosting(true);
-    try {
-      const { data: ann, error } = await supabase
-        .from("subject_announcements")
-        .insert({ subject_section_id: sectionId, title: title.trim(), content, created_by: currentUserId || null })
-        .select()
-        .maybeSingle();
-      if (error) throw error;
-
-      if (files.length > 0 && teacherEmail) {
-        for (const f of files) {
-          try {
-            const fd = new FormData();
-            fd.append("file", f);
-            fd.append("account", teacherEmail);
-            fd.append("path", `ประกาศ/${sanitizeFolderName(title.trim())}/${Date.now()}-${f.name}`);
-            const res = await fetch("/api/upload-onedrive", { method: "POST", body: fd });
-            const result = await res.json();
-            if (result.ok && result.url) {
-              await supabase.from("subject_announcement_attachments").insert({
-                announcement_id: ann.id,
-                kind: "file",
-                url: result.url,
-                file_name: result.fileName || f.name,
-              });
-            }
-          } catch {}
-        }
-      }
-
-      onPosted();
-    } catch (e: any) {
-      alert("โพสต์ประกาศไม่สำเร็จ: " + (e?.message ?? "unknown error"));
-    }
-    setPosting(false);
+  const content = editorRef.current?.innerHTML ?? "";
+  if (!title.trim()) {
+    alert("กรุณาใส่หัวข้อประกาศ");
+    return;
   }
+  setPosting(true);
+  try {
+    // 1) อัปโหลดไฟล์ขึ้น OneDrive ก่อน (ถ้ามี) เพื่อเอา url มาแนบพร้อมกับประกาศ
+    const attachments: { kind: "file"; url: string; file_name?: string }[] = [];
+    if (files.length > 0 && teacherEmail) {
+      for (const f of files) {
+        try {
+          const fd = new FormData();
+          fd.append("file", f);
+          fd.append("account", teacherEmail);
+          fd.append("path", `ประกาศ/${sanitizeFolderName(title.trim())}/${Date.now()}-${f.name}`);
+          const res = await fetch("/api/upload-onedrive", { method: "POST", body: fd });
+          const result = await res.json();
+          if (result.ok && result.url) {
+            attachments.push({ kind: "file", url: result.url, file_name: result.fileName || f.name });
+          }
+        } catch {}
+      }
+    }
+
+    // 2) ยิงไป API route ของเราแทนการเรียก Supabase ตรง ๆ
+    const res = await fetch("/api/subject-announcements", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject_section_id: sectionId,
+        title: title.trim(),
+        content,
+        created_by: currentUserId || null,
+        attachments,
+      }),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error ?? "โพสต์ประกาศไม่สำเร็จ");
+
+    onPosted();
+  } catch (e: any) {
+    alert("โพสต์ประกาศไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+  }
+  setPosting(false);
+}
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
