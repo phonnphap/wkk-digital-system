@@ -46,7 +46,6 @@ export default function AttendanceOverviewTool({
   joinCode,
   students,
   onCreateNew,   // เปิดหน้า/โมดัลสร้างตารางเช็คชื่อใหม่ (ให้ parent ส่งเข้ามา)
-  onOpenSettings, // เปิดโมดัล "ปรับแต่ง/ตั้งค่า"
   onOpenDate,     // คลิกหัวคอลัมน์วันที่ -> ไปหน้าเช็คชื่อของวันนั้น (ใช้ AttendanceTool เดิม)
 }: {
   sectionId: string;
@@ -196,12 +195,6 @@ export default function AttendanceOverviewTool({
             className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5 disabled:opacity-50"
           >
             📊 {exporting ? "กำลังดาวน์โหลด..." : "ดาวน์โหลดข้อมูล"}
-          </button>
-          <button
-            onClick={onOpenSettings}
-            className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
-          >
-            ⚙️ ปรับแต่ง / ตั้งค่า
           </button>
         </div>
       </div>
