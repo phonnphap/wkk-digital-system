@@ -49,6 +49,24 @@ type Submission = {
 };
 
 type TeacherSection = { id: string; label: string };
+type AnnouncementAttachment = {
+  id: string;
+  announcement_id: string;
+  kind: "file" | "link";
+  url: string;
+  file_name?: string | null;
+};
+
+type Announcement = {
+  id: string;
+  subject_section_id: string;
+  title: string;
+  content: string | null;
+  created_by: string | null;
+  created_at: string;
+  attachments?: AnnouncementAttachment[];
+  creator?: { full_name: string | null; email: string } | null;
+};
 
 /* ---- NEW: rubric / announcement / import types ----
    These map to the tables added in the migration SQL. Adjust field
@@ -160,6 +178,17 @@ export default function AssignmentsTool({
 
   // NEW: which top-level modal (rubric manager / import / announcement) is open
   const [modal, setModal] = useState<ModalMode>(null);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+
+async function loadAnnouncements() {
+  try {
+    const res = await fetch(`/api/subject-announcements?subject_section_id=${sectionId}`);
+    const result = await res.json();
+    setAnnouncements(result.announcements ?? []);
+  } catch {
+    setAnnouncements([]);
+  }
+}
 
   async function loadAll() {
     setLoading(true);
@@ -191,6 +220,7 @@ export default function AssignmentsTool({
 
   useEffect(() => {
     loadAll();
+    loadAnnouncements();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionId]);
 
@@ -248,18 +278,21 @@ export default function AssignmentsTool({
     );
   } else {
     content = (
-      <AssignmentList
-        assignments={assignments}
-        students={students}
-        studentLinks={studentLinks}
-        submissions={submissions}
-        onCreate={openCreate}
-        onOpen={openDetail}
-        onManageRubrics={() => setModal("rubric")}
-        onImport={() => setModal("import")}
-        onAnnouncement={() => setModal("announcement")}
-      />
-    );
+  <AssignmentList
+    assignments={assignments}
+    students={students}
+    studentLinks={studentLinks}
+    submissions={submissions}
+    announcements={announcements}                 // ★
+    onAnnouncementsChanged={loadAnnouncements}      // ★
+    currentUserId={currentUserId}                   // ★ ใช้เช็คว่าประกาศเป็นของครูคนนี้ไหม (โชว์ปุ่มแก้/ลบ)
+    onCreate={openCreate}
+    onOpen={openDetail}
+    onManageRubrics={() => setModal("rubric")}
+    onImport={() => setModal("import")}
+    onAnnouncement={() => setModal("announcement")}
+  />
+);
   }
 
   return (
@@ -288,13 +321,16 @@ export default function AssignmentsTool({
       )}
 
       {modal === "announcement" && (
-        <AnnouncementModal
-          sectionId={sectionId}
-          currentUserId={currentUserId}
-          onClose={() => setModal(null)}
-          onPosted={() => setModal(null)}
-        />
-      )}
+  <AnnouncementModal
+    sectionId={sectionId}
+    currentUserId={currentUserId}
+    onClose={() => setModal(null)}
+    onPosted={() => {
+      setModal(null);
+      loadAnnouncements(); // ★ เพิ่มบรรทัดนี้
+    }}
+  />
+)}
     </>
   );
 }
@@ -302,17 +338,173 @@ export default function AssignmentsTool({
 /* =========================================================================
    List view — การ์ดชิ้นงานเรียงตามวันที่มอบหมาย
    ========================================================================= */
+function AnnouncementsFeed({
+  announcements,
+  currentUserId,
+  onChanged,
+}: {
+  announcements: Announcement[];
+  currentUserId: string;
+  onChanged: () => void;
+}) {
+  const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
+  const [editing, setEditing] = useState<Announcement | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function handleDelete(id: string) {
+    if (!confirm("ต้องการลบประกาศนี้ใช่หรือไม่?")) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/subject-announcements?id=${id}`, { method: "DELETE" });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error ?? "ลบไม่สำเร็จ");
+      onChanged();
+    } catch (e: any) {
+      alert("ลบประกาศไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+    setDeletingId(null);
+  }
+
+  if (announcements.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs font-black text-slate-400">ประกาศ</p>
+
+      {announcements.map(a => {
+        const files = (a.attachments ?? []).filter(x => x.kind === "file");
+        const links = (a.attachments ?? []).filter(x => x.kind === "link");
+        const isOwner = a.created_by === currentUserId;
+        const authorName = a.creator?.full_name?.trim() || a.creator?.email || "ครูผู้สอน";
+
+        return (
+          <div key={a.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-indigo-200 text-indigo-700 font-black flex items-center justify-center text-sm shrink-0">
+                  {authorName[0]}
+                </div>
+                <div>
+                  <p className="font-black text-slate-800 text-sm">{authorName}</p>
+                  <p className="text-slate-400 text-xs font-bold"><DateTimeText iso={a.created_at} /></p>
+                </div>
+              </div>
+              {isOwner && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => setEditing(a)}
+                    className="w-8 h-8 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-indigo-600 flex items-center justify-center"
+                    title="แก้ไขประกาศ"
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    onClick={() => handleDelete(a.id)}
+                    disabled={deletingId === a.id}
+                    className="w-8 h-8 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-500 flex items-center justify-center disabled:opacity-50"
+                    title="ลบประกาศ"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <p className="font-black text-slate-800 mt-3">{a.title}</p>
+            {a.content && (
+              <div
+                className="text-sm font-bold text-slate-600 mt-1 prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-indigo-600 [&_a]:underline"
+                dangerouslySetInnerHTML={{ __html: a.content }}
+              />
+            )}
+
+            {/* ★ แสดงตัวอย่างรูปภาพ / ไฟล์แนบ */}
+            {files.length > 0 && (
+              <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {files.map(f => {
+                  const img = isImageFilename(f.file_name);
+                  return (
+                    <div key={f.id} className="group relative rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square">
+                      {img ? (
+                        <button type="button" onClick={() => setLightbox({ url: f.url, name: f.file_name || "รูปภาพ" })} className="w-full h-full">
+                          <img src={f.url} alt={f.file_name ?? ""} className="w-full h-full object-cover" />
+                        </button>
+                      ) : (
+                        <a href={f.url} target="_blank" rel="noopener noreferrer" className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
+                          <span className="text-2xl">📄</span>
+                          <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{f.file_name}</span>
+                        </a>
+                      )}
+                      <a
+                        href={f.url}
+                        download={f.file_name || undefined}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        title="ดาวน์โหลดไฟล์"
+                        className="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 sm:opacity-100 transition-opacity"
+                      >
+                        ⬇️
+                      </a>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {links.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {links.map(l => (
+                  <a
+                    key={l.id}
+                    href={l.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-[11px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1.5 hover:bg-indigo-100 max-w-full"
+                  >
+                    <span className="truncate max-w-[220px]">🔗 {l.url}</span>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* lightbox ดูรูปเต็ม */}
+      {lightbox && (
+        <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-6" onClick={() => setLightbox(null)}>
+          <div className="relative max-w-3xl max-h-[85vh] w-full" onClick={e => e.stopPropagation()}>
+            <img src={lightbox.url} alt={lightbox.name} className="w-full h-full max-h-[85vh] object-contain rounded-xl" />
+            <div className="absolute top-2 right-2 flex gap-2">
+              <a href={lightbox.url} download={lightbox.name} target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center text-sm shadow">⬇️</a>
+              <button onClick={() => setLightbox(null)} className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center text-sm shadow">✕</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* modal แก้ไขประกาศ — reuse AnnouncementModal เดิม โดยส่ง existing เข้าไป */}
+      {editing && (
+        <AnnouncementModal
+          sectionId={editing.subject_section_id}
+          currentUserId={currentUserId}
+          existing={editing}
+          onClose={() => setEditing(null)}
+          onPosted={() => {
+            setEditing(null);
+            onChanged();
+          }}
+        />
+      )}
+    </div>
+  );
+}
 
 function AssignmentList({
-  assignments,
-  students,
-  studentLinks,
-  submissions,
-  onCreate,
-  onOpen,
-  onManageRubrics,
-  onImport,
-  onAnnouncement,
+  assignments, students, studentLinks, submissions,
+  announcements, onAnnouncementsChanged, currentUserId,   // ★ props ใหม่
+  onCreate, onOpen, onManageRubrics, onImport, onAnnouncement,
 }: {
   assignments: Assignment[];
   students: Student[];
@@ -323,6 +515,9 @@ function AssignmentList({
   onManageRubrics: () => void;
   onImport: () => void;
   onAnnouncement: () => void;
+  announcements: Announcement[];
+  onAnnouncementsChanged: () => void;
+  currentUserId: string;
 }) {
   return (
     <div className="space-y-4">
@@ -358,6 +553,11 @@ function AssignmentList({
           <span>+</span> สร้างชิ้นงาน
         </button>
       </div>
+      <AnnouncementsFeed
+        announcements={announcements}
+        currentUserId={currentUserId}
+        onChanged={onAnnouncementsChanged}
+      />
 
       {assignments.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
@@ -429,6 +629,7 @@ function AssignmentList({
     </div>
   );
 }
+
 
 /* =========================================================================
    Create form — สร้างชิ้นงานใหม่
@@ -2585,15 +2786,17 @@ function ImportAssignmentModal({
 function AnnouncementModal({
   sectionId,
   currentUserId,
+  existing,
   onClose,
   onPosted,
 }: {
   sectionId: string;
   currentUserId: string;
+  existing?: Announcement;      // ★
   onClose: () => void;
   onPosted: () => void;
 }) {
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(existing?.title ?? "");
   const editorRef = useRef<HTMLDivElement>(null);
   const [wordCount, setWordCount] = useState(0);
   const [files, setFiles] = useState<File[]>([]);
@@ -2602,11 +2805,26 @@ function AnnouncementModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setTeacherEmail(data.user?.email ?? null));
+    if (existing?.content && editorRef.current) {
+      editorRef.current.innerHTML = existing.content;
+      updateWordCount();
+    }
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setTeacherEmail(data.user?.email ?? null);
+    });
   }, []);
 
   function exec(cmd: string) {
     document.execCommand(cmd);
+    editorRef.current?.focus();
+  }
+
+  // helper for createLink (needs 3rd arg)
+  function exec2(cmd: string, value: string) {
+    document.execCommand(cmd, false, value);
     editorRef.current?.focus();
   }
 
@@ -2616,58 +2834,54 @@ function AnnouncementModal({
   }
 
   async function post() {
-  const content = editorRef.current?.innerHTML ?? "";
-  if (!title.trim()) {
-    alert("กรุณาใส่หัวข้อประกาศ");
-    return;
-  }
-  setPosting(true);
-  try {
-    // 1) อัปโหลดไฟล์ขึ้น OneDrive ก่อน (ถ้ามี) เพื่อเอา url มาแนบพร้อมกับประกาศ
-    const attachments: { kind: "file"; url: string; file_name?: string }[] = [];
-    if (files.length > 0 && teacherEmail) {
-      for (const f of files) {
-        try {
-          const fd = new FormData();
-          fd.append("file", f);
-          fd.append("account", teacherEmail);
-          fd.append("path", `ประกาศ/${sanitizeFolderName(title.trim())}/${Date.now()}-${f.name}`);
-          const res = await fetch("/api/upload-onedrive", { method: "POST", body: fd });
-          const result = await res.json();
-          if (result.ok && result.url) {
-            attachments.push({ kind: "file", url: result.url, file_name: result.fileName || f.name });
-          }
-        } catch {}
+    const content = editorRef.current?.innerHTML ?? "";
+    if (!title.trim()) { alert("กรุณาใส่หัวข้อประกาศ"); return; }
+    setPosting(true);
+    try {
+      const attachments: { kind: "file"; url: string; file_name?: string }[] = [];
+      if (files.length > 0 && teacherEmail) {
+        for (const f of files) {
+          try {
+            const fd = new FormData();
+            fd.append("file", f);
+            fd.append("account", teacherEmail);
+            fd.append("path", `ประกาศ/${sanitizeFolderName(title.trim())}/${Date.now()}-${f.name}`);
+            const res = await fetch("/api/upload-onedrive", { method: "POST", body: fd });
+            const result = await res.json();
+            if (result.ok && result.url) {
+              attachments.push({ kind: "file", url: result.url, file_name: result.fileName || f.name });
+            }
+          } catch {}
+        }
       }
+
+      // 2) ยิงไป API route ของเราแทนการเรียก Supabase ตรง ๆ
+      const res = await fetch("/api/subject-announcements", {
+        method: existing ? "PATCH" : "POST",           // ★
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: existing?.id,                              // ★ ใช้ตอนแก้ไข
+          subject_section_id: sectionId,
+          title: title.trim(),
+          content,
+          created_by: currentUserId || null,
+          attachments,
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error ?? "บันทึกประกาศไม่สำเร็จ");
+      onPosted();
+    } catch (e: any) {
+      alert("บันทึกประกาศไม่สำเร็จ: " + (e?.message ?? "unknown error"));
     }
-
-    // 2) ยิงไป API route ของเราแทนการเรียก Supabase ตรง ๆ
-    const res = await fetch("/api/subject-announcements", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        subject_section_id: sectionId,
-        title: title.trim(),
-        content,
-        created_by: currentUserId || null,
-        attachments,
-      }),
-    });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.error ?? "โพสต์ประกาศไม่สำเร็จ");
-
-    onPosted();
-  } catch (e: any) {
-    alert("โพสต์ประกาศไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    setPosting(false);
   }
-  setPosting(false);
-}
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
-          <p className="font-black text-slate-800 text-lg">สร้างประกาศใหม่</p>
+          <p className="font-black text-slate-800 text-lg">{existing ? "แก้ไขประกาศ" : "สร้างประกาศใหม่"}</p>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
         </div>
 
@@ -2747,16 +2961,10 @@ function AnnouncementModal({
             disabled={posting}
             className="w-full py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50"
           >
-            {posting ? "กำลังโพสต์..." : "โพสต์ประกาศ"}
+            {posting ? "กำลังโพสต์..." : existing ? "บันทึกการแก้ไข" : "โพสต์ประกาศ"}
           </button>
         </div>
       </div>
     </div>
   );
-
-  // helper for createLink (needs 3rd arg)
-  function exec2(cmd: string, value: string) {
-    document.execCommand(cmd, false, value);
-    editorRef.current?.focus();
-  }
 }
