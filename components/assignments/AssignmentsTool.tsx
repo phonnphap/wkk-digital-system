@@ -419,11 +419,13 @@ async function removeExistingAttachment(att: AssignmentAttachment) {
 }
 
   useEffect(() => {
+  console.log("[preview-effect] files.length =", files.length, files);
   const next = files.map(f => ({
     file: f,
     url: URL.createObjectURL(f),
     isImage: f.type.startsWith("image/"),
   }));
+  console.log("[preview-effect] built previews =", next.length);
   setPreviews(next);
   return () => next.forEach(p => URL.revokeObjectURL(p.url));
 }, [files]);
@@ -593,6 +595,7 @@ function removeFile(index: number) {
               className="hidden"
             />
 
+            {(() => { console.log("[render] existingAttachments=", existingAttachments.length, "previews=", previews.length); return null; })()}
             {(existingAttachments.length > 0 || previews.length > 0) && (
   <div className="mt-2 grid grid-cols-3 gap-2">
     {existingAttachments.map(att => (
