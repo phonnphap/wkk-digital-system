@@ -12,11 +12,25 @@ export async function GET(req: NextRequest) {
 
     const admin = createAdminClient();
 
-    // หา timetable_entry ทั้งหมดที่ผูกกับ section นี้
+    // ขั้นแรก: ดึง classroom_id + subject_id จาก subject_sections
+    // (timetable_entries ไม่มีคอลัมน์ subject_section_id ตรง ๆ
+    //  ต้องผูกผ่าน classroom_id + subject_id แทน)
+    const { data: section, error: sectionErr } = await admin
+      .from("subject_sections")
+      .select("id, classroom_id, subject_id")
+      .eq("id", subject_section_id)
+      .maybeSingle();
+    if (sectionErr) throw sectionErr;
+    if (!section) {
+      return NextResponse.json({ error: "ไม่พบข้อมูล subject_section" }, { status: 404 });
+    }
+
+    // หา timetable_entry ทั้งหมดของห้อง+วิชานี้
     const { data: entries, error: entriesErr } = await admin
       .from("timetable_entries")
       .select("id")
-      .eq("subject_section_id", subject_section_id);
+      .eq("classroom_id", section.classroom_id)
+      .eq("subject_id", section.subject_id);
     if (entriesErr) throw entriesErr;
 
     const entryIds = (entries ?? []).map((e: any) => e.id);
