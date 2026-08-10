@@ -1968,75 +1968,70 @@ function RubricEditor({
             />
 
             <div className="overflow-x-auto">
-              <table className="border-separate border-spacing-2 w-full table-fixed">
-                <thead>
-                  <tr>
-                    <th className="text-left text-xs font-black text-slate-500 px-1">เกณฑ์การประเมิน</th>
-                    {levels.map(l => (
-                      <th key={l.id} className="min-w-[140px] w-full">
-                        <div className="border-2 border-slate-100 rounded-xl p-2">
-                          <div className="flex items-center gap-1">
-                            <input
-                              value={l.name}
-                              onChange={e => updateLevel(l.id, { name: e.target.value })}
-                              placeholder="ชื่อระดับ"
-                              className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
-                            />
-                            <button onClick={() => removeLevel(l.id)} className="w-5 h-5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-500 text-[10px] font-black shrink-0">✕</button>
-                          </div>
-                          <input
-                            type="number"
-                            value={l.score}
-                            onChange={e => updateLevel(l.id, { score: Number(e.target.value) })}
-                            className="mt-1.5 w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-center"
-                          />
-                          <span className="text-[10px] text-slate-400 font-bold ml-1">คะแนน</span>
-                        </div>
-                      </th>
-                    ))}
-                    <th className="align-bottom">
-                      <button onClick={addLevel} className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 font-black text-xs whitespace-nowrap">+ เพิ่มระดับ</button>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {criteria.map(c => (
-                    <tr key={c.id}>
-                      <td className="align-top">
-                        <div className="border-2 border-slate-100 rounded-xl p-2 min-w-[160px]">
-                          <input
-                            value={c.name}
-                            onChange={e => updateCriterion(c.id, { name: e.target.value })}
-                            placeholder="ชื่อเกณฑ์"
-                            className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
-                          />
-                          <p className="text-[10px] text-slate-400 font-bold mt-1.5">น้ำหนัก</p>
-                          <input
-                            type="number"
-                            value={c.weight}
-                            onChange={e => updateCriterion(c.id, { weight: Number(e.target.value) })}
-                            className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-center"
-                          />
-                          <button onClick={() => removeCriterion(c.id)} className="mt-2 text-rose-500 font-black text-[11px]">✕ ลบเกณฑ์</button>
-                        </div>
-                      </td>
-                      {levels.map(l => (
-                        <td key={l.id} className="align-top">
-                          <textarea
-                            value={c.notes[l.id] ?? ""}
-                            onChange={e => updateNote(c.id, l.id, e.target.value)}
-                            placeholder="คำอธิบายระดับ (ไม่บังคับ)"
-                            rows={3}
-                            className="w-full border-2 border-slate-100 rounded-xl px-2 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none resize-none"
-                          />
-                        </td>
-                      ))}
-                      <td />
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+  <div
+    className="grid gap-2"
+    style={{ gridTemplateColumns: `200px repeat(${levels.length}, minmax(180px, 1fr)) 140px` }}
+  >
+    {/* หัวตาราง */}
+    <div className="text-left text-xs font-black text-slate-500 px-1 self-end pb-2">เกณฑ์การประเมิน</div>
+    {levels.map(l => (
+      <div key={l.id} className="border-2 border-slate-100 rounded-xl p-2">
+        <div className="flex items-center gap-1">
+          <input
+            value={l.name}
+            onChange={e => updateLevel(l.id, { name: e.target.value })}
+            placeholder="ชื่อระดับ"
+            className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
+          />
+          <button onClick={() => removeLevel(l.id)} className="w-5 h-5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-500 text-[10px] font-black shrink-0">✕</button>
+        </div>
+        <input
+          type="number"
+          value={l.score}
+          onChange={e => updateLevel(l.id, { score: Number(e.target.value) })}
+          className="mt-1.5 w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-center"
+        />
+        <span className="text-[10px] text-slate-400 font-bold ml-1">คะแนน</span>
+      </div>
+    ))}
+    <div className="self-end pb-1">
+      <button onClick={addLevel} className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 font-black text-xs whitespace-nowrap w-full">+ เพิ่มระดับ</button>
+    </div>
+
+    {/* แถวของแต่ละเกณฑ์ */}
+    {criteria.map(c => (
+      <div key={c.id} className="contents">
+        <div className="border-2 border-slate-100 rounded-xl p-2">
+          <input
+            value={c.name}
+            onChange={e => updateCriterion(c.id, { name: e.target.value })}
+            placeholder="ชื่อเกณฑ์"
+            className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
+          />
+          <p className="text-[10px] text-slate-400 font-bold mt-1.5">น้ำหนัก</p>
+          <input
+            type="number"
+            value={c.weight}
+            onChange={e => updateCriterion(c.id, { weight: Number(e.target.value) })}
+            className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-center"
+          />
+          <button onClick={() => removeCriterion(c.id)} className="mt-2 text-rose-500 font-black text-[11px] block">✕ ลบเกณฑ์</button>
+        </div>
+        {levels.map(l => (
+          <textarea
+            key={l.id}
+            value={c.notes[l.id] ?? ""}
+            onChange={e => updateNote(c.id, l.id, e.target.value)}
+            placeholder="คำอธิบายระดับ (ไม่บังคับ)"
+            rows={3}
+            className="w-full border-2 border-slate-100 rounded-xl px-2 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none resize-none"
+          />
+        ))}
+        <div />
+      </div>
+    ))}
+  </div>
+</div>
 
             <button onClick={addCriterion} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">+ เพิ่มเกณฑ์</button>
 
