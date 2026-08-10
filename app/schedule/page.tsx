@@ -96,6 +96,14 @@ const ADMIN_NOTIFY_EMAIL = "admin@khienkhet.ac.th";
 const APPROVER_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head", "subject_head"];
 const NON_TEACHING_ROLES = ["admin", "director", "deputy_director", "staff", "subject_teacher"];
 
+// ★ โรลที่ถือว่าเป็น "แอดมิน" (แก้ตารางสอนได้ทุกวิชาโดยตรง ไม่ต้องรออนุมัติ เหมือน admin@khienkhet.ac.th)
+// นับ director/deputy_director เป็นแอดมินเสมอ และนับทุกโรลที่ "มีคำว่า admin" อยู่ในชื่อ (เช่น admin, subject_admin, it_admin ฯลฯ)
+function isAdminRole(role?: string | null): boolean {
+  if (!role) return false;
+  if (role === "director" || role === "deputy_director") return true;
+  return role.toLowerCase().includes("admin");
+}
+
 type UserProfile = {
   id: string; title?: string; first_name?: string; last_name?: string; full_name?: string;
   email: string; role: string; position?: string;
@@ -262,7 +270,7 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
 }) {
   const canEditDirect = permission === "direct";
   const extraRoles = currentUser.extra_roles ?? [];
-  const isHomeroomOnly = !["admin","director","deputy_director"].includes(currentUser.role)
+  const isHomeroomOnly = !isAdminRole(currentUser.role)
     && !extraRoles.includes("dept_head") && !extraRoles.includes("grade_head");
 
   // ★ ครูคนที่ 1 (ผู้สอนหลัก): ครูทั่วไป/ครูประจำชั้น ล็อกเป็นตัวเองเสมอ
@@ -766,8 +774,8 @@ function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, acad
   function getPermissionForEntry(user: UserProfile, entry: { teacher_id?: string; teacher_id_2?: string } | undefined, teachers: Teacher[]): "direct" | "request" | "deny" {
   const extraRoles = user.extra_roles ?? [];
 
-  // admin/director/deputy_director: แก้ทุกอย่างตรง ไม่ต้องรอ
-  if (["admin", "director", "deputy_director"].includes(user.role)) return "direct";
+  // admin/director/deputy_director (หรือโรลใดๆ ที่มีคำว่า admin): แก้ทุกอย่างตรง ไม่ต้องรอ
+  if (isAdminRole(user.role)) return "direct";
 
   // dept_head: แก้/เพิ่มได้เฉพาะครูใน department เดียวกัน ไม่ต้องรอ
   if (extraRoles.includes("dept_head")) {
@@ -1555,7 +1563,7 @@ useEffect(() => {
   useEffect(() => { loadEntries(); }, [loadEntries]);
 
   function isApproverUser(user: UserProfile): boolean {
-  if (["admin","director","deputy_director"].includes(user.role)) return true;
+  if (isAdminRole(user.role)) return true;
   const extraRoles = user.extra_roles ?? [];
   return extraRoles.includes("grade_head") || extraRoles.includes("dept_head");
 }
@@ -1578,7 +1586,7 @@ useEffect(() => {
   // ── Load subject addition requests ────────────────────────────────────────
   const loadSubjectRequests = useCallback(async () => {
     if (!user) return;
-    const isAdminUser = ADMIN_ROLES.includes(user.role);
+    const isAdminUser = isAdminRole(user.role);
     let query = (supabase.from("subject_addition_requests") as any)
       .select("*, requester:users!subject_addition_requests_requester_id_fkey(id,first_name,last_name,full_name,email)")
       .order("created_at", { ascending: false });
@@ -1897,8 +1905,8 @@ useEffect(() => {
   if (loading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-blue-500 font-black text-lg animate-pulse">กำลังโหลดตารางสอน...</div></div>;
   if (!user)   return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><p className="text-red-500 font-black">❌ กรุณาเข้าสู่ระบบก่อน</p></div>;
 
-  const isAdmin           = ADMIN_ROLES.includes(user.role);
-  const isApprover        = APPROVER_ROLES.includes(user.role);
+  const isAdmin           = isAdminRole(user.role);
+  const isApprover        = APPROVER_ROLES.includes(user.role) || isAdminRole(user.role);
   const canEditDirect     = isAdmin;
   const selectedClassroom = classrooms.find(c => c.id === selectedRoom);
   const roomEntries       = entries.filter(e => e.classroom_id === selectedRoom);
