@@ -1944,12 +1944,9 @@ function RubricEditor({
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl w-full max-w-6xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-start justify-between px-6 py-5 border-b border-slate-100">
           <p className="font-black text-slate-800 text-lg">{existing ? "แก้ไขเกณฑ์การให้คะแนน" : "สร้างเกณฑ์การให้คะแนน"}</p>
-          <button className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs">
-            ✨ ร่างด้วย AI
-          </button>
         </div>
 
         {loadingExisting ? (
@@ -1971,12 +1968,12 @@ function RubricEditor({
             />
 
             <div className="overflow-x-auto">
-              <table className="border-separate border-spacing-2 min-w-full">
+              <table className="border-separate border-spacing-2 w-full table-fixed">
                 <thead>
                   <tr>
                     <th className="text-left text-xs font-black text-slate-500 px-1">เกณฑ์การประเมิน</th>
                     {levels.map(l => (
-                      <th key={l.id} className="min-w-[180px]">
+                      <th key={l.id} className="min-w-[140px] w-full">
                         <div className="border-2 border-slate-100 rounded-xl p-2">
                           <div className="flex items-center gap-1">
                             <input
@@ -2208,6 +2205,19 @@ function RubricCopyFromOtherSubject({
    and the teacher lookup (uses your `users` table: id, email, title, first_name, last_name).
    ========================================================================= */
 
+type AcademicYear = { id: string; year_name: string; semester: number; is_current: boolean };
+
+type ImportableSectionCard = {
+  subject_id: string;
+  subject_section_id: string;
+  subject_code: string;
+  name_th: string;
+  year_label: string;
+  teacher_name: string;
+  teacher_id: string;
+  classroom_label: string;
+};
+
 function ImportAssignmentModal({
   subjectId,
   sectionId,
@@ -2223,68 +2233,129 @@ function ImportAssignmentModal({
 }) {
   const [step, setStep] = useState<"search" | "pick">("search");
   const [searchText, setSearchText] = useState("");
-  const [year, setYear] = useState<number>(new Date().getFullYear() + 543 - 543); // NOTE: adjust to your ปี พ.ศ./ค.ศ. convention
-  const [semester, setSemester] = useState<number>(1);
+  const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
+  const [academicYearId, setAcademicYearId] = useState<string>("");
   const [teacherFilter, setTeacherFilter] = useState<string>("");
   const [teachers, setTeachers] = useState<SchoolTeacher[]>([]);
-  const [cards, setCards] = useState<ImportableSubjectCard[]>([]);
+  const [cards, setCards] = useState<ImportableSectionCard[]>([]);
   const [loadingCards, setLoadingCards] = useState(false);
 
-  const [pickedCard, setPickedCard] = useState<ImportableSubjectCard | null>(null);
+  const [pickedCard, setPickedCard] = useState<ImportableSectionCard | null>(null);
   const [sourceAssignments, setSourceAssignments] = useState<Assignment[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copying, setCopying] = useState(false);
 
+  // โหลดรายชื่อครู (สำหรับ dropdown filter)
   useEffect(() => {
-  supabase.from("profiles").select("id, email, full_name").then(({ data }) => {
-    setTeachers((data ?? []) as SchoolTeacher[]);
-  });
-}, []);
+    supabase.from("profiles").select("id, email, full_name").then(({ data }) => {
+      setTeachers((data ?? []) as SchoolTeacher[]);
+    });
+  }, []);
+
+  // โหลดปีการศึกษา/ภาคเรียนทั้งหมด และตั้งค่าเริ่มต้นเป็นปีปัจจุบัน (is_current)
+  useEffect(() => {
+    supabase
+      .from("academic_years")
+      .select("id, year_name, semester, is_current")
+      .order("year_name", { ascending: false })
+      .order("semester", { ascending: false })
+      .then(({ data }) => {
+        const rows = (data ?? []) as AcademicYear[];
+        setAcademicYears(rows);
+        const current = rows.find(y => y.is_current);
+        if (current) setAcademicYearId(current.id);
+      });
+  }, []);
 
   async function runSearch() {
     setLoadingCards(true);
     try {
-      // ค้นหารายวิชาเดียวกัน (ตรงกันด้วย subject_code หรือชื่อวิชา) ในปี/ภาคเรียนที่เลือก
-      // แม้จะเป็นคนละห้อง หรือคนละครูผู้สอน
-      let query = supabase
+      // 1) หาว่าวิชาปัจจุบันมีรหัสวิชาอะไร แล้วรวบรวม subject id ที่ "ถือว่าเป็นวิชาเดียวกัน"
+      //    (รวม id ปัจจุบัน + id อื่นที่ subject_code ตรงกัน เผื่อมีข้อมูลซ้ำคนละแถว)
+      const { data: currentSubject } = await supabase
         .from("subjects")
-        .select("id, subject_code, name_th, academic_year, semester, created_by")
-        .eq("academic_year", year)
-        .eq("semester", semester);
+        .select("id, subject_code, name_th")
+        .eq("id", subjectId)
+        .maybeSingle();
+
+      let subjectIds: string[] = [subjectId];
+      if (currentSubject?.subject_code) {
+        const { data: sameCode } = await supabase
+          .from("subjects")
+          .select("id")
+          .eq("subject_code", currentSubject.subject_code);
+        subjectIds = (sameCode ?? []).map((s: any) => s.id);
+      }
 
       if (searchText.trim()) {
-        query = query.or(`subject_code.ilike.%${searchText.trim()}%,name_th.ilike.%${searchText.trim()}%`);
-      }
-      if (teacherFilter) {
-        query = query.eq("created_by", teacherFilter);
+        const { data: matched } = await supabase
+          .from("subjects")
+          .select("id")
+          .in("id", subjectIds)
+          .or(`subject_code.ilike.%${searchText.trim()}%,name_th.ilike.%${searchText.trim()}%`);
+        subjectIds = (matched ?? []).map((s: any) => s.id);
       }
 
-      const { data: subjRows } = await query;
-      const subjectIds = (subjRows ?? []).map((s: any) => s.id).filter((id: string) => id !== subjectId);
       if (subjectIds.length === 0) {
         setCards([]);
         setLoadingCards(false);
         return;
       }
 
-      const { data: sectionRows } = await supabase
+      // 2) หา section ของวิชาเหล่านี้ ยกเว้นห้องปัจจุบัน กรองตามปี/ครูถ้าเลือกไว้
+      let secQuery = supabase
         .from("subject_sections")
-        .select("id, subject_id, join_code, classroom_label")
-        .in("subject_id", subjectIds);
+        .select("id, subject_id, classroom_id, academic_year_id, teacher_id, co_teacher_id, join_code")
+        .in("subject_id", subjectIds)
+        .neq("id", sectionId);
 
-      const list: ImportableSubjectCard[] = (sectionRows ?? []).map((sec: any) => {
+      if (academicYearId) secQuery = secQuery.eq("academic_year_id", academicYearId);
+      if (teacherFilter) secQuery = secQuery.or(`teacher_id.eq.${teacherFilter},co_teacher_id.eq.${teacherFilter}`);
+
+      const { data: sectionRows } = await secQuery;
+      if (!sectionRows || sectionRows.length === 0) {
+        setCards([]);
+        setLoadingCards(false);
+        return;
+      }
+
+      // 3) โหลดข้อมูลประกอบ: วิชา / ห้องเรียน / ปีการศึกษา / ครู
+      const secSubjectIds = Array.from(new Set(sectionRows.map((s: any) => s.subject_id)));
+      const classroomIds = Array.from(new Set(sectionRows.map((s: any) => s.classroom_id).filter(Boolean)));
+      const yearIds = Array.from(new Set(sectionRows.map((s: any) => s.academic_year_id).filter(Boolean)));
+      const teacherIds = Array.from(
+        new Set(sectionRows.flatMap((s: any) => [s.teacher_id, s.co_teacher_id]).filter(Boolean))
+      );
+
+      const [{ data: subjRows }, { data: classroomRows }, { data: yearRows }, { data: teacherRows }] = await Promise.all([
+        supabase.from("subjects").select("id, subject_code, name_th").in("id", secSubjectIds),
+        classroomIds.length
+          ? supabase.from("classrooms").select("id, room_name, room_number").in("id", classroomIds)
+          : Promise.resolve({ data: [] as any[] }),
+        yearIds.length
+          ? supabase.from("academic_years").select("id, year_name, semester").in("id", yearIds)
+          : Promise.resolve({ data: [] as any[] }),
+        teacherIds.length
+          ? supabase.from("profiles").select("id, email, full_name").in("id", teacherIds)
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+
+      const list: ImportableSectionCard[] = sectionRows.map((sec: any) => {
         const subj = (subjRows ?? []).find((s: any) => s.id === sec.subject_id);
-        const teacher = teachers.find(t => t.id === subj?.created_by);
+        const classroom = (classroomRows ?? []).find((c: any) => c.id === sec.classroom_id);
+        const year = (yearRows ?? []).find((y: any) => y.id === sec.academic_year_id);
+        const teacher = (teacherRows ?? []).find((t: any) => t.id === sec.teacher_id) as SchoolTeacher | undefined;
+
         return {
-          subject_id: subj?.id,
+          subject_id: subj?.id ?? sec.subject_id,
           subject_section_id: sec.id,
           subject_code: subj?.subject_code ?? "",
           name_th: subj?.name_th ?? "",
-          academic_year: subj?.academic_year ?? year,
-          semester: subj?.semester ?? semester,
+          year_label: year ? `เทอม ${year.semester} / ${year.year_name}` : "-",
           teacher_name: teacherDisplayName(teacher),
-          teacher_id: subj?.created_by ?? "",
-          classroom_label: sec.classroom_label ?? sec.join_code ?? "-",
+          teacher_id: sec.teacher_id ?? "",
+          classroom_label:
+            classroom?.room_name || (classroom?.room_number ? `ห้อง ${classroom.room_number}` : sec.join_code || "-"),
         };
       });
       setCards(list);
@@ -2297,9 +2368,9 @@ function ImportAssignmentModal({
   useEffect(() => {
     runSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [academicYearId]);
 
-  async function openCard(card: ImportableSubjectCard) {
+  async function openCard(card: ImportableSectionCard) {
     setPickedCard(card);
     setSelectedIds(new Set());
     const { data } = await supabase
@@ -2349,7 +2420,6 @@ function ImportAssignmentModal({
           .maybeSingle();
         if (error) throw error;
 
-        // คัดลอกไฟล์แนบ/ลิงก์ไปด้วย
         const { data: atts } = await supabase.from("assignment_attachments").select("*").eq("assignment_id", a.id);
         if (atts && atts.length > 0) {
           await supabase.from("assignment_attachments").insert(
@@ -2391,19 +2461,16 @@ function ImportAssignmentModal({
                 placeholder="ค้นหารายวิชา เช่น รหัสวิชา หรือชื่อวิชา"
                 className="border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
               />
-              <div className="flex items-center gap-1.5">
-                <select value={semester} onChange={e => setSemester(Number(e.target.value))} className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none">
-                  <option value={1}>1</option>
-                  <option value={2}>2</option>
-                </select>
-                <span className="text-slate-300">/</span>
-                <input
-                  type="number"
-                  value={year}
-                  onChange={e => setYear(Number(e.target.value))}
-                  className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-                />
-              </div>
+              <select
+                value={academicYearId}
+                onChange={e => setAcademicYearId(e.target.value)}
+                className="border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+              >
+                <option value="">ทุกปีการศึกษา/ภาคเรียน</option>
+                {academicYears.map(y => (
+                  <option key={y.id} value={y.id}>เทอม {y.semester} / {y.year_name}{y.is_current ? " (ปัจจุบัน)" : ""}</option>
+                ))}
+              </select>
               <select
                 value={teacherFilter}
                 onChange={e => setTeacherFilter(e.target.value)}
@@ -2435,13 +2502,13 @@ function ImportAssignmentModal({
                     </div>
                     <div className="p-4 space-y-1">
                       <p className="font-black text-slate-800">{c.name_th || c.subject_code}</p>
-                      <p className="text-slate-400 text-xs font-bold">ปีการศึกษา {c.semester}/{c.academic_year}</p>
+                      <p className="text-slate-400 text-xs font-bold">{c.year_label}</p>
                       <p className="text-slate-300 text-xs font-bold">{c.subject_code}</p>
                       <div className="flex items-center gap-1.5 pt-1">
                         <div className="w-5 h-5 rounded-full bg-slate-700 text-white text-[10px] font-black flex items-center justify-center">
                           {c.teacher_name?.[0] ?? "?"}
                         </div>
-                        <span className="text-[11px] text-slate-400 font-bold">Classroom: {c.classroom_label}</span>
+                        <span className="text-[11px] text-slate-400 font-bold">{c.teacher_name} · ห้อง: {c.classroom_label}</span>
                       </div>
                     </div>
                   </button>
@@ -2454,7 +2521,7 @@ function ImportAssignmentModal({
         {step === "pick" && pickedCard && (
           <div className="p-6 space-y-4">
             <button onClick={() => setStep("search")} className="text-indigo-500 font-black text-xs">← กลับไปค้นหา</button>
-            <p className="font-black text-slate-700 text-sm">{pickedCard.name_th} · {pickedCard.classroom_label}</p>
+            <p className="font-black text-slate-700 text-sm">{pickedCard.name_th} · {pickedCard.classroom_label} · {pickedCard.teacher_name}</p>
 
             {sourceAssignments.length === 0 ? (
               <p className="text-center text-slate-300 font-bold text-sm py-10">วิชานี้ยังไม่มีชิ้นงาน</p>
