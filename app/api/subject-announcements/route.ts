@@ -76,15 +76,16 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
-    if (!id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
-
     const body = await req.json();
-    const { title, content, attachments } = body as {
+    const { id: bodyId, title, content, attachments } = body as {
+      id?: string;
       title?: string;
       content?: string;
       attachments?: { kind: "file" | "link"; url: string; file_name?: string }[];
     };
+
+    const id = searchParams.get("id") || bodyId;
+    if (!id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
 
     const admin = createAdminClient();
 
