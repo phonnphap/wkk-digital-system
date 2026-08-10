@@ -94,6 +94,11 @@ function sanitizeFolderName(name: string): string {
   return cleaned || "ไม่มีชื่อ";
 }
 
+// เช็คว่าไฟล์แนบเป็นไฟล์รูปภาพหรือไม่ จากนามสกุลไฟล์
+function isImageFilename(name?: string | null): boolean {
+  return !!name && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
+}
+
 /* =========================================================================
    Main component
    ========================================================================= */
@@ -910,23 +915,159 @@ function AssignmentDetail({
 
 function AssignmentInfoTab({ assignment }: { assignment: Assignment }) {
   return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 space-y-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <InfoBox label="ประเภท" value={TYPE_LABELS[assignment.type]} />
+          <InfoBox label="คะแนนเต็ม" value={String(assignment.max_score)} />
+          <InfoBox label="มอบหมายเมื่อ" value={<DateTimeText iso={assignment.assigned_at} />} />
+          <InfoBox label="กำหนดส่ง" value={<DateTimeText iso={assignment.due_date} />} />
+        </div>
+        {assignment.allow_weight && (
+          <div className="grid grid-cols-2 gap-3">
+            <InfoBox label="น้ำหนักชิ้นงาน" value={assignment.weight_percent ? `${assignment.weight_percent}%` : "-"} />
+            <InfoBox label="เกณฑ์การให้คะแนน" value={assignment.grading_criteria_note || "-"} />
+          </div>
+        )}
+        <div>
+          <p className="text-xs font-black text-slate-400 mb-1">คำอธิบาย</p>
+          <p className="text-sm font-bold text-slate-600 whitespace-pre-wrap">{assignment.description || "ไม่มีคำอธิบายเพิ่มเติม"}</p>
+        </div>
+      </div>
+
+      <AssignmentAttachmentsPanel assignmentId={assignment.id} />
+    </div>
+  );
+}
+
+/* --------- ไฟล์แนบ / รูปภาพของชิ้นงาน (แสดงตัวอย่างรูป + ปุ่มดาวน์โหลด) --------- */
+
+function AssignmentAttachmentsPanel({ assignmentId }: { assignmentId: string }) {
+  const [attachments, setAttachments] = useState<AssignmentAttachment[]>([]);
+  const [loadingAtt, setLoadingAtt] = useState(true);
+  const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoadingAtt(true);
+    supabase
+      .from("assignment_attachments")
+      .select("*")
+      .eq("assignment_id", assignmentId)
+      .then(({ data }) => {
+        if (!active) return;
+        setAttachments((data ?? []) as AssignmentAttachment[]);
+        setLoadingAtt(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [assignmentId]);
+
+  const files = attachments.filter(a => a.kind === "file");
+  const links = attachments.filter(a => a.kind === "link");
+
+  return (
     <div className="bg-white rounded-2xl border border-slate-100 p-5 space-y-3">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-  <InfoBox label="ประเภท" value={TYPE_LABELS[assignment.type]} />
-  <InfoBox label="คะแนนเต็ม" value={String(assignment.max_score)} />
-  <InfoBox label="มอบหมายเมื่อ" value={<DateTimeText iso={assignment.assigned_at} />} />
-  <InfoBox label="กำหนดส่ง" value={<DateTimeText iso={assignment.due_date} />} />
-</div>
-      {assignment.allow_weight && (
-        <div className="grid grid-cols-2 gap-3">
-          <InfoBox label="น้ำหนักชิ้นงาน" value={assignment.weight_percent ? `${assignment.weight_percent}%` : "-"} />
-          <InfoBox label="เกณฑ์การให้คะแนน" value={assignment.grading_criteria_note || "-"} />
+      <p className="text-xs font-black text-slate-400">📎 ไฟล์แนบ / รูปภาพ</p>
+
+      {loadingAtt ? (
+        <p className="text-xs font-bold text-slate-300 py-4">กำลังโหลดไฟล์แนบ...</p>
+      ) : files.length === 0 && links.length === 0 ? (
+        <p className="text-xs font-bold text-slate-300 py-4">ไม่มีไฟล์แนบสำหรับชิ้นงานนี้</p>
+      ) : (
+        <>
+          {files.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {files.map(att => {
+                const img = isImageFilename(att.file_name);
+                return (
+                  <div
+                    key={att.id}
+                    className="group relative rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square"
+                  >
+                    {img ? (
+                      <button
+                        type="button"
+                        onClick={() => setLightbox({ url: att.url, name: att.file_name || "รูปภาพ" })}
+                        className="w-full h-full"
+                      >
+                        <img src={att.url} alt={att.file_name ?? ""} className="w-full h-full object-cover" />
+                      </button>
+                    ) : (
+                      <a
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full h-full flex flex-col items-center justify-center p-2 text-center"
+                      >
+                        <span className="text-2xl">📄</span>
+                        <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{att.file_name}</span>
+                      </a>
+                    )}
+                    <a
+                      href={att.url}
+                      download={att.file_name || undefined}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      title="ดาวน์โหลดไฟล์"
+                      className="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 sm:opacity-100 transition-opacity"
+                    >
+                      ⬇️
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {links.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {links.map(l => (
+                <a
+                  key={l.id}
+                  href={l.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[11px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1.5 hover:bg-indigo-100 transition-colors max-w-full"
+                >
+                  <span className="truncate max-w-[220px]">🔗 {l.url}</span>
+                </a>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-6"
+          onClick={() => setLightbox(null)}
+        >
+          <div className="relative max-w-3xl max-h-[85vh] w-full" onClick={e => e.stopPropagation()}>
+            <img src={lightbox.url} alt={lightbox.name} className="w-full h-full max-h-[85vh] object-contain rounded-xl" />
+            <div className="absolute top-2 right-2 flex gap-2">
+              <a
+                href={lightbox.url}
+                download={lightbox.name}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="ดาวน์โหลด"
+                className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center text-sm shadow"
+              >
+                ⬇️
+              </a>
+              <button
+                onClick={() => setLightbox(null)}
+                className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center text-sm shadow"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
         </div>
       )}
-      <div>
-        <p className="text-xs font-black text-slate-400 mb-1">คำอธิบาย</p>
-        <p className="text-sm font-bold text-slate-600 whitespace-pre-wrap">{assignment.description || "ไม่มีคำอธิบายเพิ่มเติม"}</p>
-      </div>
     </div>
   );
 }
