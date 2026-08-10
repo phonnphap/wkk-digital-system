@@ -7,6 +7,7 @@ import { useRouter, useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import AttendanceTool from "@/components/attendance/AttendanceTool";
 import AssignmentsTool from "@/components/assignments/AssignmentsTool";
+import AttendanceOverviewTool from "@/components/attendance/AttendanceOverviewTool";
 
 const supabase = createClient();
 
@@ -876,14 +877,8 @@ export default function SmartClassRosterPage() {
 
   // --- เมนูมุมซ้ายล่างของแบนเนอร์ ---
   function handleBannerMenuClick(key: BannerMenuKey) {
-    if (key === "attendanceInfo") {
-      // ใช้แท็บเช็กชื่อที่มีอยู่แล้วโดยตรง แทนการสร้างหน้าซ้ำ
-      setBannerMenu(null);
-      setTab("attendance");
-      return;
-    }
-    setBannerMenu(key);
-  }
+  setBannerMenu(key);
+}
 
   async function handleGiveScore(preset: ScorePreset | null, customPoints?: number) {
     if (!scoreTargets || !section?.id) return;
@@ -1046,9 +1041,25 @@ export default function SmartClassRosterPage() {
         {bannerMenu === "totalScore" && (
           <TotalScoreTab students={students} studentScores={studentScores} />
         )}
-        {bannerMenu === "settings" && (
-          <SubjectSettingsTab subject={subject} classroom={classroom} />
-        )}
+        {bannerMenu === "attendanceInfo" && section && (
+  <AttendanceOverviewTool
+    sectionId={section.id}
+    subjectTitle={subject.name_th}
+    subjectCode={subject.subject_code}
+    joinCode={section.join_code}
+    students={students}
+    onCreateNew={() => {
+      setBannerMenu(null);
+      setTab("attendance");
+    }}
+    onOpenSettings={() => setBannerMenu("settings")}
+    onOpenDate={(date) => {
+      setSelectedDate(date);
+      setBannerMenu(null);
+      setTab("attendance");
+    }}
+  />
+)}
         {!bannerMenu && tab === "roster" && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 w-full">
             <div className="flex items-center justify-between flex-wrap gap-2 mb-5">
