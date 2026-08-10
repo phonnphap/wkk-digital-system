@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 const supabase = createClient();
@@ -348,6 +348,7 @@ function AssignmentForm({
   const [linkUrl, setLinkUrl] = useState("");
   const [links, setLinks] = useState<{ id?: string; url: string }[]>([]);
   const [files, setFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 const [previews, setPreviews] = useState<{ file: File; url: string; isImage: boolean }[]>([]);
   const [saving, setSaving] = useState<"draft" | "publish" | null>(null);
   const [teacherEmail, setTeacherEmail] = useState<string | null>(null);
@@ -548,20 +549,21 @@ function removeFile(index: number) {
           {/* แนบไฟล์ — ทำเป็นกล่อง dropzone แทน input ดิบๆ */}
           <div>
             <label className="text-xs font-black text-slate-500">แนบไฟล์ / รูปภาพ (แนบได้หลายไฟล์)</label>
-            <label
-              htmlFor="assignment-file-input"
-              className="mt-1.5 flex items-center justify-center gap-2 w-full border-2 border-dashed border-slate-200 rounded-xl px-4 py-3.5 text-xs font-bold text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50/40 cursor-pointer transition-colors"
-            >
-              <span className="text-base">📎</span>
-              <span>คลิกเพื่อเลือกไฟล์ (เลือกได้หลายไฟล์)</span>
-            </label>
-            <input
-              id="assignment-file-input"
-              type="file"
-              multiple
-              onChange={e => { addFiles(e.target.files); e.target.value = ""; }}
-              className="hidden"
-            />
+            <button
+  type="button"
+  onClick={() => fileInputRef.current?.click()}
+  className="mt-1.5 flex items-center justify-center gap-2 w-full border-2 border-dashed border-slate-200 rounded-xl px-4 py-3.5 text-xs font-bold text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50/40 cursor-pointer transition-colors"
+>
+  <span className="text-base">📎</span>
+  <span>คลิกเพื่อเลือกไฟล์ (เลือกได้หลายไฟล์)</span>
+</button>
+<input
+  ref={fileInputRef}
+  type="file"
+  multiple
+  onChange={e => { addFiles(e.target.files); e.target.value = ""; }}
+  className="hidden"
+/>
 
             {(existingAttachments.length > 0 || previews.length > 0) && (
   <div className="mt-2 grid grid-cols-3 gap-2">
