@@ -431,8 +431,10 @@ async function removeExistingAttachment(att: AssignmentAttachment) {
 }, [files]);
 
 function addFiles(list: FileList | null) {
-  if (!list) return;
-  setFiles(prev => [...prev, ...Array.from(list)]);
+  if (!list || list.length === 0) return;
+  const newFiles = Array.from(list); // ★ แปลงเป็น array ทันที ก่อนที่ input.value = "" จะเคลียร์ live FileList ตัวนี้
+  console.log("[addFiles] captured", newFiles.length, "file(s) eagerly:", newFiles.map(f => f.name));
+  setFiles(prev => [...prev, ...newFiles]);
 }
 function removeFile(index: number) {
   setFiles(prev => prev.filter((_, i) => i !== index));
