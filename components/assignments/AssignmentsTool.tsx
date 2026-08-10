@@ -27,6 +27,8 @@ type Assignment = {
   allow_weight: boolean;
   weight_percent: number | null;
   grading_criteria_note: string | null;
+  /* NOTE: new column — see migration SQL (assignments.rubric_id) */
+  rubric_id?: string | null;
   status: AssignmentStatus;
   published_at: string | null;
   created_by: string | null;
@@ -47,6 +49,37 @@ type Submission = {
 };
 
 type TeacherSection = { id: string; label: string };
+
+/* ---- NEW: rubric / announcement / import types ----
+   These map to the tables added in the migration SQL. Adjust field
+   names if your real schema differs. */
+
+type SavedRubric = {
+  id: string;
+  subject_id: string;
+  name: string;
+  description: string | null;
+  max_score: number;
+};
+type RubricLevel = { id: string; rubric_id: string; name: string; score: number; order_index: number };
+type RubricCriterion = { id: string; rubric_id: string; name: string; weight: number; order_index: number };
+type RubricCellNote = { id: string; criterion_id: string; level_id: string; description: string | null };
+type SchoolTeacher = { id: string; email: string; full_name: string | null };
+function teacherDisplayName(t: SchoolTeacher | undefined | null): string {
+  if (!t) return "-";
+  return (t.full_name && t.full_name.trim()) || t.email;
+}
+type ImportableSubjectCard = {
+  subject_id: string;
+  subject_section_id: string;
+  subject_code: string;
+  name_th: string;
+  academic_year: number;
+  semester: number;
+  teacher_name: string;
+  teacher_id: string;
+  classroom_label: string;
+};
 
 const TYPE_LABELS: Record<AssignmentType, string> = {
   assignment: "งาน/การบ้าน",
@@ -104,6 +137,7 @@ function isImageFilename(name?: string | null): boolean {
    ========================================================================= */
 
 type ViewMode = "list" | "create" | "detail";
+type ModalMode = null | "rubric" | "import" | "announcement";
 
 export default function AssignmentsTool({
   sectionId,
@@ -123,6 +157,9 @@ export default function AssignmentsTool({
 
   const [view, setView] = useState<ViewMode>("list");
   const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null);
+
+  // NEW: which top-level modal (rubric manager / import / announcement) is open
+  const [modal, setModal] = useState<ModalMode>(null);
 
   async function loadAll() {
     setLoading(true);
@@ -180,24 +217,23 @@ export default function AssignmentsTool({
     return <div className="text-center py-16 text-indigo-400 font-black animate-pulse">กำลังโหลดชิ้นงาน...</div>;
   }
 
+  let content: React.ReactNode;
+
   if (view === "create") {
-    return (
+    content = (
       <AssignmentForm
         sectionId={sectionId}
         subjectId={subjectId}
         currentUserId={currentUserId}
         onCancel={backToList}
-        onPublished={id => {
-          openDetail(id);
-          loadAll();
-        }}
+        // CHANGED: publishing now returns to the "มอบหมายงาน" list tab
+        // instead of jumping into the assignment detail view.
+        onPublished={() => backToList()}
         onSavedDraft={() => backToList()}
       />
     );
-  }
-
-  if (view === "detail" && activeAssignment) {
-    return (
+  } else if (view === "detail" && activeAssignment) {
+    content = (
       <AssignmentDetail
         assignment={activeAssignment}
         subjectId={subjectId}
@@ -210,17 +246,56 @@ export default function AssignmentsTool({
         onRefresh={loadAll}
       />
     );
+  } else {
+    content = (
+      <AssignmentList
+        assignments={assignments}
+        students={students}
+        studentLinks={studentLinks}
+        submissions={submissions}
+        onCreate={openCreate}
+        onOpen={openDetail}
+        onManageRubrics={() => setModal("rubric")}
+        onImport={() => setModal("import")}
+        onAnnouncement={() => setModal("announcement")}
+      />
+    );
   }
 
   return (
-    <AssignmentList
-      assignments={assignments}
-      students={students}
-      studentLinks={studentLinks}
-      submissions={submissions}
-      onCreate={openCreate}
-      onOpen={openDetail}
-    />
+    <>
+      {content}
+
+      {modal === "rubric" && (
+        <RubricManagerModal
+          subjectId={subjectId}
+          currentUserId={currentUserId}
+          onClose={() => setModal(null)}
+        />
+      )}
+
+      {modal === "import" && (
+        <ImportAssignmentModal
+          subjectId={subjectId}
+          sectionId={sectionId}
+          currentUserId={currentUserId}
+          onClose={() => setModal(null)}
+          onImported={() => {
+            setModal(null);
+            loadAll();
+          }}
+        />
+      )}
+
+      {modal === "announcement" && (
+        <AnnouncementModal
+          sectionId={sectionId}
+          currentUserId={currentUserId}
+          onClose={() => setModal(null)}
+          onPosted={() => setModal(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -235,6 +310,9 @@ function AssignmentList({
   submissions,
   onCreate,
   onOpen,
+  onManageRubrics,
+  onImport,
+  onAnnouncement,
 }: {
   assignments: Assignment[];
   students: Student[];
@@ -242,19 +320,42 @@ function AssignmentList({
   submissions: Submission[];
   onCreate: () => void;
   onOpen: (id: string) => void;
+  onManageRubrics: () => void;
+  onImport: () => void;
+  onAnnouncement: () => void;
 }) {
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h2 className="font-black text-slate-800 text-lg">📌 มอบหมายงานในรายวิชา</h2>
-          <p className="text-slate-400 text-xs font-bold">มอบหมายงานให้นักเรียน และดูความคืบหน้าของชิ้นงานได้ที่นี่</p>
-        </div>
+      <div>
+        <h2 className="font-black text-slate-800 text-lg">📌 มอบหมายงานในรายวิชา</h2>
+        <p className="text-slate-400 text-xs font-bold">คุณสามารถมอบหมายงานนักเรียน และดูความคืบหน้าของชิ้นงานได้ที่นี่</p>
+      </div>
+
+      {/* แถบปุ่มเมนู: จัดการเกณฑ์รูบิก / นำเข้าชิ้นงาน / สร้างประกาศใหม่ / สร้างชิ้นงาน */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={onManageRubrics}
+          className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
+        >
+          <span>☑️</span> จัดการเกณฑ์รูบิก
+        </button>
+        <button
+          onClick={onImport}
+          className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
+        >
+          <span>📘</span> นำเข้าชิ้นงาน
+        </button>
+        <button
+          onClick={onAnnouncement}
+          className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
+        >
+          <span>📣</span> สร้างประกาศใหม่
+        </button>
         <button
           onClick={onCreate}
-          className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow"
+          className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow flex items-center gap-1.5"
         >
-          + สร้างชิ้นงาน
+          <span>+</span> สร้างชิ้นงาน
         </button>
       </div>
 
@@ -359,6 +460,10 @@ function AssignmentForm({
   const [allowWeight, setAllowWeight] = useState(existing?.allow_weight ?? false);
   const [weightPercent, setWeightPercent] = useState<number | "">(existing?.weight_percent ?? "");
   const [gradingNote, setGradingNote] = useState(existing?.grading_criteria_note ?? "");
+  // NEW: link to a saved rubric (assignments.rubric_id)
+  const [rubricId, setRubricId] = useState<string | null>(existing?.rubric_id ?? null);
+  const [savedRubrics, setSavedRubrics] = useState<SavedRubric[]>([]);
+  const [showRubricPicker, setShowRubricPicker] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [links, setLinks] = useState<{ id?: string; url: string }[]>([]);
   const [files, setFiles] = useState<File[]>([]);
@@ -380,6 +485,23 @@ const [previews, setPreviews] = useState<{ file: File; url: string; isImage: boo
         if (data) setSubjectName(`${data.name_th ?? ""}`.trim() || data.subject_code || subjectId);
       });
   }, [subjectId]);
+
+  // NEW: load the saved rubrics ("เลือกจากที่ตั้งไว้") for this subject
+  useEffect(() => {
+    if (!subjectId) return;
+    supabase
+      .from("grading_rubrics")
+      .select("id, subject_id, name, description, max_score")
+      .eq("subject_id", subjectId)
+      .order("name", { ascending: true })
+      .then(({ data }) => setSavedRubrics((data ?? []) as SavedRubric[]));
+  }, [subjectId]);
+
+  function pickRubric(r: SavedRubric) {
+    setRubricId(r.id);
+    setGradingNote(r.name);
+    setShowRubricPicker(false);
+  }
 
 useEffect(() => {
   if (!existing) return;
@@ -424,13 +546,11 @@ async function removeExistingAttachment(att: AssignmentAttachment) {
 }
 
   useEffect(() => {
-  console.log("[preview-effect] files.length =", files.length, files);
   const next = files.map(f => ({
     file: f,
     url: URL.createObjectURL(f),
     isImage: f.type.startsWith("image/"),
   }));
-  console.log("[preview-effect] built previews =", next.length);
   setPreviews(next);
   return () => next.forEach(p => URL.revokeObjectURL(p.url));
 }, [files]);
@@ -438,7 +558,6 @@ async function removeExistingAttachment(att: AssignmentAttachment) {
 function addFiles(list: FileList | null) {
   if (!list || list.length === 0) return;
   const newFiles = Array.from(list); // ★ แปลงเป็น array ทันที ก่อนที่ input.value = "" จะเคลียร์ live FileList ตัวนี้
-  console.log("[addFiles] captured", newFiles.length, "file(s) eagerly:", newFiles.map(f => f.name));
   setFiles(prev => [...prev, ...newFiles]);
 }
 function removeFile(index: number) {
@@ -469,6 +588,7 @@ function removeFile(index: number) {
       allow_weight: allowWeight,
       weight_percent: allowWeight && weightPercent !== "" ? Number(weightPercent) : null,
       grading_criteria_note: allowWeight && gradingNote.trim() ? gradingNote.trim() : null,
+      rubric_id: allowWeight ? rubricId : null,
       status,
       published_at: status === "published" ? new Date().toISOString() : null,
       created_by: currentUserId || null,
@@ -595,14 +715,12 @@ function removeFile(index: number) {
               type="file"
               multiple
               onChange={e => {
-                console.log("[assignment-file-input] change fired, files:", e.target.files?.length);
                 addFiles(e.target.files);
                 e.target.value = "";
               }}
               className="hidden"
             />
 
-            {(() => { console.log("[render] existingAttachments=", existingAttachments.length, "previews=", previews.length); return null; })()}
             {(existingAttachments.length > 0 || previews.length > 0) && (
   <div className="mt-2 grid grid-cols-3 gap-2">
     {existingAttachments.map(att => (
@@ -746,14 +864,45 @@ function removeFile(index: number) {
                   className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
                 />
               </div>
-              <div>
+              {/* NEW: grading-criteria field now lets you pick a saved rubric */}
+              <div className="relative">
                 <label className="text-[11px] font-black text-slate-400">เกณฑ์การให้คะแนน (ไม่บังคับ)</label>
-                <input
-                  value={gradingNote}
-                  onChange={e => setGradingNote(e.target.value)}
-                  placeholder="พิมพ์เกณฑ์ หรือเลือกจากที่ตั้งไว้"
-                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-                />
+                <div className="mt-1 flex gap-1.5">
+                  <input
+                    value={gradingNote}
+                    onChange={e => {
+                      setGradingNote(e.target.value);
+                      setRubricId(null); // free-typed text detaches from a saved rubric
+                    }}
+                    placeholder="พิมพ์เกณฑ์ หรือเลือกจากที่ตั้งไว้"
+                    className="flex-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowRubricPicker(v => !v)}
+                    className="px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-[11px] shrink-0"
+                  >
+                    เลือกจากที่ตั้งไว้
+                  </button>
+                </div>
+                {showRubricPicker && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                    {savedRubrics.length === 0 ? (
+                      <p className="text-xs font-bold text-slate-300 text-center py-4">ยังไม่มีเกณฑ์การให้คะแนนที่บันทึกไว้</p>
+                    ) : (
+                      savedRubrics.map(r => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => pickRubric(r)}
+                          className={`w-full text-left px-3 py-2.5 hover:bg-indigo-50 text-xs font-bold text-slate-600 border-b border-slate-50 last:border-0 ${rubricId === r.id ? "bg-indigo-50 text-indigo-600" : ""}`}
+                        >
+                          {r.name} <span className="text-slate-300 font-normal">· คะแนนดิบสูงสุด {r.max_score}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1492,4 +1641,1038 @@ function CrossSectionTab({
       {done && <p className="text-center text-emerald-500 font-black text-xs">✅ มอบหมายให้วิชาอื่นเรียบร้อยแล้ว</p>}
     </div>
   );
+}
+
+/* =========================================================================
+   NEW — จัดการเกณฑ์รูบิก (Rubric manager)
+   Tables used: grading_rubrics, rubric_levels, rubric_criteria,
+   rubric_criteria_level_notes (see migration SQL).
+   ========================================================================= */
+
+function RubricManagerModal({
+  subjectId,
+  currentUserId,
+  onClose,
+}: {
+  subjectId: string;
+  currentUserId: string;
+  onClose: () => void;
+}) {
+  const [step, setStep] = useState<"list" | "create" | "copy">("list");
+  const [rubrics, setRubrics] = useState<SavedRubric[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingRubric, setEditingRubric] = useState<SavedRubric | null>(null);
+
+  async function loadRubrics() {
+    setLoading(true);
+    const { data } = await supabase
+      .from("grading_rubrics")
+      .select("id, subject_id, name, description, max_score")
+      .eq("subject_id", subjectId)
+      .order("name", { ascending: true });
+    setRubrics((data ?? []) as SavedRubric[]);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadRubrics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subjectId]);
+
+  async function deleteRubric(id: string) {
+    if (!confirm("ลบเกณฑ์การให้คะแนนนี้ใช่หรือไม่?")) return;
+    try {
+      await supabase.from("grading_rubrics").delete().eq("id", id);
+      loadRubrics();
+    } catch (e: any) {
+      alert("ลบไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+  }
+
+  if (step === "create" || editingRubric) {
+    return (
+      <RubricEditor
+        subjectId={subjectId}
+        currentUserId={currentUserId}
+        existing={editingRubric}
+        onCancel={() => {
+          setStep("list");
+          setEditingRubric(null);
+        }}
+        onSaved={() => {
+          setStep("list");
+          setEditingRubric(null);
+          loadRubrics();
+        }}
+      />
+    );
+  }
+
+  if (step === "copy") {
+    return (
+      <RubricCopyFromOtherSubject
+        subjectId={subjectId}
+        currentUserId={currentUserId}
+        onCancel={() => setStep("list")}
+        onCopied={() => {
+          setStep("list");
+          loadRubrics();
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto">
+        <div className="flex items-start justify-between px-6 py-5 border-b border-slate-100">
+          <div>
+            <p className="font-black text-slate-800 text-lg">เกณฑ์การให้คะแนน</p>
+            <p className="text-slate-400 text-xs font-bold mt-0.5">สร้างและจัดการเกณฑ์การให้คะแนนสำหรับงานของวิชานี้</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-sm">ปิด</button>
+        </div>
+
+        <div className="p-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-black text-slate-700">เกณฑ์การให้คะแนน</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setStep("copy")}
+                className="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-xs flex items-center gap-1.5"
+              >
+                📋 คัดลอกจากวิชาอื่น
+              </button>
+              <button
+                onClick={() => setStep("create")}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-xs flex items-center gap-1.5"
+              >
+                + สร้างเกณฑ์การให้คะแนนแบบรูบิก
+              </button>
+            </div>
+          </div>
+
+          {loading ? (
+            <p className="text-center text-slate-300 font-bold text-sm py-16">กำลังโหลด...</p>
+          ) : rubrics.length === 0 ? (
+            <div className="text-center py-16">
+              <p className="font-black text-slate-500 text-sm">ยังไม่มีเกณฑ์การให้คะแนน</p>
+              <p className="text-slate-300 text-xs font-bold mt-1">สร้างเกณฑ์การให้คะแนนเพื่อให้คะแนนงานตามเกณฑ์ต่าง ๆ</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {rubrics.map(r => (
+                <div key={r.id} className="flex items-center justify-between rounded-xl border border-slate-100 px-4 py-3 hover:bg-slate-50">
+                  <button className="text-left flex-1 min-w-0" onClick={() => setEditingRubric(r)}>
+                    <p className="font-black text-slate-700 text-sm truncate">{r.name}</p>
+                    <p className="text-slate-400 text-xs font-bold">คะแนนดิบสูงสุด {r.max_score}</p>
+                  </button>
+                  <button
+                    onClick={() => deleteRubric(r.id)}
+                    className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-500 font-black text-xs shrink-0"
+                  >
+                    ลบ
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------- สร้าง/แก้ไข เกณฑ์การให้คะแนนแบบรูบิก (matrix: เกณฑ์ × ระดับ) ------- */
+
+type EditorLevel = { id: string; name: string; score: number };
+type EditorCriterion = { id: string; name: string; weight: number; notes: Record<string, string> }; // notes keyed by level id
+
+function RubricEditor({
+  subjectId,
+  currentUserId,
+  existing,
+  onCancel,
+  onSaved,
+}: {
+  subjectId: string;
+  currentUserId: string;
+  existing: SavedRubric | null;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(existing?.name ?? "");
+  const [description, setDescription] = useState(existing?.description ?? "");
+  const [levels, setLevels] = useState<EditorLevel[]>([
+    { id: "lvl-1", name: "", score: 4 },
+    { id: "lvl-2", name: "", score: 3 },
+    { id: "lvl-3", name: "", score: 2 },
+    { id: "lvl-4", name: "", score: 1 },
+  ]);
+  const [criteria, setCriteria] = useState<EditorCriterion[]>([
+    { id: "crit-1", name: "", weight: 1, notes: {} },
+  ]);
+  const [saving, setSaving] = useState(false);
+  const [loadingExisting, setLoadingExisting] = useState(!!existing);
+
+  useEffect(() => {
+    if (!existing) return;
+    (async () => {
+      const [{ data: lvlRows }, { data: critRows }] = await Promise.all([
+        supabase.from("rubric_levels").select("*").eq("rubric_id", existing.id).order("order_index"),
+        supabase.from("rubric_criteria").select("*").eq("rubric_id", existing.id).order("order_index"),
+      ]);
+      const lvls = ((lvlRows ?? []) as RubricLevel[]).map(l => ({ id: l.id, name: l.name ?? "", score: l.score }));
+      if (lvls.length > 0) setLevels(lvls);
+
+      const critIds = (critRows ?? []).map((c: any) => c.id);
+      const { data: noteRows } = critIds.length
+        ? await supabase.from("rubric_criteria_level_notes").select("*").in("criterion_id", critIds)
+        : { data: [] as any[] };
+
+      const critList: EditorCriterion[] = ((critRows ?? []) as RubricCriterion[]).map(c => {
+        const notes: Record<string, string> = {};
+        ((noteRows ?? []) as RubricCellNote[])
+          .filter(n => n.criterion_id === c.id)
+          .forEach(n => { notes[n.level_id] = n.description ?? ""; });
+        return { id: c.id, name: c.name, weight: c.weight, notes };
+      });
+      if (critList.length > 0) setCriteria(critList);
+      setLoadingExisting(false);
+    })();
+  }, [existing]);
+
+  const topScore = Math.max(0, ...levels.map(l => l.score));
+  const maxScore = criteria.reduce((sum, c) => sum + (Number(c.weight) || 0) * topScore, 0);
+
+  function updateLevel(id: string, patch: Partial<EditorLevel>) {
+    setLevels(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l)));
+  }
+  function addLevel() {
+    setLevels(prev => [...prev, { id: `lvl-${Date.now()}`, name: "", score: 0 }]);
+  }
+  function removeLevel(id: string) {
+    setLevels(prev => prev.filter(l => l.id !== id));
+    setCriteria(prev => prev.map(c => {
+      const { [id]: _, ...rest } = c.notes;
+      return { ...c, notes: rest };
+    }));
+  }
+
+  function updateCriterion(id: string, patch: Partial<EditorCriterion>) {
+    setCriteria(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+  }
+  function addCriterion() {
+    setCriteria(prev => [...prev, { id: `crit-${Date.now()}`, name: "", weight: 1, notes: {} }]);
+  }
+  function removeCriterion(id: string) {
+    setCriteria(prev => prev.filter(c => c.id !== id));
+  }
+  function updateNote(criterionId: string, levelId: string, text: string) {
+    setCriteria(prev => prev.map(c => (c.id === criterionId ? { ...c, notes: { ...c.notes, [levelId]: text } } : c)));
+  }
+
+  async function save() {
+    if (!name.trim()) {
+      alert("ต้องระบุชื่อเกณฑ์การให้คะแนน");
+      return;
+    }
+    setSaving(true);
+    try {
+      let rubricId = existing?.id ?? "";
+      const rubricPayload = {
+        subject_id: subjectId,
+        name: name.trim(),
+        description: description || null,
+        max_score: maxScore,
+        created_by: currentUserId || null,
+      };
+      if (existing) {
+        await supabase.from("grading_rubrics").update(rubricPayload).eq("id", existing.id);
+        rubricId = existing.id;
+        // เคลียร์ของเก่าแล้วเขียนใหม่ทั้งหมด (ง่ายกว่าการ diff ทีละแถว)
+        const { data: oldCrit } = await supabase.from("rubric_criteria").select("id").eq("rubric_id", rubricId);
+        const oldCritIds = (oldCrit ?? []).map((c: any) => c.id);
+        if (oldCritIds.length) await supabase.from("rubric_criteria_level_notes").delete().in("criterion_id", oldCritIds);
+        await supabase.from("rubric_criteria").delete().eq("rubric_id", rubricId);
+        await supabase.from("rubric_levels").delete().eq("rubric_id", rubricId);
+      } else {
+        const { data, error } = await supabase.from("grading_rubrics").insert(rubricPayload).select().maybeSingle();
+        if (error) throw error;
+        rubricId = data.id;
+      }
+
+      // levels — insert and remember the real (new) ids, mapping from temp ids
+      const levelIdMap: Record<string, string> = {};
+      for (let i = 0; i < levels.length; i++) {
+        const l = levels[i];
+        const { data, error } = await supabase
+          .from("rubric_levels")
+          .insert({ rubric_id: rubricId, name: l.name || null, score: l.score, order_index: i })
+          .select()
+          .maybeSingle();
+        if (error) throw error;
+        levelIdMap[l.id] = data.id;
+      }
+
+      // criteria + per-cell notes
+      for (let i = 0; i < criteria.length; i++) {
+        const c = criteria[i];
+        const { data: critData, error: critErr } = await supabase
+          .from("rubric_criteria")
+          .insert({ rubric_id: rubricId, name: c.name || "ไม่มีชื่อเกณฑ์", weight: c.weight, order_index: i })
+          .select()
+          .maybeSingle();
+        if (critErr) throw critErr;
+
+        const noteRows = Object.entries(c.notes)
+          .filter(([, text]) => text && text.trim())
+          .map(([tempLevelId, text]) => ({
+            criterion_id: critData.id,
+            level_id: levelIdMap[tempLevelId] ?? tempLevelId,
+            description: text,
+          }));
+        if (noteRows.length) await supabase.from("rubric_criteria_level_notes").insert(noteRows);
+      }
+
+      onSaved();
+    } catch (e: any) {
+      alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-start justify-between px-6 py-5 border-b border-slate-100">
+          <p className="font-black text-slate-800 text-lg">{existing ? "แก้ไขเกณฑ์การให้คะแนน" : "สร้างเกณฑ์การให้คะแนน"}</p>
+          <button className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs">
+            ✨ ร่างด้วย AI
+          </button>
+        </div>
+
+        {loadingExisting ? (
+          <p className="text-center text-slate-300 font-bold text-sm py-16">กำลังโหลด...</p>
+        ) : (
+          <div className="p-6 space-y-4">
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="ชื่อเกณฑ์การให้คะแนน"
+              className="w-full rounded-xl px-4 py-3 text-sm font-black bg-gradient-to-r from-indigo-500 to-blue-500 text-white placeholder:text-white/70 focus:outline-none"
+            />
+            <textarea
+              value={description ?? ""}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="คำอธิบาย (ไม่บังคับ)"
+              rows={2}
+              className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none resize-none"
+            />
+
+            <div className="overflow-x-auto">
+              <table className="border-separate border-spacing-2 min-w-full">
+                <thead>
+                  <tr>
+                    <th className="text-left text-xs font-black text-slate-500 px-1">เกณฑ์การประเมิน</th>
+                    {levels.map(l => (
+                      <th key={l.id} className="min-w-[180px]">
+                        <div className="border-2 border-slate-100 rounded-xl p-2">
+                          <div className="flex items-center gap-1">
+                            <input
+                              value={l.name}
+                              onChange={e => updateLevel(l.id, { name: e.target.value })}
+                              placeholder="ชื่อระดับ"
+                              className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
+                            />
+                            <button onClick={() => removeLevel(l.id)} className="w-5 h-5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-500 text-[10px] font-black shrink-0">✕</button>
+                          </div>
+                          <input
+                            type="number"
+                            value={l.score}
+                            onChange={e => updateLevel(l.id, { score: Number(e.target.value) })}
+                            className="mt-1.5 w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-center"
+                          />
+                          <span className="text-[10px] text-slate-400 font-bold ml-1">คะแนน</span>
+                        </div>
+                      </th>
+                    ))}
+                    <th className="align-bottom">
+                      <button onClick={addLevel} className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 font-black text-xs whitespace-nowrap">+ เพิ่มระดับ</button>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {criteria.map(c => (
+                    <tr key={c.id}>
+                      <td className="align-top">
+                        <div className="border-2 border-slate-100 rounded-xl p-2 min-w-[160px]">
+                          <input
+                            value={c.name}
+                            onChange={e => updateCriterion(c.id, { name: e.target.value })}
+                            placeholder="ชื่อเกณฑ์"
+                            className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
+                          />
+                          <p className="text-[10px] text-slate-400 font-bold mt-1.5">น้ำหนัก</p>
+                          <input
+                            type="number"
+                            value={c.weight}
+                            onChange={e => updateCriterion(c.id, { weight: Number(e.target.value) })}
+                            className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-center"
+                          />
+                          <button onClick={() => removeCriterion(c.id)} className="mt-2 text-rose-500 font-black text-[11px]">✕ ลบเกณฑ์</button>
+                        </div>
+                      </td>
+                      {levels.map(l => (
+                        <td key={l.id} className="align-top">
+                          <textarea
+                            value={c.notes[l.id] ?? ""}
+                            onChange={e => updateNote(c.id, l.id, e.target.value)}
+                            placeholder="คำอธิบายระดับ (ไม่บังคับ)"
+                            rows={3}
+                            className="w-full border-2 border-slate-100 rounded-xl px-2 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none resize-none"
+                          />
+                        </td>
+                      ))}
+                      <td />
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <button onClick={addCriterion} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">+ เพิ่มเกณฑ์</button>
+
+            <div className="flex items-center justify-between pt-2">
+              <div className="text-xs font-bold">
+                <span className="text-slate-500">คะแนนดิบสูงสุด: </span>
+                <span className="text-slate-800 font-black">{maxScore}</span>
+                {!name.trim() && <span className="text-rose-400 ml-3">ต้องระบุชื่อเกณฑ์การให้คะแนน</span>}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={onCancel} className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm">ยกเลิก</button>
+                <button
+                  onClick={save}
+                  disabled={saving || !name.trim()}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm disabled:opacity-50"
+                >
+                  {saving ? "กำลังบันทึก..." : "บันทึก"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------- คัดลอกเกณฑ์การให้คะแนนจากวิชาอื่นที่ครูคนนี้สอน ------- */
+
+function RubricCopyFromOtherSubject({
+  subjectId,
+  currentUserId,
+  onCancel,
+  onCopied,
+}: {
+  subjectId: string;
+  currentUserId: string;
+  onCancel: () => void;
+  onCopied: () => void;
+}) {
+  const [otherSubjects, setOtherSubjects] = useState<{ id: string; label: string }[]>([]);
+  const [pickedSubjectId, setPickedSubjectId] = useState<string | null>(null);
+  const [rubricsOfPicked, setRubricsOfPicked] = useState<SavedRubric[]>([]);
+  const [copying, setCopying] = useState(false);
+
+  useEffect(() => {
+    supabase
+      .from("subjects")
+      .select("id, subject_code, name_th")
+      .eq("created_by", currentUserId) // NOTE: adjust to your actual ownership column
+      .neq("id", subjectId)
+      .then(({ data }) => {
+        setOtherSubjects(((data ?? []) as any[]).map(s => ({ id: s.id, label: `${s.subject_code ?? ""} · ${s.name_th ?? ""}` })));
+      });
+  }, [subjectId, currentUserId]);
+
+  useEffect(() => {
+    if (!pickedSubjectId) { setRubricsOfPicked([]); return; }
+    supabase
+      .from("grading_rubrics")
+      .select("id, subject_id, name, description, max_score")
+      .eq("subject_id", pickedSubjectId)
+      .then(({ data }) => setRubricsOfPicked((data ?? []) as SavedRubric[]));
+  }, [pickedSubjectId]);
+
+  async function copyRubric(r: SavedRubric) {
+    setCopying(true);
+    try {
+      const [{ data: levelRows }, { data: critRows }] = await Promise.all([
+        supabase.from("rubric_levels").select("*").eq("rubric_id", r.id).order("order_index"),
+        supabase.from("rubric_criteria").select("*").eq("rubric_id", r.id).order("order_index"),
+      ]);
+
+      const { data: newRubric, error } = await supabase
+        .from("grading_rubrics")
+        .insert({ subject_id: subjectId, name: r.name, description: r.description, max_score: r.max_score, created_by: currentUserId || null })
+        .select()
+        .maybeSingle();
+      if (error) throw error;
+
+      const levelIdMap: Record<string, string> = {};
+      for (const l of (levelRows ?? []) as RubricLevel[]) {
+        const { data } = await supabase
+          .from("rubric_levels")
+          .insert({ rubric_id: newRubric.id, name: l.name, score: l.score, order_index: l.order_index })
+          .select()
+          .maybeSingle();
+        levelIdMap[l.id] = data.id;
+      }
+
+      for (const c of (critRows ?? []) as RubricCriterion[]) {
+        const { data: newCrit } = await supabase
+          .from("rubric_criteria")
+          .insert({ rubric_id: newRubric.id, name: c.name, weight: c.weight, order_index: c.order_index })
+          .select()
+          .maybeSingle();
+
+        const { data: noteRows } = await supabase.from("rubric_criteria_level_notes").select("*").eq("criterion_id", c.id);
+        const newNotes = ((noteRows ?? []) as RubricCellNote[]).map(n => ({
+          criterion_id: newCrit.id,
+          level_id: levelIdMap[n.level_id] ?? n.level_id,
+          description: n.description,
+        }));
+        if (newNotes.length) await supabase.from("rubric_criteria_level_notes").insert(newNotes);
+      }
+
+      onCopied();
+    } catch (e: any) {
+      alert("คัดลอกไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+    setCopying(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+          <p className="font-black text-slate-800 text-lg">คัดลอกเกณฑ์การให้คะแนนจากวิชาอื่น</p>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 font-bold text-sm">ปิด</button>
+        </div>
+        <div className="p-6 space-y-4">
+          <select
+            value={pickedSubjectId ?? ""}
+            onChange={e => setPickedSubjectId(e.target.value || null)}
+            className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+          >
+            <option value="">เลือกวิชาที่คุณสอน</option>
+            {otherSubjects.map(s => (
+              <option key={s.id} value={s.id}>{s.label}</option>
+            ))}
+          </select>
+
+          {pickedSubjectId && (
+            rubricsOfPicked.length === 0 ? (
+              <p className="text-center text-slate-300 font-bold text-sm py-8">วิชานี้ยังไม่มีเกณฑ์การให้คะแนน</p>
+            ) : (
+              <div className="space-y-2">
+                {rubricsOfPicked.map(r => (
+                  <div key={r.id} className="flex items-center justify-between rounded-xl border border-slate-100 px-4 py-3">
+                    <div>
+                      <p className="font-black text-slate-700 text-sm">{r.name}</p>
+                      <p className="text-slate-400 text-xs font-bold">คะแนนดิบสูงสุด {r.max_score}</p>
+                    </div>
+                    <button
+                      onClick={() => copyRubric(r)}
+                      disabled={copying}
+                      className="px-4 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-xs disabled:opacity-50"
+                    >
+                      {copying ? "กำลังคัดลอก..." : "+ คัดลอก"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================================
+   NEW — นำเข้าชิ้นงาน (Import assignment from the same subject, across
+   sections/teachers). Table used for lookups: subjects, subject_sections,
+   assignments. Adjust the "same subject" match rule (currently subject_code)
+   and the teacher lookup (uses your `users` table: id, email, title, first_name, last_name).
+   ========================================================================= */
+
+function ImportAssignmentModal({
+  subjectId,
+  sectionId,
+  currentUserId,
+  onClose,
+  onImported,
+}: {
+  subjectId: string;
+  sectionId: string;
+  currentUserId: string;
+  onClose: () => void;
+  onImported: () => void;
+}) {
+  const [step, setStep] = useState<"search" | "pick">("search");
+  const [searchText, setSearchText] = useState("");
+  const [year, setYear] = useState<number>(new Date().getFullYear() + 543 - 543); // NOTE: adjust to your ปี พ.ศ./ค.ศ. convention
+  const [semester, setSemester] = useState<number>(1);
+  const [teacherFilter, setTeacherFilter] = useState<string>("");
+  const [teachers, setTeachers] = useState<SchoolTeacher[]>([]);
+  const [cards, setCards] = useState<ImportableSubjectCard[]>([]);
+  const [loadingCards, setLoadingCards] = useState(false);
+
+  const [pickedCard, setPickedCard] = useState<ImportableSubjectCard | null>(null);
+  const [sourceAssignments, setSourceAssignments] = useState<Assignment[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [copying, setCopying] = useState(false);
+
+  useEffect(() => {
+  supabase.from("profiles").select("id, email, full_name").then(({ data }) => {
+    setTeachers((data ?? []) as SchoolTeacher[]);
+  });
+}, []);
+
+  async function runSearch() {
+    setLoadingCards(true);
+    try {
+      // ค้นหารายวิชาเดียวกัน (ตรงกันด้วย subject_code หรือชื่อวิชา) ในปี/ภาคเรียนที่เลือก
+      // แม้จะเป็นคนละห้อง หรือคนละครูผู้สอน
+      let query = supabase
+        .from("subjects")
+        .select("id, subject_code, name_th, academic_year, semester, created_by")
+        .eq("academic_year", year)
+        .eq("semester", semester);
+
+      if (searchText.trim()) {
+        query = query.or(`subject_code.ilike.%${searchText.trim()}%,name_th.ilike.%${searchText.trim()}%`);
+      }
+      if (teacherFilter) {
+        query = query.eq("created_by", teacherFilter);
+      }
+
+      const { data: subjRows } = await query;
+      const subjectIds = (subjRows ?? []).map((s: any) => s.id).filter((id: string) => id !== subjectId);
+      if (subjectIds.length === 0) {
+        setCards([]);
+        setLoadingCards(false);
+        return;
+      }
+
+      const { data: sectionRows } = await supabase
+        .from("subject_sections")
+        .select("id, subject_id, join_code, classroom_label")
+        .in("subject_id", subjectIds);
+
+      const list: ImportableSubjectCard[] = (sectionRows ?? []).map((sec: any) => {
+        const subj = (subjRows ?? []).find((s: any) => s.id === sec.subject_id);
+        const teacher = teachers.find(t => t.id === subj?.created_by);
+        return {
+          subject_id: subj?.id,
+          subject_section_id: sec.id,
+          subject_code: subj?.subject_code ?? "",
+          name_th: subj?.name_th ?? "",
+          academic_year: subj?.academic_year ?? year,
+          semester: subj?.semester ?? semester,
+          teacher_name: teacherDisplayName(teacher),
+          teacher_id: subj?.created_by ?? "",
+          classroom_label: sec.classroom_label ?? sec.join_code ?? "-",
+        };
+      });
+      setCards(list);
+    } catch (e: any) {
+      alert("ค้นหาไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+    setLoadingCards(false);
+  }
+
+  useEffect(() => {
+    runSearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function openCard(card: ImportableSubjectCard) {
+    setPickedCard(card);
+    setSelectedIds(new Set());
+    const { data } = await supabase
+      .from("assignments")
+      .select("*")
+      .eq("subject_section_id", card.subject_section_id)
+      .order("assigned_at", { ascending: false });
+    setSourceAssignments((data ?? []) as Assignment[]);
+    setStep("pick");
+  }
+
+  function toggle(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  async function confirmCopy() {
+    if (selectedIds.size === 0) return;
+    setCopying(true);
+    try {
+      for (const id of selectedIds) {
+        const a = sourceAssignments.find(x => x.id === id);
+        if (!a) continue;
+
+        const { data: cloned, error } = await supabase
+          .from("assignments")
+          .insert({
+            subject_section_id: sectionId,
+            title: a.title,
+            description: a.description,
+            type: a.type,
+            assigned_at: new Date().toISOString(),
+            due_date: a.due_date,
+            max_score: a.max_score,
+            allow_weight: a.allow_weight,
+            weight_percent: a.weight_percent,
+            grading_criteria_note: a.grading_criteria_note,
+            rubric_id: a.rubric_id ?? null,
+            status: "draft",
+            published_at: null,
+            created_by: currentUserId || null,
+          })
+          .select()
+          .maybeSingle();
+        if (error) throw error;
+
+        // คัดลอกไฟล์แนบ/ลิงก์ไปด้วย
+        const { data: atts } = await supabase.from("assignment_attachments").select("*").eq("assignment_id", a.id);
+        if (atts && atts.length > 0) {
+          await supabase.from("assignment_attachments").insert(
+            atts.map((att: any) => ({ assignment_id: cloned.id, kind: att.kind, url: att.url, file_name: att.file_name }))
+          );
+        }
+
+        await supabase.from("assignment_imports").insert({
+          source_assignment_id: a.id,
+          target_subject_section_id: sectionId,
+          created_assignment_id: cloned.id,
+          imported_by: currentUserId || null,
+        });
+      }
+      onImported();
+    } catch (e: any) {
+      alert("นำเข้าชิ้นงานไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+    setCopying(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[85vh] overflow-y-auto">
+        <div className="flex items-start justify-between px-6 py-5 border-b border-slate-100">
+          <div>
+            <p className="font-black text-slate-800 text-lg flex items-center gap-2">📘 นำเข้าชิ้นงาน</p>
+            <p className="text-slate-400 text-xs font-bold mt-0.5">คุณสามารถนำเข้าชิ้นงานจากรายวิชาเดียวกัน แม้อยู่คนละห้องหรือคนละครูผู้สอน</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
+        </div>
+
+        {step === "search" && (
+          <div className="p-6 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input
+                value={searchText}
+                onChange={e => setSearchText(e.target.value)}
+                placeholder="ค้นหารายวิชา เช่น รหัสวิชา หรือชื่อวิชา"
+                className="border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+              />
+              <div className="flex items-center gap-1.5">
+                <select value={semester} onChange={e => setSemester(Number(e.target.value))} className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none">
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                </select>
+                <span className="text-slate-300">/</span>
+                <input
+                  type="number"
+                  value={year}
+                  onChange={e => setYear(Number(e.target.value))}
+                  className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                />
+              </div>
+              <select
+                value={teacherFilter}
+                onChange={e => setTeacherFilter(e.target.value)}
+                className="border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+              >
+                <option value="">ค้นหาตามรายชื่อคุณครูในโรงเรียน</option>
+                {teachers.map(t => (
+                  <option key={t.id} value={t.id}>{teacherDisplayName(t)}</option>
+                ))}
+              </select>
+            </div>
+            <button onClick={runSearch} className="px-5 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-sm">ค้นหา</button>
+
+            {loadingCards ? (
+              <p className="text-center text-slate-300 font-bold text-sm py-10">กำลังค้นหา...</p>
+            ) : cards.length === 0 ? (
+              <p className="text-center text-slate-300 font-bold text-sm py-10">ไม่พบรายวิชาที่ตรงกับเงื่อนไข</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {cards.map(c => (
+                  <button
+                    key={c.subject_section_id}
+                    onClick={() => openCard(c)}
+                    className="text-left rounded-2xl border border-slate-200 overflow-hidden hover:shadow-lg transition-shadow"
+                  >
+                    <div className="bg-gradient-to-r from-indigo-500 to-blue-500 px-4 py-2 flex items-center justify-between">
+                      <span className="text-white text-[10px] font-black bg-white/20 rounded px-2 py-0.5">SUBJECT</span>
+                      <span className="text-white font-black text-lg">+</span>
+                    </div>
+                    <div className="p-4 space-y-1">
+                      <p className="font-black text-slate-800">{c.name_th || c.subject_code}</p>
+                      <p className="text-slate-400 text-xs font-bold">ปีการศึกษา {c.semester}/{c.academic_year}</p>
+                      <p className="text-slate-300 text-xs font-bold">{c.subject_code}</p>
+                      <div className="flex items-center gap-1.5 pt-1">
+                        <div className="w-5 h-5 rounded-full bg-slate-700 text-white text-[10px] font-black flex items-center justify-center">
+                          {c.teacher_name?.[0] ?? "?"}
+                        </div>
+                        <span className="text-[11px] text-slate-400 font-bold">Classroom: {c.classroom_label}</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {step === "pick" && pickedCard && (
+          <div className="p-6 space-y-4">
+            <button onClick={() => setStep("search")} className="text-indigo-500 font-black text-xs">← กลับไปค้นหา</button>
+            <p className="font-black text-slate-700 text-sm">{pickedCard.name_th} · {pickedCard.classroom_label}</p>
+
+            {sourceAssignments.length === 0 ? (
+              <p className="text-center text-slate-300 font-bold text-sm py-10">วิชานี้ยังไม่มีชิ้นงาน</p>
+            ) : (
+              <div className="grid gap-3">
+                {sourceAssignments.map(a => {
+                  const selected = selectedIds.has(a.id);
+                  return (
+                    <button
+                      key={a.id}
+                      onClick={() => toggle(a.id)}
+                      className={`text-left bg-white rounded-2xl border-2 p-4 transition-colors ${selected ? "border-indigo-400" : "border-slate-100 hover:border-slate-200"}`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-lg font-black text-white shrink-0 ${a.status === "draft" ? "bg-slate-300" : "bg-gradient-to-br from-indigo-500 to-blue-500"}`}>📄</div>
+                        <div>
+                          <p className="font-black text-slate-800">{a.title}</p>
+                          <p className="text-slate-400 text-xs font-bold mt-0.5"><DateTimeText iso={a.assigned_at} /> · {a.max_score} คะแนน</p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={onClose} className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm">Cancel</button>
+              <button
+                onClick={confirmCopy}
+                disabled={copying || selectedIds.size === 0}
+                className="px-5 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-sm disabled:opacity-50"
+              >
+                {copying ? "กำลังนำเข้า..." : "+ Copy"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================================
+   NEW — สร้างประกาศใหม่ (Announcement)
+   Tables: subject_announcements, subject_announcement_attachments.
+   ========================================================================= */
+
+function AnnouncementModal({
+  sectionId,
+  currentUserId,
+  onClose,
+  onPosted,
+}: {
+  sectionId: string;
+  currentUserId: string;
+  onClose: () => void;
+  onPosted: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [wordCount, setWordCount] = useState(0);
+  const [files, setFiles] = useState<File[]>([]);
+  const [teacherEmail, setTeacherEmail] = useState<string | null>(null);
+  const [posting, setPosting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setTeacherEmail(data.user?.email ?? null));
+  }, []);
+
+  function exec(cmd: string) {
+    document.execCommand(cmd);
+    editorRef.current?.focus();
+  }
+
+  function updateWordCount() {
+    const text = editorRef.current?.innerText ?? "";
+    setWordCount(text.trim() ? text.trim().split(/\s+/).length : 0);
+  }
+
+  async function post() {
+    const content = editorRef.current?.innerHTML ?? "";
+    if (!title.trim()) {
+      alert("กรุณาใส่หัวข้อประกาศ");
+      return;
+    }
+    setPosting(true);
+    try {
+      const { data: ann, error } = await supabase
+        .from("subject_announcements")
+        .insert({ subject_section_id: sectionId, title: title.trim(), content, created_by: currentUserId || null })
+        .select()
+        .maybeSingle();
+      if (error) throw error;
+
+      if (files.length > 0 && teacherEmail) {
+        for (const f of files) {
+          try {
+            const fd = new FormData();
+            fd.append("file", f);
+            fd.append("account", teacherEmail);
+            fd.append("path", `ประกาศ/${sanitizeFolderName(title.trim())}/${Date.now()}-${f.name}`);
+            const res = await fetch("/api/upload-onedrive", { method: "POST", body: fd });
+            const result = await res.json();
+            if (result.ok && result.url) {
+              await supabase.from("subject_announcement_attachments").insert({
+                announcement_id: ann.id,
+                kind: "file",
+                url: result.url,
+                file_name: result.fileName || f.name,
+              });
+            }
+          } catch {}
+        }
+      }
+
+      onPosted();
+    } catch (e: any) {
+      alert("โพสต์ประกาศไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+    setPosting(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+          <p className="font-black text-slate-800 text-lg">สร้างประกาศใหม่</p>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
+        </div>
+
+        <div className="p-6 space-y-3">
+          <input
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            placeholder="หัวข้อ"
+            className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+          />
+
+          <div className="border-2 border-slate-200 rounded-xl overflow-hidden">
+            <div className="flex items-center gap-1 px-3 py-2 border-b border-slate-100 bg-slate-50">
+              <button type="button" onClick={() => exec("undo")} className="w-7 h-7 rounded hover:bg-slate-200 text-slate-500">↺</button>
+              <button type="button" onClick={() => exec("redo")} className="w-7 h-7 rounded hover:bg-slate-200 text-slate-500">↻</button>
+              <span className="w-px h-4 bg-slate-200 mx-1" />
+              <button type="button" onClick={() => exec("bold")} className="w-7 h-7 rounded hover:bg-slate-200 text-slate-600 font-black">B</button>
+              <button type="button" onClick={() => exec("italic")} className="w-7 h-7 rounded hover:bg-slate-200 text-slate-600 italic">I</button>
+              <span className="w-px h-4 bg-slate-200 mx-1" />
+              <button type="button" onClick={() => exec("insertUnorderedList")} className="w-7 h-7 rounded hover:bg-slate-200 text-slate-500">•≡</button>
+              <button type="button" onClick={() => exec("insertOrderedList")} className="w-7 h-7 rounded hover:bg-slate-200 text-slate-500">1≡</button>
+              <span className="w-px h-4 bg-slate-200 mx-1" />
+              <button
+                type="button"
+                onClick={() => {
+                  const url = prompt("ใส่ลิงก์ (URL)");
+                  if (url) exec2("createLink", url);
+                }}
+                className="w-7 h-7 rounded hover:bg-slate-200 text-slate-500"
+              >
+                🔗
+              </button>
+            </div>
+            <div
+              ref={editorRef}
+              contentEditable
+              onInput={updateWordCount}
+              className="min-h-[140px] px-4 py-3 text-sm font-bold focus:outline-none"
+              suppressContentEditableWarning
+            />
+            <div className="flex items-center justify-between px-4 py-2 border-t border-slate-100 text-[11px] text-slate-400 font-bold">
+              <span>p</span>
+              <span>{wordCount} words</span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-1.5 text-indigo-500 font-black text-xs"
+          >
+            📎 แนบไฟล์
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={e => {
+              if (e.target.files) setFiles(prev => [...prev, ...Array.from(e.target.files!)]);
+              e.target.value = "";
+            }}
+          />
+          {files.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {files.map((f, i) => (
+                <span key={i} className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 font-bold bg-slate-100 rounded-full pl-3 pr-1.5 py-1">
+                  📄 {f.name}
+                  <button onClick={() => setFiles(prev => prev.filter((_, idx) => idx !== i))} className="w-4 h-4 rounded-full bg-slate-200 hover:bg-rose-100 hover:text-rose-500 flex items-center justify-center">✕</button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          <button
+            onClick={post}
+            disabled={posting}
+            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50"
+          >
+            {posting ? "กำลังโพสต์..." : "โพสต์ประกาศ"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // helper for createLink (needs 3rd arg)
+  function exec2(cmd: string, value: string) {
+    document.execCommand(cmd, false, value);
+    editorRef.current?.focus();
+  }
 }
