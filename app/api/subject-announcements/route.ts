@@ -72,6 +72,50 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err?.message ?? "โพสต์ประกาศไม่สำเร็จ" }, { status: 500 });
   }
 }
+// ★ ใหม่ — ใช้ตอนกดแก้ไขประกาศ
+export async function PATCH(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+    if (!id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
+
+    const body = await req.json();
+    const { title, content, attachments } = body as {
+      title?: string;
+      content?: string;
+      attachments?: { kind: "file" | "link"; url: string; file_name?: string }[];
+    };
+
+    const admin = createAdminClient();
+
+    const updatePayload: Record<string, any> = {};
+    if (title !== undefined) updatePayload.title = title;
+    if (content !== undefined) updatePayload.content = content;
+
+    const { data: ann, error } = await admin
+      .from("subject_announcements")
+      .update(updatePayload)
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error) throw error;
+
+    if (attachments) {
+      await admin.from("subject_announcement_attachments").delete().eq("announcement_id", id);
+      if (attachments.length > 0) {
+        const { error: attErr } = await admin.from("subject_announcement_attachments").insert(
+          attachments.map(a => ({ announcement_id: id, kind: a.kind, url: a.url, file_name: a.file_name || null }))
+        );
+        if (attErr) console.error("[PATCH /api/subject-announcements] attachment error:", attErr);
+      }
+    }
+
+    return NextResponse.json({ announcement: ann });
+  } catch (err: any) {
+    console.error("[PATCH /api/subject-announcements] error:", err);
+    return NextResponse.json({ error: err?.message ?? "แก้ไขประกาศไม่สำเร็จ" }, { status: 500 });
+  }
+}
 
 // ★ ใหม่ — ใช้ตอนกดลบประกาศ
 export async function DELETE(req: NextRequest) {
