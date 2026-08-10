@@ -1879,13 +1879,22 @@ function RubricEditor({
     }
     setSaving(true);
     try {
+      // ดึง uid จาก session ตรงๆ เพื่อให้ตรงกับ auth.uid() ที่ RLS ใช้เช็คเสมอ
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userData?.user?.id) {
+        alert("ไม่พบผู้ใช้ที่ล็อกอินอยู่ กรุณาล็อกอินใหม่แล้วลองอีกครั้ง");
+        setSaving(false);
+        return;
+      }
+      const uid = userData.user.id;
+
       let rubricId = existing?.id ?? "";
       const rubricPayload = {
         subject_id: subjectId,
         name: name.trim(),
         description: description || null,
         max_score: maxScore,
-        created_by: currentUserId || null,
+        created_by: uid,
       };
       if (existing) {
         await supabase.from("grading_rubrics").update(rubricPayload).eq("id", existing.id);
@@ -2100,6 +2109,14 @@ function RubricCopyFromOtherSubject({
   async function copyRubric(r: SavedRubric) {
     setCopying(true);
     try {
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userData?.user?.id) {
+        alert("ไม่พบผู้ใช้ที่ล็อกอินอยู่ กรุณาล็อกอินใหม่แล้วลองอีกครั้ง");
+        setCopying(false);
+        return;
+      }
+      const uid = userData.user.id;
+
       const [{ data: levelRows }, { data: critRows }] = await Promise.all([
         supabase.from("rubric_levels").select("*").eq("rubric_id", r.id).order("order_index"),
         supabase.from("rubric_criteria").select("*").eq("rubric_id", r.id).order("order_index"),
@@ -2107,7 +2124,7 @@ function RubricCopyFromOtherSubject({
 
       const { data: newRubric, error } = await supabase
         .from("grading_rubrics")
-        .insert({ subject_id: subjectId, name: r.name, description: r.description, max_score: r.max_score, created_by: currentUserId || null })
+        .insert({ subject_id: subjectId, name: r.name, description: r.description, max_score: r.max_score, created_by: uid })
         .select()
         .maybeSingle();
       if (error) throw error;
