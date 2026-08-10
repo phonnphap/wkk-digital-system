@@ -88,6 +88,12 @@ function toLocalInput(iso: string | null) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// ตัดอักขระที่ OneDrive ห้ามใช้ในชื่อโฟลเดอร์/ไฟล์ออก (\ / : * ? " < > | และช่องว่างหัวท้าย)
+function sanitizeFolderName(name: string): string {
+  const cleaned = name.replace(/[\\/:*?"<>|]/g, "").trim();
+  return cleaned || "ไม่มีชื่อ";
+}
+
 /* =========================================================================
    Main component
    ========================================================================= */
@@ -173,6 +179,7 @@ export default function AssignmentsTool({
     return (
       <AssignmentForm
         sectionId={sectionId}
+        subjectId={subjectId}
         currentUserId={currentUserId}
         onCancel={backToList}
         onPublished={id => {
@@ -323,6 +330,7 @@ function AssignmentList({
 
 function AssignmentForm({
   sectionId,
+  subjectId,
   currentUserId,
   existing,
   onCancel,
@@ -330,6 +338,7 @@ function AssignmentForm({
   onSavedDraft,
 }: {
   sectionId: string;
+  subjectId: string;
   currentUserId: string;
   existing?: Assignment;
   onCancel: () => void;
@@ -348,11 +357,24 @@ function AssignmentForm({
   const [linkUrl, setLinkUrl] = useState("");
   const [links, setLinks] = useState<{ id?: string; url: string }[]>([]);
   const [files, setFiles] = useState<File[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 const [previews, setPreviews] = useState<{ file: File; url: string; isImage: boolean }[]>([]);
   const [saving, setSaving] = useState<"draft" | "publish" | null>(null);
   const [teacherEmail, setTeacherEmail] = useState<string | null>(null);
   const [existingAttachments, setExistingAttachments] = useState<AssignmentAttachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [subjectName, setSubjectName] = useState<string>("");
+
+  useEffect(() => {
+    if (!subjectId) return;
+    supabase
+      .from("subjects")
+      .select("name_th, subject_code")
+      .eq("id", subjectId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) setSubjectName(`${data.name_th ?? ""}`.trim() || data.subject_code || subjectId);
+      });
+  }, [subjectId]);
 
 useEffect(() => {
   if (!existing) return;
@@ -459,12 +481,14 @@ function removeFile(index: number) {
         if (!teacherEmail) {
           alert("ไม่พบอีเมลของครูผู้สอน จึงไม่สามารถแนบไฟล์ขึ้น OneDrive ได้");
         } else {
+          const subjectFolder = sanitizeFolderName(subjectName || subjectId);
+          const assignmentFolder = sanitizeFolderName(title.trim());
           for (const f of files) {
             try {
               const fd = new FormData();
               fd.append("file", f);
               fd.append("account", teacherEmail);
-              fd.append("path", `Assignments/${assignmentId}/${Date.now()}-${f.name}`);
+              fd.append("path", `มอบหมายงาน/${subjectFolder}/${assignmentFolder}/${Date.now()}-${f.name}`);
 
               const res = await fetch("/api/upload-onedrive", { method: "POST", body: fd });
               const result = await res.json();
@@ -550,20 +574,24 @@ function removeFile(index: number) {
           <div>
             <label className="text-xs font-black text-slate-500">แนบไฟล์ / รูปภาพ (แนบได้หลายไฟล์)</label>
             <button
-  type="button"
-  onClick={() => fileInputRef.current?.click()}
-  className="mt-1.5 flex items-center justify-center gap-2 w-full border-2 border-dashed border-slate-200 rounded-xl px-4 py-3.5 text-xs font-bold text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50/40 cursor-pointer transition-colors"
->
-  <span className="text-base">📎</span>
-  <span>คลิกเพื่อเลือกไฟล์ (เลือกได้หลายไฟล์)</span>
-</button>
-<input
-  ref={fileInputRef}
-  type="file"
-  multiple
-  onChange={e => { addFiles(e.target.files); e.target.value = ""; }}
-  className="hidden"
-/>
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="mt-1.5 flex items-center justify-center gap-2 w-full border-2 border-dashed border-slate-200 rounded-xl px-4 py-3.5 text-xs font-bold text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50/40 cursor-pointer transition-colors"
+            >
+              <span className="text-base">📎</span>
+              <span>คลิกเพื่อเลือกไฟล์ (เลือกได้หลายไฟล์)</span>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={e => {
+                console.log("[assignment-file-input] change fired, files:", e.target.files?.length);
+                addFiles(e.target.files);
+                e.target.value = "";
+              }}
+              className="hidden"
+            />
 
             {(existingAttachments.length > 0 || previews.length > 0) && (
   <div className="mt-2 grid grid-cols-3 gap-2">
@@ -805,6 +833,7 @@ function AssignmentDetail({
     return (
       <AssignmentForm
         sectionId={sectionId}
+        subjectId={subjectId}
         currentUserId={currentUserId}
         existing={assignment}
         onCancel={() => setEditing(false)}
