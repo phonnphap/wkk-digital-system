@@ -368,162 +368,483 @@ const presetToDelete = presets.find(p => p.id === confirmDeleteId) ?? null;
 
 /* ---------------- แท็บ สุ่มชื่อ ---------------- */
 
-type RandomMode = "circle" | "slide" | "card" | "face";
+type RandomMode = "circle" | "slide" | "card";
+
+type WheelEntry = {
+  id: string;
+  label: string;
+  first_name: string;
+  avatar_url?: string;
+};
+
+const WHEEL_COLORS = [
+  "#f472b6", "#a78bfa", "#38bdf8", "#4ade80",
+  "#facc15", "#fb923c", "#f87171", "#2dd4bf",
+];
+
+function buildEntries(students: Student[]): WheelEntry[] {
+  return students.map(s => ({
+    id: s.id,
+    label: `${s.seat_number}. ${s.first_name} ${s.last_name}`,
+    first_name: s.first_name,
+    avatar_url: s.avatar_url,
+  }));
+}
+
+/* ---------------- แท็บ สุ่มชื่อ (หลัก) ---------------- */
 
 function RandomPickerTab({ students }: { students: Student[] }) {
-  const [mode, setMode] = useState<RandomMode>("card");
-  const [selected, setSelected] = useState<Set<string>>(new Set(students.map(s => s.id)));
-  const [excludePicked, setExcludePicked] = useState(true);
-  const [pickedIds, setPickedIds] = useState<Set<string>>(new Set());
-  const [highlightId, setHighlightId] = useState<string | null>(null);
-  const [winner, setWinner] = useState<Student | null>(null);
+  const [mode, setMode] = useState<RandomMode>("circle");
+  const [entries, setEntries] = useState<WheelEntry[]>(() => buildEntries(students));
+  const [editing, setEditing] = useState(false);
+  const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
+  const [winner, setWinner] = useState<WheelEntry | null>(null);
   const [spinning, setSpinning] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => { setSelected(new Set(students.map(s => s.id))); }, [students]);
+  useEffect(() => {
+    setEntries(buildEntries(students));
+    setRemovedIds(new Set());
+    setWinner(null);
+  }, [students]);
 
-  const pool = useMemo(() => {
-    return students.filter(s => selected.has(s.id) && (!excludePicked || !pickedIds.has(s.id)));
-  }, [students, selected, excludePicked, pickedIds]);
+  const pool = useMemo(() => entries.filter(e => !removedIds.has(e.id)), [entries, removedIds]);
 
-  function toggleAll() {
-    setSelected(prev => (prev.size === students.length ? new Set() : new Set(students.map(s => s.id))));
+  function updateLabel(id: string, label: string) {
+    setEntries(prev => prev.map(e => (e.id === id ? { ...e, label } : e)));
   }
-  function toggleOne(id: string) {
-    setSelected(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
+  function deleteEntry(id: string) {
+    setEntries(prev => prev.filter(e => e.id !== id));
+    setRemovedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+  }
+  function moveEntry(id: string, dir: -1 | 1) {
+    setEntries(prev => {
+      const idx = prev.findIndex(e => e.id === id);
+      const next = idx + dir;
+      if (idx < 0 || next < 0 || next >= prev.length) return prev;
+      const copy = [...prev];
+      [copy[idx], copy[next]] = [copy[next], copy[idx]];
+      return copy;
     });
   }
-
-  function spin() {
-    if (pool.length === 0 || spinning) return;
-    setSpinning(true);
-    setWinner(null);
-    let ticks = 0;
-    const totalTicks = 18 + Math.floor(Math.random() * 8);
-    let delay = 60;
-    function tick() {
-      const pick = pool[Math.floor(Math.random() * pool.length)];
-      setHighlightId(pick.id);
-      ticks++;
-      if (ticks >= totalTicks) {
-        setWinner(pick);
-        setHighlightId(pick.id);
-        setPickedIds(prev => new Set(prev).add(pick.id));
-        setSpinning(false);
-        return;
-      }
-      delay = delay + ticks * 4; // ค่อยๆ ช้าลง
-      intervalRef.current = setTimeout(tick, delay);
-    }
-    tick();
+  function addEntry() {
+    const label = window.prompt("พิมพ์ชื่อที่ต้องการเพิ่มเข้าวงล้อ");
+    if (!label?.trim()) return;
+    setEntries(prev => [...prev, { id: `custom-${Date.now()}`, label: label.trim(), first_name: label.trim() }]);
   }
-
-  function resetPicked() {
-    setPickedIds(new Set());
+  function resetEntries() {
+    setEntries(buildEntries(students));
+    setRemovedIds(new Set());
     setWinner(null);
-    setHighlightId(null);
   }
-
-  useEffect(() => () => { if (intervalRef.current) clearTimeout(intervalRef.current); }, []);
+  function removeWinnerFromPool() {
+    if (!winner) return;
+    setRemovedIds(prev => new Set(prev).add(winner.id));
+    setWinner(null);
+  }
+  function keepWinnerInPool() {
+    setWinner(null);
+  }
 
   return (
     <div className="space-y-4">
-      {/* ตั้งค่าโหมด */}
+      {/* ตั้งค่าโหมด + จัดการรายชื่อ */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
-        <p className="font-black text-slate-700 text-sm mb-3">โหมดสุ่ม</p>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <p className="font-black text-slate-700 text-sm">โหมดสุ่ม</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setEditing(v => !v)}
+              className={`px-3 py-1.5 rounded-lg font-black text-xs transition-colors ${
+                editing ? "bg-fuchsia-500 text-white" : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              ✏️ {editing ? "เสร็จแล้ว" : "แก้ไข/สลับตำแหน่ง"}
+            </button>
+            <button onClick={resetEntries} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-black text-xs">
+              ↺ รีเซ็ตรายชื่อ
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
           {([
             { key: "circle", label: "วงเวียน", icon: "🎡" },
             { key: "slide", label: "สไลด์", icon: "🃏" },
             { key: "card", label: "การ์ด", icon: "🗂️" },
-            { key: "face", label: "ใบหน้า", icon: "🙂" },
           ] as { key: RandomMode; label: string; icon: string }[]).map(m => (
-            <button key={m.key} onClick={() => setMode(m.key)}
+            <button
+              key={m.key}
+              onClick={() => { setMode(m.key); setWinner(null); }}
               className={`rounded-xl border-2 py-2 text-xs font-black flex flex-col items-center gap-1 ${
                 mode === m.key ? "border-emerald-400 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-500"
-              }`}>
+              }`}
+            >
               <span className="text-lg">{m.icon}</span>{m.label}
             </button>
           ))}
         </div>
 
-        <div className="flex items-center justify-between mt-4 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <button onClick={toggleAll} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-bold text-xs">
-              {selected.size === students.length ? "ยกเลิกเลือกทั้งหมด" : "เลือกทั้งหมด"}
+        <p className="text-xs text-slate-400 font-bold mt-3">เหลือในรายการ {pool.length}/{entries.length} คน</p>
+      </div>
+
+      {editing && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="font-black text-slate-700 text-sm">จัดการรายชื่อในวงล้อ</p>
+            <button onClick={addEntry} className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs">
+              + เพิ่มชื่อ
             </button>
-            <span className="text-xs text-slate-400 font-bold">เลือกแล้ว {selected.size}/{students.length} คน</span>
           </div>
-          <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
-            <input type="checkbox" checked={excludePicked} onChange={e => setExcludePicked(e.target.checked)} />
-            ไม่สุ่มซ้ำคนที่เคยออกแล้ว
-          </label>
+          <div className="space-y-1.5 max-h-72 overflow-y-auto">
+            {entries.map((e, i) => (
+              <div
+                key={e.id}
+                className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${
+                  removedIds.has(e.id) ? "bg-slate-50 border-slate-100 opacity-50" : "border-slate-200"
+                }`}
+              >
+                <div className="flex flex-col">
+                  <button onClick={() => moveEntry(e.id, -1)} disabled={i === 0} className="text-slate-400 disabled:opacity-20 text-xs leading-none">▲</button>
+                  <button onClick={() => moveEntry(e.id, 1)} disabled={i === entries.length - 1} className="text-slate-400 disabled:opacity-20 text-xs leading-none">▼</button>
+                </div>
+                <input
+                  value={e.label}
+                  onChange={ev => updateLabel(e.id, ev.target.value)}
+                  className="flex-1 text-sm font-bold border-0 focus:outline-none focus:ring-1 focus:ring-fuchsia-300 rounded px-1.5 py-1"
+                />
+                {removedIds.has(e.id) && (
+                  <button
+                    onClick={() => setRemovedIds(prev => { const n = new Set(prev); n.delete(e.id); return n; })}
+                    className="text-[10px] font-black text-emerald-500 whitespace-nowrap"
+                  >
+                    คืนเข้ารายการ
+                  </button>
+                )}
+                <button onClick={() => deleteEntry(e.id)} className="text-slate-300 hover:text-red-500 text-xs">✕</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {mode === "circle" && (
+        <WheelPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
+      )}
+      {mode === "slide" && (
+        <SlidePicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
+      )}
+      {mode === "card" && (
+        <CardPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
+      )}
+
+      {winner && !spinning && (
+        <div className="bg-white rounded-2xl border-2 border-emerald-200 p-4 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p className="text-slate-400 text-xs font-bold">🎉 ผลการสุ่ม</p>
+            <p className="text-lg font-black text-emerald-700">{winner.label}</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={keepWinnerInPool} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 font-black text-xs">
+              เก็บไว้ในรายชื่อ
+            </button>
+            <button onClick={removeWinnerFromPool} className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black text-xs">
+              🗑 เอาออกจากรายชื่อ
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- โหมดวงเวียน (SVG spinning wheel) ---------------- */
+
+function WheelPicker({
+  pool, spinning, setSpinning, setWinner,
+}: {
+  pool: WheelEntry[];
+  spinning: boolean;
+  setSpinning: (v: boolean) => void;
+  setWinner: (w: WheelEntry | null) => void;
+}) {
+  const [rotation, setRotation] = useState(0);
+  const size = 300;
+  const cx = size / 2, cy = size / 2, r = size / 2 - 6;
+  const n = pool.length;
+  const segAngle = n > 0 ? 360 / n : 0;
+
+  function polar(angleDeg: number, radius: number): [number, number] {
+    const rad = ((angleDeg - 90) * Math.PI) / 180;
+    return [cx + radius * Math.cos(rad), cy + radius * Math.sin(rad)];
+  }
+
+  function spin() {
+    if (spinning || n === 0) return;
+    setSpinning(true);
+    setWinner(null);
+    const winIdx = Math.floor(Math.random() * n);
+    const targetMid = winIdx * segAngle + segAngle / 2;
+    const remainder = (360 - targetMid) % 360;
+    const currentMod = ((rotation % 360) + 360) % 360;
+    let delta = remainder - currentMod;
+    if (delta <= 0) delta += 360;
+    const extraSpins = 6;
+    const newRotation = rotation + extraSpins * 360 + delta;
+    setRotation(newRotation);
+    window.setTimeout(() => {
+      setWinner(pool[winIdx]);
+      setSpinning(false);
+    }, 4200);
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col items-center gap-4">
+      {n === 0 ? (
+        <p className="text-slate-400 font-bold text-sm py-10">ไม่มีนักเรียนในรายการ</p>
+      ) : (
+        <div className="relative" style={{ width: size, height: size }}>
+          <div className="absolute left-1/2 -top-1 -translate-x-1/2 z-10 text-3xl drop-shadow" style={{ transform: "translateX(-50%) rotate(180deg)" }}>
+            🔻
+          </div>
+          <svg
+            width={size}
+            height={size}
+            viewBox={`0 0 ${size} ${size}`}
+            style={{
+              transform: `rotate(${rotation}deg)`,
+              transition: spinning ? "transform 4s cubic-bezier(0.17,0.67,0.12,0.99)" : "none",
+            }}
+          >
+            {pool.map((e, i) => {
+              const startAngle = i * segAngle;
+              const endAngle = (i + 1) * segAngle;
+              const [x1, y1] = polar(startAngle, r);
+              const [x2, y2] = polar(endAngle, r);
+              const largeArc = segAngle > 180 ? 1 : 0;
+              const midAngle = startAngle + segAngle / 2;
+              const [tx, ty] = polar(midAngle, r * 0.62);
+              return (
+                <g key={e.id}>
+                  <path
+                    d={`M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`}
+                    fill={WHEEL_COLORS[i % WHEEL_COLORS.length]}
+                    stroke="white"
+                    strokeWidth={2}
+                  />
+                  <text
+                    x={tx}
+                    y={ty}
+                    fontSize={10}
+                    fontWeight={900}
+                    fill="white"
+                    textAnchor="middle"
+                    transform={`rotate(${midAngle}, ${tx}, ${ty})`}
+                  >
+                    {e.label.length > 12 ? e.label.slice(0, 11) + "…" : e.label}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+          <button
+            onClick={spin}
+            disabled={spinning}
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-white border-4 border-fuchsia-400 shadow-lg font-black text-fuchsia-600 text-xs disabled:opacity-60"
+          >
+            {spinning ? "..." : "หมุน"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- โหมดสไลด์ (การ์ดเลื่อนไปด้านข้าง) ---------------- */
+
+function SlidePicker({
+  pool, spinning, setSpinning, setWinner,
+}: {
+  pool: WheelEntry[];
+  spinning: boolean;
+  setSpinning: (v: boolean) => void;
+  setWinner: (w: WheelEntry | null) => void;
+}) {
+  const [speed, setSpeed] = useState<"slow" | "fast">("slow");
+  const [offset, setOffset] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const CARD_W = 96, GAP = 12, STEP = CARD_W + GAP, REPEATS = 10;
+
+  const track = useMemo(() => Array.from({ length: REPEATS }, () => pool).flat(), [pool]);
+
+  function spin() {
+    if (spinning || pool.length === 0) return;
+    setSpinning(true);
+    setWinner(null);
+    const winIdx = Math.floor(Math.random() * pool.length);
+    const occurrence = pool.length * (REPEATS - 2) + winIdx;
+    const containerWidth = containerRef.current?.clientWidth ?? 600;
+    const center = containerWidth / 2;
+    const targetOffset = -(occurrence * STEP + CARD_W / 2 - center);
+    setOffset(targetOffset);
+    const duration = speed === "fast" ? 1800 : 4000;
+    window.setTimeout(() => {
+      setWinner(pool[winIdx]);
+      setSpinning(false);
+    }, duration);
+  }
+
+  function restart() {
+    setOffset(0);
+    setWinner(null);
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div className="flex gap-2">
+          <button onClick={() => setSpeed("slow")} className={`px-3 py-1.5 rounded-lg font-black text-xs ${speed === "slow" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>ช้า</button>
+          <button onClick={() => setSpeed("fast")} className={`px-3 py-1.5 rounded-lg font-black text-xs ${speed === "fast" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>ไว</button>
+        </div>
+        <button onClick={restart} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-500 font-black text-xs">↺ เริ่มใหม่</button>
+      </div>
+
+      <div className="relative h-32 overflow-hidden rounded-xl bg-slate-50" ref={containerRef}>
+        <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-emerald-400 z-10 -translate-x-1/2" />
+        <div
+          className="absolute inset-y-0 left-0 flex items-center gap-3 px-2"
+          style={{
+            transform: `translateX(${offset}px)`,
+            transition: spinning ? `transform ${speed === "fast" ? 1.8 : 4}s cubic-bezier(0.15,0.65,0.15,1)` : "none",
+          }}
+        >
+          {track.map((e, i) => (
+            <div key={i} style={{ width: CARD_W }} className="shrink-0 h-24 rounded-xl border-2 border-slate-200 bg-white flex flex-col items-center justify-center text-center px-1">
+              {e.avatar_url ? (
+                <img src={e.avatar_url} className="w-10 h-10 rounded-full object-cover" />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-400 to-blue-400 text-white text-sm font-black flex items-center justify-center">
+                  {e.first_name[0]}
+                </div>
+              )}
+              <p className="text-[10px] font-black text-slate-600 mt-1 truncate w-full">{e.label}</p>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* พื้นที่แสดงผลสุ่ม */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col items-center justify-center min-h-[220px]">
-        {pool.length === 0 ? (
-          <p className="text-slate-400 font-bold text-sm">ไม่มีนักเรียนในกลุ่มที่เลือก / สุ่มครบแล้ว</p>
-        ) : winner && !spinning ? (
-          <div className="text-center">
-            {winner.avatar_url ? (
-              <img src={winner.avatar_url} className="w-20 h-20 rounded-full object-cover mx-auto border-4 border-emerald-300" />
-            ) : (
-              <div className="w-20 h-20 rounded-full bg-emerald-400 text-white text-2xl font-black flex items-center justify-center mx-auto">
-                {winner.first_name[0]}
+      {pool.length === 0 && <p className="text-center text-slate-400 text-sm font-bold mt-3">ไม่มีนักเรียนในรายการ</p>}
+
+      <button
+        onClick={spin}
+        disabled={spinning || pool.length === 0}
+        className="w-full mt-4 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black"
+      >
+        {spinning ? "กำลังสุ่ม..." : "🃏 สุ่มชื่อ"}
+      </button>
+    </div>
+  );
+}
+
+/* ---------------- โหมดการ์ด (สับไพ่ / เปิดไพ่) ---------------- */
+
+function CardPicker({
+  pool, spinning, setSpinning, setWinner,
+}: {
+  pool: WheelEntry[];
+  spinning: boolean;
+  setSpinning: (v: boolean) => void;
+  setWinner: (w: WheelEntry | null) => void;
+}) {
+  const [displayList, setDisplayList] = useState<WheelEntry[]>(pool);
+  const [flippedId, setFlippedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDisplayList(pool);
+    setFlippedId(null);
+  }, [pool]);
+
+  function shuffle() {
+    if (spinning) return;
+    setFlippedId(null);
+    setWinner(null);
+    setDisplayList(prev => [...prev].sort(() => Math.random() - 0.5));
+  }
+
+  function reveal() {
+    if (spinning || pool.length === 0) return;
+    setSpinning(true);
+    setWinner(null);
+    setFlippedId(null);
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    let ticks = 0;
+    const iv = setInterval(() => {
+      setDisplayList(prev => [...prev].sort(() => Math.random() - 0.5));
+      ticks++;
+      if (ticks >= 6) {
+        clearInterval(iv);
+        setFlippedId(pick.id);
+        setTimeout(() => {
+          setWinner(pick);
+          setSpinning(false);
+        }, 700);
+      }
+    }, 200);
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-4">
+      <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 mb-4">
+        {displayList.map(e => {
+          const isFlipped = flippedId === e.id;
+          return (
+            <div key={e.id} className="relative h-24" style={{ perspective: "600px" }}>
+              <div
+                className="absolute inset-0 rounded-xl transition-transform duration-500"
+                style={{ transformStyle: "preserve-3d", transform: isFlipped ? "rotateY(180deg)" : "rotateY(0deg)" }}
+              >
+                {/* หลังไพ่ (เบลอ) */}
+                <div
+                  className="absolute inset-0 rounded-xl bg-gradient-to-br from-fuchsia-400 to-purple-400 flex items-center justify-center text-white text-2xl"
+                  style={{ backfaceVisibility: "hidden" }}
+                >
+                  🎴
+                </div>
+                {/* หน้าไพ่ */}
+                <div
+                  className="absolute inset-0 rounded-xl bg-white border-2 border-emerald-300 flex flex-col items-center justify-center px-1"
+                  style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
+                >
+                  {e.avatar_url ? (
+                    <img src={e.avatar_url} className="w-9 h-9 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-emerald-400 text-white text-xs font-black flex items-center justify-center">
+                      {e.first_name[0]}
+                    </div>
+                  )}
+                  <p className="text-[9px] font-black text-slate-600 mt-1 truncate w-full text-center">{e.label}</p>
+                </div>
               </div>
-            )}
-            <p className="mt-3 text-xl font-black text-emerald-700">{winner.first_name} {winner.last_name}</p>
-            <p className="text-slate-400 text-xs font-bold">เลขที่ {winner.seat_number}</p>
-          </div>
-        ) : (
-          <div className="w-full">
-            {mode === "card" || mode === "face" ? (
-              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                {pool.map(s => (
-                  <div key={s.id} className={`rounded-xl p-2 text-center border-2 transition-all ${
-                    highlightId === s.id ? "border-emerald-400 bg-emerald-50 scale-105" : "border-slate-100"
-                  }`}>
-                    {mode === "face" ? (
-                      s.avatar_url ? (
-                        <img src={s.avatar_url} className="w-9 h-9 rounded-full object-cover mx-auto" />
-                      ) : (
-                        <div className="w-9 h-9 rounded-full bg-slate-300 text-white text-xs font-black flex items-center justify-center mx-auto">
-                          {s.first_name[0]}
-                        </div>
-                      )
-                    ) : (
-                      <p className="text-[10px] font-black text-slate-600 truncate">{s.first_name}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center">
-                {highlightId ? (
-                  <p className="text-2xl font-black text-slate-700 animate-pulse">
-                    {students.find(s => s.id === highlightId)?.first_name ?? "?"}
-                  </p>
-                ) : (
-                  <p className="text-slate-300 font-black text-lg">กดสุ่มเพื่อเริ่ม</p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+            </div>
+          );
+        })}
       </div>
 
+      {pool.length === 0 && <p className="text-center text-slate-400 text-sm font-bold py-6">ไม่มีนักเรียนในรายการ</p>}
+
       <div className="flex gap-2">
-        <button onClick={spin} disabled={spinning || pool.length === 0}
-          className="flex-1 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black">
-          {spinning ? "กำลังสุ่ม..." : "🎲 สุ่มชื่อ"}
+        <button
+          onClick={shuffle}
+          disabled={spinning || pool.length === 0}
+          className="flex-1 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-600 font-black text-sm"
+        >
+          🔀 สับไพ่
         </button>
-        <button onClick={resetPicked} className="px-4 py-3 rounded-xl bg-slate-100 text-slate-600 font-black text-sm">
-          รีเซ็ต
+        <button
+          onClick={reveal}
+          disabled={spinning || pool.length === 0}
+          className="flex-1 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black text-sm"
+        >
+          {spinning ? "กำลังเปิดไพ่..." : "🎴 เปิดไพ่"}
         </button>
       </div>
     </div>
