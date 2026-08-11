@@ -1545,6 +1545,7 @@ useEffect(() => { loadClubs(); }, [loadClubs]);
     }));
 
     setEntries(enriched);
+console.log("✅ loadEntries: total =", enriched.length, "for room:", enriched.filter(e => e.classroom_id === selectedRoom).length);
   }, [selectedYear, academicYearsRaw]);
 
   // ★ โหลด entries ของ "ทุกปีการศึกษา" แบบไม่กรอง เพื่อใช้ตรวจคาบซ้ำ/ครูซ้อนคาบ
@@ -1725,11 +1726,26 @@ useEffect(() => {
         .eq("academic_year_id", data.academic_year_id);
       if (clashErr) throw clashErr;
       const otherClash = (clash ?? []).filter(c => c.id !== data.id);
-      if (otherClash.length > 0) {
-        alert("⚠️ ช่องนี้มีคาบเรียนอยู่แล้ว (ข้อมูลบนหน้าจอไม่ตรงกับฐานข้อมูล) กำลังโหลดข้อมูลล่าสุดให้ใหม่...");
-        await loadEntries();
-        return;
-      }
+if (otherClash.length > 0) {
+  const confirmOverwrite = confirm(
+    "⚠️ ช่องนี้มีคาบเรียนอยู่แล้วในระบบ (แต่หน้าจอไม่แสดง)\n\n" +
+    "ต้องการบันทึกทับคาบเดิมด้วยข้อมูลใหม่นี้เลยหรือไม่?"
+  );
+  if (!confirmOverwrite) { await loadEntries(); return; }
+
+  // เขียนทับแถวที่ซ้ำแถวแรก แทนการ insert ใหม่
+  const { error: overwriteErr } = await (supabase.from("timetable_entries") as any)
+    .update({
+      subject_id: data.subject_id,
+      teacher_id: data.teacher_id,
+      teacher_id_2: data.teacher_id_2 ?? null,
+      time_slot_id: realSlotId,
+    })
+    .eq("id", otherClash[0].id);
+  if (overwriteErr) throw overwriteErr;
+  await loadEntries();
+  return;
+}
 
       if (data.id) {
         const { error } = await (supabase.from("timetable_entries") as any)
@@ -2278,7 +2294,8 @@ const totalScheduledPeriods = entries.length;
                 </div>
               </div>
               <TimetableGrid
-      classroom={selectedClassroom} entries={roomEntries} timeSlots={roomTimeSlots}
+  key={`${selectedRoom}-${roomEntries.length}`}
+  classroom={selectedClassroom} entries={roomEntries} timeSlots={roomTimeSlots}
       allTimeSlots={timeSlots}
       subjects={subjects} teachers={teachers} academicYearId={selectedYear}
       currentUser={user}
