@@ -152,10 +152,11 @@ export default function GradeOverviewTool({
 
       const presetTotals: Record<string, number> = {};
       presets.forEach(p => { presetTotals[p.id] = 0; });
-      scoreEvents.filter(ev => ev.student_id === s.id).forEach(ev => {
-        if (presetTotals[ev.preset_id] !== undefined) presetTotals[ev.preset_id] += ev.points;
-        else presetTotals[ev.preset_id] = ev.points;
-      });
+      // สำคัญ: ถ้าครูลบการ์ดคะแนนพิเศษ (preset) ไปแล้ว score_events เก่าที่อ้างถึง preset_id นั้น
+      // ต้องไม่ถูกนับรวมอีก ไม่งั้นคะแนนรวมจะไม่ตรงกับที่แสดงในตาราง (คอลัมน์หายแต่ยอดรวมยังบวกอยู่)
+      scoreEvents
+        .filter(ev => ev.student_id === s.id && presetTotals[ev.preset_id] !== undefined)
+        .forEach(ev => { presetTotals[ev.preset_id] += ev.points; });
       const specialTotal = Object.values(presetTotals).reduce((a, b) => a + b, 0);
 
       const percentage = totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * 100 : 0;

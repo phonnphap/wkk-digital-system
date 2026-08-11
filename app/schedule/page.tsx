@@ -230,10 +230,15 @@ function buildRoomSlots(scheduleType: string | undefined, allDbSlots: TimeSlot[]
   const tmpl = SCHEDULE_TEMPLATES.find(t => t.key === type) ?? SCHEDULE_TEMPLATES[0];
 
   return tmpl.slots.map((tmplSlot, idx) => {
-    // ★ match เฉพาะ start_time (ไม่กรอง schedule_type) เพื่อรองรับ DB ที่ไม่มี schedule_type
-    const dbSlot = allDbSlots.find(s => s.start_time.slice(0, 5) === tmplSlot.start_time);
+    // ✅ FIX: จับคู่ schedule_type ก่อนเสมอ (กันเคสเวลาเดียวกันแต่คนละ schedule_type ชนกัน)
+    // ถ้าไม่เจอที่ schedule_type ตรงกัน ค่อย fallback ไปหาแค่ start_time (รองรับ DB เก่าที่ไม่มี schedule_type)
+    let dbSlot = allDbSlots.find(
+      s => s.start_time.slice(0, 5) === tmplSlot.start_time && s.schedule_type === type
+    );
+    if (!dbSlot) {
+      dbSlot = allDbSlots.find(s => s.start_time.slice(0, 5) === tmplSlot.start_time);
+    }
     if (dbSlot) {
-      // ถ้าเจอใน DB ใช้ id จริง แต่ override label/break จาก template
       return {
         ...dbSlot,
         slot_label: tmplSlot.slot_label,
@@ -241,7 +246,6 @@ function buildRoomSlots(scheduleType: string | undefined, allDbSlots: TimeSlot[]
         end_time: tmplSlot.end_time,
       };
     }
-    // fallback: สร้าง virtual slot จาก template (ยังไม่มีแถวจริงใน DB)
     return {
       id: `tmpl-${type}-${idx}-${tmplSlot.start_time.replace(":", "")}`,
       slot_number: tmplSlot.slot_number,

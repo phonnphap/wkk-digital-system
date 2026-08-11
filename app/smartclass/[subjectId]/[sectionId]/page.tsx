@@ -195,6 +195,8 @@ function ScoreModal({
   const [newLabel, setNewLabel] = useState("");
   const [newPoints, setNewPoints] = useState(1);
   const [newEmoji, setNewEmoji] = useState("🙂");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+const presetToDelete = presets.find(p => p.id === confirmDeleteId) ?? null;
   const single = students.length === 1 ? students[0] : null;
 
   function submitNewPreset() {
@@ -261,13 +263,13 @@ function ScoreModal({
                 className="group relative rounded-xl border-2 border-slate-200 hover:border-fuchsia-400 hover:bg-fuchsia-50/60 flex flex-col items-center justify-center py-4 gap-1 transition-colors"
               >
                 <button
-                  type="button"
-                  onClick={e => { e.stopPropagation(); onDeletePreset(p.id); }}
-                  title="ลบการ์ดนี้"
-                  className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-white border border-slate-200 text-slate-400 hover:bg-red-500 hover:border-red-500 hover:text-white flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity shadow"
-                >
-                  🗑
-                </button>
+  type="button"
+  onClick={e => { e.stopPropagation(); setConfirmDeleteId(p.id); }}
+  title="ลบการ์ดนี้"
+  className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-white border border-slate-200 text-slate-400 hover:bg-red-500 hover:border-red-500 hover:text-white flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity shadow"
+>
+  🗑
+</button>
                 <span
                   className={`absolute -top-2 -right-2 w-5 h-5 rounded-full text-[10px] font-black text-white flex items-center justify-center shadow ${
                     p.points >= 0 ? "bg-emerald-500" : "bg-rose-500"
@@ -311,6 +313,38 @@ function ScoreModal({
               </div>
             </div>
           )}
+          {presetToDelete && (
+  <div
+    className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4"
+    onClick={() => setConfirmDeleteId(null)}
+  >
+    <div
+      className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-5 text-center"
+      onClick={e => e.stopPropagation()}
+    >
+      <p className="text-3xl mb-2">{presetToDelete.emoji}</p>
+      <h4 className="font-black text-slate-800 text-sm mb-1">ลบการ์ด "{presetToDelete.label}"?</h4>
+      <p className="text-slate-400 text-xs font-bold mb-4">การ์ดนี้จะถูกลบออกจากรายการให้คะแนนถาวร</p>
+      <div className="flex gap-2">
+        <button
+          onClick={() => setConfirmDeleteId(null)}
+          className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm"
+        >
+          ยกเลิก
+        </button>
+        <button
+          onClick={() => {
+            onDeletePreset(presetToDelete.id);
+            setConfirmDeleteId(null);
+          }}
+          className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-sm"
+        >
+          ลบเลย
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
           <div className="flex items-center gap-2 mt-5">
             <input
