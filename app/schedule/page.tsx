@@ -257,6 +257,21 @@ function buildRoomSlots(scheduleType: string | undefined, allDbSlots: TimeSlot[]
     } as TimeSlot;
   });
 }
+// ✅ ดึงข้อมูลทุกแถวจาก Supabase แบบไม่จำกัดที่ 1000 แถว (วนดึงทีละหน้าจนครบ)
+async function fetchAllRows<T = any>(query: any): Promise<T[]> {
+  const pageSize = 1000;
+  let from = 0;
+  let all: T[] = [];
+  while (true) {
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all = all.concat(data as T[]);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Entry Modal ───────────────────────────────────────────────────────────────
@@ -1505,18 +1520,16 @@ useEffect(() => { loadClubs(); }, [loadClubs]);
       : [selectedYear];
 
     // ★ FIX: ใช้ simple select แล้ว join ใน JS เพื่อหลีกเลี่ยง foreign key alias ผิด
-    const { data: entriesData } = await (supabase.from("timetable_entries") as any)
-      .select("*")
-      .in("academic_year_id", yearIds);
+    const entriesData = await fetchAllRows<TimetableEntry>(
+  supabase.from("timetable_entries").select("*").in("academic_year_id", yearIds)
+);
 
-    if (!entriesData) return;
-
-    // ★ FIX: ถ้า academic_year_id ไม่ตรง → ลอง fetch ทั้งหมดด้วย
-    let allEntries = entriesData as TimetableEntry[];
-    if (allEntries.length === 0) {
-      const { data: allData } = await (supabase.from("timetable_entries") as any).select("*");
-      allEntries = (allData ?? []) as TimetableEntry[];
-    }
+if (!entriesData) return;
+let allEntries = entriesData as TimetableEntry[];
+// ในบรรทัดถัดจากขั้น 2
+if (allEntries.length === 0) {
+  allEntries = await fetchAllRows<TimetableEntry>(supabase.from("timetable_entries").select("*"));
+}
 
     // Join subjects + teachers ใน JS
     const subjectIds = [...new Set(allEntries.map(e => e.subject_id))];
@@ -1552,8 +1565,8 @@ console.log("✅ loadEntries: total =", enriched.length, "for room:", enriched.f
 // ป้องกันเคสที่คาบซ้ำถูกสร้างข้าม academic_year_id คนละค่ากัน แล้วมองไม่เห็นตอนดูเฉพาะปีที่เลือก
 const loadAllEntriesForCheck = useCallback(async () => {
   setCheckingAllYears(true);
-  const { data: allData } = await (supabase.from("timetable_entries") as any).select("*");
-  const allEntries = (allData ?? []) as TimetableEntry[];
+  // ใน loadAllEntriesForCheck
+const allEntries = await fetchAllRows<TimetableEntry>(supabase.from("timetable_entries").select("*"));
 
   const subjectIds = [...new Set(allEntries.map(e => e.subject_id))];
   const teacherIds = [...new Set([
