@@ -368,7 +368,7 @@ const presetToDelete = presets.find(p => p.id === confirmDeleteId) ?? null;
 
 /* ---------------- แท็บ สุ่มชื่อ ---------------- */
 
-type RandomMode = "circle" | "slide" | "card";
+type RandomMode = "circle" | "slide" | "card" | "deck";
 
 type WheelEntry = {
   id: string;
@@ -382,10 +382,11 @@ const WHEEL_COLORS = [
   "#facc15", "#fb923c", "#f87171", "#2dd4bf",
 ];
 
-const MODE_INFO: Record<RandomMode, { label: string; icon: string }> = {
-  circle: { label: "วงเวียน", icon: "🎡" },
-  slide: { label: "สไลด์", icon: "🃏" },
-  card: { label: "การ์ด", icon: "🗂️" },
+const MODE_INFO: Record<RandomMode, { label: string; icon: string; bg: string; text: string }> = {
+  circle: { label: "วงเวียนสุ่มชื่อ", icon: "🎡", bg: "bg-amber-50", text: "text-amber-700" },
+  slide: { label: "สไลด์สุ่มชื่อ", icon: "🃏", bg: "bg-violet-50", text: "text-violet-700" },
+  card: { label: "การ์ดสุ่มชื่อ", icon: "🗂️", bg: "bg-rose-50", text: "text-rose-700" },
+  deck: { label: "ไพ่ยิปซีสุ่มชื่อ", icon: "🔮", bg: "bg-teal-50", text: "text-teal-700" },
 };
 
 function buildEntries(students: Student[]): WheelEntry[] {
@@ -399,7 +400,14 @@ function buildEntries(students: Student[]): WheelEntry[] {
 
 /* ---------------- แท็บ สุ่มชื่อ (หลัก) ---------------- */
 
-function RandomPickerTab({ students }: { students: Student[] }) {
+function RandomPickerTab({
+  students,
+  onOpenScore,
+}: {
+  students: Student[];
+  /** เรียกตอนกด "ให้คะแนน" ในป๊อปอัพผลการสุ่ม — parent ควรเซ็ต scoreTargets([student]) */
+  onOpenScore?: (student: Student) => void;
+}) {
   const [mode, setMode] = useState<RandomMode>("circle");
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [entries, setEntries] = useState<WheelEntry[]>(() => buildEntries(students));
@@ -415,6 +423,10 @@ function RandomPickerTab({ students }: { students: Student[] }) {
   }, [students]);
 
   const pool = useMemo(() => entries.filter(e => !removedIds.has(e.id)), [entries, removedIds]);
+  const matchedStudent = useMemo(
+    () => (winner ? students.find(s => s.id === winner.id) ?? null : null),
+    [winner, students]
+  );
 
   function updateLabel(id: string, label: string) {
     setEntries(prev => prev.map(e => (e.id === id ? { ...e, label } : e)));
@@ -461,6 +473,12 @@ function RandomPickerTab({ students }: { students: Student[] }) {
   function keepWinnerInPool() {
     setWinner(null);
   }
+  function giveScoreToWinner() {
+    if (matchedStudent && onOpenScore) {
+      onOpenScore(matchedStudent);
+      setWinner(null);
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -469,7 +487,7 @@ function RandomPickerTab({ students }: { students: Student[] }) {
         <div className="relative">
           <button
             onClick={() => setModeMenuOpen(v => !v)}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border-2 border-emerald-200 text-emerald-700 font-black text-sm"
+            className={`flex items-center gap-2 px-4 py-2 rounded-full border-2 border-current font-black text-sm ${MODE_INFO[mode].bg} ${MODE_INFO[mode].text}`}
           >
             <span className="text-lg">{MODE_INFO[mode].icon}</span>
             {MODE_INFO[mode].label}
@@ -478,13 +496,13 @@ function RandomPickerTab({ students }: { students: Student[] }) {
           {modeMenuOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
-              <div className="absolute z-20 top-full left-0 mt-1 w-48 bg-white rounded-xl border border-slate-200 shadow-xl p-1.5">
+              <div className="absolute z-20 top-full left-0 mt-2 w-56 bg-white rounded-2xl border border-slate-100 shadow-xl p-2 space-y-1.5">
                 {(Object.keys(MODE_INFO) as RandomMode[]).map(k => (
                   <button
                     key={k}
                     onClick={() => { setMode(k); setWinner(null); setModeMenuOpen(false); }}
-                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-black text-left transition-colors ${
-                      mode === k ? "bg-emerald-50 text-emerald-700" : "text-slate-600 hover:bg-slate-50"
+                    className={`w-full flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-black text-left transition-opacity ${MODE_INFO[k].bg} ${MODE_INFO[k].text} ${
+                      mode === k ? "ring-2 ring-current opacity-100" : "opacity-80 hover:opacity-100"
                     }`}
                   >
                     <span className="text-lg">{MODE_INFO[k].icon}</span>{MODE_INFO[k].label}
@@ -567,6 +585,9 @@ function RandomPickerTab({ students }: { students: Student[] }) {
         {mode === "card" && (
           <CardPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
         )}
+        {mode === "deck" && (
+          <DeckPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} removedCount={removedIds.size} />
+        )}
       </div>
 
       {/* ป๊อปอัพผลการสุ่ม กลางจอ */}
@@ -583,12 +604,18 @@ function RandomPickerTab({ students }: { students: Student[] }) {
             )}
             <p className="text-2xl font-black text-slate-800">{winner.label}</p>
             <p className="text-slate-400 text-xs font-bold mt-1">คือคนที่ถูกสุ่มเลือก</p>
-            <div className="flex gap-2 mt-6">
-              <button onClick={keepWinnerInPool} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-black text-sm">
-                เก็บไว้ในรายชื่อ
+
+            <div className={`grid gap-2 mt-6 ${matchedStudent && onOpenScore ? "grid-cols-3" : "grid-cols-2"}`}>
+              <button onClick={keepWinnerInPool} className="py-3 rounded-xl bg-slate-100 text-slate-600 font-black text-xs">
+                เก็บไว้
               </button>
-              <button onClick={removeWinnerFromPool} className="flex-1 py-3 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black text-sm">
-                🗑 เอาออกจากรายชื่อ
+              {matchedStudent && onOpenScore && (
+                <button onClick={giveScoreToWinner} className="py-3 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 text-white font-black text-xs">
+                  ⭐ ให้คะแนน
+                </button>
+              )}
+              <button onClick={removeWinnerFromPool} className="py-3 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black text-xs">
+                🗑 เอาออก
               </button>
             </div>
           </div>
@@ -786,7 +813,7 @@ function SlidePicker({
   );
 }
 
-/* ---------------- โหมดการ์ด (สับไพ่ / เปิดไพ่) ---------------- */
+/* ---------------- โหมดการ์ด (สับไพ่ / เปิดไพ่ ทั้งกระดาน) ---------------- */
 
 function CardPicker({
   pool, spinning, setSpinning, setWinner,
@@ -843,14 +870,12 @@ function CardPicker({
                 className="absolute inset-0 rounded-xl transition-transform duration-500"
                 style={{ transformStyle: "preserve-3d", transform: isFlipped ? "rotateY(180deg)" : "rotateY(0deg)" }}
               >
-                {/* หลังไพ่ (เบลอ) */}
                 <div
                   className="absolute inset-0 rounded-xl bg-gradient-to-br from-fuchsia-400 to-purple-400 flex items-center justify-center text-white text-3xl"
                   style={{ backfaceVisibility: "hidden" }}
                 >
                   🎴
                 </div>
-                {/* หน้าไพ่ */}
                 <div
                   className="absolute inset-0 rounded-xl bg-white border-2 border-emerald-300 flex flex-col items-center justify-center px-1"
                   style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
@@ -886,6 +911,95 @@ function CardPicker({
           className="flex-1 py-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black"
         >
           {spinning ? "กำลังเปิดไพ่..." : "🎴 เปิดไพ่"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- โหมดไพ่ยิปซี (กองไพ่ ดึงทีละใบ) ---------------- */
+
+function DeckPicker({
+  pool, spinning, setSpinning, setWinner, removedCount,
+}: {
+  pool: WheelEntry[];
+  spinning: boolean;
+  setSpinning: (v: boolean) => void;
+  setWinner: (w: WheelEntry | null) => void;
+  removedCount: number;
+}) {
+  const [order, setOrder] = useState<WheelEntry[]>(pool);
+
+  useEffect(() => {
+    setOrder(pool);
+  }, [pool]);
+
+  function shuffleDeck() {
+    if (spinning) return;
+    // สับไพ่ = รีเซ็ตกองจากรายชื่อทั้งหมดที่ยังไม่ถูกเอาออกถาวร แล้วสลับลำดับใหม่
+    setOrder([...pool].sort(() => Math.random() - 0.5));
+  }
+
+  function drawCard() {
+    if (spinning || order.length === 0) return;
+    setSpinning(true);
+    setWinner(null);
+    const top = order[0];
+    setOrder(prev => prev.slice(1));
+    window.setTimeout(() => {
+      setWinner(top);
+      setSpinning(false);
+    }, 700);
+  }
+
+  const stackCount = Math.max(1, Math.min(order.length, 7));
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-10 flex flex-col items-center gap-6 w-full max-w-xl">
+      <div className="flex items-center gap-8">
+        <div className="text-center">
+          <p className="text-xs font-black text-emerald-600">ในกอง</p>
+          <p className="text-2xl font-black text-slate-700">{order.length}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-xs font-black text-rose-500">ดึงออกแล้ว</p>
+          <p className="text-2xl font-black text-slate-700">{removedCount}</p>
+        </div>
+      </div>
+
+      <div className="relative h-56 w-40 flex items-center justify-center">
+        {order.length === 0 ? (
+          <p className="text-slate-300 font-bold text-sm text-center px-4">กองไพ่หมดแล้ว<br />กด "สับไพ่" เพื่อเริ่มใหม่</p>
+        ) : (
+          Array.from({ length: stackCount }).map((_, i) => (
+            <div
+              key={i}
+              className="absolute w-32 h-48 rounded-2xl border-2 border-white shadow-lg bg-gradient-to-br from-indigo-400 via-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-5xl"
+              style={{
+                transform: `translate(${i * 2}px, ${-i * 2.5}px) rotate(${(i - stackCount / 2) * 1.5}deg)`,
+                zIndex: stackCount - i,
+              }}
+            >
+              {i === 0 ? "🔮" : ""}
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="flex gap-3 w-full max-w-xs">
+        <button
+          onClick={shuffleDeck}
+          disabled={spinning || pool.length === 0}
+          className="flex-1 py-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-600 font-black text-sm"
+        >
+          🔀 สับไพ่
+        </button>
+        <button
+          onClick={drawCard}
+          disabled={spinning || order.length === 0}
+          className="flex-1 py-3.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black text-sm"
+        >
+          {spinning ? "กำลังดึง..." : "🎴 ดึงไพ่"}
         </button>
       </div>
     </div>
@@ -1606,7 +1720,9 @@ useEffect(() => {
             )}
           </div>
         )}
-        {!bannerMenu && tab === "random" && <RandomPickerTab students={students} />}
+        {!bannerMenu && tab === "random" && (
+  <RandomPickerTab students={students} onOpenScore={s => setScoreTargets([s])} />
+)}
         {!bannerMenu && tab === "tools" && <ToolsTab students={students} />}
       </main>
 
