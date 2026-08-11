@@ -1849,21 +1849,18 @@ useEffect(() => {
     try {
       const req = subjectRequests.find(r => r.id === requestId);
       if (!req) return;
-      const { error: insErr } = await (supabase.from("subjects") as any).insert([{
-        subject_code: req.subject_code, name_th: req.name_th, subject_group: req.subject_group ?? null,
-      }]);
-      if (insErr) throw insErr;
+
+      // ★ FIX: ไม่ insert ลงตาราง subjects อีกต่อไป เพราะแอดมินจะไปสร้างวิชาเองภายหลัง
+      // (การ insert ตรงนี้ทำให้ชน unique constraint ถ้ารหัสวิชาซ้ำกับที่มีอยู่แล้ว
+      // และทำให้อนุมัติไม่สำเร็จทั้งที่จริง ๆ ควรอนุมัติได้ปกติ)
       const { error: updErr } = await (supabase.from("subject_addition_requests") as any)
         .update({ status: "approved", reviewed_by: user.id, reviewed_at: new Date().toISOString() })
         .eq("id", requestId);
       if (updErr) throw updErr;
 
-      const { data: subjectsData } = await supabase.from("subjects")
-        .select("id,subject_code,name_th,subject_group").order("subject_code");
-      setSubjects((subjectsData ?? []) as Subject[]);
       await loadSubjectRequests();
 
-      // ★ เพิ่มใหม่: DM แจ้งผู้ขอ
+      // ★ เพิ่มใหม่: DM แจ้งผู้ขอว่าอนุมัติแล้ว
       if (req.requester?.email) {
         sendTeamsDM("academic", req.requester.email,
           `✅ คำขอเพิ่มรายวิชา "${req.subject_code} ${req.name_th}" ของคุณได้รับการอนุมัติแล้ว`);
@@ -1871,7 +1868,7 @@ useEffect(() => {
         console.warn("[handleApproveSubjectRequest] ไม่มี email ผู้ขอ ส่ง DM ไม่ได้:", req.requester);
       }
 
-      alert("✅ อนุมัติและเพิ่มรายวิชาใหม่เข้าระบบแล้ว");
+      alert("✅ อนุมัติคำขอแล้ว (แอดมินจะเป็นผู้เพิ่มรายวิชาเข้าระบบเอง)");
     } catch (err: any) {
       console.error("[handleApproveSubjectRequest] error:", err);
       alert("❌ อนุมัติไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));

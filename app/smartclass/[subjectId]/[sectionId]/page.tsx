@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import AttendanceTool from "@/components/attendance/AttendanceTool";
 import AssignmentsTool from "@/components/assignments/AssignmentsTool";
 import AttendanceOverviewTool from "@/components/attendance/AttendanceOverviewTool";
+import GradeOverviewTool from "@/components/attendance/GradeOverviewTool";
 
 const supabase = createClient();
 
@@ -747,6 +748,50 @@ export default function SmartClassRosterPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [scoreTargets, setScoreTargets] = useState<Student[] | null>(null);
+  const [academicYearLabel, setAcademicYearLabel] = useState("");
+const [homeroomTeacherName, setHomeroomTeacherName] = useState("");
+const [subjectTeacherName, setSubjectTeacherName] = useState("");
+
+useEffect(() => {
+  (async () => {
+    if (!section) return;
+
+    // ปีการศึกษา — ใช้ academic_year_id จาก subject_sections (ต้อง select เพิ่มตอนโหลด section)
+    // ครูประจำชั้น — จาก classrooms.homeroom_teacher_id
+    // ครูประจำวิชา — จาก subject_sections.teacher_id
+    // ตัวอย่าง query รวม (ปรับ path ตามจริง):
+    const { data: sectionFull } = await supabase
+      .from("subject_sections")
+      .select("academic_year_id, teacher_id")
+      .eq("id", section.id)
+      .maybeSingle();
+
+    if (sectionFull?.academic_year_id) {
+      const { data: year } = await supabase
+        .from("academic_years")
+        .select("year_name, semester")
+        .eq("id", sectionFull.academic_year_id)
+        .maybeSingle();
+      if (year) setAcademicYearLabel(`${year.year_name} ภาคเรียนที่ ${year.semester}`);
+    }
+    if (sectionFull?.teacher_id) {
+      const { data: t } = await supabase
+        .from("users").select("full_name, first_name, last_name")
+        .eq("id", sectionFull.teacher_id).maybeSingle();
+      if (t) setSubjectTeacherName(t.full_name || `${t.first_name} ${t.last_name}`);
+    }
+    if (classroom) {
+      const { data: room } = await supabase
+        .from("classrooms").select("homeroom_teacher_id").eq("id", classroom.id).maybeSingle();
+      if (room?.homeroom_teacher_id) {
+        const { data: t } = await supabase
+          .from("users").select("full_name, first_name, last_name")
+          .eq("id", room.homeroom_teacher_id).maybeSingle();
+        if (t) setHomeroomTeacherName(t.full_name || `${t.first_name} ${t.last_name}`);
+      }
+    }
+  })();
+}, [section, classroom]);
 
   useEffect(() => {
     (async () => {
@@ -1038,9 +1083,19 @@ export default function SmartClassRosterPage() {
         {bannerMenu === "assignments" && section && (
           <AssignmentsTool sectionId={section.id} subjectId={subjectId} students={students} currentUserId={currentUserId} />
         )}
-        {bannerMenu === "totalScore" && (
-          <TotalScoreTab students={students} studentScores={studentScores} />
-        )}
+        {bannerMenu === "totalScore" && section && (
+  <GradeOverviewTool
+    sectionId={section.id}
+    subjectTitle={subject.name_th}
+    subjectCode={subject.subject_code}
+    students={students}
+    classroomLabel={`${classroom?.grade_group ?? ""} ${classroom?.room_name ?? ""}`}
+    // ค่าด้านล่างนี้ยังไม่มีตัวแปรจริงในหน้า page.tsx ปัจจุบัน ต้องเพิ่ม fetch เอง (ดูข้อ 5)
+    academicYearLabel={academicYearLabel}
+    homeroomTeacherName={homeroomTeacherName}
+    subjectTeacherName={subjectTeacherName}
+  />
+)}
         {bannerMenu === "attendanceInfo" && section && (
   <AttendanceOverviewTool
     sectionId={section.id}
