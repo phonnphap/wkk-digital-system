@@ -1681,9 +1681,27 @@ useEffect(() => {
 
   // ── Save direct (admin) ───────────────────────────────────────────────────
   // ✅ เพิ่ม try/catch + alert ให้เห็น error จริงเสมอ (เดิมไม่เช็ค error เลย ทำให้ "กดแล้วเงียบ")
+  // ── Save direct (admin) ───────────────────────────────────────────────────
   async function handleSaveDirect(data: any) {
     try {
       const realSlotId = await ensureRealTimeSlot(data.time_slot_id, data.time_slot);
+
+      // ✅ NEW: เช็คก่อนบันทึกว่ามีคาบอยู่ในช่องนี้แล้วหรือไม่ (กันเคสหน้าจอไม่ sync กับ DB)
+      // ถ้ากำลังแก้ไขคาบเดิม (data.id) ให้ไม่นับตัวเอง
+      const { data: clash, error: clashErr } = await supabase
+        .from("timetable_entries")
+        .select("id")
+        .eq("classroom_id", data.classroom_id)
+        .eq("day_of_week", data.day_of_week)
+        .eq("time_slot_id", realSlotId)
+        .eq("academic_year_id", data.academic_year_id);
+      if (clashErr) throw clashErr;
+      const otherClash = (clash ?? []).filter(c => c.id !== data.id);
+      if (otherClash.length > 0) {
+        alert("⚠️ ช่องนี้มีคาบเรียนอยู่แล้ว (ข้อมูลบนหน้าจอไม่ตรงกับฐานข้อมูล) กำลังโหลดข้อมูลล่าสุดให้ใหม่...");
+        await loadEntries();
+        return;
+      }
 
       if (data.id) {
         const { error } = await (supabase.from("timetable_entries") as any)
@@ -1703,18 +1721,29 @@ useEffect(() => {
         if (error) throw error;
       }
       await loadEntries();
-      await checkAndNotifyConflict(data.classroom_id, data.day_of_week, realSlotId); // ★ เพิ่มบรรทัดนี้
+      await checkAndNotifyConflict(data.classroom_id, data.day_of_week, realSlotId);
     } catch (err: any) {
       console.error("[handleSaveDirect] error:", err);
+
+      // ✅ NEW: จับ unique constraint violation โดยเฉพาะ (เผื่อมีคนอื่นบันทึกแทรกพอดีระหว่างที่เช็ค)
+      if (err?.code === "23505") {
+        alert(
+          "⚠️ บันทึกไม่สำเร็จ: ช่องนี้มีคาบเรียนอยู่แล้ว (อาจมีคนอื่นเพิ่งบันทึกไปพร้อมกัน)\n\n" +
+          "ระบบจะโหลดตารางล่าสุดให้ กรุณาลองใหม่อีกครั้งหลังตรวจดูคาบที่มีอยู่"
+        );
+        await loadEntries();
+        return;
+      }
+
       alert(
         "❌ บันทึกคาบเรียนไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ") +
         "\n\nถ้าปัญหายังเกิดซ้ำ ลองกดปุ่ม ⚙️ มุมขวาบนเพื่อเลือกตารางเวลาของห้องนี้ใหม่อีกครั้ง หรือแจ้งผู้ดูแลระบบ"
       );
     }
   }
-
   // ── Request change (teacher) ──────────────────────────────────────────────
   // ✅ เพิ่ม ensureRealTimeSlot เหมือนกัน กันคำขอพังด้วยสาเหตุเดียวกัน
+  // ── Request change (teacher) ──────────────────────────────────────────────
   async function handleRequestChange(data: any) {
     if (!user) return;
     try {
@@ -1729,7 +1758,6 @@ useEffect(() => {
       }]);
       if (error) throw error;
 
-      // ★ แจ้งเตือนผ่าน Teams
       notifyTeams({
         title: "🗓️ มีคำขอแก้ไขตารางสอนใหม่",
         message: `${fullName(user)} ยื่นคำขอแก้ไขคาบเรียน`,
@@ -1743,6 +1771,10 @@ useEffect(() => {
       await loadChangeRequests();
     } catch (err: any) {
       console.error("[handleRequestChange] error:", err);
+      if (err?.code === "23505") {
+        alert("⚠️ ส่งคำขอไม่สำเร็จ: มีคำขอ/คาบเรียนซ้ำในช่องนี้อยู่แล้ว กรุณาลองใหม่");
+        return;
+      }
       alert("❌ ส่งคำขอไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
     }
   }
