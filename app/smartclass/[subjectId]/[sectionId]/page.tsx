@@ -1020,15 +1020,27 @@ useEffect(() => {
   }
 
   async function handleDeletePreset(presetId: string) {
-    setPresets(prev => prev.filter(p => p.id !== presetId));
-    if (!presetId.startsWith("local-")) {
-      try {
-        await supabase.from("score_presets").delete().eq("id", presetId);
-      } catch {
-        // เงียบไว้ก่อนถ้าลบในฐานข้อมูลไม่สำเร็จ การ์ดยังคงถูกซ่อนออกจากหน้าจอ
-      }
+  const removed = presets.find(p => p.id === presetId) ?? null;
+  setPresets(prev => prev.filter(p => p.id !== presetId)); // ซ่อนออกจาก UI ทันที (optimistic)
+
+  if (presetId.startsWith("local-")) return; // ยังไม่เคยบันทึกลง DB จริง ไม่ต้องยิง API
+
+  try {
+    const res = await fetch("/api/score-presets/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ preset_id: presetId }),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error ?? "ลบการ์ดไม่สำเร็จ");
     }
+  } catch (e: any) {
+    // ลบไม่สำเร็จจริง ๆ -> คืนการ์ดกลับมาแสดง ไม่ให้ UI กับฐานข้อมูลเพี้ยนกัน
+    if (removed) setPresets(prev => [...prev, removed].sort((a, b) => a.sort_order - b.sort_order));
+    alert("ลบการ์ดไม่สำเร็จ: " + (e?.message ?? "unknown error"));
   }
+}
 
   if (loading) {
     return (

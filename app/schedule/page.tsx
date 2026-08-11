@@ -755,12 +755,12 @@ function SubjectRequestsPanel({ requests, canApprove, onApprove, onReject }: {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Timetable Grid ────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, academicYearId,
+function TimetableGrid({ classroom, entries, timeSlots, allTimeSlots, subjects, teachers, academicYearId,
   currentUser, clubPeriod, clubsForGrade, onSave, onRequestChange, onDelete }: {
-  classroom: Classroom; entries: TimetableEntry[]; timeSlots: TimeSlot[];
+  classroom: Classroom; entries: TimetableEntry[]; timeSlots: TimeSlot[]; allTimeSlots: TimeSlot[];
   subjects: Subject[]; teachers: Teacher[]; academicYearId: string;
   currentUser: UserProfile;
-  clubPeriod?: ClubPeriod; clubsForGrade: Club[]; // ★ เพิ่ม
+  clubPeriod?: ClubPeriod; clubsForGrade: Club[];
   onSave: (d: any) => Promise<void>;
   onRequestChange: (d: any) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -768,8 +768,19 @@ function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, acad
 
   const [modal, setModal] = useState<{ slot: TimeSlot; day: number; entry?: TimetableEntry; permission: "direct"|"request" } | null>(null);
 
-  function getEntry(day: number, slotId: string) {
-    return entries.find(e => e.day_of_week === day && e.time_slot_id === slotId);
+  // ✅ FIX (root cause): จับคู่ entry กับ slot ด้วย "เวลาเริ่ม" เป็น fallback แทนการเทียบ time_slot_id ตรงๆ อย่างเดียว
+  // เพราะ time_slots อาจมีหลาย record ที่เวลาเดียวกันแต่คนละ id (คนละ schedule_type)
+  // ทำให้คาบเรียนที่ผูกกับ id หนึ่ง ถูกมองไม่เห็นเมื่อตารางที่ render ใช้อีก id หนึ่งที่เวลาเดียวกัน
+  const startTimeMap: Record<string, string> = {};
+  allTimeSlots.forEach(s => { startTimeMap[s.id] = (s.start_time ?? "").slice(0, 5); });
+
+  function getEntry(day: number, slot: TimeSlot) {
+    const slotStart = (slot.start_time ?? "").slice(0, 5);
+    return entries.find(e => {
+      if (e.day_of_week !== day) return false;
+      if (e.time_slot_id === slot.id) return true;               // ตรงกันตรงๆ
+      return startTimeMap[e.time_slot_id] === slotStart;          // ตรงกันด้วยเวลา (id ต่างกันแต่เวลาเดียวกัน)
+    });
   }
 
   const subjectColorMap: Record<string, typeof SUBJECT_COLORS[0]> = {};
@@ -889,7 +900,7 @@ function TimetableGrid({ classroom, entries, timeSlots, subjects, teachers, acad
                       </td>
                     );
 
-                    const entry    = getEntry(day, slot.id);
+                    const entry    = getEntry(day, slot);
                       const perm     = getCellPermission(entry);
                       const clickable = perm !== "deny";
                       const colors   = entry ? (subjectColorMap[entry.subject_id] ?? SUBJECT_COLORS[0]) : null;
@@ -1102,13 +1113,26 @@ function ClubManagementModal({ clubPeriods, clubs, teachers, academicYearId, onC
 }
 
 // ── Personal Timetable Grid ────────────────────────────────────────────────────
-function PersonalTimetableGrid({ myEntries, myClubBlocks, timeSlots, subjects, teachers, classrooms, userId }: {
+function PersonalTimetableGrid({ myEntries, myClubBlocks, timeSlots, allTimeSlots, subjects, teachers, classrooms, userId }: {
   myEntries: TimetableEntry[];
-  myClubBlocks: { dayOfWeek: number; slotLabel: string; club: Club }[]; // ★ เพิ่ม
-  timeSlots: TimeSlot[]; subjects: Subject[]; teachers: Teacher[]; classrooms: Classroom[]; userId: string;
+  myClubBlocks: { dayOfWeek: number; slotLabel: string; club: Club }[];
+  timeSlots: TimeSlot[]; allTimeSlots: TimeSlot[]; subjects: Subject[]; teachers: Teacher[]; classrooms: Classroom[]; userId: string;
 }) {
   const subjectColorMap: Record<string, typeof SUBJECT_COLORS[0]> = {};
   subjects.forEach((s, i) => { subjectColorMap[s.id] = SUBJECT_COLORS[i % SUBJECT_COLORS.length]; });
+
+  // ✅ FIX: จับคู่ด้วยเวลาเริ่มเหมือนกับ TimetableGrid
+  const startTimeMap: Record<string, string> = {};
+  allTimeSlots.forEach(s => { startTimeMap[s.id] = (s.start_time ?? "").slice(0, 5); });
+
+  function getMyEntry(day: number, slot: TimeSlot) {
+    const slotStart = (slot.start_time ?? "").slice(0, 5);
+    return myEntries.find(e => {
+      if (e.day_of_week !== day) return false;
+      if (e.time_slot_id === slot.id) return true;
+      return startTimeMap[e.time_slot_id] === slotStart;
+    });
+  }
   return (
     <div className="w-full rounded-2xl border border-slate-200 shadow-sm bg-white overflow-x-auto">
       <table className="border-collapse w-full" style={{ minWidth: "600px" }}>
@@ -1163,7 +1187,7 @@ function PersonalTimetableGrid({ myEntries, myClubBlocks, timeSlots, subjects, t
     }
 
                   
-                  const entry = myEntries.find(e => e.day_of_week === day && e.time_slot_id === slot.id);
+                  const entry = getMyEntry(day, slot);
 if (!entry) return <td key={slot.id} className="p-1 border-r border-slate-100"><div className="rounded-xl border-2 border-dashed border-slate-100" style={{ minHeight: "92px" }} /></td>;
 const colors  = subjectColorMap[entry.subject_id] ?? SUBJECT_COLORS[0];
 const subject = subjects.find(s => s.id === entry.subject_id) ?? (entry as any).subject;
@@ -2255,6 +2279,7 @@ const totalScheduledPeriods = entries.length;
               </div>
               <TimetableGrid
       classroom={selectedClassroom} entries={roomEntries} timeSlots={roomTimeSlots}
+      allTimeSlots={timeSlots}
       subjects={subjects} teachers={teachers} academicYearId={selectedYear}
       currentUser={user}
       clubPeriod={clubPeriods.find(cp => cp.grade_label === getClassroomGradeLabel(selectedClassroom))}
@@ -2263,8 +2288,8 @@ const totalScheduledPeriods = entries.length;
       onRequestChange={handleRequestChange}
       onDelete={async (id) => { await supabase.from("timetable_entries").delete().eq("id", id); await loadEntries(); }}
     />
-  </div>
-)}
+    </div>  
+  )} 
 
           {/* ── ของฉัน ── */}
           {viewMode === "teacher" && (
@@ -2314,9 +2339,10 @@ const totalScheduledPeriods = entries.length;
         <div key={type}>
           <h3 className="font-black text-slate-700 text-sm mb-3">📅 ตารางคาบสอนของฉัน · {label}</h3>
           <PersonalTimetableGrid
-            myEntries={entriesOfType} myClubBlocks={myClubBlocksOfType} timeSlots={slots}
-            subjects={subjects} teachers={teachers} classrooms={classrooms} userId={user.id}
-          />
+  myEntries={entriesOfType} myClubBlocks={myClubBlocksOfType} timeSlots={slots}
+  allTimeSlots={timeSlots}
+  subjects={subjects} teachers={teachers} classrooms={classrooms} userId={user.id}
+/>
         </div>
       );
     })}
