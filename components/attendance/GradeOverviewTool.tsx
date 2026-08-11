@@ -55,6 +55,7 @@ export default function GradeOverviewTool({
   homeroomTeacherName,
   subjectTeacherName,
   students,
+  currentUserId,
 }: {
   sectionId: string;
   subjectTitle: string;
@@ -64,6 +65,7 @@ export default function GradeOverviewTool({
   homeroomTeacherName?: string;
   subjectTeacherName?: string;
   students: Student[];
+  currentUserId?: string;
 }) {
   const [tab, setTab] = useState<ViewTab>("table");
   const [loading, setLoading] = useState(true);
@@ -75,6 +77,8 @@ export default function GradeOverviewTool({
   const [criteria, setCriteria] = useState<Criterion[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [scoreEvents, setScoreEvents] = useState<ScoreEvent[]>([]);
+  // สรุปเช็คชื่อ: studentId -> { present, total }
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, { present: number; total: number }>>({});
 
   const [showGradeSetting, setShowGradeSetting] = useState(false);
   const [reportStudent, setReportStudent] = useState<Student | null>(null);
@@ -84,14 +88,34 @@ export default function GradeOverviewTool({
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/subject-grades/summary?subject_section_id=${sectionId}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "โหลดข้อมูลไม่สำเร็จ");
+      const [gradeRes, attRes] = await Promise.all([
+        fetch(`/api/subject-grades/summary?subject_section_id=${sectionId}`),
+        fetch(`/api/subject-attendance/summary?subject_section_id=${sectionId}`),
+      ]);
+      const json = await gradeRes.json();
+      if (!gradeRes.ok) throw new Error(json.error ?? "โหลดข้อมูลไม่สำเร็จ");
       setAssignments(json.assignments ?? []);
       setPresets(json.presets ?? []);
       setCriteria(json.criteria ?? []);
       setSubmissions(json.submissions ?? []);
       setScoreEvents(json.scoreEvents ?? []);
+
+      // การเช็คชื่อไม่ใช่ข้อมูลหลักของหน้านี้ ถ้าโหลดไม่สำเร็จ ไม่ต้อง block ทั้งหน้า แค่ปล่อยว่างไว้
+      try {
+        const attJson = await attRes.json();
+        if (attRes.ok) {
+          const totalDates: string[] = attJson.dates ?? [];
+          const map: Record<string, { present: number; total: number }> = {};
+          students.forEach(s => { map[s.id] = { present: 0, total: totalDates.length }; });
+          (attJson.records ?? []).forEach((r: any) => {
+            if (!map[r.student_id]) map[r.student_id] = { present: 0, total: totalDates.length };
+            if (r.status === "present" || r.status === "late") map[r.student_id].present += 1;
+          });
+          setAttendanceMap(map);
+        }
+      } catch {
+        // เงียบไว้ ไม่ critical
+      }
     } catch (e: any) {
       setError(e?.message ?? "โหลดข้อมูลคะแนนรวมไม่สำเร็จ");
     } finally {
@@ -162,6 +186,32 @@ export default function GradeOverviewTool({
     return [...rows].sort((a, b) => b.grandTotal - a.grandTotal).slice(0, 5);
   }, [rows]);
 
+  /* ---------------- แก้ไขคะแนนพิเศษแบบ inline ในตาราง ---------------- */
+
+  async function handleAdjustPreset(studentId: string, presetId: string, currentValue: number, newValue: number) {
+    const delta = newValue - currentValue;
+    if (delta === 0) return;
+    try {
+      const res = await fetch("/api/score-events/adjust", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject_section_id: sectionId,
+          student_id: studentId,
+          preset_id: presetId,
+          delta,
+          created_by: currentUserId || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "แก้ไขคะแนนไม่สำเร็จ");
+      // อัปเดตแบบ optimistic โดยเติม event ใหม่ในหน่วยความจำ ไม่ต้องรอโหลดใหม่ทั้งหน้า
+      setScoreEvents(prev => [...prev, { id: json.event?.id ?? `local-${Date.now()}`, student_id: studentId, preset_id: presetId, points: delta }]);
+    } catch (e: any) {
+      alert("แก้ไขคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+  }
+
   /* ---------------- ตั้งค่าเกณฑ์เกรด ---------------- */
 
   async function saveCriteria(newRows: Criterion[]) {
@@ -225,7 +275,9 @@ export default function GradeOverviewTool({
         <StudentReportModal
           row={rows.find(r => r.student.id === reportStudent.id)!}
           assignments={assignments}
-          presets={presets}
+          sectionId={sectionId}
+          currentUserId={currentUserId}
+          attendance={attendanceMap[reportStudent.id] ?? { present: 0, total: 0 }}
           subjectTitle={subjectTitle}
           subjectCode={subjectCode}
           academicYearLabel={academicYearLabel}
@@ -284,6 +336,7 @@ export default function GradeOverviewTool({
           presets={presets}
           totalMaxScore={totalMaxScore}
           onOpenReport={s => setReportStudent(s)}
+          onAdjustPreset={handleAdjustPreset}
         />
       ) : (
         <PodiumView top5={podiumTop5} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
@@ -302,12 +355,14 @@ function GradeTable({
   presets,
   totalMaxScore,
   onOpenReport,
+  onAdjustPreset,
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
   presets: Preset[];
   totalMaxScore: number;
   onOpenReport: (s: Student) => void;
+  onAdjustPreset: (studentId: string, presetId: string, currentValue: number, newValue: number) => void;
 }) {
   if (rows.length === 0) {
     return (
@@ -389,9 +444,10 @@ function GradeTable({
                 })}
                 {presets.map(p => (
                   <td key={p.id} className="text-center px-3 py-3">
-                    <span className={`text-sm font-black ${r.presetTotals[p.id] > 0 ? "text-emerald-600" : r.presetTotals[p.id] < 0 ? "text-red-500" : "text-slate-300"}`}>
-                      {r.presetTotals[p.id] ?? 0}
-                    </span>
+                    <EditablePresetCell
+                      value={r.presetTotals[p.id] ?? 0}
+                      onSave={newValue => onAdjustPreset(s.id, p.id, r.presetTotals[p.id] ?? 0, newValue)}
+                    />
                   </td>
                 ))}
                 <td className="text-center px-3 py-3">
@@ -410,6 +466,46 @@ function GradeTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function EditablePresetCell({ value, onSave }: { value: number; onSave: (newValue: number) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => { setDraft(String(value)); }, [value]);
+
+  function commit() {
+    const parsed = Number(draft);
+    setEditing(false);
+    if (Number.isNaN(parsed)) { setDraft(String(value)); return; }
+    if (parsed !== value) onSave(parsed);
+  }
+
+  if (editing) {
+    return (
+      <input
+        type="number"
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(String(value)); setEditing(false); } }}
+        className="w-16 text-center border-2 border-sky-300 rounded-lg py-1 text-sm font-black focus:outline-none"
+      />
+    );
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      title="คลิกเพื่อแก้ไขคะแนน"
+      className={`text-sm font-black px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors ${
+        value > 0 ? "text-emerald-600" : value < 0 ? "text-red-500" : "text-slate-300"
+      }`}
+    >
+      {value}
+    </button>
   );
 }
 
@@ -573,7 +669,9 @@ function GradeSettingModal({
 function StudentReportModal({
   row,
   assignments,
-  presets,
+  sectionId,
+  currentUserId,
+  attendance,
   subjectTitle,
   subjectCode,
   academicYearLabel,
@@ -584,7 +682,9 @@ function StudentReportModal({
 }: {
   row: ReturnType<typeof buildRowsType>[number];
   assignments: Assignment[];
-  presets: Preset[];
+  sectionId: string;
+  currentUserId?: string;
+  attendance: { present: number; total: number };
   subjectTitle: string;
   subjectCode: string;
   academicYearLabel?: string;
@@ -594,9 +694,47 @@ function StudentReportModal({
   onClose: () => void;
 }) {
   const s = row.student;
-  const comments = Object.values(row.subMap)
-    .map(sub => sub.teacher_comment)
-    .filter((c): c is string => !!c && c.trim().length > 0);
+
+  const [comment, setComment] = useState("");
+  const [savingComment, setSavingComment] = useState(false);
+  const [commentSaved, setCommentSaved] = useState(false);
+  const [loadingComment, setLoadingComment] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoadingComment(true);
+    fetch(`/api/student-subject-comments?subject_section_id=${sectionId}&student_id=${s.id}`)
+      .then(res => res.json())
+      .then(json => { if (active) setComment(json.comment ?? ""); })
+      .catch(() => {})
+      .finally(() => { if (active) setLoadingComment(false); });
+    return () => { active = false; };
+  }, [sectionId, s.id]);
+
+  async function saveComment() {
+    setSavingComment(true);
+    setCommentSaved(false);
+    try {
+      const res = await fetch("/api/student-subject-comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject_section_id: sectionId,
+          student_id: s.id,
+          comment,
+          updated_by: currentUserId || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "บันทึกคอมเมนต์ไม่สำเร็จ");
+      setCommentSaved(true);
+      setTimeout(() => setCommentSaved(false), 2000);
+    } catch (e: any) {
+      alert("บันทึกคอมเมนต์ไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    } finally {
+      setSavingComment(false);
+    }
+  }
 
   function handlePrint() {
     window.print();
@@ -651,40 +789,72 @@ function StudentReportModal({
           </div>
         </div>
 
-        {/* สถิติส่งงาน */}
+        {/* การเข้าเรียน */}
         <div className="mb-5">
-          <p className="text-xs font-black text-slate-600 mb-2">📚 สถิติการส่งงาน</p>
-          <div className="grid grid-cols-2 gap-2">
-            <InfoBox label="ส่งงานแล้ว" value={`${row.submittedCount} / ${assignments.length} ชิ้น`} />
-            <InfoBox label="คะแนนงานที่ได้ / เต็ม" value={`${row.assignmentTotal} / ${assignments.reduce((a, b) => a + (b.max_score ?? 0), 0)}`} />
+          <p className="text-xs font-black text-slate-600 mb-2">🗓️ การเข้าเรียน</p>
+          <InfoBox
+            label="จำนวนวันที่มาเรียน"
+            value={attendance.total > 0 ? `${attendance.present} / ${attendance.total} วัน` : "ยังไม่มีข้อมูลการเช็คชื่อ"}
+          />
+        </div>
+
+        {/* รายการชิ้นงาน */}
+        <div className="mb-5">
+          <p className="text-xs font-black text-slate-600 mb-2">📚 รายการชิ้นงาน</p>
+          {assignments.length === 0 ? (
+            <p className="text-slate-300 text-xs font-bold italic">ยังไม่มีงานที่มอบหมาย</p>
+          ) : (
+            <div className="rounded-xl border border-slate-100 overflow-hidden">
+              {assignments.map((a, i) => {
+                const sub = row.subMap[a.id];
+                return (
+                  <div key={a.id} className={`flex items-center justify-between px-3 py-2 text-xs ${i % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
+                    <span className="font-bold text-slate-600 truncate pr-2">{a.title}</span>
+                    <span className="font-black text-slate-700 whitespace-nowrap">
+                      {sub?.score ?? (sub ? "รอตรวจ" : "ไม่ส่งงาน")} / {a.max_score}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="mt-2 text-right text-[11px] font-black text-slate-500">
+            ส่งงานแล้ว {row.submittedCount} / {assignments.length} ชิ้น · รวม {row.assignmentTotal} / {assignments.reduce((a, b) => a + (b.max_score ?? 0), 0)} คะแนน
           </div>
         </div>
 
-        {/* คะแนนพิเศษ */}
-        {presets.length > 0 && (
-          <div className="mb-5">
-            <p className="text-xs font-black text-slate-600 mb-2">⭐ คะแนนพิเศษ</p>
-            <div className="flex flex-wrap gap-2">
-              {presets.map(p => (
-                <span key={p.id} className="px-2.5 py-1.5 rounded-lg bg-sky-50 text-sky-700 text-[11px] font-black">
-                  {p.emoji} {p.label}: {row.presetTotals[p.id] ?? 0}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* คะแนนพิเศษ (แสดงเป็นค่ารวม ไม่แยกชื่อการ์ด) */}
+        <div className="mb-5">
+          <p className="text-xs font-black text-slate-600 mb-2">⭐ คะแนนพิเศษรวม</p>
+          <InfoBox label="คะแนนพิเศษที่ได้ (บวก/ลบ)" value={`${row.specialTotal > 0 ? "+" : ""}${row.specialTotal} คะแนน`} />
+        </div>
 
-        {/* คอมเมนต์ครู */}
+        {/* คอมเมนต์ครู — แก้ไข/บันทึกได้ */}
         <div>
-          <p className="text-xs font-black text-slate-600 mb-2">💬 คอมเมนต์ครูประจำวิชา</p>
-          {comments.length === 0 ? (
-            <p className="text-slate-300 text-xs font-bold italic">ยังไม่มีคอมเมนต์</p>
+          <p className="text-xs font-black text-slate-600 mb-2 flex items-center justify-between print:hidden">
+            <span>💬 คอมเมนต์ครูประจำวิชา</span>
+            {commentSaved && <span className="text-emerald-500 text-[10px] font-black">✓ บันทึกแล้ว</span>}
+          </p>
+          <p className="text-xs font-black text-slate-600 mb-2 hidden print:block">💬 คอมเมนต์ครูประจำวิชา</p>
+          {loadingComment ? (
+            <p className="text-slate-300 text-xs font-bold">กำลังโหลด...</p>
           ) : (
-            <div className="space-y-1.5">
-              {comments.map((c, i) => (
-                <p key={i} className="text-xs text-slate-600 bg-slate-50 rounded-lg px-3 py-2">{c}</p>
-              ))}
-            </div>
+            <>
+              <textarea
+                value={comment}
+                onChange={e => setComment(e.target.value)}
+                placeholder="พิมพ์คอมเมนต์ถึงนักเรียน (ไม่บังคับ)..."
+                rows={3}
+                className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-xs font-bold resize-none focus:border-fuchsia-300 focus:outline-none print:border-none print:p-0"
+              />
+              <button
+                onClick={saveComment}
+                disabled={savingComment}
+                className="mt-2 w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-black text-xs disabled:opacity-50 print:hidden"
+              >
+                {savingComment ? "กำลังบันทึก..." : "💾 บันทึกคอมเมนต์"}
+              </button>
+            </>
           )}
         </div>
       </div>
