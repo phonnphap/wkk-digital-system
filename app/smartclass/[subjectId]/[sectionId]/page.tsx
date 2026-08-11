@@ -382,6 +382,12 @@ const WHEEL_COLORS = [
   "#facc15", "#fb923c", "#f87171", "#2dd4bf",
 ];
 
+const MODE_INFO: Record<RandomMode, { label: string; icon: string }> = {
+  circle: { label: "วงเวียน", icon: "🎡" },
+  slide: { label: "สไลด์", icon: "🃏" },
+  card: { label: "การ์ด", icon: "🗂️" },
+};
+
 function buildEntries(students: Student[]): WheelEntry[] {
   return students.map(s => ({
     id: s.id,
@@ -395,6 +401,7 @@ function buildEntries(students: Student[]): WheelEntry[] {
 
 function RandomPickerTab({ students }: { students: Student[] }) {
   const [mode, setMode] = useState<RandomMode>("circle");
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [entries, setEntries] = useState<WheelEntry[]>(() => buildEntries(students));
   const [editing, setEditing] = useState(false);
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
@@ -426,6 +433,16 @@ function RandomPickerTab({ students }: { students: Student[] }) {
       return copy;
     });
   }
+  function shuffleOrderAuto() {
+    setEntries(prev => {
+      const copy = [...prev];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    });
+  }
   function addEntry() {
     const label = window.prompt("พิมพ์ชื่อที่ต้องการเพิ่มเข้าวงล้อ");
     if (!label?.trim()) return;
@@ -446,54 +463,66 @@ function RandomPickerTab({ students }: { students: Student[] }) {
   }
 
   return (
-    <div className="space-y-4">
-      {/* ตั้งค่าโหมด + จัดการรายชื่อ */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-4">
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <p className="font-black text-slate-700 text-sm">โหมดสุ่ม</p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setEditing(v => !v)}
-              className={`px-3 py-1.5 rounded-lg font-black text-xs transition-colors ${
-                editing ? "bg-fuchsia-500 text-white" : "bg-slate-100 text-slate-600"
-              }`}
-            >
-              ✏️ {editing ? "เสร็จแล้ว" : "แก้ไข/สลับตำแหน่ง"}
-            </button>
-            <button onClick={resetEntries} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-black text-xs">
-              ↺ รีเซ็ตรายชื่อ
-            </button>
-          </div>
+    <div className="space-y-3">
+      {/* แถบควบคุมบาง ๆ ด้านบน: เมนูเลือกโหมด + แก้ไขรายชื่อ */}
+      <div className="bg-white rounded-2xl border border-slate-200 px-4 py-2.5 flex items-center justify-between flex-wrap gap-2">
+        <div className="relative">
+          <button
+            onClick={() => setModeMenuOpen(v => !v)}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border-2 border-emerald-200 text-emerald-700 font-black text-sm"
+          >
+            <span className="text-lg">{MODE_INFO[mode].icon}</span>
+            {MODE_INFO[mode].label}
+            <span className="text-xs">▾</span>
+          </button>
+          {modeMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
+              <div className="absolute z-20 top-full left-0 mt-1 w-48 bg-white rounded-xl border border-slate-200 shadow-xl p-1.5">
+                {(Object.keys(MODE_INFO) as RandomMode[]).map(k => (
+                  <button
+                    key={k}
+                    onClick={() => { setMode(k); setWinner(null); setModeMenuOpen(false); }}
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-black text-left transition-colors ${
+                      mode === k ? "bg-emerald-50 text-emerald-700" : "text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span className="text-lg">{MODE_INFO[k].icon}</span>{MODE_INFO[k].label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
-          {([
-            { key: "circle", label: "วงเวียน", icon: "🎡" },
-            { key: "slide", label: "สไลด์", icon: "🃏" },
-            { key: "card", label: "การ์ด", icon: "🗂️" },
-          ] as { key: RandomMode; label: string; icon: string }[]).map(m => (
-            <button
-              key={m.key}
-              onClick={() => { setMode(m.key); setWinner(null); }}
-              className={`rounded-xl border-2 py-2 text-xs font-black flex flex-col items-center gap-1 ${
-                mode === m.key ? "border-emerald-400 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-500"
-              }`}
-            >
-              <span className="text-lg">{m.icon}</span>{m.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400 font-bold hidden sm:inline">เหลือ {pool.length}/{entries.length} คน</span>
+          <button
+            onClick={() => setEditing(v => !v)}
+            className={`px-3 py-1.5 rounded-lg font-black text-xs transition-colors ${
+              editing ? "bg-fuchsia-500 text-white" : "bg-slate-100 text-slate-600"
+            }`}
+          >
+            ✏️ {editing ? "เสร็จแล้ว" : "แก้ไขรายชื่อ"}
+          </button>
+          <button onClick={resetEntries} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-black text-xs">
+            ↺ รีเซ็ต
+          </button>
         </div>
-
-        <p className="text-xs text-slate-400 font-bold mt-3">เหลือในรายการ {pool.length}/{entries.length} คน</p>
       </div>
 
       {editing && (
         <div className="bg-white rounded-2xl border border-slate-200 p-4">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <p className="font-black text-slate-700 text-sm">จัดการรายชื่อในวงล้อ</p>
-            <button onClick={addEntry} className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs">
-              + เพิ่มชื่อ
-            </button>
+            <div className="flex gap-2">
+              <button onClick={shuffleOrderAuto} className="px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-600 text-white font-black text-xs">
+                🔀 สลับตำแหน่งอัตโนมัติ
+              </button>
+              <button onClick={addEntry} className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs">
+                + เพิ่มชื่อ
+              </button>
+            </div>
           </div>
           <div className="space-y-1.5 max-h-72 overflow-y-auto">
             {entries.map((e, i) => (
@@ -527,29 +556,41 @@ function RandomPickerTab({ students }: { students: Student[] }) {
         </div>
       )}
 
-      {mode === "circle" && (
-        <WheelPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
-      )}
-      {mode === "slide" && (
-        <SlidePicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
-      )}
-      {mode === "card" && (
-        <CardPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
-      )}
+      {/* พื้นที่เกมสุ่ม — ขยายเกือบเต็มพื้นที่ที่มี */}
+      <div className="min-h-[65vh] flex items-center justify-center">
+        {mode === "circle" && (
+          <WheelPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
+        )}
+        {mode === "slide" && (
+          <SlidePicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
+        )}
+        {mode === "card" && (
+          <CardPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
+        )}
+      </div>
 
+      {/* ป๊อปอัพผลการสุ่ม กลางจอ */}
       {winner && !spinning && (
-        <div className="bg-white rounded-2xl border-2 border-emerald-200 p-4 flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <p className="text-slate-400 text-xs font-bold">🎉 ผลการสุ่ม</p>
-            <p className="text-lg font-black text-emerald-700">{winner.label}</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={keepWinnerInPool} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 font-black text-xs">
-              เก็บไว้ในรายชื่อ
-            </button>
-            <button onClick={removeWinnerFromPool} className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black text-xs">
-              🗑 เอาออกจากรายชื่อ
-            </button>
+        <div className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={keepWinnerInPool}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center" onClick={e => e.stopPropagation()}>
+            <p className="text-5xl mb-3">🎉</p>
+            {winner.avatar_url ? (
+              <img src={winner.avatar_url} className="w-24 h-24 rounded-full object-cover mx-auto border-4 border-emerald-300 mb-3" />
+            ) : (
+              <div className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-400 to-teal-400 text-white text-3xl font-black flex items-center justify-center mx-auto mb-3">
+                {winner.first_name[0]}
+              </div>
+            )}
+            <p className="text-2xl font-black text-slate-800">{winner.label}</p>
+            <p className="text-slate-400 text-xs font-bold mt-1">คือคนที่ถูกสุ่มเลือก</p>
+            <div className="flex gap-2 mt-6">
+              <button onClick={keepWinnerInPool} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-black text-sm">
+                เก็บไว้ในรายชื่อ
+              </button>
+              <button onClick={removeWinnerFromPool} className="flex-1 py-3 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black text-sm">
+                🗑 เอาออกจากรายชื่อ
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -568,7 +609,7 @@ function WheelPicker({
   setWinner: (w: WheelEntry | null) => void;
 }) {
   const [rotation, setRotation] = useState(0);
-  const size = 300;
+  const size = 460;
   const cx = size / 2, cy = size / 2, r = size / 2 - 6;
   const n = pool.length;
   const segAngle = n > 0 ? 360 / n : 0;
@@ -598,17 +639,17 @@ function WheelPicker({
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col items-center gap-4">
+    <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-10 flex flex-col items-center gap-6 w-full max-w-3xl">
       {n === 0 ? (
         <p className="text-slate-400 font-bold text-sm py-10">ไม่มีนักเรียนในรายการ</p>
       ) : (
-        <div className="relative" style={{ width: size, height: size }}>
-          <div className="absolute left-1/2 -top-1 -translate-x-1/2 z-10 text-3xl drop-shadow" style={{ transform: "translateX(-50%) rotate(180deg)" }}>
+        <div className="relative" style={{ width: size, height: size, maxWidth: "100%" }}>
+          <div className="absolute left-1/2 -top-1 -translate-x-1/2 z-10 text-4xl drop-shadow" style={{ transform: "translateX(-50%) rotate(180deg)" }}>
             🔻
           </div>
           <svg
-            width={size}
-            height={size}
+            width="100%"
+            height="100%"
             viewBox={`0 0 ${size} ${size}`}
             style={{
               transform: `rotate(${rotation}deg)`,
@@ -622,7 +663,7 @@ function WheelPicker({
               const [x2, y2] = polar(endAngle, r);
               const largeArc = segAngle > 180 ? 1 : 0;
               const midAngle = startAngle + segAngle / 2;
-              const [tx, ty] = polar(midAngle, r * 0.62);
+              const [tx, ty] = polar(midAngle, r * 0.64);
               return (
                 <g key={e.id}>
                   <path
@@ -634,13 +675,13 @@ function WheelPicker({
                   <text
                     x={tx}
                     y={ty}
-                    fontSize={10}
+                    fontSize={13}
                     fontWeight={900}
                     fill="white"
                     textAnchor="middle"
                     transform={`rotate(${midAngle}, ${tx}, ${ty})`}
                   >
-                    {e.label.length > 12 ? e.label.slice(0, 11) + "…" : e.label}
+                    {e.label.length > 14 ? e.label.slice(0, 13) + "…" : e.label}
                   </text>
                 </g>
               );
@@ -649,7 +690,7 @@ function WheelPicker({
           <button
             onClick={spin}
             disabled={spinning}
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-white border-4 border-fuchsia-400 shadow-lg font-black text-fuchsia-600 text-xs disabled:opacity-60"
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full bg-white border-4 border-fuchsia-400 shadow-lg font-black text-fuchsia-600 text-sm disabled:opacity-60"
           >
             {spinning ? "..." : "หมุน"}
           </button>
@@ -672,7 +713,7 @@ function SlidePicker({
   const [speed, setSpeed] = useState<"slow" | "fast">("slow");
   const [offset, setOffset] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
-  const CARD_W = 96, GAP = 12, STEP = CARD_W + GAP, REPEATS = 10;
+  const CARD_W = 120, GAP = 14, STEP = CARD_W + GAP, REPEATS = 10;
 
   const track = useMemo(() => Array.from({ length: REPEATS }, () => pool).flat(), [pool]);
 
@@ -682,7 +723,7 @@ function SlidePicker({
     setWinner(null);
     const winIdx = Math.floor(Math.random() * pool.length);
     const occurrence = pool.length * (REPEATS - 2) + winIdx;
-    const containerWidth = containerRef.current?.clientWidth ?? 600;
+    const containerWidth = containerRef.current?.clientWidth ?? 800;
     const center = containerWidth / 2;
     const targetOffset = -(occurrence * STEP + CARD_W / 2 - center);
     setOffset(targetOffset);
@@ -699,34 +740,34 @@ function SlidePicker({
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-4">
+    <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 w-full">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div className="flex gap-2">
-          <button onClick={() => setSpeed("slow")} className={`px-3 py-1.5 rounded-lg font-black text-xs ${speed === "slow" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>ช้า</button>
-          <button onClick={() => setSpeed("fast")} className={`px-3 py-1.5 rounded-lg font-black text-xs ${speed === "fast" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>ไว</button>
+          <button onClick={() => setSpeed("slow")} className={`px-4 py-2 rounded-lg font-black text-sm ${speed === "slow" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>ช้า</button>
+          <button onClick={() => setSpeed("fast")} className={`px-4 py-2 rounded-lg font-black text-sm ${speed === "fast" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>ไว</button>
         </div>
-        <button onClick={restart} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-500 font-black text-xs">↺ เริ่มใหม่</button>
+        <button onClick={restart} className="px-3 py-2 rounded-lg bg-slate-100 text-slate-500 font-black text-xs">↺ เริ่มใหม่</button>
       </div>
 
-      <div className="relative h-32 overflow-hidden rounded-xl bg-slate-50" ref={containerRef}>
-        <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-emerald-400 z-10 -translate-x-1/2" />
+      <div className="relative h-44 overflow-hidden rounded-xl bg-slate-50" ref={containerRef}>
+        <div className="absolute left-1/2 top-0 bottom-0 w-1 bg-emerald-400 z-10 -translate-x-1/2" />
         <div
-          className="absolute inset-y-0 left-0 flex items-center gap-3 px-2"
+          className="absolute inset-y-0 left-0 flex items-center gap-3.5 px-2"
           style={{
             transform: `translateX(${offset}px)`,
             transition: spinning ? `transform ${speed === "fast" ? 1.8 : 4}s cubic-bezier(0.15,0.65,0.15,1)` : "none",
           }}
         >
           {track.map((e, i) => (
-            <div key={i} style={{ width: CARD_W }} className="shrink-0 h-24 rounded-xl border-2 border-slate-200 bg-white flex flex-col items-center justify-center text-center px-1">
+            <div key={i} style={{ width: CARD_W }} className="shrink-0 h-36 rounded-xl border-2 border-slate-200 bg-white flex flex-col items-center justify-center text-center px-1">
               {e.avatar_url ? (
-                <img src={e.avatar_url} className="w-10 h-10 rounded-full object-cover" />
+                <img src={e.avatar_url} className="w-14 h-14 rounded-full object-cover" />
               ) : (
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-400 to-blue-400 text-white text-sm font-black flex items-center justify-center">
+                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-sky-400 to-blue-400 text-white text-lg font-black flex items-center justify-center">
                   {e.first_name[0]}
                 </div>
               )}
-              <p className="text-[10px] font-black text-slate-600 mt-1 truncate w-full">{e.label}</p>
+              <p className="text-xs font-black text-slate-600 mt-2 truncate w-full">{e.label}</p>
             </div>
           ))}
         </div>
@@ -737,7 +778,7 @@ function SlidePicker({
       <button
         onClick={spin}
         disabled={spinning || pool.length === 0}
-        className="w-full mt-4 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black"
+        className="w-full mt-5 py-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black text-lg"
       >
         {spinning ? "กำลังสุ่ม..." : "🃏 สุ่มชื่อ"}
       </button>
@@ -792,19 +833,19 @@ function CardPicker({
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-4">
-      <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 mb-4">
+    <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 w-full">
+      <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-3 mb-5">
         {displayList.map(e => {
           const isFlipped = flippedId === e.id;
           return (
-            <div key={e.id} className="relative h-24" style={{ perspective: "600px" }}>
+            <div key={e.id} className="relative h-28" style={{ perspective: "600px" }}>
               <div
                 className="absolute inset-0 rounded-xl transition-transform duration-500"
                 style={{ transformStyle: "preserve-3d", transform: isFlipped ? "rotateY(180deg)" : "rotateY(0deg)" }}
               >
                 {/* หลังไพ่ (เบลอ) */}
                 <div
-                  className="absolute inset-0 rounded-xl bg-gradient-to-br from-fuchsia-400 to-purple-400 flex items-center justify-center text-white text-2xl"
+                  className="absolute inset-0 rounded-xl bg-gradient-to-br from-fuchsia-400 to-purple-400 flex items-center justify-center text-white text-3xl"
                   style={{ backfaceVisibility: "hidden" }}
                 >
                   🎴
@@ -815,13 +856,13 @@ function CardPicker({
                   style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
                 >
                   {e.avatar_url ? (
-                    <img src={e.avatar_url} className="w-9 h-9 rounded-full object-cover" />
+                    <img src={e.avatar_url} className="w-10 h-10 rounded-full object-cover" />
                   ) : (
-                    <div className="w-9 h-9 rounded-full bg-emerald-400 text-white text-xs font-black flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-full bg-emerald-400 text-white text-sm font-black flex items-center justify-center">
                       {e.first_name[0]}
                     </div>
                   )}
-                  <p className="text-[9px] font-black text-slate-600 mt-1 truncate w-full text-center">{e.label}</p>
+                  <p className="text-[10px] font-black text-slate-600 mt-1 truncate w-full text-center">{e.label}</p>
                 </div>
               </div>
             </div>
@@ -831,18 +872,18 @@ function CardPicker({
 
       {pool.length === 0 && <p className="text-center text-slate-400 text-sm font-bold py-6">ไม่มีนักเรียนในรายการ</p>}
 
-      <div className="flex gap-2">
+      <div className="flex gap-3">
         <button
           onClick={shuffle}
           disabled={spinning || pool.length === 0}
-          className="flex-1 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-600 font-black text-sm"
+          className="flex-1 py-4 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-600 font-black"
         >
           🔀 สับไพ่
         </button>
         <button
           onClick={reveal}
           disabled={spinning || pool.length === 0}
-          className="flex-1 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black text-sm"
+          className="flex-1 py-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black"
         >
           {spinning ? "กำลังเปิดไพ่..." : "🎴 เปิดไพ่"}
         </button>
@@ -1446,7 +1487,12 @@ useEffect(() => {
         </div>
       </div>
 
-        <main className={`p-4 lg:p-6 mx-auto w-full ${bannerMenu === "assignments" ? "max-w-[1600px]" : tab === "roster" || tab === "attendance" ? "max-w-[1600px]" : "max-w-4xl"}`}>
+        <main className={`p-4 lg:p-6 mx-auto w-full ${
+  bannerMenu === "assignments" ? "max-w-[1600px]"
+  : tab === "roster" || tab === "attendance" ? "max-w-[1600px]"
+  : tab === "random" ? "max-w-[1900px]"
+  : "max-w-4xl"
+}`}>
         {bannerMenu === "assignments" && section && (
           <AssignmentsTool sectionId={section.id} subjectId={subjectId} students={students} currentUserId={currentUserId} />
         )}
