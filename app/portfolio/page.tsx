@@ -67,13 +67,6 @@ function isExcusedNote(note: string | null | undefined): boolean {
   return EXCUSED_NOTE_KEYWORDS.some((kw) => note.includes(kw));
 }
 
-// ── คำในหมายเหตุที่บ่งชี้ว่า "มาทำงานจริงแต่ไม่ได้สแกนนิ้ว" (ลงชื่อในสมุด ฯลฯ) ──
-const NO_SCAN_NOTE_KEYWORDS = ["ลงชื่อ", "ลงลายมือชื่อ", "ไม่สแกน", "ไม่ได้สแกน", "เครื่องสแกนเสีย", "เครื่องขัดข้อง"];
-function isNoScanNote(note: string | null | undefined): boolean {
-  if (!note) return false;
-  return NO_SCAN_NOTE_KEYWORDS.some((kw) => note.includes(kw));
-}
-
 const MONTH_LABEL: Record<number, string> = {
   1: "ม.ค.", 2: "ก.พ.", 3: "มี.ค.", 4: "เม.ย.", 5: "พ.ค.", 6: "มิ.ย.",
   7: "ก.ค.", 8: "ส.ค.", 9: "ก.ย.", 10: "ต.ค.", 11: "พ.ย.", 12: "ธ.ค.",
@@ -110,7 +103,7 @@ function toDateInputValue(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
-// สีตามสถานะ: เขียว = ปกติ, ส้ม = สาย/กลับก่อน, แดง = ไม่ได้ลงเวลา/ขาด, เทา = เป็นกลาง/รอข้อมูล
+// สีตามสถานะ: เขียว = ปกติ, ส้ม = สาย/กลับก่อน, แดง = ไม่ได้ลงเวลา/ขาด, เทา = เป็นกลาง/รอข้อมูล, ม่วง = ไม่แสกนนิ้ว (แต่ไม่มีปัญหา)
 type Tone = "green" | "orange" | "red" | "slate" | "purple";
 const TONE_CLASSES: Record<Tone, { bg: string; text: string; iconBg: string }> = {
   green: { bg: "bg-emerald-50", text: "text-emerald-600", iconBg: "bg-emerald-100 text-emerald-600" },
@@ -203,8 +196,14 @@ function buildRemark(note: string | null | undefined, onLeave: boolean): string 
 }
 
 // ── สถานะกล่อง "มา" มุมมองรายวัน ──
-function dayCheckInInfo(row: AttendanceRow | null | undefined) {
-  if (!row?.check_in_time) return { time: null as string | null, label: "ไม่ได้ลงเวลาเข้า", tone: "red" as Tone };
+// ★ กติกาใหม่: ถ้าไม่มีเวลาเข้า + ไม่มีหมายเหตุ + ไม่มีใบลา -> ถือว่า "ไม่แสกนมา" (ม่วง) แทนที่จะฟันธงว่าขาดงาน
+function dayCheckInInfo(row: AttendanceRow | null | undefined, onLeave: boolean) {
+  if (!row?.check_in_time) {
+    if (!row?.note && !onLeave) {
+      return { time: null as string | null, label: "ไม่แสกนมา", tone: "purple" as Tone };
+    }
+    return { time: null as string | null, label: "ไม่ได้ลงเวลาเข้า", tone: "red" as Tone };
+  }
   const isLate = row.status === "late" || row.status === "late_and_left_early";
   return {
     time: formatTimeHHmm(row.check_in_time),
@@ -214,8 +213,14 @@ function dayCheckInInfo(row: AttendanceRow | null | undefined) {
 }
 
 // ── สถานะกล่อง "กลับ" มุมมองรายวัน ──
-function dayCheckOutInfo(row: AttendanceRow | null | undefined) {
-  if (!row?.check_out_time) return { time: null as string | null, label: "ไม่ได้ลงเวลากลับ", tone: "red" as Tone };
+// ★ กติกาใหม่: ถ้าไม่มีเวลากลับ + ไม่มีหมายเหตุ + ไม่มีใบลา -> ถือว่า "ไม่แสกนกลับ" (ม่วง)
+function dayCheckOutInfo(row: AttendanceRow | null | undefined, onLeave: boolean) {
+  if (!row?.check_out_time) {
+    if (!row?.note && !onLeave) {
+      return { time: null as string | null, label: "ไม่แสกนกลับ", tone: "purple" as Tone };
+    }
+    return { time: null as string | null, label: "ไม่ได้ลงเวลากลับ", tone: "red" as Tone };
+  }
   const isEarly = row.status === "left_early" || row.status === "late_and_left_early";
   return {
     time: formatTimeHHmm(row.check_out_time),
@@ -224,17 +229,23 @@ function dayCheckOutInfo(row: AttendanceRow | null | undefined) {
   };
 }
 
-// ── สถานะ "เวลาเข้า" มุมมองรายเดือน ──
-function monthlyCheckInStatus(row: { check_in_time: string | null; status: string | null; late_minutes: number }) {
-  if (!row.check_in_time) return { text: "ไม่ลงเวลา", tone: "red" as Tone };
+// ── สถานะ "เวลาเข้า" มุมมองรายเดือน (ตารางรายวันของเดือน) ──
+function monthlyCheckInStatus(row: { check_in_time: string | null; status: string | null; late_minutes: number; note: string | null }, onLeave: boolean) {
+  if (!row.check_in_time) {
+    if (!row.note && !onLeave) return { text: "ไม่แสกนมา", tone: "purple" as Tone };
+    return { text: "ไม่ลงเวลา", tone: "red" as Tone };
+  }
   const isLate = row.status === "late" || row.status === "late_and_left_early";
   if (isLate) return { text: `สาย${row.late_minutes ? ` ${row.late_minutes} นาที` : ""}`, tone: "orange" as Tone };
   return { text: "มาปฏิบัติงาน", tone: "green" as Tone };
 }
 
-// ── สถานะ "เวลาออก" มุมมองรายเดือน ──
-function monthlyCheckOutStatus(row: { check_out_time: string | null; status: string | null }) {
-  if (!row.check_out_time) return { text: "ยังไม่ออกงาน", tone: "slate" as Tone };
+// ── สถานะ "เวลาออก" มุมมองรายเดือน (ตารางรายวันของเดือน) ──
+function monthlyCheckOutStatus(row: { check_out_time: string | null; status: string | null; note: string | null }, onLeave: boolean) {
+  if (!row.check_out_time) {
+    if (!row.note && !onLeave) return { text: "ไม่แสกนกลับ", tone: "purple" as Tone };
+    return { text: "ยังไม่ออกงาน", tone: "slate" as Tone };
+  }
   const isEarly = row.status === "left_early" || row.status === "late_and_left_early";
   if (isEarly) return { text: "กลับก่อนเวลา", tone: "orange" as Tone };
   return { text: "ออกงานแล้ว", tone: "green" as Tone };
@@ -279,16 +290,7 @@ export default function TeacherPortfolioPage() {
   }, [attendance, selectedDay]);
 
   const selectedOnLeave = onLeaveDates.has(selectedDay);
-  const selectedHasIn = !!selectedDayRow?.check_in_time;
-  const selectedHasOut = !!selectedDayRow?.check_out_time;
   const selectedHasEnrichedRow = selectedDayRow?.hasEnrichedRow ?? false;
-  const selectedNoScan = isNoScanNote(selectedDayRow?.note);
-  // ★ "ขาดงาน" เฉพาะกรณีที่ระบบประมวลผลวันนั้นแล้ว ไม่มีเวลาเข้า-ออก ไม่ได้ลา และไม่ใช่กรณีลงชื่อแต่ไม่สแกน
-  const selectedDayIsAbsent =
-    selectedHasEnrichedRow && !selectedHasIn && !selectedHasOut && !selectedOnLeave && selectedDayRow?.status !== "leave" && !selectedNoScan;
-  // ★ มาปฏิบัติงานจริงแต่ไม่ได้สแกนนิ้ว (ลงรายมือชื่อ)
-  const selectedDayIsNoScan =
-    selectedHasEnrichedRow && !selectedHasIn && !selectedHasOut && !selectedOnLeave && selectedDayRow?.status !== "leave" && selectedNoScan;
   // ★ "รอข้อมูล" คือยังไม่มี enriched row เข้ามาเลยสำหรับวันนั้น (ระบบยังไม่ประมวลผล/ยังไม่ sync)
   const selectedDayIsPending = !selectedHasEnrichedRow && !selectedOnLeave && selectedDay <= todayStr;
   const selectedRemark = buildRemark(selectedDayRow?.note, selectedOnLeave);
@@ -309,10 +311,15 @@ export default function TeacherPortfolioPage() {
       // ★ ไม่นับหมายเหตุที่เข้าข่าย "ยกเว้น" (เช่น เทศบาลฉีดพ่นหมอกควัน) เป็นวันที่ถูกลา/มีปัญหา
       const noteCount = rows.filter((r) => (r.note && !isExcusedNote(r.note)) || onLeaveDates.has(r.work_date)).length;
       const pendingCount = rows.filter((r) => !r.hasEnrichedRow).length;
-      // ★ แยก "ขาดงาน" ออกจาก "ไม่แสกนนิ้ว" (ลงชื่อแต่ไม่สแกน) โดยดูจากหมายเหตุของวันที่สถานะเป็น absent
-      const absentRows = rows.filter((r) => r.status === "absent");
-      const noScanCount = absentRows.filter((r) => isNoScanNote(r.note)).length;
-      const absentCount = absentRows.length - noScanCount;
+
+      // ★ เฉพาะแถวที่ระบบประมวลผลแล้ว ไม่ได้อยู่ในสถานะ "ลา" และไม่มีใบลาอนุมัติในวันนั้น
+      const relevantRows = rows.filter((r) => r.hasEnrichedRow && r.status !== "leave" && !onLeaveDates.has(r.work_date));
+      // ★ ไม่แสกนมา/ไม่แสกนกลับ = ไม่มีเวลา + ไม่มีหมายเหตุใดๆ (แยกอิสระต่อกันระหว่างเข้า-ออก)
+      const noScanInCount = relevantRows.filter((r) => !r.check_in_time && !r.note).length;
+      const noScanOutCount = relevantRows.filter((r) => !r.check_out_time && !r.note).length;
+      // ★ ขาดงาน = ไม่มีเวลาเข้าและออกเลย แต่มีหมายเหตุระบุไว้ (ไม่ใช่กรณีไม่แสกน)
+      const absentCount = relevantRows.filter((r) => !r.check_in_time && !r.check_out_time && !!r.note).length;
+
       return {
         month: m,
         label: MONTH_LABEL[m],
@@ -321,7 +328,8 @@ export default function TeacherPortfolioPage() {
         onTimeReturn: cnt("present") + cnt("late"),
         leftEarly: cnt("left_early") + cnt("late_and_left_early"),
         absent: absentCount,
-        noScan: noScanCount,
+        noScanIn: noScanInCount,
+        noScanOut: noScanOutCount,
         noteCount,
         pendingCount,
       };
@@ -508,8 +516,8 @@ export default function TeacherPortfolioPage() {
   }
   if (!profile) return null;
 
-  const checkInInfo = dayCheckInInfo(selectedDayRow);
-  const checkOutInfo = dayCheckOutInfo(selectedDayRow);
+  const checkInInfo = dayCheckInInfo(selectedDayRow, selectedOnLeave);
+  const checkOutInfo = dayCheckOutInfo(selectedDayRow, selectedOnLeave);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800 font-sans antialiased">
@@ -767,36 +775,6 @@ export default function TeacherPortfolioPage() {
                       <p className="text-xs text-slate-400 font-bold mt-0.5">ยังไม่มีข้อมูลการลงเวลาสำหรับวันนี้เข้าสู่ระบบ</p>
                     </div>
                   </div>
-                ) : selectedDayIsNoScan ? (
-                  <div className="rounded-2xl bg-violet-50 border border-violet-100 p-5 flex items-center justify-between flex-wrap gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-600 flex items-center justify-center shrink-0">
-                        <ClipboardList className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-black text-violet-600">ไม่แสกนนิ้ว</p>
-                        <p className="text-xs text-violet-400 font-bold mt-0.5">มาปฏิบัติงานแต่ไม่ได้ลงเวลาผ่านเครื่องสแกน</p>
-                      </div>
-                    </div>
-                    {selectedRemark && (
-                      <div className="text-xs font-bold text-violet-600 bg-white rounded-lg px-3 py-2 border border-violet-100">หมายเหตุ: {selectedRemark}</div>
-                    )}
-                  </div>
-                ) : selectedDayIsAbsent ? (
-                  <div className="rounded-2xl bg-rose-50 border border-rose-100 p-5 flex items-center justify-between flex-wrap gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
-                        <AlertCircle className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-black text-rose-600">ขาดงาน</p>
-                        <p className="text-xs text-rose-400 font-bold mt-0.5">ไม่มีการลงเวลาเข้า-ออกในวันนี้</p>
-                      </div>
-                    </div>
-                    {selectedRemark && (
-                      <div className="text-xs font-bold text-rose-600 bg-white rounded-lg px-3 py-2 border border-rose-100">หมายเหตุ: {selectedRemark}</div>
-                    )}
-                  </div>
                 ) : (
                   <div className="space-y-3">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -841,20 +819,13 @@ export default function TeacherPortfolioPage() {
                       const dateStr = toDateInputValue(d.date);
                       const isFuture = dateStr > todayStr;
                       const onLeave = onLeaveDates.has(dateStr);
-                      const hasIn = !!d.check_in_time;
-                      const hasOut = !!d.check_out_time;
                       const remark = buildRemark(d.note, onLeave);
 
-                      const noScan = isNoScanNote(d.note);
-                      // ★ แยก "รอข้อมูล" / "ไม่แสกนนิ้ว" (ลงชื่อแต่ไม่สแกน) / "ขาดงาน" ออกจากกัน
+                      // ★ "รอข้อมูล" คือยังไม่มี enriched row เข้ามาเลย (ยังคงต้องรวมทั้งแถว เพราะระบบยังไม่ประมวลผลอะไรเลย)
                       const isPendingRow = !isWeekend && !isFuture && !d.hasEnrichedRow && !onLeave;
-                      const isNoScanRow =
-                        !isWeekend && !isFuture && d.hasEnrichedRow && !hasIn && !hasOut && !onLeave && d.status !== "leave" && noScan;
-                      const isAbsentRow =
-                        !isWeekend && !isFuture && d.hasEnrichedRow && !hasIn && !hasOut && !onLeave && d.status !== "leave" && !noScan;
 
-                      const inStatus = monthlyCheckInStatus(d);
-                      const outStatus = monthlyCheckOutStatus(d);
+                      const inStatus = monthlyCheckInStatus(d, onLeave);
+                      const outStatus = monthlyCheckOutStatus(d, onLeave);
 
                       return (
                         <tr key={d.day} className={isWeekend ? "bg-slate-50/60" : "hover:bg-slate-50/60"}>
@@ -869,31 +840,35 @@ export default function TeacherPortfolioPage() {
                             <td colSpan={2} className="px-3 py-2 text-center">
                               <span className="inline-block px-2.5 py-1 rounded-md text-xs font-bold text-slate-400 bg-slate-100">รอข้อมูล</span>
                             </td>
-                          ) : isNoScanRow ? (
-                            <td colSpan={2} className="px-3 py-2 text-center">
-                              <span className="inline-block px-2.5 py-1 rounded-md text-xs font-bold text-violet-600 bg-violet-50">ไม่แสกนนิ้ว</span>
-                            </td>
-                          ) : isAbsentRow ? (
-                            <td colSpan={2} className="px-3 py-2 text-center">
-                              <span className="inline-block px-2.5 py-1 rounded-md text-xs font-bold text-rose-600 bg-rose-50">ขาดงาน</span>
-                            </td>
                           ) : (
                             <>
                               <td className="px-3 py-2 text-center">
-                                <div className="flex flex-col items-center gap-1">
-                                  <span className="font-black text-slate-700">{formatTimeHHmm(d.check_in_time) ?? "-"}</span>
-                                  <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${TONE_CLASSES[inStatus.tone].bg} ${TONE_CLASSES[inStatus.tone].text}`}>
+                                {d.check_in_time ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="font-black text-slate-700">{formatTimeHHmm(d.check_in_time) ?? "-"}</span>
+                                    <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${TONE_CLASSES[inStatus.tone].bg} ${TONE_CLASSES[inStatus.tone].text}`}>
+                                      {inStatus.text}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-bold ${TONE_CLASSES[inStatus.tone].bg} ${TONE_CLASSES[inStatus.tone].text}`}>
                                     {inStatus.text}
                                   </span>
-                                </div>
+                                )}
                               </td>
                               <td className="px-3 py-2 text-center">
-                                <div className="flex flex-col items-center gap-1">
-                                  <span className="font-black text-slate-700">{formatTimeHHmm(d.check_out_time) ?? "-"}</span>
-                                  <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${TONE_CLASSES[outStatus.tone].bg} ${TONE_CLASSES[outStatus.tone].text}`}>
+                                {d.check_out_time ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="font-black text-slate-700">{formatTimeHHmm(d.check_out_time) ?? "-"}</span>
+                                    <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${TONE_CLASSES[outStatus.tone].bg} ${TONE_CLASSES[outStatus.tone].text}`}>
+                                      {outStatus.text}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-bold ${TONE_CLASSES[outStatus.tone].bg} ${TONE_CLASSES[outStatus.tone].text}`}>
                                     {outStatus.text}
                                   </span>
-                                </div>
+                                )}
                               </td>
                             </>
                           )}
@@ -915,7 +890,8 @@ export default function TeacherPortfolioPage() {
                       <th className="text-center px-3 py-2 font-bold text-emerald-600 text-xs">กลับตรงเวลา</th>
                       <th className="text-center px-3 py-2 font-bold text-orange-600 text-xs">กลับก่อน</th>
                       <th className="text-center px-3 py-2 font-bold text-rose-600 text-xs">ขาด</th>
-                      <th className="text-center px-3 py-2 font-bold text-violet-600 text-xs">ไม่แสกนนิ้ว</th>
+                      <th className="text-center px-3 py-2 font-bold text-violet-600 text-xs">ไม่แสกนมา</th>
+                      <th className="text-center px-3 py-2 font-bold text-violet-600 text-xs">ไม่แสกนกลับ</th>
                       <th className="text-center px-3 py-2 font-bold text-slate-400 text-xs">รอข้อมูล</th>
                       <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">หมายเหตุ</th>
                     </tr>
@@ -929,7 +905,8 @@ export default function TeacherPortfolioPage() {
                         <td className="px-3 py-2 text-center font-black text-emerald-600">{m.onTimeReturn || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-orange-600">{m.leftEarly || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-rose-600">{m.absent || "-"}</td>
-                        <td className="px-3 py-2 text-center font-black text-violet-600">{m.noScan || "-"}</td>
+                        <td className="px-3 py-2 text-center font-black text-violet-600">{m.noScanIn || "-"}</td>
+                        <td className="px-3 py-2 text-center font-black text-violet-600">{m.noScanOut || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-slate-400">{m.pendingCount || "-"}</td>
                         <td className="px-3 py-2 text-xs text-slate-500 font-bold">{m.noteCount > 0 ? `${m.noteCount} วัน` : "—"}</td>
                       </tr>

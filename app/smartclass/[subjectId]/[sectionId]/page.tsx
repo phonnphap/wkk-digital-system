@@ -36,8 +36,6 @@ const BANNER_MENU: { key: BannerMenuKey; label: string; icon: string }[] = [
 ];
 
 // Fallback presets shown even before the teacher has saved any of their own
-// (used purely client-side until the teacher actually taps one, at which
-// point it gets written to score_presets so it becomes "real" and reusable).
 const DEFAULT_PRESETS: Omit<ScorePreset, "id">[] = [
   { label: "Keep It Up", points: 1, emoji: "😌", sort_order: 0 },
   { label: "Good Job", points: 1, emoji: "😄", sort_order: 1 },
@@ -46,7 +44,6 @@ const DEFAULT_PRESETS: Omit<ScorePreset, "id">[] = [
   { label: "Well Done", points: 1, emoji: "😎", sort_order: 4 },
 ];
 
-// ชุดสีสดใส สบายตา สำหรับวนใช้เป็นพื้นหลังอวาตาร์ตัวอักษรของ นร. แต่ละคน
 const AVATAR_GRADIENTS = [
   "from-teal-400 to-emerald-400",
   "from-sky-400 to-blue-400",
@@ -61,12 +58,93 @@ function avatarGradient(seed: number) {
   return AVATAR_GRADIENTS[seed % AVATAR_GRADIENTS.length];
 }
 
-// อีโมจิที่เลือกใช้บ่อยสำหรับการ์ดให้คะแนน
 const EMOJI_CHOICES = [
   "🙂", "😄", "😆", "😎", "🤩", "😍", "🥳", "👍", "👏", "💯",
   "⭐", "🌟", "🏆", "🎉", "✅", "💪", "🔥", "😌", "🤝", "📚",
   "😟", "😢", "😠", "👎", "⚠️", "🙄", "😴", "🤫", "❌", "🚫",
 ];
+
+/* ---------------- เอฟเฟกต์เสียง (สังเคราะห์ด้วย Web Audio API ไม่ต้องพึ่งไฟล์เสียงภายนอก) ---------------- */
+
+let _sharedAudioCtx: AudioContext | null = null;
+function getAudioCtx(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return null;
+    if (!_sharedAudioCtx) _sharedAudioCtx = new Ctx();
+    if (_sharedAudioCtx.state === "suspended") _sharedAudioCtx.resume();
+    return _sharedAudioCtx;
+  } catch {
+    return null;
+  }
+}
+
+// เสียง "ตริ้ง/ปริ้ง" ตอนให้คะแนน
+function playDing() {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  try {
+    const now = ctx.currentTime;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(1100, now);
+    o.frequency.exponentialRampToValueAtTime(1760, now + 0.09);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.28, now + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.start(now);
+    o.stop(now + 0.4);
+  } catch {}
+}
+
+// เสียง "ปรบมือเย้ๆ" ตอนสุ่มชื่อได้ผู้ถูกเลือก
+function playCheer() {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  try {
+    const now = ctx.currentTime;
+    const claps = 9;
+    for (let i = 0; i < claps; i++) {
+      const t = now + i * 0.055 + Math.random() * 0.02;
+      const dur = 0.045;
+      const bufferSize = Math.floor(ctx.sampleRate * dur);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let j = 0; j < bufferSize; j++) {
+        data[j] = (Math.random() * 2 - 1) * (1 - j / bufferSize);
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 1800 + Math.random() * 800;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.35, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(ctx.destination);
+      src.start(t);
+    }
+    // เสียงโทน "เย้!" สั้นๆ ปิดท้าย
+    const o = ctx.createOscillator();
+    const g2 = ctx.createGain();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(520, now + 0.4);
+    o.frequency.exponentialRampToValueAtTime(880, now + 0.62);
+    g2.gain.setValueAtTime(0.0001, now + 0.4);
+    g2.gain.exponentialRampToValueAtTime(0.22, now + 0.45);
+    g2.gain.exponentialRampToValueAtTime(0.0001, now + 0.75);
+    o.connect(g2);
+    g2.connect(ctx.destination);
+    o.start(now + 0.4);
+    o.stop(now + 0.8);
+  } catch {}
+}
 
 function EmojiPicker({ value, onChange }: { value: string; onChange: (emoji: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -139,12 +217,10 @@ function StudentCard({
         selected ? "border-fuchsia-400 ring-4 ring-fuchsia-100 bg-fuchsia-50/40" : "border-slate-100 shadow-sm"
       }`}
     >
-      {/* badge คะแนนรวม */}
       <div className="absolute -top-3 left-1/2 -translate-x-1/2 min-w-[30px] h-7 px-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white text-xs font-black flex items-center justify-center shadow-md ring-2 ring-white">
         {score}
       </div>
 
-      {/* checkbox ตอนเลือกหลายคน */}
       {selectMode && (
         <div
           className={`absolute top-2 right-2 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-black transition-colors ${
@@ -196,7 +272,7 @@ function ScoreModal({
   const [newPoints, setNewPoints] = useState(1);
   const [newEmoji, setNewEmoji] = useState("🙂");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-const presetToDelete = presets.find(p => p.id === confirmDeleteId) ?? null;
+  const presetToDelete = presets.find(p => p.id === confirmDeleteId) ?? null;
   const single = students.length === 1 ? students[0] : null;
 
   function submitNewPreset() {
@@ -214,7 +290,6 @@ const presetToDelete = presets.find(p => p.id === confirmDeleteId) ?? null;
         className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col sm:flex-row"
         onClick={e => e.stopPropagation()}
       >
-        {/* ซ้าย: ข้อมูลนักเรียน */}
         <div className="sm:w-52 shrink-0 bg-slate-50 p-5 flex flex-col items-center text-center border-b sm:border-b-0 sm:border-r border-slate-100">
           {single ? (
             <>
@@ -241,7 +316,6 @@ const presetToDelete = presets.find(p => p.id === confirmDeleteId) ?? null;
           )}
         </div>
 
-        {/* ขวา: ให้คะแนน */}
         <div className="flex-1 p-5 max-h-[80vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-black text-slate-800 text-lg">Give Your Student A Score!</h3>
@@ -249,7 +323,6 @@ const presetToDelete = presets.find(p => p.id === confirmDeleteId) ?? null;
           </div>
 
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-            {/* ปุ่มเพิ่มพรีเซ็ตใหม่ */}
             <button
               onClick={() => setAddingPreset(true)}
               className="rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-fuchsia-400 hover:text-fuchsia-500 hover:bg-fuchsia-50/60 flex flex-col items-center justify-center py-4 gap-1 transition-colors"
@@ -263,13 +336,13 @@ const presetToDelete = presets.find(p => p.id === confirmDeleteId) ?? null;
                 className="group relative rounded-xl border-2 border-slate-200 hover:border-fuchsia-400 hover:bg-fuchsia-50/60 flex flex-col items-center justify-center py-4 gap-1 transition-colors"
               >
                 <button
-  type="button"
-  onClick={e => { e.stopPropagation(); setConfirmDeleteId(p.id); }}
-  title="ลบการ์ดนี้"
-  className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-white border border-slate-200 text-slate-400 hover:bg-red-500 hover:border-red-500 hover:text-white flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity shadow"
->
-  🗑
-</button>
+                  type="button"
+                  onClick={e => { e.stopPropagation(); setConfirmDeleteId(p.id); }}
+                  title="ลบการ์ดนี้"
+                  className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-white border border-slate-200 text-slate-400 hover:bg-red-500 hover:border-red-500 hover:text-white flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                >
+                  🗑
+                </button>
                 <span
                   className={`absolute -top-2 -right-2 w-5 h-5 rounded-full text-[10px] font-black text-white flex items-center justify-center shadow ${
                     p.points >= 0 ? "bg-emerald-500" : "bg-rose-500"
@@ -314,37 +387,37 @@ const presetToDelete = presets.find(p => p.id === confirmDeleteId) ?? null;
             </div>
           )}
           {presetToDelete && (
-  <div
-    className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4"
-    onClick={() => setConfirmDeleteId(null)}
-  >
-    <div
-      className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-5 text-center"
-      onClick={e => e.stopPropagation()}
-    >
-      <p className="text-3xl mb-2">{presetToDelete.emoji}</p>
-      <h4 className="font-black text-slate-800 text-sm mb-1">ลบการ์ด "{presetToDelete.label}"?</h4>
-      <p className="text-slate-400 text-xs font-bold mb-4">การ์ดนี้จะถูกลบออกจากรายการให้คะแนนถาวร</p>
-      <div className="flex gap-2">
-        <button
-          onClick={() => setConfirmDeleteId(null)}
-          className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm"
-        >
-          ยกเลิก
-        </button>
-        <button
-          onClick={() => {
-            onDeletePreset(presetToDelete.id);
-            setConfirmDeleteId(null);
-          }}
-          className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-sm"
-        >
-          ลบเลย
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+            <div
+              className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4"
+              onClick={() => setConfirmDeleteId(null)}
+            >
+              <div
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-5 text-center"
+                onClick={e => e.stopPropagation()}
+              >
+                <p className="text-3xl mb-2">{presetToDelete.emoji}</p>
+                <h4 className="font-black text-slate-800 text-sm mb-1">ลบการ์ด "{presetToDelete.label}"?</h4>
+                <p className="text-slate-400 text-xs font-bold mb-4">การ์ดนี้จะถูกลบออกจากรายการให้คะแนนถาวร</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmDeleteId(null)}
+                    className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    onClick={() => {
+                      onDeletePreset(presetToDelete.id);
+                      setConfirmDeleteId(null);
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-sm"
+                  >
+                    ลบเลย
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center gap-2 mt-5">
             <input
@@ -399,19 +472,19 @@ function buildEntries(students: Student[]): WheelEntry[] {
 }
 
 /* ---------------- แท็บ สุ่มชื่อ (หลัก) ---------------- */
+/* หมายเหตุ: โหมด (mode) ยกไปควบคุมจาก dropdown ของแท็บล่าง "สุ่มชื่อ" ในหน้าหลักแล้ว
+   ที่นี่รับ mode มาจาก props แทน ไม่มี dropdown ซ้อนภายในอีก */
 
 function RandomPickerTab({
   students,
+  mode,
   onOpenScore,
 }: {
   students: Student[];
-  /** เรียกตอนกด "ให้คะแนน" ในป๊อปอัพผลการสุ่ม — parent ควรเซ็ต scoreTargets([student]) */
+  mode: RandomMode;
   onOpenScore?: (student: Student) => void;
 }) {
-  const [mode, setMode] = useState<RandomMode>("circle");
-  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [entries, setEntries] = useState<WheelEntry[]>(() => buildEntries(students));
-  const [editing, setEditing] = useState(false);
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [winner, setWinner] = useState<WheelEntry | null>(null);
   const [spinning, setSpinning] = useState(false);
@@ -435,33 +508,19 @@ function RandomPickerTab({
     setEntries(prev => prev.filter(e => e.id !== id));
     setRemovedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   }
-  function moveEntry(id: string, dir: -1 | 1) {
-    setEntries(prev => {
-      const idx = prev.findIndex(e => e.id === id);
-      const next = idx + dir;
-      if (idx < 0 || next < 0 || next >= prev.length) return prev;
-      const copy = [...prev];
-      [copy[idx], copy[next]] = [copy[next], copy[idx]];
-      return copy;
-    });
-  }
-  function shuffleOrderAuto() {
-    setEntries(prev => {
-      const copy = [...prev];
-      for (let i = copy.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [copy[i], copy[j]] = [copy[j], copy[i]];
-      }
-      return copy;
-    });
-  }
   function addEntry() {
-    const label = window.prompt("พิมพ์ชื่อที่ต้องการเพิ่มเข้าวงล้อ");
+    const label = window.prompt("พิมพ์ชื่อที่ต้องการเพิ่มเข้ารายการ");
     if (!label?.trim()) return;
     setEntries(prev => [...prev, { id: `custom-${Date.now()}`, label: label.trim(), first_name: label.trim() }]);
   }
   function resetEntries() {
     setEntries(buildEntries(students));
+    setRemovedIds(new Set());
+    setWinner(null);
+  }
+  function clearAllEntries() {
+    if (!window.confirm("ล้างรายชื่อทั้งหมดออกจากรายการนี้หรือไม่?")) return;
+    setEntries([]);
     setRemovedIds(new Set());
     setWinner(null);
   }
@@ -482,112 +541,75 @@ function RandomPickerTab({
 
   return (
     <div className="space-y-3">
-      {/* แถบควบคุมบาง ๆ ด้านบน: เมนูเลือกโหมด + แก้ไขรายชื่อ */}
+      {/* แถบสถานะบาง ๆ ด้านบน: แสดงโหมดปัจจุบัน (เลือกจาก dropdown ของแท็บล่างแล้ว) + จำนวนคนคงเหลือ */}
       <div className="bg-white rounded-2xl border border-slate-200 px-4 py-2.5 flex items-center justify-between flex-wrap gap-2">
-        <div className="relative">
-          <button
-            onClick={() => setModeMenuOpen(v => !v)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-full border-2 border-current font-black text-sm ${MODE_INFO[mode].bg} ${MODE_INFO[mode].text}`}
-          >
-            <span className="text-lg">{MODE_INFO[mode].icon}</span>
-            {MODE_INFO[mode].label}
-            <span className="text-xs">▾</span>
-          </button>
-          {modeMenuOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
-              <div className="absolute z-20 top-full left-0 mt-2 w-56 bg-white rounded-2xl border border-slate-100 shadow-xl p-2 space-y-1.5">
-                {(Object.keys(MODE_INFO) as RandomMode[]).map(k => (
-                  <button
-                    key={k}
-                    onClick={() => { setMode(k); setWinner(null); setModeMenuOpen(false); }}
-                    className={`w-full flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-black text-left transition-opacity ${MODE_INFO[k].bg} ${MODE_INFO[k].text} ${
-                      mode === k ? "ring-2 ring-current opacity-100" : "opacity-80 hover:opacity-100"
-                    }`}
-                  >
-                    <span className="text-lg">{MODE_INFO[k].icon}</span>{MODE_INFO[k].label}
-                  </button>
-                ))}
-              </div>
-            </>
+        <div className={`flex items-center gap-2 px-4 py-2 rounded-full border-2 border-current font-black text-sm ${MODE_INFO[mode].bg} ${MODE_INFO[mode].text}`}>
+          <span className="text-lg">{MODE_INFO[mode].icon}</span>
+          {MODE_INFO[mode].label}
+        </div>
+        <span className="text-xs text-slate-400 font-bold">เหลือ {pool.length}/{entries.length} คน</span>
+      </div>
+
+      {/* ผังหลัก: เกมสุ่ม 75% ซ้าย + กรอบจัดการรายชื่อ 25% ขวา */}
+      <div className="flex flex-col lg:flex-row gap-3 items-start">
+        <div className="w-full lg:w-[75%] min-h-[60vh] flex items-center justify-center">
+          {mode === "circle" && (
+            <WheelPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
+          )}
+          {mode === "slide" && (
+            <SlidePicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
+          )}
+          {mode === "card" && (
+            <CardPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
+          )}
+          {mode === "deck" && (
+            <DeckPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} removedCount={removedIds.size} />
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-400 font-bold hidden sm:inline">เหลือ {pool.length}/{entries.length} คน</span>
-          <button
-            onClick={() => setEditing(v => !v)}
-            className={`px-3 py-1.5 rounded-lg font-black text-xs transition-colors ${
-              editing ? "bg-fuchsia-500 text-white" : "bg-slate-100 text-slate-600"
-            }`}
-          >
-            ✏️ {editing ? "เสร็จแล้ว" : "แก้ไขรายชื่อ"}
-          </button>
-          <button onClick={resetEntries} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-black text-xs">
-            ↺ รีเซ็ต
-          </button>
-        </div>
-      </div>
-
-      {editing && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <p className="font-black text-slate-700 text-sm">จัดการรายชื่อในวงล้อ</p>
-            <div className="flex gap-2">
-              <button onClick={shuffleOrderAuto} className="px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-600 text-white font-black text-xs">
-                🔀 สลับตำแหน่งอัตโนมัติ
-              </button>
-              <button onClick={addEntry} className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs">
-                + เพิ่มชื่อ
-              </button>
-            </div>
+        {/* กรอบจัดการรายชื่อ */}
+        <div className="w-full lg:w-[25%] shrink-0 bg-white rounded-2xl border border-slate-200 p-4 flex flex-col lg:sticky lg:top-4 lg:max-h-[75vh]">
+          <p className="font-black text-slate-700 text-sm mb-3">📋 จัดการรายชื่อ ({entries.length})</p>
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <button onClick={resetEntries} className="py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">
+              ↺ รีเซ็ต
+            </button>
+            <button onClick={addEntry} className="py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs">
+              + เพิ่มชื่อ
+            </button>
           </div>
-          <div className="space-y-1.5 max-h-72 overflow-y-auto">
-            {entries.map((e, i) => (
+          <button onClick={clearAllEntries} className="mb-3 py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-black text-xs">
+            🗑 ล้างทั้งหมด
+          </button>
+          <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 max-h-[50vh] lg:max-h-none">
+            {entries.length === 0 && (
+              <p className="text-center text-slate-300 text-xs font-bold py-6">ไม่มีรายชื่อในรายการ</p>
+            )}
+            {entries.map(e => (
               <div
                 key={e.id}
-                className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${
+                className={`flex items-center gap-1.5 rounded-lg border px-2 py-1.5 ${
                   removedIds.has(e.id) ? "bg-slate-50 border-slate-100 opacity-50" : "border-slate-200"
                 }`}
               >
-                <div className="flex flex-col">
-                  <button onClick={() => moveEntry(e.id, -1)} disabled={i === 0} className="text-slate-400 disabled:opacity-20 text-xs leading-none">▲</button>
-                  <button onClick={() => moveEntry(e.id, 1)} disabled={i === entries.length - 1} className="text-slate-400 disabled:opacity-20 text-xs leading-none">▼</button>
-                </div>
                 <input
                   value={e.label}
                   onChange={ev => updateLabel(e.id, ev.target.value)}
-                  className="flex-1 text-sm font-bold border-0 focus:outline-none focus:ring-1 focus:ring-fuchsia-300 rounded px-1.5 py-1"
+                  className="flex-1 text-xs font-bold border-0 focus:outline-none focus:ring-1 focus:ring-fuchsia-300 rounded px-1 py-1 min-w-0"
                 />
                 {removedIds.has(e.id) && (
                   <button
                     onClick={() => setRemovedIds(prev => { const n = new Set(prev); n.delete(e.id); return n; })}
-                    className="text-[10px] font-black text-emerald-500 whitespace-nowrap"
+                    className="text-[9px] font-black text-emerald-500 whitespace-nowrap"
                   >
-                    คืนเข้ารายการ
+                    คืน
                   </button>
                 )}
-                <button onClick={() => deleteEntry(e.id)} className="text-slate-300 hover:text-red-500 text-xs">✕</button>
+                <button onClick={() => deleteEntry(e.id)} className="text-slate-300 hover:text-red-500 text-xs shrink-0">✕</button>
               </div>
             ))}
           </div>
         </div>
-      )}
-
-      {/* พื้นที่เกมสุ่ม — ขยายเกือบเต็มพื้นที่ที่มี */}
-      <div className="min-h-[65vh] flex items-center justify-center">
-        {mode === "circle" && (
-          <WheelPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
-        )}
-        {mode === "slide" && (
-          <SlidePicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
-        )}
-        {mode === "card" && (
-          <CardPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
-        )}
-        {mode === "deck" && (
-          <DeckPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} removedCount={removedIds.size} />
-        )}
       </div>
 
       {/* ป๊อปอัพผลการสุ่ม กลางจอ */}
@@ -660,6 +682,7 @@ function WheelPicker({
     const newRotation = rotation + extraSpins * 360 + delta;
     setRotation(newRotation);
     window.setTimeout(() => {
+      playCheer();
       setWinner(pool[winIdx]);
       setSpinning(false);
     }, 4200);
@@ -756,6 +779,7 @@ function SlidePicker({
     setOffset(targetOffset);
     const duration = speed === "fast" ? 1800 : 4000;
     window.setTimeout(() => {
+      playCheer();
       setWinner(pool[winIdx]);
       setSpinning(false);
     }, duration);
@@ -813,7 +837,7 @@ function SlidePicker({
   );
 }
 
-/* ---------------- โหมดการ์ด (สับไพ่ / เปิดไพ่ ทั้งกระดาน) ---------------- */
+/* ---------------- โหมดการ์ด (คลิกใบไหน เปิดใบนั้นได้เลย) ---------------- */
 
 function CardPicker({
   pool, spinning, setSpinning, setWinner,
@@ -838,25 +862,17 @@ function CardPicker({
     setDisplayList(prev => [...prev].sort(() => Math.random() - 0.5));
   }
 
-  function reveal() {
-    if (spinning || pool.length === 0) return;
+  // คลิกใบไหน ใบนั้นเปิดได้เลย (ไม่ต้องกดปุ่มเปิดไพ่แยกอีก)
+  function pickCard(entry: WheelEntry) {
+    if (spinning || flippedId) return;
     setSpinning(true);
     setWinner(null);
-    setFlippedId(null);
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    let ticks = 0;
-    const iv = setInterval(() => {
-      setDisplayList(prev => [...prev].sort(() => Math.random() - 0.5));
-      ticks++;
-      if (ticks >= 6) {
-        clearInterval(iv);
-        setFlippedId(pick.id);
-        setTimeout(() => {
-          setWinner(pick);
-          setSpinning(false);
-        }, 700);
-      }
-    }, 200);
+    setFlippedId(entry.id);
+    window.setTimeout(() => {
+      playCheer();
+      setWinner(entry);
+      setSpinning(false);
+    }, 600);
   }
 
   return (
@@ -865,13 +881,18 @@ function CardPicker({
         {displayList.map(e => {
           const isFlipped = flippedId === e.id;
           return (
-            <div key={e.id} className="relative h-28" style={{ perspective: "600px" }}>
+            <div
+              key={e.id}
+              className="relative h-28 cursor-pointer"
+              style={{ perspective: "600px" }}
+              onClick={() => pickCard(e)}
+            >
               <div
                 className="absolute inset-0 rounded-xl transition-transform duration-500"
                 style={{ transformStyle: "preserve-3d", transform: isFlipped ? "rotateY(180deg)" : "rotateY(0deg)" }}
               >
                 <div
-                  className="absolute inset-0 rounded-xl bg-gradient-to-br from-fuchsia-400 to-purple-400 flex items-center justify-center text-white text-3xl"
+                  className="absolute inset-0 rounded-xl bg-gradient-to-br from-fuchsia-400 to-purple-400 flex items-center justify-center text-white text-3xl hover:brightness-110"
                   style={{ backfaceVisibility: "hidden" }}
                 >
                   🎴
@@ -897,27 +918,18 @@ function CardPicker({
 
       {pool.length === 0 && <p className="text-center text-slate-400 text-sm font-bold py-6">ไม่มีนักเรียนในรายการ</p>}
 
-      <div className="flex gap-3">
-        <button
-          onClick={shuffle}
-          disabled={spinning || pool.length === 0}
-          className="flex-1 py-4 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-600 font-black"
-        >
-          🔀 สับไพ่
-        </button>
-        <button
-          onClick={reveal}
-          disabled={spinning || pool.length === 0}
-          className="flex-1 py-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black"
-        >
-          {spinning ? "กำลังเปิดไพ่..." : "🎴 เปิดไพ่"}
-        </button>
-      </div>
+      <button
+        onClick={shuffle}
+        disabled={spinning || pool.length === 0}
+        className="w-full py-4 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-600 font-black"
+      >
+        🔀 สับไพ่
+      </button>
     </div>
   );
 }
 
-/* ---------------- โหมดไพ่ยิปซี (กองไพ่ ดึงทีละใบ) ---------------- */
+/* ---------------- โหมดไพ่ยิปซี (สับแล้วกางเป็นครึ่งวงกลม เม้าท์ชี้แล้วยกขึ้น คลิกแล้วเปิด) ---------------- */
 
 function DeckPicker({
   pool, spinning, setSpinning, setWinner, removedCount,
@@ -929,25 +941,40 @@ function DeckPicker({
   removedCount: number;
 }) {
   const [order, setOrder] = useState<WheelEntry[]>(pool);
+  const [fanned, setFanned] = useState(false);
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [flippedId, setFlippedId] = useState<string | null>(null);
 
   useEffect(() => {
     setOrder(pool);
+    setFanned(false);
+    setFlippedId(null);
   }, [pool]);
 
   function shuffleDeck() {
     if (spinning) return;
-    // สับไพ่ = รีเซ็ตกองจากรายชื่อทั้งหมดที่ยังไม่ถูกเอาออกถาวร แล้วสลับลำดับใหม่
+    setFlippedId(null);
+    setWinner(null);
     setOrder([...pool].sort(() => Math.random() - 0.5));
+    setFanned(true);
   }
 
-  function drawCard() {
-    if (spinning || order.length === 0) return;
+  function resetDeck() {
+    setFanned(false);
+    setFlippedId(null);
+    setOrder(pool);
+  }
+
+  // คลิกใบไหนในกอง ใบนั้นถูกดึงออกมาเปิด
+  function pickCard(entry: WheelEntry) {
+    if (spinning || flippedId) return;
     setSpinning(true);
     setWinner(null);
-    const top = order[0];
-    setOrder(prev => prev.slice(1));
+    setFlippedId(entry.id);
     window.setTimeout(() => {
-      setWinner(top);
+      playCheer();
+      setWinner(entry);
+      setOrder(prev => prev.filter(e => e.id !== entry.id));
       setSpinning(false);
     }, 700);
   }
@@ -955,7 +982,7 @@ function DeckPicker({
   const stackCount = Math.max(1, Math.min(order.length, 7));
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-10 flex flex-col items-center gap-6 w-full max-w-xl">
+    <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-10 flex flex-col items-center gap-6 w-full">
       <div className="flex items-center gap-8">
         <div className="text-center">
           <p className="text-xs font-black text-emerald-600">ในกอง</p>
@@ -967,24 +994,83 @@ function DeckPicker({
         </div>
       </div>
 
-      <div className="relative h-56 w-40 flex items-center justify-center">
-        {order.length === 0 ? (
-          <p className="text-slate-300 font-bold text-sm text-center px-4">กองไพ่หมดแล้ว<br />กด "สับไพ่" เพื่อเริ่มใหม่</p>
-        ) : (
-          Array.from({ length: stackCount }).map((_, i) => (
-            <div
-              key={i}
-              className="absolute w-32 h-48 rounded-2xl border-2 border-white shadow-lg bg-gradient-to-br from-indigo-400 via-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-5xl"
-              style={{
-                transform: `translate(${i * 2}px, ${-i * 2.5}px) rotate(${(i - stackCount / 2) * 1.5}deg)`,
-                zIndex: stackCount - i,
-              }}
-            >
-              {i === 0 ? "🔮" : ""}
-            </div>
-          ))
-        )}
-      </div>
+      {!fanned ? (
+        // สถานะเริ่มต้น: ไพ่เรียงกันเป็นกอง
+        <div className="relative h-56 w-40 flex items-center justify-center">
+          {order.length === 0 ? (
+            <p className="text-slate-300 font-bold text-sm text-center px-4">กองไพ่หมดแล้ว<br />กด "สับไพ่" เพื่อเริ่มใหม่</p>
+          ) : (
+            Array.from({ length: stackCount }).map((_, i) => (
+              <div
+                key={i}
+                className="absolute w-32 h-48 rounded-2xl border-2 border-white shadow-lg bg-gradient-to-br from-indigo-400 via-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-5xl"
+                style={{
+                  transform: `translate(${i * 2}px, ${-i * 2.5}px) rotate(${(i - stackCount / 2) * 1.5}deg)`,
+                  zIndex: stackCount - i,
+                }}
+              >
+                {i === 0 ? "🔮" : ""}
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+        // สถานะกางไพ่: จัดเรียงเป็นครึ่งวงกลมแบบทำนายไพ่ยิปซีจริง
+        <div className="relative w-full flex items-end justify-center" style={{ height: 260 }}>
+          {order.length === 0 && (
+            <p className="text-slate-300 font-bold text-sm text-center">กองไพ่หมดแล้ว<br />กด "สับไพ่" เพื่อเริ่มใหม่</p>
+          )}
+          {order.map((e, i) => {
+            const n = order.length;
+            const mid = (n - 1) / 2;
+            const spread = Math.min(9, 64 / Math.max(n, 1));
+            const angle = (i - mid) * spread;
+            const isHover = hoverId === e.id;
+            const isFlipped = flippedId === e.id;
+            return (
+              <div
+                key={e.id}
+                onMouseEnter={() => setHoverId(e.id)}
+                onMouseLeave={() => setHoverId(null)}
+                onClick={() => pickCard(e)}
+                className="absolute bottom-0 cursor-pointer transition-transform duration-300"
+                style={{
+                  transform: `rotate(${angle}deg) translateY(${isHover && !isFlipped ? -26 : 0}px)`,
+                  transformOrigin: "bottom center",
+                  zIndex: isHover ? 100 : i,
+                }}
+              >
+                <div className="relative w-20 h-32" style={{ perspective: "600px" }}>
+                  <div
+                    className="absolute inset-0 rounded-xl transition-transform duration-500"
+                    style={{ transformStyle: "preserve-3d", transform: isFlipped ? "rotateY(180deg)" : "rotateY(0deg)" }}
+                  >
+                    <div
+                      className="absolute inset-0 rounded-xl border-2 border-white shadow-lg bg-gradient-to-br from-indigo-400 via-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-2xl"
+                      style={{ backfaceVisibility: "hidden" }}
+                    >
+                      🔮
+                    </div>
+                    <div
+                      className="absolute inset-0 rounded-xl border-2 border-emerald-300 bg-white flex flex-col items-center justify-center px-1"
+                      style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
+                    >
+                      {e.avatar_url ? (
+                        <img src={e.avatar_url} className="w-8 h-8 rounded-full object-cover" />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-emerald-400 text-white text-xs font-black flex items-center justify-center">
+                          {e.first_name[0]}
+                        </div>
+                      )}
+                      <p className="text-[9px] font-black text-slate-600 mt-1 truncate w-full text-center">{e.label}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="flex gap-3 w-full max-w-xs">
         <button
@@ -994,13 +1080,14 @@ function DeckPicker({
         >
           🔀 สับไพ่
         </button>
-        <button
-          onClick={drawCard}
-          disabled={spinning || order.length === 0}
-          className="flex-1 py-3.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black text-sm"
-        >
-          {spinning ? "กำลังดึง..." : "🎴 ดึงไพ่"}
-        </button>
+        {fanned && (
+          <button
+            onClick={resetDeck}
+            className="flex-1 py-3.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-sm"
+          >
+            📥 รวมกอง
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1252,6 +1339,10 @@ export default function SmartClassRosterPage() {
   const [timetableEntryId, setTimetableEntryId] = useState("");
   const [homeroomMap, setHomeroomMap] = useState<Record<string, { status: "present" | "absent" | "late" | "leave" }>>({});
 
+  // --- สุ่มชื่อ: โหมด + dropdown จากแท็บล่าง ---
+  const [randomMode, setRandomMode] = useState<RandomMode>("circle");
+  const [randomMenuOpen, setRandomMenuOpen] = useState(false);
+
   // --- คะแนน ---
   const [presets, setPresets] = useState<ScorePreset[]>([]);
   const [studentScores, setStudentScores] = useState<Record<string, number>>({});
@@ -1259,49 +1350,44 @@ export default function SmartClassRosterPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [scoreTargets, setScoreTargets] = useState<Student[] | null>(null);
   const [academicYearLabel, setAcademicYearLabel] = useState("");
-const [homeroomTeacherName, setHomeroomTeacherName] = useState("");
-const [subjectTeacherName, setSubjectTeacherName] = useState("");
+  const [homeroomTeacherName, setHomeroomTeacherName] = useState("");
+  const [subjectTeacherName, setSubjectTeacherName] = useState("");
 
-useEffect(() => {
-  (async () => {
-    if (!section) return;
-
-    // ปีการศึกษา — ใช้ academic_year_id จาก subject_sections (ต้อง select เพิ่มตอนโหลด section)
-    // ครูประจำชั้น — จาก classrooms.homeroom_teacher_id
-    // ครูประจำวิชา — จาก subject_sections.teacher_id
-    // ตัวอย่าง query รวม (ปรับ path ตามจริง):
-    const { data: sectionFull } = await supabase
-      .from("subject_sections")
-      .select("academic_year_id, teacher_id")
-      .eq("id", section.id)
-      .maybeSingle();
-
-    if (sectionFull?.academic_year_id) {
-      const { data: year } = await supabase
-        .from("academic_years")
-        .select("year_name, semester")
-        .eq("id", sectionFull.academic_year_id)
+  useEffect(() => {
+    (async () => {
+      if (!section) return;
+      const { data: sectionFull } = await supabase
+        .from("subject_sections")
+        .select("academic_year_id, teacher_id")
+        .eq("id", section.id)
         .maybeSingle();
-      if (year) setAcademicYearLabel(`${year.year_name} ภาคเรียนที่ ${year.semester}`);
-    }
-    if (sectionFull?.teacher_id) {
-      const { data: t } = await supabase
-        .from("users").select("full_name, first_name, last_name")
-        .eq("id", sectionFull.teacher_id).maybeSingle();
-      if (t) setSubjectTeacherName(t.full_name || `${t.first_name} ${t.last_name}`);
-    }
-    if (classroom) {
-      const { data: room } = await supabase
-        .from("classrooms").select("homeroom_teacher_id").eq("id", classroom.id).maybeSingle();
-      if (room?.homeroom_teacher_id) {
+
+      if (sectionFull?.academic_year_id) {
+        const { data: year } = await supabase
+          .from("academic_years")
+          .select("year_name, semester")
+          .eq("id", sectionFull.academic_year_id)
+          .maybeSingle();
+        if (year) setAcademicYearLabel(`${year.year_name} ภาคเรียนที่ ${year.semester}`);
+      }
+      if (sectionFull?.teacher_id) {
         const { data: t } = await supabase
           .from("users").select("full_name, first_name, last_name")
-          .eq("id", room.homeroom_teacher_id).maybeSingle();
-        if (t) setHomeroomTeacherName(t.full_name || `${t.first_name} ${t.last_name}`);
+          .eq("id", sectionFull.teacher_id).maybeSingle();
+        if (t) setSubjectTeacherName(t.full_name || `${t.first_name} ${t.last_name}`);
       }
-    }
-  })();
-}, [section, classroom]);
+      if (classroom) {
+        const { data: room } = await supabase
+          .from("classrooms").select("homeroom_teacher_id").eq("id", classroom.id).maybeSingle();
+        if (room?.homeroom_teacher_id) {
+          const { data: t } = await supabase
+            .from("users").select("full_name, first_name, last_name")
+            .eq("id", room.homeroom_teacher_id).maybeSingle();
+          if (t) setHomeroomTeacherName(t.full_name || `${t.first_name} ${t.last_name}`);
+        }
+      }
+    })();
+  }, [section, classroom]);
 
   useEffect(() => {
     (async () => {
@@ -1320,17 +1406,15 @@ useEffect(() => {
       setSubject(subj as Subject);
       setClassroom(room as Classroom);
 
-      // ดึงรายชื่อ นร. ตรงจาก classroom_id ทันที ไม่ต้องรอ join code / subject_enrollments
       if (sec?.classroom_id) {
         const { data: studentsData } = await supabase
-  .from("students")
-  .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url")
-  .eq("classroom_id", sec.classroom_id)
-  .order("seat_number");
+          .from("students")
+          .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url")
+          .eq("classroom_id", sec.classroom_id)
+          .order("seat_number");
         setStudents((studentsData ?? []) as Student[]);
       }
 
-      // โหลดพรีเซ็ตคะแนนของวิชานี้ + ผลรวมคะแนนของแต่ละคน (ถ้ายังไม่มีตาราง จะเงียบและใช้ค่า default แทน)
       if (sec?.id) {
         try {
           const { data: presetRows } = await supabase
@@ -1432,16 +1516,18 @@ useEffect(() => {
 
   // --- เมนูมุมซ้ายล่างของแบนเนอร์ ---
   function handleBannerMenuClick(key: BannerMenuKey) {
-  setBannerMenu(key);
-}
+    setBannerMenu(key);
+  }
 
   async function handleGiveScore(preset: ScorePreset | null, customPoints?: number) {
     if (!scoreTargets || !section?.id) return;
     const points = preset ? preset.points : (customPoints ?? 0);
     if (points === 0) return;
 
+    // เสียง "ตริ้ง/ปริ้ง" ทันทีที่ให้คะแนน
+    playDing();
+
     let presetId: string | null = preset?.id ?? null;
-    // ถ้าเป็นพรีเซ็ตค่า default ที่ยังไม่เคยบันทึกลงฐานข้อมูล (id ขึ้นต้นด้วย local-) ให้บันทึกจริงก่อน
     if (preset && preset.id.startsWith("local-")) {
       try {
         const { data } = await supabase
@@ -1453,7 +1539,6 @@ useEffect(() => {
           setPresets(prev => prev.map(p => (p.id === preset.id ? (data as ScorePreset) : p)));
         }
       } catch {
-        // เก็บ event ต่อได้แม้บันทึกพรีเซ็ตไม่สำเร็จ แค่ไม่ผูก preset_id
         presetId = null;
       }
     }
@@ -1496,27 +1581,26 @@ useEffect(() => {
   }
 
   async function handleDeletePreset(presetId: string) {
-  const removed = presets.find(p => p.id === presetId) ?? null;
-  setPresets(prev => prev.filter(p => p.id !== presetId)); // ซ่อนออกจาก UI ทันที (optimistic)
+    const removed = presets.find(p => p.id === presetId) ?? null;
+    setPresets(prev => prev.filter(p => p.id !== presetId));
 
-  if (presetId.startsWith("local-")) return; // ยังไม่เคยบันทึกลง DB จริง ไม่ต้องยิง API
+    if (presetId.startsWith("local-")) return;
 
-  try {
-    const res = await fetch("/api/score-presets/delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preset_id: presetId }),
-    });
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}));
-      throw new Error(json.error ?? "ลบการ์ดไม่สำเร็จ");
+    try {
+      const res = await fetch("/api/score-presets/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preset_id: presetId }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? "ลบการ์ดไม่สำเร็จ");
+      }
+    } catch (e: any) {
+      if (removed) setPresets(prev => [...prev, removed].sort((a, b) => a.sort_order - b.sort_order));
+      alert("ลบการ์ดไม่สำเร็จ: " + (e?.message ?? "unknown error"));
     }
-  } catch (e: any) {
-    // ลบไม่สำเร็จจริง ๆ -> คืนการ์ดกลับมาแสดง ไม่ให้ UI กับฐานข้อมูลเพี้ยนกัน
-    if (removed) setPresets(prev => [...prev, removed].sort((a, b) => a.sort_order - b.sort_order));
-    alert("ลบการ์ดไม่สำเร็จ: " + (e?.message ?? "unknown error"));
   }
-}
 
   if (loading) {
     return (
@@ -1568,7 +1652,6 @@ useEffect(() => {
           </p>
         </div>
 
-        {/* แถวรวม: เมนูมุมซ้าย (มอบหมายงาน/ข้อมูลเช็กชื่อ/คะแนนรวม/ตั้งค่ารายวิชา) + ฝั่งขวา (รหัสเข้าวิชา/คัดลอกลิงก์/QR) */}
         <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-between mt-4">
           <div className="flex items-center gap-2 flex-wrap justify-center">
             {BANNER_MENU.map(m => (
@@ -1601,47 +1684,46 @@ useEffect(() => {
         </div>
       </div>
 
-        <main className={`p-4 lg:p-6 mx-auto w-full ${
-  bannerMenu === "assignments" ? "max-w-[1600px]"
-  : tab === "roster" || tab === "attendance" ? "max-w-[1600px]"
-  : tab === "random" ? "max-w-[1900px]"
-  : "max-w-4xl"
-}`}>
+      <main className={`p-4 lg:p-6 mx-auto w-full ${
+        bannerMenu === "assignments" ? "max-w-[1600px]"
+        : tab === "roster" || tab === "attendance" ? "max-w-[1600px]"
+        : tab === "random" ? "max-w-[1900px]"
+        : "max-w-4xl"
+      }`}>
         {bannerMenu === "assignments" && section && (
           <AssignmentsTool sectionId={section.id} subjectId={subjectId} students={students} currentUserId={currentUserId} />
         )}
         {bannerMenu === "totalScore" && section && (
-  <GradeOverviewTool
-    sectionId={section.id}
-    subjectTitle={subject.name_th}
-    subjectCode={subject.subject_code}
-    students={students}
-    classroomLabel={`${classroom?.grade_group ?? ""} ${classroom?.room_name ?? ""}`}
-    // ค่าด้านล่างนี้ยังไม่มีตัวแปรจริงในหน้า page.tsx ปัจจุบัน ต้องเพิ่ม fetch เอง (ดูข้อ 5)
-    academicYearLabel={academicYearLabel}
-    homeroomTeacherName={homeroomTeacherName}
-    subjectTeacherName={subjectTeacherName}
-  />
-)}
+          <GradeOverviewTool
+            sectionId={section.id}
+            subjectTitle={subject.name_th}
+            subjectCode={subject.subject_code}
+            students={students}
+            classroomLabel={`${classroom?.grade_group ?? ""} ${classroom?.room_name ?? ""}`}
+            academicYearLabel={academicYearLabel}
+            homeroomTeacherName={homeroomTeacherName}
+            subjectTeacherName={subjectTeacherName}
+          />
+        )}
         {bannerMenu === "attendanceInfo" && section && (
-  <AttendanceOverviewTool
-    sectionId={section.id}
-    subjectTitle={subject.name_th}
-    subjectCode={subject.subject_code}
-    joinCode={section.join_code}
-    students={students}
-    onCreateNew={() => {
-      setBannerMenu(null);
-      setTab("attendance");
-    }}
-    onOpenSettings={() => setBannerMenu("settings")}
-    onOpenDate={(date) => {
-      setSelectedDate(date);
-      setBannerMenu(null);
-      setTab("attendance");
-    }}
-  />
-)}
+          <AttendanceOverviewTool
+            sectionId={section.id}
+            subjectTitle={subject.name_th}
+            subjectCode={subject.subject_code}
+            joinCode={section.join_code}
+            students={students}
+            onCreateNew={() => {
+              setBannerMenu(null);
+              setTab("attendance");
+            }}
+            onOpenSettings={() => setBannerMenu("settings")}
+            onOpenDate={(date) => {
+              setSelectedDate(date);
+              setBannerMenu(null);
+              setTab("attendance");
+            }}
+          />
+        )}
         {!bannerMenu && tab === "roster" && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 w-full">
             <div className="flex items-center justify-between flex-wrap gap-2 mb-5">
@@ -1721,16 +1803,56 @@ useEffect(() => {
           </div>
         )}
         {!bannerMenu && tab === "random" && (
-  <RandomPickerTab students={students} onOpenScore={s => setScoreTargets([s])} />
-)}
+          <RandomPickerTab students={students} mode={randomMode} onOpenScore={s => setScoreTargets([s])} />
+        )}
         {!bannerMenu && tab === "tools" && <ToolsTab students={students} />}
       </main>
 
       {/* แท็บด้านล่าง */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-2px_8px_rgba(0,0,0,0.04)] z-40">
+        {randomMenuOpen && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setRandomMenuOpen(false)} />
+            <div className="absolute z-20 bottom-full mb-2 left-1/2 -translate-x-1/2 w-64 bg-white rounded-2xl border border-slate-100 shadow-xl p-2 space-y-1.5">
+              {(Object.keys(MODE_INFO) as RandomMode[]).map(k => (
+                <button
+                  key={k}
+                  onClick={() => {
+                    setRandomMode(k);
+                    setBannerMenu(null);
+                    setTab("random");
+                    setRandomMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-black text-left transition-opacity ${MODE_INFO[k].bg} ${MODE_INFO[k].text} ${
+                    tab === "random" && randomMode === k && !bannerMenu ? "ring-2 ring-current opacity-100" : "opacity-80 hover:opacity-100"
+                  }`}
+                >
+                  <span className="text-lg">{MODE_INFO[k].icon}</span>{MODE_INFO[k].label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         <div className="max-w-4xl mx-auto grid grid-cols-4">
           {TABS.map(t => (
-            <button key={t.key} onClick={() => { setBannerMenu(null); setTab(t.key); }}
+            <button
+              key={t.key}
+              onClick={() => {
+                if (t.key === "random") {
+                  // ถ้าอยู่ในแท็บสุ่มชื่ออยู่แล้ว ให้กดเปิด/ปิด dropdown เมนูย่อยแทนการนำทางซ้ำ
+                  if (tab === "random" && !bannerMenu) {
+                    setRandomMenuOpen(v => !v);
+                  } else {
+                    setBannerMenu(null);
+                    setTab("random");
+                    setRandomMenuOpen(true);
+                  }
+                } else {
+                  setBannerMenu(null);
+                  setTab(t.key);
+                  setRandomMenuOpen(false);
+                }
+              }}
               className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-black ${
                 !bannerMenu && tab === t.key ? "text-fuchsia-600" : "text-slate-400"
               }`}>
