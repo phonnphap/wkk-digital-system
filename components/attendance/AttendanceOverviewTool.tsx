@@ -13,6 +13,7 @@ type Student = {
   prefix?: string;
   first_name: string;
   last_name: string;
+  nickname?: string;
   seat_number: number;
   avatar_url?: string;
 };
@@ -126,7 +127,7 @@ export default function AttendanceOverviewTool({
       const dailySheetRows = students.map(s => {
         const row: Record<string, string> = {
           "เลขที่": String(s.seat_number),
-          "ชื่อ-นามสกุล": `${s.prefix ?? ""}${s.first_name} ${s.last_name}`.trim(),
+          "ชื่อ-นามสกุล": `${s.prefix ?? ""}${s.first_name} ${s.last_name} (${s.nickname})`.trim(),
         };
         dates.forEach(d => {
           const st = cellMap[s.id]?.[d];
@@ -138,7 +139,7 @@ export default function AttendanceOverviewTool({
       // ชีตที่ 2: สรุปรวม
       const summarySheetRows = summaryRows.map(({ student, counts, totalPresent }) => ({
         "เลขที่": String(student.seat_number),
-        "ชื่อ-นามสกุล": `${student.prefix ?? ""}${student.first_name} ${student.last_name}`.trim(),
+        "ชื่อ-นามสกุล": `${student.prefix ?? ""}${student.first_name} ${student.last_name} (${student.nickname})`.trim(),
         "ขาด": counts.absent,
         "ลาป่วย/ลากิจ": counts.leave,
         "มาสาย": counts.late,
@@ -380,8 +381,8 @@ function SummaryTable({
                     </div>
                   )}
                   <div>
-                    <p className="text-sm font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name}</p>
-                    <p className="text-[10px] text-slate-400 font-bold">Number {s.seat_number}</p>
+                    <p className="text-sm font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nickname})</p>
+                    <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                   </div>
                 </div>
               </td>
