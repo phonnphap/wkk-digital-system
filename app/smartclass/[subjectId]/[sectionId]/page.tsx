@@ -2111,10 +2111,11 @@ export default function SmartClassRosterPage() {
             subjectTeacherName={subjectTeacherName}
           />
         )}
-        {bannerMenu === "insights" && (
+        {bannerMenu === "insights" && classroom && (
   <InsightsTool
     currentUserId={currentUserId}
-    defaultClassroomId={classroom?.id}
+    subjectId={subjectId}
+    classroomId={classroom.id}
   />
 )}
         {bannerMenu === "attendanceInfo" && section && (

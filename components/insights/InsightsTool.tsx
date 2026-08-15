@@ -10,13 +10,16 @@ const supabase = createClient();
    ========================================================================= */
 
 type Role = "admin" | "homeroom_teacher" | "subject_teacher" | "unknown";
-type Scope = "school" | "grade_level" | "classroom";
+type Scope = "classroom" | "grade_level";
 
 type Totals = {
   studentCount: number;
   atRiskCount: number;
+  atRiskHigh: number;
+  atRiskMedium: number;
   atRiskPercent: number;
   onTimeRate: number | null;
+  onTimePendingCount: number;
   attendanceRate: number | null;
   avgScore: number | null;
 };
@@ -44,72 +47,82 @@ type InsightsResponse = {
   classroomRanking: ClassroomRank[];
   subjectRanking: SubjectRank[];
   teacherRanking: TeacherRank[];
+  updatedAt?: string;
   error?: string;
 };
 
-type GradeLevel = { id: string; name: string };
-type ClassroomOption = { id: string; room_name?: string; grade_group?: string; grade_level_id?: string };
-type SubjectOption = { id: string; name_th: string; subject_code: string };
+type AcademicYear = { id: string; year_name: string; semester: number; is_current: boolean };
+type ClassroomInfo = { id: string; room_name?: string | null; grade_group?: string | null; grade_level_id?: string | null };
 
 /* =========================================================================
-   Component
+   Component — ฝังอยู่ในหน้าของ "วิชา + ห้องปัจจุบัน" เสมอ
    ========================================================================= */
 
 export default function InsightsTool({
   currentUserId,
-  defaultClassroomId,
-  defaultGradeLevelId,
+  subjectId,     // วิชาปัจจุบัน (ล็อกตายตัวจากหน้าที่เข้ามา ไม่ให้เลือกเอง)
+  classroomId,   // ห้องปัจจุบัน (ล็อกตายตัวจากหน้าที่เข้ามา)
 }: {
   currentUserId?: string;
-  defaultClassroomId?: string;
-  defaultGradeLevelId?: string;
+  subjectId: string;
+  classroomId: string;
 }) {
   const [role, setRole] = useState<Role>("unknown");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState<InsightsResponse | null>(null);
 
-  // ตัวเลือกขอบเขตการดู
-  const [scope, setScope] = useState<Scope>(defaultClassroomId ? "classroom" : "grade_level");
-  const [scopeId, setScopeId] = useState<string>(defaultClassroomId ?? defaultGradeLevelId ?? "");
-  const [subjectId, setSubjectId] = useState<string>("");
+  // ขอบเขตการดู: เฉพาะห้องปัจจุบัน หรือ ทุกห้องในสายชั้นเดียวกัน (วิชาเดียวกันเสมอ)
+  const [scope, setScope] = useState<Scope>("classroom");
 
-  const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
-  const [classrooms, setClassrooms] = useState<ClassroomOption[]>([]);
-  const [mySubjects, setMySubjects] = useState<SubjectOption[]>([]);
+  const [currentClassroom, setCurrentClassroom] = useState<ClassroomInfo | null>(null);
+  const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
+  const [academicYearId, setAcademicYearId] = useState<string>("");
 
-  // โหลดตัวเลือกสำหรับ dropdown (สายชั้น/ระดับชั้น, ห้องเรียน, วิชาที่ครูสอน)
+  // โหลดข้อมูลห้องปัจจุบัน (เพื่อรู้ grade_level_id สำหรับโหมด "สายชั้น") + ปีการศึกษา
   useEffect(() => {
-    (async () => {
-      const { data: levels } = await supabase.from("grade_levels").select("id, name").order("name");
-      setGradeLevels((levels ?? []) as GradeLevel[]);
+    if (!classroomId) return;
+    supabase
+      .from("classrooms")
+      .select("id, room_name, grade_group, grade_level_id")
+      .eq("id", classroomId)
+      .maybeSingle()
+      .then(({ data }) => setCurrentClassroom((data ?? null) as ClassroomInfo | null));
+  }, [classroomId]);
 
-      const { data: rooms } = await supabase.from("classrooms").select("id, room_name, grade_group, grade_level_id");
-      setClassrooms((rooms ?? []) as ClassroomOption[]);
-
-      if (currentUserId) {
-        const { data: sections } = await supabase
-          .from("subject_sections")
-          .select("subject_id, subjects(id, name_th, subject_code)")
-          .eq("teacher_id", currentUserId);
-        const uniq = new Map<string, SubjectOption>();
-        (sections ?? []).forEach((s: any) => {
-          const subj = s.subjects;
-          if (subj) uniq.set(subj.id, subj);
-        });
-        setMySubjects(Array.from(uniq.values()));
-      }
-    })();
-  }, [currentUserId]);
+  useEffect(() => {
+    supabase
+      .from("academic_years")
+      .select("id, year_name, semester, is_current")
+      .order("year_name", { ascending: false })
+      .order("semester", { ascending: false })
+      .then(({ data }) => {
+        const rows = (data ?? []) as AcademicYear[];
+        setAcademicYears(rows);
+        const current = rows.find(y => y.is_current);
+        if (current) setAcademicYearId(current.id);
+      });
+  }, []);
 
   async function loadInsights() {
-    if (!currentUserId) return;
+    if (!currentUserId || !subjectId || !classroomId) return;
+    // โหมด "สายชั้น" ต้องรู้ grade_level_id ของห้องปัจจุบันก่อนถึงจะยิง query ได้
+    if (scope === "grade_level" && !currentClassroom?.grade_level_id) return;
+
     setLoading(true);
     setError("");
     try {
-      const params = new URLSearchParams({ requester_id: currentUserId, scope });
-      if (scope !== "school" && scopeId) params.set("scope_id", scopeId);
-      if (subjectId) params.set("subject_id", subjectId);
+      const params = new URLSearchParams({
+        requester_id: currentUserId,
+        subject_id: subjectId,   // ล็อกวิชาปัจจุบันเสมอ ไม่ว่าจะเลือก scope ไหน
+        scope,
+      });
+      if (scope === "classroom") {
+        params.set("classroom_id", classroomId);
+      } else {
+        params.set("grade_level_id", currentClassroom!.grade_level_id!);
+      }
+      if (academicYearId) params.set("academic_year_id", academicYearId);
 
       const res = await fetch(`/api/insights/overview?${params.toString()}`);
       const json = await res.json();
@@ -126,76 +139,53 @@ export default function InsightsTool({
   useEffect(() => {
     loadInsights();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUserId, scope, scopeId, subjectId]);
+  }, [currentUserId, subjectId, classroomId, scope, currentClassroom, academicYearId]);
 
-  const isAdmin = role === "admin";
-  const isSubjectTeacher = role === "subject_teacher";
-
-  const filteredClassrooms = useMemo(() => {
-    // ถ้าเลือกสายชั้น/ระดับชั้นไว้ ให้กรองรายการห้องให้เหลือเฉพาะระดับนั้น (สะดวกตอนสลับไปเลือกห้องเฉพาะ)
-    return classrooms;
-  }, [classrooms]);
+  const scopeLabel = scope === "classroom" ? "ห้องเรียนนี้ (วิชานี้)" : "ทุกห้องในสายชั้นเดียวกัน (วิชานี้)";
+  const bandColor = (band: string) => {
+    switch (band) {
+      case "0-49": return "bg-red-400";
+      case "50-59": return "bg-amber-400";
+      case "60-69": return "bg-yellow-400";
+      case "70-79": return "bg-sky-400";
+      case "80-89": return "bg-emerald-400";
+      case "90-100": return "bg-teal-500";
+      default: return "bg-slate-300";
+    }
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="font-black text-slate-800 text-lg">📊 ข้อมูลเชิงลึก</h2>
-          <p className="text-slate-400 text-xs font-bold">ภาพรวมความเสี่ยง การเข้าเรียน การส่งงาน และคะแนนของนักเรียน</p>
+    <div className="space-y-4">
+      {/* Header การ์ดสีน้ำเงิน */}
+      <div className="rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-5 sm:p-6 flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center text-xl shrink-0">📊</div>
+          <div>
+            <p className="font-black text-lg">ข้อมูลเชิงลึกของวิชา</p>
+            <p className="text-white/70 text-xs font-bold mt-0.5">
+              {data?.updatedAt ? `อัปเดตเมื่อ ${new Date(data.updatedAt).toLocaleString("th-TH")}` : "ภาพรวมความเสี่ยง การเข้าเรียน การส่งงาน และคะแนน"}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
+          <span className="text-white/80 text-xs font-bold">ปีการศึกษา</span>
+          <select
+            value={academicYearId}
+            onChange={e => setAcademicYearId(e.target.value)}
+            className="bg-white/20 text-white text-xs font-black rounded-lg px-2 py-1.5 focus:outline-none [&>option]:text-slate-800"
+          >
+            {academicYears.map(y => (
+              <option key={y.id} value={y.id}>{y.semester} / {y.year_name}</option>
+            ))}
+          </select>
         </div>
       </div>
 
-      {/* ตัวเลือกขอบเขตการดู */}
-      <div className="bg-white rounded-2xl border border-slate-100 p-4 flex items-center gap-2 flex-wrap">
-        {isAdmin && (
-          <>
-            <ScopeButton active={scope === "school"} onClick={() => { setScope("school"); setScopeId(""); }} label="🏫 ทั้งโรงเรียน" />
-            <ScopeButton active={scope === "grade_level"} onClick={() => setScope("grade_level")} label="🎓 สายชั้น/ระดับชั้น" />
-            <ScopeButton active={scope === "classroom"} onClick={() => setScope("classroom")} label="🏠 ห้องเรียน" />
-          </>
-        )}
-        {isSubjectTeacher && (
-          <>
-            <ScopeButton active={scope === "grade_level"} onClick={() => setScope("grade_level")} label="🎓 ระดับชั้นที่สอน" />
-            <ScopeButton active={scope === "classroom"} onClick={() => setScope("classroom")} label="🏠 ห้องเรียน" />
-          </>
-        )}
-        {role === "homeroom_teacher" && (
-          <span className="px-3 py-2 rounded-xl bg-slate-50 text-slate-500 font-black text-xs">🏠 ห้องที่ปรึกษาของฉัน</span>
-        )}
-
-        {scope === "grade_level" && (
-          <select
-            value={scopeId}
-            onChange={e => setScopeId(e.target.value)}
-            className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-fuchsia-400 focus:outline-none"
-          >
-            <option value="">-- เลือกสายชั้น/ระดับชั้น --</option>
-            {gradeLevels.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
-        )}
-        {scope === "classroom" && (
-          <select
-            value={scopeId}
-            onChange={e => setScopeId(e.target.value)}
-            className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-fuchsia-400 focus:outline-none"
-          >
-            <option value="">-- เลือกห้องเรียน --</option>
-            {filteredClassrooms.map(c => (
-              <option key={c.id} value={c.id}>{c.grade_group} {c.room_name}</option>
-            ))}
-          </select>
-        )}
-        {isSubjectTeacher && mySubjects.length > 0 && (
-          <select
-            value={subjectId}
-            onChange={e => setSubjectId(e.target.value)}
-            className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-fuchsia-400 focus:outline-none"
-          >
-            <option value="">-- ทุกวิชาที่สอน --</option>
-            {mySubjects.map(s => <option key={s.id} value={s.id}>{s.subject_code} · {s.name_th}</option>)}
-          </select>
-        )}
+      {/* ตัวเลือกขอบเขต: ห้องเรียนนี้ vs สายชั้นเดียวกัน */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-3 flex items-center gap-2 flex-wrap">
+        <ScopeButton active={scope === "classroom"} onClick={() => setScope("classroom")} label={`🏠 ห้องนี้ (${currentClassroom?.grade_group ?? ""}${currentClassroom?.room_name ?? ""})`} />
+        <ScopeButton active={scope === "grade_level"} onClick={() => setScope("grade_level")} label="🎓 ทุกห้องในสายชั้นเดียวกัน" />
+        <span className="text-slate-300 text-[11px] font-bold ml-auto">ขอบเขต: {scopeLabel}</span>
       </div>
 
       {loading ? (
@@ -205,122 +195,82 @@ export default function InsightsTool({
       ) : !data ? null : data.totals.studentCount === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
           <p className="text-3xl mb-2">📭</p>
-          <p className="font-bold text-sm">ไม่มีข้อมูลนักเรียนในขอบเขตที่เลือก ลองเลือกขอบเขตอื่น</p>
+          <p className="font-bold text-sm">ไม่มีข้อมูลนักเรียนในขอบเขตที่เลือก ลองสลับไปดู "{scope === "classroom" ? "ทุกห้องในสายชั้นเดียวกัน" : "ห้องนี้"}"</p>
         </div>
       ) : (
         <>
-          {/* การ์ดสรุป */}
+          {/* การ์ดสรุป 4 ใบ */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatCard
-              icon="⚠️"
-              label="นักเรียนกลุ่มเสี่ยง"
-              count={`${data.totals.atRiskCount} คน`}
-              percent={`${data.totals.atRiskPercent.toFixed(1)}%`}
-              tone="rose"
-            />
-            <StatCard
-              icon="✅"
-              label="ส่งงานตรงเวลา"
-              count={data.totals.onTimeRate === null ? "ไม่มีข้อมูล" : `${data.totals.onTimeRate.toFixed(1)}%`}
-              percent="เฉลี่ยทั้งหมด"
-              tone="emerald"
-            />
-            <StatCard
-              icon="🗓️"
-              label="อัตราการเข้าเรียน"
-              count={data.totals.attendanceRate === null ? "ไม่มีข้อมูล" : `${data.totals.attendanceRate.toFixed(1)}%`}
-              percent="เฉลี่ยทั้งหมด"
-              tone="sky"
-            />
-            <StatCard
-              icon="⭐"
-              label="คะแนนเฉลี่ย"
-              count={data.totals.avgScore === null ? "ไม่มีข้อมูล" : `${data.totals.avgScore.toFixed(1)}%`}
-              percent={`จากนักเรียน ${data.totals.studentCount} คน`}
-              tone="amber"
-            />
+            <StatCard icon="⚠️" label="นักเรียนกลุ่มเสี่ยง" value={`${data.totals.atRiskCount}`} sub={`${data.totals.atRiskHigh} สูง · ${data.totals.atRiskMedium} ปานกลาง`} tone="rose" />
+            <StatCard icon="🕐" label="ส่งงานตรงเวลา" value={data.totals.onTimeRate === null ? "-" : `${data.totals.onTimeRate.toFixed(0)}%`} sub={`${data.totals.onTimePendingCount} รอตรวจ`} tone="sky" />
+            <StatCard icon="🗓️" label="อัตราการเข้าเรียน" value={data.totals.attendanceRate === null ? "-" : `${data.totals.attendanceRate.toFixed(0)}%`} sub="เฉลี่ยทั้งหมด" tone="emerald" />
+            <StatCard icon="⭐" label="คะแนนเฉลี่ย" value={data.totals.avgScore === null ? "-" : `${data.totals.avgScore.toFixed(0)}%`} sub="จากงานที่ตรวจแล้ว" tone="amber" />
           </div>
 
-          {/* นักเรียนกลุ่มเสี่ยง */}
-          <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-6">
-            <h3 className="font-black text-slate-700 text-sm mb-3 flex items-center gap-1.5">⚠️ นักเรียนกลุ่มเสี่ยง (ปีการศึกษานี้)</h3>
-            {data.atRiskStudents.length === 0 ? (
-              <p className="text-center text-slate-300 font-bold text-sm py-6">ไม่มีนักเรียนกลุ่มเสี่ยงในขอบเขตนี้ 🎉</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50">
-                      <th className="text-left text-[11px] font-black text-slate-500 px-4 py-2">ชื่อ</th>
-                      <th className="text-left text-[11px] font-black text-slate-500 px-4 py-2">ห้อง</th>
-                      <th className="text-center text-[11px] font-black text-slate-500 px-4 py-2">เข้าเรียน</th>
-                      <th className="text-center text-[11px] font-black text-slate-500 px-4 py-2">คะแนนเฉลี่ย</th>
-                      <th className="text-left text-[11px] font-black text-slate-500 px-4 py-2">สาเหตุ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.atRiskStudents.map(s => (
-                      <tr key={s.id} className="border-t border-slate-100">
-                        <td className="px-4 py-2 text-xs font-black text-slate-700 whitespace-nowrap">เลขที่ {s.seatNumber} {s.name}</td>
-                        <td className="px-4 py-2 text-xs font-bold text-slate-500 whitespace-nowrap">{s.classroomName}</td>
-                        <td className="px-4 py-2 text-center text-xs font-black">
-                          {s.attendanceRate === null ? "-" : <span className={s.attendanceRate < 80 ? "text-red-500" : "text-slate-600"}>{s.attendanceRate}%</span>}
-                        </td>
-                        <td className="px-4 py-2 text-center text-xs font-black">
-                          {s.avgScore === null ? "-" : <span className={s.avgScore < 50 ? "text-red-500" : "text-slate-600"}>{s.avgScore}%</span>}
-                        </td>
-                        <td className="px-4 py-2 text-[11px] font-bold text-slate-400">{s.reasons.join(" · ")}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* การกระจายของคะแนน */}
-          <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-6">
-            <h3 className="font-black text-slate-700 text-sm mb-4 flex items-center gap-1.5">📈 การกระจายของคะแนน</h3>
-            <div className="space-y-2.5">
-              {data.scoreDistribution.map(b => (
-                <div key={b.band} className="flex items-center gap-3">
-                  <span className="w-16 text-xs font-black text-slate-500 shrink-0">{b.band}%</span>
-                  <div className="flex-1 h-6 rounded-full bg-slate-100 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${b.band === "0-49" ? "bg-red-400" : b.band === "50-59" ? "bg-amber-400" : "bg-emerald-400"}`}
-                      style={{ width: `${Math.max(2, b.percent)}%` }}
-                    />
-                  </div>
-                  <span className="w-24 text-xs font-black text-slate-600 text-right shrink-0">{b.count} คน ({b.percent.toFixed(1)}%)</span>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* นักเรียนกลุ่มเสี่ยง — กว้าง 2 คอลัมน์ */}
+            <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 p-4 sm:p-6">
+              <h3 className="font-black text-slate-700 text-sm mb-3 flex items-center gap-1.5">⚠️ นักเรียนกลุ่มเสี่ยง</h3>
+              {data.atRiskStudents.length === 0 ? (
+                <div className="text-center py-10">
+                  <p className="text-3xl mb-2">🎉</p>
+                  <p className="text-emerald-500 font-black text-sm">ไม่มีนักเรียนกลุ่มเสี่ยงในปีนี้</p>
                 </div>
-              ))}
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[520px] border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50">
+                        <th className="text-left text-[11px] font-black text-slate-500 px-3 py-2">ชื่อ</th>
+                        <th className="text-left text-[11px] font-black text-slate-500 px-3 py-2">ห้อง</th>
+                        <th className="text-center text-[11px] font-black text-slate-500 px-3 py-2">เข้าเรียน</th>
+                        <th className="text-center text-[11px] font-black text-slate-500 px-3 py-2">คะแนนเฉลี่ย</th>
+                        <th className="text-left text-[11px] font-black text-slate-500 px-3 py-2">สาเหตุ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.atRiskStudents.map(s => (
+                        <tr key={s.id} className="border-t border-slate-100">
+                          <td className="px-3 py-2 text-xs font-black text-slate-700 whitespace-nowrap">เลขที่ {s.seatNumber} {s.name}</td>
+                          <td className="px-3 py-2 text-xs font-bold text-slate-500 whitespace-nowrap">{s.classroomName}</td>
+                          <td className="px-3 py-2 text-center text-xs font-black">
+                            {s.attendanceRate === null ? "-" : <span className={s.attendanceRate < 80 ? "text-red-500" : "text-slate-600"}>{s.attendanceRate}%</span>}
+                          </td>
+                          <td className="px-3 py-2 text-center text-xs font-black">
+                            {s.avgScore === null ? "-" : <span className={s.avgScore < 50 ? "text-red-500" : "text-slate-600"}>{s.avgScore}%</span>}
+                          </td>
+                          <td className="px-3 py-2 text-[11px] font-bold text-slate-400">{s.reasons.join(" · ")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* คอลัมน์ขวา: กระจายคะแนน + อันดับห้อง */}
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-5">
+                <h3 className="font-black text-slate-700 text-sm mb-3 flex items-center gap-1.5">📈 การกระจายของคะแนน</h3>
+                <div className="grid grid-cols-3 gap-2">
+                  {data.scoreDistribution.map(b => (
+                    <div key={b.band} className="text-center rounded-xl border border-slate-100 p-2">
+                      <div className={`w-2 h-2 rounded-full mx-auto mb-1 ${bandColor(b.band)}`} />
+                      <p className="text-base font-black text-slate-700">{b.count}</p>
+                      <p className="text-[9px] text-slate-400 font-bold">{b.band}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {scope === "grade_level" && (
+                <RankingCard
+                  title="🏠 อันดับห้องเรียน"
+                  rows={data.classroomRanking.map(c => ({ id: c.classroomId, name: c.name, sub: `${c.studentCount} คน`, riskPercent: c.riskPercent }))}
+                />
+              )}
             </div>
           </div>
-
-          {/* อันดับห้องเรียน + อันดับวิชา */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <RankingCard
-              title="🏠 อันดับห้องเรียน (เสี่ยงน้อย → มาก)"
-              rows={data.classroomRanking.map(c => ({ id: c.classroomId, name: c.name, sub: `${c.studentCount} คน`, riskPercent: c.riskPercent }))}
-            />
-            <RankingCard
-              title="📚 วิชาตามอัตราการเข้าเรียน (เสี่ยงน้อย → มาก)"
-              rows={data.subjectRanking.map(s => ({
-                id: s.subjectId,
-                name: s.name,
-                sub: s.attendanceRate === null ? `${s.studentCount} คน` : `เข้าเรียน ${s.attendanceRate.toFixed(1)}% · ${s.studentCount} คน`,
-                riskPercent: s.riskPercent,
-              }))}
-            />
-          </div>
-
-          {/* ครูที่ดีที่สุด (แอดมินเท่านั้น) */}
-          {isAdmin && (
-            <RankingCard
-              title="🏆 ครูที่ดีที่สุด (เสี่ยงต่ำสุด)"
-              rows={data.teacherRanking.map(t => ({ id: t.teacherId, name: t.name, sub: `${t.studentCount} คน`, riskPercent: t.riskPercent }))}
-            />
-          )}
         </>
       )}
     </div>
@@ -336,7 +286,7 @@ function ScopeButton({ active, onClick, label }: { active: boolean; onClick: () 
     <button
       onClick={onClick}
       className={`px-3 py-2 rounded-xl font-black text-xs transition-colors ${
-        active ? "bg-fuchsia-500 text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+        active ? "bg-blue-600 text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
       }`}
     >
       {label}
@@ -347,35 +297,43 @@ function ScopeButton({ active, onClick, label }: { active: boolean; onClick: () 
 function StatCard({
   icon,
   label,
-  count,
-  percent,
+  value,
+  sub,
   tone,
 }: {
   icon: string;
   label: string;
-  count: string;
-  percent: string;
+  value: string;
+  sub: string;
   tone: "rose" | "emerald" | "sky" | "amber";
 }) {
   const toneMap: Record<string, string> = {
-    rose: "from-rose-400 to-red-400",
-    emerald: "from-emerald-400 to-teal-400",
-    sky: "from-sky-400 to-blue-400",
-    amber: "from-amber-400 to-orange-400",
+    rose: "bg-rose-50 text-rose-500",
+    emerald: "bg-emerald-50 text-emerald-500",
+    sky: "bg-sky-50 text-sky-500",
+    amber: "bg-amber-50 text-amber-500",
+  };
+  const valueToneMap: Record<string, string> = {
+    rose: "text-rose-600",
+    emerald: "text-emerald-600",
+    sky: "text-sky-600",
+    amber: "text-amber-600",
   };
   return (
-    <div className={`rounded-2xl bg-gradient-to-br ${toneMap[tone]} text-white p-4 shadow-sm`}>
-      <p className="text-xl mb-1">{icon}</p>
-      <p className="text-[11px] font-bold opacity-90">{label}</p>
-      <p className="text-xl font-black mt-0.5">{count}</p>
-      <p className="text-[10px] font-bold opacity-80 mt-0.5">{percent}</p>
+    <div className="bg-white rounded-2xl border border-slate-100 p-4 flex items-start justify-between">
+      <div>
+        <p className="text-[11px] font-bold text-slate-400">{label}</p>
+        <p className={`text-2xl font-black mt-1 ${valueToneMap[tone]}`}>{value}</p>
+        <p className="text-[10px] font-bold text-slate-300 mt-0.5">{sub}</p>
+      </div>
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0 ${toneMap[tone]}`}>{icon}</div>
     </div>
   );
 }
 
 function RankingCard({ title, rows }: { title: string; rows: { id: string; name: string; sub: string; riskPercent: number }[] }) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-6">
+    <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-5">
       <h3 className="font-black text-slate-700 text-sm mb-3">{title}</h3>
       {rows.length === 0 ? (
         <p className="text-center text-slate-300 font-bold text-xs py-6">ไม่มีข้อมูล</p>
@@ -393,7 +351,7 @@ function RankingCard({ title, rows }: { title: string; rows: { id: string; name:
                   r.riskPercent < 20 ? "bg-emerald-50 text-emerald-600" : r.riskPercent < 50 ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600"
                 }`}
               >
-                เสี่ยง {r.riskPercent.toFixed(1)}%
+                เสี่ยง {r.riskPercent.toFixed(0)}%
               </span>
             </div>
           ))}
