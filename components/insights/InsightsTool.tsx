@@ -156,31 +156,6 @@ export default function InsightsTool({
 
   return (
     <div className="space-y-4">
-      {/* Header การ์ดสีน้ำเงิน */}
-      <div className="rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-5 sm:p-6 flex items-center justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center text-xl shrink-0">📊</div>
-          <div>
-            <p className="font-black text-lg">ข้อมูลเชิงลึกของวิชา</p>
-            <p className="text-white/70 text-xs font-bold mt-0.5">
-              {data?.updatedAt ? `อัปเดตเมื่อ ${new Date(data.updatedAt).toLocaleString("th-TH")}` : "ภาพรวมความเสี่ยง การเข้าเรียน การส่งงาน และคะแนน"}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
-          <span className="text-white/80 text-xs font-bold">ปีการศึกษา</span>
-          <select
-            value={academicYearId}
-            onChange={e => setAcademicYearId(e.target.value)}
-            className="bg-white/20 text-white text-xs font-black rounded-lg px-2 py-1.5 focus:outline-none [&>option]:text-slate-800"
-          >
-            {academicYears.map(y => (
-              <option key={y.id} value={y.id}>{y.semester} / {y.year_name}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
       {/* ตัวเลือกขอบเขต: ห้องเรียนนี้ vs สายชั้นเดียวกัน */}
       <div className="bg-white rounded-2xl border border-slate-100 p-3 flex items-center gap-2 flex-wrap">
         <ScopeButton active={scope === "classroom"} onClick={() => setScope("classroom")} label={`🏠 ห้องนี้ (${currentClassroom?.grade_group ?? ""}${currentClassroom?.room_name ?? ""})`} />

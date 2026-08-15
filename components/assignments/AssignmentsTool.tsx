@@ -46,6 +46,7 @@ type Submission = {
   submitted_at: string | null;
   score: number | null;
   teacher_comment: string | null;
+  is_late: boolean | null; 
 };
 
 type TeacherSection = { id: string; label: string };
@@ -1450,6 +1451,7 @@ function SubmissionsTab({
   const [scoreDraft, setScoreDraft] = useState<number | "">("");
   const [commentDraft, setCommentDraft] = useState("");
   const [statusDraft, setStatusDraft] = useState<SubmissionStatus>("pending_review");
+  const [lateDraft, setLateDraft] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
 
   const filtered = students.filter(s => `${s.first_name} ${s.last_name}`.toLowerCase().includes(search.toLowerCase()));
@@ -1460,6 +1462,7 @@ function SubmissionsTab({
     setScoreDraft(selectedSub?.score ?? "");
     setCommentDraft(selectedSub?.teacher_comment ?? "");
     setStatusDraft(selectedSub?.status ?? "pending_review");
+    setLateDraft(selectedSub?.is_late ?? null);
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function saveGrade() {
@@ -1471,6 +1474,7 @@ function SubmissionsTab({
       status: statusDraft,
       score: scoreDraft === "" ? null : Number(scoreDraft),
       teacher_comment: commentDraft || null,
+      is_late: lateDraft,  
       graded_by: currentUserId || null,
       graded_at: new Date().toISOString(),
     };
@@ -1546,30 +1550,54 @@ function SubmissionsTab({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-black text-slate-500">คะแนน (เต็ม {assignment.max_score})</label>
-                <input
-                  type="number"
-                  value={scoreDraft}
-                  onChange={e => setScoreDraft(e.target.value === "" ? "" : Number(e.target.value))}
-                  max={assignment.max_score}
-                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-black text-slate-500">สถานะ</label>
-                <select
-                  value={statusDraft}
-                  onChange={e => setStatusDraft(e.target.value as SubmissionStatus)}
-                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
-                >
-                  <option value="pending_review">รอตรวจ</option>
-                  <option value="reviewed">ตรวจแล้ว</option>
-                  <option value="needs_revision">ต้องแก้ไข</option>
-                  <option value="failed">ไม่ผ่าน</option>
-                </select>
-              </div>
-            </div>
+  <div>
+    <label className="text-xs font-black text-slate-500">คะแนน (เต็ม {assignment.max_score})</label>
+    <input
+      type="number"
+      value={scoreDraft}
+      onChange={e => setScoreDraft(e.target.value === "" ? "" : Number(e.target.value))}
+      max={assignment.max_score}
+      className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+    />
+  </div>
+  <div>
+    <label className="text-xs font-black text-slate-500">สถานะ</label>
+    <select
+      value={statusDraft}
+      onChange={e => setStatusDraft(e.target.value as SubmissionStatus)}
+      className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+    >
+      <option value="pending_review">รอตรวจ</option>
+      <option value="reviewed">ตรวจแล้ว</option>
+      <option value="needs_revision">ต้องแก้ไข</option>
+      <option value="failed">ไม่ผ่าน</option>
+    </select>
+  </div>
+</div>
+
+{/* ★ เพิ่มส่วนนี้ */}
+<div className="rounded-xl bg-slate-50 border border-slate-100 p-3 flex items-center justify-between">
+  <div>
+    <p className="text-xs font-black text-slate-600">ส่งช้าหรือไม่</p>
+    <p className="text-[10px] text-slate-400 font-bold mt-0.5">ใช้สำหรับคำนวณสถิติ "ส่งงานตรงเวลา" ในข้อมูลเชิงลึก</p>
+  </div>
+  <div className="flex gap-2 shrink-0">
+    <button
+      type="button"
+      onClick={() => setLateDraft(false)}
+      className={`px-3 py-1.5 rounded-lg font-black text-xs ${lateDraft === false ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}
+    >
+      ✅ ตรงเวลา
+    </button>
+    <button
+      type="button"
+      onClick={() => setLateDraft(true)}
+      className={`px-3 py-1.5 rounded-lg font-black text-xs ${lateDraft === true ? "bg-rose-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}
+    >
+      ⏰ ส่งช้า
+    </button>
+  </div>
+</div>
 
             <div>
               <label className="text-xs font-black text-slate-500">คอมเมนต์ให้นักเรียน</label>
