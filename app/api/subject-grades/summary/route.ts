@@ -21,7 +21,9 @@ export async function GET(req: NextRequest) {
     ] = await Promise.all([
       admin
         .from("assignments")
-        .select("id, title, max_score, weight_percent, allow_weight, status")
+        // เพิ่ม due_date: ใช้คำนวณอัตรา "ส่งตรงเวลา" ใน GradeOverviewTool.tsx
+        // ⚠️ ต้องมีคอลัมน์ due_date ในตาราง assignments จริงก่อน ไม่งั้นจะได้ null กลับมาทุกแถว
+        .select("id, title, max_score, weight_percent, allow_weight, status, due_date")
         .eq("subject_section_id", subject_section_id)
         .order("assigned_at", { ascending: true }),
       admin
@@ -46,7 +48,9 @@ export async function GET(req: NextRequest) {
       assignmentIds.length > 0
         ? admin
             .from("assignment_submissions")
-            .select("id, assignment_id, student_id, status, score, teacher_comment, graded_at")
+            // เพิ่ม submitted_at: ใช้เทียบกับ assignments.due_date เพื่อตัดสิน "ตรงเวลา/ส่งช้า"
+            // ⚠️ ต้องมีคอลัมน์ submitted_at ในตาราง assignment_submissions จริงก่อน
+            .select("id, assignment_id, student_id, status, score, teacher_comment, graded_at, submitted_at")
             .in("assignment_id", assignmentIds)
         : Promise.resolve({ data: [], error: null }),
       // score_events ผูกกับ subject_section_id ตรง ๆ อยู่แล้ว ไม่ต้องกรองด้วย preset_id ก็ได้

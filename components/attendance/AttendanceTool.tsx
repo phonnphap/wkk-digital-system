@@ -292,7 +292,7 @@ export default function AttendanceTool({
       <div className="px-5 py-4 mt-3 border-t border-slate-100">
         <button onClick={handleSave} disabled={saving}
           className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2">
-          {saving ? "⏳ กำลังบันทึก..." : saved ? "✅ บันทึกแล้ว — กดซ้ำเพื่ออัปเดต" : "✏️ สร้าง"}
+          {saving ? "⏳ กำลังบันทึก..." : saved ? "✅ บันทึกแล้ว — กดซ้ำเพื่ออัปเดต" : "✏️ บันทึก"}
         </button>
       </div>
     </div>

@@ -23,6 +23,11 @@ type Assignment = {
   weight_percent?: number;
   allow_weight?: boolean;
   status?: string;
+  // เพิ่มใหม่: กำหนดส่งงาน ใช้คำนวณอัตรา "ส่งตรงเวลา"
+  // ⚠️ ASSUMPTION: ตาราง assignments ต้องมีคอลัมน์ due_date (timestamp/date) อยู่แล้ว
+  // ถ้ายังไม่มี ต้อง ALTER TABLE เพิ่มคอลัมน์นี้ก่อน ไม่งั้นค่าจะเป็น undefined ทั้งหมด
+  // (โค้ดนี้รองรับ undefined อยู่แล้ว จะไม่นับเป็น "ส่งช้า" ถ้าไม่มี due_date)
+  due_date?: string | null;
 };
 
 type Preset = { id: string; label: string; points: number; emoji: string; sort_order: number };
@@ -35,6 +40,9 @@ type Submission = {
   score: number | null;
   teacher_comment?: string | null;
   graded_at?: string | null;
+  // เพิ่มใหม่: เวลาที่นักเรียนส่งงานจริง ใช้เทียบกับ assignment.due_date
+  // ⚠️ ASSUMPTION: ตาราง submissions ต้องมีคอลัมน์ submitted_at (timestamp) อยู่แล้ว
+  submitted_at?: string | null;
 };
 
 type ScoreEvent = { id: string; student_id: string; preset_id: string; points: number };
@@ -136,6 +144,14 @@ export default function GradeOverviewTool({
     [assignments]
   );
 
+  // ตรวจว่างานชิ้นนี้ "ส่งตรงเวลา" หรือไม่ ต้องมีทั้ง due_date ของงาน และ submitted_at ของการส่ง
+  // ถ้าข้อมูลฝั่งใดฝั่งหนึ่งไม่มี ให้ถือว่า "ไม่ทราบ / ไม่นับเป็นส่งช้า" (กันไม่ให้ค่าคะแนนความเสี่ยงเพี้ยนเพราะข้อมูลยังไม่ครบ)
+  function isOnTime(assignment: Assignment, sub?: Submission): boolean | null {
+    if (!sub || !(sub.status === "submitted" || sub.status === "graded")) return null;
+    if (!assignment.due_date || !sub.submitted_at) return null;
+    return new Date(sub.submitted_at).getTime() <= new Date(assignment.due_date).getTime();
+  }
+
   const rows = useMemo(() => {
     return students.map(s => {
       const subMap: Record<string, Submission> = {};
@@ -150,6 +166,18 @@ export default function GradeOverviewTool({
         const sub = subMap[a.id];
         return sub && (sub.status === "submitted" || sub.status === "graded");
       }).length;
+
+      // อัตราส่งตรงเวลา: นับเฉพาะงานที่ "ทราบผล" ว่าตรง/ช้า (มีทั้ง due_date และ submitted_at)
+      let onTimeCount = 0;
+      let lateCount = 0;
+      let knownOnTimeCount = 0;
+      assignments.forEach(a => {
+        const result = isOnTime(a, subMap[a.id]);
+        if (result === null) return;
+        knownOnTimeCount++;
+        if (result) onTimeCount++; else lateCount++;
+      });
+      const onTimeRate = knownOnTimeCount > 0 ? (onTimeCount / knownOnTimeCount) * 100 : null;
 
       const presetTotals: Record<string, number> = {};
       presets.forEach(p => { presetTotals[p.id] = 0; });
@@ -176,6 +204,9 @@ export default function GradeOverviewTool({
         presetTotals,
         assignmentTotal,
         submittedCount,
+        onTimeCount,
+        lateCount,
+        onTimeRate,
         specialTotal,
         percentage,
         grade,
@@ -246,7 +277,11 @@ export default function GradeOverviewTool({
         };
         assignments.forEach(a => {
           const sub = r.subMap[a.id];
-          row[a.title] = sub?.score ?? (sub ? "ส่งแล้ว-ยังไม่ให้คะแนน" : "ไม่ส่งงาน");
+          const result = isOnTime(a, sub);
+          const onTimeTag = result === null ? "" : result ? " (ตรงเวลา)" : " (ส่งช้า)";
+          row[a.title] = sub?.score !== null && sub?.score !== undefined
+            ? `${sub.score}${onTimeTag}`
+            : (sub ? "ส่งแล้ว-ยังไม่ให้คะแนน" + onTimeTag : "ไม่ส่งงาน");
         });
         presets.forEach(p => {
           row[p.label] = r.presetTotals[p.id] ?? 0;
@@ -256,6 +291,9 @@ export default function GradeOverviewTool({
         row["คะแนนรวมทั้งหมด"] = r.grandTotal;
         row["เปอร์เซ็นต์"] = Number(r.percentage.toFixed(2));
         row["เกรด"] = r.grade;
+        row["ส่งตรงเวลา (ชิ้น)"] = r.onTimeCount;
+        row["ส่งช้า (ชิ้น)"] = r.lateCount;
+        row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null ? "ไม่มีข้อมูล" : Number(r.onTimeRate.toFixed(2));
         return row;
       });
 
@@ -339,6 +377,7 @@ export default function GradeOverviewTool({
           totalMaxScore={totalMaxScore}
           onOpenReport={s => setReportStudent(s)}
           onAdjustPreset={handleAdjustPreset}
+          isOnTime={isOnTime}
         />
       ) : (
         <PodiumView top5={podiumTop5} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
@@ -358,6 +397,7 @@ function GradeTable({
   totalMaxScore,
   onOpenReport,
   onAdjustPreset,
+  isOnTime,
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
@@ -365,6 +405,7 @@ function GradeTable({
   totalMaxScore: number;
   onOpenReport: (s: Student) => void;
   onAdjustPreset: (studentId: string, presetId: string, currentValue: number, newValue: number) => void;
+  isOnTime: (assignment: Assignment, sub?: Submission) => boolean | null;
 }) {
   if (rows.length === 0) {
     return (
@@ -376,7 +417,7 @@ function GradeTable({
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 overflow-x-auto">
-      <table className="w-full min-w-[900px] border-collapse">
+      <table className="w-full min-w-[960px] border-collapse">
         <thead>
           <tr className="bg-slate-50">
             <th className="text-left text-[11px] font-black text-slate-500 px-5 py-3 sticky left-0 bg-slate-50 z-10">Name</th>
@@ -399,6 +440,9 @@ function GradeTable({
             </th>
             <th className="px-3 py-3 text-center min-w-[70px]">
               <p className="text-[11px] font-black text-slate-700">Grade</p>
+            </th>
+            <th className="px-3 py-3 text-center min-w-[90px]">
+              <p className="text-[11px] font-black text-slate-700">ส่งตรงเวลา</p>
             </th>
           </tr>
         </thead>
@@ -432,6 +476,7 @@ function GradeTable({
                 </td>
                 {assignments.map(a => {
                   const sub = r.subMap[a.id];
+                  const onTimeResult = isOnTime(a, sub);
                   return (
                     <td key={a.id} className="text-center px-3 py-3">
                       {!sub ? (
@@ -439,7 +484,12 @@ function GradeTable({
                       ) : sub.score === null ? (
                         <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600">รอตรวจ</span>
                       ) : (
-                        <span className="text-sm font-black text-slate-700">{sub.score}</span>
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className="text-sm font-black text-slate-700">{sub.score}</span>
+                          {onTimeResult === false && (
+                            <span className="text-[9px] font-black text-red-500">⏰ ส่งช้า</span>
+                          )}
+                        </div>
                       )}
                     </td>
                   );
@@ -461,6 +511,17 @@ function GradeTable({
                   <span className="inline-flex items-center justify-center min-w-[36px] px-2.5 py-1.5 rounded-xl font-black text-sm bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white">
                     {r.grade}
                   </span>
+                </td>
+                <td className="text-center px-3 py-3">
+                  {r.onTimeRate === null ? (
+                    <span className="text-[10px] text-slate-300 font-bold">ไม่มีข้อมูล</span>
+                  ) : (
+                    <span className={`inline-flex items-center justify-center min-w-[50px] px-2 py-1.5 rounded-xl font-black text-xs ${
+                      r.onTimeRate >= 80 ? "bg-emerald-50 text-emerald-600" : r.onTimeRate >= 50 ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600"
+                    }`}>
+                      {r.onTimeRate.toFixed(0)}%
+                    </span>
+                  )}
                 </td>
               </tr>
             );
@@ -519,6 +580,9 @@ function buildRowsType() {
     presetTotals: Record<string, number>;
     assignmentTotal: number;
     submittedCount: number;
+    onTimeCount: number;
+    lateCount: number;
+    onTimeRate: number | null;
     specialTotal: number;
     percentage: number;
     grade: string;
@@ -820,8 +884,11 @@ function StudentReportModal({
               })}
             </div>
           )}
-          <div className="mt-2 text-right text-[11px] font-black text-slate-500">
-            ส่งงานแล้ว {row.submittedCount} / {assignments.length} ชิ้น · รวม {row.assignmentTotal} / {assignments.reduce((a, b) => a + (b.max_score ?? 0), 0)} คะแนน
+          <div className="mt-2 flex items-center justify-between text-[11px] font-black text-slate-500">
+            <span>ส่งงานแล้ว {row.submittedCount} / {assignments.length} ชิ้น · รวม {row.assignmentTotal} / {assignments.reduce((a, b) => a + (b.max_score ?? 0), 0)} คะแนน</span>
+            <span>
+              {row.onTimeRate === null ? "ไม่มีข้อมูลส่งตรงเวลา" : `⏱️ ตรงเวลา ${row.onTimeCount} / ส่งช้า ${row.lateCount} (${row.onTimeRate.toFixed(0)}%)`}
+            </span>
           </div>
         </div>
 

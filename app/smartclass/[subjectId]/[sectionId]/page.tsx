@@ -9,6 +9,7 @@ import AttendanceTool from "@/components/attendance/AttendanceTool";
 import AssignmentsTool from "@/components/assignments/AssignmentsTool";
 import AttendanceOverviewTool from "@/components/attendance/AttendanceOverviewTool";
 import GradeOverviewTool from "@/components/attendance/GradeOverviewTool";
+import InsightsTool from "@/components/insights/InsightsTool";
 
 const supabase = createClient();
 
@@ -19,7 +20,7 @@ type Student = { id: string; prefix?: string; first_name: string; last_name: str
 type ScorePreset = { id: string; label: string; points: number; emoji: string; sort_order: number };
 
 type TabKey = "roster" | "attendance" | "random" | "tools";
-type BannerMenuKey = "assignments" | "attendanceInfo" | "totalScore" | "settings";
+type BannerMenuKey = "assignments" | "attendanceInfo" | "totalScore" | "insights" | "settings";
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: "roster", label: "รายชื่อ", icon: "👥" },
@@ -32,6 +33,7 @@ const BANNER_MENU: { key: BannerMenuKey; label: string; icon: string }[] = [
   { key: "assignments", label: "มอบหมายงาน", icon: "📌" },
   { key: "attendanceInfo", label: "ข้อมูลเช็กชื่อ", icon: "🗓️" },
   { key: "totalScore", label: "คะแนนรวม", icon: "⭐" },
+  { key: "insights", label: "ข้อมูลเชิงลึก", icon: "📊" },
   { key: "settings", label: "ตั้งค่ารายวิชา", icon: "⚙️" },
 ];
 
@@ -2109,6 +2111,12 @@ export default function SmartClassRosterPage() {
             subjectTeacherName={subjectTeacherName}
           />
         )}
+        {bannerMenu === "insights" && (
+  <InsightsTool
+    currentUserId={currentUserId}
+    defaultClassroomId={classroom?.id}
+  />
+)}
         {bannerMenu === "attendanceInfo" && section && (
           <AttendanceOverviewTool
             sectionId={section.id}
