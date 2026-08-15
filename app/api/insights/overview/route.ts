@@ -139,20 +139,38 @@ if (role === "unknown") {
     /* -----------------------------------------------------------------
        3) หา classroom ids ตามขอบเขตที่ขอ (ห้องเดียว หรือ ทุกห้องในสายชั้นเดียวกัน)
        ----------------------------------------------------------------- */
-    let classroomQuery = admin
-      .from("classrooms")
-      .select("id, room_name, grade_group, grade_level_id, homeroom_teacher_id, homeroom_teacher_2_id");
+    async function fetchClassroomsWithFallback() {
+  let baseQuery = admin
+    .from("classrooms")
+    .select("id, room_name, grade_group, grade_level_id, homeroom_teacher_id, homeroom_teacher_2_id");
 
-    if (scope === "classroom") {
-      classroomQuery = classroomQuery.eq("id", classroomIdParam!);
-    } else {
-      classroomQuery = classroomQuery.eq("grade_level_id", gradeLevelIdParam!);
-    }
-    if (academicYearId) classroomQuery = classroomQuery.eq("academic_year_id", academicYearId);
+  if (scope === "classroom") {
+    baseQuery = baseQuery.eq("id", classroomIdParam!);
+  } else {
+    baseQuery = baseQuery.eq("grade_level_id", gradeLevelIdParam!);
+  }
 
-    const { data: classroomsRaw } = await classroomQuery;
-    let classrooms = classroomsRaw ?? [];
-    if (classrooms.length === 0) return NextResponse.json(emptyResult(role));
+  if (academicYearId) {
+    const { data } = await baseQuery.eq("academic_year_id", academicYearId);
+    if (data && data.length > 0) return data;
+    // Fallback: ห้องนี้/สายชั้นนี้ผูกกับปีการศึกษาอื่น (ไม่ตรงกับปีที่เลือก/ปีปัจจุบัน)
+    // ดึงโดยไม่กรองปีการศึกษาแทน ดีกว่าแสดงผลว่างทั้งที่ห้องมีอยู่จริง
+  }
+
+  let fallbackQuery = admin
+    .from("classrooms")
+    .select("id, room_name, grade_group, grade_level_id, homeroom_teacher_id, homeroom_teacher_2_id");
+  if (scope === "classroom") {
+    fallbackQuery = fallbackQuery.eq("id", classroomIdParam!);
+  } else {
+    fallbackQuery = fallbackQuery.eq("grade_level_id", gradeLevelIdParam!);
+  }
+  const { data } = await fallbackQuery;
+  return data ?? [];
+}
+
+let classrooms = await fetchClassroomsWithFallback();
+if (classrooms.length === 0) return NextResponse.json(emptyResult(role));
 
     const scopeClassroomIds = classrooms.map(c => c.id);
 
