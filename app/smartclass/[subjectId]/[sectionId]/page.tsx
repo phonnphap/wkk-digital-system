@@ -1068,10 +1068,24 @@ function DeckPicker({
 
   const stackCount = Math.max(1, Math.min(order.length, 7));
 
-  // รัศมีของพัดไพ่: ขยายตามความกว้างของกรอบจริง ให้กางกว้างจนเกือบเต็มกรอบเสมอ (มีเพดานกันกว้างเกินจอใหญ่)
-  const radius = Math.min(fanWidth * 0.48, 620);
+  // ขนาดการ์ด: คงเดิม (ผู้ใช้ยืนยันว่าโอเคแล้ว)
   const cardW = fanWidth < 640 ? 88 : fanWidth < 1024 ? 116 : 148;
   const cardH = cardW * 1.55;
+
+  // มุมรวมของพัดไพ่: ลดความโค้งลงจากเดิม ไม่กางกว้างจนเกินไป
+  const fanCount = order.length;
+  const totalSpread = Math.min(112, Math.max(28, fanCount * 6));
+  const maxAngleRad = ((totalSpread / 2) * Math.PI) / 180;
+
+  // รัศมีของพัดไพ่: คำนวณแบบกันไพ่ล้นกรอบซ้าย/ขวา โดยคิดรวมความกว้างของการ์ดที่หมุนแล้วด้วย ไม่ใช่แค่จุดหมุน
+  const pad = 16;
+  const cornerReach = maxAngleRad > 0
+    ? cardH * Math.sin(maxAngleRad) + (cardW / 2) * Math.cos(maxAngleRad)
+    : cardW / 2;
+  const maxRadiusFit = maxAngleRad > 0
+    ? Math.max(60, (fanWidth / 2 - pad - cornerReach) / Math.sin(maxAngleRad))
+    : fanWidth;
+  const radius = Math.min(fanWidth * 0.4, 480, maxRadiusFit);
   const fanHeight = Math.round(radius + cardH * 0.85);
 
   return (
@@ -1118,8 +1132,6 @@ function DeckPicker({
           {order.map((e, i) => {
             const n = order.length;
             const mid = (n - 1) / 2;
-            // มุมรวมของพัดไพ่: ยิ่งมีไพ่มาก ยิ่งกางกว้างขึ้น จนเกือบครึ่งวงกลมเต็ม
-            const totalSpread = Math.min(168, Math.max(40, n * 9));
             const spread = n > 1 ? totalSpread / (n - 1) : 0;
             const angle = (i - mid) * spread;
             const rad = (angle * Math.PI) / 180;
