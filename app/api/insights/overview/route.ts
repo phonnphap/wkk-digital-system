@@ -178,20 +178,32 @@ if (classrooms.length === 0) return NextResponse.json(emptyResult(role));
        4) subject_sections ของ "วิชาปัจจุบัน" ในห้องที่อยู่ในขอบเขต
           ไม่ใช่ admin -> จำกัดเฉพาะ section ที่ตัวเองสอน (teacher_id/co_teacher_id)
        ----------------------------------------------------------------- */
-    let sectionsQuery = admin
+    async function fetchSectionsWithFallback() {
+  function buildBaseQuery() {
+    let q = admin
       .from("subject_sections")
       .select("id, subject_id, classroom_id, academic_year_id, teacher_id, co_teacher_id")
       .eq("subject_id", subjectId)
       .in("classroom_id", scopeClassroomIds);
-
-    if (academicYearId) sectionsQuery = sectionsQuery.eq("academic_year_id", academicYearId);
-
     if (!isAdmin) {
-      sectionsQuery = sectionsQuery.or(`teacher_id.eq.${requesterId},co_teacher_id.eq.${requesterId}`);
+      q = q.or(`teacher_id.eq.${requesterId},co_teacher_id.eq.${requesterId}`);
     }
+    return q;
+  }
 
-    const { data: sections } = await sectionsQuery;
-    if (!sections || sections.length === 0) return NextResponse.json(emptyResult(role));
+  if (academicYearId) {
+    const { data } = await buildBaseQuery().eq("academic_year_id", academicYearId);
+    if (data && data.length > 0) return data;
+    // Fallback: section ผูกกับปีการศึกษาอื่น (ไม่ตรงกับปีที่เลือก/ปีปัจจุบัน)
+    // ดึงโดยไม่กรองปีการศึกษาแทน ดีกว่าแสดงผลว่างทั้งที่มี section อยู่จริง
+  }
+
+  const { data } = await buildBaseQuery();
+  return data ?? [];
+}
+
+const sections = await fetchSectionsWithFallback();
+if (!sections || sections.length === 0) return NextResponse.json(emptyResult(role));
 
     const sectionIds = sections.map(s => s.id);
     // ห้องที่มี section ของวิชานี้จริง ๆ (กันกรณีบางห้องในสายชั้นไม่ได้สอนวิชานี้)
