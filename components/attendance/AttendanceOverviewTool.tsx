@@ -163,20 +163,6 @@ export default function AttendanceOverviewTool({
 
   return (
     <div className="space-y-6">
-      {/* Banner หัววิชา */}
-      <div className="rounded-2xl bg-gradient-to-r from-sky-500 to-blue-500 px-6 py-5 text-white">
-        <p className="font-black text-xl">{subjectTitle}</p>
-        <p className="font-bold text-sm opacity-90">{subjectCode}</p>
-        <div className="flex items-center gap-2 mt-2 flex-wrap">
-          {academicYearLabel && (
-            <span className="px-2.5 py-1 rounded-full bg-red-500/90 text-[11px] font-black">ปีการศึกษา: {academicYearLabel}</span>
-          )}
-          {joinCode && (
-            <span className="px-2.5 py-1 rounded-full bg-orange-400/90 text-[11px] font-black">รหัสเข้าร่วมวิชา: {joinCode}</span>
-          )}
-        </div>
-      </div>
-
       {/* หัวข้อ + ปุ่มควบคุม */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>

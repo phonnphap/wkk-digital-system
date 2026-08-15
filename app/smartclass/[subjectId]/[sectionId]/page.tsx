@@ -1019,12 +1019,24 @@ function DeckPicker({
   const [fanned, setFanned] = useState(false);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [flippedId, setFlippedId] = useState<string | null>(null);
+  const fanRef = useRef<HTMLDivElement>(null);
+  const [fanWidth, setFanWidth] = useState(1000);
 
   useEffect(() => {
     setOrder(pool);
     setFanned(false);
     setFlippedId(null);
   }, [pool]);
+
+  // วัดความกว้างจริงของกรอบพื้นที่กางไพ่ เพื่อคำนวณรัศมีให้พัดไพ่กว้างเต็มกรอบเสมอ (responsive)
+  useEffect(() => {
+    function measure() {
+      if (fanRef.current) setFanWidth(fanRef.current.clientWidth);
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [fanned, order.length]);
 
   function shuffleDeck() {
     if (spinning) return;
@@ -1055,6 +1067,12 @@ function DeckPicker({
   }
 
   const stackCount = Math.max(1, Math.min(order.length, 7));
+
+  // รัศมีของพัดไพ่: ขยายตามความกว้างของกรอบจริง ให้กางกว้างจนเกือบเต็มกรอบเสมอ (มีเพดานกันกว้างเกินจอใหญ่)
+  const radius = Math.min(fanWidth * 0.48, 620);
+  const cardW = fanWidth < 640 ? 88 : fanWidth < 1024 ? 116 : 148;
+  const cardH = cardW * 1.55;
+  const fanHeight = Math.round(radius + cardH * 0.85);
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-10 flex flex-col items-center gap-6 w-full">
@@ -1090,18 +1108,23 @@ function DeckPicker({
           )}
         </div>
       ) : (
-        // สถานะกางไพ่: จัดเรียงเป็นครึ่งวงกลมกว้างใหญ่เต็มพื้นที่ ให้เลือกได้ง่าย
-        <div className="relative w-full flex items-end justify-center" style={{ height: 440 }}>
+        // สถานะกางไพ่: กางเป็นรูปพัดครึ่งวงกลม กว้างเต็มกรอบพื้นที่จริง (วัดความกว้างจาก fanRef)
+        <div ref={fanRef} className="relative w-full" style={{ height: fanHeight }}>
           {order.length === 0 && (
-            <p className="text-slate-300 font-bold text-sm text-center">กองไพ่หมดแล้ว<br />กด "สับไพ่" เพื่อเริ่มใหม่</p>
+            <p className="absolute inset-0 flex items-center justify-center text-slate-300 font-bold text-sm text-center px-4">
+              กองไพ่หมดแล้ว<br />กด "สับไพ่" เพื่อเริ่มใหม่
+            </p>
           )}
           {order.map((e, i) => {
             const n = order.length;
             const mid = (n - 1) / 2;
-            // กางกว้างขึ้นมาก: มุมรวมของพัดไพ่ขยับเข้าใกล้ครึ่งวงกลมเต็ม (~170°) เมื่อมีไพ่หลายใบ
-            const totalSpread = Math.min(170, Math.max(40, n * 11));
+            // มุมรวมของพัดไพ่: ยิ่งมีไพ่มาก ยิ่งกางกว้างขึ้น จนเกือบครึ่งวงกลมเต็ม
+            const totalSpread = Math.min(168, Math.max(40, n * 9));
             const spread = n > 1 ? totalSpread / (n - 1) : 0;
             const angle = (i - mid) * spread;
+            const rad = (angle * Math.PI) / 180;
+            const dx = Math.sin(rad) * radius;
+            const dy = Math.cos(rad) * radius;
             const isHover = hoverId === e.id;
             const isFlipped = flippedId === e.id;
             return (
@@ -1112,19 +1135,21 @@ function DeckPicker({
                 onClick={() => pickCard(e)}
                 className="absolute bottom-0 cursor-pointer transition-transform duration-300"
                 style={{
-                  transform: `rotate(${angle}deg) translateY(${isHover && !isFlipped ? -40 : 0}px)`,
+                  left: `calc(50% + ${dx}px)`,
+                  bottom: `${dy}px`,
+                  transform: `translateX(-50%) rotate(${angle}deg) ${isHover && !isFlipped ? "translateY(-40px)" : ""}`,
                   transformOrigin: "bottom center",
                   zIndex: isHover ? 100 : i,
                 }}
               >
-                <div className="relative w-32 h-52 sm:w-36 sm:h-56" style={{ perspective: "600px" }}>
+                <div className="relative" style={{ width: cardW, height: cardH, perspective: "600px" }}>
                   <div
                     className="absolute inset-0 rounded-2xl transition-transform duration-500"
                     style={{ transformStyle: "preserve-3d", transform: isFlipped ? "rotateY(180deg)" : "rotateY(0deg)" }}
                   >
                     <div
-                      className="absolute inset-0 rounded-2xl border-2 border-white shadow-lg bg-gradient-to-br from-indigo-400 via-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-4xl"
-                      style={{ backfaceVisibility: "hidden" }}
+                      className="absolute inset-0 rounded-2xl border-2 border-white shadow-lg bg-gradient-to-br from-indigo-400 via-purple-500 to-fuchsia-500 flex items-center justify-center text-white"
+                      style={{ backfaceVisibility: "hidden", fontSize: cardW * 0.32 }}
                     >
                       🔮
                     </div>
@@ -1133,13 +1158,16 @@ function DeckPicker({
                       style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
                     >
                       {e.avatar_url ? (
-                        <img src={e.avatar_url} className="w-14 h-14 rounded-full object-cover" />
+                        <img src={e.avatar_url} className="rounded-full object-cover" style={{ width: cardW * 0.4, height: cardW * 0.4 }} />
                       ) : (
-                        <div className="w-14 h-14 rounded-full bg-emerald-400 text-white text-lg font-black flex items-center justify-center">
+                        <div
+                          className="rounded-full bg-emerald-400 text-white font-black flex items-center justify-center"
+                          style={{ width: cardW * 0.4, height: cardW * 0.4, fontSize: cardW * 0.16 }}
+                        >
                           {e.first_name[0]}
                         </div>
                       )}
-                      <p className="text-xs font-black text-slate-600 mt-2 truncate w-full text-center">{e.label}</p>
+                      <p className="font-black text-slate-600 mt-2 truncate w-full text-center" style={{ fontSize: cardW * 0.1 }}>{e.label}</p>
                     </div>
                   </div>
                 </div>
