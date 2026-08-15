@@ -213,21 +213,36 @@ if (role === "unknown") {
     /* -----------------------------------------------------------------
        7) เช็กชื่อ (กรองตามช่วงปีการศึกษาถ้าระบุ) + ข้อมูลอ้างอิงชื่อวิชา/ครู
        ----------------------------------------------------------------- */
-    let attendanceQuery = admin
+    async function fetchAttendanceWithFallback() {
+  if (yearStart && yearEnd) {
+    const { data } = await admin
       .from("attendance_records")
       .select("student_id, classroom_id, status, attendance_date")
-      .in("classroom_id", classroomIds);
-    if (yearStart) attendanceQuery = attendanceQuery.gte("attendance_date", yearStart);
-    if (yearEnd) attendanceQuery = attendanceQuery.lte("attendance_date", yearEnd);
+      .in("classroom_id", classroomIds)
+      .gte("attendance_date", yearStart)
+      .lte("attendance_date", yearEnd);
 
-    const [{ data: attendanceRecords }, { data: subjectRow }, { data: teacherUsers }] = await Promise.all([
-      attendanceQuery,
-      admin.from("subjects").select("id, subject_code, name_th").eq("id", subjectId).maybeSingle(),
-      admin.from("users").select("id, full_name, first_name, last_name").in(
-        "id",
-        Array.from(new Set(sections.flatMap(s => [s.teacher_id, s.co_teacher_id]).filter(Boolean)))
-      ),
-    ]);
+    if (data && data.length > 0) return data;
+
+    // Fallback: ตัวกรองปีการศึกษาไม่เจอข้อมูลเลย (start_date/end_date อาจตั้งไม่ตรงกับข้อมูลจริง)
+    // ดึงทั้งหมดของห้องในขอบเขตแทน ดีกว่าแสดงผลว่างทั้งที่มีข้อมูลจริงอยู่
+  }
+
+  const { data } = await admin
+    .from("attendance_records")
+    .select("student_id, classroom_id, status, attendance_date")
+    .in("classroom_id", classroomIds);
+  return data ?? [];
+}
+
+const [attendanceRecords, { data: subjectRow }, { data: teacherUsers }] = await Promise.all([
+  fetchAttendanceWithFallback(),
+  admin.from("subjects").select("id, subject_code, name_th").eq("id", subjectId).maybeSingle(),
+  admin.from("users").select("id, full_name, first_name, last_name").in(
+    "id",
+    Array.from(new Set(sections.flatMap(s => [s.teacher_id, s.co_teacher_id]).filter(Boolean)))
+  ),
+]);
 
     /* -----------------------------------------------------------------
        8) คำนวณสถิติต่อนักเรียน
