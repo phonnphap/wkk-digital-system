@@ -162,6 +162,35 @@ function playPointSound(points: number) {
   }
 }
 
+// เสียงกริ่งเตือนจริงจากไฟล์ bell.mp3 (public/sounds/bell.mp3)
+// ใช้ตอน: จับเวลาหมดเวลา และ ตรวจจับเสียงดังเกินค่าที่ตั้งไว้
+// เผื่อโหลดไฟล์ไม่สำเร็จ จะ fallback ไปใช้เสียงสังเคราะห์ playDing() แทนอัตโนมัติ
+function playBellSound() {
+  if (typeof window === "undefined") return;
+  try {
+    const audio = new Audio("/sounds/bell.mp3");
+    audio.volume = 1;
+    audio.onerror = () => playDing();
+    audio.play().catch(() => playDing());
+  } catch {
+    playDing();
+  }
+}
+
+// เสียงไฟล์จริงตอนสุ่มชื่อได้ผลลัพธ์ จากไฟล์ random.mp3 (public/sounds/random.mp3)
+// เผื่อโหลดไฟล์ไม่สำเร็จ จะ fallback ไปใช้เสียงปรบมือสังเคราะห์ playCheer() แทนอัตโนมัติ
+function playRandomResultSound() {
+  if (typeof window === "undefined") return;
+  try {
+    const audio = new Audio("/sounds/random.mp3");
+    audio.volume = 0.9;
+    audio.onerror = () => playCheer();
+    audio.play().catch(() => playCheer());
+  } catch {
+    playCheer();
+  }
+}
+
 function EmojiPicker({ value, onChange }: { value: string; onChange: (emoji: string) => void }) {
   const [open, setOpen] = useState(false);
   return (
@@ -728,7 +757,7 @@ function WheelPicker({
     const newRotation = rotation + extraSpins * 360 + delta;
     setRotation(newRotation);
     window.setTimeout(() => {
-      playCheer();
+      playRandomResultSound();
       setWinner(pool[winIdx]);
       setSpinning(false);
     }, 4200);
@@ -825,7 +854,7 @@ function SlidePicker({
     setOffset(targetOffset);
     const duration = speed === "fast" ? 1800 : 4000;
     window.setTimeout(() => {
-      playCheer();
+      playRandomResultSound();
       setWinner(pool[winIdx]);
       setSpinning(false);
     }, duration);
@@ -915,7 +944,7 @@ function CardPicker({
     setWinner(null);
     setFlippedId(entry.id);
     window.setTimeout(() => {
-      playCheer();
+      playRandomResultSound();
       setWinner(entry);
       setSpinning(false);
     }, 600);
@@ -1018,7 +1047,7 @@ function DeckPicker({
     setWinner(null);
     setFlippedId(entry.id);
     window.setTimeout(() => {
-      playCheer();
+      playRandomResultSound();
       setWinner(entry);
       setOrder(prev => prev.filter(e => e.id !== entry.id));
       setSpinning(false);
@@ -1141,59 +1170,187 @@ function DeckPicker({
   );
 }
 
-/* ---------------- แท็บ เครื่องมือ (จับเวลา / เสียงดัง / จัดกลุ่ม) ---------------- */
+/* ---------------- แท็บ เครื่องมือ (จับเวลาลอย / ตรวจจับเสียงดัง / จัดกลุ่ม) ---------------- */
 
-function TimerBox() {
-  const [totalSec, setTotalSec] = useState(300);
-  const [remaining, setRemaining] = useState(300);
+const SENSITIVITY_MODES: { key: string; label: string; threshold: number }[] = [
+  { key: "silent", label: "Silent", threshold: 25 },
+  { key: "whisper", label: "Whisper", threshold: 40 },
+  { key: "group", label: "Group", threshold: 55 },
+  { key: "party", label: "Party", threshold: 75 },
+];
+
+/* ---------------- ตัวจับเวลาลอย: ย่อ/ขยาย/เต็มจอ/ลากย้ายได้ ใช้งานได้ทุกแท็บ ---------------- */
+
+function FloatingTimer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [minimized, setMinimized] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [position, setPosition] = useState({ x: 24, y: 96 });
+  const [minutesInput, setMinutesInput] = useState(0);
+  const [secondsInput, setSecondsInput] = useState(10);
+  const [remaining, setRemaining] = useState(10);
   const [running, setRunning] = useState(false);
-  const ref = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dragInfo = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
 
   useEffect(() => {
-    if (running) {
-      ref.current = setInterval(() => {
-        setRemaining(r => {
-          if (r <= 1) { setRunning(false); return 0; }
-          return r - 1;
-        });
-      }, 1000);
-    } else if (ref.current) {
-      clearInterval(ref.current);
-    }
-    return () => { if (ref.current) clearInterval(ref.current); };
+    if (!running) return;
+    const iv = setInterval(() => {
+      setRemaining(r => {
+        if (r <= 1) {
+          setRunning(false);
+          playBellSound();
+          return 0;
+        }
+        return r - 1;
+      });
+    }, 1000);
+    return () => clearInterval(iv);
   }, [running]);
+
+  function applyCustomTime() {
+    const total = Math.max(0, minutesInput) * 60 + Math.max(0, Math.min(59, secondsInput));
+    setRemaining(total);
+    setRunning(false);
+  }
+  function addSeconds(sec: number) {
+    setRemaining(r => Math.max(0, r + sec));
+  }
+  function resetTimer() {
+    const total = Math.max(0, minutesInput) * 60 + Math.max(0, Math.min(59, secondsInput));
+    setRemaining(total);
+    setRunning(false);
+  }
+
+  function onDragStart(e: any) {
+    if (fullscreen) return;
+    dragInfo.current = { startX: e.clientX, startY: e.clientY, origX: position.x, origY: position.y };
+    window.addEventListener("mousemove", onDragMove);
+    window.addEventListener("mouseup", onDragEnd);
+  }
+  function onDragMove(e: MouseEvent) {
+    if (!dragInfo.current) return;
+    const dx = e.clientX - dragInfo.current.startX;
+    const dy = e.clientY - dragInfo.current.startY;
+    setPosition({ x: Math.max(0, dragInfo.current.origX + dx), y: Math.max(0, dragInfo.current.origY + dy) });
+  }
+  function onDragEnd() {
+    dragInfo.current = null;
+    window.removeEventListener("mousemove", onDragMove);
+    window.removeEventListener("mouseup", onDragEnd);
+  }
+  useEffect(() => () => {
+    window.removeEventListener("mousemove", onDragMove);
+    window.removeEventListener("mouseup", onDragEnd);
+  }, []);
+
+  if (!open) return null;
 
   const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
   const ss = String(remaining % 60).padStart(2, "0");
 
+  // สถานะย่อ: ลอยเป็นวงกลมมุมจอ กดเพื่อขยายกลับ ใช้งานได้ต่อเนื่องแม้สลับแท็บ/เมนูอื่น
+  if (minimized) {
+    return (
+      <button
+        onClick={() => setMinimized(false)}
+        className="fixed bottom-24 right-5 z-[75] w-16 h-16 rounded-full bg-gradient-to-br from-cyan-400 to-sky-500 text-white shadow-2xl flex flex-col items-center justify-center font-black hover:scale-105 transition-transform"
+        title="เปิดตัวจับเวลา"
+      >
+        <span className="text-[10px] leading-none">⏱️</span>
+        <span className="tabular-nums text-xs leading-tight">{mm}:{ss}</span>
+      </button>
+    );
+  }
+
+  const wrapperClass = fullscreen
+    ? "fixed inset-0 z-[80] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+    : "fixed z-[75]";
+  const wrapperStyle = fullscreen ? {} : { left: position.x, top: position.y };
+
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-4">
-      <p className="font-black text-slate-700 text-sm mb-3">⏱️ จับเวลา</p>
-      <p className={`text-center text-5xl font-black tabular-nums mb-3 ${remaining === 0 ? "text-red-500" : "text-slate-700"}`}>{mm}:{ss}</p>
-      <div className="flex gap-2 mb-3">
-        {[60, 180, 300, 600].map(sec => (
-          <button key={sec} onClick={() => { setTotalSec(sec); setRemaining(sec); setRunning(false); }}
-            className="flex-1 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-black">{sec / 60} นาที</button>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        <button onClick={() => setRunning(r => !r)} disabled={remaining === 0}
-          className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 text-white font-black text-sm">
-          {running ? "หยุดชั่วคราว" : "เริ่ม"}
+    <div className={wrapperClass} style={wrapperStyle}>
+      <div className={`bg-gradient-to-br from-cyan-400 to-sky-500 rounded-3xl shadow-2xl p-4 ${fullscreen ? "w-full max-w-sm" : "w-72"}`}>
+        <div className="flex items-center justify-between mb-3 cursor-move select-none" onMouseDown={onDragStart}>
+          <p className="text-white font-black text-sm flex items-center gap-1.5">⏱️ จับเวลา</p>
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => setFullscreen(v => !v)} title={fullscreen ? "ย่อกลับ" : "เต็มจอ"} className="w-7 h-7 rounded-lg bg-white/25 hover:bg-white/40 text-white flex items-center justify-center text-xs">
+              {fullscreen ? "⤡" : "⤢"}
+            </button>
+            {!fullscreen && (
+              <button onClick={() => setMinimized(true)} title="ย่อ" className="w-7 h-7 rounded-lg bg-white/25 hover:bg-white/40 text-white flex items-center justify-center text-xs">
+                –
+              </button>
+            )}
+            <button onClick={onClose} title="ปิด" className="w-7 h-7 rounded-lg bg-white/25 hover:bg-white/40 text-white flex items-center justify-center text-xs">
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <div className={`bg-cyan-50 rounded-2xl text-center tabular-nums font-black mb-3 ${fullscreen ? "py-10 text-7xl" : "py-6 text-5xl"} ${remaining === 0 ? "text-red-500" : "text-slate-800"}`}>
+          {mm}:{ss}
+        </div>
+
+        <div className="flex items-center justify-center gap-3 mb-3">
+          <button
+            onClick={() => setRunning(r => !r)}
+            disabled={remaining === 0}
+            className="w-12 h-12 rounded-full bg-white text-emerald-500 flex items-center justify-center text-xl shadow disabled:opacity-50"
+          >
+            {running ? "⏸" : "▶"}
+          </button>
+          <button onClick={resetTimer} className="w-12 h-12 rounded-full bg-white text-red-500 flex items-center justify-center text-xl shadow">
+            ↻
+          </button>
+        </div>
+
+        <div className="flex items-center justify-center gap-2 mb-3">
+          <span className="text-white/90 text-[11px] font-black">SEC:</span>
+          {[5, 10, 30].map(s => (
+            <button key={s} onClick={() => addSeconds(s)} className="px-2.5 py-1 rounded-lg bg-white/25 hover:bg-white/40 text-white text-[11px] font-black">
+              +{s}s
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-white rounded-xl px-2 py-1.5 flex items-center justify-between">
+            <button onClick={() => setMinutesInput(m => Math.max(0, m - 1))} className="text-slate-400 font-black px-1">–</button>
+            <span className="text-[11px] font-black text-slate-600">Minutes: {minutesInput}</span>
+            <button onClick={() => setMinutesInput(m => m + 1)} className="text-slate-400 font-black px-1">+</button>
+          </div>
+          <div className="bg-white rounded-xl px-2 py-1.5 flex items-center justify-between">
+            <button onClick={() => setSecondsInput(s => Math.max(0, s - 5))} className="text-slate-400 font-black px-1">–</button>
+            <span className="text-[11px] font-black text-slate-600">Seconds: {secondsInput}</span>
+            <button onClick={() => setSecondsInput(s => Math.min(59, s + 5))} className="text-slate-400 font-black px-1">+</button>
+          </div>
+        </div>
+        <button onClick={applyCustomTime} className="w-full mt-2 py-2 rounded-xl bg-white/90 hover:bg-white text-sky-600 font-black text-xs">
+          ตั้งเวลาใหม่
         </button>
-        <button onClick={() => { setRunning(false); setRemaining(totalSec); }}
-          className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 font-black text-sm">รีเซ็ต</button>
       </div>
     </div>
   );
 }
 
-function NoiseDetectorBox() {
+/* ---------------- ตัวตรวจจับเสียงดัง: กราฟ + บันทึกเหตุการณ์ + โหมดความไว ---------------- */
+
+function NoiseDetectorPanel({ onClose }: { onClose: () => void }) {
   const [active, setActive] = useState(false);
   const [level, setLevel] = useState(0);
-  const [threshold, setThreshold] = useState(60);
+  const [history, setHistory] = useState<number[]>([]);
+  const [modeKey, setModeKey] = useState<string>("group");
+  const [customThreshold, setCustomThreshold] = useState(60);
+  const [sustainSec, setSustainSec] = useState(0);
+  const [log, setLog] = useState<{ time: string; level: number; limit: number }[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
+  const sampleIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sustainIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const levelRef = useRef(0);
+
+  const threshold = modeKey === "custom" ? customThreshold : (SENSITIVITY_MODES.find(m => m.key === modeKey)?.threshold ?? 55);
+  const thresholdRef = useRef(threshold);
+  useEffect(() => { thresholdRef.current = threshold; }, [threshold]);
 
   async function start() {
     try {
@@ -1208,41 +1365,158 @@ function NoiseDetectorBox() {
       function loop() {
         analyser.getByteFrequencyData(data);
         const avg = data.reduce((a, b) => a + b, 0) / data.length;
-        setLevel(Math.min(100, Math.round((avg / 255) * 100)));
+        const pct = Math.min(100, Math.round((avg / 255) * 100));
+        levelRef.current = pct;
+        setLevel(pct);
         rafRef.current = requestAnimationFrame(loop);
       }
       loop();
       setActive(true);
+
+      sampleIntervalRef.current = setInterval(() => {
+        setHistory(prev => {
+          const next = [...prev, levelRef.current];
+          return next.length > 48 ? next.slice(next.length - 48) : next;
+        });
+      }, 300);
+
+      sustainIntervalRef.current = setInterval(() => {
+        setSustainSec(prev => {
+          if (levelRef.current > thresholdRef.current) {
+            const next = prev + 1;
+            if (next >= 5) {
+              playBellSound();
+              const now = new Date();
+              const timeStr = now.toLocaleTimeString("th-TH", { hour12: false });
+              setLog(l => [{ time: timeStr, level: levelRef.current, limit: thresholdRef.current }, ...l].slice(0, 20));
+              return 0;
+            }
+            return next;
+          }
+          return 0;
+        });
+      }, 1000);
     } catch {
       alert("ไม่สามารถเข้าถึงไมโครโฟนได้ กรุณาอนุญาตการใช้งานไมค์");
     }
   }
+
   function stop() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (sampleIntervalRef.current) clearInterval(sampleIntervalRef.current);
+    if (sustainIntervalRef.current) clearInterval(sustainIntervalRef.current);
     streamRef.current?.getTracks().forEach(t => t.stop());
     setActive(false);
     setLevel(0);
+    setSustainSec(0);
   }
+
   useEffect(() => () => stop(), []);
 
-  const loud = level >= threshold;
-
   return (
-    <div className={`bg-white rounded-2xl border-2 p-4 transition-colors ${loud ? "border-red-400" : "border-slate-200"}`}>
-      <p className="font-black text-slate-700 text-sm mb-3">🔊 ตรวจจับเสียงดัง</p>
-      <div className="h-4 rounded-full bg-slate-100 overflow-hidden mb-2">
-        <div className={`h-full transition-all ${loud ? "bg-red-400" : "bg-emerald-400"}`} style={{ width: `${level}%` }} />
+    <div className="fixed inset-0 z-[65] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 pt-5">
+          <div>
+            <h3 className="font-black text-slate-800 text-2xl flex items-center gap-2">🔊 Noise Detector</h3>
+            {sustainSec > 0 && (
+              <p className="text-amber-500 font-bold text-xs mt-1 flex items-center gap-1">⚠️ Getting loud... {sustainSec}s</p>
+            )}
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center">✕</button>
+        </div>
+
+        <div className="flex flex-col lg:flex-row gap-4 p-6">
+          {/* กราฟระดับเสียง */}
+          <div className="flex-1 relative rounded-2xl bg-slate-50 border border-slate-100 h-64 sm:h-80 overflow-hidden">
+            <div className="absolute left-0 right-0 border-t-2 border-dashed border-red-300" style={{ top: `${100 - threshold}%` }}>
+              <span className="absolute right-2 -top-5 text-[10px] font-black text-red-400 bg-red-50 px-1.5 py-0.5 rounded">Limit: {threshold}%</span>
+            </div>
+            <div className="absolute inset-0 flex items-end gap-1 px-3 pb-3">
+              {history.length === 0 && (
+                <p className="w-full text-center text-slate-300 font-bold text-sm self-center">กดเริ่มตรวจจับเพื่อดูกราฟเสียง</p>
+              )}
+              {history.map((h, i) => (
+                <div
+                  key={i}
+                  className={`flex-1 rounded-t-sm transition-all ${h > threshold ? "bg-red-400" : "bg-sky-300"}`}
+                  style={{ height: `${Math.max(2, h)}%` }}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* บันทึกเหตุการณ์เสียงดัง */}
+          <div className="w-full lg:w-72 shrink-0 rounded-2xl border border-slate-100 bg-white flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+              <p className="font-black text-slate-700 text-sm flex items-center gap-1.5">🕓 Noise Log</p>
+              <button onClick={() => setLog([])} className="text-red-400 hover:text-red-500 text-xs font-black flex items-center gap-1">🗑 Clear</button>
+            </div>
+            <div className="flex-1 overflow-y-auto max-h-64">
+              <div className="grid grid-cols-3 gap-2 px-4 py-2 text-[10px] font-black text-slate-400">
+                <span>Time</span><span className="text-center">Level</span><span className="text-right">Limit</span>
+              </div>
+              {log.length === 0 ? (
+                <p className="text-center text-slate-300 text-xs font-bold py-8">ยังไม่มีบันทึกเสียงดัง</p>
+              ) : (
+                log.map((l, i) => (
+                  <div key={i} className="grid grid-cols-3 gap-2 px-4 py-1.5 text-xs font-bold">
+                    <span className="text-slate-500">{l.time}</span>
+                    <span className="text-center text-red-500 font-black">{l.level}%</span>
+                    <span className="text-right text-slate-400">{l.limit}%</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* แถบควบคุมด้านล่าง */}
+        <div className="flex flex-col sm:flex-row items-center gap-4 px-6 py-5 border-t border-slate-100 bg-slate-50">
+          <button
+            onClick={active ? stop : start}
+            className={`px-6 py-3 rounded-2xl font-black text-sm text-white shrink-0 flex items-center gap-2 ${active ? "bg-red-500 hover:bg-red-600" : "bg-emerald-500 hover:bg-emerald-600"}`}
+          >
+            {active ? "🔇 STOP" : "🎙️ START"}
+          </button>
+
+          <div className="flex-1 w-full">
+            <p className="text-[10px] font-black text-slate-400 mb-1.5 flex items-center gap-1">⚙️ Sensitivity Mode</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {SENSITIVITY_MODES.map(m => (
+                <button
+                  key={m.key}
+                  onClick={() => setModeKey(m.key)}
+                  className={`px-4 py-2 rounded-xl font-black text-xs ${modeKey === m.key ? "bg-blue-500 text-white" : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-100"}`}
+                >
+                  {m.label}
+                </button>
+              ))}
+              <button
+                onClick={() => setModeKey("custom")}
+                className={`px-4 py-2 rounded-xl font-black text-xs ${modeKey === "custom" ? "bg-blue-500 text-white" : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-100"}`}
+              >
+                Custom
+              </button>
+              {modeKey === "custom" && (
+                <input
+                  type="range" min={10} max={95} value={customThreshold}
+                  onChange={e => setCustomThreshold(Number(e.target.value))}
+                  className="w-28"
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col items-center gap-1 shrink-0">
+            <p className="text-[10px] font-black text-slate-400">Volume</p>
+            <div className="w-4 h-20 rounded-full bg-slate-200 overflow-hidden flex flex-col-reverse">
+              <div className={`w-full transition-all ${level > threshold ? "bg-red-400" : "bg-emerald-400"}`} style={{ height: `${level}%` }} />
+            </div>
+            <p className="text-[10px] font-black text-slate-600">{level}%</p>
+          </div>
+        </div>
       </div>
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-[10px] text-slate-400 font-bold">ระดับเตือน</span>
-        <input type="range" min={20} max={100} value={threshold} onChange={e => setThreshold(Number(e.target.value))} className="flex-1" />
-        <span className="text-[10px] text-slate-400 font-bold">{threshold}</span>
-      </div>
-      {loud && <p className="text-center text-red-500 font-black text-sm mb-2 animate-pulse">⚠️ เสียงดังเกินไป!</p>}
-      <button onClick={active ? stop : start}
-        className={`w-full py-2.5 rounded-xl font-black text-sm text-white ${active ? "bg-red-500 hover:bg-red-600" : "bg-emerald-500 hover:bg-emerald-600"}`}>
-        {active ? "หยุดตรวจจับ" : "เริ่มตรวจจับ (ต้องอนุญาตไมค์)"}
-      </button>
     </div>
   );
 }
@@ -1289,12 +1563,48 @@ function GroupingBox({ students }: { students: Student[] }) {
   );
 }
 
-function ToolsTab({ students }: { students: Student[] }) {
+/* แถบเครื่องมือ: จัดเป็นแถวเดียว 3 ช่อง เลือกกดเครื่องมือไหนก็ได้
+   - จับเวลา: เปิดวิดเจ็ตลอย (FloatingTimer) ที่หน้าเพจหลัก ใช้ต่อได้แม้สลับแท็บ/เมนูอื่น
+   - ตรวจจับเสียงดัง / สร้างกลุ่ม: เปิดแผงเครื่องมือด้านล่างในแท็บนี้ */
+function ToolsTab({ students, onOpenTimer }: { students: Student[]; onOpenTimer: () => void }) {
+  const [activeTool, setActiveTool] = useState<"noise" | "group" | null>(null);
+
+  const TOOL_CARDS: { key: "timer" | "noise" | "group"; label: string; icon: string; bg: string }[] = [
+    { key: "timer", label: "จับเวลา", icon: "⏱️", bg: "bg-gradient-to-br from-cyan-400 to-sky-500" },
+    { key: "noise", label: "ตรวจจับเสียงดัง", icon: "🔊", bg: "bg-gradient-to-br from-rose-400 to-red-500" },
+    { key: "group", label: "สร้างกลุ่ม", icon: "👨‍👩‍👧‍👦", bg: "bg-gradient-to-br from-emerald-400 to-teal-500" },
+  ];
+
+  function handleCardClick(key: "timer" | "noise" | "group") {
+    if (key === "timer") {
+      onOpenTimer();
+      return;
+    }
+    setActiveTool(prev => (prev === key ? null : key));
+  }
+
   return (
     <div className="space-y-4">
-      <TimerBox />
-      <NoiseDetectorBox />
-      <GroupingBox students={students} />
+      <div className="grid grid-cols-3 gap-3">
+        {TOOL_CARDS.map(c => (
+          <button
+            key={c.key}
+            onClick={() => handleCardClick(c.key)}
+            className={`rounded-2xl ${c.bg} text-white p-4 sm:p-5 flex flex-col items-center justify-center gap-1.5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all ${
+              activeTool === c.key ? "ring-4 ring-white/60" : ""
+            }`}
+          >
+            <span className="text-2xl sm:text-3xl">{c.icon}</span>
+            <span className="font-black text-xs sm:text-sm text-center">{c.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {activeTool === "noise" && <NoiseDetectorPanel onClose={() => setActiveTool(null)} />}
+      {activeTool === "group" && <GroupingBox students={students} />}
+      {activeTool === null && (
+        <p className="text-center text-slate-300 text-xs font-bold py-6">เลือกเครื่องมือด้านบนเพื่อเริ่มใช้งาน</p>
+      )}
     </div>
   );
 }
@@ -1386,6 +1696,9 @@ export default function SmartClassRosterPage() {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [timetableEntryId, setTimetableEntryId] = useState("");
   const [homeroomMap, setHomeroomMap] = useState<Record<string, { status: "present" | "absent" | "late" | "leave" }>>({});
+
+  // --- ตัวจับเวลาลอย: เปิด/ปิดจากหน้าเพจหลัก ให้ใช้งานได้ต่อเนื่องแม้สลับแท็บ/เมนูอื่น ---
+  const [timerOpen, setTimerOpen] = useState(false);
 
   // --- สุ่มชื่อ: โหมด + dropdown จากแท็บล่าง ---
   const [randomMode, setRandomMode] = useState<RandomMode>("circle");
@@ -1680,6 +1993,9 @@ export default function SmartClassRosterPage() {
         />
       )}
 
+      {/* ตัวจับเวลาลอย: อยู่นอกเนื้อหาของแท็บ จึงใช้งานได้ต่อเนื่องแม้สลับแท็บ/เมนูอื่น */}
+      <FloatingTimer open={timerOpen} onClose={() => setTimerOpen(false)} />
+
       <div className="bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-4 pt-4 pb-6">
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
@@ -1853,7 +2169,9 @@ export default function SmartClassRosterPage() {
         {!bannerMenu && tab === "random" && (
           <RandomPickerTab students={students} mode={randomMode} onOpenScore={s => setScoreTargets([s])} />
         )}
-        {!bannerMenu && tab === "tools" && <ToolsTab students={students} />}
+        {!bannerMenu && tab === "tools" && (
+          <ToolsTab students={students} onOpenTimer={() => setTimerOpen(true)} />
+        )}
       </main>
 
       {/* แท็บด้านล่าง */}

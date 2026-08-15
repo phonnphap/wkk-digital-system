@@ -200,12 +200,6 @@ export default function AttendanceOverviewTool({
         </div>
       </div>
 
-      {/* การ์ด Default */}
-      <div className="inline-block px-4 py-3 rounded-xl bg-gradient-to-r from-sky-500 to-blue-500 text-white">
-        <p className="font-black text-sm">Default</p>
-        <p className="text-[11px] opacity-90 font-bold">Attendance table for {subjectTitle}</p>
-      </div>
-
       {/* Tabs */}
       <div className="flex items-center gap-2">
         <button
