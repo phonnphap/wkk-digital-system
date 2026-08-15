@@ -10,7 +10,7 @@ const supabase = createClient();
    ========================================================================= */
 
 type Role = "admin" | "homeroom_teacher" | "subject_teacher" | "unknown";
-type Scope = "classroom" | "grade_level";
+type Scope = "classroom" | "grade_level" | "subject_all" | "school";
 
 type Totals = {
   studentCount: number;
@@ -55,31 +55,33 @@ type AcademicYear = { id: string; year_name: string; semester: number; is_curren
 type ClassroomInfo = { id: string; room_name?: string | null; grade_group?: string | null; grade_level_id?: string | null };
 
 /* =========================================================================
-   Component — ฝังอยู่ในหน้าของ "วิชา + ห้องปัจจุบัน" เสมอ
+   Component
+   - subjectId / classroomId ล็อกตายตัวจากหน้าที่เข้ามาเสมอ (เหมือนเดิม)
+   - isAdmin: ถ้า true จะเห็นปุ่มขอบเขตเพิ่ม "รายวิชานี้ (ทุกห้องทั้งโรงเรียน)" และ "ทั้งโรงเรียน"
    ========================================================================= */
 
 export default function InsightsTool({
   currentUserId,
-  subjectId,     // วิชาปัจจุบัน (ล็อกตายตัวจากหน้าที่เข้ามา ไม่ให้เลือกเอง)
-  classroomId,   // ห้องปัจจุบัน (ล็อกตายตัวจากหน้าที่เข้ามา)
+  subjectId,
+  classroomId,
+  isAdmin = false,
 }: {
   currentUserId?: string;
   subjectId: string;
   classroomId: string;
+  isAdmin?: boolean;
 }) {
   const [role, setRole] = useState<Role>("unknown");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState<InsightsResponse | null>(null);
 
-  // ขอบเขตการดู: เฉพาะห้องปัจจุบัน หรือ ทุกห้องในสายชั้นเดียวกัน (วิชาเดียวกันเสมอ)
   const [scope, setScope] = useState<Scope>("classroom");
 
   const [currentClassroom, setCurrentClassroom] = useState<ClassroomInfo | null>(null);
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
   const [academicYearId, setAcademicYearId] = useState<string>("");
 
-  // โหลดข้อมูลห้องปัจจุบัน (เพื่อรู้ grade_level_id สำหรับโหมด "สายชั้น") + ปีการศึกษา
   useEffect(() => {
     if (!classroomId) return;
     supabase
@@ -105,23 +107,21 @@ export default function InsightsTool({
   }, []);
 
   async function loadInsights() {
-    if (!currentUserId || !subjectId || !classroomId) return;
-    // โหมด "สายชั้น" ต้องรู้ grade_level_id ของห้องปัจจุบันก่อนถึงจะยิง query ได้
+    if (!currentUserId || !classroomId) return;
+    if (scope !== "school" && !subjectId) return;
     if (scope === "grade_level" && !currentClassroom?.grade_level_id) return;
 
     setLoading(true);
     setError("");
     try {
-      const params = new URLSearchParams({
-        requester_id: currentUserId,
-        subject_id: subjectId,   // ล็อกวิชาปัจจุบันเสมอ ไม่ว่าจะเลือก scope ไหน
-        scope,
-      });
+      const params = new URLSearchParams({ requester_id: currentUserId, scope });
+      if (scope !== "school") params.set("subject_id", subjectId);
       if (scope === "classroom") {
         params.set("classroom_id", classroomId);
-      } else {
+      } else if (scope === "grade_level") {
         params.set("grade_level_id", currentClassroom!.grade_level_id!);
       }
+      // subject_all / school -> ไม่ล็อกห้อง/สายชั้น
       if (academicYearId) params.set("academic_year_id", academicYearId);
 
       const res = await fetch(`/api/insights/overview?${params.toString()}`);
@@ -141,7 +141,15 @@ export default function InsightsTool({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserId, subjectId, classroomId, scope, currentClassroom, academicYearId]);
 
-  const scopeLabel = scope === "classroom" ? "ห้องเรียนนี้ (วิชานี้)" : "ทุกห้องในสายชั้นเดียวกัน (วิชานี้)";
+  const scopeLabel =
+    scope === "classroom" ? "ห้องเรียนนี้ (วิชานี้)"
+    : scope === "grade_level" ? "ทุกห้องในสายชั้นเดียวกัน (วิชานี้)"
+    : scope === "subject_all" ? "วิชานี้ ทุกห้องทั้งโรงเรียน"
+    : "ทั้งโรงเรียน (ทุกวิชา ทุกห้อง)";
+
+  const isMultiClassroomScope = scope !== "classroom";
+  const isMultiSubjectScope = scope === "school";
+
   const bandColor = (band: string) => {
     switch (band) {
       case "0-49": return "bg-red-400";
@@ -156,10 +164,16 @@ export default function InsightsTool({
 
   return (
     <div className="space-y-4">
-      {/* ตัวเลือกขอบเขต: ห้องเรียนนี้ vs สายชั้นเดียวกัน */}
+      {/* ตัวเลือกขอบเขต */}
       <div className="bg-white rounded-2xl border border-slate-100 p-3 flex items-center gap-2 flex-wrap">
         <ScopeButton active={scope === "classroom"} onClick={() => setScope("classroom")} label={`🏠 ห้องนี้ (${currentClassroom?.grade_group ?? ""}${currentClassroom?.room_name ?? ""})`} />
         <ScopeButton active={scope === "grade_level"} onClick={() => setScope("grade_level")} label="🎓 ทุกห้องในสายชั้นเดียวกัน" />
+        {isAdmin && (
+          <>
+            <ScopeButton active={scope === "subject_all"} onClick={() => setScope("subject_all")} label="📘 วิชานี้ (ทุกห้องทั้งโรงเรียน)" />
+            <ScopeButton active={scope === "school"} onClick={() => setScope("school")} label="🏫 ทั้งโรงเรียน" />
+          </>
+        )}
         <span className="text-slate-300 text-[11px] font-bold ml-auto">ขอบเขต: {scopeLabel}</span>
       </div>
 
@@ -170,11 +184,10 @@ export default function InsightsTool({
       ) : !data ? null : data.totals.studentCount === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
           <p className="text-3xl mb-2">📭</p>
-          <p className="font-bold text-sm">ไม่มีข้อมูลนักเรียนในขอบเขตที่เลือก ลองสลับไปดู "{scope === "classroom" ? "ทุกห้องในสายชั้นเดียวกัน" : "ห้องนี้"}"</p>
+          <p className="font-bold text-sm">ไม่มีข้อมูลนักเรียนในขอบเขตที่เลือก ลองสลับไปดูขอบเขตอื่น</p>
         </div>
       ) : (
         <>
-          {/* การ์ดสรุป 4 ใบ */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <StatCard icon="⚠️" label="นักเรียนกลุ่มเสี่ยง" value={`${data.totals.atRiskCount}`} sub={`${data.totals.atRiskHigh} สูง · ${data.totals.atRiskMedium} ปานกลาง`} tone="rose" />
             <StatCard icon="🕐" label="ส่งงานตรงเวลา" value={data.totals.onTimeRate === null ? "-" : `${data.totals.onTimeRate.toFixed(0)}%`} sub={`${data.totals.onTimePendingCount} รอตรวจ`} tone="sky" />
@@ -183,13 +196,12 @@ export default function InsightsTool({
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* นักเรียนกลุ่มเสี่ยง — กว้าง 2 คอลัมน์ */}
             <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 p-4 sm:p-6">
               <h3 className="font-black text-slate-700 text-sm mb-3 flex items-center gap-1.5">⚠️ นักเรียนกลุ่มเสี่ยง</h3>
               {data.atRiskStudents.length === 0 ? (
                 <div className="text-center py-10">
                   <p className="text-3xl mb-2">🎉</p>
-                  <p className="text-emerald-500 font-black text-sm">ไม่มีนักเรียนกลุ่มเสี่ยงในปีนี้</p>
+                  <p className="text-emerald-500 font-black text-sm">ไม่มีนักเรียนกลุ่มเสี่ยงในขอบเขตนี้</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -223,7 +235,6 @@ export default function InsightsTool({
               )}
             </div>
 
-            {/* คอลัมน์ขวา: กระจายคะแนน + อันดับห้อง */}
             <div className="space-y-4">
               <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-5">
                 <h3 className="font-black text-slate-700 text-sm mb-3 flex items-center gap-1.5">📈 การกระจายของคะแนน</h3>
@@ -238,10 +249,24 @@ export default function InsightsTool({
                 </div>
               </div>
 
-              {scope === "grade_level" && (
+              {isMultiClassroomScope && (
                 <RankingCard
                   title="🏠 อันดับห้องเรียน"
                   rows={data.classroomRanking.map(c => ({ id: c.classroomId, name: c.name, sub: `${c.studentCount} คน`, riskPercent: c.riskPercent }))}
+                />
+              )}
+
+              {isMultiSubjectScope && (
+                <RankingCard
+                  title="📘 อันดับรายวิชา"
+                  rows={data.subjectRanking.map(s => ({ id: s.subjectId, name: s.name, sub: `${s.studentCount} คน`, riskPercent: s.riskPercent }))}
+                />
+              )}
+
+              {isAdmin && data.teacherRanking.length > 0 && (
+                <RankingCard
+                  title="🧑‍🏫 อันดับครูผู้สอน"
+                  rows={data.teacherRanking.map(t => ({ id: t.teacherId, name: t.name, sub: `${t.studentCount} คน`, riskPercent: t.riskPercent }))}
                 />
               )}
             </div>
@@ -270,29 +295,16 @@ function ScopeButton({ active, onClick, label }: { active: boolean; onClick: () 
 }
 
 function StatCard({
-  icon,
-  label,
-  value,
-  sub,
-  tone,
+  icon, label, value, sub, tone,
 }: {
-  icon: string;
-  label: string;
-  value: string;
-  sub: string;
-  tone: "rose" | "emerald" | "sky" | "amber";
+  icon: string; label: string; value: string; sub: string; tone: "rose" | "emerald" | "sky" | "amber";
 }) {
   const toneMap: Record<string, string> = {
-    rose: "bg-rose-50 text-rose-500",
-    emerald: "bg-emerald-50 text-emerald-500",
-    sky: "bg-sky-50 text-sky-500",
-    amber: "bg-amber-50 text-amber-500",
+    rose: "bg-rose-50 text-rose-500", emerald: "bg-emerald-50 text-emerald-500",
+    sky: "bg-sky-50 text-sky-500", amber: "bg-amber-50 text-amber-500",
   };
   const valueToneMap: Record<string, string> = {
-    rose: "text-rose-600",
-    emerald: "text-emerald-600",
-    sky: "text-sky-600",
-    amber: "text-amber-600",
+    rose: "text-rose-600", emerald: "text-emerald-600", sky: "text-sky-600", amber: "text-amber-600",
   };
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-4 flex items-start justify-between">

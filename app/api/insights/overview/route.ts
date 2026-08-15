@@ -5,43 +5,34 @@ import { createAdminClient } from "@/lib/supabase/admin";
    GET /api/insights/overview
    -------------------------------------------------------------------------
    Query params:
-     requester_id     : string (users.id)  -- บังคับ ใช้เช็ก role/สิทธิ์
-     subject_id        : string  -- บังคับเสมอ (วิชาปัจจุบันของหน้าที่เข้ามา)
-     scope             : "classroom" | "grade_level"  (default: "classroom")
+     requester_id     : string (users.id)  -- บังคับ
+     subject_id        : string  -- บังคับเมื่อ scope != "school"
+     scope             : "classroom" | "grade_level" | "subject_all" | "school"
      classroom_id       : string  -- บังคับเมื่อ scope = "classroom"
      grade_level_id     : string  -- บังคับเมื่อ scope = "grade_level"
-     academic_year_id   : string  -- แนะนำให้ส่งเสมอ ใช้กรอง subject_sections/classrooms ตามปีการศึกษา
+     academic_year_id   : string  -- แนะนำให้ส่งเสมอ
 
-   ⚠️ ASSUMPTIONS เกี่ยวกับ schema (ยืนยันแล้วบางส่วนจากการตรวจสคีมาจริง):
-     - subjects(id, subject_code, name_th, name_en, credit_hours, subject_group, created_at)
-       ⚠️ ไม่มีคอลัมน์ created_by/academic_year/semester — ยืนยันแล้วจากสคีมาจริง
-     - subject_sections(id, subject_id, classroom_id, academic_year_id, teacher_id,
-       co_teacher_id, join_code, is_active, created_by, created_at) — ยืนยันแล้ว
-     - classrooms(id, grade_level_id, room_number, room_name, homeroom_teacher_id,
-       academic_year_id, student_count, created_at, grade_group, homeroom_teacher_2_id,
-       schedule_type, school_id) — ยืนยันแล้ว
-     - academic_years(id, year_name, semester, start_date, end_date, is_current, created_at) — ยืนยันแล้ว
-     - users(id, role, extra_roles, full_name, first_name, last_name)
-       ⚠️ ยังไม่ยืนยัน — ก่อนหน้านี้ยืนยันว่าตารางโปรไฟล์จริงคือ `profiles(id, email, full_name)`
-       ถ้าระบบ role/สิทธิ์ของครู-แอดมินอยู่ใน `profiles` ไม่ใช่ `users` ต้องเปลี่ยน 2 จุดที่ query `users` ด้านล่าง
-     - students(id, prefix, first_name, last_name, seat_number, classroom_id)
-     - assignments(id, subject_section_id, max_score, due_date, assigned_at)
-     - assignment_submissions(id, assignment_id, student_id, status, score, submitted_at)
-     - attendance_records(student_id, classroom_id, status, attendance_date)
-       ผูกกับ classroom_id ไม่ใช่รายวิชา จึงกรองช่วงวันที่ตามปีการศึกษาที่เลือก (start_date/end_date)
-       เพื่อไม่ให้ปนข้อมูลข้ามปี
+   scope ใหม่ (เฉพาะ role = admin เท่านั้น):
+     - "subject_all" : วิชาเดียวกัน (จาก subject_id) แต่ดูทุกห้องทั้งโรงเรียน ไม่ล็อกสายชั้น
+     - "school"      : ทั้งโรงเรียน ทุกวิชา ทุกห้อง (ไม่ต้องส่ง subject_id)
 
-   เกณฑ์ "กลุ่มเสี่ยง" (แก้ค่าคงที่ด้านล่างได้ภายหลัง):
-     - อัตราเข้าเรียน < 80%  หรือ
-     - คะแนนเฉลี่ย (%) < 50
-     ระดับความเสี่ยง: เข้าเงื่อนไข 2 ข้อ = สูง, เข้าเงื่อนไข 1 ข้อ = ปานกลาง
+   ⚠️ แก้บั๊ก (2026-08): เดิม fetchAttendanceWithFallback() อ่านจาก attendance_records
+   (เช็กชื่อโฮมรูม ผูกกับ classroom_id) เพียงอย่างเดียว ทำให้ห้องที่ครูเช็กชื่อผ่านหน้า
+   "เช็กชื่อ" ของรายวิชา (บันทึกลงตาราง subject_attendance ผูกกับ timetable_entry_id
+   ซึ่งอ้างอิงกลับไปที่ subject_section_id) ไม่ถูกนับเลย -> attendanceRate ขึ้น null เสมอ
+   แก้เป็น: ดึงจาก subject_attendance ผ่าน timetable_entries ของ section ในขอบเขตนี้ก่อน
+   เป็นหลัก แล้วค่อย fallback ไปที่ attendance_records (โฮมรูม) เฉพาะตอนที่ subject_attendance
+   ว่างจริง ๆ (เผื่อบางห้องยังไม่เคยเช็กชื่อรายวิชาเลย)
+   ⚠️ ตรวจสอบ: query นี้ ASSUME ว่า timetable_entries มีคอลัมน์ subject_section_id
+   (ยืนยันจากการใช้งานจริงใน periods API และ AttendanceTool.tsx) และ subject_attendance
+   มีคอลัมน์ timetable_entry_id, student_id, status, attendance_date
    ========================================================================= */
 
-const ATTENDANCE_RISK_THRESHOLD = 0.8; // เข้าเรียน < 80% ถือว่าเสี่ยง
-const SCORE_RISK_THRESHOLD = 50; // คะแนนเฉลี่ย(%) < 50 ถือว่าเสี่ยง
+const ATTENDANCE_RISK_THRESHOLD = 0.8;
+const SCORE_RISK_THRESHOLD = 50;
 
 type Role = "admin" | "homeroom_teacher" | "subject_teacher" | "unknown";
-type Scope = "classroom" | "grade_level";
+type Scope = "classroom" | "grade_level" | "subject_all" | "school";
 
 function emptyResult(role: Role) {
   return {
@@ -70,7 +61,7 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient();
   const { searchParams } = new URL(req.url);
   const requesterId = searchParams.get("requester_id");
-  const subjectId = searchParams.get("subject_id");
+  const subjectId = searchParams.get("subject_id"); // optional เมื่อ scope = "school"
   const scope = (searchParams.get("scope") ?? "classroom") as Scope;
   const classroomIdParam = searchParams.get("classroom_id");
   const gradeLevelIdParam = searchParams.get("grade_level_id");
@@ -79,7 +70,7 @@ export async function GET(req: NextRequest) {
   if (!requesterId) {
     return NextResponse.json({ error: "missing requester_id" }, { status: 400 });
   }
-  if (!subjectId) {
+  if (scope !== "school" && !subjectId) {
     return NextResponse.json({ error: "missing subject_id" }, { status: 400 });
   }
   if (scope === "classroom" && !classroomIdParam) {
@@ -90,40 +81,39 @@ export async function GET(req: NextRequest) {
   }
 
   // 1) หา role ของผู้ขอข้อมูล
-const { data: requester, error: userErr } = await admin
-  .from("users")
-  .select("id, role, is_homeroom, is_subject_teacher, full_name, first_name, last_name")
-  .eq("id", requesterId)
-  .maybeSingle();
+  const { data: requester, error: userErr } = await admin
+    .from("users")
+    .select("id, role, is_homeroom, is_subject_teacher, full_name, first_name, last_name")
+    .eq("id", requesterId)
+    .maybeSingle();
 
-if (userErr || !requester) {
-  return NextResponse.json({ error: "ไม่พบผู้ใช้" }, { status: 404 });
-}
+  if (userErr || !requester) {
+    return NextResponse.json({ error: "ไม่พบผู้ใช้" }, { status: 404 });
+  }
 
-const ADMIN_ROLES = ["admin", "director", "deputy_director"];
-const isAdmin = ADMIN_ROLES.includes(requester.role);
-const isHomeroom = requester.is_homeroom === true;
-const isSubjectTeacher = requester.is_subject_teacher === true;
+  const ADMIN_ROLES = ["admin", "director", "deputy_director", "executive"];
+  const isAdmin = ADMIN_ROLES.includes(requester.role);
+  const isHomeroom = requester.is_homeroom === true;
+  const isSubjectTeacher = requester.is_subject_teacher === true;
 
-// ลำดับความสำคัญ: admin > subject_teacher > homeroom_teacher
-// (ครูคนหนึ่งอาจเป็นทั้งสองอย่างพร้อมกัน แต่หน้า Insights นี้ฝังอยู่ในบริบท "รายวิชา" เสมอ
-//  จึงให้สิทธิ์แบบ subject_teacher เป็นตัวตัดสินก่อน ถ้ามีทั้งสองบทบาท)
-const role: Role = isAdmin
-  ? "admin"
-  : isSubjectTeacher
-  ? "subject_teacher"
-  : isHomeroom
-  ? "homeroom_teacher"
-  : "unknown";
+  const role: Role = isAdmin
+    ? "admin"
+    : isSubjectTeacher
+    ? "subject_teacher"
+    : isHomeroom
+    ? "homeroom_teacher"
+    : "unknown";
 
-if (role === "unknown") {
-  return NextResponse.json({ error: "ไม่มีสิทธิ์เข้าถึงข้อมูลเชิงลึก" }, { status: 403 });
-}
+  if (role === "unknown") {
+    return NextResponse.json({ error: "ไม่มีสิทธิ์เข้าถึงข้อมูลเชิงลึก" }, { status: 403 });
+  }
+
+  // scope ใหม่ทั้งสอง เฉพาะแอดมิน/ผู้บริหารเท่านั้น
+  if ((scope === "subject_all" || scope === "school") && role !== "admin") {
+    return NextResponse.json({ error: "เฉพาะแอดมิน/ผู้บริหารเท่านั้นที่ดูขอบเขตนี้ได้" }, { status: 403 });
+  }
 
   try {
-    /* -----------------------------------------------------------------
-       2) หาช่วงวันที่ของปีการศึกษา (ถ้าระบุ) ไว้กรอง attendance/assignments
-       ----------------------------------------------------------------- */
     let yearStart: string | null = null;
     let yearEnd: string | null = null;
     if (academicYearId) {
@@ -137,81 +127,66 @@ if (role === "unknown") {
     }
 
     /* -----------------------------------------------------------------
-       3) หา classroom ids ตามขอบเขตที่ขอ (ห้องเดียว หรือ ทุกห้องในสายชั้นเดียวกัน)
+       3) หา classroom ids ตามขอบเขต
+       classroom   -> ห้องเดียว
+       grade_level -> ทุกห้องในสายชั้นเดียวกัน
+       subject_all -> ทุกห้องทั้งโรงเรียน (จะถูกกรองอีกทีด้วย subject_id ตอนหา sections)
+       school      -> ทุกห้องทั้งโรงเรียน ทุกวิชา
        ----------------------------------------------------------------- */
     async function fetchClassroomsWithFallback() {
-  let baseQuery = admin
-    .from("classrooms")
-    .select("id, room_name, grade_group, grade_level_id, homeroom_teacher_id, homeroom_teacher_2_id");
+      function buildQuery() {
+        let q = admin
+          .from("classrooms")
+          .select("id, room_name, grade_group, grade_level_id, homeroom_teacher_id, homeroom_teacher_2_id");
+        if (scope === "classroom") q = q.eq("id", classroomIdParam!);
+        else if (scope === "grade_level") q = q.eq("grade_level_id", gradeLevelIdParam!);
+        return q;
+      }
+      if (academicYearId) {
+        const { data } = await buildQuery().eq("academic_year_id", academicYearId);
+        if (data && data.length > 0) return data;
+      }
+      const { data } = await buildQuery();
+      return data ?? [];
+    }
 
-  if (scope === "classroom") {
-    baseQuery = baseQuery.eq("id", classroomIdParam!);
-  } else {
-    baseQuery = baseQuery.eq("grade_level_id", gradeLevelIdParam!);
-  }
-
-  if (academicYearId) {
-    const { data } = await baseQuery.eq("academic_year_id", academicYearId);
-    if (data && data.length > 0) return data;
-    // Fallback: ห้องนี้/สายชั้นนี้ผูกกับปีการศึกษาอื่น (ไม่ตรงกับปีที่เลือก/ปีปัจจุบัน)
-    // ดึงโดยไม่กรองปีการศึกษาแทน ดีกว่าแสดงผลว่างทั้งที่ห้องมีอยู่จริง
-  }
-
-  let fallbackQuery = admin
-    .from("classrooms")
-    .select("id, room_name, grade_group, grade_level_id, homeroom_teacher_id, homeroom_teacher_2_id");
-  if (scope === "classroom") {
-    fallbackQuery = fallbackQuery.eq("id", classroomIdParam!);
-  } else {
-    fallbackQuery = fallbackQuery.eq("grade_level_id", gradeLevelIdParam!);
-  }
-  const { data } = await fallbackQuery;
-  return data ?? [];
-}
-
-let classrooms = await fetchClassroomsWithFallback();
-if (classrooms.length === 0) return NextResponse.json(emptyResult(role));
+    let classrooms = await fetchClassroomsWithFallback();
+    if (classrooms.length === 0) return NextResponse.json(emptyResult(role));
 
     const scopeClassroomIds = classrooms.map(c => c.id);
 
     /* -----------------------------------------------------------------
-       4) subject_sections ของ "วิชาปัจจุบัน" ในห้องที่อยู่ในขอบเขต
-          ไม่ใช่ admin -> จำกัดเฉพาะ section ที่ตัวเองสอน (teacher_id/co_teacher_id)
+       4) subject_sections ในขอบเขต
        ----------------------------------------------------------------- */
     async function fetchSectionsWithFallback() {
-  function buildBaseQuery() {
-    let q = admin
-      .from("subject_sections")
-      .select("id, subject_id, classroom_id, academic_year_id, teacher_id, co_teacher_id")
-      .eq("subject_id", subjectId)
-      .in("classroom_id", scopeClassroomIds);
-    if (!isAdmin) {
-      q = q.or(`teacher_id.eq.${requesterId},co_teacher_id.eq.${requesterId}`);
+      function buildBaseQuery() {
+        let q = admin
+          .from("subject_sections")
+          .select("id, subject_id, classroom_id, academic_year_id, teacher_id, co_teacher_id")
+          .in("classroom_id", scopeClassroomIds);
+        if (subjectId) q = q.eq("subject_id", subjectId);
+        if (!isAdmin) {
+          q = q.or(`teacher_id.eq.${requesterId},co_teacher_id.eq.${requesterId}`);
+        }
+        return q;
+      }
+      if (academicYearId) {
+        const { data } = await buildBaseQuery().eq("academic_year_id", academicYearId);
+        if (data && data.length > 0) return data;
+      }
+      const { data } = await buildBaseQuery();
+      return data ?? [];
     }
-    return q;
-  }
 
-  if (academicYearId) {
-    const { data } = await buildBaseQuery().eq("academic_year_id", academicYearId);
-    if (data && data.length > 0) return data;
-    // Fallback: section ผูกกับปีการศึกษาอื่น (ไม่ตรงกับปีที่เลือก/ปีปัจจุบัน)
-    // ดึงโดยไม่กรองปีการศึกษาแทน ดีกว่าแสดงผลว่างทั้งที่มี section อยู่จริง
-  }
-
-  const { data } = await buildBaseQuery();
-  return data ?? [];
-}
-
-const sections = await fetchSectionsWithFallback();
-if (!sections || sections.length === 0) return NextResponse.json(emptyResult(role));
+    const sections = await fetchSectionsWithFallback();
+    if (!sections || sections.length === 0) return NextResponse.json(emptyResult(role));
 
     const sectionIds = sections.map(s => s.id);
-    // ห้องที่มี section ของวิชานี้จริง ๆ (กันกรณีบางห้องในสายชั้นไม่ได้สอนวิชานี้)
     const classroomIds = Array.from(new Set(sections.map(s => s.classroom_id)));
     classrooms = classrooms.filter(c => classroomIds.includes(c.id));
 
     /* -----------------------------------------------------------------
-       5) นักเรียนในห้องที่อยู่ในขอบเขต (เฉพาะห้องที่มีวิชานี้สอนจริง)
+       5) นักเรียนในห้องที่อยู่ในขอบเขต
        ----------------------------------------------------------------- */
     const { data: students } = await admin
       .from("students")
@@ -221,7 +196,7 @@ if (!sections || sections.length === 0) return NextResponse.json(emptyResult(rol
     if (!students || students.length === 0) return NextResponse.json(emptyResult(role));
 
     /* -----------------------------------------------------------------
-       6) assignments -> submissions (เฉพาะ section ของวิชานี้ในขอบเขต)
+       6) assignments -> submissions
        ----------------------------------------------------------------- */
     let assignmentQuery = admin
       .from("assignments")
@@ -241,48 +216,72 @@ if (!sections || sections.length === 0) return NextResponse.json(emptyResult(rol
       : { data: [] as any[] };
 
     /* -----------------------------------------------------------------
-       7) เช็กชื่อ (กรองตามช่วงปีการศึกษาถ้าระบุ) + ข้อมูลอ้างอิงชื่อวิชา/ครู
+       7) เช็กชื่อ — ดึงจาก subject_attendance (รายวิชา) เป็นหลัก
+          fallback ไปที่ attendance_records (โฮมรูม) เฉพาะตอนไม่มีข้อมูลรายวิชาเลย
        ----------------------------------------------------------------- */
-    async function fetchAttendanceWithFallback() {
-  if (yearStart && yearEnd) {
-    const { data } = await admin
-      .from("attendance_records")
-      .select("student_id, classroom_id, status, attendance_date")
-      .in("classroom_id", classroomIds)
-      .gte("attendance_date", yearStart)
-      .lte("attendance_date", yearEnd);
+    async function fetchAttendanceWithFallback(): Promise<{ student_id: string; status: string }[]> {
+      const { data: timetableEntries } = await admin
+        .from("timetable_entries")
+        .select("id, subject_section_id")
+        .in("subject_section_id", sectionIds);
+      const entryIds = (timetableEntries ?? []).map((t: any) => t.id);
 
-    if (data && data.length > 0) return data;
+      if (entryIds.length > 0) {
+        if (yearStart && yearEnd) {
+          const { data } = await admin
+            .from("subject_attendance")
+            .select("student_id, status, attendance_date")
+            .in("timetable_entry_id", entryIds)
+            .gte("attendance_date", yearStart)
+            .lte("attendance_date", yearEnd);
+          if (data && data.length > 0) return data.map((r: any) => ({ student_id: r.student_id, status: r.status }));
+        }
+        const { data } = await admin
+          .from("subject_attendance")
+          .select("student_id, status")
+          .in("timetable_entry_id", entryIds);
+        if (data && data.length > 0) return data as any[];
+      }
 
-    // Fallback: ตัวกรองปีการศึกษาไม่เจอข้อมูลเลย (start_date/end_date อาจตั้งไม่ตรงกับข้อมูลจริง)
-    // ดึงทั้งหมดของห้องในขอบเขตแทน ดีกว่าแสดงผลว่างทั้งที่มีข้อมูลจริงอยู่
-  }
+      // Fallback: ยังไม่มีการเช็กชื่อรายวิชาเลย -> ใช้เช็กชื่อโฮมรูมของห้องในขอบเขตแทน
+      if (yearStart && yearEnd) {
+        const { data } = await admin
+          .from("attendance_records")
+          .select("student_id, status")
+          .in("classroom_id", classroomIds)
+          .gte("attendance_date", yearStart)
+          .lte("attendance_date", yearEnd);
+        if (data && data.length > 0) return data as any[];
+      }
+      const { data } = await admin
+        .from("attendance_records")
+        .select("student_id, status")
+        .in("classroom_id", classroomIds);
+      return (data ?? []) as any[];
+    }
 
-  const { data } = await admin
-    .from("attendance_records")
-    .select("student_id, classroom_id, status, attendance_date")
-    .in("classroom_id", classroomIds);
-  return data ?? [];
-}
+    const distinctSubjectIds = Array.from(new Set(sections.map(s => s.subject_id)));
 
-const [attendanceRecords, { data: subjectRow }, { data: teacherUsers }] = await Promise.all([
-  fetchAttendanceWithFallback(),
-  admin.from("subjects").select("id, subject_code, name_th").eq("id", subjectId).maybeSingle(),
-  admin.from("users").select("id, full_name, first_name, last_name").in(
-    "id",
-    Array.from(new Set(sections.flatMap(s => [s.teacher_id, s.co_teacher_id]).filter(Boolean)))
-  ),
-]);
+    const [attendanceRecords, subjectRows, teacherUsers] = await Promise.all([
+      fetchAttendanceWithFallback(),
+      admin.from("subjects").select("id, subject_code, name_th").in("id", distinctSubjectIds).then(r => r.data ?? []),
+      admin
+        .from("users")
+        .select("id, full_name, first_name, last_name")
+        .in("id", Array.from(new Set(sections.flatMap(s => [s.teacher_id, s.co_teacher_id]).filter(Boolean))))
+        .then(r => r.data ?? []),
+    ]);
+
+    const subjectNameById = new Map(subjectRows.map((s: any) => [s.id, s.name_th]));
 
     /* -----------------------------------------------------------------
        8) คำนวณสถิติต่อนักเรียน
        ----------------------------------------------------------------- */
     const assignmentById = new Map((assignments ?? []).map(a => [a.id, a]));
     const classroomById = new Map(classrooms.map(c => [c.id, c]));
-    const sectionByClassroom = new Map(sections.map(s => [s.classroom_id, s]));
 
     const attendanceByStudent: Record<string, { present: number; total: number }> = {};
-    (attendanceRecords ?? []).forEach((r: any) => {
+    attendanceRecords.forEach(r => {
       if (!attendanceByStudent[r.student_id]) attendanceByStudent[r.student_id] = { present: 0, total: 0 };
       attendanceByStudent[r.student_id].total += 1;
       if (r.status === "present" || r.status === "late") attendanceByStudent[r.student_id].present += 1;
@@ -343,7 +342,7 @@ const [attendanceRecords, { data: subjectRow }, { data: teacherUsers }] = await 
         name: `${s.prefix ?? ""}${s.first_name} ${s.last_name}`.trim(),
         seatNumber: s.seat_number,
         classroomId: s.classroom_id,
-        classroomName: classroom ? `${classroom.grade_group ?? ""} ${classroom.room_name ?? ""}`.trim() : "-",
+        classroomName: classroom ? `${(classroom as any).grade_group ?? ""} ${(classroom as any).room_name ?? ""}`.trim() : "-",
         attendanceRate,
         avgScore,
         onTimeRate,
@@ -354,7 +353,7 @@ const [attendanceRecords, { data: subjectRow }, { data: teacherUsers }] = await 
     });
 
     /* -----------------------------------------------------------------
-       9) สรุปภาพรวม (totals)
+       9) สรุปภาพรวม
        ----------------------------------------------------------------- */
     const atRiskStudents = studentStats.filter(s => s.atRisk);
     const withAttendance = studentStats.filter(s => s.attendanceRate !== null);
@@ -374,7 +373,7 @@ const [attendanceRecords, { data: subjectRow }, { data: teacherUsers }] = await 
     };
 
     /* -----------------------------------------------------------------
-       10) การกระจายของคะแนน (เฉพาะคนที่มีข้อมูลคะแนน)
+       10) การกระจายของคะแนน
        ----------------------------------------------------------------- */
     const bands = [
       { key: "0-49", min: 0, max: 49 },
@@ -386,15 +385,11 @@ const [attendanceRecords, { data: subjectRow }, { data: teacherUsers }] = await 
     ];
     const scoreDistribution = bands.map(b => {
       const count = withScore.filter(s => (s.avgScore as number) >= b.min && (s.avgScore as number) <= b.max).length;
-      return {
-        band: b.key,
-        count,
-        percent: withScore.length > 0 ? (count / withScore.length) * 100 : 0,
-      };
+      return { band: b.key, count, percent: withScore.length > 0 ? (count / withScore.length) * 100 : 0 };
     });
 
     /* -----------------------------------------------------------------
-       11) อันดับห้องเรียน (ความเสี่ยงน้อย -> มาก) — มีความหมายเฉพาะโหมด "สายชั้น"
+       11) อันดับห้องเรียน
        ----------------------------------------------------------------- */
     const byClassroom = new Map<string, StudentStat[]>();
     studentStats.forEach(s => {
@@ -407,7 +402,7 @@ const [attendanceRecords, { data: subjectRow }, { data: teacherUsers }] = await 
         const c = classroomById.get(classroomId);
         return {
           classroomId,
-          name: c ? `${c.grade_group ?? ""} ${c.room_name ?? ""}`.trim() : "-",
+          name: c ? `${(c as any).grade_group ?? ""} ${(c as any).room_name ?? ""}`.trim() : "-",
           studentCount: list.length,
           riskCount,
           riskPercent: list.length > 0 ? (riskCount / list.length) * 100 : 0,
@@ -416,21 +411,50 @@ const [attendanceRecords, { data: subjectRow }, { data: teacherUsers }] = await 
       .sort((a, b) => a.riskPercent - b.riskPercent);
 
     /* -----------------------------------------------------------------
-       12) subjectRanking / teacherRanking — ในบริบทนี้มีวิชาเดียวเสมอ (subjectId ที่ล็อกไว้)
-           จึงคืนเป็นแถวเดียวของวิชาปัจจุบัน (เผื่อ UI ฝั่งหน้าใช้โครงสร้างเดิม)
+       12) subjectRanking — วิชาเดียว (subject_id ล็อก) คืนแถวเดียว
+           หลายวิชา (scope="school") -> รวมนักเรียนต่อวิชาจริง แล้วจัดอันดับ
        ----------------------------------------------------------------- */
-    const subjectRanking = [
-      {
-        subjectId: subjectId,
-        name: subjectRow?.name_th ?? "-",
-        studentCount: studentStats.length,
-        attendanceRate: totals.attendanceRate,
-        riskPercent: totals.atRiskPercent,
-      },
-    ];
+    const studentStatById = new Map(studentStats.map(s => [s.id, s]));
 
+    let subjectRanking: any[];
+    if (distinctSubjectIds.length <= 1) {
+      subjectRanking = [
+        {
+          subjectId: subjectId ?? distinctSubjectIds[0] ?? "",
+          name: subjectNameById.get(subjectId ?? distinctSubjectIds[0] ?? "") ?? "-",
+          studentCount: studentStats.length,
+          attendanceRate: totals.attendanceRate,
+          riskPercent: totals.atRiskPercent,
+        },
+      ];
+    } else {
+      const bySubject = new Map<string, Set<string>>();
+      sections.forEach(sec => {
+        const classroomStudentIds = students.filter(s => s.classroom_id === sec.classroom_id).map(s => s.id);
+        if (!bySubject.has(sec.subject_id)) bySubject.set(sec.subject_id, new Set());
+        classroomStudentIds.forEach(id => bySubject.get(sec.subject_id)!.add(id));
+      });
+      subjectRanking = Array.from(bySubject.entries())
+        .map(([subjId, idSet]) => {
+          const list = Array.from(idSet).map(id => studentStatById.get(id)).filter(Boolean) as StudentStat[];
+          const riskCount = list.filter(s => s.atRisk).length;
+          const withAtt = list.filter(s => s.attendanceRate !== null);
+          return {
+            subjectId: subjId,
+            name: subjectNameById.get(subjId) ?? "-",
+            studentCount: list.length,
+            attendanceRate: withAtt.length > 0 ? avg(withAtt.map(s => s.attendanceRate as number)) * 100 : null,
+            riskPercent: list.length > 0 ? (riskCount / list.length) * 100 : 0,
+          };
+        })
+        .sort((a, b) => a.riskPercent - b.riskPercent);
+    }
+
+    /* -----------------------------------------------------------------
+       13) teacherRanking — เฉพาะแอดมิน
+       ----------------------------------------------------------------- */
     const teacherNameById = new Map(
-      (teacherUsers ?? []).map((t: any) => [t.id, t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim()])
+      teacherUsers.map((t: any) => [t.id, t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim()])
     );
     const byTeacher = new Map<string, Set<string>>();
     sections.forEach(sec => {
@@ -440,7 +464,6 @@ const [attendanceRecords, { data: subjectRow }, { data: teacherUsers }] = await 
       classroomStudentIds.forEach(id => byTeacher.get(sec.teacher_id)!.add(id));
     });
 
-    const studentStatById = new Map(studentStats.map(s => [s.id, s]));
     const teacherRanking = isAdmin
       ? Array.from(byTeacher.entries())
           .map(([teacherId, idSet]) => {

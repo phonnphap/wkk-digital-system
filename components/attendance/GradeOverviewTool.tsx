@@ -2,10 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-/* =========================================================================
-   Types
-   ========================================================================= */
-
 type Student = {
   id: string;
   prefix?: string;
@@ -23,10 +19,6 @@ type Assignment = {
   weight_percent?: number;
   allow_weight?: boolean;
   status?: string;
-  // เพิ่มใหม่: กำหนดส่งงาน ใช้คำนวณอัตรา "ส่งตรงเวลา"
-  // ⚠️ ASSUMPTION: ตาราง assignments ต้องมีคอลัมน์ due_date (timestamp/date) อยู่แล้ว
-  // ถ้ายังไม่มี ต้อง ALTER TABLE เพิ่มคอลัมน์นี้ก่อน ไม่งั้นค่าจะเป็น undefined ทั้งหมด
-  // (โค้ดนี้รองรับ undefined อยู่แล้ว จะไม่นับเป็น "ส่งช้า" ถ้าไม่มี due_date)
   due_date?: string | null;
 };
 
@@ -36,12 +28,10 @@ type Submission = {
   id: string;
   assignment_id: string;
   student_id: string;
-  status: string; // e.g. "submitted" | "graded" | "missing"
+  status: string;
   score: number | null;
   teacher_comment?: string | null;
   graded_at?: string | null;
-  // เพิ่มใหม่: เวลาที่นักเรียนส่งงานจริง ใช้เทียบกับ assignment.due_date
-  // ⚠️ ASSUMPTION: ตาราง submissions ต้องมีคอลัมน์ submitted_at (timestamp) อยู่แล้ว
   submitted_at?: string | null;
 };
 
@@ -53,6 +43,8 @@ type ViewTab = "table" | "podium";
 
 /* =========================================================================
    Component
+   readOnly: สำหรับแอดมิน/ผู้บริหาร — ดู/export/print ได้ แต่แก้ไขคะแนนพิเศษ,
+   ตั้งค่าเกณฑ์เกรด, และคอมเมนต์ครู ไม่ได้
    ========================================================================= */
 
 export default function GradeOverviewTool({
@@ -65,6 +57,7 @@ export default function GradeOverviewTool({
   subjectTeacherName,
   students,
   currentUserId,
+  readOnly = false,
 }: {
   sectionId: string;
   subjectTitle: string;
@@ -75,6 +68,7 @@ export default function GradeOverviewTool({
   subjectTeacherName?: string;
   students: Student[];
   currentUserId?: string;
+  readOnly?: boolean;
 }) {
   const [tab, setTab] = useState<ViewTab>("table");
   const [loading, setLoading] = useState(true);
@@ -86,7 +80,6 @@ export default function GradeOverviewTool({
   const [criteria, setCriteria] = useState<Criterion[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [scoreEvents, setScoreEvents] = useState<ScoreEvent[]>([]);
-  // สรุปเช็คชื่อ: studentId -> { present, total }
   const [attendanceMap, setAttendanceMap] = useState<Record<string, { present: number; total: number }>>({});
 
   const [showGradeSetting, setShowGradeSetting] = useState(false);
@@ -109,7 +102,6 @@ export default function GradeOverviewTool({
       setSubmissions(json.submissions ?? []);
       setScoreEvents(json.scoreEvents ?? []);
 
-      // การเช็คชื่อไม่ใช่ข้อมูลหลักของหน้านี้ ถ้าโหลดไม่สำเร็จ ไม่ต้อง block ทั้งหน้า แค่ปล่อยว่างไว้
       try {
         const attJson = await attRes.json();
         if (attRes.ok) {
@@ -123,7 +115,7 @@ export default function GradeOverviewTool({
           setAttendanceMap(map);
         }
       } catch {
-        // เงียบไว้ ไม่ critical
+        // ไม่ critical
       }
     } catch (e: any) {
       setError(e?.message ?? "โหลดข้อมูลคะแนนรวมไม่สำเร็จ");
@@ -137,15 +129,11 @@ export default function GradeOverviewTool({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionId]);
 
-  /* ---------------- คำนวณคะแนนต่อคน ---------------- */
-
   const totalMaxScore = useMemo(
     () => assignments.reduce((sum, a) => sum + (a.max_score ?? 0), 0),
     [assignments]
   );
 
-  // ตรวจว่างานชิ้นนี้ "ส่งตรงเวลา" หรือไม่ ต้องมีทั้ง due_date ของงาน และ submitted_at ของการส่ง
-  // ถ้าข้อมูลฝั่งใดฝั่งหนึ่งไม่มี ให้ถือว่า "ไม่ทราบ / ไม่นับเป็นส่งช้า" (กันไม่ให้ค่าคะแนนความเสี่ยงเพี้ยนเพราะข้อมูลยังไม่ครบ)
   function isOnTime(assignment: Assignment, sub?: Submission): boolean | null {
     if (!sub || !(sub.status === "submitted" || sub.status === "graded")) return null;
     if (!assignment.due_date || !sub.submitted_at) return null;
@@ -167,7 +155,6 @@ export default function GradeOverviewTool({
         return sub && (sub.status === "submitted" || sub.status === "graded");
       }).length;
 
-      // อัตราส่งตรงเวลา: นับเฉพาะงานที่ "ทราบผล" ว่าตรง/ช้า (มีทั้ง due_date และ submitted_at)
       let onTimeCount = 0;
       let lateCount = 0;
       let knownOnTimeCount = 0;
@@ -181,8 +168,6 @@ export default function GradeOverviewTool({
 
       const presetTotals: Record<string, number> = {};
       presets.forEach(p => { presetTotals[p.id] = 0; });
-      // สำคัญ: ถ้าครูลบการ์ดคะแนนพิเศษ (preset) ไปแล้ว score_events เก่าที่อ้างถึง preset_id นั้น
-      // ต้องไม่ถูกนับรวมอีก ไม่งั้นคะแนนรวมจะไม่ตรงกับที่แสดงในตาราง (คอลัมน์หายแต่ยอดรวมยังบวกอยู่)
       scoreEvents
         .filter(ev => ev.student_id === s.id && presetTotals[ev.preset_id] !== undefined)
         .forEach(ev => { presetTotals[ev.preset_id] += ev.points; });
@@ -199,18 +184,8 @@ export default function GradeOverviewTool({
       const grandTotal = assignmentTotal + specialTotal;
 
       return {
-        student: s,
-        subMap,
-        presetTotals,
-        assignmentTotal,
-        submittedCount,
-        onTimeCount,
-        lateCount,
-        onTimeRate,
-        specialTotal,
-        percentage,
-        grade,
-        grandTotal,
+        student: s, subMap, presetTotals, assignmentTotal, submittedCount,
+        onTimeCount, lateCount, onTimeRate, specialTotal, percentage, grade, grandTotal,
       };
     });
   }, [students, submissions, assignments, presets, scoreEvents, criteria, totalMaxScore]);
@@ -219,9 +194,8 @@ export default function GradeOverviewTool({
     return [...rows].sort((a, b) => b.grandTotal - a.grandTotal).slice(0, 5);
   }, [rows]);
 
-  /* ---------------- แก้ไขคะแนนพิเศษแบบ inline ในตาราง ---------------- */
-
   async function handleAdjustPreset(studentId: string, presetId: string, currentValue: number, newValue: number) {
+    if (readOnly) return;
     const delta = newValue - currentValue;
     if (delta === 0) return;
     try {
@@ -229,29 +203,23 @@ export default function GradeOverviewTool({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          subject_section_id: sectionId,
-          student_id: studentId,
-          preset_id: presetId,
-          delta,
-          created_by: currentUserId || null,
+          subject_section_id: sectionId, student_id: studentId, preset_id: presetId,
+          delta, created_by: currentUserId || null,
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "แก้ไขคะแนนไม่สำเร็จ");
-      // อัปเดตแบบ optimistic โดยเติม event ใหม่ในหน่วยความจำ ไม่ต้องรอโหลดใหม่ทั้งหน้า
       setScoreEvents(prev => [...prev, { id: json.event?.id ?? `local-${Date.now()}`, student_id: studentId, preset_id: presetId, points: delta }]);
     } catch (e: any) {
       alert("แก้ไขคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"));
     }
   }
 
-  /* ---------------- ตั้งค่าเกณฑ์เกรด ---------------- */
-
   async function saveCriteria(newRows: Criterion[]) {
+    if (readOnly) return;
     try {
       const res = await fetch("/api/grade-criteria", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ subject_section_id: sectionId, rows: newRows }),
       });
       const json = await res.json();
@@ -262,8 +230,6 @@ export default function GradeOverviewTool({
       alert("บันทึกเกณฑ์เกรดไม่สำเร็จ: " + (e?.message ?? "unknown error"));
     }
   }
-
-  /* ---------------- Export Excel ---------------- */
 
   async function handleExportExcel() {
     setExporting(true);
@@ -283,9 +249,7 @@ export default function GradeOverviewTool({
             ? `${sub.score}${onTimeTag}`
             : (sub ? "ส่งแล้ว-ยังไม่ให้คะแนน" + onTimeTag : "ไม่ส่งงาน");
         });
-        presets.forEach(p => {
-          row[p.label] = r.presetTotals[p.id] ?? 0;
-        });
+        presets.forEach(p => { row[p.label] = r.presetTotals[p.id] ?? 0; });
         row["คะแนนงานรวม"] = r.assignmentTotal;
         row["คะแนนพิเศษรวม"] = r.specialTotal;
         row["คะแนนรวมทั้งหมด"] = r.grandTotal;
@@ -309,6 +273,10 @@ export default function GradeOverviewTool({
     }
   }
 
+  function handlePrint() {
+    window.print();
+  }
+
   return (
     <div className="space-y-6">
       {reportStudent && (
@@ -324,11 +292,12 @@ export default function GradeOverviewTool({
           classroomLabel={classroomLabel}
           homeroomTeacherName={homeroomTeacherName}
           subjectTeacherName={subjectTeacherName}
+          readOnly={readOnly}
           onClose={() => setReportStudent(null)}
         />
       )}
 
-      {showGradeSetting && (
+      {showGradeSetting && !readOnly && (
         <GradeSettingModal
           initialCriteria={criteria}
           onCancel={() => setShowGradeSetting(false)}
@@ -336,11 +305,12 @@ export default function GradeOverviewTool({
         />
       )}
 
-      {/* หัวข้อ + ปุ่มควบคุม */}
-      <div className="flex items-start justify-between flex-wrap gap-3">
+      <div className="flex items-start justify-between flex-wrap gap-3 print:hidden">
         <div>
           <h2 className="font-black text-slate-800 text-lg">คะแนนรวม</h2>
-          <p className="text-slate-400 text-xs font-bold">คุณสามารถดูคะแนนรวมของงานที่มอบหมาย และคะแนนพิเศษได้ที่นี่</p>
+          <p className="text-slate-400 text-xs font-bold">
+            {readOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คุณสามารถดูคะแนนรวมของงานที่มอบหมาย และคะแนนพิเศษได้ที่นี่"}
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
@@ -349,12 +319,22 @@ export default function GradeOverviewTool({
           >
             {tab === "table" ? "🏆 อันดับคะแนน" : "🔢 ตาราง"}
           </button>
-          <button
-            onClick={() => setShowGradeSetting(true)}
-            className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
-          >
-            ⚙️ ตั้งค่าคำนวณเกรด
-          </button>
+          {!readOnly && (
+            <button
+              onClick={() => setShowGradeSetting(true)}
+              className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
+            >
+              ⚙️ ตั้งค่าคำนวณเกรด
+            </button>
+          )}
+          {readOnly && (
+            <button
+              onClick={handlePrint}
+              className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
+            >
+              🖨️ พิมพ์
+            </button>
+          )}
           <button
             onClick={handleExportExcel}
             disabled={exporting || loading}
@@ -378,6 +358,7 @@ export default function GradeOverviewTool({
           onOpenReport={s => setReportStudent(s)}
           onAdjustPreset={handleAdjustPreset}
           isOnTime={isOnTime}
+          readOnly={readOnly}
         />
       ) : (
         <PodiumView top5={podiumTop5} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
@@ -386,18 +367,8 @@ export default function GradeOverviewTool({
   );
 }
 
-/* =========================================================================
-   ตารางคะแนนรวม
-   ========================================================================= */
-
 function GradeTable({
-  rows,
-  assignments,
-  presets,
-  totalMaxScore,
-  onOpenReport,
-  onAdjustPreset,
-  isOnTime,
+  rows, assignments, presets, totalMaxScore, onOpenReport, onAdjustPreset, isOnTime, readOnly,
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
@@ -406,6 +377,7 @@ function GradeTable({
   onOpenReport: (s: Student) => void;
   onAdjustPreset: (studentId: string, presetId: string, currentValue: number, newValue: number) => void;
   isOnTime: (assignment: Assignment, sub?: Submission) => boolean | null;
+  readOnly: boolean;
 }) {
   if (rows.length === 0) {
     return (
@@ -498,6 +470,7 @@ function GradeTable({
                   <td key={p.id} className="text-center px-3 py-3">
                     <EditablePresetCell
                       value={r.presetTotals[p.id] ?? 0}
+                      readOnly={readOnly}
                       onSave={newValue => onAdjustPreset(s.id, p.id, r.presetTotals[p.id] ?? 0, newValue)}
                     />
                   </td>
@@ -532,7 +505,7 @@ function GradeTable({
   );
 }
 
-function EditablePresetCell({ value, onSave }: { value: number; onSave: (newValue: number) => void }) {
+function EditablePresetCell({ value, onSave, readOnly }: { value: number; onSave: (newValue: number) => void; readOnly: boolean }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
 
@@ -543,6 +516,14 @@ function EditablePresetCell({ value, onSave }: { value: number; onSave: (newValu
     setEditing(false);
     if (Number.isNaN(parsed)) { setDraft(String(value)); return; }
     if (parsed !== value) onSave(parsed);
+  }
+
+  if (readOnly) {
+    return (
+      <span className={`text-sm font-black px-2 py-1 ${value > 0 ? "text-emerald-600" : value < 0 ? "text-red-500" : "text-slate-300"}`}>
+        {value}
+      </span>
+    );
   }
 
   if (editing) {
@@ -572,7 +553,6 @@ function EditablePresetCell({ value, onSave }: { value: number; onSave: (newValu
   );
 }
 
-// เอาไว้ให้ TS อนุมาน type ของ rows แบบสั้น ๆ โดยไม่ต้อง export type ซ้อนหลายชั้น
 function buildRowsType() {
   return [] as {
     student: Student;
@@ -590,14 +570,8 @@ function buildRowsType() {
   }[];
 }
 
-/* =========================================================================
-   Podium — อันดับคะแนน Top 5
-   ========================================================================= */
-
 function PodiumView({
-  top5,
-  hideScores,
-  onToggleHide,
+  top5, hideScores, onToggleHide,
 }: {
   top5: ReturnType<typeof buildRowsType>;
   hideScores: boolean;
@@ -611,14 +585,13 @@ function PodiumView({
     );
   }
 
-  // จัดลำดับการวางแท่น: 3-1-2-4-5 (อันดับ 1 อยู่กลางและสูงสุด)
   const order = [2, 0, 1, 3, 4].filter(i => i < top5.length);
   const heights: Record<number, string> = { 0: "h-40", 1: "h-28", 2: "h-20", 3: "h-14", 4: "h-14" };
   const medalEmoji: Record<number, string> = { 0: "🥇", 1: "🥈", 2: "🥉", 3: "🏅", 4: "🏅" };
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-6 sm:p-10">
-      <div className="flex justify-end mb-6">
+      <div className="flex justify-end mb-6 print:hidden">
         <button onClick={onToggleHide} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-bold text-xs">
           {hideScores ? "👁️ แสดงคะแนน" : "🙈 ซ่อนคะแนน"}
         </button>
@@ -651,14 +624,8 @@ function PodiumView({
   );
 }
 
-/* =========================================================================
-   ป๊อปอัพ ตั้งค่าเกณฑ์เกรด (Max / Min / Grade)
-   ========================================================================= */
-
 function GradeSettingModal({
-  initialCriteria,
-  onCancel,
-  onSave,
+  initialCriteria, onCancel, onSave,
 }: {
   initialCriteria: Criterion[];
   onCancel: () => void;
@@ -728,23 +695,9 @@ function GradeSettingModal({
   );
 }
 
-/* =========================================================================
-   Modal Report รายบุคคล
-   ========================================================================= */
-
 function StudentReportModal({
-  row,
-  assignments,
-  sectionId,
-  currentUserId,
-  attendance,
-  subjectTitle,
-  subjectCode,
-  academicYearLabel,
-  classroomLabel,
-  homeroomTeacherName,
-  subjectTeacherName,
-  onClose,
+  row, assignments, sectionId, currentUserId, attendance, subjectTitle, subjectCode,
+  academicYearLabel, classroomLabel, homeroomTeacherName, subjectTeacherName, readOnly, onClose,
 }: {
   row: ReturnType<typeof buildRowsType>[number];
   assignments: Assignment[];
@@ -757,6 +710,7 @@ function StudentReportModal({
   classroomLabel?: string;
   homeroomTeacherName?: string;
   subjectTeacherName?: string;
+  readOnly?: boolean;
   onClose: () => void;
 }) {
   const s = row.student;
@@ -778,18 +732,13 @@ function StudentReportModal({
   }, [sectionId, s.id]);
 
   async function saveComment() {
+    if (readOnly) return;
     setSavingComment(true);
     setCommentSaved(false);
     try {
       const res = await fetch("/api/student-subject-comments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject_section_id: sectionId,
-          student_id: s.id,
-          comment,
-          updated_by: currentUserId || null,
-        }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject_section_id: sectionId, student_id: s.id, comment, updated_by: currentUserId || null }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "บันทึกคอมเมนต์ไม่สำเร็จ");
@@ -822,7 +771,6 @@ function StudentReportModal({
           </div>
         </div>
 
-        {/* หัวการ์ด */}
         <div className="text-center mb-5">
           {s.avatar_url ? (
             <img src={s.avatar_url} className="w-24 h-24 rounded-full object-cover mx-auto border-4 border-fuchsia-100" />
@@ -835,7 +783,6 @@ function StudentReportModal({
           <p className="text-slate-400 text-xs font-bold">เลขที่ {s.seat_number} · {classroomLabel ?? "-"}</p>
         </div>
 
-        {/* ข้อมูลวิชา */}
         <div className="grid grid-cols-2 gap-2 mb-5">
           <InfoBox label="ปีการศึกษา" value={academicYearLabel ?? "-"} />
           <InfoBox label="รายวิชา" value={`${subjectTitle} (${subjectCode})`} />
@@ -843,7 +790,6 @@ function StudentReportModal({
           <InfoBox label="ครูประจำวิชา" value={subjectTeacherName ?? "-"} />
         </div>
 
-        {/* สรุปเกรด */}
         <div className="rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white p-4 flex items-center justify-between mb-5">
           <div>
             <p className="text-[11px] font-bold opacity-90">คะแนนรวมทั้งหมด</p>
@@ -855,7 +801,6 @@ function StudentReportModal({
           </div>
         </div>
 
-        {/* การเข้าเรียน */}
         <div className="mb-5">
           <p className="text-xs font-black text-slate-600 mb-2">🗓️ การเข้าเรียน</p>
           <InfoBox
@@ -864,7 +809,6 @@ function StudentReportModal({
           />
         </div>
 
-        {/* รายการชิ้นงาน */}
         <div className="mb-5">
           <p className="text-xs font-black text-slate-600 mb-2">📚 รายการชิ้นงาน</p>
           {assignments.length === 0 ? (
@@ -892,13 +836,11 @@ function StudentReportModal({
           </div>
         </div>
 
-        {/* คะแนนพิเศษ (แสดงเป็นค่ารวม ไม่แยกชื่อการ์ด) */}
         <div className="mb-5">
           <p className="text-xs font-black text-slate-600 mb-2">⭐ คะแนนพิเศษรวม</p>
           <InfoBox label="คะแนนพิเศษที่ได้ (บวก/ลบ)" value={`${row.specialTotal > 0 ? "+" : ""}${row.specialTotal} คะแนน`} />
         </div>
 
-        {/* คอมเมนต์ครู — แก้ไข/บันทึกได้ */}
         <div>
           <p className="text-xs font-black text-slate-600 mb-2 flex items-center justify-between print:hidden">
             <span>💬 คอมเมนต์ครูประจำวิชา</span>
@@ -907,6 +849,10 @@ function StudentReportModal({
           <p className="text-xs font-black text-slate-600 mb-2 hidden print:block">💬 คอมเมนต์ครูประจำวิชา</p>
           {loadingComment ? (
             <p className="text-slate-300 text-xs font-bold">กำลังโหลด...</p>
+          ) : readOnly ? (
+            <p className="w-full border-2 border-slate-100 rounded-xl px-3 py-2 text-xs font-bold text-slate-600 bg-slate-50 min-h-[3rem] print:border-none print:p-0 print:bg-transparent">
+              {comment || "— ไม่มีคอมเมนต์ —"}
+            </p>
           ) : (
             <>
               <textarea
