@@ -146,6 +146,22 @@ function playCheer() {
   } catch {}
 }
 
+// เสียงไฟล์จริงตอนให้คะแนน: บวก -> point +.mp3, ลบ -> point -.mp3 (อยู่ใน public/sounds/)
+// เผื่อโหลดไฟล์ไม่สำเร็จ (ยังไม่ได้วางไฟล์ไว้ใน public/sounds/) จะ fallback ไปใช้เสียงสังเคราะห์ playDing() แทนอัตโนมัติ
+function playPointSound(points: number) {
+  if (typeof window === "undefined") return;
+  const fileName = points > 0 ? "point +.mp3" : "point -.mp3";
+  const url = "/sounds/" + encodeURIComponent(fileName);
+  try {
+    const audio = new Audio(url);
+    audio.volume = 0.9;
+    audio.onerror = () => playDing();
+    audio.play().catch(() => playDing());
+  } catch {
+    playDing();
+  }
+}
+
 function EmojiPicker({ value, onChange }: { value: string; onChange: (emoji: string) => void }) {
   const [open, setOpen] = useState(false);
   return (
@@ -488,12 +504,32 @@ function RandomPickerTab({
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [winner, setWinner] = useState<WheelEntry | null>(null);
   const [spinning, setSpinning] = useState(false);
+  const [autoSwap, setAutoSwap] = useState(false);
+  const autoSwapRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     setEntries(buildEntries(students));
     setRemovedIds(new Set());
     setWinner(null);
   }, [students]);
+
+  // สลับชื่ออัตโนมัติ: สุ่มสลับลำดับ entries เป็นระยะ ๆ จนกว่าจะกดปิด
+  useEffect(() => {
+    if (autoSwap) {
+      autoSwapRef.current = setInterval(() => {
+        setEntries(prev => [...prev].sort(() => Math.random() - 0.5));
+      }, 700);
+    } else if (autoSwapRef.current) {
+      clearInterval(autoSwapRef.current);
+      autoSwapRef.current = null;
+    }
+    return () => {
+      if (autoSwapRef.current) {
+        clearInterval(autoSwapRef.current);
+        autoSwapRef.current = null;
+      }
+    };
+  }, [autoSwap]);
 
   const pool = useMemo(() => entries.filter(e => !removedIds.has(e.id)), [entries, removedIds]);
   const matchedStudent = useMemo(
@@ -571,16 +607,26 @@ function RandomPickerTab({
         <div className="w-full lg:w-[25%] shrink-0 bg-white rounded-2xl border border-slate-200 p-4 flex flex-col lg:sticky lg:top-4 lg:max-h-[75vh]">
           <p className="font-black text-slate-700 text-sm mb-3">📋 จัดการรายชื่อ ({entries.length})</p>
           <div className="grid grid-cols-2 gap-2 mb-2">
-            <button onClick={resetEntries} className="py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">
-              ↺ รีเซ็ต
+            <button
+              onClick={() => setAutoSwap(v => !v)}
+              className={`py-2 rounded-lg font-black text-xs transition-colors ${
+                autoSwap ? "bg-fuchsia-500 hover:bg-fuchsia-600 text-white" : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+              }`}
+            >
+              🔀 {autoSwap ? "กำลังสลับ..." : "สลับ"}
             </button>
             <button onClick={addEntry} className="py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs">
               + เพิ่มชื่อ
             </button>
           </div>
-          <button onClick={clearAllEntries} className="mb-3 py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-black text-xs">
-            🗑 ล้างทั้งหมด
-          </button>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <button onClick={resetEntries} className="py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">
+              ↺ รีเซ็ต
+            </button>
+            <button onClick={clearAllEntries} className="py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-black text-xs">
+              🗑 ล้างทั้งหมด
+            </button>
+          </div>
           <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 max-h-[50vh] lg:max-h-none">
             {entries.length === 0 && (
               <p className="text-center text-slate-300 text-xs font-bold py-6">ไม่มีรายชื่อในรายการ</p>
@@ -1015,15 +1061,17 @@ function DeckPicker({
           )}
         </div>
       ) : (
-        // สถานะกางไพ่: จัดเรียงเป็นครึ่งวงกลมแบบทำนายไพ่ยิปซีจริง
-        <div className="relative w-full flex items-end justify-center" style={{ height: 260 }}>
+        // สถานะกางไพ่: จัดเรียงเป็นครึ่งวงกลมกว้างใหญ่เต็มพื้นที่ ให้เลือกได้ง่าย
+        <div className="relative w-full flex items-end justify-center" style={{ height: 440 }}>
           {order.length === 0 && (
             <p className="text-slate-300 font-bold text-sm text-center">กองไพ่หมดแล้ว<br />กด "สับไพ่" เพื่อเริ่มใหม่</p>
           )}
           {order.map((e, i) => {
             const n = order.length;
             const mid = (n - 1) / 2;
-            const spread = Math.min(9, 64 / Math.max(n, 1));
+            // กางกว้างขึ้นมาก: มุมรวมของพัดไพ่ขยับเข้าใกล้ครึ่งวงกลมเต็ม (~170°) เมื่อมีไพ่หลายใบ
+            const totalSpread = Math.min(170, Math.max(40, n * 11));
+            const spread = n > 1 ? totalSpread / (n - 1) : 0;
             const angle = (i - mid) * spread;
             const isHover = hoverId === e.id;
             const isFlipped = flippedId === e.id;
@@ -1035,34 +1083,34 @@ function DeckPicker({
                 onClick={() => pickCard(e)}
                 className="absolute bottom-0 cursor-pointer transition-transform duration-300"
                 style={{
-                  transform: `rotate(${angle}deg) translateY(${isHover && !isFlipped ? -26 : 0}px)`,
+                  transform: `rotate(${angle}deg) translateY(${isHover && !isFlipped ? -40 : 0}px)`,
                   transformOrigin: "bottom center",
                   zIndex: isHover ? 100 : i,
                 }}
               >
-                <div className="relative w-20 h-32" style={{ perspective: "600px" }}>
+                <div className="relative w-32 h-52 sm:w-36 sm:h-56" style={{ perspective: "600px" }}>
                   <div
-                    className="absolute inset-0 rounded-xl transition-transform duration-500"
+                    className="absolute inset-0 rounded-2xl transition-transform duration-500"
                     style={{ transformStyle: "preserve-3d", transform: isFlipped ? "rotateY(180deg)" : "rotateY(0deg)" }}
                   >
                     <div
-                      className="absolute inset-0 rounded-xl border-2 border-white shadow-lg bg-gradient-to-br from-indigo-400 via-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-2xl"
+                      className="absolute inset-0 rounded-2xl border-2 border-white shadow-lg bg-gradient-to-br from-indigo-400 via-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-4xl"
                       style={{ backfaceVisibility: "hidden" }}
                     >
                       🔮
                     </div>
                     <div
-                      className="absolute inset-0 rounded-xl border-2 border-emerald-300 bg-white flex flex-col items-center justify-center px-1"
+                      className="absolute inset-0 rounded-2xl border-2 border-emerald-300 bg-white flex flex-col items-center justify-center px-2"
                       style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
                     >
                       {e.avatar_url ? (
-                        <img src={e.avatar_url} className="w-8 h-8 rounded-full object-cover" />
+                        <img src={e.avatar_url} className="w-14 h-14 rounded-full object-cover" />
                       ) : (
-                        <div className="w-8 h-8 rounded-full bg-emerald-400 text-white text-xs font-black flex items-center justify-center">
+                        <div className="w-14 h-14 rounded-full bg-emerald-400 text-white text-lg font-black flex items-center justify-center">
                           {e.first_name[0]}
                         </div>
                       )}
-                      <p className="text-[9px] font-black text-slate-600 mt-1 truncate w-full text-center">{e.label}</p>
+                      <p className="text-xs font-black text-slate-600 mt-2 truncate w-full text-center">{e.label}</p>
                     </div>
                   </div>
                 </div>
@@ -1524,8 +1572,8 @@ export default function SmartClassRosterPage() {
     const points = preset ? preset.points : (customPoints ?? 0);
     if (points === 0) return;
 
-    // เสียง "ตริ้ง/ปริ้ง" ทันทีที่ให้คะแนน
-    playDing();
+    // เสียงไฟล์จริงตามเครื่องหมายคะแนน (บวก/ลบ) จาก public/sounds/
+    playPointSound(points);
 
     let presetId: string | null = preset?.id ?? null;
     if (preset && preset.id.startsWith("local-")) {

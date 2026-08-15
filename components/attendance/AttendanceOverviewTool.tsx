@@ -306,7 +306,7 @@ function AttendancesDailyTable({
                     </div>
                   )}
                   <div>
-                    <p className="text-xs font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name}</p>
+                    <p className="text-xs font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nickname})</p>
                     <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                   </div>
                 </div>
