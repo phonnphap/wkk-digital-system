@@ -698,56 +698,36 @@ function StatusBadge({ status }: { status: ItemStatus }) {
 
   const [schoolEvents, setSchoolEvents] = useState<{date: string; title: string; color: string; colorHex: string | null}[]>([]);
 
+  type AttendanceSummary = {
+  present: number;
+  absent: number;
+  checked_in: number;
+  total: number;
+};
+
 useEffect(() => {
-  async function loadEvents() {
+  async function loadAttendanceStats() {
     const today = new Date().toISOString().split("T")[0];
+
     const { data, error } = await supabase
-      .from("calendar_events")
-      .select("title, start_date, categories, color_override")
-      .eq("status", "approved")              // ★ เฉพาะที่อนุมัติแล้ว ตามที่ขอ
-      .gte("end_date", today)
-      .order("start_date", { ascending: true })
-      .limit(5);                              // ★ 5 รายการตามที่ขอ
+      .rpc("get_attendance_summary", { target_date: today })
+      .single();
 
     if (error) {
-      console.error("loadEvents error:", error.message);
+      console.warn("[loadAttendanceStats] โหลดสถิติการมาเรียนไม่สำเร็จ:", error.message);
       return;
     }
 
-    if (data) {
-      const colorMap: Record<string, string> = {
-        academic:  "bg-blue-500",
-        student:   "bg-emerald-500",
-        meeting:   "bg-amber-500",
-        holiday:   "bg-rose-500",
-        training:  "bg-violet-500",
-        personnel: "bg-amber-700",
-        parent:    "bg-violet-600",
-        budget:    "bg-teal-600",
-        important: "bg-orange-500",
-        general:   "bg-slate-500",
-      };
+    const summary = data as AttendanceSummary | null;
 
-      setSchoolEvents(data.map(ev => {
-        const d = new Date(ev.start_date + "T00:00:00");
-        const day = d.getDate();
-        const month = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."][d.getMonth()];
-
-        // ★ categories เป็น array — ดึงตัวแรกมาเทียบกับ colorMap
-        const firstCat = (ev.categories ?? [])[0] ?? "general";
-        const bgClass = colorMap[firstCat] ?? "bg-slate-500";
-
-        return {
-          date: `${day} ${month}`,
-          title: ev.title,
-          // ★ ถ้ามี color_override (hex สีที่ admin เลือกเอง) ให้ใช้ inline style แทน class
-          color: ev.color_override ? "" : bgClass,
-          colorHex: ev.color_override ?? null,
-        };
-      }));
-    }
+    setAttendanceStats({
+      present: summary?.present ?? 0,
+      absent: summary?.absent ?? 0,
+      total: summary?.total ?? 0,
+      checkedIn: summary?.checked_in ?? 0,
+    });
   }
-  loadEvents();
+  loadAttendanceStats();
 }, [supabase]);
 
 // ══════════════════════════════════════════════════════════
@@ -780,41 +760,6 @@ useEffect(() => {
 //        and u.role in ('admin','director','deputy_director')
 //      ));
 // ══════════════════════════════════════════════════════════
-useEffect(() => {
-  async function loadAttendanceStats() {
-    const today = new Date().toISOString().split("T")[0];
-
-    // 1) จำนวนนักเรียนทั้งหมดที่ลงทะเบียนไว้จริง — ใช้เป็นตัวหารที่ถูกต้อง
-    const { count: enrolledTotal, error: enrolledErr } = await supabase
-      .from("students")
-      .select("id", { count: "exact", head: true });
-    if (enrolledErr) {
-      console.warn("[loadAttendanceStats] โหลดจำนวนนักเรียนทั้งหมดไม่สำเร็จ (ตรวจสิทธิ์ RLS ตาราง students):", enrolledErr.message);
-    }
-
-    // 2) สถานะเช็คชื่อของวันนี้ (เท่าที่มีการเช็คแล้ว)
-    const { data, error } = await supabase
-      .from("attendance_records")
-      .select("status")
-      .eq("attendance_date", today);
-
-    if (error) {
-      console.warn("[loadAttendanceStats] โหลดสถิติการมาเรียนไม่สำเร็จ (ตรวจสิทธิ์ RLS ตาราง attendance_records):", error.message);
-      return;
-    }
-
-    const rows = data ?? [];
-    const checkedIn = rows.length;
-    // "มาเรียน" นับ present + late (มาโรงเรียนจริง แค่มาสาย) — ให้สอดคล้องกับหน้า /attendance
-    const present = rows.filter((r: any) => r.status === "present" || r.status === "late").length;
-    const absent = rows.filter((r: any) => r.status === "absent").length;
-    // ใช้จำนวนนักเรียนจริงเป็นตัวหาร ถ้า query students ล้มเหลวค่อย fallback เป็นจำนวนที่เช็คแล้ว
-    const total = typeof enrolledTotal === "number" ? enrolledTotal : checkedIn;
-
-    setAttendanceStats({ present, absent, total, checkedIn });
-  }
-  loadAttendanceStats();
-}, [supabase]);
 
 // ══════════════════════════════════════════════════════════
 // ── สถิติ "ครูลางาน" วันนี้ — ดึงจากตาราง leave_requests / substitution_records จริง
