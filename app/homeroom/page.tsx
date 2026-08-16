@@ -46,8 +46,9 @@ const SUBMENUS: SubMenuItem[] = [
 
 // ★ เมนูสำหรับผู้ดูแลระบบ (admin/director/deputy_director) เท่านั้น
 const ADMIN_SUBMENUS: SubMenuItem[] = [
-  { key: "attendance_overview", name: "สถิติการมาเรียนทั้งโรงเรียน", desc: "ภาพรวมการมา/ขาด/ลา/สาย ทุกห้องเรียน", icon: BarChart3, color: "bg-purple-600", path: "/admin/attendance-overview", status: "in_progress" },
-  { key: "holidays", name: "จัดการวันหยุดเรียน", desc: "เพิ่ม/ลบวันหยุดที่ไม่ต้องเช็คชื่อ", icon: CalendarOff, color: "bg-slate-700", path: "/admin/holidays", status: "in_progress" },
+  { key: "students_overview", name: "ทะเบียนนักเรียนทั้งโรงเรียน", desc: "ดูรายชื่อนักเรียนทุกห้อง เลือกกรองทีละห้องได้", icon: Users, color: "bg-blue-700", path: "/admin/students-overview", status: "live" },
+  { key: "attendance_overview", name: "สถิติการมาเรียนทั้งโรงเรียน", desc: "ภาพรวมการมา/ขาด/ลา/สาย ทุกห้องเรียน", icon: BarChart3, color: "bg-purple-600", path: "/admin/attendance-overview", status: "live" },
+  { key: "holidays", name: "จัดการวันหยุดเรียน", desc: "เพิ่ม/ลบวันหยุด เชื่อมกับเช็คชื่อ/สถิติ/ปฏิทินโรงเรียน", icon: CalendarOff, color: "bg-slate-700", path: "/admin/holidays", status: "live" },
 ];
 
 const STATUS_LABEL: Record<MenuStatus, { text: string; cls: string }> = {
@@ -60,6 +61,10 @@ const DASHBOARD_PATH = "/dashboard";
 
 // ★ role ที่ถือว่าเป็นผู้ดูแลระบบ — ปรับให้ตรงกับค่า role จริงในตาราง users ของระบบ
 const ADMIN_ROLES = new Set(["admin", "director", "deputy_director"]);
+
+// ★ เมนู (อ้างอิงด้วย key) ที่ไม่ต้องแสดงให้ผู้ดูแลระบบ/ผู้บริหารเห็นในฮับนี้
+//   เช่น "บันทึกเช็คชื่อ" รายวันเป็นงานของครูประจำชั้น แอดมินมีมุมมอง "สถิติการมาเรียนทั้งโรงเรียน" ของตัวเองแล้ว
+const HIDDEN_FOR_ADMIN_KEYS = new Set(["attendance"]);
 
 function MenuCard({ item }: { item: SubMenuItem }) {
   const Icon = item.icon;
@@ -110,6 +115,9 @@ export default function HomeroomHubPage() {
     })();
   }, []);
 
+  // ★ ผู้ดูแลระบบ/ผู้บริหาร ไม่ต้องเห็นเมนู "บันทึกเช็คชื่อ" รายวันในฮับนี้ (ยังเข้าตรง ๆ ผ่านลิงก์ /attendance ได้ถ้าจำเป็น)
+  const visibleSubmenus = isAdmin ? SUBMENUS.filter((item) => !HIDDEN_FOR_ADMIN_KEYS.has(item.key)) : SUBMENUS;
+
   return (
     // ✅ ขยายให้เต็มหน้าจอ (ตัด mx-auto max-w-6xl ออก)
     <div className="w-full px-4 sm:px-6 py-6 lg:px-8">
@@ -141,7 +149,7 @@ export default function HomeroomHubPage() {
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
-        {SUBMENUS.map((item) => <MenuCard key={item.key} item={item} />)}
+        {visibleSubmenus.map((item) => <MenuCard key={item.key} item={item} />)}
       </div>
 
       {isAdmin && (
