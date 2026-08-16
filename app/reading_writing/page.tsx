@@ -111,13 +111,19 @@ for (let i = 1; i <= 6; i++) {
       { key: "read", label: "ฉบับที่ ๑ การอ่าน", parts: [
         { key: "r1", label: "การอ่าน (๒๐ ข้อ)", max: 20 },
       ]},
-      { key: "write", label: "ฉบับที่ ๒ การเขียน", parts: [
-        { key: "w1", label: "๑. การตั้งชื่อเรื่อง", max: 5 },
-        { key: "w2", label: "๒. เนื้อหา", max: 15 },
-        { key: "w3", label: "๓. การใช้ภาษา", max: 4 },
-        { key: "w4", label: "๔. ความเป็นระเบียบเรียบร้อย", max: 3 },
-        { key: "w5", label: "๕. การเขียนสะกดคำ", max: 5 },
-      ]},
+      { key: "write", label: "ฉบับที่ ๒ การเขียน", parts:
+        (i === 2 || i === 3)
+          ? [
+              { key: "w_total", label: "คะแนนรวม การเขียน", max: 32 },
+            ]
+          : [
+              { key: "w1", label: "๑. การตั้งชื่อเรื่อง", max: 5 },
+              { key: "w2", label: "๒. เนื้อหา", max: 15 },
+              { key: "w3", label: "๓. การใช้ภาษา", max: 4 },
+              { key: "w4", label: "๔. ความเป็นระเบียบเรียบร้อย", max: 3 },
+              { key: "w5", label: "๕. การเขียนสะกดคำ", max: 5 },
+            ]
+      },
     ],
     evalLevel: "group",
   };
@@ -176,9 +182,10 @@ function formatAge(bd) {
 }
 function genderPrefix(g, roomName) {
   const isHighSchool = /^ม\.?(\d+)/.test(roomName || "") && Number((roomName || "").match(/^ม\.?(\d+)/)?.[1]) >= 4;
-  const isMale = (g || "").toLowerCase().includes("male") || (g || "").includes("ชาย");
-  if (isHighSchool) return isMale ? "นาย" : "นางสาว";
-  return isMale ? "ด.ช." : "ด.ญ.";
+  const gender = (g || "").toLowerCase();
+  const isFemale = gender.includes("female") || (g || "").includes("หญิง");
+  if (isHighSchool) return isFemale ? "นางสาว" : "นาย";
+  return isFemale ? "ด.ญ." : "ด.ช.";
 }
 
 // ── ดึงเฉพาะห้องเรียนที่ผู้ใช้เป็นครูประจำชั้น ──
