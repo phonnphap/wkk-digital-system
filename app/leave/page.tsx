@@ -550,7 +550,7 @@ const LEAVE_TYPE_LIST: { key:LeaveType; label:string; icon:string }[] = [
   { key:"maternity",  label:"ลาคลอดบุตร / ช่วยเหลือภริยาคลอด",icon:"👶" },
   { key:"ordination", label:"ลาอุปสมบท / ประกอบพิธีฮัจย์",     icon:"🙏" },
   { key:"official",   label:"ไปราชการ",                          icon:"🏛️" },
-  { key:"other" as LeaveType, label:"ลาประเภทอื่นๆ",            icon:"📌" },
+  { key:"other" as LeaveType, label:"ลากรณีฉุกเฉิน",            icon:"📌" },
 ];
 
 const inp = (err?: boolean) => `w-full bg-white border-2 ${err?"border-red-400":"border-blue-200"} rounded-xl px-4 py-3 text-slate-800 text-sm font-medium focus:border-blue-500 focus:outline-none transition-colors`;

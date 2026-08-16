@@ -7,6 +7,14 @@
 //   - role admin/director/deputy_director มีสิทธิ์ SELECT ทุกแถวในตารางเหล่านี้ผ่าน RLS policy
 //     (ถ้ายังไม่มี ต้องเพิ่ม policy ที่อนุญาตให้ role เหล่านี้เห็นข้อมูลทุกห้อง ไม่ใช่แค่ห้องตัวเอง)
 //
+// ⚠️ ฟีเจอร์ "กราฟ/สถิติ" (รายวัน/รายเดือน/รายเทอม/รายปีการศึกษา) ใช้ไลบรารี recharts
+//   ถ้ายังไม่ได้ติดตั้ง ให้รัน:  npm install recharts
+//
+//   สมมติฐานเรื่อง "เทอม" / "ปีการศึกษา" (ปรับตามปฏิทินโรงเรียนจริงได้ที่ getTermRange / getAcademicYearRange):
+//     - ปีการศึกษา X  หมายถึงช่วง 1 พ.ค. ปี X  ถึง 31 มี.ค. ปี X+1 (ค.ศ.)
+//     - เทอม 1: 1 พ.ค. - 15 ต.ค. ของปี X
+//     - เทอม 2: 1 พ.ย. ของปี X - 31 มี.ค. ของปี X+1
+//
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -14,8 +22,12 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   Home, ArrowLeft, Calendar, ChevronLeft, ChevronRight,
-  ChevronDown, ChevronUp, Users, BarChart3, Loader2,
+  ChevronDown, ChevronUp, Users, BarChart3, Loader2, TrendingUp,
 } from "lucide-react";
+import {
+  ResponsiveContainer, LineChart, Line, BarChart, Bar,
+  CartesianGrid, XAxis, YAxis, Tooltip, Legend,
+} from "recharts";
 
 const supabase = createClient();
 
@@ -43,6 +55,10 @@ const THAI_WEEKDAYS_FULL = ["อาทิตย์", "จันทร์", "อ�
 const THAI_MONTHS_FULL = [
   "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
   "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+];
+const THAI_MONTHS_SHORT = [
+  "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+  "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
 ];
 
 function parseISODateLocal(iso: string) {
@@ -74,6 +90,23 @@ function addDaysISO(iso: string, delta: number) {
   const m = String(dt.getMonth() + 1).padStart(2, "0");
   const d = String(dt.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+// ★ ช่วงวันที่ของ "เดือน" ที่เลือก (ปฏิทิน)
+function getMonthRange(year: number, month: number) {
+  const start = `${year}-${String(month).padStart(2, "0")}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const end = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  return { start, end };
+}
+// ★ ช่วงวันที่ของ "เทอม" ในปีการศึกษาที่เลือก (ปรับตามปฏิทินโรงเรียนจริงได้ตรงนี้)
+function getTermRange(academicYear: number, term: 1 | 2) {
+  if (term === 1) return { start: `${academicYear}-05-01`, end: `${academicYear}-10-15` };
+  return { start: `${academicYear}-11-01`, end: `${academicYear + 1}-03-31` };
+}
+// ★ ช่วงวันที่ของ "ปีการศึกษา" ที่เลือก (รวมทั้ง 2 เทอม)
+function getAcademicYearRange(academicYear: number) {
+  return { start: `${academicYear}-05-01`, end: `${academicYear + 1}-03-31` };
 }
 
 // ★ ดึง "ระดับชั้น" จากชื่อห้อง เช่น "ป.1/2" -> "ป.1", "ม.3/4" -> "ม.3"
@@ -130,6 +163,9 @@ async function fetchAllRows<T>(
 type ClassroomRow = { classroom_id: string; room_name: string };
 type StudentRow = { id: string; classroom_id: string; gender: string | null };
 type AttendanceRecordRow = { student_id: string; classroom_id: string; status: AttendanceStatus };
+type AttendanceRecordWithDate = { student_id: string; classroom_id: string; status: AttendanceStatus; attendance_date: string };
+
+type BaseData = { classrooms: ClassroomRow[]; students: StudentRow[] };
 
 type ClassStat = {
   classroom_id: string;
@@ -153,6 +189,8 @@ type GradeGroup = {
   totals: Omit<ClassStat, "classroom_id" | "room_name" | "grade">;
 };
 
+type ChartPoint = { label: string; [key: string]: number | string };
+
 function emptyTotals() {
   return {
     total: 0, maleTotal: 0, femaleTotal: 0,
@@ -173,6 +211,16 @@ function sumInto(target: ReturnType<typeof emptyTotals>, src: ReturnType<typeof 
   target.notRecorded += src.notRecorded;
 }
 
+// ★ สีเส้นกราฟ วนใช้ตามลำดับระดับชั้นที่เลือก ("ทั้งโรงเรียน" ใช้สีเทาเข้มเสมอ)
+const LINE_COLORS = ["#7c3aed", "#059669", "#0284c7", "#d97706", "#e11d48", "#0d9488", "#9333ea", "#ca8a04"];
+const SCHOOL_ENTITY = "__school__";
+function colorForEntity(ent: string, idx: number) {
+  return ent === SCHOOL_ENTITY ? "#1e293b" : LINE_COLORS[idx % LINE_COLORS.length];
+}
+function entityLabel(ent: string) {
+  return ent === SCHOOL_ENTITY ? "ทั้งโรงเรียน" : `ระดับ ${ent}`;
+}
+
 export default function AttendanceOverviewPage() {
   const router = useRouter();
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -182,6 +230,9 @@ export default function AttendanceOverviewPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
+  // ★ ข้อมูลห้องเรียน/นักเรียน ดึงครั้งเดียวแล้วใช้ร่วมกันทั้งมุมมองตารางและกราฟ (ไม่ผูกกับวันที่)
+  const [baseData, setBaseData] = useState<BaseData | null>(null);
+
   const [gradeGroups, setGradeGroups] = useState<GradeGroup[]>([]);
   const [grandTotals, setGrandTotals] = useState(emptyTotals());
   const [collapsedGrades, setCollapsedGrades] = useState<Set<string>>(new Set());
@@ -190,6 +241,21 @@ export default function AttendanceOverviewPage() {
     female: { present: 0, late: 0, leave: 0, absent: 0 },
     unknown: { present: 0, late: 0, leave: 0, absent: 0 },
   });
+
+  // ★ สถานะของมุมมอง "กราฟ/สถิติ"
+  const [viewMode, setViewMode] = useState<"table" | "chart">("table");
+  const [periodType, setPeriodType] = useState<"day" | "month" | "term" | "year">("day");
+  const [chartMonth, setChartMonth] = useState<number>(new Date().getMonth() + 1);
+  const [chartYear, setChartYear] = useState<number>(() => {
+    const now = new Date();
+    // ถ้ายังไม่ถึงพฤษภาคม ให้ถือว่ายังอยู่ในปีการศึกษาที่เริ่มเมื่อพฤษภาคมปีก่อนหน้า
+    return now.getMonth() + 1 >= 5 ? now.getFullYear() : now.getFullYear() - 1;
+  });
+  const [chartTerm, setChartTerm] = useState<1 | 2>(1);
+  const [chartEntities, setChartEntities] = useState<Set<string>>(new Set([SCHOOL_ENTITY]));
+  const [chartData, setChartData] = useState<ChartPoint[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartErrorMsg, setChartErrorMsg] = useState("");
 
   const dateInputRef = useRef<HTMLInputElement>(null);
 
@@ -202,6 +268,15 @@ export default function AttendanceOverviewPage() {
       el.focus();
       el.click();
     }
+  }
+
+  function toggleEntity(ent: string) {
+    setChartEntities((prev) => {
+      const next = new Set(prev);
+      if (next.has(ent)) next.delete(ent);
+      else next.add(ent);
+      return next;
+    });
   }
 
   // ตรวจสิทธิ์ผู้ดูแลระบบก่อนแสดงหน้า
@@ -227,25 +302,19 @@ export default function AttendanceOverviewPage() {
     })();
   }, [router]);
 
-  // โหลดข้อมูลสรุปของวันที่เลือก
+  // ★ โหลดรายชื่อห้องเรียน/นักเรียนครั้งเดียว (ใช้ร่วมกันทั้งตารางรายวันและกราฟ)
   useEffect(() => {
     if (!allowed) return;
-    setLoading(true);
-    setErrorMsg("");
-
     (async () => {
-      const [classroomsRes, studentsRes, attendanceRes] = await Promise.all([
+      const [classroomsRes, studentsRes] = await Promise.all([
         // ★ ตาราง classrooms ใช้ primary key ชื่อ "id" (ไม่ใช่ "classroom_id") — จำนวนห้องมีไม่มาก ดึงครั้งเดียวพอ
         supabase.from("classrooms").select("id, room_name").order("room_name"),
-        // ★ students และ attendance_records อาจมีมากกว่า 1,000 แถว ต้องดึงแบบแบ่งหน้า ไม่งั้นข้อมูลจะขาดหาย
+        // ★ students อาจมีมากกว่า 1,000 แถว ต้องดึงแบบแบ่งหน้า ไม่งั้นข้อมูลจะขาดหาย
         fetchAllRows<{ id: string; classroom_id: string; gender: string | null }>("students", "id, classroom_id, gender"),
-        fetchAllRows<AttendanceRecordRow>("attendance_records", "student_id, classroom_id, status", (q) =>
-          q.eq("attendance_date", date)
-        ),
       ]);
 
-      if (classroomsRes.error || studentsRes.error || attendanceRes.error) {
-        console.error(classroomsRes.error || studentsRes.error || attendanceRes.error);
+      if (classroomsRes.error || studentsRes.error) {
+        console.error(classroomsRes.error || studentsRes.error);
         setErrorMsg(
           "โหลดข้อมูลไม่สำเร็จ — อาจเป็นเพราะชื่อตาราง/คอลัมน์ไม่ตรงกับระบบจริง หรือ RLS policy ยังไม่อนุญาตให้ role นี้เห็นข้อมูลทุกห้อง กรุณาตรวจสอบคอมเมนต์ด้านบนของไฟล์นี้"
         );
@@ -253,12 +322,37 @@ export default function AttendanceOverviewPage() {
         return;
       }
 
-      // แปลง id -> classroom_id ให้ตรงกับ type ที่ใช้ทั้งไฟล์ (students.classroom_id อ้างอิงมาที่ classrooms.id)
       const classrooms = ((classroomsRes.data ?? []) as { id: string; room_name: string }[]).map((c) => ({
         classroom_id: c.id,
         room_name: c.room_name,
       })) as ClassroomRow[];
       const students = (studentsRes.data ?? []) as StudentRow[];
+      setBaseData({ classrooms, students });
+    })();
+  }, [allowed]);
+
+  // โหลดข้อมูลสรุปของวันที่เลือก (มุมมองตาราง)
+  useEffect(() => {
+    if (!allowed || !baseData) return;
+    setLoading(true);
+    setErrorMsg("");
+
+    (async () => {
+      // ★ attendance_records อาจมีมากกว่า 1,000 แถว ต้องดึงแบบแบ่งหน้า ไม่งั้นข้อมูลจะขาดหาย
+      const attendanceRes = await fetchAllRows<AttendanceRecordRow>("attendance_records", "student_id, classroom_id, status", (q) =>
+        q.eq("attendance_date", date)
+      );
+
+      if (attendanceRes.error) {
+        console.error(attendanceRes.error);
+        setErrorMsg(
+          "โหลดข้อมูลไม่สำเร็จ — อาจเป็นเพราะชื่อตาราง/คอลัมน์ไม่ตรงกับระบบจริง หรือ RLS policy ยังไม่อนุญาตให้ role นี้เห็นข้อมูลทุกห้อง กรุณาตรวจสอบคอมเมนต์ด้านบนของไฟล์นี้"
+        );
+        setLoading(false);
+        return;
+      }
+
+      const { classrooms, students } = baseData;
       const records = (attendanceRes.data ?? []) as AttendanceRecordRow[];
 
       // สถานะของนักเรียนแต่ละคนในวันที่เลือก
@@ -327,7 +421,127 @@ export default function AttendanceOverviewPage() {
       setGenderTotals(gTotals);
       setLoading(false);
     })();
-  }, [allowed, date]);
+  }, [allowed, baseData, date]);
+
+  // รายชื่อระดับชั้นทั้งหมด (สำหรับตัวเลือก "เปรียบเทียบ" ในกราฟ)
+  const availableGrades = useMemo(() => {
+    if (!baseData) return [] as string[];
+    const set = new Set(baseData.classrooms.map((c) => extractGradeLevel(c.room_name)));
+    return Array.from(set).sort(gradeSort);
+  }, [baseData]);
+
+  // กราฟแบบ "รายวัน" ใช้ข้อมูลจากตารางที่โหลดไว้แล้ว ไม่ต้อง fetch เพิ่ม — เปรียบเทียบทุกระดับชั้น + ทั้งโรงเรียนในวันเดียวกัน
+  const dayChartData = useMemo<ChartPoint[]>(() => {
+    const points: ChartPoint[] = gradeGroups.map((g) => ({
+      label: `ระดับ ${g.grade}`,
+      "อัตรามาเรียน (%)": g.totals.total ? Math.round(((g.totals.present + g.totals.late) / g.totals.total) * 1000) / 10 : 0,
+    }));
+    points.push({
+      label: "ทั้งโรงเรียน",
+      "อัตรามาเรียน (%)": grandTotals.total ? Math.round(((grandTotals.present + grandTotals.late) / grandTotals.total) * 1000) / 10 : 0,
+    });
+    return points;
+  }, [gradeGroups, grandTotals]);
+
+  // ★ โหลดข้อมูลกราฟสำหรับ "รายเดือน / รายเทอม / รายปีการศึกษา" — ดึงเฉพาะช่วงวันที่ที่ต้องใช้
+  useEffect(() => {
+    if (!allowed || !baseData || viewMode !== "chart" || periodType === "day") return;
+    setChartLoading(true);
+    setChartErrorMsg("");
+
+    (async () => {
+      const range =
+        periodType === "month" ? getMonthRange(chartYear, chartMonth) :
+        periodType === "term" ? getTermRange(chartYear, chartTerm) :
+        getAcademicYearRange(chartYear);
+
+      const res = await fetchAllRows<AttendanceRecordWithDate>(
+        "attendance_records",
+        "student_id, classroom_id, status, attendance_date",
+        (q) => q.gte("attendance_date", range.start).lte("attendance_date", range.end)
+      );
+
+      if (res.error) {
+        console.error(res.error);
+        setChartErrorMsg("โหลดข้อมูลกราฟไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+        setChartLoading(false);
+        return;
+      }
+
+      const { classrooms, students } = baseData;
+      const classroomGrade = new Map(classrooms.map((c) => [c.classroom_id, extractGradeLevel(c.room_name)]));
+      const studentGrade = new Map(students.map((s) => [s.id, classroomGrade.get(s.classroom_id) ?? "-"]));
+
+      // จำนวน นร. ทั้งหมดต่อระดับชั้น/ทั้งโรงเรียน (คงที่ ไม่ขึ้นกับวันที่)
+      const totalByGrade = new Map<string, number>();
+      students.forEach((s) => {
+        const grade = studentGrade.get(s.id) ?? "-";
+        totalByGrade.set(grade, (totalByGrade.get(grade) ?? 0) + 1);
+      });
+      const totalSchool = students.length;
+
+      // จัดกลุ่ม record ตามวันที่ที่มีการเช็คชื่อจริงเท่านั้น (ข้ามวันหยุด/วันที่ยังไม่ได้เช็คชื่อโดยอัตโนมัติ)
+      const byDate = new Map<string, AttendanceRecordWithDate[]>();
+      (res.data ?? []).forEach((r) => {
+        const arr = byDate.get(r.attendance_date) ?? [];
+        arr.push(r);
+        byDate.set(r.attendance_date, arr);
+      });
+
+      const entities = Array.from(chartEntities);
+      const goodCountFor = (dayRecords: AttendanceRecordWithDate[], ent: string) =>
+        dayRecords.filter((r) => {
+          const belongs = ent === SCHOOL_ENTITY ? true : studentGrade.get(r.student_id) === ent;
+          return belongs && (r.status === "present" || r.status === "late");
+        }).length;
+
+      if (periodType === "month") {
+        const points: ChartPoint[] = Array.from(byDate.keys())
+          .sort()
+          .map((d) => {
+            const dayRecords = byDate.get(d) ?? [];
+            const point: ChartPoint = { label: String(parseISODateLocal(d).getDate()) };
+            entities.forEach((ent) => {
+              const total = ent === SCHOOL_ENTITY ? totalSchool : totalByGrade.get(ent) ?? 0;
+              const good = goodCountFor(dayRecords, ent);
+              point[ent] = total > 0 ? Math.round((good / total) * 1000) / 10 : 0;
+            });
+            return point;
+          });
+        setChartData(points);
+      } else {
+        // เทอม / ปีการศึกษา -> สรุปเป็น "ค่าเฉลี่ยอัตรามาเรียนรายเดือน" (เฉลี่ยเฉพาะวันที่มีการเช็คชื่อจริงในเดือนนั้น)
+        const monthAgg = new Map<string, Map<string, { sum: number; count: number }>>();
+        Array.from(byDate.keys()).sort().forEach((d) => {
+          const monthKey = d.slice(0, 7); // YYYY-MM
+          const dayRecords = byDate.get(d) ?? [];
+          let entMap = monthAgg.get(monthKey);
+          if (!entMap) { entMap = new Map(); monthAgg.set(monthKey, entMap); }
+          entities.forEach((ent) => {
+            const total = ent === SCHOOL_ENTITY ? totalSchool : totalByGrade.get(ent) ?? 0;
+            const good = goodCountFor(dayRecords, ent);
+            const rate = total > 0 ? (good / total) * 100 : 0;
+            const prev = entMap!.get(ent) ?? { sum: 0, count: 0 };
+            entMap!.set(ent, { sum: prev.sum + rate, count: prev.count + 1 });
+          });
+        });
+        const points: ChartPoint[] = Array.from(monthAgg.keys())
+          .sort()
+          .map((mk) => {
+            const m = Number(mk.split("-")[1]);
+            const point: ChartPoint = { label: THAI_MONTHS_SHORT[m - 1] };
+            const entMap = monthAgg.get(mk)!;
+            entities.forEach((ent) => {
+              const agg = entMap.get(ent);
+              point[ent] = agg && agg.count > 0 ? Math.round((agg.sum / agg.count) * 10) / 10 : 0;
+            });
+            return point;
+          });
+        setChartData(points);
+      }
+      setChartLoading(false);
+    })();
+  }, [allowed, baseData, viewMode, periodType, chartYear, chartMonth, chartTerm, chartEntities]);
 
   const attendedRate = useMemo(() => {
     if (grandTotals.total === 0) return 0;
@@ -432,13 +646,35 @@ export default function AttendanceOverviewPage() {
           </div>
         </div>
 
+        {/* ★ แท็บสลับมุมมอง: ตารางรายวัน / กราฟ-สถิติ */}
+        <div className="mt-5 inline-flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-200">
+          <button
+            onClick={() => setViewMode("table")}
+            className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
+              viewMode === "table" ? "bg-purple-600 text-white shadow" : "text-slate-500 hover:text-purple-600"
+            }`}
+          >
+            ตารางรายวัน
+          </button>
+          <button
+            onClick={() => setViewMode("chart")}
+            className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
+              viewMode === "chart" ? "bg-purple-600 text-white shadow" : "text-slate-500 hover:text-purple-600"
+            }`}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <TrendingUp className="h-4 w-4" /> กราฟ/สถิติ
+            </span>
+          </button>
+        </div>
+
         {errorMsg && (
           <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">
             ⚠️ {errorMsg}
           </div>
         )}
 
-        {!errorMsg && (
+        {!errorMsg && viewMode === "table" && (
           <>
             {/* การ์ดสรุปรวมทั้งโรงเรียน */}
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -573,6 +809,135 @@ export default function AttendanceOverviewPage() {
             </p>
           </>
         )}
+
+        {/* ★ มุมมอง "กราฟ/สถิติ" — เปรียบเทียบรายวัน/รายเดือน/รายเทอม/รายปีการศึกษา */}
+        {!errorMsg && viewMode === "chart" && (
+          <div className="mt-6 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
+            {/* เลือกช่วงเวลา */}
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                { value: "day", label: "รายวัน" },
+                { value: "month", label: "รายเดือน" },
+                { value: "term", label: "รายเทอม" },
+                { value: "year", label: "รายปีการศึกษา" },
+              ].map((p) => (
+                <button
+                  key={p.value}
+                  onClick={() => setPeriodType(p.value as "day" | "month" | "term" | "year")}
+                  className={`rounded-xl px-3.5 py-2 text-xs font-bold transition ${
+                    periodType === p.value
+                      ? "bg-purple-100 text-purple-700 ring-1 ring-purple-300"
+                      : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            {/* ตัวเลือกช่วงเวลาย่อย */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {periodType === "day" && (
+                <p className="text-xs text-slate-400">
+                  ใช้วันที่ที่เลือกไว้ด้านบน: <span className="font-semibold text-slate-600">{formatThaiDateFull(date)}</span>
+                </p>
+              )}
+              {periodType === "month" && (
+                <>
+                  <select
+                    value={chartMonth}
+                    onChange={(e) => setChartMonth(Number(e.target.value))}
+                    className="rounded-xl border-2 border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600"
+                  >
+                    {THAI_MONTHS_FULL.map((m, i) => (
+                      <option key={m} value={i + 1}>{m}</option>
+                    ))}
+                  </select>
+                  <YearSelect value={chartYear} onChange={setChartYear} />
+                </>
+              )}
+              {periodType === "term" && (
+                <>
+                  <select
+                    value={chartTerm}
+                    onChange={(e) => setChartTerm(Number(e.target.value) as 1 | 2)}
+                    className="rounded-xl border-2 border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600"
+                  >
+                    <option value={1}>เทอม 1 (พ.ค. - ต.ค.)</option>
+                    <option value={2}>เทอม 2 (พ.ย. - มี.ค.)</option>
+                  </select>
+                  <YearSelect value={chartYear} onChange={setChartYear} label="ปีการศึกษา" />
+                </>
+              )}
+              {periodType === "year" && <YearSelect value={chartYear} onChange={setChartYear} label="ปีการศึกษา" />}
+            </div>
+
+            {/* เลือกสิ่งที่จะเปรียบเทียบ (สำหรับรายเดือน/เทอม/ปี — รายวันเทียบทุกระดับชั้นให้อัตโนมัติ) */}
+            {periodType !== "day" && (
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-slate-400">เปรียบเทียบ:</span>
+                <EntityChip label="ทั้งโรงเรียน" active={chartEntities.has(SCHOOL_ENTITY)} onClick={() => toggleEntity(SCHOOL_ENTITY)} />
+                {availableGrades.map((g) => (
+                  <EntityChip key={g} label={`ระดับ ${g}`} active={chartEntities.has(g)} onClick={() => toggleEntity(g)} />
+                ))}
+              </div>
+            )}
+
+            {chartErrorMsg && (
+              <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">
+                ⚠️ {chartErrorMsg}
+              </div>
+            )}
+
+            {/* พื้นที่กราฟ */}
+            <div className="mt-5 h-80 w-full">
+              {periodType === "day" ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dayChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                    <YAxis unit="%" tick={{ fontSize: 11 }} domain={[0, 100]} />
+                    <Tooltip formatter={(value) => [`${value}%`, "อัตรามาเรียน"]} />
+                    <Bar dataKey="อัตรามาเรียน (%)" radius={[6, 6, 0, 0]} fill="#7c3aed" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : chartLoading ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> กำลังโหลดข้อมูล...
+                </div>
+              ) : chartData.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                  ไม่พบข้อมูลการเช็คชื่อในช่วงเวลาที่เลือก
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                    <YAxis unit="%" tick={{ fontSize: 11 }} domain={[0, 100]} />
+                    <Tooltip formatter={(value, name) => [`${value}%`, entityLabel(String(name))]} />
+                    <Legend formatter={(value) => entityLabel(String(value))} />
+                    {Array.from(chartEntities).map((ent, idx) => (
+                      <Line
+                        key={ent}
+                        type="monotone"
+                        dataKey={ent}
+                        name={ent}
+                        stroke={colorForEntity(ent, idx)}
+                        strokeWidth={2.5}
+                        dot={{ r: 3 }}
+                        connectNulls
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+            <p className="mt-3 text-[11px] text-slate-400">
+              * อัตรามาเรียน = (จำนวนมา + สาย) ÷ จำนวนนักเรียนทั้งหมดในกลุ่มนั้น × 100 — คำนวณเฉพาะวันที่มีการเช็คชื่อจริงเท่านั้น (ข้ามวันหยุด/วันที่ยังไม่ได้เช็คชื่อ)
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -639,5 +1004,38 @@ function SummaryCard({
       </div>
       <p className="mt-1 text-2xl font-black">{value}</p>
     </div>
+  );
+}
+
+// ★ ตัวเลือกปี (พ.ศ.) สำหรับกราฟรายเดือน/เทอม/ปีการศึกษา — ค่าที่เก็บเป็น ค.ศ. (Gregorian) แต่แสดงผลเป็น พ.ศ.
+function YearSelect({ value, onChange, label }: { value: number; onChange: (v: number) => void; label?: string }) {
+  const now = new Date().getFullYear();
+  const years = Array.from({ length: 5 }, (_, i) => now - 3 + i);
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className="rounded-xl border-2 border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600"
+    >
+      {years.map((y) => (
+        <option key={y} value={y}>
+          {label ?? "ปี"} {toBuddhistYear(y)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+// ★ ปุ่มเลือก/ยกเลิกกลุ่มที่จะเปรียบเทียบในกราฟ (ระดับชั้น / ทั้งโรงเรียน)
+function EntityChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+        active ? "bg-purple-600 text-white shadow-sm" : "bg-slate-50 text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
