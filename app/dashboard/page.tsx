@@ -116,7 +116,7 @@ export default function DashboardPage() {
   const hasLoadedNotifOnceRef = useRef(false);
   const notifOptsRef = useRef<LoadNotifOpts | null>(null);
   // ── สถิติการมาเรียน/ขาดเรียนวันนี้ — ดึงจากการเช็คชื่อโฮมรูมของครูประจำชั้น ──
-  const [attendanceStats, setAttendanceStats] = useState<{ present: number; absent: number; total: number } | null>(null);
+  const [attendanceStats, setAttendanceStats] = useState<{ present: number; absent: number; total: number; checkedIn: number } | null>(null);
   // ── สถิติ "ครูลางาน" วันนี้ (ในสายชั้นตัวเอง ยกเว้นแอดมิน/ผู้บริหารเห็นทั้งโรงเรียน)
   //    + จำนวนคาบที่ตัวเองต้องสอนแทนวันนี้ (แอดมิน/ผู้บริหารไม่ต้องเห็นตัวเลขนี้) ──
   const [leaveTodayStats, setLeaveTodayStats] = useState<{
@@ -754,26 +754,64 @@ useEffect(() => {
 // ── สถิติ นร.มาเรียนวันนี้ / ขาดเรียนวันนี้ — ดึงจากการเช็คชื่อโฮมรูมของครูประจำชั้น
 // (ตาราง attendance_records: student_id, classroom_id, attendance_date, status
 //  ตรงกับ app/attendance/page.tsx — status เป็น "present" / "late" / "leave" / "absent")
+//
+// ⚠️ "total" ใช้จำนวนนักเรียนที่ลงทะเบียนจริงจากตาราง students (ไม่ใช่แค่จำนวนแถวที่
+//    เช็คชื่อแล้ววันนี้) เพราะถ้ายังเช็คไม่ครบทุกห้อง จำนวนจากแถว attendance_records
+//    อย่างเดียวจะน้อยกว่าความจริงเสมอ — checkedIn เก็บไว้เผื่ออยากโชว์ "เช็คแล้วกี่คน"
+//
+// ⚠️ ถ้าตัวเลขที่แอดมินเห็นยังไม่ตรง ให้ตรวจ RLS policy ของตาราง attendance_records
+//    และ students ก่อน — เพราะถ้า policy อนุญาตให้อ่านได้เฉพาะ "ครูประจำชั้นของห้องนั้น"
+//    ตอนแอดมินโหลดจะได้แถวว่างๆ กลับมาแบบไม่ error (query ผ่านแต่ไม่มีข้อมูล)
+//    ตัวอย่าง policy ที่ต้องมีเพิ่ม (รันใน Supabase SQL editor):
+//
+//    create policy "admins can view all attendance"
+//      on attendance_records for select
+//      using (exists (
+//        select 1 from users u
+//        where u.auth_id = auth.uid()
+//        and u.role in ('admin','director','deputy_director')
+//      ));
+//
+//    create policy "admins can view all students"
+//      on students for select
+//      using (exists (
+//        select 1 from users u
+//        where u.auth_id = auth.uid()
+//        and u.role in ('admin','director','deputy_director')
+//      ));
 // ══════════════════════════════════════════════════════════
 useEffect(() => {
   async function loadAttendanceStats() {
     const today = new Date().toISOString().split("T")[0];
+
+    // 1) จำนวนนักเรียนทั้งหมดที่ลงทะเบียนไว้จริง — ใช้เป็นตัวหารที่ถูกต้อง
+    const { count: enrolledTotal, error: enrolledErr } = await supabase
+      .from("students")
+      .select("id", { count: "exact", head: true });
+    if (enrolledErr) {
+      console.warn("[loadAttendanceStats] โหลดจำนวนนักเรียนทั้งหมดไม่สำเร็จ (ตรวจสิทธิ์ RLS ตาราง students):", enrolledErr.message);
+    }
+
+    // 2) สถานะเช็คชื่อของวันนี้ (เท่าที่มีการเช็คแล้ว)
     const { data, error } = await supabase
       .from("attendance_records")
       .select("status")
       .eq("attendance_date", today);
 
     if (error) {
-      console.warn("[loadAttendanceStats] โหลดสถิติการมาเรียนไม่สำเร็จ:", error.message);
+      console.warn("[loadAttendanceStats] โหลดสถิติการมาเรียนไม่สำเร็จ (ตรวจสิทธิ์ RLS ตาราง attendance_records):", error.message);
       return;
     }
-    if (data) {
-      const total = data.length;
-      // "มาเรียน" นับ present + late (มาโรงเรียนจริง แค่มาสาย) — ให้สอดคล้องกับหน้า /attendance
-      const present = data.filter((r: any) => r.status === "present" || r.status === "late").length;
-      const absent = data.filter((r: any) => r.status === "absent").length;
-      setAttendanceStats({ present, absent, total });
-    }
+
+    const rows = data ?? [];
+    const checkedIn = rows.length;
+    // "มาเรียน" นับ present + late (มาโรงเรียนจริง แค่มาสาย) — ให้สอดคล้องกับหน้า /attendance
+    const present = rows.filter((r: any) => r.status === "present" || r.status === "late").length;
+    const absent = rows.filter((r: any) => r.status === "absent").length;
+    // ใช้จำนวนนักเรียนจริงเป็นตัวหาร ถ้า query students ล้มเหลวค่อย fallback เป็นจำนวนที่เช็คแล้ว
+    const total = typeof enrolledTotal === "number" ? enrolledTotal : checkedIn;
+
+    setAttendanceStats({ present, absent, total, checkedIn });
   }
   loadAttendanceStats();
 }, [supabase]);
@@ -1005,7 +1043,9 @@ return (
           {
             icon: "✓", bg: "bg-emerald-100", color: "text-emerald-600", label: "นักเรียนมาวันนี้",
             value: attendanceStats ? String(attendanceStats.present) : "-",
-            sub: attendanceStats ? `/ ${attendanceStats.total} คน` : "รอข้อมูล",
+            sub: attendanceStats
+              ? `/ ${attendanceStats.total} คน (เช็คแล้ว ${attendanceStats.checkedIn})`
+              : "รอข้อมูล",
             subColor: "text-slate-400",
           },
           {
