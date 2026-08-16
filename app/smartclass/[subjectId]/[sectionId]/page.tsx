@@ -1733,8 +1733,8 @@ export default function SmartClassRosterPage() {
   const [tab, setTab] = useState<TabKey>("roster");
   const [bannerMenu, setBannerMenu] = useState<BannerMenuKey | null>(null);
   const [currentUserId, setCurrentUserId] = useState("");
-const [isAdmin, setIsAdmin] = useState(false);
-const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   type Period = { timetable_entry_id: string; slot_number?: number; start_time?: string; end_time?: string };
   const [periods, setPeriods] = useState<Period[]>([]);
   const [timetableEntryId, setTimetableEntryId] = useState("");
@@ -1846,22 +1846,22 @@ const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(
   }, [subjectId, sectionId]);
 
   useEffect(() => {
-  (async () => {
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (authUser) {
-      const { data: profile } = await supabase.from("users").select("id, role").eq("auth_id", authUser.id).maybeSingle();
-      if (profile) {
-        setCurrentUserId(profile.id);
-        setIsAdmin(!!profile.role && ["admin", "executive"].includes(profile.role));
+    (async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (authUser) {
+        const { data: profile } = await supabase.from("users").select("id, role").eq("auth_id", authUser.id).maybeSingle();
+        if (profile) {
+          setCurrentUserId(profile.id);
+          setIsAdmin(!!profile.role && ["admin", "executive"].includes(profile.role));
+        }
       }
-    }
-  })();
-}, []);
+    })();
+  }, []);
 
-// เพิ่ม effect ใหม่ต่อท้าย: แอดมิน/ผู้บริหาร ไม่มีแท็บล่าง เลยต้อง default ไปที่ "ข้อมูลเช็กชื่อ" เสมอ
-useEffect(() => {
-  if (isAdmin && !bannerMenu) setBannerMenu("attendanceInfo");
-}, [isAdmin, bannerMenu]);
+  // แอดมิน/ผู้บริหาร ไม่มีแท็บล่าง เลยต้อง default ไปที่ "ข้อมูลเช็กชื่อ" เสมอ
+  useEffect(() => {
+    if (isAdmin && !bannerMenu) setBannerMenu("attendanceInfo");
+  }, [isAdmin, bannerMenu]);
 
   useEffect(() => {
     (async () => {
@@ -2108,25 +2108,13 @@ useEffect(() => {
         {bannerMenu === "assignments" && section && (
           <AssignmentsTool sectionId={section.id} subjectId={subjectId} students={students} currentUserId={currentUserId} />
         )}
-        {bannerMenu === "totalScore" && section && (
-          <GradeOverviewTool
-            sectionId={section.id}
-            subjectTitle={subject.name_th}
-            subjectCode={subject.subject_code}
-            students={students}
-            classroomLabel={`${classroom?.grade_group ?? ""} ${classroom?.room_name ?? ""}`}
-            academicYearLabel={academicYearLabel}
-            homeroomTeacherName={homeroomTeacherName}
-            subjectTeacherName={subjectTeacherName}
-          />
-        )}
         {bannerMenu === "insights" && classroom && (
           <InsightsTool
             currentUserId={currentUserId}
             subjectId={subjectId}
             classroomId={classroom.id}
           />
-        )}    
+        )}
         {bannerMenu === "attendanceInfo" && section && (
           <AttendanceOverviewTool
             sectionId={section.id}
