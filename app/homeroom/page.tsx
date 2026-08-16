@@ -64,7 +64,7 @@ const ADMIN_ROLES = new Set(["admin", "director", "deputy_director"]);
 
 // ★ เมนู (อ้างอิงด้วย key) ที่ไม่ต้องแสดงให้ผู้ดูแลระบบ/ผู้บริหารเห็นในฮับนี้
 //   เช่น "บันทึกเช็คชื่อ" รายวันเป็นงานของครูประจำชั้น แอดมินมีมุมมอง "สถิติการมาเรียนทั้งโรงเรียน" ของตัวเองแล้ว
-const HIDDEN_FOR_ADMIN_KEYS = new Set(["attendance"]);
+const HIDDEN_FOR_ADMIN_KEYS = new Set(["attendance", "students"]);
 
 function MenuCard({ item }: { item: SubMenuItem }) {
   const Icon = item.icon;
