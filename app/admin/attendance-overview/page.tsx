@@ -83,9 +83,46 @@ function extractGradeLevel(roomName: string): string {
   return idx === -1 ? roomName : roomName.slice(0, idx);
 }
 
-// เรียงระดับชั้นแบบ natural sort (ป.1, ป.2, ..., ป.10 ไม่ใช่ ป.1, ป.10, ป.2)
+// ★ ลำดับ "ประเภทชั้น" ที่ถูกต้องตามระบบการศึกษาไทย: อนุบาล -> ประถม -> มัธยม
+//    (เรียงตามตัวอักษรไทยเฉยๆ จะผิด เพราะ "อ" มาหลัง "ป" ในพยัญชนะไทย)
+const GRADE_PREFIX_ORDER: Record<string, number> = { "อ": 0, "ป": 1, "ม": 2 };
+
+function parseGrade(grade: string): { prefixRank: number; num: number } {
+  const match = grade.match(/^([ก-๙]+)\.?(\d+)?/);
+  const prefix = match?.[1]?.charAt(0) ?? "";
+  const num = match?.[2] ? Number(match[2]) : 0;
+  return { prefixRank: GRADE_PREFIX_ORDER[prefix] ?? 99, num };
+}
+
+// เรียงระดับชั้น: อนุบาล -> ประถม -> มัธยม ก่อน แล้วค่อยเรียงเลขชั้นจากน้อยไปมาก
 function gradeSort(a: string, b: string) {
+  const pa = parseGrade(a);
+  const pb = parseGrade(b);
+  if (pa.prefixRank !== pb.prefixRank) return pa.prefixRank - pb.prefixRank;
+  if (pa.num !== pb.num) return pa.num - pb.num;
   return a.localeCompare(b, "th", { numeric: true });
+}
+
+// ★ Supabase/PostgREST จำกัดผลลัพธ์ query ละ 1,000 แถวโดยดีฟอลต์ (max-rows)
+//    ฟังก์ชันนี้วนดึงข้อมูลทีละหน้าจนกว่าจะครบ เพื่อไม่ให้จำนวน นร./รายการเช็คชื่อขาดหายเมื่อโรงเรียนมีมากกว่า 1,000 คน
+async function fetchAllRows<T>(
+  table: string,
+  selectStr: string,
+  applyFilters?: (q: any) => any
+): Promise<{ data: T[] | null; error: any }> {
+  const pageSize = 1000;
+  let from = 0;
+  let all: T[] = [];
+  while (true) {
+    let query: any = supabase.from(table).select(selectStr).range(from, from + pageSize - 1);
+    if (applyFilters) query = applyFilters(query);
+    const { data, error } = await query;
+    if (error) return { data: null, error };
+    all = all.concat((data ?? []) as T[]);
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return { data: all, error: null };
 }
 
 /* ------------------------------------------------------------------ */
@@ -186,10 +223,13 @@ export default function AttendanceOverviewPage() {
 
     (async () => {
       const [classroomsRes, studentsRes, attendanceRes] = await Promise.all([
-        // ★ ตาราง classrooms ใช้ primary key ชื่อ "id" (ไม่ใช่ "classroom_id")
+        // ★ ตาราง classrooms ใช้ primary key ชื่อ "id" (ไม่ใช่ "classroom_id") — จำนวนห้องมีไม่มาก ดึงครั้งเดียวพอ
         supabase.from("classrooms").select("id, room_name").order("room_name"),
-        supabase.from("students").select("id, classroom_id, gender"),
-        supabase.from("attendance_records").select("student_id, classroom_id, status").eq("attendance_date", date),
+        // ★ students และ attendance_records อาจมีมากกว่า 1,000 แถว ต้องดึงแบบแบ่งหน้า ไม่งั้นข้อมูลจะขาดหาย
+        fetchAllRows<{ id: string; classroom_id: string; gender: string | null }>("students", "id, classroom_id, gender"),
+        fetchAllRows<AttendanceRecordRow>("attendance_records", "student_id, classroom_id, status", (q) =>
+          q.eq("attendance_date", date)
+        ),
       ]);
 
       if (classroomsRes.error || studentsRes.error || attendanceRes.error) {
