@@ -467,14 +467,16 @@ function GradeTable({
                   );
                 })}
                 {presets.map(p => (
-                  <td key={p.id} className="text-center px-3 py-3">
-                    <EditablePresetCell
-                      value={r.presetTotals[p.id] ?? 0}
-                      readOnly={readOnly}
-                      onSave={newValue => onAdjustPreset(s.id, p.id, r.presetTotals[p.id] ?? 0, newValue)}
-                    />
-                  </td>
-                ))}
+  <td key={p.id} className="text-center px-3 py-3">
+    {readOnly ? (
+      <span className={`text-sm font-black ${ (r.presetTotals[p.id] ?? 0) > 0 ? "text-emerald-600" : (r.presetTotals[p.id] ?? 0) < 0 ? "text-red-500" : "text-slate-300" }`}>
+        {r.presetTotals[p.id] ?? 0}
+      </span>
+    ) : (
+      <EditablePresetCell value={r.presetTotals[p.id] ?? 0} onSave={newValue => onAdjustPreset(s.id, p.id, r.presetTotals[p.id] ?? 0, newValue)} />
+    )}
+  </td>
+))}
                 <td className="text-center px-3 py-3">
                   <span className="inline-flex items-center justify-center min-w-[44px] px-2.5 py-1.5 rounded-xl font-black text-sm bg-slate-100 text-slate-700">
                     {r.grandTotal}
@@ -505,7 +507,7 @@ function GradeTable({
   );
 }
 
-function EditablePresetCell({ value, onSave, readOnly }: { value: number; onSave: (newValue: number) => void; readOnly: boolean }) {
+function EditablePresetCell({ value, onSave, readOnly = false }: { value: number; onSave: (newValue: number) => void; readOnly?: boolean }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
 

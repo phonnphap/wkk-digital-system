@@ -3,29 +3,28 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 /* =========================================================================
    GET /api/insights/overview
-   -------------------------------------------------------------------------
+
    Query params:
-     requester_id     : string (users.id)  -- บังคับ
-     subject_id        : string  -- บังคับเมื่อ scope != "school"
-     scope             : "classroom" | "grade_level" | "subject_all" | "school"
-     classroom_id       : string  -- บังคับเมื่อ scope = "classroom"
-     grade_level_id     : string  -- บังคับเมื่อ scope = "grade_level"
-     academic_year_id   : string  -- แนะนำให้ส่งเสมอ
+     requester_id, subject_id (บังคับ ยกเว้น scope="school"),
+     scope: "classroom" | "grade_level" | "subject_all" | "school"
+     classroom_id (บังคับเมื่อ scope="classroom")
+     grade_level_id (บังคับเมื่อ scope="grade_level")
+     academic_year_id (แนะนำให้ส่งเสมอ)
 
-   scope ใหม่ (เฉพาะ role = admin เท่านั้น):
-     - "subject_all" : วิชาเดียวกัน (จาก subject_id) แต่ดูทุกห้องทั้งโรงเรียน ไม่ล็อกสายชั้น
-     - "school"      : ทั้งโรงเรียน ทุกวิชา ทุกห้อง (ไม่ต้องส่ง subject_id)
+   scope ใหม่ (เฉพาะแอดมิน/ผู้บริหาร):
+     - "subject_all": วิชาเดียวกัน (subject_id) แต่ทุกห้องทั้งโรงเรียน ไม่ล็อกสายชั้น
+     - "school": ทุกวิชา ทุกห้อง ทั้งโรงเรียน (ไม่ต้องส่ง subject_id/classroom_id/grade_level_id)
 
-   ⚠️ แก้บั๊ก (2026-08): เดิม fetchAttendanceWithFallback() อ่านจาก attendance_records
-   (เช็กชื่อโฮมรูม ผูกกับ classroom_id) เพียงอย่างเดียว ทำให้ห้องที่ครูเช็กชื่อผ่านหน้า
-   "เช็กชื่อ" ของรายวิชา (บันทึกลงตาราง subject_attendance ผูกกับ timetable_entry_id
-   ซึ่งอ้างอิงกลับไปที่ subject_section_id) ไม่ถูกนับเลย -> attendanceRate ขึ้น null เสมอ
-   แก้เป็น: ดึงจาก subject_attendance ผ่าน timetable_entries ของ section ในขอบเขตนี้ก่อน
-   เป็นหลัก แล้วค่อย fallback ไปที่ attendance_records (โฮมรูม) เฉพาะตอนที่ subject_attendance
-   ว่างจริง ๆ (เผื่อบางห้องยังไม่เคยเช็กชื่อรายวิชาเลย)
-   ⚠️ ตรวจสอบ: query นี้ ASSUME ว่า timetable_entries มีคอลัมน์ subject_section_id
-   (ยืนยันจากการใช้งานจริงใน periods API และ AttendanceTool.tsx) และ subject_attendance
-   มีคอลัมน์ timetable_entry_id, student_id, status, attendance_date
+   🔧 FIX (2026-08): เดิมอ่านค่าเช็กชื่อจาก attendance_records (ตารางเช็กชื่อ "โฮมรูม"
+   ผูกกับ classroom_id เท่านั้น) แต่การเช็กชื่อจริงของครูรายวิชา (ผ่าน AttendanceTool
+   รายคาบ) ถูกบันทึกลงตาราง subject_attendance (ผูกกับ timetable_entry_id) ต่างหาก
+   ทำให้ห้องที่เช็กชื่อผ่านครูรายวิชา (ไม่ใช่โฮมรูม) ไม่เคยถูกนับใน Insights เลย
+   -> attendanceRate ออกมาเป็น null เสมอ แก้โดยดึงจาก subject_attendance แทน
+   ⚠️ ASSUMPTION: มีตาราง timetable_entries(id, subject_section_id) ผูก
+   timetable_entry_id กับ subject_section_id — ถ้าชื่อตาราง/คอลัมน์จริงต่างจากนี้
+   ต้องแก้เฉพาะใน fetchAttendanceWithFallback() ด้านล่าง
+
+   เกณฑ์ "กลุ่มเสี่ยง": อัตราเข้าเรียน < 80% หรือ คะแนนเฉลี่ย(%) < 50
    ========================================================================= */
 
 const ATTENDANCE_RISK_THRESHOLD = 0.8;
@@ -38,15 +37,9 @@ function emptyResult(role: Role) {
   return {
     role,
     totals: {
-      studentCount: 0,
-      atRiskCount: 0,
-      atRiskHigh: 0,
-      atRiskMedium: 0,
-      atRiskPercent: 0,
-      onTimeRate: null as number | null,
-      onTimePendingCount: 0,
-      attendanceRate: null as number | null,
-      avgScore: null as number | null,
+      studentCount: 0, atRiskCount: 0, atRiskHigh: 0, atRiskMedium: 0, atRiskPercent: 0,
+      onTimeRate: null as number | null, onTimePendingCount: 0,
+      attendanceRate: null as number | null, avgScore: null as number | null,
     },
     atRiskStudents: [] as any[],
     scoreDistribution: [] as any[],
@@ -55,6 +48,11 @@ function emptyResult(role: Role) {
     teacherRanking: [] as any[],
     updatedAt: new Date().toISOString(),
   };
+}
+
+function avg(nums: number[]) {
+  if (nums.length === 0) return 0;
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
 export async function GET(req: NextRequest) {
@@ -70,17 +68,8 @@ export async function GET(req: NextRequest) {
   if (!requesterId) {
     return NextResponse.json({ error: "missing requester_id" }, { status: 400 });
   }
-  if (scope !== "school" && !subjectId) {
-    return NextResponse.json({ error: "missing subject_id" }, { status: 400 });
-  }
-  if (scope === "classroom" && !classroomIdParam) {
-    return NextResponse.json({ error: "missing classroom_id" }, { status: 400 });
-  }
-  if (scope === "grade_level" && !gradeLevelIdParam) {
-    return NextResponse.json({ error: "missing grade_level_id" }, { status: 400 });
-  }
 
-  // 1) หา role ของผู้ขอข้อมูล
+  // 1) หา role ของผู้ขอข้อมูล (ย้ายมาก่อน เพื่อเช็กสิทธิ์ scope "subject_all"/"school")
   const { data: requester, error: userErr } = await admin
     .from("users")
     .select("id, role, is_homeroom, is_subject_teacher, full_name, first_name, last_name")
@@ -91,7 +80,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ไม่พบผู้ใช้" }, { status: 404 });
   }
 
-  const ADMIN_ROLES = ["admin", "director", "deputy_director", "executive"];
+  const ADMIN_ROLES = ["admin", "executive", "director", "deputy_director"];
   const isAdmin = ADMIN_ROLES.includes(requester.role);
   const isHomeroom = requester.is_homeroom === true;
   const isSubjectTeacher = requester.is_subject_teacher === true;
@@ -108,9 +97,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ไม่มีสิทธิ์เข้าถึงข้อมูลเชิงลึก" }, { status: 403 });
   }
 
-  // scope ใหม่ทั้งสอง เฉพาะแอดมิน/ผู้บริหารเท่านั้น
-  if ((scope === "subject_all" || scope === "school") && role !== "admin") {
+  // 2) ตรวจ scope + สิทธิ์ + พารามิเตอร์ที่บังคับตาม scope
+  if ((scope === "subject_all" || scope === "school") && !isAdmin) {
     return NextResponse.json({ error: "เฉพาะแอดมิน/ผู้บริหารเท่านั้นที่ดูขอบเขตนี้ได้" }, { status: 403 });
+  }
+  if (scope !== "school" && !subjectId) {
+    return NextResponse.json({ error: "missing subject_id" }, { status: 400 });
+  }
+  if (scope === "classroom" && !classroomIdParam) {
+    return NextResponse.json({ error: "missing classroom_id" }, { status: 400 });
+  }
+  if (scope === "grade_level" && !gradeLevelIdParam) {
+    return NextResponse.json({ error: "missing grade_level_id" }, { status: 400 });
   }
 
   try {
@@ -118,28 +116,19 @@ export async function GET(req: NextRequest) {
     let yearEnd: string | null = null;
     if (academicYearId) {
       const { data: yearRow } = await admin
-        .from("academic_years")
-        .select("start_date, end_date")
-        .eq("id", academicYearId)
-        .maybeSingle();
+        .from("academic_years").select("start_date, end_date").eq("id", academicYearId).maybeSingle();
       yearStart = yearRow?.start_date ?? null;
       yearEnd = yearRow?.end_date ?? null;
     }
 
-    /* -----------------------------------------------------------------
-       3) หา classroom ids ตามขอบเขต
-       classroom   -> ห้องเดียว
-       grade_level -> ทุกห้องในสายชั้นเดียวกัน
-       subject_all -> ทุกห้องทั้งโรงเรียน (จะถูกกรองอีกทีด้วย subject_id ตอนหา sections)
-       school      -> ทุกห้องทั้งโรงเรียน ทุกวิชา
-       ----------------------------------------------------------------- */
+    // 3) classroom ids ตามขอบเขต
     async function fetchClassroomsWithFallback() {
       function buildQuery() {
-        let q = admin
-          .from("classrooms")
+        let q = admin.from("classrooms")
           .select("id, room_name, grade_group, grade_level_id, homeroom_teacher_id, homeroom_teacher_2_id");
         if (scope === "classroom") q = q.eq("id", classroomIdParam!);
         else if (scope === "grade_level") q = q.eq("grade_level_id", gradeLevelIdParam!);
+        // subject_all / school: ไม่กรองห้อง เอาทุกห้อง
         return q;
       }
       if (academicYearId) {
@@ -152,22 +141,17 @@ export async function GET(req: NextRequest) {
 
     let classrooms = await fetchClassroomsWithFallback();
     if (classrooms.length === 0) return NextResponse.json(emptyResult(role));
-
     const scopeClassroomIds = classrooms.map(c => c.id);
 
-    /* -----------------------------------------------------------------
-       4) subject_sections ในขอบเขต
-       ----------------------------------------------------------------- */
+    // 4) subject_sections ในขอบเขต (school = ทุกวิชา, อื่นๆ = ล็อก subject_id)
     async function fetchSectionsWithFallback() {
       function buildBaseQuery() {
         let q = admin
           .from("subject_sections")
           .select("id, subject_id, classroom_id, academic_year_id, teacher_id, co_teacher_id")
           .in("classroom_id", scopeClassroomIds);
-        if (subjectId) q = q.eq("subject_id", subjectId);
-        if (!isAdmin) {
-          q = q.or(`teacher_id.eq.${requesterId},co_teacher_id.eq.${requesterId}`);
-        }
+        if (scope !== "school") q = q.eq("subject_id", subjectId!);
+        if (!isAdmin) q = q.or(`teacher_id.eq.${requesterId},co_teacher_id.eq.${requesterId}`);
         return q;
       }
       if (academicYearId) {
@@ -185,26 +169,20 @@ export async function GET(req: NextRequest) {
     const classroomIds = Array.from(new Set(sections.map(s => s.classroom_id)));
     classrooms = classrooms.filter(c => classroomIds.includes(c.id));
 
-    /* -----------------------------------------------------------------
-       5) นักเรียนในห้องที่อยู่ในขอบเขต
-       ----------------------------------------------------------------- */
+    // 5) นักเรียน
     const { data: students } = await admin
       .from("students")
       .select("id, prefix, first_name, last_name, seat_number, classroom_id")
       .in("classroom_id", classroomIds);
-
     if (!students || students.length === 0) return NextResponse.json(emptyResult(role));
 
-    /* -----------------------------------------------------------------
-       6) assignments -> submissions
-       ----------------------------------------------------------------- */
+    // 6) assignments -> submissions
     let assignmentQuery = admin
       .from("assignments")
       .select("id, subject_section_id, max_score, due_date, assigned_at")
       .in("subject_section_id", sectionIds);
     if (yearStart) assignmentQuery = assignmentQuery.gte("assigned_at", yearStart);
     if (yearEnd) assignmentQuery = assignmentQuery.lte("assigned_at", yearEnd);
-
     const { data: assignments } = await assignmentQuery;
     const assignmentIds = (assignments ?? []).map(a => a.id);
 
@@ -215,73 +193,61 @@ export async function GET(req: NextRequest) {
           .in("assignment_id", assignmentIds)
       : { data: [] as any[] };
 
-    /* -----------------------------------------------------------------
-       7) เช็กชื่อ — ดึงจาก subject_attendance (รายวิชา) เป็นหลัก
-          fallback ไปที่ attendance_records (โฮมรูม) เฉพาะตอนไม่มีข้อมูลรายวิชาเลย
-       ----------------------------------------------------------------- */
-    async function fetchAttendanceWithFallback(): Promise<{ student_id: string; status: string }[]> {
-      const { data: timetableEntries } = await admin
+    // 7) เช็กชื่อ — 🔧 FIX: ดึงจาก subject_attendance (รายคาบ/รายวิชา) แทน attendance_records (โฮมรูม)
+    async function fetchAttendanceWithFallback() {
+      const { data: entries } = await admin
         .from("timetable_entries")
         .select("id, subject_section_id")
         .in("subject_section_id", sectionIds);
-      const entryIds = (timetableEntries ?? []).map((t: any) => t.id);
+      const entryIds = (entries ?? []).map((e: any) => e.id);
+      if (entryIds.length === 0) return [];
 
-      if (entryIds.length > 0) {
-        if (yearStart && yearEnd) {
-          const { data } = await admin
-            .from("subject_attendance")
-            .select("student_id, status, attendance_date")
-            .in("timetable_entry_id", entryIds)
-            .gte("attendance_date", yearStart)
-            .lte("attendance_date", yearEnd);
-          if (data && data.length > 0) return data.map((r: any) => ({ student_id: r.student_id, status: r.status }));
-        }
-        const { data } = await admin
+      async function buildQuery() {
+        let q = admin
           .from("subject_attendance")
-          .select("student_id, status")
+          .select("student_id, timetable_entry_id, status, attendance_date")
           .in("timetable_entry_id", entryIds);
-        if (data && data.length > 0) return data as any[];
+        if (yearStart) q = q.gte("attendance_date", yearStart);
+        if (yearEnd) q = q.lte("attendance_date", yearEnd);
+        return q;
       }
+      const { data } = await buildQuery();
+      if (data && data.length > 0) return data;
 
-      // Fallback: ยังไม่มีการเช็กชื่อรายวิชาเลย -> ใช้เช็กชื่อโฮมรูมของห้องในขอบเขตแทน
-      if (yearStart && yearEnd) {
-        const { data } = await admin
-          .from("attendance_records")
-          .select("student_id, status")
-          .in("classroom_id", classroomIds)
-          .gte("attendance_date", yearStart)
-          .lte("attendance_date", yearEnd);
-        if (data && data.length > 0) return data as any[];
-      }
-      const { data } = await admin
-        .from("attendance_records")
-        .select("student_id, status")
-        .in("classroom_id", classroomIds);
-      return (data ?? []) as any[];
+      // Fallback: กรองปีการศึกษาแล้วว่าง (yearStart/yearEnd อาจไม่ตรงข้อมูลจริง) -> ดึงทั้งหมด
+      const { data: fallback } = await admin
+        .from("subject_attendance")
+        .select("student_id, timetable_entry_id, status, attendance_date")
+        .in("timetable_entry_id", entryIds);
+      return fallback ?? [];
     }
 
-    const distinctSubjectIds = Array.from(new Set(sections.map(s => s.subject_id)));
-
-    const [attendanceRecords, subjectRows, teacherUsers] = await Promise.all([
+    const [attendanceRecords, subjectsResult, { data: teacherUsers }] = await Promise.all([
       fetchAttendanceWithFallback(),
-      admin.from("subjects").select("id, subject_code, name_th").in("id", distinctSubjectIds).then(r => r.data ?? []),
-      admin
-        .from("users")
-        .select("id, full_name, first_name, last_name")
-        .in("id", Array.from(new Set(sections.flatMap(s => [s.teacher_id, s.co_teacher_id]).filter(Boolean))))
-        .then(r => r.data ?? []),
+      scope === "school"
+        ? admin.from("subjects").select("id, subject_code, name_th")
+            .in("id", Array.from(new Set(sections.map(s => s.subject_id))))
+        : admin.from("subjects").select("id, subject_code, name_th").eq("id", subjectId!).maybeSingle(),
+      admin.from("users").select("id, full_name, first_name, last_name").in(
+        "id",
+        Array.from(new Set(sections.flatMap(s => [s.teacher_id, s.co_teacher_id]).filter(Boolean)))
+      ),
     ]);
 
-    const subjectNameById = new Map(subjectRows.map((s: any) => [s.id, s.name_th]));
+    const subjectsById = new Map<string, { id: string; subject_code: string; name_th: string }>(
+      scope === "school"
+        ? ((subjectsResult.data ?? []) as any[]).map((s: any) => [s.id, s])
+        : subjectsResult.data
+        ? [[(subjectsResult.data as any).id, subjectsResult.data as any]]
+        : []
+    );
 
-    /* -----------------------------------------------------------------
-       8) คำนวณสถิติต่อนักเรียน
-       ----------------------------------------------------------------- */
+    // 8) คำนวณสถิติต่อนักเรียน
     const assignmentById = new Map((assignments ?? []).map(a => [a.id, a]));
     const classroomById = new Map(classrooms.map(c => [c.id, c]));
 
     const attendanceByStudent: Record<string, { present: number; total: number }> = {};
-    attendanceRecords.forEach(r => {
+    (attendanceRecords ?? []).forEach((r: any) => {
       if (!attendanceByStudent[r.student_id]) attendanceByStudent[r.student_id] = { present: 0, total: 0 };
       attendanceByStudent[r.student_id].total += 1;
       if (r.status === "present" || r.status === "late") attendanceByStudent[r.student_id].present += 1;
@@ -311,17 +277,9 @@ export async function GET(req: NextRequest) {
     });
 
     type StudentStat = {
-      id: string;
-      name: string;
-      seatNumber: number;
-      classroomId: string;
-      classroomName: string;
-      attendanceRate: number | null;
-      avgScore: number | null;
-      onTimeRate: number | null;
-      atRisk: boolean;
-      riskLevel: "high" | "medium" | null;
-      reasons: string[];
+      id: string; name: string; seatNumber: number; classroomId: string; classroomName: string;
+      attendanceRate: number | null; avgScore: number | null; onTimeRate: number | null;
+      atRisk: boolean; riskLevel: "high" | "medium" | null; reasons: string[];
     };
 
     const studentStats: StudentStat[] = students.map(s => {
@@ -342,19 +300,15 @@ export async function GET(req: NextRequest) {
         name: `${s.prefix ?? ""}${s.first_name} ${s.last_name}`.trim(),
         seatNumber: s.seat_number,
         classroomId: s.classroom_id,
-        classroomName: classroom ? `${(classroom as any).grade_group ?? ""} ${(classroom as any).room_name ?? ""}`.trim() : "-",
-        attendanceRate,
-        avgScore,
-        onTimeRate,
+        classroomName: classroom ? `${classroom.grade_group ?? ""} ${classroom.room_name ?? ""}`.trim() : "-",
+        attendanceRate, avgScore, onTimeRate,
         atRisk: reasons.length > 0,
         riskLevel: reasons.length >= 2 ? "high" : reasons.length === 1 ? "medium" : null,
         reasons,
       };
     });
 
-    /* -----------------------------------------------------------------
-       9) สรุปภาพรวม
-       ----------------------------------------------------------------- */
+    // 9) สรุปภาพรวม
     const atRiskStudents = studentStats.filter(s => s.atRisk);
     const withAttendance = studentStats.filter(s => s.attendanceRate !== null);
     const withScore = studentStats.filter(s => s.avgScore !== null);
@@ -372,25 +326,18 @@ export async function GET(req: NextRequest) {
       onTimePendingCount: pendingReviewCount,
     };
 
-    /* -----------------------------------------------------------------
-       10) การกระจายของคะแนน
-       ----------------------------------------------------------------- */
+    // 10) การกระจายของคะแนน
     const bands = [
-      { key: "0-49", min: 0, max: 49 },
-      { key: "50-59", min: 50, max: 59 },
-      { key: "60-69", min: 60, max: 69 },
-      { key: "70-79", min: 70, max: 79 },
-      { key: "80-89", min: 80, max: 89 },
-      { key: "90-100", min: 90, max: 100 },
+      { key: "0-49", min: 0, max: 49 }, { key: "50-59", min: 50, max: 59 },
+      { key: "60-69", min: 60, max: 69 }, { key: "70-79", min: 70, max: 79 },
+      { key: "80-89", min: 80, max: 89 }, { key: "90-100", min: 90, max: 100 },
     ];
     const scoreDistribution = bands.map(b => {
       const count = withScore.filter(s => (s.avgScore as number) >= b.min && (s.avgScore as number) <= b.max).length;
       return { band: b.key, count, percent: withScore.length > 0 ? (count / withScore.length) * 100 : 0 };
     });
 
-    /* -----------------------------------------------------------------
-       11) อันดับห้องเรียน
-       ----------------------------------------------------------------- */
+    // 11) อันดับห้องเรียน
     const byClassroom = new Map<string, StudentStat[]>();
     studentStats.forEach(s => {
       if (!byClassroom.has(s.classroomId)) byClassroom.set(s.classroomId, []);
@@ -402,59 +349,53 @@ export async function GET(req: NextRequest) {
         const c = classroomById.get(classroomId);
         return {
           classroomId,
-          name: c ? `${(c as any).grade_group ?? ""} ${(c as any).room_name ?? ""}`.trim() : "-",
-          studentCount: list.length,
-          riskCount,
+          name: c ? `${c.grade_group ?? ""} ${c.room_name ?? ""}`.trim() : "-",
+          studentCount: list.length, riskCount,
           riskPercent: list.length > 0 ? (riskCount / list.length) * 100 : 0,
         };
       })
       .sort((a, b) => a.riskPercent - b.riskPercent);
 
-    /* -----------------------------------------------------------------
-       12) subjectRanking — วิชาเดียว (subject_id ล็อก) คืนแถวเดียว
-           หลายวิชา (scope="school") -> รวมนักเรียนต่อวิชาจริง แล้วจัดอันดับ
-       ----------------------------------------------------------------- */
-    const studentStatById = new Map(studentStats.map(s => [s.id, s]));
-
-    let subjectRanking: any[];
-    if (distinctSubjectIds.length <= 1) {
-      subjectRanking = [
-        {
-          subjectId: subjectId ?? distinctSubjectIds[0] ?? "",
-          name: subjectNameById.get(subjectId ?? distinctSubjectIds[0] ?? "") ?? "-",
-          studentCount: studentStats.length,
-          attendanceRate: totals.attendanceRate,
-          riskPercent: totals.atRiskPercent,
-        },
-      ];
-    } else {
-      const bySubject = new Map<string, Set<string>>();
-      sections.forEach(sec => {
-        const classroomStudentIds = students.filter(s => s.classroom_id === sec.classroom_id).map(s => s.id);
-        if (!bySubject.has(sec.subject_id)) bySubject.set(sec.subject_id, new Set());
-        classroomStudentIds.forEach(id => bySubject.get(sec.subject_id)!.add(id));
+    // 12) subjectRanking — scope="school": คำนวณจริงแยกตามวิชา, อื่นๆ: แถวเดียวของวิชาปัจจุบัน
+    let subjectRanking;
+    if (scope === "school") {
+      const sectionsBySubject = new Map<string, typeof sections>();
+      sections.forEach(s => {
+        const arr = sectionsBySubject.get(s.subject_id) ?? [];
+        arr.push(s);
+        sectionsBySubject.set(s.subject_id, arr);
       });
-      subjectRanking = Array.from(bySubject.entries())
-        .map(([subjId, idSet]) => {
-          const list = Array.from(idSet).map(id => studentStatById.get(id)).filter(Boolean) as StudentStat[];
-          const riskCount = list.filter(s => s.atRisk).length;
+      subjectRanking = Array.from(sectionsBySubject.entries())
+        .map(([subId, secs]) => {
+          const classroomIdsOfSubject = new Set(secs.map(s => s.classroom_id));
+          const studentIdsOfSubject = new Set(
+            students.filter(s => classroomIdsOfSubject.has(s.classroom_id)).map(s => s.id)
+          );
+          const list = studentStats.filter(s => studentIdsOfSubject.has(s.id));
           const withAtt = list.filter(s => s.attendanceRate !== null);
+          const riskCount = list.filter(s => s.atRisk).length;
           return {
-            subjectId: subjId,
-            name: subjectNameById.get(subjId) ?? "-",
+            subjectId: subId,
+            name: subjectsById.get(subId)?.name_th ?? "-",
             studentCount: list.length,
             attendanceRate: withAtt.length > 0 ? avg(withAtt.map(s => s.attendanceRate as number)) * 100 : null,
             riskPercent: list.length > 0 ? (riskCount / list.length) * 100 : 0,
           };
         })
         .sort((a, b) => a.riskPercent - b.riskPercent);
+    } else {
+      subjectRanking = [{
+        subjectId: subjectId!,
+        name: subjectsById.get(subjectId!)?.name_th ?? "-",
+        studentCount: studentStats.length,
+        attendanceRate: totals.attendanceRate,
+        riskPercent: totals.atRiskPercent,
+      }];
     }
 
-    /* -----------------------------------------------------------------
-       13) teacherRanking — เฉพาะแอดมิน
-       ----------------------------------------------------------------- */
+    // 13) teacherRanking (เฉพาะแอดมิน)
     const teacherNameById = new Map(
-      teacherUsers.map((t: any) => [t.id, t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim()])
+      (teacherUsers ?? []).map((t: any) => [t.id, t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim()])
     );
     const byTeacher = new Map<string, Set<string>>();
     sections.forEach(sec => {
@@ -463,15 +404,14 @@ export async function GET(req: NextRequest) {
       if (!byTeacher.has(sec.teacher_id)) byTeacher.set(sec.teacher_id, new Set());
       classroomStudentIds.forEach(id => byTeacher.get(sec.teacher_id)!.add(id));
     });
-
+    const studentStatById = new Map(studentStats.map(s => [s.id, s]));
     const teacherRanking = isAdmin
       ? Array.from(byTeacher.entries())
           .map(([teacherId, idSet]) => {
             const list = Array.from(idSet).map(id => studentStatById.get(id)).filter(Boolean) as StudentStat[];
             const riskCount = list.filter(s => s.atRisk).length;
             return {
-              teacherId,
-              name: teacherNameById.get(teacherId) ?? "-",
+              teacherId, name: teacherNameById.get(teacherId) ?? "-",
               studentCount: list.length,
               riskPercent: list.length > 0 ? (riskCount / list.length) * 100 : 0,
             };
@@ -481,31 +421,19 @@ export async function GET(req: NextRequest) {
       : [];
 
     return NextResponse.json({
-      role,
-      totals,
+      role, totals,
       atRiskStudents: atRiskStudents
         .sort((a, b) => (a.attendanceRate ?? 1) - (b.attendanceRate ?? 1))
         .map(s => ({
-          id: s.id,
-          name: s.name,
-          seatNumber: s.seatNumber,
-          classroomName: s.classroomName,
+          id: s.id, name: s.name, seatNumber: s.seatNumber, classroomName: s.classroomName,
           attendanceRate: s.attendanceRate === null ? null : Number((s.attendanceRate * 100).toFixed(1)),
           avgScore: s.avgScore === null ? null : Number(s.avgScore.toFixed(1)),
           reasons: s.reasons,
         })),
-      scoreDistribution,
-      classroomRanking,
-      subjectRanking,
-      teacherRanking,
+      scoreDistribution, classroomRanking, subjectRanking, teacherRanking,
       updatedAt: new Date().toISOString(),
     });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "โหลดข้อมูลเชิงลึกไม่สำเร็จ" }, { status: 500 });
   }
-}
-
-function avg(nums: number[]) {
-  if (nums.length === 0) return 0;
-  return nums.reduce((a, b) => a + b, 0) / nums.length;
 }

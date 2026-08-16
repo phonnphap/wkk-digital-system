@@ -65,32 +65,31 @@ export default function InsightsTool({
   subjectId,
   classroomId,
   isAdmin = false,
+  defaultScope,
 }: {
   currentUserId?: string;
-  subjectId: string;
-  classroomId: string;
+  subjectId?: string;
+  classroomId?: string;
   isAdmin?: boolean;
+  defaultScope?: Scope; // เช่นเปิดจากหน้า room ให้ default เป็น "school"
 }) {
   const [role, setRole] = useState<Role>("unknown");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState<InsightsResponse | null>(null);
 
-  const [scope, setScope] = useState<Scope>("classroom");
+  const [scope, setScope] = useState<Scope>(defaultScope ?? (subjectId && classroomId ? "classroom" : "school"));
 
   const [currentClassroom, setCurrentClassroom] = useState<ClassroomInfo | null>(null);
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
   const [academicYearId, setAcademicYearId] = useState<string>("");
 
   useEffect(() => {
-    if (!classroomId) return;
-    supabase
-      .from("classrooms")
-      .select("id, room_name, grade_group, grade_level_id")
-      .eq("id", classroomId)
-      .maybeSingle()
-      .then(({ data }) => setCurrentClassroom((data ?? null) as ClassroomInfo | null));
-  }, [classroomId]);
+  if (!classroomId) return;
+  supabase.from("classrooms").select("id, room_name, grade_group, grade_level_id")
+    .eq("id", classroomId).maybeSingle()
+    .then(({ data }) => setCurrentClassroom((data ?? null) as ClassroomInfo | null));
+}, [classroomId]);
 
   useEffect(() => {
     supabase
@@ -107,45 +106,49 @@ export default function InsightsTool({
   }, []);
 
   async function loadInsights() {
-    if (!currentUserId || !classroomId) return;
-    if (scope !== "school" && !subjectId) return;
-    if (scope === "grade_level" && !currentClassroom?.grade_level_id) return;
+  if (!currentUserId) return;
+  if (scope !== "school" && !subjectId) return;
+  if (scope === "classroom" && !classroomId) return;
+  if (scope === "grade_level" && !currentClassroom?.grade_level_id) return;
 
-    setLoading(true);
-    setError("");
-    try {
-      const params = new URLSearchParams({ requester_id: currentUserId, scope });
-      if (scope !== "school") params.set("subject_id", subjectId);
-      if (scope === "classroom") {
-        params.set("classroom_id", classroomId);
-      } else if (scope === "grade_level") {
-        params.set("grade_level_id", currentClassroom!.grade_level_id!);
-      }
-      // subject_all / school -> ไม่ล็อกห้อง/สายชั้น
-      if (academicYearId) params.set("academic_year_id", academicYearId);
-
-      const res = await fetch(`/api/insights/overview?${params.toString()}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "โหลดข้อมูลเชิงลึกไม่สำเร็จ");
-      setData(json);
-      setRole(json.role);
-    } catch (e: any) {
-      setError(e?.message ?? "โหลดข้อมูลเชิงลึกไม่สำเร็จ");
-    } finally {
-      setLoading(false);
+  setLoading(true);
+  setError("");
+  try {
+    const params = new URLSearchParams({ requester_id: currentUserId, scope });
+    if (subjectId && scope !== "school") params.set("subject_id", subjectId);
+    if (scope === "classroom") {
+      params.set("classroom_id", classroomId!);
+    } else if (scope === "grade_level") {
+      params.set("grade_level_id", currentClassroom!.grade_level_id!);
     }
+    // subject_all / school: ไม่ต้อง set classroom_id/grade_level_id
+    if (academicYearId) params.set("academic_year_id", academicYearId);
+
+    const res = await fetch(`/api/insights/overview?${params.toString()}`);
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? "โหลดข้อมูลเชิงลึกไม่สำเร็จ");
+    setData(json);
+    setRole(json.role);
+  } catch (e: any) {
+    setError(e?.message ?? "โหลดข้อมูลเชิงลึกไม่สำเร็จ");
+  } finally {
+    setLoading(false);
   }
+}
 
   useEffect(() => {
     loadInsights();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserId, subjectId, classroomId, scope, currentClassroom, academicYearId]);
 
-  const scopeLabel =
-    scope === "classroom" ? "ห้องเรียนนี้ (วิชานี้)"
-    : scope === "grade_level" ? "ทุกห้องในสายชั้นเดียวกัน (วิชานี้)"
-    : scope === "subject_all" ? "วิชานี้ ทุกห้องทั้งโรงเรียน"
-    : "ทั้งโรงเรียน (ทุกวิชา ทุกห้อง)";
+  function scopeLabelOf(scope: Scope) {
+  switch (scope) {
+    case "classroom": return "ห้องเรียนนี้ (วิชานี้)";
+    case "grade_level": return "ทุกห้องในสายชั้นเดียวกัน (วิชานี้)";
+    case "subject_all": return "วิชานี้ทุกห้องทั้งโรงเรียน";
+    case "school": return "ทั้งโรงเรียน (ทุกวิชา)";
+  }
+}
 
   const isMultiClassroomScope = scope !== "classroom";
   const isMultiSubjectScope = scope === "school";
@@ -166,16 +169,25 @@ export default function InsightsTool({
     <div className="space-y-4">
       {/* ตัวเลือกขอบเขต */}
       <div className="bg-white rounded-2xl border border-slate-100 p-3 flex items-center gap-2 flex-wrap">
-        <ScopeButton active={scope === "classroom"} onClick={() => setScope("classroom")} label={`🏠 ห้องนี้ (${currentClassroom?.grade_group ?? ""}${currentClassroom?.room_name ?? ""})`} />
-        <ScopeButton active={scope === "grade_level"} onClick={() => setScope("grade_level")} label="🎓 ทุกห้องในสายชั้นเดียวกัน" />
-        {isAdmin && (
-          <>
-            <ScopeButton active={scope === "subject_all"} onClick={() => setScope("subject_all")} label="📘 วิชานี้ (ทุกห้องทั้งโรงเรียน)" />
-            <ScopeButton active={scope === "school"} onClick={() => setScope("school")} label="🏫 ทั้งโรงเรียน" />
-          </>
-        )}
-        <span className="text-slate-300 text-[11px] font-bold ml-auto">ขอบเขต: {scopeLabel}</span>
-      </div>
+  {subjectId && classroomId && (
+    <ScopeButton active={scope === "classroom"} onClick={() => setScope("classroom")}
+      label={`🏠 ห้องนี้ (${currentClassroom?.grade_group ?? ""}${currentClassroom?.room_name ?? ""})`} />
+  )}
+  {subjectId && classroomId && (
+    <ScopeButton active={scope === "grade_level"} onClick={() => setScope("grade_level")}
+      label="🎓 ทุกห้องในสายชั้นเดียวกัน" />
+  )}
+  {isAdmin && subjectId && (
+    <ScopeButton active={scope === "subject_all"} onClick={() => setScope("subject_all")}
+      label="📘 วิชานี้ทุกห้องทั้งโรงเรียน" />
+  )}
+
+  {isAdmin && (
+    <ScopeButton active={scope === "school"} onClick={() => setScope("school")}
+      label="🏫 ทั้งโรงเรียน (ทุกวิชา)" />
+  )}
+  <span className="text-slate-300 text-[11px] font-bold ml-auto">ขอบเขต: {scopeLabelOf(scope)}</span>
+</div>
 
       {loading ? (
         <div className="text-center py-16 text-slate-300 font-bold text-sm">กำลังโหลดข้อมูลเชิงลึก...</div>
@@ -256,19 +268,15 @@ export default function InsightsTool({
                 />
               )}
 
-              {isMultiSubjectScope && (
-                <RankingCard
-                  title="📘 อันดับรายวิชา"
-                  rows={data.subjectRanking.map(s => ({ id: s.subjectId, name: s.name, sub: `${s.studentCount} คน`, riskPercent: s.riskPercent }))}
-                />
-              )}
+              {(scope === "grade_level" || scope === "subject_all") && (
+  <RankingCard title="🏠 อันดับห้องเรียน"
+    rows={data.classroomRanking.map(c => ({ id: c.classroomId, name: c.name, sub: `${c.studentCount} คน`, riskPercent: c.riskPercent }))} />
+)}
 
-              {isAdmin && data.teacherRanking.length > 0 && (
-                <RankingCard
-                  title="🧑‍🏫 อันดับครูผู้สอน"
-                  rows={data.teacherRanking.map(t => ({ id: t.teacherId, name: t.name, sub: `${t.studentCount} คน`, riskPercent: t.riskPercent }))}
-                />
-              )}
+              {scope === "school" && (
+  <RankingCard title="📚 อันดับรายวิชา"
+    rows={data.subjectRanking.map(s => ({ id: s.subjectId, name: s.name, sub: `${s.studentCount} คน`, riskPercent: s.riskPercent }))} />
+)}
             </div>
           </div>
         </>
