@@ -186,7 +186,8 @@ export default function AttendanceOverviewPage() {
 
     (async () => {
       const [classroomsRes, studentsRes, attendanceRes] = await Promise.all([
-        supabase.from("classrooms").select("classroom_id, room_name").order("room_name"),
+        // ★ ตาราง classrooms ใช้ primary key ชื่อ "id" (ไม่ใช่ "classroom_id")
+        supabase.from("classrooms").select("id, room_name").order("room_name"),
         supabase.from("students").select("id, classroom_id, gender"),
         supabase.from("attendance_records").select("student_id, classroom_id, status").eq("attendance_date", date),
       ]);
@@ -200,7 +201,11 @@ export default function AttendanceOverviewPage() {
         return;
       }
 
-      const classrooms = (classroomsRes.data ?? []) as ClassroomRow[];
+      // แปลง id -> classroom_id ให้ตรงกับ type ที่ใช้ทั้งไฟล์ (students.classroom_id อ้างอิงมาที่ classrooms.id)
+      const classrooms = ((classroomsRes.data ?? []) as { id: string; room_name: string }[]).map((c) => ({
+        classroom_id: c.id,
+        room_name: c.room_name,
+      })) as ClassroomRow[];
       const students = (studentsRes.data ?? []) as StudentRow[];
       const records = (attendanceRes.data ?? []) as AttendanceRecordRow[];
 
