@@ -25,6 +25,14 @@ const ATTENDANCE_IMPORT_ALLOWED_EMAILS = [
   // เพิ่มอีเมลคนอื่นที่ต้องการให้สิทธิ์ได้ที่นี่
 ];
 
+// ★ ไฟล์เสียงแจ้งเตือน — วางไฟล์ไว้ที่ public/sounds/ui alert.mp3
+// (แนะนำให้เปลี่ยนชื่อไฟล์เป็น ui-alert.mp3 ไม่มีเว้นวรรค จะปลอดภัยกว่า
+//  แต่โค้ดนี้ encodeURI ให้แล้วเผื่อยังใช้ชื่อเดิมที่มีเว้นวรรค)
+const NOTIF_SOUND_PATH = "/sounds/ui alert.mp3";
+
+// ★ จำนวนวินาทีที่ให้ตรวจสอบแจ้งเตือนใหม่ซ้ำอัตโนมัติ (สำหรับเล่นเสียงเตือนตอนมีรายการใหม่)
+const NOTIF_POLL_INTERVAL_MS = 60_000;
+
 function leaveApproverSlotByEmail(email: string): 1 | 2 | 3 | null {
   const e = (email || "").toLowerCase().trim();
   if (e === LEAVE_APPROVER_1_EMAIL) return 1;
@@ -40,6 +48,32 @@ function toThaiDateShort(iso: string) {
   } catch { return ""; }
 }
 
+// ══════════════════════════════════════════════════════════
+// ── การแจ้งเตือนที่ "ปิด/ดูแล้ว" ของผู้ใช้แต่ละคน — เก็บใน localStorage ──
+// (เก็บแยกตามเครื่อง/เบราว์เซอร์ ไม่ sync ข้ามอุปกรณ์ — ถ้าต้องการ sync ข้ามอุปกรณ์
+//  ในอนาคตค่อยย้ายไปเก็บเป็นตารางใน Supabase เช่น notification_reads)
+// ══════════════════════════════════════════════════════════
+function dismissedNotifStorageKey(profileId: string) {
+  return `khienkhet_dismissed_notifs_${profileId}`;
+}
+function loadDismissedNotifIds(profileId: string): Set<string> {
+  if (!profileId || typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(dismissedNotifStorageKey(profileId));
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+function saveDismissedNotifIds(profileId: string, ids: Set<string>) {
+  if (!profileId || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(dismissedNotifStorageKey(profileId), JSON.stringify(Array.from(ids)));
+  } catch {
+    // เก็บไม่สำเร็จ (เช่น localStorage เต็ม/ถูกปิด) — ปล่อยผ่าน ไม่ critical
+  }
+}
+
 type NotifSource = "leave_approval" | "leave_status" | "timetable_request" | "swap_request" | "swap_status" | "sub_assigned"
   | "subject_request" | "subject_status" | "timetable_status" | "schedule_conflict";
 type NotifItem = {
@@ -50,6 +84,14 @@ type NotifItem = {
   date: string;   // ISO date ใช้เรียงลำดับ + แสดงผล
   path: string;    // หน้าไปเมื่อคลิก
   urgent?: boolean; // นับรวมใน badge สีแดง (แปลว่า "ต้องดำเนินการ")
+};
+
+type LoadNotifOpts = {
+  profileId: string;
+  email: string;
+  role: string;
+  extraRoles: string[];
+  gradeLevel?: string | null; // ★ ใช้กรองครูในสายชั้นเดียวกัน (สำหรับหัวหน้าสายชั้น)
 };
 
 export default function DashboardPage() {
@@ -65,6 +107,21 @@ export default function DashboardPage() {
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifications, setNotifications] = useState<NotifItem[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
+  const [myProfileId, setMyProfileId] = useState<string>("");
+  // ★ อ้างอิงตัวเล่นเสียงแจ้งเตือน + รายการล่าสุดที่เคยเห็น เพื่อรู้ว่ามี "รายการใหม่" เมื่อไหร่
+  const notifAudioRef = useRef<HTMLAudioElement | null>(null);
+  const prevNotifIdsRef = useRef<Set<string>>(new Set());
+  const hasLoadedNotifOnceRef = useRef(false);
+  const notifOptsRef = useRef<LoadNotifOpts | null>(null);
+  // ── สถิติการมาเรียน/ขาดเรียนวันนี้ — ดึงจากการเช็คชื่อโฮมรูมของครูประจำชั้น ──
+  const [attendanceStats, setAttendanceStats] = useState<{ present: number; absent: number; total: number } | null>(null);
+
+  // ★ เตรียมตัวเล่นเสียงแจ้งเตือนไว้ตั้งแต่โหลดหน้า (เล่นได้ก็ต่อเมื่อผู้ใช้เคยมีการโต้ตอบกับหน้าเว็บแล้ว
+  //   ตามข้อจำกัด autoplay ของเบราว์เซอร์ — ถ้าเล่นไม่ได้จะเงียบไปเฉยๆ ไม่ error ค้าง)
+  useEffect(() => {
+    notifAudioRef.current = new Audio(encodeURI(NOTIF_SOUND_PATH));
+    notifAudioRef.current.volume = 0.6;
+  }, []);
 
   useEffect(() => {
   async function checkUserRole() {
@@ -140,6 +197,7 @@ export default function DashboardPage() {
         setUserPrefix(prefix);
         setUserName(finalName);
         setIsAdmin(profile.role === "admin");
+        setMyProfileId(profile.id);
 
         // ✅ โหลดการแจ้งเตือนหลังรู้ตัวตนผู้ใช้ครบแล้ว
         loadNotifications({
@@ -147,6 +205,7 @@ export default function DashboardPage() {
           email: user.email || user.user_metadata?.email || "",
           role: profile.role || "",
           extraRoles: profile.extra_roles || [],
+          gradeLevel: profile.grade_level || null,
         });
       }
 
@@ -165,6 +224,14 @@ export default function DashboardPage() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // ── ตรวจการแจ้งเตือนใหม่อัตโนมัติเป็นระยะ (สำหรับเล่นเสียงเตือนตอนมีรายการใหม่) ──
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (notifOptsRef.current) loadNotifications(notifOptsRef.current);
+    }, NOTIF_POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
   // ══════════════════════════════════════════════════════════
   // ── โหลดการแจ้งเตือน — รวมจากหลายระบบที่มีตารางข้อมูลรองรับแล้ว
   // ปัจจุบันเชื่อมกับ: ใบลา/ไปราชการ (leave_requests) และ คำขอแก้ไขตารางสอน
@@ -172,7 +239,8 @@ export default function DashboardPage() {
   // ชัดเจนอยู่แล้ว ระบบอื่น (แจ้งซ่อม/จองรถ/ขอออกนอกโรงเรียน ฯลฯ) ยังไม่มีให้ดูโครงสร้าง
   // ตาราง — เพิ่มเป็นบล็อกใหม่ในฟังก์ชันนี้ได้เลยเมื่อพร้อม (ดูคอมเมนต์ท้ายฟังก์ชัน)
   // ══════════════════════════════════════════════════════════
-  async function loadNotifications(opts: { profileId: string; email: string; role: string; extraRoles: string[] }) {
+  async function loadNotifications(opts: LoadNotifOpts) {
+    notifOptsRef.current = opts; // ★ จำ opts ล่าสุดไว้ ใช้ตอน refresh อัตโนมัติ/กดรีเฟรชเอง
     setNotifLoading(true);
     const items: NotifItem[] = [];
     try {
@@ -408,12 +476,103 @@ if (opts.profileId) {
   });
 }
 
-      items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setNotifications(items);
+// ══════════════════════════════════════════════════════════
+// 11) ★ ใหม่ — ครูในสายชั้นเดียวกันลา / มีการจัดสอนแทน (สำหรับหัวหน้าสายชั้น)
+// ใช้ users.grade_level เทียบกับของฉันเอง (เหมือนหน้าแลกคาบ&สอนแทนที่กรอง
+// restrictToOwnGrade) — เห็นเฉพาะคนที่ role หรือ extra_roles มี "grade_head"
+// ══════════════════════════════════════════════════════════
+const isGradeHead = opts.role === "grade_head" || opts.extraRoles.includes("grade_head");
+if (isGradeHead && opts.gradeLevel) {
+  const { data: gradeTeachers, error: gtErr } = await supabase
+    .from("users")
+    .select("id, first_name, last_name, full_name")
+    .eq("grade_level", opts.gradeLevel)
+    .neq("id", opts.profileId);
+  if (gtErr) console.warn("[loadNotifications] grade teachers query error:", gtErr.message);
+  const gradeTeacherIds = (gradeTeachers || []).map((t: any) => t.id);
+  const gradeTeacherName: Record<string, string> = Object.fromEntries(
+    (gradeTeachers || []).map((t: any) => [t.id, t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim() || "—"])
+  );
+
+  if (gradeTeacherIds.length > 0) {
+    // 11a) ใบลาที่กำลังรออนุมัติของครูในสายชั้นเดียวกัน
+    const { data: gradeLeaves, error: glErr } = await supabase
+      .from("leave_requests")
+      .select("id, days_count, start_date, status, user_id")
+      .eq("status", "pending")
+      .in("user_id", gradeTeacherIds);
+    if (glErr) console.warn("[loadNotifications] grade leave query error:", glErr.message);
+    (gradeLeaves || []).forEach((r: any) => {
+      items.push({
+        id: `gradeleave-${r.id}`,
+        source: "leave_approval",
+        title: "🧑‍🏫 ครูในสายชั้นยื่นใบลา",
+        detail: `${gradeTeacherName[r.user_id] ?? "—"} · ${r.days_count} วัน`,
+        date: r.start_date,
+        path: "/leave",
+        urgent: true,
+      });
+    });
+
+    // 11b) การจัดสอนแทนล่าสุดที่เกี่ยวข้องกับครูในสายชั้นเดียวกัน (ยังไม่ยกเลิก)
+    const { data: gradeSubs, error: gsErr } = await supabase
+      .from("substitution_records")
+      .select("id, substitute_date, status, created_at, absent_teacher_id, substitute_teacher_id")
+      .in("absent_teacher_id", gradeTeacherIds)
+      .neq("status", "cancelled")
+      .order("created_at", { ascending: false })
+      .limit(10);
+    if (gsErr) console.warn("[loadNotifications] grade sub query error:", gsErr.message);
+    (gradeSubs || []).forEach((r: any) => {
+      const subName = r.substitute_teacher_id ? (gradeTeacherName[r.substitute_teacher_id] ?? "ครูท่านอื่น") : "ยังไม่ได้จัด";
+      items.push({
+        id: `gradesub-${r.id}`,
+        source: "sub_assigned",
+        title: "📋 มีการจัดสอนแทนในสายชั้น",
+        detail: `${gradeTeacherName[r.absent_teacher_id] ?? "—"} วันที่ ${toThaiDateShort(r.substitute_date)} · สอนแทนโดย ${subName}`,
+        date: r.created_at,
+        path: "/substitution",
+        urgent: true,
+      });
+    });
+  }
+}
+
+      // ── กรองรายการที่ผู้ใช้ "ดูแล้ว/กดแล้ว" ทิ้งไป (เก็บสถานะไว้ใน localStorage) ──
+      const dismissed = loadDismissedNotifIds(opts.profileId);
+      const visibleItems = items.filter(it => !dismissed.has(it.id));
+      // เก็บเฉพาะ id ที่ยังปรากฏอยู่จริง กัน localStorage บวมขึ้นเรื่อยๆ
+      const currentIds = new Set(items.map(it => it.id));
+      const prunedDismissed = new Set(Array.from(dismissed).filter(id => currentIds.has(id)));
+      saveDismissedNotifIds(opts.profileId, prunedDismissed);
+
+      visibleItems.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      // ── ตรวจว่ามีรายการ "ใหม่" ที่ไม่เคยเห็นมาก่อนหรือไม่ ถ้ามีให้เล่นเสียงแจ้งเตือน ──
+      const newIdSet = new Set(visibleItems.map(it => it.id));
+      const hasNewItem = Array.from(newIdSet).some(id => !prevNotifIdsRef.current.has(id));
+      if (hasNewItem && hasLoadedNotifOnceRef.current) {
+        notifAudioRef.current?.play().catch(() => { /* เบราว์เซอร์บล็อก autoplay — ข้ามไปเงียบๆ */ });
+      }
+      prevNotifIdsRef.current = newIdSet;
+      hasLoadedNotifOnceRef.current = true;
+
+      setNotifications(visibleItems);
     } catch (err) {
       console.error("[loadNotifications] unexpected error:", err);
     }
     setNotifLoading(false);
+  }
+
+  // ★ ปิดแจ้งเตือนรายการนี้ทิ้งถาวร (ใช้ตอนกดดู/กดปิด) — ไม่ต้องรอ query รอบถัดไป
+  function dismissNotification(id: string) {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+    prevNotifIdsRef.current.delete(id);
+    if (myProfileId) {
+      const cur = loadDismissedNotifIds(myProfileId);
+      cur.add(id);
+      saveDismissedNotifIds(myProfileId, cur);
+    }
   }
 
   const urgentCount = notifications.filter(n => n.urgent).length;
@@ -482,7 +641,7 @@ function StatusBadge({ status }: { status: ItemStatus }) {
     {
       title: "🏫 ระบบจัดการห้องเรียนและงานสอน",
       items: [
-        { name: "Smart Class", icon: <UserCheck className="w-6 h-6" />, color: "bg-emerald-500", path: "/smartclass", status: "wip" as ItemStatus },
+        { name: "Smart Class", icon: <UserCheck className="w-6 h-6" />, color: "bg-emerald-500", path: "/smartclass", status: "live" as ItemStatus },
         { name: "ครูประจำชั้น", icon: <Users className="w-6 h-6" />, color: "bg-teal-500", path: "/homeroom", status: "live" as ItemStatus },
         { name: "ตารางสอน", icon: <Calendar className="w-6 h-6" />, color: "bg-purple-500", path: "/schedule", status: "live"  as ItemStatus },
         { name: "แลกคาบ & สอนแทน", icon: <RefreshCw className="w-6 h-6" />, color: "bg-pink-500", path: "/substitution", status: "live"  as ItemStatus },
@@ -579,6 +738,34 @@ useEffect(() => {
   loadEvents();
 }, [supabase]);
 
+// ══════════════════════════════════════════════════════════
+// ── สถิติ นร.มาเรียนวันนี้ / ขาดเรียนวันนี้ — ดึงจากการเช็คชื่อโฮมรูมของครูประจำชั้น
+// ⚠️ ปรับชื่อตาราง/คอลัมน์ตรงนี้ให้ตรงกับตารางเช็คชื่อจริงของหน้า /attendance
+//    (ตอนนี้สมมติว่าชื่อตารางคือ "attendance_records" มีคอลัมน์ date (yyyy-mm-dd)
+//    และ status ที่มีค่าเป็น "present" / "absent" / "late" / "leave" ต่อ นร. 1 คน/วัน)
+// ══════════════════════════════════════════════════════════
+useEffect(() => {
+  async function loadAttendanceStats() {
+    const today = new Date().toISOString().split("T")[0];
+    const { data, error } = await supabase
+      .from("attendance_records")
+      .select("status")
+      .eq("date", today);
+
+    if (error) {
+      console.warn("[loadAttendanceStats] โหลดสถิติการมาเรียนไม่สำเร็จ (ตรวจชื่อตาราง/คอลัมน์):", error.message);
+      return;
+    }
+    if (data) {
+      const total = data.length;
+      const present = data.filter((r: any) => r.status === "present" || r.status === "late").length;
+      const absent = data.filter((r: any) => r.status === "absent").length;
+      setAttendanceStats({ present, absent, total });
+    }
+  }
+  loadAttendanceStats();
+}, [supabase]);
+
 return (
   <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
 
@@ -628,12 +815,12 @@ return (
               <div className="sticky top-0 bg-white px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                 <p className="font-black text-slate-800 text-sm">🔔 การแจ้งเตือน</p>
                 <button
-                  onClick={() => loadNotifications({
-                    profileId: "", email: "", role: "", extraRoles: [],
-                  })}
-                  className="hidden"
-                />
-                {notifLoading && <span className="text-xs text-slate-400 animate-pulse">กำลังโหลด...</span>}
+                  onClick={() => { if (notifOptsRef.current) loadNotifications(notifOptsRef.current); }}
+                  title="รีเฟรชการแจ้งเตือน"
+                  className="text-xs text-slate-400 hover:text-blue-600 font-bold flex items-center gap-1"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${notifLoading ? "animate-spin" : ""}`} />
+                </button>
               </div>
               {notifications.length === 0 ? (
                 <div className="px-4 py-10 text-center text-slate-400 text-sm">
@@ -642,18 +829,30 @@ return (
               ) : (
                 <div className="divide-y divide-slate-50">
                   {notifications.map(n => (
-                    <button
+                    <div
                       key={n.id}
-                      onClick={() => { setNotifOpen(false); router.push(n.path); }}
-                      className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors flex flex-col gap-0.5"
+                      className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors flex items-start gap-2 group"
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-bold text-slate-800">{n.title}</span>
-                        {n.urgent && <span className="shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-600 border border-rose-200">ต้องดำเนินการ</span>}
-                      </div>
-                      <span className="text-xs text-slate-500 line-clamp-1">{n.detail}</span>
-                      <span className="text-[10px] text-slate-400">{toThaiDateShort(n.date)}</span>
-                    </button>
+                      <button
+                        onClick={() => { setNotifOpen(false); dismissNotification(n.id); router.push(n.path); }}
+                        className="flex-1 min-w-0 flex flex-col gap-0.5 text-left"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-bold text-slate-800">{n.title}</span>
+                          {n.urgent && <span className="shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-600 border border-rose-200">ต้องดำเนินการ</span>}
+                        </div>
+                        <span className="text-xs text-slate-500 line-clamp-1">{n.detail}</span>
+                        <span className="text-[10px] text-slate-400">{toThaiDateShort(n.date)}</span>
+                      </button>
+                      {/* ★ ปิดแจ้งเตือนนี้โดยไม่ต้องเปิดหน้าไปดู — เผื่อดำเนินการ/เห็นแล้วจากที่อื่น */}
+                      <button
+                        onClick={() => dismissNotification(n.id)}
+                        title="ทำเครื่องหมายว่าดูแล้ว"
+                        className="shrink-0 w-6 h-6 mt-0.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -707,8 +906,20 @@ return (
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { icon:"✓", bg:"bg-emerald-100", color:"text-emerald-600", label:"นักเรียนมาวันนี้", value:"847", sub:"/ 920 คน", subColor:"text-slate-400" },
-          { icon:"✕", bg:"bg-rose-100",    color:"text-rose-600",    label:"ขาดเรียนวันนี้",  value:"28",  sub:"(3.0%)",  subColor:"text-rose-400"  },
+          {
+            icon: "✓", bg: "bg-emerald-100", color: "text-emerald-600", label: "นักเรียนมาวันนี้",
+            value: attendanceStats ? String(attendanceStats.present) : "-",
+            sub: attendanceStats ? `/ ${attendanceStats.total} คน` : "รอข้อมูล",
+            subColor: "text-slate-400",
+          },
+          {
+            icon: "✕", bg: "bg-rose-100", color: "text-rose-600", label: "ขาดเรียนวันนี้",
+            value: attendanceStats ? String(attendanceStats.absent) : "-",
+            sub: attendanceStats && attendanceStats.total > 0
+              ? `(${((attendanceStats.absent / attendanceStats.total) * 100).toFixed(1)}%)`
+              : "รอข้อมูล",
+            subColor: "text-rose-400",
+          },
           { icon:"📅", bg:"bg-blue-100",   color:"text-blue-600",   label:"ครูลางาน",         value:"4",   sub:"มีสอนแทน 3", subColor:"text-slate-400" },
           { icon:"📌", bg:"bg-purple-100", color:"text-purple-600", label:"รอดำเนินการ",      value:String(urgentCount),  sub:"รายการ",  subColor:"text-slate-400" },
         ].map((s, i) => (
