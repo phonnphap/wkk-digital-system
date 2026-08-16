@@ -108,6 +108,8 @@ export default function DashboardPage() {
   const [notifications, setNotifications] = useState<NotifItem[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
   const [myProfileId, setMyProfileId] = useState<string>("");
+  const [myRole, setMyRole] = useState<string>("");
+  const [myGradeLevel, setMyGradeLevel] = useState<string | null>(null);
   // ★ อ้างอิงตัวเล่นเสียงแจ้งเตือน + รายการล่าสุดที่เคยเห็น เพื่อรู้ว่ามี "รายการใหม่" เมื่อไหร่
   const notifAudioRef = useRef<HTMLAudioElement | null>(null);
   const prevNotifIdsRef = useRef<Set<string>>(new Set());
@@ -115,6 +117,14 @@ export default function DashboardPage() {
   const notifOptsRef = useRef<LoadNotifOpts | null>(null);
   // ── สถิติการมาเรียน/ขาดเรียนวันนี้ — ดึงจากการเช็คชื่อโฮมรูมของครูประจำชั้น ──
   const [attendanceStats, setAttendanceStats] = useState<{ present: number; absent: number; total: number } | null>(null);
+  // ── สถิติ "ครูลางาน" วันนี้ (ในสายชั้นตัวเอง ยกเว้นแอดมิน/ผู้บริหารเห็นทั้งโรงเรียน)
+  //    + จำนวนคาบที่ตัวเองต้องสอนแทนวันนี้ (แอดมิน/ผู้บริหารไม่ต้องเห็นตัวเลขนี้) ──
+  const [leaveTodayStats, setLeaveTodayStats] = useState<{
+    onLeave: number;
+    mySubPeriods: number;
+    isAdminExec: boolean;
+    scopeLabel: string;
+  } | null>(null);
 
   // ★ เตรียมตัวเล่นเสียงแจ้งเตือนไว้ตั้งแต่โหลดหน้า (เล่นได้ก็ต่อเมื่อผู้ใช้เคยมีการโต้ตอบกับหน้าเว็บแล้ว
   //   ตามข้อจำกัด autoplay ของเบราว์เซอร์ — ถ้าเล่นไม่ได้จะเงียบไปเฉยๆ ไม่ error ค้าง)
@@ -198,6 +208,8 @@ export default function DashboardPage() {
         setUserName(finalName);
         setIsAdmin(profile.role === "admin");
         setMyProfileId(profile.id);
+        setMyRole(profile.role || "");
+        setMyGradeLevel(profile.grade_level || null);
 
         // ✅ โหลดการแจ้งเตือนหลังรู้ตัวตนผู้ใช้ครบแล้ว
         loadNotifications({
@@ -740,9 +752,8 @@ useEffect(() => {
 
 // ══════════════════════════════════════════════════════════
 // ── สถิติ นร.มาเรียนวันนี้ / ขาดเรียนวันนี้ — ดึงจากการเช็คชื่อโฮมรูมของครูประจำชั้น
-// ⚠️ ปรับชื่อตาราง/คอลัมน์ตรงนี้ให้ตรงกับตารางเช็คชื่อจริงของหน้า /attendance
-//    (ตอนนี้สมมติว่าชื่อตารางคือ "attendance_records" มีคอลัมน์ date (yyyy-mm-dd)
-//    และ status ที่มีค่าเป็น "present" / "absent" / "late" / "leave" ต่อ นร. 1 คน/วัน)
+// (ตาราง attendance_records: student_id, classroom_id, attendance_date, status
+//  ตรงกับ app/attendance/page.tsx — status เป็น "present" / "late" / "leave" / "absent")
 // ══════════════════════════════════════════════════════════
 useEffect(() => {
   async function loadAttendanceStats() {
@@ -750,14 +761,15 @@ useEffect(() => {
     const { data, error } = await supabase
       .from("attendance_records")
       .select("status")
-      .eq("date", today);
+      .eq("attendance_date", today);
 
     if (error) {
-      console.warn("[loadAttendanceStats] โหลดสถิติการมาเรียนไม่สำเร็จ (ตรวจชื่อตาราง/คอลัมน์):", error.message);
+      console.warn("[loadAttendanceStats] โหลดสถิติการมาเรียนไม่สำเร็จ:", error.message);
       return;
     }
     if (data) {
       const total = data.length;
+      // "มาเรียน" นับ present + late (มาโรงเรียนจริง แค่มาสาย) — ให้สอดคล้องกับหน้า /attendance
       const present = data.filter((r: any) => r.status === "present" || r.status === "late").length;
       const absent = data.filter((r: any) => r.status === "absent").length;
       setAttendanceStats({ present, absent, total });
@@ -765,6 +777,90 @@ useEffect(() => {
   }
   loadAttendanceStats();
 }, [supabase]);
+
+// ══════════════════════════════════════════════════════════
+// ── สถิติ "ครูลางาน" วันนี้ — ดึงจากตาราง leave_requests / substitution_records จริง
+// (ตารางเดียวกับที่หน้า /substitution ใช้อยู่แล้ว)
+//
+// กฎการแสดงผล:
+// - แอดมิน/ผอ./รองผอ. (ADMIN_EXEC_ROLES) → เห็นจำนวนครูลา "ทั้งโรงเรียน" และไม่ต้องขึ้นจำนวนคาบสอนแทน
+// - ครูทั่วไป/หัวหน้าสายชั้น/หัวหน้าหมวด → เห็นจำนวนครูลาเฉพาะ "สายชั้นเดียวกับตัวเอง" (grade_level)
+//   และขึ้นจำนวนคาบที่ตัวเอง (ผู้ล็อกอิน) ถูกจัดให้สอนแทนวันนี้เท่านั้น
+// ══════════════════════════════════════════════════════════
+const ADMIN_EXEC_ROLES = ["admin", "director", "deputy_director"];
+
+useEffect(() => {
+  if (!myProfileId) return; // รอให้โหลดโปรไฟล์ (role/grade_level) เสร็จก่อน
+
+  async function loadLeaveTodayStats() {
+    const today = new Date().toISOString().split("T")[0];
+    const isAdminExec = ADMIN_EXEC_ROLES.includes(myRole);
+
+    // ── แอดมิน/ผู้บริหาร: ไม่กรองสายชั้น เห็นครูลาทั้งโรงเรียน ──
+    // ── ครูทั่วไป: กรองเฉพาะครูที่ grade_level เดียวกับตัวเอง ──
+    let sameGradeTeacherIds: string[] | null = null;
+    if (!isAdminExec) {
+      if (!myGradeLevel) {
+        // ไม่มีสายชั้นระบุไว้ในโปรไฟล์ — ไม่มีใครเข้าเงื่อนไข ให้ขึ้น 0 ไปก่อน
+        setLeaveTodayStats({ onLeave: 0, mySubPeriods: 0, isAdminExec: false, scopeLabel: "สายชั้นของคุณ" });
+        return;
+      }
+      const { data: gradeTeachers, error: gtErr } = await supabase
+        .from("users")
+        .select("id")
+        .eq("grade_level", myGradeLevel);
+      if (gtErr) {
+        console.warn("[loadLeaveTodayStats] โหลดรายชื่อครูในสายชั้นไม่สำเร็จ:", gtErr.message);
+        return;
+      }
+      sameGradeTeacherIds = (gradeTeachers || []).map((t: any) => t.id);
+      if (sameGradeTeacherIds.length === 0) {
+        setLeaveTodayStats({ onLeave: 0, mySubPeriods: 0, isAdminExec: false, scopeLabel: "สายชั้นของคุณ" });
+        return;
+      }
+    }
+
+    // 1) ครูที่ลาแบบอนุมัติแล้ว และวันนี้อยู่ในช่วงวันลา (กรองสายชั้นถ้าไม่ใช่แอดมิน/ผู้บริหาร)
+    let leaveQuery = supabase
+      .from("leave_requests")
+      .select("id, user_id")
+      .eq("status", "approved")
+      .lte("start_date", today)
+      .gte("end_date", today);
+    if (sameGradeTeacherIds) leaveQuery = leaveQuery.in("user_id", sameGradeTeacherIds);
+
+    const { data: leaves, error: leaveErr } = await leaveQuery;
+    if (leaveErr) {
+      console.warn("[loadLeaveTodayStats] โหลดใบลาวันนี้ไม่สำเร็จ:", leaveErr.message);
+      return;
+    }
+    const onLeave = (leaves || []).length;
+
+    // 2) จำนวนคาบที่ "ตัวเอง" ถูกจัดให้สอนแทนวันนี้ — เฉพาะครูทั่วไป (แอดมิน/ผู้บริหารไม่ต้องเห็น)
+    let mySubPeriods = 0;
+    if (!isAdminExec) {
+      const { data: mySubs, error: subErr } = await supabase
+        .from("substitution_records")
+        .select("id")
+        .eq("substitute_teacher_id", myProfileId)
+        .eq("substitute_date", today)
+        .neq("status", "cancelled");
+      if (subErr) {
+        console.warn("[loadLeaveTodayStats] โหลดคาบสอนแทนของตัวเองไม่สำเร็จ:", subErr.message);
+      } else {
+        mySubPeriods = (mySubs || []).length;
+      }
+    }
+
+    setLeaveTodayStats({
+      onLeave,
+      mySubPeriods,
+      isAdminExec,
+      scopeLabel: isAdminExec ? "ทั้งโรงเรียน" : "สายชั้นของคุณ",
+    });
+  }
+  loadLeaveTodayStats();
+}, [supabase, myProfileId, myRole, myGradeLevel]);
 
 return (
   <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
@@ -920,7 +1016,17 @@ return (
               : "รอข้อมูล",
             subColor: "text-rose-400",
           },
-          { icon:"📅", bg:"bg-blue-100",   color:"text-blue-600",   label:"ครูลางาน",         value:"4",   sub:"มีสอนแทน 3", subColor:"text-slate-400" },
+          {
+            icon: "📅", bg: "bg-blue-100", color: "text-blue-600",
+            label: leaveTodayStats ? `ครูลางาน (${leaveTodayStats.scopeLabel})` : "ครูลางาน",
+            value: leaveTodayStats ? String(leaveTodayStats.onLeave) : "-",
+            sub: !leaveTodayStats
+              ? "รอข้อมูล"
+              : leaveTodayStats.isAdminExec
+                ? "" // ★ แอดมิน/ผู้บริหาร ไม่ต้องขึ้นจำนวนคาบสอนแทน
+                : `คุณสอนแทน ${leaveTodayStats.mySubPeriods} คาบ`,
+            subColor: "text-slate-400",
+          },
           { icon:"📌", bg:"bg-purple-100", color:"text-purple-600", label:"รอดำเนินการ",      value:String(urgentCount),  sub:"รายการ",  subColor:"text-slate-400" },
         ].map((s, i) => (
           <div key={i} className="bg-white border border-slate-200 rounded-2xl p-5 flex items-center gap-4 shadow-sm">
