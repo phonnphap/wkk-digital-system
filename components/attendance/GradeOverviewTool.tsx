@@ -44,7 +44,9 @@ type ViewTab = "table" | "podium";
 /* =========================================================================
    Component
    readOnly: สำหรับแอดมิน/ผู้บริหาร — ดู/export/print ได้ แต่แก้ไขคะแนนพิเศษ,
-   ตั้งค่าเกณฑ์เกรด, และคอมเมนต์ครู ไม่ได้
+   คะแนนงาน, ตั้งค่าเกณฑ์เกรด, และคอมเมนต์ครู ไม่ได้
+   ครูประจำวิชา (readOnly=false): แก้ไขคะแนนงานที่มอบหมายได้โดยตรงจากตารางนี้
+   (คลิกที่คะแนน/ป้าย "รอตรวจ"/"ไม่ส่งงาน" เพื่อกรอกคะแนนได้ทันที)
    ========================================================================= */
 
 export default function GradeOverviewTool({
@@ -215,6 +217,56 @@ export default function GradeOverviewTool({
     }
   }
 
+  // ให้คะแนนงานที่มอบหมายแบบ inline จากตารางคะแนนรวมนี้โดยตรง (เฉพาะครูประจำวิชา ไม่ใช่ readOnly)
+  // ⚠️ ASSUMPTION: endpoint /api/assignment-submissions/grade ยังไม่มีอยู่จริง ต้องสร้างเพิ่ม
+  // คาดหวัง request: { subject_section_id, assignment_id, student_id, score, graded_by }
+  // คาดหวัง response: { submission: { id, assignment_id, student_id, status: "graded", score, submitted_at, graded_at } }
+  // endpoint ควร upsert แถวใน assignment_submissions (ถ้านักเรียนยังไม่เคยส่งงานเลย ให้สร้างแถวใหม่โดยไม่ต้องมี submitted_at
+  // เพื่อไม่ให้กระทบการคำนวณ "ส่งตรงเวลา/ส่งช้า" ที่ต้องมีทั้ง due_date และ submitted_at ถึงจะตัดสินได้)
+  async function handleUpdateScore(studentId: string, assignmentId: string, newScore: number) {
+    if (readOnly) return;
+    const assignment = assignments.find(a => a.id === assignmentId);
+    if (!assignment) return;
+    if (Number.isNaN(newScore) || newScore < 0 || newScore > (assignment.max_score ?? 0)) {
+      alert(`คะแนนต้องอยู่ระหว่าง 0 - ${assignment.max_score} คะแนน`);
+      return;
+    }
+    try {
+      const res = await fetch("/api/assignment-submissions/grade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject_section_id: sectionId,
+          assignment_id: assignmentId,
+          student_id: studentId,
+          score: newScore,
+          graded_by: currentUserId || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "บันทึกคะแนนไม่สำเร็จ");
+
+      const updated: Submission = json.submission ?? {
+        id: `local-${Date.now()}`,
+        assignment_id: assignmentId,
+        student_id: studentId,
+        status: "graded",
+        score: newScore,
+        graded_at: new Date().toISOString(),
+      };
+
+      setSubmissions(prev => {
+        const exists = prev.some(s => s.assignment_id === assignmentId && s.student_id === studentId);
+        if (exists) {
+          return prev.map(s => (s.assignment_id === assignmentId && s.student_id === studentId ? { ...s, ...updated } : s));
+        }
+        return [...prev, updated];
+      });
+    } catch (e: any) {
+      alert("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+  }
+
   async function saveCriteria(newRows: Criterion[]) {
     if (readOnly) return;
     try {
@@ -309,7 +361,7 @@ export default function GradeOverviewTool({
         <div>
           <h2 className="font-black text-slate-800 text-lg">คะแนนรวม</h2>
           <p className="text-slate-400 text-xs font-bold">
-            {readOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คุณสามารถดูคะแนนรวมของงานที่มอบหมาย และคะแนนพิเศษได้ที่นี่"}
+            {readOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที"}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -357,6 +409,7 @@ export default function GradeOverviewTool({
           totalMaxScore={totalMaxScore}
           onOpenReport={s => setReportStudent(s)}
           onAdjustPreset={handleAdjustPreset}
+          onUpdateScore={handleUpdateScore}
           isOnTime={isOnTime}
           readOnly={readOnly}
         />
@@ -368,7 +421,7 @@ export default function GradeOverviewTool({
 }
 
 function GradeTable({
-  rows, assignments, presets, totalMaxScore, onOpenReport, onAdjustPreset, isOnTime, readOnly,
+  rows, assignments, presets, totalMaxScore, onOpenReport, onAdjustPreset, onUpdateScore, isOnTime, readOnly,
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
@@ -376,6 +429,7 @@ function GradeTable({
   totalMaxScore: number;
   onOpenReport: (s: Student) => void;
   onAdjustPreset: (studentId: string, presetId: string, currentValue: number, newValue: number) => void;
+  onUpdateScore: (studentId: string, assignmentId: string, newScore: number) => void;
   isOnTime: (assignment: Assignment, sub?: Submission) => boolean | null;
   readOnly: boolean;
 }) {
@@ -451,32 +505,41 @@ function GradeTable({
                   const onTimeResult = isOnTime(a, sub);
                   return (
                     <td key={a.id} className="text-center px-3 py-3">
-                      {!sub ? (
-                        <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-red-50 text-red-600">ไม่ส่งงาน</span>
-                      ) : sub.score === null ? (
-                        <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600">รอตรวจ</span>
+                      {readOnly ? (
+                        !sub ? (
+                          <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-red-50 text-red-600">ไม่ส่งงาน</span>
+                        ) : sub.score === null ? (
+                          <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600">รอตรวจ</span>
+                        ) : (
+                          <div className="flex flex-col items-center gap-0.5">
+                            <span className="text-sm font-black text-slate-700">{sub.score}</span>
+                            {onTimeResult === false && (
+                              <span className="text-[9px] font-black text-red-500">⏰ ส่งช้า</span>
+                            )}
+                          </div>
+                        )
                       ) : (
-                        <div className="flex flex-col items-center gap-0.5">
-                          <span className="text-sm font-black text-slate-700">{sub.score}</span>
-                          {onTimeResult === false && (
-                            <span className="text-[9px] font-black text-red-500">⏰ ส่งช้า</span>
-                          )}
-                        </div>
+                        <EditableScoreCell
+                          submission={sub}
+                          maxScore={a.max_score}
+                          onTimeResult={onTimeResult}
+                          onSave={newScore => onUpdateScore(s.id, a.id, newScore)}
+                        />
                       )}
                     </td>
                   );
                 })}
                 {presets.map(p => (
-  <td key={p.id} className="text-center px-3 py-3">
-    {readOnly ? (
-      <span className={`text-sm font-black ${ (r.presetTotals[p.id] ?? 0) > 0 ? "text-emerald-600" : (r.presetTotals[p.id] ?? 0) < 0 ? "text-red-500" : "text-slate-300" }`}>
-        {r.presetTotals[p.id] ?? 0}
-      </span>
-    ) : (
-      <EditablePresetCell value={r.presetTotals[p.id] ?? 0} onSave={newValue => onAdjustPreset(s.id, p.id, r.presetTotals[p.id] ?? 0, newValue)} />
-    )}
-  </td>
-))}
+                  <td key={p.id} className="text-center px-3 py-3">
+                    {readOnly ? (
+                      <span className={`text-sm font-black ${(r.presetTotals[p.id] ?? 0) > 0 ? "text-emerald-600" : (r.presetTotals[p.id] ?? 0) < 0 ? "text-red-500" : "text-slate-300"}`}>
+                        {r.presetTotals[p.id] ?? 0}
+                      </span>
+                    ) : (
+                      <EditablePresetCell value={r.presetTotals[p.id] ?? 0} onSave={newValue => onAdjustPreset(s.id, p.id, r.presetTotals[p.id] ?? 0, newValue)} />
+                    )}
+                  </td>
+                ))}
                 <td className="text-center px-3 py-3">
                   <span className="inline-flex items-center justify-center min-w-[44px] px-2.5 py-1.5 rounded-xl font-black text-sm bg-slate-100 text-slate-700">
                     {r.grandTotal}
@@ -507,7 +570,91 @@ function GradeTable({
   );
 }
 
-function EditablePresetCell({ value, onSave, readOnly = false }: { value: number; onSave: (newValue: number) => void; readOnly?: boolean }) {
+/* ป้าย/ช่องกรอกคะแนนงานที่มอบหมาย แบบคลิกแก้ไขได้ทันที (สำหรับครูประจำวิชาเท่านั้น)
+   - ยังไม่มีการส่งงานเลย ("ไม่ส่งงาน") -> คลิกเพื่อกรอกคะแนนได้เลย (ให้คะแนนย้อนหลัง/กรณีส่งงานกระดาษ)
+   - ส่งงานแล้วแต่ยังไม่ตรวจ ("รอตรวจ") -> คลิกเพื่อกรอกคะแนน
+   - มีคะแนนแล้ว -> คลิกที่ตัวเลขเพื่อแก้ไข */
+function EditableScoreCell({
+  submission,
+  maxScore,
+  onTimeResult,
+  onSave,
+}: {
+  submission?: Submission;
+  maxScore: number;
+  onTimeResult: boolean | null;
+  onSave: (newScore: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(submission?.score !== null && submission?.score !== undefined ? String(submission.score) : "");
+
+  useEffect(() => {
+    setDraft(submission?.score !== null && submission?.score !== undefined ? String(submission.score) : "");
+  }, [submission?.score]);
+
+  function commit() {
+    const parsed = Number(draft);
+    setEditing(false);
+    if (draft.trim() === "" || Number.isNaN(parsed)) return;
+    if (submission?.score !== null && submission?.score !== undefined && parsed === submission.score) return;
+    onSave(parsed);
+  }
+
+  if (editing) {
+    return (
+      <input
+        type="number"
+        autoFocus
+        min={0}
+        max={maxScore}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") {
+            setDraft(submission?.score !== null && submission?.score !== undefined ? String(submission.score) : "");
+            setEditing(false);
+          }
+        }}
+        className="w-16 mx-auto block text-center border-2 border-sky-300 rounded-lg py-1 text-sm font-black focus:outline-none"
+      />
+    );
+  }
+
+  if (!submission) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        title="คลิกเพื่อให้คะแนน"
+        className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+      >
+        ไม่ส่งงาน · ให้คะแนน
+      </button>
+    );
+  }
+
+  if (submission.score === null) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        title="คลิกเพื่อให้คะแนน"
+        className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
+      >
+        รอตรวจ · ให้คะแนน
+      </button>
+    );
+  }
+
+  return (
+    <button onClick={() => setEditing(true)} title="คลิกเพื่อแก้ไขคะแนน" className="flex flex-col items-center gap-0.5 mx-auto">
+      <span className="text-sm font-black text-slate-700 hover:bg-slate-100 rounded-lg px-2 py-0.5 transition-colors">{submission.score}</span>
+      {onTimeResult === false && <span className="text-[9px] font-black text-red-500">⏰ ส่งช้า</span>}
+    </button>
+  );
+}
+
+function EditablePresetCell({ value, onSave }: { value: number; onSave: (newValue: number) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
 
@@ -518,14 +665,6 @@ function EditablePresetCell({ value, onSave, readOnly = false }: { value: number
     setEditing(false);
     if (Number.isNaN(parsed)) { setDraft(String(value)); return; }
     if (parsed !== value) onSave(parsed);
-  }
-
-  if (readOnly) {
-    return (
-      <span className={`text-sm font-black px-2 py-1 ${value > 0 ? "text-emerald-600" : value < 0 ? "text-red-500" : "text-slate-300"}`}>
-        {value}
-      </span>
-    );
   }
 
   if (editing) {
