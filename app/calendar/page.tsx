@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { fetchHolidayMap } from "@/lib/holidays";
 
 const supabase = createClient();
 
@@ -262,7 +263,6 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
   const isEdit  = !!event?.id;
   const isOwner = !event?.id || event.created_by === user.id;
   const canEdit = isOwner || isApprover;
-
   const [title,        setTitle]       = useState(event?.title ?? "");
   const [desc,         setDesc]        = useState(event?.description ?? "");
   const [schedule,     setSchedule]    = useState(event?.schedule ?? "");
@@ -1102,6 +1102,36 @@ export default function CalendarPage() {
     }),[events,catFilter,user,isApprover]);
 
   const pendingCount=useMemo(()=>events.filter(e=>e.status==="pending").length,[events]);
+  const [holidayEvents, setHolidayEvents] = useState<CalEvent[]>([]);
+
+  useEffect(() => {
+    const from = ymd(new Date(curDate.getFullYear(), curDate.getMonth() - 1, 1));
+    const to   = ymd(new Date(curDate.getFullYear(), curDate.getMonth() + 2, 0));
+    fetchHolidayMap(from, to).then((map) => {
+      const evs: CalEvent[] = Array.from(map.entries()).map(([date, h]) => ({
+        id: `holiday-${date}`,
+        title: h.name,
+        categories: ["holiday"],
+        start_date: date,
+        end_date: date,
+        is_all_day: true,
+        status: "approved",
+        created_by: "system",
+        is_public: true,
+        target_roles: ["all"],
+        attachment_urls: [],
+        created_at: date,
+      }));
+      setHolidayEvents(evs);
+    });
+  }, [curDate]);
+   const displayEvents = useMemo(() => [...filteredEvents, ...holidayEvents], [filteredEvents, holidayEvents]);
+
+  // ★ กันไม่ให้คลิกอีเวนต์วันหยุด (system) เปิด modal แก้ไข
+  function handleEventClick(ev: CalEvent) {
+    if (ev.id.startsWith("holiday-")) return;
+    setModalEv(ev);
+  }
 
   function navigate(dir:1|-1){
     const d=new Date(curDate);
@@ -1189,7 +1219,7 @@ export default function CalendarPage() {
           {/* Mini cal */}
           <MiniCal year={curDate.getFullYear()} month={curDate.getMonth()}
             today={todayStr} selected={selected}
-            hasEv={d=>filteredEvents.some(e=>e.start_date<=d&&e.end_date>=d&&e.status==="approved")}
+            hasEv={d=>displayEvents.some(e=>e.start_date<=d&&e.end_date>=d&&e.status==="approved")}
             onSelect={d=>{setSelected(d);setCurDate(toDate(d));if(view!=="month")setView("day");}}/>
 
           {/* Category filter */}
@@ -1270,11 +1300,11 @@ export default function CalendarPage() {
           )}
 
           <div className="flex-1">
-            {view==="month"&&<MonthView year={curDate.getFullYear()} month={curDate.getMonth()} events={filteredEvents} today={todayStr} onDayClick={d=>{setSelected(d);setCurDate(toDate(d));setView("day");}} onEventClick={ev=>setModalEv(ev)}/>}
-            {view==="week" &&<WeekView currentDate={curDate} events={filteredEvents} today={todayStr} onEventClick={ev=>setModalEv(ev)} onDayClick={d=>{setSelected(d);setCurDate(toDate(d));setView("day");}}/>}
-            {view==="day"  &&<DayView currentDate={curDate} events={filteredEvents} today={todayStr} onEventClick={ev=>setModalEv(ev)}/>}
-            {view==="agenda"&&<AgendaView events={filteredEvents} onEventClick={ev=>setModalEv(ev)}/>}
-          </div>
+  {view==="month"&&<MonthView year={curDate.getFullYear()} month={curDate.getMonth()} events={displayEvents} today={todayStr} onDayClick={d=>{setSelected(d);setCurDate(toDate(d));setView("day");}} onEventClick={handleEventClick}/>}
+  {view==="week" &&<WeekView currentDate={curDate} events={displayEvents} today={todayStr} onEventClick={handleEventClick} onDayClick={d=>{setSelected(d);setCurDate(toDate(d));setView("day");}}/>}
+  {view==="day"  &&<DayView currentDate={curDate} events={displayEvents} today={todayStr} onEventClick={handleEventClick}/>}
+  {view==="agenda"&&<AgendaView events={displayEvents} onEventClick={handleEventClick}/>}
+</div>
         </main>
       </div>
 

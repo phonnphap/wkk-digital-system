@@ -20,6 +20,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { fetchHolidayMap, isHoliday, HolidayMap } from "@/lib/holidays";
 import {
   Home, ArrowLeft, Calendar, ChevronLeft, ChevronRight,
   ChevronDown, ChevronUp, Users, BarChart3, Loader2, TrendingUp,
@@ -212,6 +213,7 @@ function sumInto(target: ReturnType<typeof emptyTotals>, src: ReturnType<typeof 
 }
 
 // ★ สีเส้นกราฟ วนใช้ตามลำดับระดับชั้นที่เลือก ("ทั้งโรงเรียน" ใช้สีเทาเข้มเสมอ)
+
 const LINE_COLORS = ["#7c3aed", "#059669", "#0284c7", "#d97706", "#e11d48", "#0d9488", "#9333ea", "#ca8a04"];
 const SCHOOL_ENTITY = "__school__";
 function colorForEntity(ent: string, idx: number) {
@@ -256,8 +258,15 @@ export default function AttendanceOverviewPage() {
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
   const [chartErrorMsg, setChartErrorMsg] = useState("");
-
   const dateInputRef = useRef<HTMLInputElement>(null);
+  const [holidayMap, setHolidayMap] = useState<HolidayMap>(new Map());
+
+useEffect(() => {
+  // โหลดคู่กับ date ของมุมมองตาราง
+  fetchHolidayMap(date, date).then(setHolidayMap);
+}, [date]);
+
+const todayHoliday = isHoliday(date, holidayMap);
 
   function openDatePicker() {
     const el = dateInputRef.current;
@@ -511,8 +520,9 @@ export default function AttendanceOverviewPage() {
         setChartData(points);
       } else {
         // เทอม / ปีการศึกษา -> สรุปเป็น "ค่าเฉลี่ยอัตรามาเรียนรายเดือน" (เฉลี่ยเฉพาะวันที่มีการเช็คชื่อจริงในเดือนนั้น)
+        const rangeHolidays = await fetchHolidayMap(range.start, range.end);
         const monthAgg = new Map<string, Map<string, { sum: number; count: number }>>();
-        Array.from(byDate.keys()).sort().forEach((d) => {
+        Array.from(byDate.keys()).filter((d) => !isHoliday(d, rangeHolidays)) .sort().forEach((d) => {
           const monthKey = d.slice(0, 7); // YYYY-MM
           const dayRecords = byDate.get(d) ?? [];
           let entMap = monthAgg.get(monthKey);
@@ -634,7 +644,11 @@ export default function AttendanceOverviewPage() {
             >
               <ChevronRight className="h-4 w-4" />
             </button>
-
+            {todayHoliday && (
+  <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">
+    📅 {formatThaiDateFull(date)} เป็นวันหยุด: {todayHoliday.name} — ตัวเลข &quot;ยังไม่บันทึก&quot; ไม่นับเป็นความผิดปกติ
+  </div>
+)}
             {date !== getTodayISO() && (
               <button
                 onClick={() => setDate(getTodayISO())}

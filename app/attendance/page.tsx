@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Save, Home, ArrowLeft, Calendar, TrendingUp, Users } from "lucide-react";
+import { fetchHolidayMap, isHoliday, HolidayMap } from "@/lib/holidays";
 
 const supabase = createClient();
 
@@ -204,11 +205,13 @@ function MonthlyStatsTable({
   enrolledCounts,
   selectedDate,
   onSelectDate,
+  holidayMap,                    // ★ เพิ่มบรรทัดนี้
 }: {
   dayStats: DayStat[];
   enrolledCounts: { male: number; female: number; total: number };
   selectedDate: string;
   onSelectDate: (iso: string) => void;
+  holidayMap: HolidayMap;        // ★ เพิ่มบรรทัดนี้
 }) {
   if (dayStats.length === 0) {
     return <p className="text-xs text-slate-400 py-8 text-center">ยังไม่มีข้อมูลสำหรับเดือนนี้</p>;
@@ -250,22 +253,24 @@ function MonthlyStatsTable({
         </thead>
         <tbody>
           {dayStats.map((d) => {
-            const dt = parseISODateLocal(d.date);
-            const isWeekend = dt.getDay() === 0 || dt.getDay() === 6;
-            const isSelected = d.date === selectedDate;
-            return (
-              <tr
-                key={d.date}
-                onClick={() => onSelectDate(d.date)}
-                title="คลิกเพื่อดูข้อมูลวันนี้"
-                className={`cursor-pointer border-b border-slate-50 last:border-0 transition-colors ${
-                  isWeekend ? "bg-slate-200/70" : ""
-                } ${isSelected ? "bg-indigo-50/80" : "hover:bg-indigo-50/40"}`}
-              >
-                <td className={`px-2.5 py-1.5 whitespace-nowrap ${isSelected ? "font-bold text-indigo-700" : "text-slate-600"}`}>
-                  {formatThaiDateRow(d.date)}
-                </td>
-                <td className="px-1.5 py-1.5 text-center text-slate-500 border-l border-slate-50">{enrolledCounts.male}</td>
+  const dt = parseISODateLocal(d.date);
+  const isWeekend = dt.getDay() === 0 || dt.getDay() === 6;
+  const holiday = isHoliday(d.date, holidayMap);
+  const isSelected = d.date === selectedDate;
+  return (
+    <tr
+      key={d.date}
+      onClick={() => onSelectDate(d.date)}
+      title="คลิกเพื่อดูข้อมูลวันนี้"
+      className={`cursor-pointer border-b border-slate-50 last:border-0 transition-colors ${
+        isWeekend || holiday ? "bg-slate-200/70" : ""
+      } ${isSelected ? "bg-indigo-50/80" : "hover:bg-indigo-50/40"}`}
+    >
+      <td className={`px-2.5 py-1.5 whitespace-nowrap ${isSelected ? "font-bold text-indigo-700" : "text-slate-600"}`}>
+        {formatThaiDateRow(d.date)}
+        {holiday && <span className="ml-1 text-[10px] font-normal text-rose-500">({holiday.name})</span>}
+      </td>
+      <td className="px-1.5 py-1.5 text-center text-slate-500 border-l border-slate-50">{enrolledCounts.male}</td>
                 <td className="px-1.5 py-1.5 text-center text-slate-500">{enrolledCounts.female}</td>
                 <td className="px-1.5 py-1.5 text-center text-slate-600 font-semibold">{enrolledCounts.total}</td>
                 <td className="px-1.5 py-1.5 text-center text-emerald-600 border-l border-slate-50">{d.presentMale}</td>
@@ -293,8 +298,16 @@ export default function AttendancePage() {
   const [dayStats, setDayStats] = useState<DayStat[]>([]);
   // ตัวกรองรายชื่อใต้ชิปสรุป (คลิกชิปเพื่อดูรายชื่อ เลขที่ + ชื่อ)
   const [summaryFilter, setSummaryFilter] = useState<SummaryFilter | null>(null);
+  const [holidayMap, setHolidayMap] = useState<HolidayMap>(new Map());
 
   const dateInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+  const days = getDaysInMonth(date);
+  fetchHolidayMap(days[0], days[days.length - 1]).then(setHolidayMap);
+}, [date]);
+
+const todayHoliday = isHoliday(date, holidayMap);
 
   function openDatePicker() {
     const el = dateInputRef.current;
@@ -602,6 +615,12 @@ export default function AttendancePage() {
                   ))}
                 </div>
 
+                {todayHoliday && (
+  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">
+    📅 วันนี้เป็นวันหยุด: {todayHoliday.name} — ถ้ามีเรียนชดเชยสามารถเช็คชื่อได้ตามปกติ
+  </div>
+)}
+
                 {summaryFilter && (
                   <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
                     <p className="mb-2 text-xs font-bold text-slate-500">
@@ -690,12 +709,7 @@ export default function AttendancePage() {
               <h3 className="mb-3 flex items-center gap-1.5 text-sm font-black text-slate-700">
                 <TrendingUp className="h-4 w-4 text-indigo-500" /> สถิติมาเรียนประจำเดือน
               </h3>
-              <MonthlyStatsTable
-                dayStats={dayStats}
-                enrolledCounts={enrolledCounts}
-                selectedDate={date}
-                onSelectDate={setDate}
-              />
+              <MonthlyStatsTable dayStats={dayStats} enrolledCounts={enrolledCounts} selectedDate={date} onSelectDate={setDate} holidayMap={holidayMap} />
             </div>
 
             <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">

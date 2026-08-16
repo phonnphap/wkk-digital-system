@@ -10,6 +10,7 @@ import {
   CalendarDays, Trophy, FolderOpen, FileText, AlertCircle, Send, Loader2,
   ClipboardList, ArrowRight, Clock,
 } from "lucide-react";
+import { fetchHolidayMap, isHoliday, HolidayMap } from "@/lib/holidays";
 
 function currentFiscalYear() {
   const now = new Date();
@@ -322,7 +323,7 @@ export default function TeacherPortfolioPage() {
   const [supportForm, setSupportForm] = useState({ category: "edit_locked_field", subject: "", message: "" });
   const [supportSending, setSupportSending] = useState(false);
   const [supportSent, setSupportSent] = useState(false);
-
+  const [holidayMap, setHolidayMap] = useState<HolidayMap>(new Map());
   const todayStr = useMemo(() => toDateInputValue(new Date()), []);
 
   useEffect(() => {
@@ -347,9 +348,11 @@ export default function TeacherPortfolioPage() {
     selectedOnLeave
   );
   const selectedMeetingExcuse = isMeetingExcuseNote(selectedDayRow?.note);
+  const selectedIsHoliday = !!isHoliday(selectedDay, holidayMap);
   // ★ "ขาดงาน" เฉพาะกรณีที่ระบบประมวลผลวันนั้นแล้ว ไม่มีเวลาเข้า-ออก ไม่ได้ลา และ "มีหมายเหตุที่ไม่ใช่กรณีไม่แสกน/ประชุม"
   //    (ถ้าไม่มีหมายเหตุเลย ให้ถือเป็น "ไม่แสกนมา/ไม่แสกนกลับ" ไม่ใช่ขาดงาน — ต้องรอการยืนยัน)
   const selectedDayIsAbsent =
+  !selectedIsHoliday &&   
     selectedHasEnrichedRow &&
     !selectedHasIn &&
     !selectedHasOut &&
@@ -360,7 +363,7 @@ export default function TeacherPortfolioPage() {
     !selectedNoScanOut &&
     !selectedMeetingExcuse;
   // ★ "รอข้อมูล" คือยังไม่มี enriched row เข้ามาเลยสำหรับวันนั้น (ระบบยังไม่ประมวลผล/ยังไม่ sync)
-  const selectedDayIsPending = !selectedHasEnrichedRow && !selectedOnLeave && selectedDay <= todayStr;
+  const selectedDayIsPending = !selectedIsHoliday &&  !selectedHasEnrichedRow && !selectedOnLeave && selectedDay <= todayStr;
   const selectedRemark = buildRemark(selectedDayRow?.note, selectedOnLeave);
 
   const monthlyAttendance = useMemo(() => {
@@ -511,6 +514,7 @@ export default function TeacherPortfolioPage() {
         fetchEnrichedAttendance(supabase, me.id, fy),
         fetchAttendanceTimes(supabase, me.id, fy),
         fetchApprovedLeaveDates(supabase, me.id),
+        fetchHolidayMap(fiscalYearDateRange(fy).start, fiscalYearDateRange(fy).end),
       ]);
       setLeaveSummary(quotaRows || []);
       setLeaveCount(countRow || null);
@@ -920,7 +924,7 @@ export default function TeacherPortfolioPage() {
                       const hasIn = !!d.check_in_time;
                       const hasOut = !!d.check_out_time;
                       const remark = buildRemark(d.note, onLeave);
-
+                      const dayHoliday = isHoliday(dateStr, holidayMap);  
                       const noScanInRow = isNoScanIn(d, onLeave);
                       const noScanOutRow = isNoScanOut(d, onLeave);
                       const meetingExcuseRow = isMeetingExcuseNote(d.note);
@@ -947,10 +951,10 @@ export default function TeacherPortfolioPage() {
                           <td className="px-3 py-2 font-bold text-slate-700 whitespace-nowrap">
                             {d.day} {WEEKDAY_LABEL[dow]}
                           </td>
-                          {isWeekend || isFuture ? (
-                            <td colSpan={2} className="px-3 py-2 text-center text-xs text-slate-300 font-bold">
-                              {isWeekend ? "วันหยุด" : "—"}
-                            </td>
+                          {isWeekend || isFuture || dayHoliday ? (
+  <td colSpan={2} className="px-3 py-2 text-center text-xs text-slate-300 font-bold">
+    {dayHoliday ? `หยุด: ${dayHoliday.name}` : isWeekend ? "วันหยุด" : "—"}
+  </td>
                           ) : isPendingRow ? (
                             <td colSpan={2} className="px-3 py-2 text-center">
                               <span className="inline-block px-2.5 py-1 rounded-md text-xs font-bold text-slate-400 bg-slate-100">รอข้อมูล</span>

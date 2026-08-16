@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { fetchSingleHoliday, HolidayInfo } from "@/lib/holidays";
+
+const supabase = createClient();
 
 type Status = "present" | "absent" | "late" | "leave" | "excused";
 
@@ -48,6 +52,12 @@ export default function AttendanceTool({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [holidayInfo, setHolidayInfo] = useState<HolidayInfo | null>(null);
+
+  useEffect(() => {
+  if (!date) return;
+  fetchSingleHoliday(date).then(setHolidayInfo);
+}, [date]);
 
   const loadAttendance = useCallback(async () => {
     if (!timetableEntryId || !date) return;
@@ -200,6 +210,11 @@ export default function AttendanceTool({
               📥 ดึงจาก{referenceLabel}
             </button>
           )}
+          {holidayInfo && (
+  <div className="mx-5 mt-3 rounded-xl border-2 border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-bold text-rose-600">
+    📅 วันนี้เป็นวันหยุด: {holidayInfo.name} — ถ้าไม่มีเรียนชดเชย ไม่ต้องเช็คชื่อ
+  </div>
+)}
         </div>
       </div>
 
