@@ -193,13 +193,35 @@ export async function GET(req: NextRequest) {
           .in("assignment_id", assignmentIds)
       : { data: [] as any[] };
 
-    // 7) เช็กชื่อ — 🔧 FIX: ดึงจาก subject_attendance (รายคาบ/รายวิชา) แทน attendance_records (โฮมรูม)
+    // 7) เช็กชื่อ — 🔧 FIX (v2): timetable_entries ผูกกับ classroom_id + subject_id
+    // (ไม่มีคอลัมน์ subject_section_id) จึงต้องหา entry ids ผ่าน classroom_id+subject_id
+    // ของแต่ละ section ในขอบเขต แล้วค่อยไปดึง subject_attendance ต่อ
     async function fetchAttendanceWithFallback() {
-      const { data: entries } = await admin
+      // แมป classroom_id -> subject_id ที่ใช้ในขอบเขตนี้ (มาจาก sections ที่ผ่านการกรองแล้ว)
+      const pairs = Array.from(
+        new Set(sections.map(s => `${s.classroom_id}::${s.subject_id}`))
+      ).map(p => {
+        const [classroomIdPart, subjectIdPart] = p.split("::");
+        return { classroomId: classroomIdPart, subjectId: subjectIdPart };
+      });
+      if (pairs.length === 0) return [];
+
+      const classroomIdsForTT = Array.from(new Set(pairs.map(p => p.classroomId)));
+      const subjectIdsForTT = Array.from(new Set(pairs.map(p => p.subjectId)));
+
+      const { data: entries, error: ttErr } = await admin
         .from("timetable_entries")
-        .select("id, subject_section_id")
-        .in("subject_section_id", sectionIds);
-      const entryIds = (entries ?? []).map((e: any) => e.id);
+        .select("id, classroom_id, subject_id")
+        .in("classroom_id", classroomIdsForTT)
+        .in("subject_id", subjectIdsForTT);
+      if (ttErr || !entries) return [];
+
+      // กรองเฉพาะ entry ที่ classroom_id+subject_id ตรงกับคู่ที่อยู่ในขอบเขตจริง
+      // (กันเคส subject_id ใน scope="school" ไปโดนห้ามอื่นที่ไม่ได้สอนวิชานั้นในห้องนั้น)
+      const pairSet = new Set(pairs.map(p => `${p.classroomId}::${p.subjectId}`));
+      const entryIds = entries
+        .filter((e: any) => pairSet.has(`${e.classroom_id}::${e.subject_id}`))
+        .map((e: any) => e.id);
       if (entryIds.length === 0) return [];
 
       async function buildQuery() {
@@ -214,7 +236,7 @@ export async function GET(req: NextRequest) {
       const { data } = await buildQuery();
       if (data && data.length > 0) return data;
 
-      // Fallback: กรองปีการศึกษาแล้วว่าง (yearStart/yearEnd อาจไม่ตรงข้อมูลจริง) -> ดึงทั้งหมด
+      // Fallback: กรองปีการศึกษาแล้วว่าง -> ดึงทั้งหมดของ entryIds นี้แทน
       const { data: fallback } = await admin
         .from("subject_attendance")
         .select("student_id, timetable_entry_id, status, attendance_date")
