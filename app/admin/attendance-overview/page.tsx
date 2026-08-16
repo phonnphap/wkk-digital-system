@@ -135,8 +135,12 @@ type ClassStat = {
   classroom_id: string;
   room_name: string;
   grade: string;
-  total: number; // จำนวนเต็ม นร. ในห้อง
-  present: number;
+  total: number; // จำนวนเต็ม นร. ในห้อง (รวม)
+  maleTotal: number; // จำนวนเต็ม ชาย
+  femaleTotal: number; // จำนวนเต็ม หญิง
+  present: number; // มาเรียน (รวม)
+  malePresent: number; // มาเรียน ชาย
+  femalePresent: number; // มาเรียน หญิง
   late: number;
   leave: number;
   absent: number;
@@ -150,11 +154,19 @@ type GradeGroup = {
 };
 
 function emptyTotals() {
-  return { total: 0, present: 0, late: 0, leave: 0, absent: 0, notRecorded: 0 };
+  return {
+    total: 0, maleTotal: 0, femaleTotal: 0,
+    present: 0, malePresent: 0, femalePresent: 0,
+    late: 0, leave: 0, absent: 0, notRecorded: 0,
+  };
 }
 function sumInto(target: ReturnType<typeof emptyTotals>, src: ReturnType<typeof emptyTotals>) {
   target.total += src.total;
+  target.maleTotal += src.maleTotal;
+  target.femaleTotal += src.femaleTotal;
   target.present += src.present;
+  target.malePresent += src.malePresent;
+  target.femalePresent += src.femalePresent;
   target.late += src.late;
   target.leave += src.leave;
   target.absent += src.absent;
@@ -275,12 +287,18 @@ export default function AttendanceOverviewPage() {
         const stat = statByClassroom.get(s.classroom_id);
         if (!stat) return; // นักเรียนอยู่ในห้องที่ไม่พบ (ข้อมูลไม่สอดคล้อง) — ข้าม
         stat.total += 1;
+        if (s.gender === "male") stat.maleTotal += 1;
+        else if (s.gender === "female") stat.femaleTotal += 1;
 
         const status = statusByStudent.get(s.id);
         if (!status) {
           stat.notRecorded += 1;
         } else {
           stat[status] += 1;
+          if (status === "present") {
+            if (s.gender === "male") stat.malePresent += 1;
+            else if (s.gender === "female") stat.femalePresent += 1;
+          }
           const key = s.gender === "male" || s.gender === "female" ? s.gender : "unknown";
           gTotals[key][status] += 1;
         }
@@ -479,14 +497,22 @@ export default function AttendanceOverviewPage() {
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr className="text-xs text-slate-500">
-                        <th className="px-4 py-3 text-left font-semibold">ระดับชั้น / ห้อง</th>
-                        <th className="px-3 py-3 text-center font-semibold">นร. ทั้งหมด</th>
-                        <th className="px-3 py-3 text-center font-semibold text-emerald-600">มา</th>
-                        <th className="px-3 py-3 text-center font-semibold text-amber-600">สาย</th>
-                        <th className="px-3 py-3 text-center font-semibold text-sky-600">ลา</th>
-                        <th className="px-3 py-3 text-center font-semibold text-rose-600">ขาด</th>
-                        <th className="px-3 py-3 text-center font-semibold text-slate-400">ยังไม่บันทึก</th>
-                        <th className="px-3 py-3 text-center font-semibold">% มาเรียน</th>
+                        <th rowSpan={2} className="px-4 py-3 text-left font-semibold align-bottom">ระดับชั้น / ห้อง</th>
+                        <th colSpan={3} className="px-2 py-2 text-center font-semibold border-l border-slate-200">จำนวนเต็ม</th>
+                        <th colSpan={3} className="px-2 py-2 text-center font-semibold border-l border-slate-200">จำนวนมาเรียน</th>
+                        <th rowSpan={2} className="px-3 py-3 text-center font-semibold text-amber-600 border-l border-slate-200 align-bottom">สาย</th>
+                        <th rowSpan={2} className="px-3 py-3 text-center font-semibold text-sky-600 align-bottom">ลา</th>
+                        <th rowSpan={2} className="px-3 py-3 text-center font-semibold text-rose-600 align-bottom">ขาด</th>
+                        <th rowSpan={2} className="px-3 py-3 text-center font-semibold text-slate-400 align-bottom">ยังไม่บันทึก</th>
+                        <th rowSpan={2} className="px-3 py-3 text-center font-semibold align-bottom">% มาเรียน</th>
+                      </tr>
+                      <tr className="text-[11px] text-slate-400">
+                        <th className="px-1.5 py-1.5 text-center font-medium border-l border-slate-200">ช</th>
+                        <th className="px-1.5 py-1.5 text-center font-medium">ญ</th>
+                        <th className="px-1.5 py-1.5 text-center font-medium text-slate-600">รวม</th>
+                        <th className="px-1.5 py-1.5 text-center font-medium border-l border-slate-200">ช</th>
+                        <th className="px-1.5 py-1.5 text-center font-medium">ญ</th>
+                        <th className="px-1.5 py-1.5 text-center font-medium text-emerald-600">รวม</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -557,16 +583,29 @@ function TotalsCells({
   bold,
   dark,
 }: {
-  totals: { total: number; present: number; late: number; leave: number; absent: number; notRecorded: number };
+  totals: {
+    total: number; maleTotal: number; femaleTotal: number;
+    present: number; malePresent: number; femalePresent: number;
+    late: number; leave: number; absent: number; notRecorded: number;
+  };
   bold?: boolean;
   dark?: boolean;
 }) {
   const base = bold ? "font-bold" : dark ? "font-black" : "font-semibold";
+  const muted = dark ? "text-slate-200" : "text-slate-500";
   return (
     <>
-      <td className={`px-3 py-2.5 text-center text-slate-700 ${dark ? "text-white" : ""} ${base}`}>{totals.total || "-"}</td>
-      <td className={`px-3 py-2.5 text-center ${dark ? "text-emerald-300" : "text-emerald-600"} ${base}`}>{totals.present || "-"}</td>
-      <td className={`px-3 py-2.5 text-center ${dark ? "text-amber-300" : "text-amber-600"} ${base}`}>{totals.late || "-"}</td>
+      {/* จำนวนเต็ม: ช / ญ / รวม */}
+      <td className={`px-1.5 py-2.5 text-center border-l border-slate-100/70 ${muted}`}>{totals.maleTotal || "-"}</td>
+      <td className={`px-1.5 py-2.5 text-center ${muted}`}>{totals.femaleTotal || "-"}</td>
+      <td className={`px-1.5 py-2.5 text-center ${dark ? "text-white" : "text-slate-700"} ${base}`}>{totals.total || "-"}</td>
+
+      {/* จำนวนมาเรียน: ช / ญ / รวม */}
+      <td className={`px-1.5 py-2.5 text-center border-l border-slate-100/70 ${muted}`}>{totals.malePresent || "-"}</td>
+      <td className={`px-1.5 py-2.5 text-center ${muted}`}>{totals.femalePresent || "-"}</td>
+      <td className={`px-1.5 py-2.5 text-center ${dark ? "text-emerald-300" : "text-emerald-600"} ${base}`}>{totals.present || "-"}</td>
+
+      <td className={`px-3 py-2.5 text-center border-l border-slate-100/70 ${dark ? "text-amber-300" : "text-amber-600"} ${base}`}>{totals.late || "-"}</td>
       <td className={`px-3 py-2.5 text-center ${dark ? "text-sky-300" : "text-sky-600"} ${base}`}>{totals.leave || "-"}</td>
       <td className={`px-3 py-2.5 text-center ${dark ? "text-rose-300" : "text-rose-600"} ${base}`}>{totals.absent || "-"}</td>
       <td className={`px-3 py-2.5 text-center ${dark ? "text-slate-300" : "text-slate-400"} ${base}`}>{totals.notRecorded || "-"}</td>
