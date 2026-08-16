@@ -232,6 +232,13 @@ if (roomIds.length > 0) {
           : `วิชาที่คุณสอน · ${filteredSubjects.length} วิชา`}
       </p>
     </div>
+    {isAdmin && (
+      <button onClick={() => router.push("/smartclass/insights")}
+        title="ข้อมูลเชิงลึก"
+        className="shrink-0 px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center gap-1.5 text-white text-xs font-black">
+        📊 ข้อมูลเชิงลึก
+      </button>
+    )}
   </div>
   <input value={search} onChange={e => setSearch(e.target.value)}
     placeholder={isAdmin ? "🔍 ค้นหาชื่อห้อง/สายชั้น..." : "🔍 ค้นหาชื่อ/รหัสวิชา..."}

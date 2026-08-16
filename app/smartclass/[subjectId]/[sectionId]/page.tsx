@@ -1733,7 +1733,8 @@ export default function SmartClassRosterPage() {
   const [tab, setTab] = useState<TabKey>("roster");
   const [bannerMenu, setBannerMenu] = useState<BannerMenuKey | null>(null);
   const [currentUserId, setCurrentUserId] = useState("");
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+const [isAdmin, setIsAdmin] = useState(false);
+const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   type Period = { timetable_entry_id: string; slot_number?: number; start_time?: string; end_time?: string };
   const [periods, setPeriods] = useState<Period[]>([]);
   const [timetableEntryId, setTimetableEntryId] = useState("");
@@ -1845,14 +1846,22 @@ export default function SmartClassRosterPage() {
   }, [subjectId, sectionId]);
 
   useEffect(() => {
-    (async () => {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (authUser) {
-        const { data: profile } = await supabase.from("users").select("id").eq("auth_id", authUser.id).maybeSingle();
-        if (profile) setCurrentUserId(profile.id);
+  (async () => {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (authUser) {
+      const { data: profile } = await supabase.from("users").select("id, role").eq("auth_id", authUser.id).maybeSingle();
+      if (profile) {
+        setCurrentUserId(profile.id);
+        setIsAdmin(!!profile.role && ["admin", "executive"].includes(profile.role));
       }
-    })();
-  }, []);
+    }
+  })();
+}, []);
+
+// เพิ่ม effect ใหม่ต่อท้าย: แอดมิน/ผู้บริหาร ไม่มีแท็บล่าง เลยต้อง default ไปที่ "ข้อมูลเช็กชื่อ" เสมอ
+useEffect(() => {
+  if (isAdmin && !bannerMenu) setBannerMenu("attendanceInfo");
+}, [isAdmin, bannerMenu]);
 
   useEffect(() => {
     (async () => {
@@ -2060,7 +2069,7 @@ export default function SmartClassRosterPage() {
 
         <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-between mt-4">
           <div className="flex items-center gap-2 flex-wrap justify-center">
-            {BANNER_MENU.map(m => (
+            {(isAdmin ? BANNER_MENU.filter(m => m.key === "attendanceInfo" || m.key === "totalScore") : BANNER_MENU).map(m => (
               <button
                 key={m.key}
                 onClick={() => handleBannerMenuClick(m.key)}
@@ -2112,12 +2121,12 @@ export default function SmartClassRosterPage() {
           />
         )}
         {bannerMenu === "insights" && classroom && (
-  <InsightsTool
-    currentUserId={currentUserId}
-    subjectId={subjectId}
-    classroomId={classroom.id}
-  />
-)}
+          <InsightsTool
+            currentUserId={currentUserId}
+            subjectId={subjectId}
+            classroomId={classroom.id}
+          />
+        )}    
         {bannerMenu === "attendanceInfo" && section && (
           <AttendanceOverviewTool
             sectionId={section.id}
@@ -2125,19 +2134,27 @@ export default function SmartClassRosterPage() {
             subjectCode={subject.subject_code}
             joinCode={section.join_code}
             students={students}
-            onCreateNew={() => {
-              setBannerMenu(null);
-              setTab("attendance");
-            }}
+            onCreateNew={() => { setBannerMenu(null); setTab("attendance"); }}
             onOpenSettings={() => setBannerMenu("settings")}
-            onOpenDate={(date) => {
-              setSelectedDate(date);
-              setBannerMenu(null);
-              setTab("attendance");
-            }}
+            onOpenDate={(date) => { setSelectedDate(date); setBannerMenu(null); setTab("attendance"); }}
+            readOnly={isAdmin}
           />
         )}
-        {!bannerMenu && tab === "roster" && (
+        {bannerMenu === "totalScore" && section && (
+          <GradeOverviewTool
+            sectionId={section.id}
+            subjectTitle={subject.name_th}
+            subjectCode={subject.subject_code}
+            students={students}
+            classroomLabel={`${classroom?.grade_group ?? ""} ${classroom?.room_name ?? ""}`}
+            academicYearLabel={academicYearLabel}
+            homeroomTeacherName={homeroomTeacherName}
+            subjectTeacherName={subjectTeacherName}
+            currentUserId={currentUserId}
+            readOnly={isAdmin}
+          />
+        )}
+        {!bannerMenu && !isAdmin && tab === "roster" && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 w-full">
             <div className="flex items-center justify-between flex-wrap gap-2 mb-5">
               <h2 className="font-black text-slate-700 text-sm flex items-center gap-1.5">👥 รายชื่อนักเรียน</h2>
@@ -2186,7 +2203,7 @@ export default function SmartClassRosterPage() {
           </div>
         )}
 
-        {!bannerMenu && tab === "attendance" && (
+        {!bannerMenu && !isAdmin && tab === "attendance" && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
             <div className="px-4 pt-4 flex items-center gap-2 flex-wrap">
               <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
@@ -2215,15 +2232,16 @@ export default function SmartClassRosterPage() {
             )}
           </div>
         )}
-        {!bannerMenu && tab === "random" && (
+        {!bannerMenu && !isAdmin && tab === "random" && (
           <RandomPickerTab students={students} mode={randomMode} onOpenScore={s => setScoreTargets([s])} />
         )}
-        {!bannerMenu && tab === "tools" && (
+        {!bannerMenu && !isAdmin && tab === "tools" && (
           <ToolsTab students={students} onOpenTimer={() => setTimerOpen(true)} />
         )}
       </main>
 
       {/* แท็บด้านล่าง */}
+      {!isAdmin && (
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-2px_8px_rgba(0,0,0,0.04)] z-40">
         {randomMenuOpen && (
           <>
@@ -2277,6 +2295,7 @@ export default function SmartClassRosterPage() {
           ))}
         </div>
       </div>
+      )}
     </div>
   );
 }

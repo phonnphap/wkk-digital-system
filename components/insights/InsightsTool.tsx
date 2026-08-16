@@ -78,7 +78,9 @@ export default function InsightsTool({
   const [error, setError] = useState("");
   const [data, setData] = useState<InsightsResponse | null>(null);
 
-  const [scope, setScope] = useState<Scope>(defaultScope ?? (subjectId && classroomId ? "classroom" : "school"));
+  const [scope, setScope] = useState<Scope>(
+  defaultScope ?? (subjectId && classroomId ? "classroom" : subjectId ? "subject_all" : "school")
+);
 
   const [currentClassroom, setCurrentClassroom] = useState<ClassroomInfo | null>(null);
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
