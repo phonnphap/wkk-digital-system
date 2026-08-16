@@ -190,10 +190,18 @@ export default function SmartClassRoomPage() {
               const periodText = prePrimary ? `${year}` : `${semester}/${year}`;
 
               return (
-                <div key={subject.id} role="button" tabIndex={0}
-                  onClick={() => router.push(`/smartclass/${subject.id}/${roomId}`)}
-                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") router.push(`/smartclass/${subject.id}/${roomId}`); }}
-                  className="text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden cursor-pointer">
+                <div
+  key={subject.id}
+  role={section ? "button" : undefined}
+  tabIndex={section ? 0 : undefined}
+  onClick={() => { if (section) router.push(`/smartclass/${subject.id}/${section.id}`); }}
+  onKeyDown={e => {
+    if (section && (e.key === "Enter" || e.key === " ")) router.push(`/smartclass/${subject.id}/${section.id}`);
+  }}
+  className={`text-left rounded-2xl border border-slate-200 bg-white shadow-sm transition-all overflow-hidden ${
+    section ? "hover:shadow-lg hover:-translate-y-0.5 cursor-pointer" : "opacity-60 cursor-not-allowed"
+  }`}
+>
                   <div className={`h-14 bg-gradient-to-r ${cardGradient} px-4 flex items-center justify-between`}>
                     <span className="text-[10px] font-black bg-white/95 text-slate-700 px-2.5 py-1 rounded-full tracking-wide shadow-sm">SUBJECT</span>
                     <span className="text-white/60 text-lg leading-none">⠿</span>
