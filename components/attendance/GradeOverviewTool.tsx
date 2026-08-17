@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Student = {
   id: string;
@@ -218,11 +218,8 @@ export default function GradeOverviewTool({
   }
 
   // ให้คะแนนงานที่มอบหมายแบบ inline จากตารางคะแนนรวมนี้โดยตรง (เฉพาะครูประจำวิชา ไม่ใช่ readOnly)
-  // ⚠️ ASSUMPTION: endpoint /api/assignment-submissions/grade ยังไม่มีอยู่จริง ต้องสร้างเพิ่ม
-  // คาดหวัง request: { subject_section_id, assignment_id, student_id, score, graded_by }
-  // คาดหวัง response: { submission: { id, assignment_id, student_id, status: "graded", score, submitted_at, graded_at } }
-  // endpoint ควร upsert แถวใน assignment_submissions (ถ้านักเรียนยังไม่เคยส่งงานเลย ให้สร้างแถวใหม่โดยไม่ต้องมี submitted_at
-  // เพื่อไม่ให้กระทบการคำนวณ "ส่งตรงเวลา/ส่งช้า" ที่ต้องมีทั้ง due_date และ submitted_at ถึงจะตัดสินได้)
+  // NOTE: endpoint /api/assignment-submissions/grade ต้อง upsert สถานะเป็น "reviewed"
+  // (ไม่ใช่ "graded") ให้ตรงกับ CHECK constraint ของตาราง assignment_submissions
   async function handleUpdateScore(studentId: string, assignmentId: string, newScore: number) {
     if (readOnly) return;
     const assignment = assignments.find(a => a.id === assignmentId);
@@ -250,7 +247,7 @@ export default function GradeOverviewTool({
         id: `local-${Date.now()}`,
         assignment_id: assignmentId,
         student_id: studentId,
-        status: "graded",
+        status: "reviewed",
         score: newScore,
         graded_at: new Date().toISOString(),
       };
@@ -361,7 +358,7 @@ export default function GradeOverviewTool({
         <div>
           <h2 className="font-black text-slate-800 text-lg">คะแนนรวม</h2>
           <p className="text-slate-400 text-xs font-bold">
-            {readOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที"}
+            {readOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที · กด Enter เพื่อบันทึกและไปนักเรียนคนถัดไป"}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -420,6 +417,9 @@ export default function GradeOverviewTool({
   );
 }
 
+// ★ คีย์บอกว่า "ช่องไหน" กำลังถูกแก้ไขอยู่ (ใช้คู่ assignment_id + student_id เพราะ 1 คอลัมน์มีได้หลายแถว)
+type ActiveCell = { assignmentId: string; studentId: string } | null;
+
 function GradeTable({
   rows, assignments, presets, totalMaxScore, onOpenReport, onAdjustPreset, onUpdateScore, isOnTime, readOnly,
 }: {
@@ -433,6 +433,18 @@ function GradeTable({
   isOnTime: (assignment: Assignment, sub?: Submission) => boolean | null;
   readOnly: boolean;
 }) {
+  // ★ ช่องที่กำลังกรอกคะแนนอยู่ตอนนี้ (คุมจากที่นี่ เพื่อให้กด Enter แล้วสั่งเปิดช่องถัดไปในคอลัมน์เดียวกันได้)
+  const [activeCell, setActiveCell] = useState<ActiveCell>(null);
+
+  function moveToNextRow(assignmentId: string, studentId: string) {
+    const idx = rows.findIndex(r => r.student.id === studentId);
+    if (idx >= 0 && idx < rows.length - 1) {
+      setActiveCell({ assignmentId, studentId: rows[idx + 1].student.id });
+    } else {
+      setActiveCell(null); // แถวสุดท้ายแล้ว ไม่มีคนถัดไป ปิดโหมดแก้ไข
+    }
+  }
+
   if (rows.length === 0) {
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
@@ -523,7 +535,11 @@ function GradeTable({
                           submission={sub}
                           maxScore={a.max_score}
                           onTimeResult={onTimeResult}
-                          onSave={newScore => onUpdateScore(s.id, a.id, newScore)}
+                          isEditing={activeCell?.assignmentId === a.id && activeCell?.studentId === s.id}
+                          onRequestEdit={() => setActiveCell({ assignmentId: a.id, studentId: s.id })}
+                          onCommit={newScore => onUpdateScore(s.id, a.id, newScore)}
+                          onEnterNext={() => moveToNextRow(a.id, s.id)}
+                          onCancelEdit={() => setActiveCell(null)}
                         />
                       )}
                     </td>
@@ -573,34 +589,70 @@ function GradeTable({
 /* ป้าย/ช่องกรอกคะแนนงานที่มอบหมาย แบบคลิกแก้ไขได้ทันที (สำหรับครูประจำวิชาเท่านั้น)
    - ยังไม่มีการส่งงานเลย ("ไม่ส่งงาน") -> คลิกเพื่อกรอกคะแนนได้เลย (ให้คะแนนย้อนหลัง/กรณีส่งงานกระดาษ)
    - ส่งงานแล้วแต่ยังไม่ตรวจ ("รอตรวจ") -> คลิกเพื่อกรอกคะแนน
-   - มีคะแนนแล้ว -> คลิกที่ตัวเลขเพื่อแก้ไข */
+   - มีคะแนนแล้ว -> คลิกที่ตัวเลขเพื่อแก้ไข
+   ★ "isEditing" ถูกควบคุมจาก GradeTable (แทนที่จะเป็น state ภายในตัวเอง) เพื่อให้กด Enter
+   แล้วสั่งเปิดโหมดแก้ไขของ "แถวถัดไป คอลัมน์เดียวกัน" ต่อได้ทันที เหมือนกรอกคะแนนใน Excel */
 function EditableScoreCell({
   submission,
   maxScore,
   onTimeResult,
-  onSave,
+  isEditing,
+  onRequestEdit,
+  onCommit,
+  onEnterNext,
+  onCancelEdit,
 }: {
   submission?: Submission;
   maxScore: number;
   onTimeResult: boolean | null;
-  onSave: (newScore: number) => void;
+  isEditing: boolean;
+  onRequestEdit: () => void;
+  onCommit: (newScore: number) => void;
+  onEnterNext: () => void;
+  onCancelEdit: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(submission?.score !== null && submission?.score !== undefined ? String(submission.score) : "");
+  const currentValueText = submission?.score !== null && submission?.score !== undefined ? String(submission.score) : "";
+  const [draft, setDraft] = useState(currentValueText);
+  // ป้องกันไม่ให้ onBlur ทำงานซ้ำ หลังจากที่ Enter/Escape จัดการไปแล้ว
+  // (ตอน Enter เปลี่ยน activeCell ไปแถวถัดไป ช่องนี้จะถูกถอดออกจาก DOM ซึ่งอาจไป trigger blur ซ้ำ)
+  const justActedRef = useRef(false);
 
   useEffect(() => {
-    setDraft(submission?.score !== null && submission?.score !== undefined ? String(submission.score) : "");
-  }, [submission?.score]);
+    setDraft(currentValueText);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submission?.score, isEditing]);
 
-  function commit() {
+  function commitIfChanged() {
     const parsed = Number(draft);
-    setEditing(false);
     if (draft.trim() === "" || Number.isNaN(parsed)) return;
     if (submission?.score !== null && submission?.score !== undefined && parsed === submission.score) return;
-    onSave(parsed);
+    onCommit(parsed);
   }
 
-  if (editing) {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      justActedRef.current = true;
+      commitIfChanged();
+      onEnterNext(); // ★ บันทึกแล้วกระโดดไปช่องกรอกของนักเรียนคนถัดไปในคอลัมน์เดียวกัน
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      justActedRef.current = true;
+      setDraft(currentValueText);
+      onCancelEdit();
+    }
+  }
+
+  function handleBlur() {
+    if (justActedRef.current) {
+      justActedRef.current = false;
+      return;
+    }
+    commitIfChanged();
+    onCancelEdit();
+  }
+
+  if (isEditing) {
     return (
       <input
         type="number"
@@ -609,14 +661,9 @@ function EditableScoreCell({
         max={maxScore}
         value={draft}
         onChange={e => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") {
-            setDraft(submission?.score !== null && submission?.score !== undefined ? String(submission.score) : "");
-            setEditing(false);
-          }
-        }}
+        onFocus={e => e.currentTarget.select()}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
         className="w-16 mx-auto block text-center border-2 border-sky-300 rounded-lg py-1 text-sm font-black focus:outline-none"
       />
     );
@@ -625,7 +672,7 @@ function EditableScoreCell({
   if (!submission) {
     return (
       <button
-        onClick={() => setEditing(true)}
+        onClick={onRequestEdit}
         title="คลิกเพื่อให้คะแนน"
         className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
       >
@@ -637,7 +684,7 @@ function EditableScoreCell({
   if (submission.score === null) {
     return (
       <button
-        onClick={() => setEditing(true)}
+        onClick={onRequestEdit}
         title="คลิกเพื่อให้คะแนน"
         className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
       >
@@ -647,7 +694,7 @@ function EditableScoreCell({
   }
 
   return (
-    <button onClick={() => setEditing(true)} title="คลิกเพื่อแก้ไขคะแนน" className="flex flex-col items-center gap-0.5 mx-auto">
+    <button onClick={onRequestEdit} title="คลิกเพื่อแก้ไขคะแนน" className="flex flex-col items-center gap-0.5 mx-auto">
       <span className="text-sm font-black text-slate-700 hover:bg-slate-100 rounded-lg px-2 py-0.5 transition-colors">{submission.score}</span>
       {onTimeResult === false && <span className="text-[9px] font-black text-red-500">⏰ ส่งช้า</span>}
     </button>
