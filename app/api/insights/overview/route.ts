@@ -72,30 +72,32 @@ export async function GET(req: NextRequest) {
   // 1) หา role ของผู้ขอข้อมูล (ย้ายมาก่อน เพื่อเช็กสิทธิ์ scope "subject_all"/"school")
   const { data: requester, error: userErr } = await admin
     .from("users")
-    .select("id, role, is_homeroom, is_subject_teacher, full_name, first_name, last_name")
+    .select("id, role, extra_roles, full_name, first_name, last_name")
     .eq("id", requesterId)
     .maybeSingle();
 
-  if (userErr || !requester) {
+if (userErr || !requester) {
     return NextResponse.json({ error: "ไม่พบผู้ใช้" }, { status: 404 });
-  }
+}
 
-  const ADMIN_ROLES = ["admin", "executive", "director", "deputy_director"];
-  const isAdmin = ADMIN_ROLES.includes(requester.role);
-  const isHomeroom = requester.is_homeroom === true;
-  const isSubjectTeacher = requester.is_subject_teacher === true;
+const ADMIN_ROLES = ["admin", "executive", "director", "deputy_director"];
+const extraRoles: string[] = requester.extra_roles ?? [];
 
-  const role: Role = isAdmin
-    ? "admin"
-    : isSubjectTeacher
-    ? "subject_teacher"
-    : isHomeroom
-    ? "homeroom_teacher"
-    : "unknown";
+const isAdmin = ADMIN_ROLES.includes(requester.role) || extraRoles.some(r => ADMIN_ROLES.includes(r));
+const isHomeroom = requester.role === "homeroom_teacher" || extraRoles.includes("homeroom_teacher");
+const isSubjectTeacher = requester.role === "subject_teacher" || extraRoles.includes("subject_teacher");
 
-  if (role === "unknown") {
-    return NextResponse.json({ error: "ไม่มีสิทธิ์เข้าถึงข้อมูลเชิงลึก" }, { status: 403 });
-  }
+const role: Role = isAdmin
+  ? "admin"
+  : isSubjectTeacher
+  ? "subject_teacher"
+  : isHomeroom
+  ? "homeroom_teacher"
+  : "unknown";
+
+if (role === "unknown") {
+  return NextResponse.json({ error: "ไม่มีสิทธิ์เข้าถึงข้อมูลเชิงลึก" }, { status: 403 });
+}
 
   // 2) ตรวจ scope + สิทธิ์ + พารามิเตอร์ที่บังคับตาม scope
   if ((scope === "subject_all" || scope === "school") && !isAdmin) {
