@@ -762,25 +762,6 @@ function SwapRequestModal({
   })();
 }, [swapDate]);
 
-// ★ หาเวลาเริ่มพักกลางวันของตารางแต่ละแบบ (kindergarten/primary/junior/senior) — ใช้เป็นเส้นแบ่งครึ่งวัน
-function getLunchBoundary(scheduleType: string | undefined, allTimeSlots: any[]): { start: string; end: string } | null {
-  const roomSlots = buildRoomSlots(scheduleType, allTimeSlots);
-  const lunch = roomSlots.find((s: any) => s.is_break && s.slot_label?.includes("พักกลางวัน"));
-  if (!lunch) {
-    console.warn(`[getLunchBoundary] ไม่พบคาบพักกลางวันสำหรับ schedule_type="${scheduleType}" — จะไม่กรองคาบครึ่งวันสำหรับคาบนี้ (โชว์ไว้ทั้งหมด)`);
-    return null;
-  }
-  return { start: lunch.start_time, end: lunch.end_time };
-}
-
-// ★ เช็คว่า entry นี้อยู่ครึ่งเช้าหรือครึ่งบ่าย เทียบกับเวลาพักกลางวันของห้องนั้นๆ (ห้องต่างชั้นพักไม่พร้อมกัน)
-function periodHalfOf(entry: { start_time?: string | null; schedule_type?: string | null }, allTimeSlots: any[]): "morning" | "afternoon" | null {
-  if (!entry.start_time) return null;
-  const lunch = getLunchBoundary(entry.schedule_type ?? undefined, allTimeSlots);
-  if (!lunch) return null;
-  return entry.start_time < lunch.start ? "morning" : "afternoon";
-}
-
   // ★ ครูที่ว่าง — เรียงลำดับแบบเดียวกับตอนแอดมินจัดสอนแทน (สายชั้นเดียวกันก่อน) + โชว์จำนวนคาบ
   const candidateTeachers = useMemo(() => {
     if (!selectedEntry || dow === null) return [] as User[];
@@ -1010,7 +991,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
   [teachers, absentId]
 );
   const leaveDates: string[] = (restrictDates && restrictDates.length > 0) ? restrictDates : getLeaveWeekdayDates(leaveRequest);
-
+   console.log("[leaveDates debug]", { leaveDates, leaveRequest_start: leaveRequest.start_date, leaveRequest_end: leaveRequest.end_date });
   const [assignments, setAssignments] = useState<Record<string, string>>(
     () => Object.fromEntries(absentEntries.flatMap(e =>
       leaveDates.map(dt => [`${e.id}_${dt}`, ""])
@@ -1144,15 +1125,20 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
             <div className="text-center py-12 text-slate-400">ไม่พบตารางสอนของครูคนนี้</div>
           ) : (
             <div className="space-y-6">
-              <p className="text-xs text-[#9D174D] bg-[#FDF2F8] border border-[#F9A8D4] rounded-xl px-3 py-2">
-                💡 ปุ่ม "⚡ จัดอัตโนมัติ" จะเลือกครูที่ว่างและมีคาบสอนวันนั้นน้อยที่สุดให้ทุกคาบที่ยังไม่ได้จัด — ตัวเลข "X คาบ" ข้างชื่อครูคือจำนวนคาบที่ครูสอนอยู่แล้วในวันนั้น ถ้าครบ {SUB_LOAD_WARN_AT} คาบจะมี ⚠️ เตือนให้พิจารณาก่อนเลือก
-              </p>
+              <p className="text-xs text-[#9D174D] ...">...</p>
               {leaveDates.map(date => {
-  const dayOfWeek = new Date(date+"T00:00:00").getDay();
-  const dayEntries = absentEntries
-    .filter(e => e.day_of_week === dayOfWeek && !e.is_break)
-    .sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
-  if (dayEntries.length === 0) return null;
+                const dayOfWeek = new Date(date+"T00:00:00").getDay();
+                const dayEntries = absentEntries
+                  .filter(e => e.day_of_week === dayOfWeek && !e.is_break)
+                  .sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
+                console.log("[day-match debug]", {
+                  date, dayOfWeek,
+                  absentEntries_total: absentEntries.length,
+                  absentEntries_day_of_weeks: absentEntries.map(e => e.day_of_week),
+                  dayEntries_found: dayEntries.length,
+                  leaveRequest_half_day: leaveRequest.half_day,   // ★ ใช้ leaveRequest ได้เพราะอยู่ใน AssignSubModal
+                });
+                if (dayEntries.length === 0) return null;
                 return (
                   <div key={date}>
                     <h4 className="font-bold text-slate-700 text-sm mb-3 pb-2 border-b border-[#FBCFE8]">
@@ -1391,10 +1377,10 @@ const absentTeacher = useMemo(
                 <p className="text-xs text-[#9D174D] bg-[#FDF2F8] border border-[#F9A8D4] rounded-xl px-3 py-2">
                   💡 รายชื่อครูในช่อง "เลือกครูสอนแทน" จะเรียงครูสายชั้นเดียวกับครูที่ลาไว้ก่อน — ตัวเลข "X คาบ" ข้างชื่อครูคือจำนวนคาบที่ครูสอนอยู่แล้วในวันนั้น ถ้าครบ {SUB_LOAD_WARN_AT} คาบจะมี ⚠️ เตือน และกดปุ่ม 🎲 เพื่อสุ่มครูสายชั้นเดียวกันที่ว่างตรงคาบและมีคาบน้อยที่สุดให้อัตโนมัติ
                 </p>
-                {leaveDates.map(date => {
+{leaveDates.map(date => {
   const dayOfWeek = new Date(date + "T00:00:00").getDay();
   const dayEntries = absentEntries
-    .filter(e => e.day_of_week === dayOfWeek)
+    .filter(e => e.day_of_week === dayOfWeek)   // ← ไม่มี !e.is_break ต่างจาก AssignSubModal
     .sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
   if (dayEntries.length === 0) return null;
                   return (
