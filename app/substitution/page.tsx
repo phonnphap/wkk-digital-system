@@ -333,7 +333,10 @@ function periodHalfOf(entry: { start_time?: string | null; schedule_type?: strin
   if (!entry.start_time) return null;
   const lunch = getLunchBoundary(entry.schedule_type ?? undefined, allTimeSlots);
   if (!lunch) return null;
-  return entry.start_time < lunch.start ? "morning" : "afternoon";
+  const entryMin = toMinutes(entry.start_time);
+  const lunchStartMin = toMinutes(lunch.start);
+  if (Number.isNaN(entryMin) || Number.isNaN(lunchStartMin)) return null;
+  return entryMin < lunchStartMin ? "morning" : "afternoon";
 }
 
 function enrichEntries(rawEntries: any[], classroomsMap: Record<string, any>, subjectsMap: Record<string, any>, allTimeSlots: any[]) {
@@ -763,7 +766,11 @@ function SwapRequestModal({
 function getLunchBoundary(scheduleType: string | undefined, allTimeSlots: any[]): { start: string; end: string } | null {
   const roomSlots = buildRoomSlots(scheduleType, allTimeSlots);
   const lunch = roomSlots.find((s: any) => s.is_break && s.slot_label?.includes("พักกลางวัน"));
-  return lunch ? { start: lunch.start_time, end: lunch.end_time } : null;
+  if (!lunch) {
+    console.warn(`[getLunchBoundary] ไม่พบคาบพักกลางวันสำหรับ schedule_type="${scheduleType}" — จะไม่กรองคาบครึ่งวันสำหรับคาบนี้ (โชว์ไว้ทั้งหมด)`);
+    return null;
+  }
+  return { start: lunch.start_time, end: lunch.end_time };
 }
 
 // ★ เช็คว่า entry นี้อยู่ครึ่งเช้าหรือครึ่งบ่าย เทียบกับเวลาพักกลางวันของห้องนั้นๆ (ห้องต่างชั้นพักไม่พร้อมกัน)
@@ -983,8 +990,13 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
   const absentId = leaveRequest.user_id;
   // ★ ถ้าลาครึ่งวัน กรองเฉพาะคาบที่อยู่ในครึ่งวันนั้นเท่านั้น — ถ้าไม่ใช่ครึ่งวัน (null) โชว์ทั้งวันเหมือนเดิม
   const absentEntries = entries
-    .filter(e => e.teacher_id === absentId || e.teacher_id_2 === absentId)
-    .filter(e => !leaveRequest.half_day || periodHalfOf(e, allTimeSlots) === leaveRequest.half_day);
+  .filter(e => e.teacher_id === absentId || e.teacher_id_2 === absentId)
+  .filter(e => {
+    if (!leaveRequest.half_day) return true; // ลาเต็มวัน โชว์หมด
+    const half = periodHalfOf(e, allTimeSlots);
+    if (half === null) return true; // ★ จำแนกไม่ได้ (หา lunch boundary ไม่เจอ) → ไม่กรองทิ้ง โชว์ไว้ก่อน ให้แอดมินตัดสินใจเอง
+    return half === leaveRequest.half_day;
+  });
   const absentTeacher = useMemo(
   () => teachers.find(t => t.id === absentId) ?? null,
   [teachers, absentId]
