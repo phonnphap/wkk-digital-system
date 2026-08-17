@@ -992,9 +992,17 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
   const absentEntries = entries
   .filter(e => e.teacher_id === absentId || e.teacher_id_2 === absentId)
   .filter(e => {
-    if (!leaveRequest.half_day) return true; // ลาเต็มวัน โชว์หมด
+    if (!leaveRequest.half_day) return true;
     const half = periodHalfOf(e, allTimeSlots);
-    if (half === null) return true; // ★ จำแนกไม่ได้ (หา lunch boundary ไม่เจอ) → ไม่กรองทิ้ง โชว์ไว้ก่อน ให้แอดมินตัดสินใจเอง
+    console.log("[half-day debug]", {
+      entry_id: e.id,
+      start_time: e.start_time,
+      schedule_type: e.schedule_type,
+      computed_half: half,
+      leave_half_day: leaveRequest.half_day,
+      match: half === leaveRequest.half_day,
+    });
+    if (half === null) return true;
     return half === leaveRequest.half_day;
   });
   const absentTeacher = useMemo(
