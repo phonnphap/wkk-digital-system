@@ -323,6 +323,10 @@ function buildRoomSlots(scheduleType: string | undefined, allDbSlots: any[]): an
 
 // ★ หาเวลาเริ่ม/สิ้นสุดพักกลางวันของตารางแต่ละแบบ (kindergarten/primary/junior/senior) — ใช้เป็นเส้นแบ่งครึ่งวัน
 function getLunchBoundary(scheduleType: string | undefined, allTimeSlots: any[]): { start: string; end: string } | null {
+  // ★ ไม่รู้ schedule_type ของห้อง (เป็น null/undefined) — อย่าเดาว่าเป็น "primary"
+  // เพราะจะทำให้คำนวณครึ่งวันผิดถ้าห้องจริงเป็นสายชั้นอื่นที่พักเที่ยงเวลาไม่ตรงกัน
+  // คืนค่า null แทน ⇒ periodHalfOf จะคืน null ⇒ ตัวกรองจะ "โชว์คาบนี้ไว้" ให้แอดมินเห็น ไม่ซ่อนหาย
+  if (!scheduleType) return null;
   const roomSlots = buildRoomSlots(scheduleType, allTimeSlots);
   const lunch = roomSlots.find((s: any) => s.is_break && s.slot_label?.includes("พักกลางวัน"));
   return lunch ? { start: lunch.start_time, end: lunch.end_time } : null;
