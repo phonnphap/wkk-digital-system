@@ -1701,6 +1701,7 @@ const [entriesData, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
     setHomeroomMap(hrMap);
 
    const allE = enrichEntries(entriesData || [], classroomsMap, subjectsMap, timeSlots) as TimetableEntry[];
+   setAllEntries(allE);
 
     // Swap requests (แลกคาบระหว่างครู — เป็นคนละฟีเจอร์กับสอนแทนจากใบลา)
     const swapQ = supabase.from("class_swap_requests")
