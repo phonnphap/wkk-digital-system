@@ -309,7 +309,15 @@ function buildRoomSlots(scheduleType: string | undefined, allDbSlots: any[]): an
   const type = scheduleType ?? "primary";
   const tmpl = SCHEDULE_TEMPLATES.find(t => t.key === type) ?? SCHEDULE_TEMPLATES[1];
   return tmpl.slots.map((tmplSlot, idx) => {
-    const dbSlot = allDbSlots.find(s => (s.start_time ?? "").slice(0, 5) === tmplSlot.start_time);
+    // ★ FIX: จับคู่ schedule_type ก่อนเสมอ (ต้องตรงกับ schedule/page.tsx เป๊ะ)
+    // กันเคสเวลาเดียวกันแต่คนละสายชั้น (เช่น 08:30 มีทั้ง primary/junior/senior)
+    // ถ้าจับคู่ schedule_type ตรงๆ ไม่เจอ ค่อย fallback ไปหาแค่ start_time (รองรับ DB เก่า)
+    let dbSlot = allDbSlots.find(
+      (s: any) => (s.start_time ?? "").slice(0, 5) === tmplSlot.start_time && s.schedule_type === type
+    );
+    if (!dbSlot) {
+      dbSlot = allDbSlots.find((s: any) => (s.start_time ?? "").slice(0, 5) === tmplSlot.start_time);
+    }
     if (dbSlot) {
       return { ...dbSlot, slot_label: tmplSlot.slot_label, is_break: tmplSlot.is_break, end_time: tmplSlot.end_time, slot_number: tmplSlot.slot_number };
     }
