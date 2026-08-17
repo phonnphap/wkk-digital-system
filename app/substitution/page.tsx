@@ -305,17 +305,20 @@ const SCHEDULE_TEMPLATES = [
   },
 ];
 
+// ★ FIX (root cause): จับคู่ schedule_type ก่อนเสมอ ต้องตรงกับ schedule/page.tsx เป๊ะ
+// สาเหตุ: time_slots มีหลายแถวที่ start_time ตรงกันข้าม schedule_type (ยืนยันจาก SQL แล้ว
+// เช่น 08:30 มีทั้ง primary/junior/senior คนละ id) ถ้าจับคู่แค่ start_time เฉยๆ
+// จะมีโอกาสหยิบ id ผิดสายชั้นมาใช้ ทำให้ enrichEntries resolve คาบผิด/หาไม่เจอ คาบเลยหายไป
 function buildRoomSlots(scheduleType: string | undefined, allDbSlots: any[]): any[] {
   const type = scheduleType ?? "primary";
   const tmpl = SCHEDULE_TEMPLATES.find(t => t.key === type) ?? SCHEDULE_TEMPLATES[1];
   return tmpl.slots.map((tmplSlot, idx) => {
-    // ★ FIX: จับคู่ schedule_type ก่อนเสมอ (ต้องตรงกับ schedule/page.tsx เป๊ะ)
-    // กันเคสเวลาเดียวกันแต่คนละสายชั้น (เช่น 08:30 มีทั้ง primary/junior/senior)
-    // ถ้าจับคู่ schedule_type ตรงๆ ไม่เจอ ค่อย fallback ไปหาแค่ start_time (รองรับ DB เก่า)
+    // ★ จับคู่ schedule_type ตรงๆ ก่อนเสมอ กันเคสเวลาเดียวกันแต่คนละสายชั้นชนกัน
     let dbSlot = allDbSlots.find(
       (s: any) => (s.start_time ?? "").slice(0, 5) === tmplSlot.start_time && s.schedule_type === type
     );
     if (!dbSlot) {
+      // fallback: หาแค่ start_time เผื่อ DB เก่าที่ยังไม่มี schedule_type ในบางแถว
       dbSlot = allDbSlots.find((s: any) => (s.start_time ?? "").slice(0, 5) === tmplSlot.start_time);
     }
     if (dbSlot) {
@@ -331,9 +334,9 @@ function buildRoomSlots(scheduleType: string | undefined, allDbSlots: any[]): an
 
 // ★ หาเวลาเริ่ม/สิ้นสุดพักกลางวันของตารางแต่ละแบบ (kindergarten/primary/junior/senior) — ใช้เป็นเส้นแบ่งครึ่งวัน
 function getLunchBoundary(scheduleType: string | undefined, allTimeSlots: any[]): { start: string; end: string } | null {
-  // ★ ไม่รู้ schedule_type ของห้อง (เป็น null/undefined) — อย่าเดาว่าเป็น "primary"
-  // เพราะจะทำให้คำนวณครึ่งวันผิดถ้าห้องจริงเป็นสายชั้นอื่นที่พักเที่ยงเวลาไม่ตรงกัน
-  // คืนค่า null แทน ⇒ periodHalfOf จะคืน null ⇒ ตัวกรองจะ "โชว์คาบนี้ไว้" ให้แอดมินเห็น ไม่ซ่อนหาย
+  // ★ ไม่รู้ schedule_type ของห้อง (null/undefined) — อย่าเดาว่าเป็น "primary"
+  // เพราะจะคำนวณครึ่งวันผิดถ้าห้องจริงเป็นสายชั้นอื่นที่พักเที่ยงเวลาไม่ตรงกัน
+  // คืนค่า null แทน ⇒ periodHalfOf จะคืน null ⇒ ตัวกรองด้านล่างจะโชว์คาบนี้ไว้ ไม่ซ่อนหาย
   if (!scheduleType) return null;
   const roomSlots = buildRoomSlots(scheduleType, allTimeSlots);
   const lunch = roomSlots.find((s: any) => s.is_break && s.slot_label?.includes("พักกลางวัน"));
@@ -981,29 +984,25 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
   onSave: () => void; onClose: () => void;
 }) {
   const absentId = leaveRequest.user_id;
-  // ★ ถ้าลาครึ่งวัน กรองเฉพาะคาบที่อยู่ในครึ่งวันนั้นเท่านั้น — ถ้าไม่ใช่ครึ่งวัน (null) โชว์ทั้งวันเหมือนเดิม
+
+  // ★ FIX: ไม่กรองคาบทิ้งอีกต่อไป — โชว์คาบทุกคาบของครูที่ลาเสมอ กันคาบหายเพราะคำนวณครึ่งวันผิดพลาด
+  // (สาเหตุเดิม: schedule_type ของห้อง/time_slots ชนกันข้ามสายชั้น ทำให้ periodHalfOf คำนวณผิดได้)
+  // ครึ่งวันถูกใช้แค่ "ติดป้ายเตือน" ให้แอดมินดูประกอบการตัดสินใจเท่านั้น ไม่ใช้กรองข้อมูลออก
   const absentEntries = entries
-  .filter(e => e.teacher_id === absentId || e.teacher_id_2 === absentId)
-  .filter(e => {
-    if (!leaveRequest.half_day) return true;
-    const half = periodHalfOf(e, allTimeSlots);
-    console.log("[half-day debug]", {
-      entry_id: e.id,
-      start_time: e.start_time,
-      schedule_type: e.schedule_type,
-      computed_half: half,
-      leave_half_day: leaveRequest.half_day,
-      match: half === leaveRequest.half_day,
-    });
-    if (half === null) return true;
-    return half === leaveRequest.half_day;
-  });
+    .filter(e => e.teacher_id === absentId || e.teacher_id_2 === absentId);
+
+  // ★ เก็บผลคำนวณครึ่งวันไว้แสดงเป็น badge เตือน (ไม่ใช้กรองอีกต่อไป)
+  const entryHalfMap = useMemo(() => {
+    const map: Record<string, "morning" | "afternoon" | null> = {};
+    absentEntries.forEach(e => { map[e.id] = periodHalfOf(e, allTimeSlots); });
+    return map;
+  }, [absentEntries, allTimeSlots]);
+
   const absentTeacher = useMemo(
   () => teachers.find(t => t.id === absentId) ?? null,
   [teachers, absentId]
 );
   const leaveDates: string[] = (restrictDates && restrictDates.length > 0) ? restrictDates : getLeaveWeekdayDates(leaveRequest);
-   console.log("[leaveDates debug]", { leaveDates, leaveRequest_start: leaveRequest.start_date, leaveRequest_end: leaveRequest.end_date });
   const [assignments, setAssignments] = useState<Record<string, string>>(
     () => Object.fromEntries(absentEntries.flatMap(e =>
       leaveDates.map(dt => [`${e.id}_${dt}`, ""])
@@ -1137,19 +1136,17 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
             <div className="text-center py-12 text-slate-400">ไม่พบตารางสอนของครูคนนี้</div>
           ) : (
             <div className="space-y-6">
-              <p className="text-xs text-[#9D174D] ...">...</p>
+              {leaveRequest.half_day && (
+                <p className="text-xs text-[#9D174D] bg-[#FDF2F8] border border-[#F9A8D4] rounded-xl px-3 py-2">
+                  💡 ครูลาครึ่ง{leaveRequest.half_day === "morning" ? "เช้า" : "บ่าย"} — ระบบแสดงคาบทั้งหมดของวันนั้นไว้ให้ครบ
+                  หากคาบไหนมีป้าย ⚠️ แปลว่าระบบคำนวณว่าอาจอยู่นอกช่วงที่ลา กรุณาตรวจสอบก่อนจัดสอนแทน
+                </p>
+              )}
               {leaveDates.map(date => {
                 const dayOfWeek = new Date(date+"T00:00:00").getDay();
                 const dayEntries = absentEntries
                   .filter(e => e.day_of_week === dayOfWeek && !e.is_break)
                   .sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
-                console.log("[day-match debug]", {
-                  date, dayOfWeek,
-                  absentEntries_total: absentEntries.length,
-                  absentEntries_day_of_weeks: absentEntries.map(e => e.day_of_week),
-                  dayEntries_found: dayEntries.length,
-                  leaveRequest_half_day: leaveRequest.half_day,   // ★ ใช้ leaveRequest ได้เพราะอยู่ใน AssignSubModal
-                });
                 if (dayEntries.length === 0) return null;
                 return (
                   <div key={date}>
@@ -1161,6 +1158,10 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
   const key = `${entry.id}_${date}`;
   const coId = coTeacherId(entry, absentId);
   const coTeacher = coId ? teachers.find(t => t.id === coId) : null;
+  // ★ ป้ายเตือนถ้าคำนวณครึ่งวันได้ไม่ตรงกับที่ครูลา (ไม่กรองทิ้ง แค่เตือน)
+  const halfMismatch = leaveRequest.half_day
+    && entryHalfMap[entry.id]
+    && entryHalfMap[entry.id] !== leaveRequest.half_day;
 
   // ★ มีครูอีกคนสอนคู่อยู่ในคาบนี้แล้ว — ไม่ต้องจัดสอนแทน แค่โชว์ให้เห็น
   if (coTeacher) {
@@ -1191,6 +1192,12 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
       <div className="flex-1 min-w-0">
         <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
         <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
+        {halfMismatch && (
+          <div className="text-[10px] font-bold text-amber-600 mt-0.5">
+            ⚠️ ระบบคำนวณว่าคาบนี้อยู่ช่วง{entryHalfMap[entry.id] === "morning" ? "เช้า" : "บ่าย"}
+            (ครูลาแค่ครึ่ง{leaveRequest.half_day === "morning" ? "เช้า" : "บ่าย"}) — โปรดตรวจสอบก่อนจัดสอนแทน
+          </div>
+        )}
       </div>
       <div className="shrink-0 w-72 sm:w-80">
         <TeacherSearchSelect
