@@ -164,6 +164,21 @@ function sourceOf(note?: string | null): keyof typeof SOURCE_LABEL {
   if (note?.includes("เจาะจง")) return "specific";
   return "admin";
 }
+// ✅ ดึงข้อมูลทุกแถวจาก Supabase แบบไม่จำกัดที่ 1000 แถว (วนดึงทีละหน้าจนครบ)
+async function fetchAllRows<T = any>(query: any): Promise<T[]> {
+  const pageSize = 1000;
+  let from = 0;
+  let all: T[] = [];
+  while (true) {
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all = all.concat(data as T[]);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
 // ══════════════════════════════════════════════════════════
 // ── Teams DM helper — ยิงแจ้งเตือนผ่าน Teams จากบัญชี HR
 // ══════════════════════════════════════════════════════════
@@ -1665,17 +1680,17 @@ if (tchErr) {
 
     // ★ ตารางสอน — ใช้วิธี resolve เดียวกับหน้าใบลาเป๊ะ (schedule template + virtual slot id)
     let entriesQuery = supabase.from("timetable_entries")
-      .select("id,classroom_id,subject_id,teacher_id,teacher_id_2,day_of_week,time_slot_id,academic_year_id");
-    if (ayId) entriesQuery = entriesQuery.eq("academic_year_id", ayId);
+  .select("id,classroom_id,subject_id,teacher_id,teacher_id_2,day_of_week,time_slot_id,academic_year_id");
+if (ayId) entriesQuery = entriesQuery.eq("academic_year_id", ayId);
 
-    const [entriesRes, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
-      entriesQuery,
-      supabase.from("time_slots")
-        .select("id,slot_number,start_time,end_time,slot_label,is_break,schedule_type")
-        .order("slot_number", { ascending: true }),
-      supabase.from("classrooms").select("id,room_name,grade_group,schedule_type,homeroom_teacher_id"),
-      supabase.from("subjects").select("id,subject_code,name_th"),
-    ]);
+const [entriesData, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
+  fetchAllRows(entriesQuery),   // ★ FIX: ดึงให้ครบทุกแถว ไม่ตัดที่ 1000
+  supabase.from("time_slots")
+    .select("id,slot_number,start_time,end_time,slot_label,is_break,schedule_type")
+    .order("slot_number", { ascending: true }),
+  supabase.from("classrooms").select("id,room_name,grade_group,schedule_type,homeroom_teacher_id"),
+  supabase.from("subjects").select("id,subject_code,name_th"),
+]);
 
     const timeSlots = slotsRes.data || [];
     setAllTimeSlots(timeSlots);
@@ -1685,8 +1700,7 @@ if (tchErr) {
     (classroomsRes.data || []).forEach((c: any) => { if (c.homeroom_teacher_id) hrMap[c.id] = c.homeroom_teacher_id; });
     setHomeroomMap(hrMap);
 
-    const allE = enrichEntries(entriesRes.data || [], classroomsMap, subjectsMap, timeSlots) as TimetableEntry[];
-    setAllEntries(allE);
+   const allE = enrichEntries(entriesData || [], classroomsMap, subjectsMap, timeSlots) as TimetableEntry[];
 
     // Swap requests (แลกคาบระหว่างครู — เป็นคนละฟีเจอร์กับสอนแทนจากใบลา)
     const swapQ = supabase.from("class_swap_requests")
