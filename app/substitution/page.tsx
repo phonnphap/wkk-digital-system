@@ -57,6 +57,7 @@ interface SubRecord {
 interface LeaveRequest {
   id: string; user_id: string; leave_type: string; start_date: string;
   end_date: string; days_count: number; reason?: string; status: string;
+  half_day?: "morning" | "afternoon" | null;   // ★ เพิ่ม
   user?: User;
 }
 interface AcademicYear { id: string; year_name: string; is_current: boolean; }
@@ -318,6 +319,21 @@ function buildRoomSlots(scheduleType: string | undefined, allDbSlots: any[]): an
       slot_label: tmplSlot.slot_label, is_break: tmplSlot.is_break, schedule_type: type,
     };
   });
+}
+
+// ★ หาเวลาเริ่ม/สิ้นสุดพักกลางวันของตารางแต่ละแบบ (kindergarten/primary/junior/senior) — ใช้เป็นเส้นแบ่งครึ่งวัน
+function getLunchBoundary(scheduleType: string | undefined, allTimeSlots: any[]): { start: string; end: string } | null {
+  const roomSlots = buildRoomSlots(scheduleType, allTimeSlots);
+  const lunch = roomSlots.find((s: any) => s.is_break && s.slot_label?.includes("พักกลางวัน"));
+  return lunch ? { start: lunch.start_time, end: lunch.end_time } : null;
+}
+
+// ★ เช็คว่า entry นี้อยู่ครึ่งเช้าหรือครึ่งบ่าย เทียบกับเวลาพักกลางวันของห้องนั้นๆ (ห้องต่างชั้นพักไม่พร้อมกัน)
+function periodHalfOf(entry: { start_time?: string | null; schedule_type?: string | null }, allTimeSlots: any[]): "morning" | "afternoon" | null {
+  if (!entry.start_time) return null;
+  const lunch = getLunchBoundary(entry.schedule_type ?? undefined, allTimeSlots);
+  if (!lunch) return null;
+  return entry.start_time < lunch.start ? "morning" : "afternoon";
 }
 
 function enrichEntries(rawEntries: any[], classroomsMap: Record<string, any>, subjectsMap: Record<string, any>, allTimeSlots: any[]) {
@@ -734,7 +750,7 @@ function SwapRequestModal({
   setLoadingMeta(true);
   (async () => {
     const { data: leaves } = await supabase.from("leave_requests")
-      .select("user_id,start_date,end_date,status")
+  .select(`*,user:users!user_id(id,first_name,last_name,title,role)`)
       .in("status", ["pending", "approved"]);
     const ids = new Set<string>();
     (leaves || []).forEach((l: any) => { if (l.start_date <= swapDate && l.end_date >= swapDate) ids.add(l.user_id); });
@@ -742,6 +758,21 @@ function SwapRequestModal({
     setLoadingMeta(false);
   })();
 }, [swapDate]);
+
+// ★ หาเวลาเริ่มพักกลางวันของตารางแต่ละแบบ (kindergarten/primary/junior/senior) — ใช้เป็นเส้นแบ่งครึ่งวัน
+function getLunchBoundary(scheduleType: string | undefined, allTimeSlots: any[]): { start: string; end: string } | null {
+  const roomSlots = buildRoomSlots(scheduleType, allTimeSlots);
+  const lunch = roomSlots.find((s: any) => s.is_break && s.slot_label?.includes("พักกลางวัน"));
+  return lunch ? { start: lunch.start_time, end: lunch.end_time } : null;
+}
+
+// ★ เช็คว่า entry นี้อยู่ครึ่งเช้าหรือครึ่งบ่าย เทียบกับเวลาพักกลางวันของห้องนั้นๆ (ห้องต่างชั้นพักไม่พร้อมกัน)
+function periodHalfOf(entry: { start_time?: string | null; schedule_type?: string | null }, allTimeSlots: any[]): "morning" | "afternoon" | null {
+  if (!entry.start_time) return null;
+  const lunch = getLunchBoundary(entry.schedule_type ?? undefined, allTimeSlots);
+  if (!lunch) return null;
+  return entry.start_time < lunch.start ? "morning" : "afternoon";
+}
 
   // ★ ครูที่ว่าง — เรียงลำดับแบบเดียวกับตอนแอดมินจัดสอนแทน (สายชั้นเดียวกันก่อน) + โชว์จำนวนคาบ
   const candidateTeachers = useMemo(() => {
@@ -942,14 +973,18 @@ function SwapRequestModal({
 }
 
 // ── AssignSubModal ──────────────────────────────────────────
-function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicYearId, currentUser, homeroomMap, restrictDates, onSave, onClose }: {
+function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicYearId, currentUser, homeroomMap, restrictDates, allTimeSlots, onSave, onClose }: {
   leaveRequest: LeaveRequest; teachers: User[];
   entries: TimetableEntry[]; subRecords: SubRecord[]; academicYearId: string;
   currentUser: User; homeroomMap: Record<string, string>; restrictDates?: string[];
+  allTimeSlots: any[];   // ★ เพิ่ม
   onSave: () => void; onClose: () => void;
 }) {
   const absentId = leaveRequest.user_id;
-  const absentEntries = entries.filter(e => e.teacher_id === absentId || e.teacher_id_2 === absentId);
+  // ★ ถ้าลาครึ่งวัน กรองเฉพาะคาบที่อยู่ในครึ่งวันนั้นเท่านั้น — ถ้าไม่ใช่ครึ่งวัน (null) โชว์ทั้งวันเหมือนเดิม
+  const absentEntries = entries
+    .filter(e => e.teacher_id === absentId || e.teacher_id_2 === absentId)
+    .filter(e => !leaveRequest.half_day || periodHalfOf(e, allTimeSlots) === leaveRequest.half_day);
   const absentTeacher = useMemo(
   () => teachers.find(t => t.id === absentId) ?? null,
   [teachers, absentId]
@@ -1521,6 +1556,31 @@ const canEditSwap = useCallback((r: SwapRequest) => {
   if (isSpecificAdmin && r.status !== "cancelled") return true;
   return r.requester_id === user?.id && r.status === "pending";
 }, [isSpecificAdmin, user]);
+// ★ เช็คว่าเคยขอ "แลกคาบคืน" สำหรับรายการสอนแทนนี้ไปแล้วหรือยัง (ยัง pending/accepted อยู่)
+// ใช้ reason เป็นตัวอ้างอิง เพราะข้อความมีวันที่+คาบเดิมที่ไม่ซ้ำกันอยู่แล้ว
+const hasActiveRepayForSub = useCallback((r: SubRecord) => {
+  if (!user || !r.substitute_teacher_id) return false;
+  const marker = `${thaiDate(r.substitute_date)} (${r.slot_label ?? "-"})`;
+  return swapRequests.some(sw =>
+    sw.requester_id === user.id &&
+    sw.target_teacher_id === r.substitute_teacher_id &&
+    sw.status !== "cancelled" && sw.status !== "rejected" &&
+    !!sw.reason?.includes(marker)
+  );
+}, [swapRequests, user]);
+
+// ★ เช็คเหมือนกันแต่สำหรับ "แลกคาบคืน" ที่มาจากคำขอแลกคาบ (accepted) ในแท็บแลกคาบ
+const hasActiveRepayForSwap = useCallback((r: SwapRequest) => {
+  if (!user) return false;
+  const marker = `${thaiDate(r.swap_date)} (${r.requester_entry?.slot_label ?? "-"})`;
+  return swapRequests.some(sw =>
+    sw.id !== r.id &&
+    sw.requester_id === user.id &&
+    sw.target_teacher_id === r.target_teacher_id &&
+    sw.status !== "cancelled" && sw.status !== "rejected" &&
+    !!sw.reason?.includes(marker)
+  );
+}, [swapRequests, user]);
 
 const [editingSwap, setEditingSwap] = useState<SwapRequest | null>(null);
 const [editingSwapDate, setEditingSwapDate] = useState<SwapRequest | null>(null); // ★ ใหม่
@@ -2255,17 +2315,17 @@ const adminFilteredSwaps = useMemo(() => {
                           <button onClick={() => handleSwapCancel(r.id)}
                             className="text-xs text-red-500 hover:text-red-700 font-bold underline">ยกเลิกคำขอ</button>
                         )}
-                        {r.requester_id === user?.id && r.status === "accepted" && (
-                          <button onClick={() => {
-                            setSwapMode("repay");
-                            setSwapFixedTargetTeacherId(r.target_teacher_id);
-                            setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.target_teacher)} ที่เคยรับแลกคาบให้เมื่อ ${thaiDate(r.swap_date)} (${r.requester_entry?.slot_label ?? "-"})`);
-                            setShowSwapModal(true);
-                          }}
-                            className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200">
-                            🔄 แลกคาบคืน
-                          </button>
-                        )}
+                        {r.requester_id === user?.id && r.status === "accepted" && !hasActiveRepayForSwap(r) && (
+  <button onClick={() => {
+    setSwapMode("repay");
+    setSwapFixedTargetTeacherId(r.target_teacher_id);
+    setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.target_teacher)} ที่เคยรับแลกคาบให้เมื่อ ${thaiDate(r.swap_date)} (${r.requester_entry?.slot_label ?? "-"})`);
+    setShowSwapModal(true);
+  }}
+    className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200">
+    🔄 แลกคาบคืน
+  </button>
+)}
                         {canEditSwap(r) && (
                           <button onClick={() => { setEditingSwap(r); setShowSwapModal(true); }}
                             className="text-xs text-blue-500 hover:text-blue-700 font-bold underline">✏️ แก้ไข</button>
@@ -2306,6 +2366,11 @@ const adminFilteredSwaps = useMemo(() => {
                             {lr.status === "pending" && (
   <span className="inline-block mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-lg bg-amber-50 text-amber-600 border border-amber-200">
     ⏳ ยังรออนุมัติ — จัดล่วงหน้าได้เลย
+  </span>
+)}
+{lr.half_day && (
+  <span className="inline-block mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-lg bg-sky-50 text-sky-600 border border-sky-200">
+    🕐 ลาครึ่ง{lr.half_day === "morning" ? "เช้า" : "บ่าย"}
   </span>
 )}
                             {partiallyAssigned && (
@@ -2485,21 +2550,21 @@ const adminFilteredSwaps = useMemo(() => {
                   </span>
                 </td>
                 <td className="px-4 py-3.5 whitespace-nowrap">
-  {r.absent_teacher_id === user?.id && r.status !== "cancelled" && r.substitute_teacher_id ? (
-  <button
-    onClick={() => {
-      setSwapMode("repay");
-      setSwapFixedTargetTeacherId(r.substitute_teacher_id);
-      setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.substitute_teacher)} ที่เคยสอนแทนให้เมื่อ ${thaiDate(r.substitute_date)} (${r.slot_label ?? "-"})`);
-      setShowSwapModal(true);
-    }}
-    className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200 transition-colors"
-  >
-    🔄 แลกคาบคืน
-  </button>
-) : (
-  <span className="text-xs text-slate-300">—</span>
-)}
+  {r.absent_teacher_id === user?.id && r.status !== "cancelled" && r.substitute_teacher_id && !hasActiveRepayForSub(r) ? (
+    <button
+      onClick={() => {
+        setSwapMode("repay");
+        setSwapFixedTargetTeacherId(r.substitute_teacher_id);
+        setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.substitute_teacher)} ที่เคยสอนแทนให้เมื่อ ${thaiDate(r.substitute_date)} (${r.slot_label ?? "-"})`);
+        setShowSwapModal(true);
+      }}
+      className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200 transition-colors"
+    >
+      🔄 แลกคาบคืน
+    </button>
+  ) : (
+    <span className="text-xs text-slate-300">—</span>
+  )}
 </td>
                 {canAssignSub && (
   <td className="px-4 py-3.5 whitespace-nowrap">
@@ -2676,6 +2741,7 @@ const adminFilteredSwaps = useMemo(() => {
     teachers={teachers} entries={allEntries} subRecords={subRecords}
     academicYearId={academicYear.id}
     currentUser={user} homeroomMap={homeroomMap} restrictDates={assignRestrictDates}
+    allTimeSlots={allTimeSlots}   // ★ เพิ่ม
     onSave={async()=>{ setAssignLeave(null); setAssignRestrictDates(undefined); await loadData(); }}
     onClose={()=>{ setAssignLeave(null); setAssignRestrictDates(undefined); }}
   />
