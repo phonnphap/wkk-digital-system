@@ -1453,6 +1453,15 @@ function SubmissionsTab({
   const [statusDraft, setStatusDraft] = useState<SubmissionStatus>("pending_review");
   const [lateDraft, setLateDraft] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
+  const scoreInputRef = useRef<HTMLInputElement>(null);
+
+  // ★ โหมดเลือกหลายคน (bulk grading)
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkScore, setBulkScore] = useState<number | "">("");
+  const [bulkStatus, setBulkStatus] = useState<SubmissionStatus>("reviewed");
+  const [bulkComment, setBulkComment] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const filtered = students.filter(s => `${s.first_name} ${s.last_name}`.toLowerCase().includes(search.toLowerCase()));
   const selectedStudent = students.find(s => s.id === selectedId) ?? null;
@@ -1465,7 +1474,16 @@ function SubmissionsTab({
     setLateDraft(selectedSub?.is_late ?? null);
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function saveGrade() {
+  function selectNextStudent() {
+    const idx = filtered.findIndex(s => s.id === selectedId);
+    if (idx >= 0 && idx < filtered.length - 1) {
+      setSelectedId(filtered[idx + 1].id);
+      // เลื่อนโฟกัสกลับไปที่ช่องคะแนนของนักเรียนคนถัดไป
+      setTimeout(() => scoreInputRef.current?.focus(), 50);
+    }
+  }
+
+  async function saveGrade(advanceToNext = false) {
     if (!selectedStudent) return;
     setSaving(true);
     const payload = {
@@ -1479,10 +1497,90 @@ function SubmissionsTab({
       graded_at: new Date().toISOString(),
     };
     try {
-      await supabase.from("assignment_submissions").upsert(payload, { onConflict: "assignment_id,student_id" });
-    } catch {}
+      const { error } = await supabase.from("assignment_submissions").upsert(payload, { onConflict: "assignment_id,student_id" });
+      if (error) throw error;
+      onChanged();
+      if (advanceToNext) selectNextStudent();
+    } catch (e: any) {
+      alert("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
     setSaving(false);
-    onChanged();
+  }
+
+  // ★ กรอกคะแนนแล้วเปลี่ยนสถานะเป็น "ตรวจแล้ว" อัตโนมัติ (ถ้ายังไม่เคยถูกตั้งสถานะเองเป็นอย่างอื่น)
+  function onScoreChange(value: number | "") {
+    setScoreDraft(value);
+    if (value !== "" && (statusDraft === "pending_review" || statusDraft === "not_submitted" as any)) {
+      setStatusDraft("reviewed");
+    }
+  }
+
+  // ★ กด Enter ในช่องคะแนน = บันทึกทันที แล้วไปนักเรียนคนถัดไป
+  function onScoreKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveGrade(true);
+    }
+  }
+
+  // ★ ลบงานของนักเรียน (แทนสถานะ "ไม่ผ่าน" เดิม) — ทำให้กลับไปเป็น "ไม่มีงาน"
+  async function deleteSubmission() {
+    if (!selectedStudent) return;
+    if (!confirm(`ต้องการลบงานของ "${selectedStudent.first_name} ${selectedStudent.last_name}" ใช่หรือไม่?\nสถานะจะกลับไปเป็น "ไม่มีงาน"`)) return;
+    setSaving(true);
+    try {
+      await supabase.from("assignment_submissions").delete().eq("assignment_id", assignment.id).eq("student_id", selectedStudent.id);
+      setScoreDraft("");
+      setCommentDraft("");
+      setStatusDraft("pending_review");
+      setLateDraft(null);
+      onChanged();
+    } catch (e: any) {
+      alert("ลบงานไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+    setSaving(false);
+  }
+
+  function toggleChecked(studentId: string) {
+    setCheckedIds(prev => {
+      const next = new Set(prev);
+      next.has(studentId) ? next.delete(studentId) : next.add(studentId);
+      return next;
+    });
+  }
+  function toggleCheckAll() {
+    if (checkedIds.size === filtered.length) {
+      setCheckedIds(new Set());
+    } else {
+      setCheckedIds(new Set(filtered.map(s => s.id)));
+    }
+  }
+
+  // ★ ให้คะแนนหลายคนพร้อมกัน
+  async function saveBulkGrade() {
+    if (checkedIds.size === 0) return;
+    setBulkSaving(true);
+    try {
+      const rows = Array.from(checkedIds).map(studentId => ({
+        assignment_id: assignment.id,
+        student_id: studentId,
+        status: bulkStatus,
+        score: bulkScore === "" ? null : Number(bulkScore),
+        teacher_comment: bulkComment || null,
+        graded_by: currentUserId || null,
+        graded_at: new Date().toISOString(),
+      }));
+      const { error } = await supabase.from("assignment_submissions").upsert(rows, { onConflict: "assignment_id,student_id" });
+      if (error) throw error;
+      onChanged();
+      setCheckedIds(new Set());
+      setBulkMode(false);
+      setBulkScore("");
+      setBulkComment("");
+    } catch (e: any) {
+      alert("บันทึกคะแนนหลายคนไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+    setBulkSaving(false);
   }
 
   return (
@@ -1494,29 +1592,57 @@ function SubmissionsTab({
           placeholder="ค้นหารายชื่อนักเรียน"
           className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-xs font-bold mb-2 focus:border-indigo-400 focus:outline-none"
         />
+
+        <div className="flex items-center justify-between mb-2 px-1">
+          <label className="flex items-center gap-1.5 text-[11px] font-black text-slate-500 cursor-pointer">
+            <input type="checkbox" checked={filtered.length > 0 && checkedIds.size === filtered.length} onChange={toggleCheckAll} className="w-3.5 h-3.5" />
+            เลือกทั้งหมด ({checkedIds.size})
+          </label>
+          {checkedIds.size > 1 && (
+            <button
+              onClick={() => setBulkMode(true)}
+              className="text-[11px] font-black text-indigo-600 hover:underline"
+            >
+              ให้คะแนนพร้อมกัน
+            </button>
+          )}
+        </div>
+
         <div className="space-y-1 max-h-[480px] overflow-y-auto">
           {filtered.map(s => {
             const sub = submissions.find(x => x.student_id === s.id);
             const status = sub?.status ?? "not_submitted";
             return (
-              <button
+              <div
                 key={s.id}
-                onClick={() => setSelectedId(s.id)}
                 className={`w-full flex items-center gap-2 rounded-xl px-2 py-2 text-left transition-colors ${
-                  selectedId === s.id ? "bg-indigo-50 border-2 border-indigo-300" : "border-2 border-transparent hover:bg-slate-50"
+                  selectedId === s.id && !bulkMode ? "bg-indigo-50 border-2 border-indigo-300" : "border-2 border-transparent hover:bg-slate-50"
                 }`}
               >
-                {s.avatar_url ? (
-                  <img src={s.avatar_url} className="w-8 h-8 rounded-full object-cover" />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-indigo-200 text-indigo-700 text-xs font-black flex items-center justify-center">{s.first_name[0]}</div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
-                  <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
-                </div>
-                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${STATUS_COLORS[status]}`}>{STATUS_LABELS[status]}</span>
-              </button>
+                <input
+                  type="checkbox"
+                  checked={checkedIds.has(s.id)}
+                  onChange={() => toggleChecked(s.id)}
+                  onClick={e => e.stopPropagation()}
+                  className="w-4 h-4 shrink-0"
+                />
+                <button
+                  type="button"
+                  onClick={() => { setSelectedId(s.id); setBulkMode(false); }}
+                  className="flex-1 min-w-0 flex items-center gap-2 text-left"
+                >
+                  {s.avatar_url ? (
+                    <img src={s.avatar_url} className="w-8 h-8 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-indigo-200 text-indigo-700 text-xs font-black flex items-center justify-center">{s.first_name[0]}</div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
+                    <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
+                  </div>
+                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${STATUS_COLORS[status]}`}>{STATUS_LABELS[status]}</span>
+                </button>
+              </div>
             );
           })}
           {filtered.length === 0 && <p className="text-center text-slate-300 text-xs font-bold py-6">ไม่พบนักเรียน</p>}
@@ -1524,7 +1650,60 @@ function SubmissionsTab({
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 p-5">
-        {!selectedStudent ? (
+        {bulkMode ? (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="font-black text-slate-800">ให้คะแนนพร้อมกัน ({checkedIds.size} คน)</p>
+              <button onClick={() => setBulkMode(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xs">✕ ยกเลิก</button>
+            </div>
+            <p className="text-xs font-bold text-slate-400">
+              {students.filter(s => checkedIds.has(s.id)).map(s => `${s.first_name} ${s.last_name}`).join(", ")}
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-black text-slate-500">คะแนน (เต็ม {assignment.max_score})</label>
+                <input
+                  type="number"
+                  value={bulkScore}
+                  onChange={e => setBulkScore(e.target.value === "" ? "" : Number(e.target.value))}
+                  max={assignment.max_score}
+                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-black text-slate-500">สถานะ</label>
+                <select
+                  value={bulkStatus}
+                  onChange={e => setBulkStatus(e.target.value as SubmissionStatus)}
+                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+                >
+                  <option value="pending_review">รอตรวจ</option>
+                  <option value="reviewed">ตรวจแล้ว</option>
+                  <option value="needs_revision">ต้องแก้ไข</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-black text-slate-500">คอมเมนต์ให้นักเรียน (ใช้ข้อความเดียวกันทุกคน)</label>
+              <textarea
+                value={bulkComment}
+                onChange={e => setBulkComment(e.target.value)}
+                rows={3}
+                className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold resize-none focus:border-indigo-400 focus:outline-none"
+              />
+            </div>
+
+            <button
+              onClick={saveBulkGrade}
+              disabled={bulkSaving}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50"
+            >
+              {bulkSaving ? "กำลังบันทึก..." : `บันทึกคะแนนให้ ${checkedIds.size} คน`}
+            </button>
+          </div>
+        ) : !selectedStudent ? (
           <p className="text-slate-300 font-bold text-sm text-center py-10">เลือกนักเรียนทางซ้ายเพื่อตรวจงาน</p>
         ) : (
           <div className="space-y-4">
@@ -1553,12 +1732,15 @@ function SubmissionsTab({
   <div>
     <label className="text-xs font-black text-slate-500">คะแนน (เต็ม {assignment.max_score})</label>
     <input
+      ref={scoreInputRef}
       type="number"
       value={scoreDraft}
-      onChange={e => setScoreDraft(e.target.value === "" ? "" : Number(e.target.value))}
+      onChange={e => onScoreChange(e.target.value === "" ? "" : Number(e.target.value))}
+      onKeyDown={onScoreKeyDown}
       max={assignment.max_score}
       className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-indigo-400 focus:outline-none"
     />
+    <p className="text-[10px] text-slate-300 font-bold mt-1">กด Enter เพื่อบันทึกและไปนักเรียนคนถัดไป</p>
   </div>
   <div>
     <label className="text-xs font-black text-slate-500">สถานะ</label>
@@ -1570,7 +1752,6 @@ function SubmissionsTab({
       <option value="pending_review">รอตรวจ</option>
       <option value="reviewed">ตรวจแล้ว</option>
       <option value="needs_revision">ต้องแก้ไข</option>
-      <option value="failed">ไม่ผ่าน</option>
     </select>
   </div>
 </div>
@@ -1609,13 +1790,23 @@ function SubmissionsTab({
               />
             </div>
 
-            <button
-              onClick={saveGrade}
-              disabled={saving}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50"
-            >
-              {saving ? "กำลังบันทึก..." : "บันทึกคะแนน"}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => saveGrade(true)}
+                disabled={saving}
+                className="flex-1 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50"
+              >
+                {saving ? "กำลังบันทึก..." : "บันทึกคะแนน · ไปคนถัดไป"}
+              </button>
+              <button
+                onClick={deleteSubmission}
+                disabled={saving}
+                title="ลบงานนักเรียน"
+                className="px-4 py-3 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-black text-xs disabled:opacity-50 shrink-0"
+              >
+                🗑️ ลบงานนักเรียน
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -1779,14 +1970,28 @@ function CrossSectionTab({
 
       const { data: allSections } = await supabase
         .from("subject_sections")
-        .select("id, subject_id, join_code")
+        .select("id, subject_id, join_code, classroom_id")
         .in("subject_id", subjectIds);
+
+      // ★ ดึงข้อมูลห้องเรียน เพื่อโชว์ชื่อห้องเรียนประกอบชื่อวิชา
+      const classroomIds = Array.from(
+        new Set((allSections ?? []).map((sec: any) => sec.classroom_id).filter(Boolean))
+      );
+      const { data: classroomRows } = classroomIds.length
+        ? await supabase.from("classrooms").select("id, room_name, room_number").in("id", classroomIds)
+        : { data: [] as any[] };
 
       const list: TeacherSection[] = (allSections ?? [])
         .filter((sec: any) => sec.id !== sectionId)
         .map((sec: any) => {
           const subj = (mySubjects ?? []).find((s: any) => s.id === sec.subject_id);
-          return { id: sec.id, label: subj ? `${subj.subject_code} · ${subj.name_th}` : sec.join_code };
+          const classroom = (classroomRows ?? []).find((c: any) => c.id === sec.classroom_id);
+          const classroomLabel =
+            classroom?.room_name || (classroom?.room_number ? `ห้อง ${classroom.room_number}` : sec.join_code || "-");
+          return {
+            id: sec.id,
+            label: subj ? `${subj.subject_code} · ${subj.name_th} · ${classroomLabel}` : `${sec.join_code} · ${classroomLabel}`,
+          };
         });
       setSections(list);
     } catch {

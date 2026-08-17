@@ -8,11 +8,18 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //
 // พฤติกรรม:
 // - ถ้านักเรียนคนนี้ยังไม่มีแถว assignment_submissions สำหรับงานชิ้นนี้ -> สร้างใหม่
-//   status = "graded", score = ตามที่ส่งมา, graded_at = now(), submitted_at = null
+//   status = "reviewed", score = ตามที่ส่งมา, graded_at = now(), submitted_at = null
 //   (submitted_at ปล่อยว่างเพราะเป็นการให้คะแนนโดยครู ไม่ใช่นักเรียนส่งเอง
 //    ถ้าใส่เวลาไปมั่ว ๆ จะกระทบการคำนวณ "ส่งตรงเวลา/ส่งช้า" ที่ฝั่ง client ให้ผิดพลาด)
 // - ถ้ามีแถวอยู่แล้ว -> อัปเดตแค่ score/status/graded_at เท่านั้น ไม่แตะ submitted_at เดิม
 //   (กรณีนักเรียนส่งงานเข้ามาเองแล้วครูตรวจให้คะแนน ต้องคงเวลาที่นักเรียนส่งจริงไว้)
+//
+// NOTE (แก้บั๊ก): ตาราง assignment_submissions มี CHECK constraint
+// "assignment_submissions_status_check" ที่อนุญาตเฉพาะค่า
+// not_submitted | pending_review | reviewed | needs_revision | failed
+// เดิมโค้ดนี้ใช้ status = "graded" ซึ่งไม่อยู่ในรายการที่อนุญาต ทำให้ insert/update
+// ชนกับ constraint และคะแนนไม่ถูกบันทึก (error 500 กลับไปที่หน้าเว็บ) — เปลี่ยนมาใช้
+// "reviewed" ซึ่งตรงกับความหมาย "ตรวจแล้ว" ของสถานะนี้แทน
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -62,7 +69,7 @@ export async function POST(req: NextRequest) {
         .from("assignment_submissions")
         .update({
           score: numericScore,
-          status: "graded",
+          status: "reviewed",
           graded_at: nowIso,
           graded_by: graded_by || null,
         })
@@ -77,7 +84,7 @@ export async function POST(req: NextRequest) {
         .insert({
           assignment_id,
           student_id,
-          status: "graded",
+          status: "reviewed",
           score: numericScore,
           graded_at: nowIso,
           graded_by: graded_by || null,
