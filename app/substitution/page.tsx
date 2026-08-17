@@ -1025,6 +1025,14 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
   );
   const [saving, setSaving] = useState(false);
   const [autoRunning, setAutoRunning] = useState(false);
+  const [expandedMismatchDates, setExpandedMismatchDates] = useState<Set<string>>(new Set());
+function toggleMismatchExpanded(date: string) {
+  setExpandedMismatchDates(prev => {
+    const next = new Set(prev);
+    if (next.has(date)) next.delete(date); else next.add(date);
+    return next;
+  });
+}
 
   function setAsgn(key: string, val: string) {
     setAssignments(prev => ({ ...prev, [key]: val }));
@@ -1054,6 +1062,9 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
       for (const entry of dayEntries) {
   const key = `${entry.id}_${date}`;
   if (coTeacherId(entry, absentId)) continue; // ★ มีครูคู่สอนอยู่แล้ว ไม่ต้องจัด ไม่ต้องนับ
+  // ★ ข้ามคาบที่ระบบเตือนว่าอาจอยู่นอกช่วงลาไปเลย ไม่จัดอัตโนมัติให้ — กันจัดผิดคาบโดยไม่มีใครตรวจสอบ
+  const isMismatch = leaveRequest.half_day && entryHalfMap[entry.id] && entryHalfMap[entry.id] !== leaveRequest.half_day;
+  if (isMismatch) continue;
   total++;
   if (next[key]) continue;
   const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, entries, absentId);
@@ -1078,10 +1089,10 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
     if (newlyFilled === 0 && unfilled === 0) {
       alert("ทุกคาบถูกจัดครูไว้แล้ว");
     } else if (unfilled > 0) {
-      alert(`⚡ จัดอัตโนมัติสำเร็จ ${newlyFilled} คาบ\n⚠️ เหลือ ${unfilled} คาบที่ไม่มีครูว่าง (หรือครูที่ว่างกำลังสอนแทนคนอื่นในคาบเดียวกันอยู่แล้ว) กรุณาเลือกเอง`);
-    } else {
-      alert(`⚡ จัดอัตโนมัติสำเร็จครบ ${newlyFilled} คาบ`);
-    }
+  alert(`⚡ จัดอัตโนมัติสำเร็จ ${newlyFilled} คาบ\n⚠️ เหลือ ${unfilled} คาบที่ไม่มีครูว่าง (หรือครูที่ว่างกำลังสอนแทนคนอื่นในคาบเดียวกันอยู่แล้ว) กรุณาเลือกเอง\n💡 คาบที่อยู่นอกช่วงลาครึ่งวัน ระบบข้ามให้อัตโนมัติ กรุณากด "ดูคาบนอกช่วงลา" เพื่อจัดเองหากจำเป็น`);
+} else {
+  alert(`⚡ จัดอัตโนมัติสำเร็จครบ ${newlyFilled} คาบ`);
+}
   }
 
   const handleSave = async () => {
@@ -1158,83 +1169,110 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, academicY
                 </p>
               )}
               {leaveDates.map(date => {
-                const dayOfWeek = new Date(date+"T00:00:00").getDay();
-                const dayEntries = absentEntries
-                  .filter(e => e.day_of_week === dayOfWeek && !e.is_break)
-                  .sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
-                if (dayEntries.length === 0) return null;
-                return (
-                  <div key={date}>
-                    <h4 className="font-bold text-slate-700 text-sm mb-3 pb-2 border-b border-[#FBCFE8]">
-                      📅 {TH_DAYS[dayOfWeek]} {thaiDate(date)}
-                    </h4>
-                    <div className="space-y-2">
-                      {dayEntries.map(entry => {
-  const key = `${entry.id}_${date}`;
-  const coId = coTeacherId(entry, absentId);
-  const coTeacher = coId ? teachers.find(t => t.id === coId) : null;
-  // ★ ป้ายเตือนถ้าคำนวณครึ่งวันได้ไม่ตรงกับที่ครูลา (ไม่กรองทิ้ง แค่เตือน)
-  const halfMismatch = leaveRequest.half_day
-    && entryHalfMap[entry.id]
-    && entryHalfMap[entry.id] !== leaveRequest.half_day;
+  const dayOfWeek = new Date(date+"T00:00:00").getDay();
+  const dayEntries = absentEntries
+    .filter(e => e.day_of_week === dayOfWeek && !e.is_break)
+    .sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
+  if (dayEntries.length === 0) return null;
 
-  // ★ มีครูอีกคนสอนคู่อยู่ในคาบนี้แล้ว — ไม่ต้องจัดสอนแทน แค่โชว์ให้เห็น
-  if (coTeacher) {
+  // ★ helper สร้างแถวของ 1 คาบ (ใช้ร่วมกันทั้งกลุ่มปกติและกลุ่มนอกช่วงลา)
+  function renderEntryRow(entry: TimetableEntry) {
+    const key = `${entry.id}_${date}`;
+    const coId = coTeacherId(entry, absentId);
+    const coTeacher = coId ? teachers.find(t => t.id === coId) : null;
+    const halfMismatch = leaveRequest.half_day
+      && entryHalfMap[entry.id]
+      && entryHalfMap[entry.id] !== leaveRequest.half_day;
+
+    if (coTeacher) {
+      return (
+        <div key={key} className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+          <div className="shrink-0 text-center w-16">
+            <div className="text-xs font-bold text-emerald-600">{entry.slot_label}</div>
+            <div className="text-[10px] text-slate-400">{thaiTime(entry.start_time ?? undefined)}</div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
+            <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-[11px] font-bold text-emerald-600">👥 มีครูสอนคู่อยู่แล้ว</p>
+            <p className="text-sm font-bold text-emerald-800">{fullName(coTeacher)}</p>
+          </div>
+        </div>
+      );
+    }
+
     return (
-      <div key={key} className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+      <div key={key} className={`flex items-center gap-3 rounded-xl px-4 py-3 ${halfMismatch ? "bg-amber-50 border border-amber-200" : "bg-[#FDF2F8]"}`}>
         <div className="shrink-0 text-center w-16">
-          <div className="text-xs font-bold text-emerald-600">{entry.slot_label}</div>
+          <div className={`text-xs font-bold ${halfMismatch ? "text-amber-600" : "text-[#DB2777]"}`}>{entry.slot_label}</div>
           <div className="text-[10px] text-slate-400">{thaiTime(entry.start_time ?? undefined)}</div>
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
           <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
+          {halfMismatch && (
+            <div className="text-[10px] font-bold text-amber-600 mt-0.5">
+              ⚠️ ระบบคำนวณว่าคาบนี้อยู่ช่วง{entryHalfMap[entry.id] === "morning" ? "เช้า" : "บ่าย"}
+              (ครูลาแค่ครึ่ง{leaveRequest.half_day === "morning" ? "เช้า" : "บ่าย"}) — โปรดตรวจสอบก่อนจัดสอนแทน
+            </div>
+          )}
         </div>
-        <div className="shrink-0 text-right">
-          <p className="text-[11px] font-bold text-emerald-600">👥 มีครูสอนคู่อยู่แล้ว</p>
-          <p className="text-sm font-bold text-emerald-800">{fullName(coTeacher)}</p>
+        <div className="shrink-0 w-72 sm:w-80">
+          <TeacherSearchSelect
+            teachers={sortTeachersByGrade(
+              computeFreeTeachersForEntry(entry, date, entries, teachers, absentId),
+              entry, absentTeacher, entries, homeroomMap
+            )}
+            value={assignments[key] || ""}
+            onChange={id => setAsgn(key, id)}
+            placeholder="— เลือกครูสอนแทน —"
+            loadMap={dayLoadMap(date, computeFreeTeachersForEntry(entry, date, entries, teachers, absentId))}
+            conflictMap={computeSubstituteConflictMap(entry, date, subRecords, entries, absentId)}
+          />
         </div>
       </div>
     );
   }
 
-  return (
-    <div key={key} className="flex items-center gap-3 bg-[#FDF2F8] rounded-xl px-4 py-3">
-      <div className="shrink-0 text-center w-16">
-        <div className="text-xs font-bold text-[#DB2777]">{entry.slot_label}</div>
-        <div className="text-[10px] text-slate-400">{thaiTime(entry.start_time ?? undefined)}</div>
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="font-bold text-slate-800 text-sm truncate">{entry.subject_name ?? "ไม่ระบุวิชา"}</div>
-        <div className="text-xs text-slate-400">{entry.grade_group ?? ""} {entry.room_name ?? ""}</div>
-        {halfMismatch && (
-          <div className="text-[10px] font-bold text-amber-600 mt-0.5">
-            ⚠️ ระบบคำนวณว่าคาบนี้อยู่ช่วง{entryHalfMap[entry.id] === "morning" ? "เช้า" : "บ่าย"}
-            (ครูลาแค่ครึ่ง{leaveRequest.half_day === "morning" ? "เช้า" : "บ่าย"}) — โปรดตรวจสอบก่อนจัดสอนแทน
-          </div>
-        )}
-      </div>
-      <div className="shrink-0 w-72 sm:w-80">
-        <TeacherSearchSelect
-          teachers={sortTeachersByGrade(
-            computeFreeTeachersForEntry(entry, date, entries, teachers, absentId),
-            entry, absentTeacher, entries, homeroomMap
-          )}
-          value={assignments[key] || ""}
-          onChange={id => setAsgn(key, id)}
-          placeholder="— เลือกครูสอนแทน —"
-          loadMap={dayLoadMap(date, computeFreeTeachersForEntry(entry, date, entries, teachers, absentId))}
-          conflictMap={computeSubstituteConflictMap(entry, date, subRecords, entries, absentId)}
-        />
-      </div>
-    </div>
+  // ★ แยกคาบวันนี้เป็น 2 กลุ่ม: ตรงกับช่วงที่ลา (หรือลาเต็มวัน) กับ นอกช่วงลาครึ่งวัน
+  const matchedEntries = dayEntries.filter(entry => {
+    const mismatch = leaveRequest.half_day && entryHalfMap[entry.id] && entryHalfMap[entry.id] !== leaveRequest.half_day;
+    return !mismatch;
+  });
+  const mismatchedEntries = dayEntries.filter(entry => {
+    const mismatch = leaveRequest.half_day && entryHalfMap[entry.id] && entryHalfMap[entry.id] !== leaveRequest.half_day;
+    return !!mismatch;
+  });
+  const isExpanded = expandedMismatchDates.has(date);
 
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
+  return (
+    <div key={date}>
+      <h4 className="font-bold text-slate-700 text-sm mb-3 pb-2 border-b border-[#FBCFE8]">
+        📅 {TH_DAYS[dayOfWeek]} {thaiDate(date)}
+      </h4>
+      <div className="space-y-2">
+        {matchedEntries.map(entry => renderEntryRow(entry))}
+      </div>
+
+      {mismatchedEntries.length > 0 && (
+        <div className="mt-2">
+          <button type="button" onClick={() => toggleMismatchExpanded(date)}
+            className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl bg-amber-50 border-2 border-amber-200 text-amber-700 text-xs font-bold hover:bg-amber-100 transition-colors">
+            <span>⚠️ คาบนอกช่วงลา ({mismatchedEntries.length} คาบ) — ระบบข้ามให้อัตโนมัติ กดเพื่อตรวจสอบ/จัดเอง</span>
+            <span>{isExpanded ? "▲ ซ่อน" : "▼ ดูคาบนอกช่วงลา"}</span>
+          </button>
+          {isExpanded && (
+            <div className="space-y-2 mt-2 pl-2 border-l-2 border-amber-200">
+              {mismatchedEntries.map(entry => renderEntryRow(entry))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+})}
             </div>
           )}
         </div>
