@@ -86,6 +86,13 @@ const extraRoles: string[] = requester.extra_roles ?? [];
 const isAdmin = ADMIN_ROLES.includes(requester.role) || extraRoles.some(r => ADMIN_ROLES.includes(r));
 const isHomeroom = requester.role === "homeroom_teacher" || extraRoles.includes("homeroom_teacher");
 const isSubjectTeacher = requester.role === "subject_teacher" || extraRoles.includes("subject_teacher");
+// ✅ เช็คสิทธิ์ครูประจำชั้นจากตาราง classrooms โดยตรง (ไม่พึ่ง role/extra_roles อีกต่อไป)
+const { data: homeroomRows } = await admin
+  .from("classrooms")
+  .select("id")
+  .or(`homeroom_teacher_id.eq.${requesterId},homeroom_teacher_2_id.eq.${requesterId}`);
+const homeroomClassroomIds = new Set((homeroomRows ?? []).map((c: any) => c.id));
+const isHomeroomTeacher = homeroomClassroomIds.size > 0;
 
 const role: Role = isAdmin
   ? "admin"
@@ -100,18 +107,21 @@ if (role === "unknown") {
 }
 
   // 2) ตรวจ scope + สิทธิ์ + พารามิเตอร์ที่บังคับตาม scope
-  if ((scope === "subject_all" || scope === "school") && !isAdmin) {
-    return NextResponse.json({ error: "เฉพาะแอดมิน/ผู้บริหารเท่านั้นที่ดูขอบเขตนี้ได้" }, { status: 403 });
-  }
-  if (scope !== "school" && !subjectId) {
-    return NextResponse.json({ error: "missing subject_id" }, { status: 400 });
-  }
-  if (scope === "classroom" && !classroomIdParam) {
-    return NextResponse.json({ error: "missing classroom_id" }, { status: 400 });
-  }
-  if (scope === "grade_level" && !gradeLevelIdParam) {
-    return NextResponse.json({ error: "missing grade_level_id" }, { status: 400 });
-  }
+if (scope === "subject_all" && !isAdmin) {
+  return NextResponse.json({ error: "เฉพาะแอดมิน/ผู้บริหารเท่านั้นที่ดูขอบเขตนี้ได้" }, { status: 403 });
+}
+if (scope === "school" && !isAdmin && !isHomeroomTeacher) {
+  return NextResponse.json({ error: "เฉพาะแอดมิน/ผู้บริหารเท่านั้นที่ดูขอบเขตนี้ได้" }, { status: 403 });
+}
+if (scope !== "school" && !subjectId) {
+  return NextResponse.json({ error: "missing subject_id" }, { status: 400 });
+}
+if (scope === "classroom" && !classroomIdParam) {
+  return NextResponse.json({ error: "missing classroom_id" }, { status: 400 });
+}
+if (scope === "grade_level" && !gradeLevelIdParam) {
+  return NextResponse.json({ error: "missing grade_level_id" }, { status: 400 });
+}
 
   try {
     let yearStart: string | null = null;
@@ -125,21 +135,25 @@ if (role === "unknown") {
 
     // 3) classroom ids ตามขอบเขต
     async function fetchClassroomsWithFallback() {
-      function buildQuery() {
-        let q = admin.from("classrooms")
-          .select("id, room_name, grade_group, grade_level_id, homeroom_teacher_id, homeroom_teacher_2_id");
-        if (scope === "classroom") q = q.eq("id", classroomIdParam!);
-        else if (scope === "grade_level") q = q.eq("grade_level_id", gradeLevelIdParam!);
-        // subject_all / school: ไม่กรองห้อง เอาทุกห้อง
-        return q;
-      }
-      if (academicYearId) {
-        const { data } = await buildQuery().eq("academic_year_id", academicYearId);
-        if (data && data.length > 0) return data;
-      }
-      const { data } = await buildQuery();
-      return data ?? [];
+  function buildQuery() {
+    let q = admin.from("classrooms")
+      .select("id, room_name, grade_group, grade_level_id, homeroom_teacher_id, homeroom_teacher_2_id");
+    if (scope === "classroom") q = q.eq("id", classroomIdParam!);
+    else if (scope === "grade_level") q = q.eq("grade_level_id", gradeLevelIdParam!);
+    else if (scope === "school" && !isAdmin) {
+      // ครูประจำชั้น (ไม่ใช่แอดมิน) ใช้ scope "school" ได้ แต่เห็นแค่ห้องของตัวเองเท่านั้น
+      q = q.in("id", Array.from(homeroomClassroomIds));
     }
+    // scope === "subject_all", หรือ admin ที่ scope="school": ไม่กรองห้อง เอาทุกห้อง
+    return q;
+  }
+  if (academicYearId) {
+    const { data } = await buildQuery().eq("academic_year_id", academicYearId);
+    if (data && data.length > 0) return data;
+  }
+  const { data } = await buildQuery();
+  return data ?? [];
+}
 
     let classrooms = await fetchClassroomsWithFallback();
     if (classrooms.length === 0) return NextResponse.json(emptyResult(role));
@@ -147,22 +161,26 @@ if (role === "unknown") {
 
     // 4) subject_sections ในขอบเขต (school = ทุกวิชา, อื่นๆ = ล็อก subject_id)
     async function fetchSectionsWithFallback() {
-      function buildBaseQuery() {
-        let q = admin
-          .from("subject_sections")
-          .select("id, subject_id, classroom_id, academic_year_id, teacher_id, co_teacher_id")
-          .in("classroom_id", scopeClassroomIds);
-        if (scope !== "school") q = q.eq("subject_id", subjectId!);
-        if (!isAdmin) q = q.or(`teacher_id.eq.${requesterId},co_teacher_id.eq.${requesterId}`);
-        return q;
-      }
-      if (academicYearId) {
-        const { data } = await buildBaseQuery().eq("academic_year_id", academicYearId);
-        if (data && data.length > 0) return data;
-      }
-      const { data } = await buildBaseQuery();
-      return data ?? [];
+  function buildBaseQuery() {
+    let q = admin
+      .from("subject_sections")
+      .select("id, subject_id, classroom_id, academic_year_id, teacher_id, co_teacher_id")
+      .in("classroom_id", scopeClassroomIds);
+    if (scope !== "school") q = q.eq("subject_id", subjectId!);
+    // เดิม: filter ตาม teacher_id/co_teacher_id เฉพาะตอนไม่ใช่แอดมิน
+    // แก้: ยกเว้นครูประจำชั้นด้วย เพราะห้องถูกจำกัดเป็นห้องของตัวเองแล้วในขั้นตอนก่อนหน้า
+    if (!isAdmin && !isHomeroomTeacher) {
+      q = q.or(`teacher_id.eq.${requesterId},co_teacher_id.eq.${requesterId}`);
     }
+    return q;
+  }
+  if (academicYearId) {
+    const { data } = await buildBaseQuery().eq("academic_year_id", academicYearId);
+    if (data && data.length > 0) return data;
+  }
+  const { data } = await buildBaseQuery();
+  return data ?? [];
+}
 
     const sections = await fetchSectionsWithFallback();
     if (!sections || sections.length === 0) return NextResponse.json(emptyResult(role));
