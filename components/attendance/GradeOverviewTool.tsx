@@ -538,35 +538,39 @@ function GradeTable({
     return (
       <td key={a.id} className="text-center px-3 py-3">
         {readOnly ? (
-          !sub ? (
-            <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-red-50 text-red-600">ไม่ส่งงาน</span>
-          ) : sub.score === null ? (
-            <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600">รอตรวจ</span>
-          ) : (
-            <div className="flex flex-col items-center gap-0.5">
-              <span className="text-sm font-black text-slate-700">{sub.score}</span>
-              {lateInfo.hasData && lateInfo.isLate && (
-                <span className="text-[9px] font-black text-red-500">
-                  ⏰ ส่งช้า{lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}
-                </span>
-              )}
-              {lateInfo.hasData && !lateInfo.isLate && (
-                <span className="text-[9px] font-black text-emerald-500">✅ ตรงเวลา</span>
-              )}
-            </div>
-          )
-        ) : (
-          <EditableScoreCell
-            submission={sub}
-            maxScore={a.max_score}
-            lateInfo={lateInfo}   // ★ เปลี่ยนจาก onTimeResult
-            isEditing={activeCell?.assignmentId === a.id && activeCell?.studentId === s.id}
-            onRequestEdit={() => setActiveCell({ assignmentId: a.id, studentId: s.id })}
-            onCommit={newScore => onUpdateScore(s.id, a.id, newScore)}
-            onEnterNext={() => moveToNextRow(a.id, s.id)}
-            onCancelEdit={() => setActiveCell(null)}
-          />
-        )}
+  !sub ? (
+    <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-red-50 text-red-600">ไม่ส่งงาน</span>
+  ) : sub.score === null ? (
+    <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600">รอตรวจ</span>
+  ) : (
+    (() => {
+      const isLate = lateInfo.hasData && lateInfo.isLate;
+      const bgClass = isLate ? "bg-orange-50" : "bg-emerald-50";
+      const textClass = isLate ? "text-orange-600" : "text-emerald-600";
+      return (
+        <div className={`inline-flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg ${bgClass}`}>
+          <span className={`text-sm font-black ${textClass}`}>{sub.score}</span>
+          {lateInfo.hasData && (
+            <span className={`text-[9px] font-black ${textClass}`}>
+              {isLate ? `⏰ ส่งช้า${lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}` : "✅ ตรงเวลา"}
+            </span>
+          )}
+        </div>
+      );
+    })()
+  )
+) : (
+  <EditableScoreCell
+    submission={sub}
+    maxScore={a.max_score}
+    lateInfo={lateInfo}
+    isEditing={activeCell?.assignmentId === a.id && activeCell?.studentId === s.id}
+    onRequestEdit={() => setActiveCell({ assignmentId: a.id, studentId: s.id })}
+    onCommit={newScore => onUpdateScore(s.id, a.id, newScore)}
+    onEnterNext={() => moveToNextRow(a.id, s.id)}
+    onCancelEdit={() => setActiveCell(null)}
+  />
+)}
       </td>
     );
   })}
@@ -620,7 +624,7 @@ function GradeTable({
 function EditableScoreCell({
   submission,
   maxScore,
-  lateInfo, // ★ เปลี่ยนจาก onTimeResult: boolean | null
+  lateInfo,
   isEditing,
   onRequestEdit,
   onCommit,
@@ -629,7 +633,7 @@ function EditableScoreCell({
 }: {
   submission?: Submission;
   maxScore: number;
-  lateInfo: LateInfo; // ★
+  lateInfo: LateInfo;
   isEditing: boolean;
   onRequestEdit: () => void;
   onCommit: (newScore: number) => void;
@@ -638,31 +642,46 @@ function EditableScoreCell({
 }) {
   const currentValueText = submission?.score !== null && submission?.score !== undefined ? String(submission.score) : "";
   const [draft, setDraft] = useState(currentValueText);
-  // ป้องกันไม่ให้ onBlur ทำงานซ้ำ หลังจากที่ Enter/Escape จัดการไปแล้ว
-  // (ตอน Enter เปลี่ยน activeCell ไปแถวถัดไป ช่องนี้จะถูกถอดออกจาก DOM ซึ่งอาจไป trigger blur ซ้ำ)
   const justActedRef = useRef(false);
+  // ★ ใช้หน่วงเวลา (debounce) เพื่อ auto-save หลังพิมพ์เสร็จ ไม่ต้องกด Enter/blur
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setDraft(currentValueText);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submission?.score, isEditing]);
 
-  function commitIfChanged() {
-    const parsed = Number(draft);
-    if (draft.trim() === "" || Number.isNaN(parsed)) return;
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  function tryCommit(value: string) {
+    const parsed = Number(value);
+    if (value.trim() === "" || Number.isNaN(parsed)) return;
     if (submission?.score !== null && submission?.score !== undefined && parsed === submission.score) return;
     onCommit(parsed);
+  }
+
+  // ★ พิมพ์แล้ว auto-save หลังหยุดพิมพ์ 500ms โดยไม่ต้องกด Enter
+  function handleChange(value: string) {
+    setDraft(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => tryCommit(value), 500);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
       e.preventDefault();
       justActedRef.current = true;
-      commitIfChanged();
-      onEnterNext(); // ★ บันทึกแล้วกระโดดไปช่องกรอกของนักเรียนคนถัดไปในคอลัมน์เดียวกัน
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      tryCommit(draft);
+      onEnterNext(); // ★ บันทึกแล้วกระโดดไปช่องกรอกของนักเรียนคนถัดไปในคอลัมน์เดียวกัน (เหมือนเดิม)
     } else if (e.key === "Escape") {
       e.preventDefault();
       justActedRef.current = true;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
       setDraft(currentValueText);
       onCancelEdit();
     }
@@ -673,7 +692,8 @@ function EditableScoreCell({
       justActedRef.current = false;
       return;
     }
-    commitIfChanged();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    tryCommit(draft);
     onCancelEdit();
   }
 
@@ -685,7 +705,7 @@ function EditableScoreCell({
         min={0}
         max={maxScore}
         value={draft}
-        onChange={e => setDraft(e.target.value)}
+        onChange={e => handleChange(e.target.value)}
         onFocus={e => e.currentTarget.select()}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
@@ -701,7 +721,7 @@ function EditableScoreCell({
         title="คลิกเพื่อให้คะแนน"
         className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
       >
-        ไม่ส่งงาน · ให้คะแนน
+        ไม่ส่งงาน
       </button>
     );
   }
@@ -713,23 +733,27 @@ function EditableScoreCell({
         title="คลิกเพื่อให้คะแนน"
         className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
       >
-        รอตรวจ · ให้คะแนน
+        รอตรวจ
       </button>
     );
   }
 
+  // ★ มีคะแนนแล้ว: ใช้พื้นหลังสีตามสถานะส่งตรงเวลา/ส่งช้า
+  const isLate = lateInfo.hasData && lateInfo.isLate;
+  const bgClass = isLate ? "bg-orange-50 hover:bg-orange-100" : "bg-emerald-50 hover:bg-emerald-100";
+  const textClass = isLate ? "text-orange-600" : "text-emerald-600";
+
   return (
-    <button onClick={onRequestEdit} title="คลิกเพื่อแก้ไขคะแนน" className="flex flex-col items-center gap-0.5 mx-auto">
-      <span className="text-sm font-black text-slate-700 hover:bg-slate-100 rounded-lg px-2 py-0.5 transition-colors">
-        {submission.score}
-      </span>
-      {lateInfo.hasData && lateInfo.isLate && (
-        <span className="text-[9px] font-black text-red-500">
-          ⏰ ส่งช้า{lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}
+    <button
+      onClick={onRequestEdit}
+      title="คลิกเพื่อแก้ไขคะแนน"
+      className={`flex flex-col items-center gap-0.5 mx-auto px-2 py-1 rounded-lg transition-colors ${bgClass}`}
+    >
+      <span className={`text-sm font-black ${textClass}`}>{submission.score}</span>
+      {lateInfo.hasData && (
+        <span className={`text-[9px] font-black ${isLate ? "text-orange-600" : "text-emerald-600"}`}>
+          {isLate ? `⏰ ส่งช้า${lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}` : "✅ ตรงเวลา"}
         </span>
-      )}
-      {lateInfo.hasData && !lateInfo.isLate && (
-        <span className="text-[9px] font-black text-emerald-500">✅ ตรงเวลา</span>
       )}
     </button>
   );

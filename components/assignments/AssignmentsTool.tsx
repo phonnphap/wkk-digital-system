@@ -1478,6 +1478,7 @@ function SubmissionsTab({
   const [statusDraft, setStatusDraft] = useState<SubmissionStatus>("pending_review");
   const [lateDraft, setLateDraft] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingLate, setSavingLate] = useState(false);
   const scoreInputRef = useRef<HTMLInputElement>(null);
 
   // ★ โหมดเลือกหลายคน (bulk grading)
@@ -1531,6 +1532,33 @@ function SubmissionsTab({
     }
     setSaving(false);
   }
+  async function saveLateStatus(value: boolean | null) {
+  if (!selectedStudent) return;
+  const prev = lateDraft;
+  setLateDraft(value);      // อัปเดต UI ทันที
+  setSavingLate(true);
+  const payload = {
+    assignment_id: assignment.id,
+    student_id: selectedStudent.id,
+    status: statusDraft,
+    score: scoreDraft === "" ? null : Number(scoreDraft),
+    teacher_comment: commentDraft || null,
+    is_late: value,
+    graded_by: currentUserId || null,
+    graded_at: new Date().toISOString(),
+  };
+  try {
+    const { error } = await supabase
+      .from("assignment_submissions")
+      .upsert(payload, { onConflict: "assignment_id,student_id" });
+    if (error) throw error;
+    onChanged();
+  } catch (e: any) {
+    setLateDraft(prev); // ย้อนค่ากลับถ้าบันทึกไม่สำเร็จ
+    alert("บันทึกสถานะการส่งช้าไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+  }
+  setSavingLate(false);
+}
 
   // ★ กรอกคะแนนแล้วเปลี่ยนสถานะเป็น "ตรวจแล้ว" อัตโนมัติ (ถ้ายังไม่เคยถูกตั้งสถานะเองเป็นอย่างอื่น)
   function onScoreChange(value: number | "") {
@@ -1798,29 +1826,30 @@ function SubmissionsTab({
           </p>
         </div>
         <div className="flex gap-2 shrink-0">
-          <button type="button" onClick={() => setLateDraft(false)}
-            className={`px-3 py-1.5 rounded-lg font-black text-xs ${lateDraft === false ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+          <button type="button" disabled={savingLate} onClick={() => saveLateStatus(false)}
+            className={`px-3 py-1.5 rounded-lg font-black text-xs disabled:opacity-50 ${lateDraft === false ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
             ✅ ตรงเวลา
           </button>
-          <button type="button" onClick={() => setLateDraft(true)}
-            className={`px-3 py-1.5 rounded-lg font-black text-xs ${lateDraft === true ? "bg-rose-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+          <button type="button" disabled={savingLate} onClick={() => saveLateStatus(true)}
+            className={`px-3 py-1.5 rounded-lg font-black text-xs disabled:opacity-50 ${lateDraft === true ? "bg-rose-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
             ⏰ ส่งช้า
           </button>
           {lateDraft !== null && (
-            <button type="button" onClick={() => setLateDraft(null)} title="กลับไปใช้การคำนวณอัตโนมัติ"
-              className="px-2 py-1.5 rounded-lg font-black text-xs bg-white border border-slate-200 text-slate-400 hover:text-indigo-500">
-              ↺ อัตโนมัติ
+            <button type="button" disabled={savingLate} onClick={() => saveLateStatus(null)} title="กลับไปใช้การคำนวณอัตโนมัติ"
+              className="px-2 py-1.5 rounded-lg font-black text-xs bg-white border border-slate-200 text-slate-400 hover:text-indigo-500 disabled:opacity-50">
+              {savingLate ? "..." : "↺ อัตโนมัติ"}
             </button>
           )}
         </div>
       </div>
 
-      {info.isLate && (
-        <p className="mt-2 text-[11px] font-black text-rose-500">
-          ⏰ ส่งเกินกำหนด {info.daysLate} วัน
-          {assignment.due_date && <> (กำหนดส่ง <DateTimeText iso={assignment.due_date} />)</>}
-        </p>
-      )}
+      {/* ★ แสดงผลเสมอ ทั้งตรงเวลาและส่งช้า */}
+      <p className={`mt-2 text-[11px] font-black ${info.isLate ? "text-rose-500" : "text-emerald-500"}`}>
+        {info.isLate
+          ? `⏰ ส่งเกินกำหนด ${info.daysLate} วัน`
+          : "✅ ส่งตรงเวลา"}
+        {assignment.due_date && <> (กำหนดส่ง <DateTimeText iso={assignment.due_date} />)</>}
+      </p>
     </div>
   );
 })()}
