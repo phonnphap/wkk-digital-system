@@ -257,6 +257,9 @@ function StudentCard({
   onClick: () => void;
 }) {
   const gradient = avatarGradient(index);
+  const badgeGradient =
+    score > 0 ? "from-emerald-500 to-teal-400" : score < 0 ? "from-rose-500 to-red-400" : "from-slate-400 to-slate-300";
+  const badgeIcon = score > 0 ? "⭐" : score < 0 ? "⚠️" : "•";
   return (
     <button
       onClick={onClick}
@@ -264,8 +267,11 @@ function StudentCard({
         selected ? "border-fuchsia-400 ring-4 ring-fuchsia-100 bg-fuchsia-50/40" : "border-slate-100 shadow-sm"
       }`}
     >
-      <div className="absolute -top-3 left-1/2 -translate-x-1/2 min-w-[30px] h-7 px-2 rounded-full bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white text-xs font-black flex items-center justify-center shadow-md ring-2 ring-white">
-        {score}
+      <div
+        className={`absolute -top-3.5 left-1/2 -translate-x-1/2 min-w-[40px] h-8 px-2.5 rounded-full bg-gradient-to-r ${badgeGradient} text-white text-sm font-black flex items-center justify-center gap-1 shadow-lg ring-[3px] ring-white`}
+      >
+        <span className="text-[10px] leading-none">{badgeIcon}</span>
+        <span>{score}</span>
       </div>
 
       {selectMode && (
@@ -488,7 +494,7 @@ function ScoreModal({
 
 /* ---------------- แท็บ สุ่มชื่อ ---------------- */
 
-type RandomMode = "circle" | "slide" | "card" | "deck";
+type RandomMode = "circle" | "slide" | "card" | "deck" | "stick";
 
 type WheelEntry = {
   id: string;
@@ -507,6 +513,7 @@ const MODE_INFO: Record<RandomMode, { label: string; icon: string; bg: string; t
   slide: { label: "สไลด์สุ่มชื่อ", icon: "🃏", bg: "bg-violet-50", text: "text-violet-700" },
   card: { label: "การ์ดสุ่มชื่อ", icon: "🗂️", bg: "bg-rose-50", text: "text-rose-700" },
   deck: { label: "ไพ่ยิปซีสุ่มชื่อ", icon: "🔮", bg: "bg-teal-50", text: "text-teal-700" },
+  stick: { label: "เสี่ยงเซียมซี", icon: "🎋", bg: "bg-red-50", text: "text-red-700" },
 };
 
 function buildEntries(students: Student[]): WheelEntry[] {
@@ -526,16 +533,19 @@ function RandomPickerTab({
   students,
   mode,
   onOpenScore,
+  scoreModalOpen,
 }: {
   students: Student[];
   mode: RandomMode;
   onOpenScore?: (student: Student) => void;
+  scoreModalOpen?: boolean;
 }) {
   const [entries, setEntries] = useState<WheelEntry[]>(() => buildEntries(students));
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [winner, setWinner] = useState<WheelEntry | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [autoSwap, setAutoSwap] = useState(false);
+  const [scoredWinnerId, setScoredWinnerId] = useState<string | null>(null);
   const autoSwapRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -543,6 +553,11 @@ function RandomPickerTab({
     setRemovedIds(new Set());
     setWinner(null);
   }, [students]);
+
+  // เมื่อได้ผู้ถูกสุ่มคนใหม่ ให้เคลียร์สถานะ "ให้คะแนนแล้ว" ของรอบก่อนหน้า
+  useEffect(() => {
+    setScoredWinnerId(null);
+  }, [winner?.id]);
 
   // สลับชื่ออัตโนมัติ: สุ่มสลับลำดับ entries เป็นระยะ ๆ จนกว่าจะกดปิด
   useEffect(() => {
@@ -600,9 +615,11 @@ function RandomPickerTab({
     setWinner(null);
   }
   function giveScoreToWinner() {
-    if (matchedStudent && onOpenScore) {
+    if (matchedStudent && onOpenScore && winner) {
       onOpenScore(matchedStudent);
-      setWinner(null);
+      setScoredWinnerId(winner.id);
+      // หมายเหตุ: ไม่เคลียร์ winner ที่นี่ เพื่อให้การ์ดผลสุ่มยังอยู่ต่อ
+      // ครูจะเลือก "เก็บไว้" หรือ "เอาออก" เองอีกทีหลังปิดหน้าต่างให้คะแนน
     }
   }
 
@@ -631,6 +648,9 @@ function RandomPickerTab({
           )}
           {mode === "deck" && (
             <DeckPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} removedCount={removedIds.size} />
+          )}
+          {mode === "stick" && (
+            <StickPicker pool={pool} spinning={spinning} setSpinning={setSpinning} setWinner={setWinner} />
           )}
         </div>
 
@@ -689,10 +709,11 @@ function RandomPickerTab({
         </div>
       </div>
 
-      {/* ป๊อปอัพผลการสุ่ม กลางจอ */}
-      {winner && !spinning && (
+      {/* ป๊อปอัพผลการสุ่ม กลางจอ — ยังคงอยู่จนกว่าครูจะเลือก "เก็บไว้" หรือ "เอาออก" เอง
+          (จะซ่อนชั่วคราวระหว่างที่หน้าต่างให้คะแนนเปิดอยู่ แล้วกลับมาแสดงใหม่หลังปิด) */}
+      {winner && !spinning && !scoreModalOpen && (
         <div className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={keepWinnerInPool}>
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center border-4 border-emerald-200" onClick={e => e.stopPropagation()}>
             <p className="text-5xl mb-3">🎉</p>
             {winner.avatar_url ? (
               <img src={winner.avatar_url} className="w-24 h-24 rounded-full object-cover mx-auto border-4 border-emerald-300 mb-3" />
@@ -703,13 +724,19 @@ function RandomPickerTab({
             )}
             <p className="text-2xl font-black text-slate-800">{winner.label}</p>
             <p className="text-slate-400 text-xs font-bold mt-1">คือคนที่ถูกสุ่มเลือก</p>
+            {scoredWinnerId === winner.id && (
+              <p className="mt-2 inline-block px-3 py-1 rounded-full bg-emerald-100 text-emerald-600 text-xs font-black">✅ ให้คะแนนแล้ว</p>
+            )}
 
             <div className={`grid gap-2 mt-6 ${matchedStudent && onOpenScore ? "grid-cols-3" : "grid-cols-2"}`}>
-              <button onClick={keepWinnerInPool} className="py-3 rounded-xl bg-slate-100 text-slate-600 font-black text-xs">
+              <button onClick={keepWinnerInPool} className="py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">
                 เก็บไว้
               </button>
               {matchedStudent && onOpenScore && (
-                <button onClick={giveScoreToWinner} className="py-3 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 text-white font-black text-xs">
+                <button
+                  onClick={giveScoreToWinner}
+                  className="py-3 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 text-white font-black text-xs"
+                >
                   ⭐ ให้คะแนน
                 </button>
               )}
@@ -1208,6 +1235,144 @@ function DeckPicker({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ---------------- โหมดเสี่ยงเซียมซี (เขย่ากระบอก แล้วแตะไม้ที่โผล่ขึ้นมาเพื่อเปิดผล) ---------------- */
+
+function StickPicker({
+  pool, spinning, setSpinning, setWinner,
+}: {
+  pool: WheelEntry[];
+  spinning: boolean;
+  setSpinning: (v: boolean) => void;
+  setWinner: (w: WheelEntry | null) => void;
+}) {
+  const STICK_COUNT = 18;
+  const [shaking, setShaking] = useState(false);
+  const [shakeDeg, setShakeDeg] = useState(0);
+  const [poppedIdx, setPoppedIdx] = useState<number | null>(null);
+  const [revealed, setRevealed] = useState(false);
+  const [drawnEntry, setDrawnEntry] = useState<WheelEntry | null>(null);
+
+  useEffect(() => {
+    setPoppedIdx(null);
+    setRevealed(false);
+    setDrawnEntry(null);
+    setShaking(false);
+  }, [pool]);
+
+  useEffect(() => {
+    if (!shaking) return;
+    const iv = setInterval(() => setShakeDeg(Math.random() * 8 - 4), 55);
+    return () => clearInterval(iv);
+  }, [shaking]);
+
+  function shakeCup() {
+    if (spinning || pool.length === 0) return;
+    setSpinning(true);
+    setShaking(true);
+    setWinner(null);
+    setPoppedIdx(null);
+    setRevealed(false);
+    setDrawnEntry(null);
+    window.setTimeout(() => {
+      setShaking(false);
+      setShakeDeg(0);
+      setPoppedIdx(Math.floor(Math.random() * STICK_COUNT));
+      setSpinning(false);
+    }, 1300);
+  }
+
+  function drawStick() {
+    if (spinning || poppedIdx === null || revealed || pool.length === 0) return;
+    setSpinning(true);
+    const entry = pool[Math.floor(Math.random() * pool.length)];
+    setDrawnEntry(entry);
+    setRevealed(true);
+    window.setTimeout(() => {
+      playRandomResultSound();
+      setWinner(entry);
+      setSpinning(false);
+    }, 650);
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-10 flex flex-col items-center gap-6 w-full max-w-2xl">
+      {pool.length === 0 ? (
+        <p className="text-slate-400 font-bold text-sm py-10">ไม่มีนักเรียนในรายการ</p>
+      ) : (
+        <>
+          <p className="text-slate-400 text-xs font-bold text-center -mb-2">
+            🎋 เขย่ากระบอกให้ไม้เซียมซีโผล่ขึ้นมา 1 อัน แล้วแตะที่ไม้นั้นเพื่อเปิดดูว่าใครถูกเลือก
+          </p>
+          <div
+            className="relative"
+            style={{ transform: `rotate(${shakeDeg}deg)`, transition: shaking ? "none" : "transform 0.2s" }}
+          >
+            <div className="relative w-56 h-64 flex items-end justify-center">
+              {/* ไม้เซียมซีในกระบอก */}
+              <div className="absolute bottom-6 flex items-end justify-center" style={{ width: 210 }}>
+                {Array.from({ length: STICK_COUNT }).map((_, i) => {
+                  const isPopped = poppedIdx === i;
+                  const angle = (i - STICK_COUNT / 2) * 2.4;
+                  const baseHeight = 132 + (i % 5) * 6;
+                  return (
+                    <div
+                      key={i}
+                      onClick={isPopped && !revealed ? drawStick : undefined}
+                      className={`shrink-0 rounded-t-full border border-amber-700/40 shadow-sm transition-all duration-500 ${
+                        isPopped ? "cursor-pointer" : ""
+                      }`}
+                      style={{
+                        width: 7,
+                        height: isPopped ? baseHeight + 55 : baseHeight,
+                        marginLeft: i === 0 ? 0 : -3,
+                        background: "linear-gradient(180deg,#fde68a 0%,#d9a441 70%,#b9812a 100%)",
+                        transform: `rotate(${angle}deg) translateY(${isPopped ? -30 : 0}px)`,
+                        zIndex: isPopped ? 50 : i,
+                        boxShadow: isPopped ? "0 0 16px rgba(251,191,36,0.95)" : undefined,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+              {/* ตัวกระบอกเซียมซี */}
+              <div className="relative w-44 h-40 rounded-b-3xl rounded-t-xl bg-gradient-to-b from-red-500 to-red-700 border-4 border-yellow-400 shadow-xl flex items-start justify-center overflow-hidden">
+                <div className="mt-3 text-yellow-200 text-2xl font-black tracking-widest" style={{ writingMode: "vertical-rl" }}>
+                  籤
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {poppedIdx !== null && !revealed && (
+            <p className="text-amber-600 font-black text-sm animate-pulse">👆 มีไม้เซียมซีโผล่ขึ้นมาแล้ว แตะที่ไม้เพื่อเปิดดูผล</p>
+          )}
+
+          {revealed && drawnEntry && (
+            <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 px-6 py-4 text-center shadow-inner">
+              {drawnEntry.avatar_url ? (
+                <img src={drawnEntry.avatar_url} className="w-16 h-16 rounded-full object-cover mx-auto border-2 border-white shadow" />
+              ) : (
+                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-amber-400 to-red-400 text-white text-xl font-black flex items-center justify-center mx-auto shadow-inner">
+                  {drawnEntry.first_name[0]}
+                </div>
+              )}
+              <p className="font-black text-slate-700 text-sm mt-2">{drawnEntry.label}</p>
+            </div>
+          )}
+
+          <button
+            onClick={shakeCup}
+            disabled={spinning}
+            className="w-full max-w-xs py-4 rounded-xl bg-gradient-to-r from-red-500 to-amber-500 hover:from-red-600 hover:to-amber-600 disabled:opacity-60 text-white font-black text-lg shadow"
+          >
+            {shaking ? "กำลังเขย่า..." : "🎋 เขย่ากระบอกเซียมซี"}
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -2030,7 +2195,7 @@ export default function SmartClassRosterPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24 font-['TH_Sarabun_New',_sans-serif]">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-fuchsia-50/40 pb-24 font-['TH_Sarabun_New',_sans-serif]">
       {showQr && <QrCodeModal inviteUrl={inviteUrl} onClose={() => setShowQr(false)} />}
       {scoreTargets && (
         <ScoreModal
@@ -2221,7 +2386,7 @@ export default function SmartClassRosterPage() {
           </div>
         )}
         {!bannerMenu && !isAdmin && tab === "random" && (
-          <RandomPickerTab students={students} mode={randomMode} onOpenScore={s => setScoreTargets([s])} />
+          <RandomPickerTab students={students} mode={randomMode} onOpenScore={s => setScoreTargets([s])} scoreModalOpen={!!scoreTargets} />
         )}
         {!bannerMenu && !isAdmin && tab === "tools" && (
           <ToolsTab students={students} onOpenTimer={() => setTimerOpen(true)} />
