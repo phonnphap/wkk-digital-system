@@ -474,37 +474,41 @@ function GradeTable({
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 overflow-x-auto">
-      <table className="w-full min-w-[960px] border-collapse">
-        <thead>
-          <tr className="bg-slate-50">
-            <th className="text-left text-[11px] font-black text-slate-500 px-5 py-3 sticky left-0 bg-slate-50 z-10">Name</th>
-            <th className="px-3 py-3 text-center text-[11px] font-black text-slate-400">Report</th>
-            {assignments.map(a => (
-              <th key={a.id} className="px-3 py-3 text-center min-w-[110px]">
-                <p className="text-[11px] font-black text-slate-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
-                <p className="text-[9px] text-slate-300 font-bold">{a.max_score} คะแนนเต็ม</p>
-              </th>
-            ))}
-            {presets.map(p => (
-              <th key={p.id} className="px-3 py-3 text-center min-w-[100px]">
-                <p className="text-[11px] font-black text-sky-600">{p.emoji} {p.label}</p>
-                <p className="text-[9px] text-slate-300 font-bold">คะแนนพิเศษ</p>
-              </th>
-            ))}
-            <th className="px-3 py-3 text-center min-w-[90px]">
-              <p className="text-[11px] font-black text-slate-700">Total Score</p>
-              <p className="text-[9px] text-slate-300 font-bold">({totalMaxScore} คะแนนเต็ม)</p>
+  <div className="bg-white rounded-2xl border border-slate-100 overflow-auto max-h-[75vh]">
+    <table className="w-full min-w-[960px] border-collapse">
+      <thead className="sticky top-0 z-20">
+        <tr className="bg-slate-50">
+          <th className="text-left text-[11px] font-black text-slate-500 px-5 py-3 sticky left-0 top-0 bg-slate-50 z-30">
+            Name
+          </th>
+          <th className="px-3 py-3 text-center text-[11px] font-black text-slate-400 bg-slate-50">
+            Report
+          </th>
+          {assignments.map(a => (
+            <th key={a.id} className="px-3 py-3 text-center min-w-[110px] bg-slate-50">
+              <p className="text-[11px] font-black text-slate-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
+              <p className="text-[9px] text-slate-300 font-bold">{a.max_score} คะแนนเต็ม</p>
             </th>
-            <th className="px-3 py-3 text-center min-w-[70px]">
-              <p className="text-[11px] font-black text-slate-700">Grade</p>
+          ))}
+          {presets.map(p => (
+            <th key={p.id} className="px-3 py-3 text-center min-w-[100px] bg-slate-50">
+              <p className="text-[11px] font-black text-sky-600">{p.emoji} {p.label}</p>
+              <p className="text-[9px] text-slate-300 font-bold">คะแนนพิเศษ</p>
             </th>
-            <th className="px-3 py-3 text-center min-w-[90px]">
-              <p className="text-[11px] font-black text-slate-700">ส่งตรงเวลา</p>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
+          ))}
+          <th className="px-3 py-3 text-center min-w-[90px] bg-slate-50">
+            <p className="text-[11px] font-black text-slate-700">Total Score</p>
+            <p className="text-[9px] text-slate-300 font-bold">({totalMaxScore} คะแนนเต็ม)</p>
+          </th>
+          <th className="px-3 py-3 text-center min-w-[70px] bg-slate-50">
+            <p className="text-[11px] font-black text-slate-700">Grade</p>
+          </th>
+          <th className="px-3 py-3 text-center min-w-[90px] bg-slate-50">
+            <p className="text-[11px] font-black text-slate-700">ส่งตรงเวลา</p>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
           {rows.map(r => {
             const s = r.student;
             return (
