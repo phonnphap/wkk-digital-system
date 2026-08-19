@@ -13,9 +13,23 @@ import InsightsTool from "@/components/insights/InsightsTool";
 
 const supabase = createClient();
 
-type Subject = { id: string; subject_code: string; name_th: string };
+type Subject = {
+  id: string;
+  subject_code: string;
+  name_th: string;
+  subject_type: "basic" | "additional";
+  credit_hours: number | null;
+  hours_per_year: number | null;
+  score_group_code: string | null;
+};
 type Classroom = { id: string; room_name?: string; grade_group?: string };
-type SectionRow = { id: string; join_code: string; classroom_id: string };
+type SectionRow = {
+  id: string;
+  join_code: string;
+  classroom_id: string;
+  student_portal_enabled: boolean;
+  allow_late_submission: boolean;
+};
 type Student = { id: string; prefix?: string; first_name: string; last_name: string; nick_name?: string; seat_number: number; avatar_url?: string };
 type ScorePreset = { id: string; label: string; points: number; emoji: string; sort_order: number };
 
@@ -1854,11 +1868,87 @@ function TotalScoreTab({ students, studentScores }: { students: Student[]; stude
 
 /* ---------------- แท็บ ตั้งค่ารายวิชา (จากเมนูมุมซ้ายล่างของแบนเนอร์) ---------------- */
 
-function SubjectSettingsTab({ subject, classroom }: { subject: Subject | null; classroom: Classroom | null }) {
+function SubjectSettingsTab({
+  subject,
+  classroom,
+  section,
+  readOnly,
+  onSubjectSaved,
+  onSectionSaved,
+}: {
+  subject: Subject | null;
+  classroom: Classroom | null;
+  section: SectionRow;
+  readOnly?: boolean;
+  onSubjectSaved: (updated: Partial<Subject>) => void;
+  onSectionSaved: (updated: Partial<SectionRow>) => void;
+}) {
+  const [subjectType, setSubjectType] = useState<"basic" | "additional">(subject?.subject_type ?? "basic");
+  const [creditHours, setCreditHours] = useState<string>(subject?.credit_hours != null ? String(subject.credit_hours) : "");
+  const [hoursPerYear, setHoursPerYear] = useState<string>(subject?.hours_per_year != null ? String(subject.hours_per_year) : "");
+  const [scoreGroupCode, setScoreGroupCode] = useState<string>(subject?.score_group_code ?? "");
+  const [studentPortalEnabled, setStudentPortalEnabled] = useState<boolean>(section.student_portal_enabled ?? true);
+  const [allowLateSubmission, setAllowLateSubmission] = useState<boolean>(section.allow_late_submission ?? true);
+
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const dirty =
+    subjectType !== (subject?.subject_type ?? "basic") ||
+    creditHours !== (subject?.credit_hours != null ? String(subject.credit_hours) : "") ||
+    hoursPerYear !== (subject?.hours_per_year != null ? String(subject.hours_per_year) : "") ||
+    scoreGroupCode !== (subject?.score_group_code ?? "") ||
+    studentPortalEnabled !== (section.student_portal_enabled ?? true) ||
+    allowLateSubmission !== (section.allow_late_submission ?? true);
+
+  async function handleSave() {
+    if (!subject || readOnly) return;
+    setSaving(true);
+    setError(null);
+
+    const subjectUpdate = {
+      subject_type: subjectType,
+      credit_hours: creditHours.trim() === "" ? null : Number(creditHours),
+      hours_per_year: hoursPerYear.trim() === "" ? null : Number(hoursPerYear),
+      score_group_code: scoreGroupCode.trim() === "" ? null : scoreGroupCode.trim(),
+    };
+    const sectionUpdate = {
+      student_portal_enabled: studentPortalEnabled,
+      allow_late_submission: allowLateSubmission,
+    };
+
+    try {
+      const [{ error: subjErr }, { error: secErr }] = await Promise.all([
+        supabase.from("subjects").update(subjectUpdate).eq("id", subject.id),
+        supabase.from("subject_sections").update(sectionUpdate).eq("id", section.id),
+      ]);
+      if (subjErr) throw subjErr;
+      if (secErr) throw secErr;
+
+      onSubjectSaved(subjectUpdate);
+      onSectionSaved(sectionUpdate);
+      setSavedAt(Date.now());
+    } catch (e: any) {
+      setError(e?.message ?? "บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6">
-      <h2 className="font-black text-slate-700 text-sm flex items-center gap-1.5 mb-4">⚙️ ตั้งค่ารายวิชา</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-black text-slate-700 text-sm flex items-center gap-1.5">⚙️ ตั้งค่ารายวิชา</h2>
+        {readOnly && (
+          <span className="text-[11px] font-black text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full">
+            ดูอย่างเดียว
+          </span>
+        )}
+      </div>
+
+      {/* ข้อมูลพื้นฐาน (แก้ไม่ได้ในหน้านี้) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
         <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
           <p className="text-[10px] font-black text-slate-400">รหัสวิชา</p>
           <p className="text-sm font-black text-slate-700 mt-0.5">{subject?.subject_code ?? "-"}</p>
@@ -1872,10 +1962,136 @@ function SubjectSettingsTab({ subject, classroom }: { subject: Subject | null; c
           <p className="text-sm font-black text-slate-700 mt-0.5">{classroom?.grade_group} {classroom?.room_name}</p>
         </div>
       </div>
-      <div className="rounded-xl border-2 border-dashed border-slate-200 p-6 text-center text-slate-400">
-        <p className="text-2xl mb-1">🚧</p>
-        <p className="font-bold text-xs">ฟีเจอร์ตั้งค่ารายวิชา (แก้ไขชื่อวิชา / ลบวิชา / จัดการผู้ช่วยสอน ฯลฯ) จะเปิดใช้งานเร็ว ๆ นี้</p>
+
+      {/* ฟอร์มแก้ไข */}
+      <div className="space-y-5">
+        {/* ประเภทวิชา */}
+        <div>
+          <p className="text-xs font-black text-slate-500 mb-2">ประเภทวิชา</p>
+          <div className="flex gap-2">
+            {[
+              { key: "basic", label: "รายวิชาพื้นฐาน" },
+              { key: "additional", label: "รายวิชาเพิ่มเติม" },
+            ].map(opt => (
+              <button
+                key={opt.key}
+                type="button"
+                disabled={readOnly}
+                onClick={() => setSubjectType(opt.key as "basic" | "additional")}
+                className={`px-4 py-2 rounded-xl font-black text-xs border-2 transition-colors disabled:opacity-50 ${
+                  subjectType === opt.key
+                    ? "bg-fuchsia-500 border-fuchsia-500 text-white"
+                    : "bg-white border-slate-200 text-slate-500 hover:border-fuchsia-300"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* หน่วยกิต + ชม./ปี */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-xs font-black text-slate-500 mb-2">จำนวนหน่วยกิต</p>
+            <input
+              type="number"
+              step="0.5"
+              min="0"
+              disabled={readOnly}
+              value={creditHours}
+              onChange={e => setCreditHours(e.target.value)}
+              placeholder="เช่น 1.0"
+              className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold disabled:bg-slate-50 disabled:text-slate-400"
+            />
+          </div>
+          <div>
+            <p className="text-xs font-black text-slate-500 mb-2">จำนวนชั่วโมง/ปี</p>
+            <input
+              type="number"
+              min="0"
+              disabled={readOnly}
+              value={hoursPerYear}
+              onChange={e => setHoursPerYear(e.target.value)}
+              placeholder="เช่น 40"
+              className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold disabled:bg-slate-50 disabled:text-slate-400"
+            />
+          </div>
+        </div>
+
+        {/* รหัสกลุ่มรวมคะแนน */}
+        <div>
+          <p className="text-xs font-black text-slate-500 mb-1.5">
+            รหัสกลุ่มรวมคะแนน <span className="font-bold text-slate-400">(ไม่บังคับ)</span>
+          </p>
+          <input
+            type="text"
+            disabled={readOnly}
+            value={scoreGroupCode}
+            onChange={e => setScoreGroupCode(e.target.value)}
+            placeholder="เช่น ART-P1 (ตั้งรหัสเดียวกันในวิชาที่ต้องการรวมคะแนน เช่น ดนตรี+ศิลปะ+นาฏศิลป์)"
+            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold disabled:bg-slate-50 disabled:text-slate-400"
+          />
+          <p className="text-[11px] text-slate-400 font-bold mt-1.5">
+            วิชาที่ตั้งรหัสกลุ่มเดียวกัน ระบบจะนำคะแนนมารวมกันตอนออกเกรดในหน้า "คะแนนรวม"
+          </p>
+        </div>
+
+        <div className="h-px bg-slate-100" />
+
+        {/* การตั้งค่า section: login นักเรียน */}
+        <div className="space-y-3">
+          <p className="text-xs font-black text-slate-500">การเข้าถึงของนักเรียน</p>
+
+          <label className="flex items-center justify-between rounded-xl border-2 border-slate-100 px-4 py-3 cursor-pointer">
+            <div>
+              <p className="text-sm font-black text-slate-700">เปิดให้นักเรียนล็อกอินดู/ส่งงาน</p>
+              <p className="text-[11px] text-slate-400 font-bold mt-0.5">ปิดไว้ถ้ายังไม่พร้อมให้นักเรียนเข้าดูเนื้อหาวิชานี้</p>
+            </div>
+            <input
+              type="checkbox"
+              disabled={readOnly}
+              checked={studentPortalEnabled}
+              onChange={e => setStudentPortalEnabled(e.target.checked)}
+              className="w-5 h-5 accent-fuchsia-500 shrink-0"
+            />
+          </label>
+
+          <label className="flex items-center justify-between rounded-xl border-2 border-slate-100 px-4 py-3 cursor-pointer">
+            <div>
+              <p className="text-sm font-black text-slate-700">อนุญาตให้ส่งงานย้อนหลัง (ส่งช้า)</p>
+              <p className="text-[11px] text-slate-400 font-bold mt-0.5">ถ้าปิด นักเรียนจะส่งงานไม่ได้หลังพ้นกำหนดส่ง</p>
+            </div>
+            <input
+              type="checkbox"
+              disabled={readOnly}
+              checked={allowLateSubmission}
+              onChange={e => setAllowLateSubmission(e.target.checked)}
+              className="w-5 h-5 accent-fuchsia-500 shrink-0"
+            />
+          </label>
+        </div>
       </div>
+
+      {error && (
+        <p className="mt-4 text-xs font-black text-red-500 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>
+      )}
+
+      {!readOnly && (
+        <div className="flex items-center gap-3 mt-6">
+          <button
+            onClick={handleSave}
+            disabled={saving || !dirty}
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-sm shadow"
+          >
+            {saving ? "กำลังบันทึก..." : "💾 บันทึกการตั้งค่า"}
+          </button>
+          {!dirty && savedAt && (
+            <span className="text-xs font-black text-emerald-500">✅ บันทึกแล้ว</span>
+          )}
+          {dirty && <span className="text-xs font-bold text-amber-500">มีการแก้ไขที่ยังไม่ได้บันทึก</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -1963,11 +2179,15 @@ export default function SmartClassRosterPage() {
       if (!sectionId) return;
 
       const { data: sec } = await supabase
-        .from("subject_sections").select("id, join_code, classroom_id").eq("id", sectionId).maybeSingle();
-      setSection(sec as SectionRow);
+  .from("subject_sections")
+  .select("id, join_code, classroom_id, student_portal_enabled, allow_late_submission")
+  .eq("id", sectionId).maybeSingle();
+setSection(sec as SectionRow);
 
-      const [{ data: subj }, { data: room }] = await Promise.all([
-        supabase.from("subjects").select("id, subject_code, name_th").eq("id", subjectId).maybeSingle(),
+const [{ data: subj }, { data: room }] = await Promise.all([
+  supabase.from("subjects")
+    .select("id, subject_code, name_th, subject_type, credit_hours, hours_per_year, score_group_code")
+    .eq("id", subjectId).maybeSingle(),
         sec?.classroom_id
           ? supabase.from("classrooms").select("id, room_name, grade_group").eq("id", sec.classroom_id).maybeSingle()
           : Promise.resolve({ data: null }),
@@ -2307,6 +2527,16 @@ export default function SmartClassRosterPage() {
             readOnly={isAdmin}
           />
         )}
+        {bannerMenu === "settings" && section && subject && (
+  <SubjectSettingsTab
+    subject={subject}
+    classroom={classroom}
+    section={section}
+    readOnly={isAdmin}
+    onSubjectSaved={(updated) => setSubject(prev => prev ? { ...prev, ...updated } : prev)}
+    onSectionSaved={(updated) => setSection(prev => prev ? { ...prev, ...updated } : prev)}
+  />
+)}
         {!bannerMenu && !isAdmin && tab === "roster" && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 w-full">
             <div className="flex items-center justify-between flex-wrap gap-2 mb-5">
