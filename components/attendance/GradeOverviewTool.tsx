@@ -545,11 +545,11 @@ function GradeTable({
   </th>
 ))}
 <th className="px-3 py-3 text-center min-w-[100px] bg-emerald-50/70">
-  <p className="text-[11px] font-black text-emerald-700">Total Score</p>
+  <p className="text-[11px] font-black text-emerald-700">รวม</p>
   <p className="text-[9px] text-emerald-400 font-bold">เต็ม {totalMaxScore} คะแนน</p>
 </th>
 <th className="px-3 py-3 text-center min-w-[70px] bg-fuchsia-50/70">
-  <p className="text-[11px] font-black text-fuchsia-700">Grade</p>
+  <p className="text-[11px] font-black text-fuchsia-700">ระดับผลการเรียน</p>
 </th>
 <th className="px-3 py-3 text-center min-w-[90px] bg-amber-50/70">
   <p className="text-[11px] font-black text-amber-700">ส่งตรงเวลา</p>

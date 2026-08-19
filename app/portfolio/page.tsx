@@ -61,7 +61,11 @@ type AttendanceRow = {
 
 const LEAVE_LABEL: Record<string, string> = { sick: "ลาป่วย", personal: "ลากิจ", maternity: "ลาคลอด" };
 
-// ── คำในหมายเหตุที่ "ไม่ถือว่าลา" (เช่น กิจกรรมของหน่วยงานภายนอก) — ปรับ/เพิ่มคำได้ตามจริง ──
+// ═══════════════════════════════════════════════════════════════════════
+// คำในหมายเหตุ (note) และเงื่อนไขพิเศษต่าง ๆ
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── คำในหมายเหตุที่ "ไม่ถือว่าลา/ขาดงาน" (เช่น กิจกรรมของหน่วยงานภายนอก) — ปรับ/เพิ่มคำได้ตามจริง ──
 const EXCUSED_NOTE_KEYWORDS = ["ฉีดพ่นหมอกควัน", "เทศบาล"];
 function isExcusedNote(note: string | null | undefined): boolean {
   if (!note) return false;
@@ -82,20 +86,138 @@ function isMeetingExcuseNote(note: string | null | undefined): boolean {
   return MEETING_EXCUSE_KEYWORDS.some((kw) => note.includes(kw));
 }
 
+// ── คำในหมายเหตุที่ "ไม่ต้องแสดงสถานะไม่แสกนนิ้ว" ทั้งฝั่งเข้า-ออก
+//    เพราะเป็นภารกิจนอกโรงเรียน/มีเหตุสุดวิสัยที่ได้รับอนุญาตแล้ว (รวมผู้ยื่นขอไปและผู้ร่วมเดินทาง) ──
+const NO_SCAN_EXEMPT_KEYWORDS = [
+  "ประชุมครู",
+  "ประชุม",
+  "ราชการ",
+  "ทัศนศึกษา",
+  "เข้าค่าย",
+  "ลากิจ",
+  "ลาป่วย",
+  "ไฟดับ",
+  "เทศบาล",
+  "ฉีดพ่นหมอกควัน",
+];
+function isNoScanExemptNote(note: string | null | undefined): boolean {
+  if (!note) return false;
+  return NO_SCAN_EXEMPT_KEYWORDS.some((kw) => note.includes(kw));
+}
+
+// ── ขออนุญาตออกก่อนเวลา ไม่เกิน 3 ชม. ก่อน 16.30 น. (คือตั้งแต่ 13.30 น. เป็นต้นไป) ไม่ถือว่า "กลับก่อน" ──
+const EARLY_LEAVE_PERMIT_KEYWORDS = ["ขออนุญาตออกก่อน", "ขออนุญาต ออกก่อน", "ออกก่อนเวลา"];
+function isEarlyLeavePermitNote(note: string | null | undefined): boolean {
+  if (!note) return false;
+  return EARLY_LEAVE_PERMIT_KEYWORDS.some((kw) => note.includes(kw));
+}
+
+// ── ขออนุญาต(เช้า): แสกนนิ้วช้ากว่า 07.45 น. แต่ไม่เกิน 08.45 น. ไม่ถือว่า "มาสาย" ──
+const MORNING_LATE_PERMIT_KEYWORDS = ["ขออนุญาต(เช้า)", "ขออนุญาต (เช้า)", "ขออนุญาตเช้า"];
+function isMorningLatePermitNote(note: string | null | undefined): boolean {
+  if (!note) return false;
+  return MORNING_LATE_PERMIT_KEYWORDS.some((kw) => note.includes(kw));
+}
+
+// ── เยี่ยมบ้าน: กลับก่อนเวลา 16.30 น. ไม่ถือว่า "กลับก่อนเวลา" ──
+const HOME_VISIT_KEYWORDS = ["เยี่ยมบ้าน"];
+function isHomeVisitNote(note: string | null | undefined): boolean {
+  if (!note) return false;
+  return HOME_VISIT_KEYWORDS.some((kw) => note.includes(kw));
+}
+
+// ── ลาครึ่งวัน: ใช้ร่วมกับ ไปราชการ/ลากิจ/ลาป่วย — ลาครึ่งเช้าต้องแสกน "กลับ" ตามปกติ (ไม่นับแสกนมา)
+//    ลาครึ่งบ่ายต้องแสกน "เข้า" ตามปกติ (ไม่นับแสกนกลับ) ──
+const HALF_DAY_MORNING_KEYWORDS = ["ครึ่งเช้า", "ครึ่งวันเช้า"];
+const HALF_DAY_AFTERNOON_KEYWORDS = ["ครึ่งบ่าย", "ครึ่งวันบ่าย"];
+function isHalfDayMorningLeave(note: string | null | undefined): boolean {
+  if (!note) return false;
+  return HALF_DAY_MORNING_KEYWORDS.some((kw) => note.includes(kw));
+}
+function isHalfDayAfternoonLeave(note: string | null | undefined): boolean {
+  if (!note) return false;
+  return HALF_DAY_AFTERNOON_KEYWORDS.some((kw) => note.includes(kw));
+}
+
+// ── แปลงเวลา "HH:mm[:ss]" เป็นจำนวนนาที เพื่อใช้เทียบช่วงเวลาที่ได้รับอนุญาตพิเศษ ──
+function timeToMinutes(t: string | null | undefined): number | null {
+  if (!t) return null;
+  const parts = t.split(":");
+  if (parts.length < 2) return null;
+  const h = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+const STANDARD_END_MINUTES = 16 * 60 + 30; // 16.30 น.
+const MORNING_LATE_PERMIT_START_MINUTES = 7 * 60 + 45; // 07.45 น.
+const MORNING_LATE_PERMIT_END_MINUTES = 8 * 60 + 45; // 08.45 น.
+const EARLY_LEAVE_PERMIT_START_MINUTES = STANDARD_END_MINUTES - 3 * 60; // 13.30 น. (ก่อน 16.30 ไม่เกิน 3 ชม.)
+
+// ── เช็คว่าเวลาเข้าอยู่ในช่วงที่ "ขออนุญาต(เช้า)" คุ้มครอง (ช้ากว่า 07.45 แต่ไม่เกิน 08.45) ──
+function withinMorningLatePermitWindow(checkInTime: string | null | undefined): boolean {
+  const mins = timeToMinutes(checkInTime);
+  if (mins === null) return false;
+  return mins > MORNING_LATE_PERMIT_START_MINUTES && mins <= MORNING_LATE_PERMIT_END_MINUTES;
+}
+
+// ── เช็คว่าเวลาออกอยู่ในช่วงที่ "ขออนุญาตออกก่อน" คุ้มครอง (13.30 - 16.30 น.) ──
+function withinEarlyLeavePermitWindow(checkOutTime: string | null | undefined): boolean {
+  const mins = timeToMinutes(checkOutTime);
+  if (mins === null) return false;
+  return mins >= EARLY_LEAVE_PERMIT_START_MINUTES && mins <= STANDARD_END_MINUTES;
+}
+
+// ── เช็คว่าเวลาออกอยู่ก่อนเวลาเลิกงานมาตรฐาน (16.30 น.) — ใช้กับกรณี "เยี่ยมบ้าน" ──
+function isBeforeStandardEndTime(checkOutTime: string | null | undefined): boolean {
+  const mins = timeToMinutes(checkOutTime);
+  if (mins === null) return false;
+  return mins <= STANDARD_END_MINUTES;
+}
+
+// ── รวมเป็นฟังก์ชันเดียว: เวลาออกนี้ควรนับเป็น "กลับตรงเวลา" (ไม่ใช่กลับก่อน) หรือไม่ ตามเงื่อนไขที่ขออนุญาตไว้ ──
+function isEarlyLeaveExempted(note: string | null | undefined, checkOutTime: string | null | undefined): boolean {
+  if (isEarlyLeavePermitNote(note) && withinEarlyLeavePermitWindow(checkOutTime)) return true;
+  if (isHomeVisitNote(note) && isBeforeStandardEndTime(checkOutTime)) return true;
+  return false;
+}
+
+// ── รวมเป็นฟังก์ชันเดียว: เวลาเข้านี้ควรนับว่า "มาปฏิบัติงาน" (ไม่ใช่มาสาย) หรือไม่ ตามเงื่อนไขที่ขออนุญาตไว้ ──
+function isMorningLateExempted(note: string | null | undefined, checkInTime: string | null | undefined): boolean {
+  return isMorningLatePermitNote(note) && withinMorningLatePermitWindow(checkInTime);
+}
+
+// ── ไม่แสดง "ไม่แสกนมา" ฝั่งเข้า เมื่อหมายเหตุเข้าเงื่อนไขยกเว้น (ยกเว้นกรณีลาครึ่งบ่าย ซึ่งช่วงเช้ายังต้องแสกนเข้าปกติ) ──
+function isNoScanInExempted(note: string | null | undefined): boolean {
+  if (!note) return false;
+  if (isHalfDayAfternoonLeave(note)) return false;
+  return isNoScanExemptNote(note);
+}
+
+// ── ไม่แสดง "ไม่แสกนกลับ" ฝั่งออก เมื่อหมายเหตุเข้าเงื่อนไขยกเว้น (ยกเว้นกรณีลาครึ่งเช้า ซึ่งช่วงบ่ายยังต้องแสกนออกปกติ) ──
+function isNoScanOutExempted(note: string | null | undefined): boolean {
+  if (!note) return false;
+  if (isHalfDayMorningLeave(note)) return false;
+  return isNoScanExemptNote(note);
+}
+
 // ── ตัดสินว่า "ไม่แสกนมา" (checkIn ขาดหาย) — เข้าเงื่อนไขนี้เมื่อไม่มีเวลาเข้า, ไม่ได้ลา,
-//    และไม่มีหมายเหตุเลย หรือมีหมายเหตุที่บ่งชี้ว่ามาทำงานจริงแต่ไม่ได้สแกน ──
+//    ไม่เข้าเงื่อนไขยกเว้น และไม่มีหมายเหตุเลย หรือมีหมายเหตุที่บ่งชี้ว่ามาทำงานจริงแต่ไม่ได้สแกน ──
 function isNoScanIn(row: { check_in_time: string | null; note: string | null; status: string | null }, onLeave: boolean): boolean {
   if (row.check_in_time) return false;
   if (onLeave || row.status === "leave") return false;
+  if (isNoScanInExempted(row.note)) return false;
   if (!row.note) return true;
   return isNoScanNote(row.note);
 }
 
-// ── ตัดสินว่า "ไม่แสกนกลับ" (checkOut ขาดหาย) — เงื่อนไขเดียวกันฝั่งขาออก (ยกเว้นกรณีหมายเหตุประชุม/ราชการ) ──
+// ── ตัดสินว่า "ไม่แสกนกลับ" (checkOut ขาดหาย) — เงื่อนไขเดียวกันฝั่งขาออก (ยกเว้นกรณีหมายเหตุประชุม/ราชการ ฯลฯ) ──
 function isNoScanOut(row: { check_out_time: string | null; note: string | null; status: string | null }, onLeave: boolean): boolean {
   if (row.check_out_time) return false;
   if (onLeave || row.status === "leave") return false;
-  if (isMeetingExcuseNote(row.note)) return false; // นับเป็นกลับตรงเวลาแทน ไม่ใช่ไม่แสกน
+  if (isMeetingExcuseNote(row.note) && !isHalfDayMorningLeave(row.note)) return false; // นับเป็นกลับตรงเวลาแทน ไม่ใช่ไม่แสกน
+  if (isNoScanOutExempted(row.note)) return false;
   if (!row.note) return true;
   return isNoScanNote(row.note);
 }
@@ -175,13 +297,35 @@ async function fetchAttendanceTimes(supabase: any, userId: string, fy: number): 
   return map;
 }
 
+// ── เทียบข้อความหมายเหตุแบบ "ตัดช่องว่างหัวท้าย + ไม่สนตัวพิมพ์เล็กใหญ่" เพื่อใช้ตัดข้อความซ้ำ ──
+function normalizeNoteText(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+// ── รวมชิ้นส่วนหมายเหตุจากหลายแหล่ง (leave_reason, note ของ enriched, note ของเครื่องสแกน)
+//    โดยตัดข้อความที่ซ้ำกัน (คำเดียวกันเป๊ะ หรือชิ้นหนึ่งเป็นส่วนหนึ่งของอีกชิ้น) ออก ไม่ให้ขึ้นซ้ำ ──
+function dedupeNoteParts(parts: (string | null | undefined)[]): string[] {
+  const cleaned = parts.map((p) => (p ?? "").trim()).filter(Boolean);
+  const result: string[] = [];
+  const seen: string[] = []; // เก็บ normalized text ของสิ่งที่เก็บไว้แล้ว
+  for (const part of cleaned) {
+    const norm = normalizeNoteText(part);
+    const isDuplicate = seen.some((s) => s === norm || s.includes(norm) || norm.includes(s));
+    if (isDuplicate) continue;
+    result.push(part);
+    seen.push(norm);
+  }
+  return result;
+}
+
 // ── รวม 2 แหล่งข้อมูลเป็น AttendanceRow เดียว โดยยึด union ของวันที่ทั้งสองฝั่ง ──
 function mergeAttendance(enrichedMap: Map<string, any>, timesMap: Map<string, any>): AttendanceRow[] {
   const allDates = new Set<string>([...enrichedMap.keys(), ...timesMap.keys()]);
   return Array.from(allDates).map((date) => {
     const e = enrichedMap.get(date);
     const t = timesMap.get(date);
-    const noteParts = [e?.leave_reason, e?.note, t?.note].filter(Boolean);
+    // ★ ตัดหมายเหตุที่ซ้ำกันออก ป้องกันข้อความ "ขึ้น 2 รอบ" เมื่อ leave_reason/note/note เครื่องสแกน มีข้อความเดียวกัน
+    const noteParts = dedupeNoteParts([e?.leave_reason, e?.note, t?.note]);
     return {
       work_date: date,
       status: e?.status ?? null,
@@ -221,27 +365,29 @@ async function fetchApprovedLeaveDates(supabase: any, userId: string): Promise<S
   }
 }
 
-// ── รวมข้อความหมายเหตุ + สถานะการลาในระบบ ──
+// ── รวมข้อความหมายเหตุ + สถานะการลาในระบบ (ตัดข้อความซ้ำอีกชั้น กันกรณี note มีคำว่า "ลาในระบบแล้ว" ติดมาแล้ว) ──
 function buildRemark(note: string | null | undefined, onLeave: boolean): string | null {
-  const parts: string[] = [];
-  if (note) parts.push(note);
-  if (onLeave) parts.push("ลาในระบบแล้ว");
+  const parts = dedupeNoteParts([note, onLeave ? "ลาในระบบแล้ว" : null]);
   return parts.length ? parts.join(" · ") : null;
 }
 
 // ── สถานะกล่อง "มา" มุมมองรายวัน ──
 function dayCheckInInfo(row: AttendanceRow | null | undefined, onLeave: boolean) {
   if (!row?.check_in_time) {
-    // ลำดับความสำคัญ: ลา > ไม่แสกน > ไม่ได้ลงเวลา
+    // ลำดับความสำคัญ: ลา > ยกเว้นตามภารกิจ (ราชการ/ทัศนศึกษา/เข้าค่าย/ลากิจ/ลาป่วย/ไฟดับ ฯลฯ) > ไม่แสกน > ไม่ได้ลงเวลา
     if (onLeave || row?.status === "leave") {
       return { time: null as string | null, label: "ลา", tone: "blue" as Tone };
+    }
+    if (isNoScanInExempted(row?.note)) {
+      return { time: null as string | null, label: "ปฏิบัติงานตามภารกิจ", tone: "green" as Tone };
     }
     if (isNoScanIn({ check_in_time: row?.check_in_time ?? null, note: row?.note ?? null, status: row?.status ?? null }, onLeave)) {
       return { time: null as string | null, label: "ไม่แสกนมา", tone: "purple" as Tone };
     }
     return { time: null as string | null, label: "ไม่ได้ลงเวลาเข้า", tone: "red" as Tone };
   }
-  const isLate = row.status === "late" || row.status === "late_and_left_early";
+  const isLateRaw = row.status === "late" || row.status === "late_and_left_early";
+  const isLate = isLateRaw && !isMorningLateExempted(row.note, row.check_in_time);
   return {
     time: formatTimeHHmm(row.check_in_time),
     label: isLate ? `มาปฏิบัติงานสาย${row.late_minutes ? ` (${row.late_minutes} นาที)` : ""}` : "มาปฏิบัติงาน",
@@ -252,19 +398,23 @@ function dayCheckInInfo(row: AttendanceRow | null | undefined, onLeave: boolean)
 // ── สถานะกล่อง "กลับ" มุมมองรายวัน ──
 function dayCheckOutInfo(row: AttendanceRow | null | undefined, onLeave: boolean) {
   if (!row?.check_out_time) {
-    // ลำดับความสำคัญ: ลา > ประชุม/ราชการ (ถือว่ากลับตรงเวลา) > ไม่แสกน > ไม่ได้ลงเวลา
+    // ลำดับความสำคัญ: ลา > ประชุม/ราชการ (ถือว่ากลับตรงเวลา) > ยกเว้นตามภารกิจ > ไม่แสกน > ไม่ได้ลงเวลา
     if (onLeave || row?.status === "leave") {
       return { time: null as string | null, label: "ลา", tone: "blue" as Tone };
     }
-    if (isMeetingExcuseNote(row?.note)) {
+    if (isMeetingExcuseNote(row?.note) && !isHalfDayMorningLeave(row?.note)) {
       return { time: null as string | null, label: "กลับตรงเวลา", tone: "green" as Tone };
+    }
+    if (isNoScanOutExempted(row?.note)) {
+      return { time: null as string | null, label: "ปฏิบัติงานตามภารกิจ", tone: "green" as Tone };
     }
     if (isNoScanOut({ check_out_time: row?.check_out_time ?? null, note: row?.note ?? null, status: row?.status ?? null }, onLeave)) {
       return { time: null as string | null, label: "ไม่แสกนกลับ", tone: "purple" as Tone };
     }
     return { time: null as string | null, label: "ไม่ได้ลงเวลากลับ", tone: "red" as Tone };
   }
-  const isEarly = row.status === "left_early" || row.status === "late_and_left_early";
+  const isEarlyRaw = row.status === "left_early" || row.status === "late_and_left_early";
+  const isEarly = isEarlyRaw && !isEarlyLeaveExempted(row.note, row.check_out_time);
   return {
     time: formatTimeHHmm(row.check_out_time),
     label: isEarly ? `กลับก่อนเวลา${row.early_leave_minutes ? ` (${row.early_leave_minutes} นาที)` : ""}` : "กลับตรงเวลา",
@@ -276,10 +426,12 @@ function dayCheckOutInfo(row: AttendanceRow | null | undefined, onLeave: boolean
 function monthlyCheckInStatus(row: { check_in_time: string | null; status: string | null; late_minutes: number; note: string | null }, onLeave: boolean) {
   if (!row.check_in_time) {
     if (onLeave || row.status === "leave") return { text: "ลา", tone: "blue" as Tone };
+    if (isNoScanInExempted(row.note)) return { text: "ตามภารกิจ", tone: "green" as Tone };
     if (isNoScanIn(row, onLeave)) return { text: "ไม่แสกนมา", tone: "purple" as Tone };
     return { text: "ไม่ลงเวลา", tone: "red" as Tone };
   }
-  const isLate = row.status === "late" || row.status === "late_and_left_early";
+  const isLateRaw = row.status === "late" || row.status === "late_and_left_early";
+  const isLate = isLateRaw && !isMorningLateExempted(row.note, row.check_in_time);
   if (isLate) return { text: `สาย${row.late_minutes ? ` ${row.late_minutes} นาที` : ""}`, tone: "orange" as Tone };
   return { text: "มาปฏิบัติงาน", tone: "green" as Tone };
 }
@@ -288,11 +440,13 @@ function monthlyCheckInStatus(row: { check_in_time: string | null; status: strin
 function monthlyCheckOutStatus(row: { check_out_time: string | null; status: string | null; note: string | null }, onLeave: boolean) {
   if (!row.check_out_time) {
     if (onLeave || row.status === "leave") return { text: "ลา", tone: "blue" as Tone };
-    if (isMeetingExcuseNote(row.note)) return { text: "กลับตรงเวลา", tone: "green" as Tone };
+    if (isMeetingExcuseNote(row.note) && !isHalfDayMorningLeave(row.note)) return { text: "กลับตรงเวลา", tone: "green" as Tone };
+    if (isNoScanOutExempted(row.note)) return { text: "ตามภารกิจ", tone: "green" as Tone };
     if (isNoScanOut(row, onLeave)) return { text: "ไม่แสกนกลับ", tone: "purple" as Tone };
     return { text: "ยังไม่ออกงาน", tone: "slate" as Tone };
   }
-  const isEarly = row.status === "left_early" || row.status === "late_and_left_early";
+  const isEarlyRaw = row.status === "left_early" || row.status === "late_and_left_early";
+  const isEarly = isEarlyRaw && !isEarlyLeaveExempted(row.note, row.check_out_time);
   if (isEarly) return { text: "กลับก่อนเวลา", tone: "orange" as Tone };
   return { text: "ออกงานแล้ว", tone: "green" as Tone };
 }
@@ -347,9 +501,11 @@ export default function TeacherPortfolioPage() {
     { check_out_time: selectedDayRow?.check_out_time ?? null, note: selectedDayRow?.note ?? null, status: selectedDayRow?.status ?? null },
     selectedOnLeave
   );
-  const selectedMeetingExcuse = isMeetingExcuseNote(selectedDayRow?.note);
+  const selectedMeetingExcuse = isMeetingExcuseNote(selectedDayRow?.note) && !isHalfDayMorningLeave(selectedDayRow?.note);
+  const selectedNoScanExemptIn = isNoScanInExempted(selectedDayRow?.note);
+  const selectedNoScanExemptOut = isNoScanOutExempted(selectedDayRow?.note);
   const selectedIsHoliday = !!isHoliday(selectedDay, holidayMap);
-  // ★ "ขาดงาน" เฉพาะกรณีที่ระบบประมวลผลวันนั้นแล้ว ไม่มีเวลาเข้า-ออก ไม่ได้ลา และ "มีหมายเหตุที่ไม่ใช่กรณีไม่แสกน/ประชุม"
+  // ★ "ขาดงาน" เฉพาะกรณีที่ระบบประมวลผลวันนั้นแล้ว ไม่มีเวลาเข้า-ออก ไม่ได้ลา และ "มีหมายเหตุที่ไม่ใช่กรณีไม่แสกน/ประชุม/ยกเว้นตามภารกิจ"
   //    (ถ้าไม่มีหมายเหตุเลย ให้ถือเป็น "ไม่แสกนมา/ไม่แสกนกลับ" ไม่ใช่ขาดงาน — ต้องรอการยืนยัน)
   const selectedDayIsAbsent =
   !selectedIsHoliday &&   
@@ -361,7 +517,9 @@ export default function TeacherPortfolioPage() {
     !!selectedDayRow?.note &&
     !selectedNoScanIn &&
     !selectedNoScanOut &&
-    !selectedMeetingExcuse;
+    !selectedMeetingExcuse &&
+    !selectedNoScanExemptIn &&
+    !selectedNoScanExemptOut;
   // ★ "รอข้อมูล" คือยังไม่มี enriched row เข้ามาเลยสำหรับวันนั้น (ระบบยังไม่ประมวลผล/ยังไม่ sync)
   const selectedDayIsPending = !selectedIsHoliday &&  !selectedHasEnrichedRow && !selectedOnLeave && selectedDay <= todayStr;
   const selectedRemark = buildRemark(selectedDayRow?.note, selectedOnLeave);
@@ -385,13 +543,14 @@ export default function TeacherPortfolioPage() {
       // ★ นับ "ไม่แสกนมา" / "ไม่แสกนกลับ" แยกฝั่งเข้า-ออก จากทุกแถวที่ประมวลผลแล้ว (ไม่ผูกกับ status field)
       const noScanInCount = rows.filter((r) => r.hasEnrichedRow && isNoScanIn(r, onLeaveDates.has(r.work_date))).length;
       const noScanOutCount = rows.filter((r) => r.hasEnrichedRow && isNoScanOut(r, onLeaveDates.has(r.work_date))).length;
-      // ★ ขาดงานจริง = ไม่มีเวลาเข้า-ออกเลย ไม่ได้ลา และมีหมายเหตุที่ไม่ใช่กรณีไม่แสกน/ประชุม
+      // ★ ขาดงานจริง = ไม่มีเวลาเข้า-ออกเลย ไม่ได้ลา และมีหมายเหตุที่ไม่ใช่กรณีไม่แสกน/ประชุม/ยกเว้นตามภารกิจ
       const absentCount = rows.filter((r) => {
         const onLeave = onLeaveDates.has(r.work_date);
         if (!r.hasEnrichedRow || onLeave || r.status === "leave") return false;
         if (r.check_in_time || r.check_out_time) return false;
         if (!r.note) return false;
-        if (isMeetingExcuseNote(r.note)) return false;
+        if (isMeetingExcuseNote(r.note) && !isHalfDayMorningLeave(r.note)) return false;
+        if (isNoScanInExempted(r.note) || isNoScanOutExempted(r.note)) return false;
         return !isNoScanNote(r.note);
       }).length;
 
@@ -927,8 +1086,10 @@ export default function TeacherPortfolioPage() {
                       const dayHoliday = isHoliday(dateStr, holidayMap);  
                       const noScanInRow = isNoScanIn(d, onLeave);
                       const noScanOutRow = isNoScanOut(d, onLeave);
-                      const meetingExcuseRow = isMeetingExcuseNote(d.note);
-                      // ★ แยก "รอข้อมูล" / "ขาดงานจริง (มีหมายเหตุ ไม่ใช่กรณีไม่แสกน/ประชุม)" ออกจากการแสดงเวลาแบบปกติ
+                      const meetingExcuseRow = isMeetingExcuseNote(d.note) && !isHalfDayMorningLeave(d.note);
+                      const noScanExemptInRow = isNoScanInExempted(d.note);
+                      const noScanExemptOutRow = isNoScanOutExempted(d.note);
+                      // ★ แยก "รอข้อมูล" / "ขาดงานจริง (มีหมายเหตุ ไม่ใช่กรณีไม่แสกน/ประชุม/ยกเว้นตามภารกิจ)" ออกจากการแสดงเวลาแบบปกติ
                       const isPendingRow = !isWeekend && !isFuture && !d.hasEnrichedRow && !onLeave;
                       const isAbsentRow =
                         !isWeekend &&
@@ -941,7 +1102,9 @@ export default function TeacherPortfolioPage() {
                         !!d.note &&
                         !noScanInRow &&
                         !noScanOutRow &&
-                        !meetingExcuseRow;
+                        !meetingExcuseRow &&
+                        !noScanExemptInRow &&
+                        !noScanExemptOutRow;
 
                       const inStatus = monthlyCheckInStatus(d, onLeave);
                       const outStatus = monthlyCheckOutStatus(d, onLeave);
