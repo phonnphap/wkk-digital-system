@@ -38,6 +38,13 @@ function toThaiDateLong(iso: string) {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString("th-TH", { day:"numeric", month:"long", year:"numeric", timeZone:"Asia/Bangkok" });
 }
+function toThaiDateTime(iso: string) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("th-TH", {
+    day:"numeric", month:"short", year:"numeric",
+    hour:"2-digit", minute:"2-digit", timeZone:"Asia/Bangkok",
+  });
+}
 function fiscalYearLabel(fy: number) { return `ปีงบประมาณ ${fy + 543}`; }
 function daysBetween(s: string, e: string) { return Math.max(Math.round((new Date(e).getTime()-new Date(s).getTime())/86400000)+1,0); }
 function fullName(u: any) {
@@ -47,7 +54,7 @@ function fullName(u: any) {
 }
 function displayName(u: any) {
   if (!u) return "";
-  return `${u.title??""} ${u.first_name??""} ${u.last_name??""}`.replace(/\s+/g," ").trim();
+  return `${u.title??""}${u.first_name??""} ${u.last_name??""}`.replace(/\s+/g," ").trim();
 }
 function getEvalRound(d: string): "1"|"2" { const m=new Date(d).getMonth()+1; return m>=10||m<=3?"1":"2"; }
 function isPersonalTooSoon(startDate: string): boolean {
@@ -673,10 +680,10 @@ function buildLeaveHTML(
   documentUrl?: string,
   leaveStats?: LeaveStats
 ): string {
-  const now = new Date();
-  const thDay   = now.getDate();
-  const thMonth = now.toLocaleDateString("th-TH",{ month:"long", timeZone:"Asia/Bangkok" });
-  const thYear  = now.getFullYear()+543;
+  const docDate = data.createdAt ? new Date(data.createdAt) : new Date();
+  const thDay   = docDate.getDate();
+  const thMonth = docDate.toLocaleDateString("th-TH",{ month:"long", timeZone:"Asia/Bangkok" });
+  const thYear  = docDate.getFullYear()+543;
 
   const isSick     = data.leaveType==="sick";
   const isPersonal = data.leaveType==="personal"||data.leaveType==="other"||data.leaveType==="ordination";
@@ -688,9 +695,22 @@ function buildLeaveHTML(
   const leaveLabel  = data.leaveType==="other"&&data.otherLeaveName?data.otherLeaveName:data.leaveTypeName;
   const reasonClean = (data.reason||"").replace(/\[.+?\]/g,"").trim();
 
-  // ✅ lastLeave สำหรับ "ข้าพเจ้าได้ลา...ครั้งสุดท้าย"
+  // ── ข้อมูล "ไปราชการ" ที่ฝังมาใน reason ผ่าน marker [ ] ──
+  const purposeText     = (data.reason||"").match(/\[วัตถุประสงค์: (.+?)\]/)?.[1] || "";
+  const destText        = (data.reason||"").match(/\[ปลายทาง: (.+?)\]/)?.[1] || "";
+  const orderFromText   = (data.reason||"").match(/\[คำสั่งจาก: (.+?)\]/)?.[1] || "";
+  const orderNumberText = (data.reason||"").match(/\[คำสั่งเลขที่: (.+?)\]/)?.[1] || "";
+  const orderDateText   = (data.reason||"").match(/\[คำสั่งวันที่: (.+?)\]/)?.[1] || "";
+  const vehicleText     = (data.reason||"").match(/\[พาหนะ: (.+?)\]/)?.[1] || "";
+  const companionText   = (data.reason||"").match(/\[ผู้ร่วมเดินทาง: (.+?)\]/)?.[1] || "";
+  const companionCount  = companionText && companionText !== "-" ? companionText.split(",").length : 0;
+  const isMeetingPurpose = purposeText.startsWith("เข้าร่วมประชุม");
+  const isStudyPurpose   = purposeText.startsWith("ศึกษาดูงาน");
+  const isSpeakerPurpose = purposeText.startsWith("เป็นวิทยากร");
+  const isOtherPurpose   = purposeText.startsWith("อื่นๆ");
+  const otherPurposeText = isOtherPurpose ? purposeText.replace(/^อื่นๆ\s*\(ระบุ\)\s*/,"") : "";
+
   const last = leaveStats?.lastLeave ?? null;
-  // lastIsPersonal: sick=ลาป่วย, personal/other/ordination=ลากิจ, maternity=ลาคลอด
   const lastIsSick     = last?.type === "sick";
   const lastIsPersonal = last ? ["personal","other","ordination"].includes(last.type) : false;
   const lastIsMat      = last?.type === "maternity";
@@ -706,7 +726,7 @@ function buildLeaveHTML(
   const approver2 = approverSignatures?.[1];
   const approver3 = approverSignatures?.[2];
 
-  // ── ลายเซ็นผู้ตรวจสอบ (approver1) ──────────────────────
+  // ── ลายเซ็นด้านล่าง — ใช้ร่วมกันทั้ง 2 แบบฟอร์ม (คงไว้เหมือนเดิม) ──
   const checkerBlock = `
   <div style="margin-top:10px;font-size:10.5pt;line-height:1.7;text-align:center">
     <div style="display:flex;align-items:flex-end;justify-content:center;gap:8px;height:44px;margin-bottom:2px">
@@ -723,7 +743,6 @@ function buildLeaveHTML(
     วันที่ ${approver1?.approved_at || ".............................."}
   </div>`;
 
-  // ── box2: รอง ผอ. ──────────────────────────────────────
   const box2 = `
   <div class="box" style="margin-bottom:7px;font-size:10.5pt;line-height:1.6">
     <div style="font-weight:700;margin-bottom:3px">ความเห็นของรอง ผอ.กลุ่มบริหารงานบุคคล</div>
@@ -744,7 +763,6 @@ function buildLeaveHTML(
     </div>
   </div>`;
 
-  // ── box3: ผอ. ─────────────────────────────────────────
   const box3 = `
   <div class="box" style="font-size:10.5pt;line-height:1.6">
     <div style="font-weight:700;margin-bottom:3px">ความเห็นของผู้บังคับบัญชา</div>
@@ -770,33 +788,37 @@ function buildLeaveHTML(
     </div>
   </div>`;
 
-  // ── ตารางสถิติ ─────────────────────────────────────────
-  const statsTableRows = isOfficial ? `
-    <tr><td>ลาป่วย</td><td></td><td></td><td></td></tr>
-    <tr><td>ลากิจส่วนตัว</td><td></td><td></td><td></td></tr>
-    <tr><td>ลาคลอดบุตร</td><td></td><td></td><td></td></tr>
-  ` : `
-    <tr>
-      <td>ลาป่วย</td>
-      <td style="text-align:center">${statSick > 0 ? statSick : ""}</td>
-      <td style="text-align:center">${thisSick > 0 ? daysDisplay : ""}</td>
-      <td style="text-align:center">${(statSick + thisSick) > 0 ? statSick + thisSick : ""}</td>
-    </tr>
-    <tr>
-      <td>ลากิจส่วนตัว</td>
-      <td style="text-align:center">${statPersonal > 0 ? statPersonal : ""}</td>
-      <td style="text-align:center">${thisPersonal > 0 ? daysDisplay : ""}</td>
-      <td style="text-align:center">${(statPersonal + thisPersonal) > 0 ? statPersonal + thisPersonal : ""}</td>
-    </tr>
-    <tr>
-      <td>ลาคลอดบุตร</td>
-      <td style="text-align:center">${statMat > 0 ? statMat : ""}</td>
-      <td style="text-align:center">${thisMat > 0 ? daysDisplay : ""}</td>
-      <td style="text-align:center">${(statMat + thisMat) > 0 ? statMat + thisMat : ""}</td>
-    </tr>
-  `;
+  // ── ตารางสถิติ: เฉพาะใบลาป่วย/กิจ/คลอด — "ไปราชการ" ไม่มีตารางนี้อีกต่อไป ──
+  const statsBlock = isOfficial ? "" : `
+  <div style="flex:1">
+    <div style="font-weight:700;text-decoration:underline;margin-bottom:5px;font-size:10.5pt">สถิติการลาในปีงบประมาณนี้</div>
+    <table class="stat">
+      <tr><th>ประเภทการลา</th><th>ลามาแล้ว</th><th>ลาครั้งนี้</th><th>รวมเป็น</th></tr>
+      <tr>
+        <td>ลาป่วย</td>
+        <td style="text-align:center">${statSick > 0 ? statSick : ""}</td>
+        <td style="text-align:center">${thisSick > 0 ? daysDisplay : ""}</td>
+        <td style="text-align:center">${(statSick + thisSick) > 0 ? statSick + thisSick : ""}</td>
+      </tr>
+      <tr>
+        <td>ลากิจส่วนตัว</td>
+        <td style="text-align:center">${statPersonal > 0 ? statPersonal : ""}</td>
+        <td style="text-align:center">${thisPersonal > 0 ? daysDisplay : ""}</td>
+        <td style="text-align:center">${(statPersonal + thisPersonal) > 0 ? statPersonal + thisPersonal : ""}</td>
+      </tr>
+      <tr>
+        <td>ลาคลอดบุตร</td>
+        <td style="text-align:center">${statMat > 0 ? statMat : ""}</td>
+        <td style="text-align:center">${thisMat > 0 ? daysDisplay : ""}</td>
+        <td style="text-align:center">${(statMat + thisMat) > 0 ? statMat + thisMat : ""}</td>
+      </tr>
+    </table>
+    ${checkerBlock}
+  </div>`;
 
-  // เอกสารแนบ (หน้า 2 ถ้ามี)
+  // ★ เมื่อไม่มีตารางสถิติ (ไปราชการ) ให้คอลัมน์ซ้ายมีแค่ลายเซ็นผู้ตรวจสอบ
+  const leftColumn = isOfficial ? `<div style="flex:1">${checkerBlock}</div>` : statsBlock;
+
   const attachmentPage = documentUrl ? `
     <div style="page-break-before:always;padding:14mm 18mm 10mm">
       <div style="font-size:14pt;font-weight:900;margin-bottom:12px;border-bottom:2px solid #000;padding-bottom:8px">เอกสารแนบ</div>
@@ -804,6 +826,137 @@ function buildLeaveHTML(
   ? `<img src="${documentUrl}" style="max-width:100%;max-height:220mm;object-fit:contain;display:block;margin:0 auto"/>`
   : `<iframe src="${documentUrl}" style="width:100%;height:220mm;border:1px solid #ccc"></iframe>`}
     </div>` : '';
+
+  // ── ส่วนหัวเอกสาร: ต่างกันระหว่าง "ใบลา" กับ "บันทึกข้อความไปราชการ" ──
+  const headerHtml = isOfficial ? `
+    <div style="position:relative;min-height:64px;margin-bottom:4px">
+      <img src="/images.jpg" style="position:absolute;left:0;top:0;width:62px;height:62px;object-fit:contain" onerror="this.style.display='none'"/>
+      <div style="font-size:16pt;font-weight:900;text-align:center;padding-top:8px">บันทึกข้อความ</div>
+    </div>
+    <div style="height:6px"></div>
+    <div style="font-size:11pt;margin-bottom:4px">
+      <span style="font-weight:700">ส่วนราชการ</span>&nbsp;<span class="dotline" style="display:inline-block;min-width:280px">&nbsp;กลุ่มบริหารงานบุคคล โรงเรียนวัดเขียนเขต&nbsp;</span>
+    </div>
+    <div style="display:flex;gap:10px;font-size:11pt;margin-bottom:4px">
+      <span><span style="font-weight:700">ที่</span>&nbsp;<span class="dotline" style="display:inline-block;min-width:100px">&nbsp;&nbsp;</span></span>
+      <span style="margin-left:auto">วันที่ <span class="dotline" style="display:inline-block;min-width:190px">&nbsp;${thDay} ${thMonth} ${thYear}&nbsp;</span></span>
+    </div>
+    <div style="display:flex;align-items:baseline;gap:4px;margin-bottom:5px;font-size:11pt">
+      <span style="white-space:nowrap;font-weight:700">เรื่อง</span>
+      <span class="dotline" style="flex:1;font-weight:400;padding-left:8px">ขออนุญาตไปราชการ</span>
+    </div>
+    <div style="margin-bottom:10px;font-size:11pt">เรียน ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
+  ` : `
+    <div style="text-align:center;margin-bottom:4px">
+      <img src="/school-logo.png" style="width:54px;height:54px;object-fit:contain" onerror="this.style.display='none'"/>
+    </div>
+    <div style="font-size:14.5pt;font-weight:900;text-align:center;margin:3px 0">แบบใบลาป่วย ลากิจส่วนตัว ลาคลอดบุตร</div>
+    <div style="height:10px"></div>
+    <div style="text-align:right;line-height:1.5;font-size:11pt;margin-bottom:7px">
+      โรงเรียนวัดเขียนเขต ตำบลบึงยี่โถ<br>อำเภอธัญบุรี จังหวัดปทุมธานี
+    </div>
+    <div style="text-align:right;margin-bottom:8px;font-size:11pt">
+      วันที่ <span class="dotline" style="min-width:32px;display:inline-block;text-align:center;font-weight:400">&nbsp;${thDay}&nbsp;</span>
+      เดือน <span class="dotline" style="min-width:90px;display:inline-block;text-align:center;font-weight:400">&nbsp;${thMonth}&nbsp;</span>
+      พ.ศ. <span class="dotline" style="min-width:50px;display:inline-block;text-align:center;font-weight:400">&nbsp;${thYear}&nbsp;</span>
+    </div>
+    <div style="display:flex;align-items:baseline;gap:4px;margin-bottom:5px;font-size:11pt">
+      <span style="white-space:nowrap">เรื่อง</span>
+      <span class="dotline" style="flex:1;font-weight:400;padding-left:8px">ขออนุญาต${leaveLabel}${halfText}</span>
+    </div>
+    <div style="margin-bottom:8px;font-size:11pt">เรียน ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
+  `;
+
+  // ── เนื้อหาเอกสาร ──
+  const bodyHtml = isOfficial ? `
+    <div style="display:flex;gap:6px;align-items:baseline;margin-bottom:6px;padding-left:40px;font-size:11pt">
+  <span style="white-space:nowrap">ข้าพเจ้า</span>
+  <span class="dotline" style="flex:1;font-weight:400;padding-left:6px">${data.fullName}</span>
+  <span style="white-space:nowrap">ตำแหน่ง</span>
+  <span class="dotline" style="flex:1;font-weight:400;padding-left:6px">${data.position}</span>
+</div>
+    <div style="display:flex;gap:6px;align-items:baseline;margin-bottom:8px;padding-left:40px;font-size:11pt">
+      <span style="white-space:nowrap">พร้อมด้วย</span>
+      <span class="dotline" style="flex:1;padding-left:6px">${companionCount>0?companionText:""}</span>
+      <span style="white-space:nowrap">รวม</span>
+      <span class="dotline" style="min-width:34px;text-align:center;font-weight:400">${companionCount||""}</span>
+      <span style="white-space:nowrap">คน</span>
+    </div>
+    <div style="margin-bottom:5px;font-size:11pt">มีความประสงค์ขออนุญาตไปราชการเพื่อ</div>
+    <div style="margin-bottom:6px;font-size:11pt;line-height:1.9">
+      <span class="chk">${isMeetingPurpose?"✓":""}</span> เข้าร่วมประชุม/อบรม/สัมมนา&nbsp;&nbsp;
+      <span class="chk">${isStudyPurpose?"✓":""}</span> ศึกษาดูงาน&nbsp;&nbsp;
+      <span class="chk">${isSpeakerPurpose?"✓":""}</span> เป็นวิทยากร<br>
+      <span class="chk">${isOtherPurpose?"✓":""}</span> อื่นๆ (ระบุ) <span class="dotline" style="display:inline-block;min-width:280px">&nbsp;${isOtherPurpose?otherPurposeText:""}&nbsp;</span>
+    </div>
+    <div style="margin-bottom:6px;font-size:11pt">
+      เรื่อง<span class="dotline" style="display:inline-block;min-width:90%;padding-left:6px">&nbsp;${reasonClean}&nbsp;</span>
+    </div>
+    <div style="margin-bottom:6px;font-size:11pt">
+      ณ<span class="dotline" style="display:inline-block;min-width:92%;padding-left:6px">&nbsp;${destText}&nbsp;</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:baseline;margin-bottom:6px;font-size:11pt">
+      <span style="white-space:nowrap">มีคำสั่งหรือหนังสือของ</span>
+      <span class="dotline" style="flex:1;min-width:120px;padding-left:6px">&nbsp;${orderFromText}&nbsp;</span>
+      <span style="white-space:nowrap">ที่</span>
+      <span class="dotline" style="min-width:90px;text-align:center">&nbsp;${orderNumberText}&nbsp;</span>
+      <span style="white-space:nowrap">ลงวันที่</span>
+      <span class="dotline" style="min-width:110px;text-align:center">&nbsp;${orderDateText}&nbsp;</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:baseline;margin-bottom:6px;font-size:11pt">
+      <span style="white-space:nowrap">ไปราชการวันที่</span>
+      <span class="dotline" style="min-width:110px;text-align:center">${toThaiDateLong(data.startDate)}</span>
+      <span style="white-space:nowrap">ถึงวันที่</span>
+      <span class="dotline" style="min-width:110px;text-align:center">${toThaiDateLong(data.endDate)}</span>
+      <span style="white-space:nowrap">เดินทางโดยพาหนะ</span>
+      <span class="dotline" style="min-width:110px;text-align:center">&nbsp;${vehicleText}&nbsp;</span>
+    </div>
+    <div style="margin-bottom:10px;font-size:11pt;line-height:1.9">
+      รวมเวลาไปราชการครั้งนี้ <span class="dotline" style="display:inline-block;min-width:50px;text-align:center">&nbsp;${daysDisplay}&nbsp;</span> วัน
+      และในช่วงเวลาดังกล่าวข้าพเจ้ามีภารกิจที่จะต้องปฏิบัติงานในโรงเรียน ทั้งนี้ข้าพเจ้าได้แนบแบบบันทึกมอบหมายงานสอนมาด้วยแล้ว
+      จึงเรียนมาเพื่อโปรดพิจารณาอนุญาตให้ไปราชการ
+    </div>
+  ` : `
+    <div style="display:flex;gap:6px;align-items:baseline;margin-bottom:6px;padding-left:40px;font-size:11pt">
+      <span style="white-space:nowrap">ข้าพเจ้า</span>
+      <span class="dotline" style="flex:1;font-weight:400;padding-left:6px">${data.fullName}</span>
+      <span style="white-space:nowrap">ตำแหน่ง</span>
+      <span class="dotline" style="flex:1;font-weight:400;padding-left:6px">${data.position}</span>
+    </div>
+    <div style="margin-bottom:7px;font-size:11pt">สังกัดโรงเรียนวัดเขียนเขต สำนักงานเขตพื้นที่การศึกษาประถมศึกษาปทุมธานี เขต 2</div>
+    <div style="line-height:1.8;margin-bottom:6px;font-size:11pt">
+      ขออนุญาต${leaveLabel} เนื่องจาก${reasonClean}
+    </div>
+    <div style="display:flex;gap:4px;align-items:baseline;margin-bottom:6px;font-size:11pt;flex-wrap:wrap">
+      <span style="white-space:nowrap">ตั้งแต่วันที่</span>
+      <span class="dotline" style="flex:1;min-width:110px;text-align:center;font-weight:400">${toThaiDateLong(data.startDate)}</span>
+      <span style="white-space:nowrap">ถึงวันที่</span>
+      <span class="dotline" style="flex:1;min-width:110px;text-align:center;font-weight:400">${toThaiDateLong(data.endDate)}</span>
+      <span style="white-space:nowrap">มีกำหนด</span>
+      <span class="dotline" style="min-width:40px;text-align:center;font-weight:400">${daysDisplay}</span>
+      <span style="white-space:nowrap">วัน${halfText}</span>
+    </div>
+    <div style="margin-bottom:7px;font-size:11pt;line-height:1.7">
+      ข้าพเจ้า ได้
+      <span class="chk">${lastIsSick?"✓":""}</span> ลาป่วย
+      <span class="chk">${lastIsPersonal?"✓":""}</span> ลากิจส่วนตัว
+      <span class="chk">${lastIsMat?"✓":""}</span> ลาคลอดบุตร ครั้งสุดท้าย<br>
+      ตั้งแต่วันที่<span class="dotline" style="min-width:110px;display:inline-block">
+        ${last ? `&nbsp;${toThaiDateLong(last.startDate)}&nbsp;` : "&nbsp;&nbsp;&nbsp;"}
+      </span>
+      ถึงวันที่<span class="dotline" style="min-width:110px;display:inline-block">
+        ${last ? `&nbsp;${toThaiDateLong(last.endDate)}&nbsp;` : "&nbsp;&nbsp;&nbsp;"}
+      </span>
+      มีกำหนด<span class="dotline" style="min-width:40px;display:inline-block">
+        ${last ? `&nbsp;${last.days}&nbsp;` : "&nbsp;&nbsp;"}
+      </span>วัน
+    </div>
+    <div style="display:flex;align-items:baseline;gap:4px;margin-bottom:4px;font-size:11pt">
+      <span style="white-space:nowrap">ในระหว่างลาจะติดต่อข้าพเจ้าได้ที่</span>
+      <span class="dotline" style="flex:1;font-weight:400;padding-left:8px">${data.contactInfo||data.phone||""}</span>
+    </div>
+    <div class="dotline" style="height:14px;margin-bottom:10px"></div>
+  `;
 
   return `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700;900&display=swap" rel="stylesheet">
@@ -821,70 +974,8 @@ table.stat td:first-child{text-align:left}
 @page{size:A4;margin:0}
 </style></head><body><div class="page">
 
-<div style="text-align:center;margin-bottom:4px">
-  <img src="/school-logo.png" style="width:54px;height:54px;object-fit:contain" onerror="this.style.display='none'"/>
-</div>
-<div style="font-size:14.5pt;font-weight:900;text-align:center;margin:3px 0">แบบใบลาป่วย ลากิจส่วนตัว ลาคลอดบุตร</div>
-<div style="height:10px"></div>
-<div style="text-align:right;line-height:1.5;font-size:11pt;margin-bottom:7px">
-  โรงเรียนวัดเขียนเขต ตำบลบึงยี่โถ<br>อำเภอธัญบุรี จังหวัดปทุมธานี
-</div>
-
-<div style="text-align:right;margin-bottom:8px;font-size:11pt">
-  วันที่ <span class="dotline" style="min-width:32px;display:inline-block;text-align:center;font-weight:700">&nbsp;${thDay}&nbsp;</span>
-  เดือน <span class="dotline" style="min-width:90px;display:inline-block;text-align:center;font-weight:700">&nbsp;${thMonth}&nbsp;</span>
-  พ.ศ. <span class="dotline" style="min-width:50px;display:inline-block;text-align:center;font-weight:700">&nbsp;${thYear}&nbsp;</span>
-</div>
-
-<div style="display:flex;align-items:baseline;gap:4px;margin-bottom:5px;font-size:11pt">
-  <span style="white-space:nowrap">เรื่อง</span>
-  <span class="dotline" style="flex:1;font-weight:700;padding-left:8px">ขออนุญาต${leaveLabel}${halfText}</span>
-</div>
-<div style="margin-bottom:8px;font-size:11pt">เรียน ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
-
-<div style="display:flex;gap:6px;align-items:baseline;margin-bottom:6px;padding-left:40px;font-size:11pt">
-  <span style="white-space:nowrap">ข้าพเจ้า</span>
-  <span class="dotline" style="flex:1;font-weight:700;padding-left:6px">${data.fullName}</span>
-  <span style="white-space:nowrap">ตำแหน่ง</span>
-  <span class="dotline" style="flex:1;font-weight:700;padding-left:6px">${data.position}</span>
-</div>
-<div style="margin-bottom:7px;font-size:11pt">สังกัดโรงเรียนวัดเขียนเขต สำนักงานเขตพื้นที่การศึกษาประถมศึกษาปทุมธานี เขต 2</div>
-
-<div style="line-height:1.8;margin-bottom:6px;font-size:11pt">
-  ขออนุญาต${leaveLabel} เนื่องจาก${reasonClean}
-</div>
-
-<div style="display:flex;gap:4px;align-items:baseline;margin-bottom:6px;font-size:11pt;flex-wrap:wrap">
-  <span style="white-space:nowrap">ตั้งแต่วันที่</span>
-  <span class="dotline" style="flex:1;min-width:110px;text-align:center;font-weight:700">${toThaiDateLong(data.startDate)}</span>
-  <span style="white-space:nowrap">ถึงวันที่</span>
-  <span class="dotline" style="flex:1;min-width:110px;text-align:center;font-weight:700">${toThaiDateLong(data.endDate)}</span>
-  <span style="white-space:nowrap">มีกำหนด</span>
-  <span class="dotline" style="min-width:40px;text-align:center;font-weight:700">${daysDisplay}</span>
-  <span style="white-space:nowrap">วัน${halfText}</span>
-</div>
-
-<div style="margin-bottom:7px;font-size:11pt;line-height:1.7">
-  ข้าพเจ้า ได้
-  <span class="chk">${lastIsSick?"✓":""}</span> ลาป่วย
-  <span class="chk">${lastIsPersonal?"✓":""}</span> ลากิจส่วนตัว
-  <span class="chk">${lastIsMat?"✓":""}</span> ลาคลอดบุตร ครั้งสุดท้าย<br>
-  ตั้งแต่วันที่<span class="dotline" style="min-width:110px;display:inline-block">
-    ${last ? `&nbsp;${toThaiDateLong(last.startDate)}&nbsp;` : "&nbsp;&nbsp;&nbsp;"}
-  </span>
-  ถึงวันที่<span class="dotline" style="min-width:110px;display:inline-block">
-    ${last ? `&nbsp;${toThaiDateLong(last.endDate)}&nbsp;` : "&nbsp;&nbsp;&nbsp;"}
-  </span>
-  มีกำหนด<span class="dotline" style="min-width:40px;display:inline-block">
-    ${last ? `&nbsp;${last.days}&nbsp;` : "&nbsp;&nbsp;"}
-  </span>วัน
-</div>
-
-<div style="display:flex;align-items:baseline;gap:4px;margin-bottom:4px;font-size:11pt">
-  <span style="white-space:nowrap">ในระหว่างลาจะติดต่อข้าพเจ้าได้ที่</span>
-  <span class="dotline" style="flex:1;font-weight:700;padding-left:8px">${data.contactInfo||data.phone||""}</span>
-</div>
-<div class="dotline" style="height:14px;margin-bottom:10px"></div>
+${headerHtml}
+${bodyHtml}
 
 <div style="text-align:right;padding-right:8%;margin-top:6px">
   <div style="display:inline-flex;flex-direction:column;align-items:center;width:240px">
@@ -898,14 +989,7 @@ table.stat td:first-child{text-align:left}
 </div>
 
 <div style="display:flex;gap:14px;margin-top:10px">
-  <div style="flex:1">
-    <div style="font-weight:700;text-decoration:underline;margin-bottom:5px;font-size:10.5pt">สถิติการลาในปีงบประมาณนี้</div>
-    <table class="stat">
-      <tr><th>ประเภทการลา</th><th>ลามาแล้ว</th><th>ลาครั้งนี้</th><th>รวมเป็น</th></tr>
-      ${statsTableRows}
-    </table>
-    ${checkerBlock}
-  </div>
+  ${leftColumn}
   <div style="flex:1;border-left:1px dashed #ccc;padding-left:12px">
     ${box2}
     ${box3}
@@ -1730,6 +1814,11 @@ function LeaveForm({ user, approvers, allTeachers, savedSignature, onSubmit, onC
   const [contactInfo,  setContactInfo]  = useState(user.phone??"");
   const [docFile,      setDocFile]      = useState<File|null>(null);
   const [tripDest,     setTripDest]     = useState("");
+  const [officialPurpose, setOfficialPurpose] = useState<"meeting"|"study"|"speaker"|"other">("meeting");
+const [officialPurposeOther, setOfficialPurposeOther] = useState("");
+const [orderFrom,   setOrderFrom]   = useState("");
+const [orderNumber, setOrderNumber] = useState("");
+const [orderDate,   setOrderDate]   = useState("");
   const [vehicle,      setVehicle]      = useState<"school"|"personal">("school");
   const [companionIds, setCompanionIds] = useState<string[]>([]);
   const [swapAssignments, setSwapAssignments] = useState<SwapAssignment[]>([]);
@@ -1813,8 +1902,9 @@ useEffect(()=>{
     reason: touched.reason&&!reason, otherName: touched.otherName&&leaveType==="other"&&!otherName,
     tripDest: touched.tripDest&&leaveType==="official"&&!tripDest,
     contactInfo: touched.contactInfo&&!contactInfo,
+    officialPurposeOther: touched.officialPurposeOther && leaveType==="official" && officialPurpose==="other" && !officialPurposeOther,
   };
-  const canSubmit = startDate&&endDate&&reason&&contactInfo&&(!tooSoon)&&(!sickTooFarAhead)&&(leaveType!=="other"||otherName)&&(leaveType!=="official"||tripDest);
+  const canSubmit = startDate&&endDate&&reason&&contactInfo&&(!tooSoon)&&(!sickTooFarAhead)&&(leaveType!=="other"||otherName)&&(leaveType!=="official"||tripDest)&&(leaveType!=="official"||officialPurpose!=="other"||officialPurposeOther);
 
   async function handleSubmit(isDraft=false){
     setTouched({startDate:true,endDate:true,reason:true,otherName:true,tripDest:true,contactInfo:true});
@@ -1843,9 +1933,15 @@ if (docFile) {
   }
 }
     const companionNames = allTeachers.filter(t=>companionIds.includes(t.id)).map(t=>displayName(t)).join(", ");
-    const reasonFull = leaveType==="official"
-      ?`[ปลายทาง: ${tripDest}] [พาหนะ: ${vehicle==="school"?"รถโรงเรียน":"รถส่วนตัว"}] [ผู้ร่วมเดินทาง: ${companionNames||"-"}] ${reason}`
-      :reason;
+    const purposeLabelMap: Record<string,string> = {
+  meeting: "เข้าร่วมประชุม/อบรม/สัมมนา",
+  study: "ศึกษาดูงาน",
+  speaker: "เป็นวิทยากร",
+  other: `อื่นๆ (ระบุ) ${officialPurposeOther||"-"}`,
+};
+const reasonFull = leaveType==="official"
+  ?`[วัตถุประสงค์: ${purposeLabelMap[officialPurpose]}] [ปลายทาง: ${tripDest}] [คำสั่งจาก: ${orderFrom||"-"}] [คำสั่งเลขที่: ${orderNumber||"-"}] [คำสั่งวันที่: ${orderDate||"-"}] [พาหนะ: ${vehicle==="school"?"รถโรงเรียน":"รถส่วนตัว"}] [ผู้ร่วมเดินทาง: ${companionNames||"-"}] ${reason}`
+  :reason;
 
     const payload={
       leave_type:leaveType, start_date:startDate, end_date:endDate,
@@ -1878,7 +1974,7 @@ if (docFile) {
       {showSigPad&&<SignaturePad initialUrl={sigUrl} onSave={async(d)=>{setSigUrl(d);setShowSigPad(false);await (supabase.from("users") as any).update({signature_url:d}).eq("id",user.id);}} onClose={()=>setShowSigPad(false)}/>}
       {showPreview&&pendingPayload&&(
         <LeavePDFPreview
-          data={{fullName:fullName(user),position:user.position??user.role,leaveType:pendingPayload.leave_type,leaveTypeName:LEAVE_TYPE_LIST.find(t=>t.key===pendingPayload.leave_type)?.label??"",otherLeaveName:pendingPayload.other_leave_name,startDate:pendingPayload.start_date,endDate:pendingPayload.end_date,days:pendingPayload.days_count,halfDay:pendingPayload.half_day,reason:pendingPayload.reason,phone:user.phone,contactInfo:pendingPayload.contact_info}}
+          data={{fullName:fullName(user),position:user.position??user.role,leaveType:pendingPayload.leave_type,leaveTypeName:LEAVE_TYPE_LIST.find(t=>t.key===pendingPayload.leave_type)?.label??"",otherLeaveName:pendingPayload.other_leave_name,startDate:pendingPayload.start_date,endDate:pendingPayload.end_date,days:pendingPayload.days_count,halfDay:pendingPayload.half_day,reason:pendingPayload.reason,phone:user.phone,contactInfo:pendingPayload.contact_info, createdAt: editData?.created_at ?? new Date().toISOString(),}}
           signatureUrl={sigUrl} leaveStats={leaveStats}
           documentUrl={docPreview} 
           onConfirm={confirmSubmit} onCancel={()=>setShowPreview(false)}
@@ -1964,21 +2060,25 @@ if (docFile) {
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-bold text-slate-600 mb-1"> 
-              {leaveType==="official"?"รายละเอียดการไปราชการ":"เหตุผลการลา"} <span className="text-red-500">*</span>
-              <span className="text-slate-400 font-normal ml-2">({reason.length}/100)</span>
-            </label>
-            <textarea value={reason} onChange={e=>e.target.value.length<=100&&setReason(e.target.value)} onBlur={()=>touch("reason")} rows={3} placeholder={leaveType==="official"?"ระบุวัตถุประสงค์...":"ระบุเหตุผล (ไม่เกิน 100 ตัวอักษร)"} className={inp(errors.reason)+" resize-none"}/>
-            {errors.reason&&<p className="text-red-500 text-xs mt-1">กรุณากรอกเหตุผล</p>}
-          </div>
-          <div>
-            <label className="block text-sm font-bold text-slate-600 mb-1">ที่อยู่/เบอร์โทรที่ติดต่อได้ระหว่างลา <span className="text-red-500">*</span></label>
-            <input type="text" value={contactInfo} onChange={e=>setContactInfo(e.target.value)} onBlur={()=>touch("contactInfo")} placeholder="เช่น 081-234-5678..." className={inp(errors.contactInfo)}/>
-            {errors.contactInfo&&<p className="text-red-500 text-xs mt-1">กรุณากรอกข้อมูลติดต่อ</p>}
-          </div>
-          <div>
-            <label className="block text-sm font-bold text-slate-600 mb-1">แนบใบรับรองแพทย์ / เอกสาร {leaveType==="sick"&&<span className="text-amber-500">(แนะนำ)</span>}</label>
+  {leaveType!=="official" && (
+    <div>
+      <label className="block text-sm font-bold text-slate-600 mb-1">
+        เหตุผลการลา <span className="text-red-500">*</span>
+        <span className="text-slate-400 font-normal ml-2">({reason.length}/100)</span>
+      </label>
+      <textarea value={reason} onChange={e=>e.target.value.length<=100&&setReason(e.target.value)} onBlur={()=>touch("reason")} rows={3} placeholder="ระบุเหตุผล (ไม่เกิน 100 ตัวอักษร)" className={inp(errors.reason)+" resize-none"}/>
+      {errors.reason&&<p className="text-red-500 text-xs mt-1">กรุณากรอกเหตุผล</p>}
+    </div>
+  )}
+  {leaveType!=="official" && (
+    <div>
+      <label className="block text-sm font-bold text-slate-600 mb-1">ที่อยู่/เบอร์โทรที่ติดต่อได้ระหว่างลา <span className="text-red-500">*</span></label>
+      <input type="text" value={contactInfo} onChange={e=>setContactInfo(e.target.value)} onBlur={()=>touch("contactInfo")} placeholder="เช่น 081-234-5678..." className={inp(errors.contactInfo)}/>
+      {errors.contactInfo&&<p className="text-red-500 text-xs mt-1">กรุณากรอกข้อมูลติดต่อ</p>}
+    </div>
+  )}
+  <div>
+    <label className="block text-sm font-bold text-slate-600 mb-1">แนบใบรับรองแพทย์ / เอกสาร {leaveType==="sick"&&<span className="text-amber-500">(แนะนำ)</span>}</label>
             <div onClick={()=>fileRef.current?.click()} className="border-2 border-dashed border-blue-200 hover:border-blue-400 rounded-xl px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-blue-50">
               <span className="text-2xl">📎</span>
               <div className="flex-1 min-w-0">
@@ -2001,27 +2101,84 @@ if (docFile) {
         )}
 
         {leaveType==="official"&&(
-          <div className="bg-sky-50 rounded-2xl border border-sky-200 shadow-sm p-6 space-y-4">
-            <h3 className="font-black text-sky-700">🏛️ ข้อมูลการไปราชการ</h3>
-            <div>
-              <label className="block text-sm font-bold text-slate-600 mb-1">สถานที่ / หน่วยงาน <span className="text-red-500">*</span></label>
-              <input type="text" value={tripDest} onChange={e=>setTripDest(e.target.value)} onBlur={()=>touch("tripDest")} placeholder="เช่น กระทรวงศึกษาธิการ กรุงเทพฯ" className={inp(errors.tripDest)}/>
-              {errors.tripDest&&<p className="text-red-500 text-xs mt-1">กรุณาระบุสถานที่</p>}
-            </div>
-            <div className="flex gap-3">
-              {[["school","🚌 รถโรงเรียน"],["personal","🚗 รถส่วนตัว"]].map(([v,l])=>(
-                <label key={v} className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 cursor-pointer font-bold text-sm flex-1 justify-center ${vehicle===v?"bg-sky-100 border-sky-400 text-sky-700":"bg-white border-blue-100 text-slate-600"}`}>
-                  <input type="radio" name="vehicle" value={v} checked={vehicle===v} onChange={()=>setVehicle(v as any)} className="accent-sky-500"/>{l}
-                </label>
-              ))}
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-600 mb-1">ผู้ร่วมเดินทาง</label>
-              <CompanionSelector allTeachers={allTeachers} selected={companionIds} onChange={setCompanionIds}/>
-              {companionIds.length>0&&<p className="text-xs text-sky-600 font-bold mt-1.5">เลือกแล้ว {companionIds.length} คน</p>}
-            </div>
-          </div>
-        )}
+  <div className="bg-sky-50 rounded-2xl border border-sky-200 shadow-sm p-6 space-y-4">
+    <h3 className="font-black text-sky-700">🏛️ ข้อมูลการไปราชการ (แบบบันทึกข้อความ)</h3>
+
+    <div>
+      <label className="block text-sm font-bold text-slate-600 mb-2">วัตถุประสงค์ <span className="text-red-500">*</span></label>
+      <div className="grid grid-cols-2 gap-2">
+        {[["meeting","เข้าร่วมประชุม/อบรม/สัมมนา"],["study","ศึกษาดูงาน"],["speaker","เป็นวิทยากร"],["other","อื่นๆ (ระบุ)"]].map(([v,l])=>(
+          <label key={v} className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 cursor-pointer font-bold text-sm ${officialPurpose===v?"bg-sky-100 border-sky-400 text-sky-700":"bg-white border-blue-100 text-slate-600"}`}>
+            <input type="radio" name="officialPurpose" value={v} checked={officialPurpose===v} onChange={()=>setOfficialPurpose(v as any)} className="accent-sky-500"/>{l}
+          </label>
+        ))}
+      </div>
+      {officialPurpose==="other"&&(
+        <div className="mt-2">
+          <input type="text" value={officialPurposeOther} onChange={e=>setOfficialPurposeOther(e.target.value)} onBlur={()=>touch("officialPurposeOther")} placeholder="ระบุวัตถุประสงค์..." className={inp(errors.officialPurposeOther)}/>
+          {errors.officialPurposeOther&&<p className="text-red-500 text-xs mt-1">กรุณาระบุวัตถุประสงค์</p>}
+        </div>
+      )}
+    </div>
+
+    {/* ★ ย้ายมาจากกล่องทั่วไป — ต่อจากวัตถุประสงค์ */}
+    <div>
+      <label className="block text-sm font-bold text-slate-600 mb-1">
+        รายละเอียดการไปราชการ <span className="text-red-500">*</span>
+        <span className="text-slate-400 font-normal ml-2">({reason.length}/100)</span>
+      </label>
+      <textarea value={reason} onChange={e=>e.target.value.length<=100&&setReason(e.target.value)} onBlur={()=>touch("reason")} rows={3} placeholder="ระบุวัตถุประสงค์/รายละเอียด (ไม่เกิน 100 ตัวอักษร)" className={inp(errors.reason)+" resize-none"}/>
+      {errors.reason&&<p className="text-red-500 text-xs mt-1">กรุณากรอกรายละเอียด</p>}
+    </div>
+
+    <div>
+      <label className="block text-sm font-bold text-slate-600 mb-1">สถานที่ / หน่วยงาน (ณ) <span className="text-red-500">*</span></label>
+      <input type="text" value={tripDest} onChange={e=>setTripDest(e.target.value)} onBlur={()=>touch("tripDest")} placeholder="เช่น กระทรวงศึกษาธิการ กรุงเทพฯ" className={inp(errors.tripDest)}/>
+      {errors.tripDest&&<p className="text-red-500 text-xs mt-1">กรุณาระบุสถานที่</p>}
+    </div>
+
+    <div className="grid grid-cols-3 gap-3">
+      <div>
+        <label className="block text-sm font-bold text-slate-600 mb-1">คำสั่ง/หนังสือของ</label>
+        <input type="text" value={orderFrom} onChange={e=>setOrderFrom(e.target.value)} placeholder="เช่น สพป.ปทุมธานี เขต 2" className={inp()}/>
+      </div>
+      <div>
+        <label className="block text-sm font-bold text-slate-600 mb-1">ที่ (เลขที่)</label>
+        <input type="text" value={orderNumber} onChange={e=>setOrderNumber(e.target.value)} placeholder="เลขที่หนังสือ" className={inp()}/>
+      </div>
+      <div>
+        <label className="block text-sm font-bold text-slate-600 mb-1">ลงวันที่</label>
+        <input type="text" value={orderDate} onChange={e=>setOrderDate(e.target.value)} placeholder="เช่น 1 ม.ค. 2568" className={inp()}/>
+      </div>
+    </div>
+
+    <div className="flex gap-3">
+      {[["school","🚌 รถโรงเรียน"],["personal","🚗 รถส่วนตัว"]].map(([v,l])=>(
+        <label key={v} className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 cursor-pointer font-bold text-sm flex-1 justify-center ${vehicle===v?"bg-sky-100 border-sky-400 text-sky-700":"bg-white border-blue-100 text-slate-600"}`}>
+          <input type="radio" name="vehicle" value={v} checked={vehicle===v} onChange={()=>setVehicle(v as any)} className="accent-sky-500"/>{l}
+        </label>
+      ))}
+    </div>
+
+    <div>
+      <label className="block text-sm font-bold text-slate-600 mb-1">ผู้ร่วมเดินทาง</label>
+      {/* ★ กรอง role ที่มีคำว่า admin ออกจากรายชื่อผู้ร่วมเดินทาง */}
+      <CompanionSelector
+        allTeachers={allTeachers.filter(t=>!(t.role||"").toLowerCase().includes("admin"))}
+        selected={companionIds}
+        onChange={setCompanionIds}
+      />
+      {companionIds.length>0&&<p className="text-xs text-sky-600 font-bold mt-1.5">เลือกแล้ว {companionIds.length} คน</p>}
+    </div>
+
+    {/* ★ ย้ายมาจากกล่องทั่วไป — ต่อจากผู้ร่วมเดินทาง */}
+    <div>
+      <label className="block text-sm font-bold text-slate-600 mb-1">ที่อยู่/เบอร์โทรที่ติดต่อได้ระหว่างไปราชการ <span className="text-red-500">*</span></label>
+      <input type="text" value={contactInfo} onChange={e=>setContactInfo(e.target.value)} onBlur={()=>touch("contactInfo")} placeholder="เช่น 081-234-5678..." className={inp(errors.contactInfo)}/>
+      {errors.contactInfo&&<p className="text-red-500 text-xs mt-1">กรุณากรอกข้อมูลติดต่อ</p>}
+    </div>
+  </div>
+)}
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
   <h3 className="font-black text-slate-700">🔄 ขอแลกคาบสอน / จัดสอนแทน</h3>
@@ -2152,6 +2309,7 @@ async function printFullLeave(r: any, userForPrint: UserProfile, savedSignature:
       days: r.days_count, halfDay: r.half_day,
       reason: r.reason, phone: (r.user??userForPrint)?.phone,
       contactInfo: r.contact_info,
+      createdAt: r.created_at,
     },
     r.signature_url || savedSignature,
     [
@@ -2382,7 +2540,8 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
                           <span className="text-slate-400 text-xs">{r.days_count} วัน</span><StatusBadge status={r.status}/>
                         </div>
                         <span className="text-slate-700 font-bold text-sm">{toThaiDate(r.start_date)}{r.start_date!==r.end_date&&` – ${toThaiDate(r.end_date)}`}</span>
-                        <span className="text-slate-400 text-xs line-clamp-1">{r.reason}</span>
+<span className="text-slate-400 text-[11px] font-bold">🕐 ยื่นเมื่อ {toThaiDateTime((r as any).created_at)}</span>
+<span className="text-slate-400 text-xs line-clamp-1">{r.reason}</span>
                         <div className="flex gap-1 mt-1 flex-wrap">
                           <button onClick={()=>setViewId(r.id)} className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg hover:bg-blue-50 border border-blue-200">👁️ ดูใบลา</button>
                           {(isApproved||canPrint)&&(
@@ -2904,10 +3063,16 @@ const allGrades = ["all", ...uniqueGrades];
                 const canAct=canApprove&&sl!==null&&myStatus==="pending"&&(sl===1||(sl===2&&r.approver_1_status==="approved"))&&(sl===1||sl===2||(sl===3&&r.approver_2_status==="approved"));
                 return(
                   <div key={r.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className={`${c.bg} border-b ${c.border} px-5 py-3 flex items-center justify-between`}>
-                      <span className={`font-black text-sm ${c.text}`}>{typeCfg?.icon} {typeCfg?.label}</span>
-                      <div className="flex items-center gap-2"><span className={`font-black text-sm ${c.text}`}>{r.days_count} วัน</span><button onClick={()=>printFullLeave(r,user,"")} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-white border border-slate-300 font-bold">🖨️ พิมพ์</button></div>
-                    </div>
+                    <div className={`${c.bg} border-b ${c.border} px-5 py-3`}>
+  <div className="flex items-center justify-between">
+    <span className={`font-black text-sm ${c.text}`}>{typeCfg?.icon} {typeCfg?.label}</span>
+    <span className="text-[11px] font-bold text-slate-400">🕐 ยื่นเมื่อ {toThaiDateTime((r as any).created_at)}</span>
+  </div>
+  <div className="flex items-center justify-end gap-2 mt-1">
+    <span className={`font-black text-sm ${c.text}`}>{r.days_count} วัน</span>
+    <button onClick={()=>printFullLeave(r,user,"")} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-white border border-slate-300 font-bold">🖨️ พิมพ์</button>
+  </div>
+</div>
                     <div className="p-5">
                       <p className="font-black text-slate-800 text-base">{fullName((r as any).user)}</p>
                       <p className="text-slate-500 text-sm">{(r as any).user?.position}</p>
@@ -2950,7 +3115,11 @@ const allGrades = ["all", ...uniqueGrades];
                         {(r as any).document_url&&<a href={(r as any).document_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-1 text-xs font-bold text-blue-500 hover:text-blue-700">📎 เอกสารแนบ</a>}
                         <button onClick={()=>setViewModal(r)} className="text-xs font-bold text-blue-600 px-2 py-1 rounded-lg border border-blue-200 hover:bg-blue-50 ml-1">👁️ ดู</button>
                       </div>
-                      <div className="flex flex-col items-end gap-2"><StatusBadge status={r.status}/><button onClick={()=>printFullLeave(r,user,"")} className="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50">🖨️ พิมพ์</button></div>
+                      <div className="flex flex-col items-end gap-2">
+  <span className="text-[11px] font-bold text-slate-400">🕐 ยื่นเมื่อ {toThaiDateTime((r as any).created_at)}</span>
+  <StatusBadge status={r.status}/>
+  <button onClick={()=>printFullLeave(r,user,"")} className="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50">🖨️ พิมพ์</button>
+</div>
                     </div>
                   );})}
                 </div>}
