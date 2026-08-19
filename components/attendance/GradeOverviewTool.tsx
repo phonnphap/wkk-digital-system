@@ -33,6 +33,7 @@ type Submission = {
   teacher_comment?: string | null;
   graded_at?: string | null;
   submitted_at?: string | null;
+  is_late?: boolean | null;
 };
 
 type ScoreEvent = { id: string; student_id: string; preset_id: string; points: number };
@@ -40,6 +41,34 @@ type ScoreEvent = { id: string; student_id: string; preset_id: string; points: n
 type Criterion = { id?: string; max_percent: number; min_percent: number; grade: string; sort_order?: number };
 
 type ViewTab = "table" | "podium";
+
+// ★ ย้ายมาไว้ module scope เพื่อให้ GradeTable / EditableScoreCell / StudentReportModal เรียกใช้ได้
+type LateInfo = { hasData: boolean; isLate: boolean; daysLate: number; isManual: boolean };
+
+// ต้องมีคะแนนแล้ว (ครูให้คะแนนแล้ว) ถึงจะเริ่มคำนวณสถานะตรงเวลา/สาย
+function getLateInfo(assignment: Assignment, sub?: Submission): LateInfo {
+  const hasScore = !!sub && sub.score !== null && sub.score !== undefined;
+  if (!hasScore) return { hasData: false, isLate: false, daysLate: 0, isManual: false };
+
+  // 1) ครูกำหนดสถานะเอง -> ใช้ค่านั้นเสมอ ไม่คำนวณทับ
+  if (sub!.is_late !== null && sub!.is_late !== undefined) {
+    return { hasData: true, isLate: sub!.is_late, daysLate: 0, isManual: true };
+  }
+
+  // 2) ชิ้นงานนี้ไม่ได้ตั้งกำหนดส่ง -> ถือว่าตรงเวลาทั้งหมด
+  if (!assignment.due_date) {
+    return { hasData: true, isLate: false, daysLate: 0, isManual: false };
+  }
+
+  // 3) เทียบกำหนดส่งกับเวลาที่ส่งจริง ถ้าไม่มีให้ใช้เวลาที่ตรวจ/ให้คะแนนแทน
+  const referenceIso = sub!.submitted_at || sub!.graded_at || new Date().toISOString();
+  const due = new Date(assignment.due_date).getTime();
+  const ref = new Date(referenceIso).getTime();
+
+  if (ref <= due) return { hasData: true, isLate: false, daysLate: 0, isManual: false };
+  const daysLate = Math.max(1, Math.ceil((ref - due) / (1000 * 60 * 60 * 24)));
+  return { hasData: true, isLate: true, daysLate, isManual: false };
+}
 
 /* =========================================================================
    Component
@@ -136,61 +165,51 @@ export default function GradeOverviewTool({
     [assignments]
   );
 
-  function isOnTime(assignment: Assignment, sub?: Submission): boolean | null {
-    if (!sub || !(sub.status === "submitted" || sub.status === "graded")) return null;
-    if (!assignment.due_date || !sub.submitted_at) return null;
-    return new Date(sub.submitted_at).getTime() <= new Date(assignment.due_date).getTime();
-  }
-
   const rows = useMemo(() => {
-    return students.map(s => {
-      const subMap: Record<string, Submission> = {};
-      submissions.filter(sub => sub.student_id === s.id).forEach(sub => { subMap[sub.assignment_id] = sub; });
+  return students.map(s => {
+    const subMap: Record<string, Submission> = {};
+    submissions.filter(sub => sub.student_id === s.id).forEach(sub => { subMap[sub.assignment_id] = sub; });
 
-      const assignmentTotal = assignments.reduce((sum, a) => {
-        const sub = subMap[a.id];
-        return sum + (sub?.score ?? 0);
-      }, 0);
+    const assignmentTotal = assignments.reduce((sum, a) => sum + (subMap[a.id]?.score ?? 0), 0);
+    const submittedCount = assignments.filter(a => subMap[a.id]?.score !== null && subMap[a.id]?.score !== undefined).length;
 
-      const submittedCount = assignments.filter(a => {
-        const sub = subMap[a.id];
-        return sub && (sub.status === "submitted" || sub.status === "graded");
-      }).length;
-
-      let onTimeCount = 0;
-      let lateCount = 0;
-      let knownOnTimeCount = 0;
-      assignments.forEach(a => {
-        const result = isOnTime(a, subMap[a.id]);
-        if (result === null) return;
-        knownOnTimeCount++;
-        if (result) onTimeCount++; else lateCount++;
-      });
-      const onTimeRate = knownOnTimeCount > 0 ? (onTimeCount / knownOnTimeCount) * 100 : null;
-
-      const presetTotals: Record<string, number> = {};
-      presets.forEach(p => { presetTotals[p.id] = 0; });
-      scoreEvents
-        .filter(ev => ev.student_id === s.id && presetTotals[ev.preset_id] !== undefined)
-        .forEach(ev => { presetTotals[ev.preset_id] += ev.points; });
-      const specialTotal = Object.values(presetTotals).reduce((a, b) => a + b, 0);
-
-      const percentage = totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * 100 : 0;
-
-      let grade = "-";
-      const sortedCriteria = [...criteria].sort((a, b) => b.min_percent - a.min_percent);
-      for (const c of sortedCriteria) {
-        if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
-      }
-
-      const grandTotal = assignmentTotal + specialTotal;
-
-      return {
-        student: s, subMap, presetTotals, assignmentTotal, submittedCount,
-        onTimeCount, lateCount, onTimeRate, specialTotal, percentage, grade, grandTotal,
-      };
+    // ★ นับตรงเวลา/สาย จาก getLateInfo แทน isOnTime เดิม
+    let onTimeCount = 0;
+    let lateCount = 0;
+    let knownOnTimeCount = 0;
+    let totalDaysLate = 0;
+    assignments.forEach(a => {
+      const info = getLateInfo(a, subMap[a.id]);
+      if (!info.hasData) return;
+      knownOnTimeCount++;
+      if (info.isLate) { lateCount++; totalDaysLate += info.daysLate; } else { onTimeCount++; }
     });
-  }, [students, submissions, assignments, presets, scoreEvents, criteria, totalMaxScore]);
+    const onTimeRate = knownOnTimeCount > 0 ? (onTimeCount / knownOnTimeCount) * 100 : null;
+
+    const presetTotals: Record<string, number> = {};
+    presets.forEach(p => { presetTotals[p.id] = 0; });
+    scoreEvents
+      .filter(ev => ev.student_id === s.id && presetTotals[ev.preset_id] !== undefined)
+      .forEach(ev => { presetTotals[ev.preset_id] += ev.points; });
+    const specialTotal = Object.values(presetTotals).reduce((a, b) => a + b, 0);
+
+    const percentage = totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * 100 : 0;
+
+    let grade = "-";
+    const sortedCriteria = [...criteria].sort((a, b) => b.min_percent - a.min_percent);
+    for (const c of sortedCriteria) {
+      if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
+    }
+
+    const grandTotal = assignmentTotal + specialTotal;
+
+    return {
+      student: s, subMap, presetTotals, assignmentTotal, submittedCount,
+      onTimeCount, lateCount, onTimeRate, totalDaysLate, // ★ เพิ่ม totalDaysLate
+      specialTotal, percentage, grade, grandTotal,
+    };
+  });
+}, [students, submissions, assignments, presets, scoreEvents, criteria, totalMaxScore]);
 
   const podiumTop5 = useMemo(() => {
     return [...rows].sort((a, b) => b.grandTotal - a.grandTotal).slice(0, 5);
@@ -291,13 +310,13 @@ export default function GradeOverviewTool({
           "ชื่อ-นามสกุล": `${r.student.prefix ?? ""}${r.student.first_name} ${r.student.last_name}`.trim(),
         };
         assignments.forEach(a => {
-          const sub = r.subMap[a.id];
-          const result = isOnTime(a, sub);
-          const onTimeTag = result === null ? "" : result ? " (ตรงเวลา)" : " (ส่งช้า)";
-          row[a.title] = sub?.score !== null && sub?.score !== undefined
-            ? `${sub.score}${onTimeTag}`
-            : (sub ? "ส่งแล้ว-ยังไม่ให้คะแนน" + onTimeTag : "ไม่ส่งงาน");
-        });
+  const sub = r.subMap[a.id];
+  const info = getLateInfo(a, sub); // ★ แทน isOnTime
+  const onTimeTag = !info.hasData ? "" : info.isLate ? ` (ส่งช้า${info.isManual ? "" : ` ${info.daysLate} วัน`})` : " (ตรงเวลา)";
+  row[a.title] = sub?.score !== null && sub?.score !== undefined
+    ? `${sub.score}${onTimeTag}`
+    : (sub ? "ส่งแล้ว-ยังไม่ให้คะแนน" : "ไม่ส่งงาน");
+});
         presets.forEach(p => { row[p.label] = r.presetTotals[p.id] ?? 0; });
         row["คะแนนงานรวม"] = r.assignmentTotal;
         row["คะแนนพิเศษรวม"] = r.specialTotal;
@@ -305,8 +324,9 @@ export default function GradeOverviewTool({
         row["เปอร์เซ็นต์"] = Number(r.percentage.toFixed(2));
         row["เกรด"] = r.grade;
         row["ส่งตรงเวลา (ชิ้น)"] = r.onTimeCount;
-        row["ส่งช้า (ชิ้น)"] = r.lateCount;
-        row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null ? "ไม่มีข้อมูล" : Number(r.onTimeRate.toFixed(2));
+row["ส่งช้า (ชิ้น)"] = r.lateCount;
+row["รวมจำนวนวันที่สายทั้งหมด"] = r.totalDaysLate; // ★ เพิ่ม
+row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null ? "ไม่มีข้อมูล" : Number(r.onTimeRate.toFixed(2));
         return row;
       });
 
@@ -400,16 +420,16 @@ export default function GradeOverviewTool({
         <p className="text-red-600 text-xs font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-3">❌ {error}</p>
       ) : tab === "table" ? (
         <GradeTable
-          rows={rows}
-          assignments={assignments}
-          presets={presets}
-          totalMaxScore={totalMaxScore}
-          onOpenReport={s => setReportStudent(s)}
-          onAdjustPreset={handleAdjustPreset}
-          onUpdateScore={handleUpdateScore}
-          isOnTime={isOnTime}
-          readOnly={readOnly}
-        />
+  rows={rows}
+  assignments={assignments}
+  presets={presets}
+  totalMaxScore={totalMaxScore}
+  onOpenReport={s => setReportStudent(s)}
+  onAdjustPreset={handleAdjustPreset}
+  onUpdateScore={handleUpdateScore}
+  getLateInfo={getLateInfo}   // ★ เปลี่ยนจาก isOnTime
+  readOnly={readOnly}
+/>
       ) : (
         <PodiumView top5={podiumTop5} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
       )}
@@ -421,7 +441,7 @@ export default function GradeOverviewTool({
 type ActiveCell = { assignmentId: string; studentId: string } | null;
 
 function GradeTable({
-  rows, assignments, presets, totalMaxScore, onOpenReport, onAdjustPreset, onUpdateScore, isOnTime, readOnly,
+  rows, assignments, presets, totalMaxScore, onOpenReport, onAdjustPreset, onUpdateScore, getLateInfo, readOnly,
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
@@ -430,7 +450,7 @@ function GradeTable({
   onOpenReport: (s: Student) => void;
   onAdjustPreset: (studentId: string, presetId: string, currentValue: number, newValue: number) => void;
   onUpdateScore: (studentId: string, assignmentId: string, newScore: number) => void;
-  isOnTime: (assignment: Assignment, sub?: Submission) => boolean | null;
+  getLateInfo: (assignment: Assignment, sub?: Submission) => LateInfo; // ★
   readOnly: boolean;
 }) {
   // ★ ช่องที่กำลังกรอกคะแนนอยู่ตอนนี้ (คุมจากที่นี่ เพื่อให้กด Enter แล้วสั่งเปิดช่องถัดไปในคอลัมน์เดียวกันได้)
@@ -513,38 +533,43 @@ function GradeTable({
                   </button>
                 </td>
                 {assignments.map(a => {
-                  const sub = r.subMap[a.id];
-                  const onTimeResult = isOnTime(a, sub);
-                  return (
-                    <td key={a.id} className="text-center px-3 py-3">
-                      {readOnly ? (
-                        !sub ? (
-                          <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-red-50 text-red-600">ไม่ส่งงาน</span>
-                        ) : sub.score === null ? (
-                          <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600">รอตรวจ</span>
-                        ) : (
-                          <div className="flex flex-col items-center gap-0.5">
-                            <span className="text-sm font-black text-slate-700">{sub.score}</span>
-                            {onTimeResult === false && (
-                              <span className="text-[9px] font-black text-red-500">⏰ ส่งช้า</span>
-                            )}
-                          </div>
-                        )
-                      ) : (
-                        <EditableScoreCell
-                          submission={sub}
-                          maxScore={a.max_score}
-                          onTimeResult={onTimeResult}
-                          isEditing={activeCell?.assignmentId === a.id && activeCell?.studentId === s.id}
-                          onRequestEdit={() => setActiveCell({ assignmentId: a.id, studentId: s.id })}
-                          onCommit={newScore => onUpdateScore(s.id, a.id, newScore)}
-                          onEnterNext={() => moveToNextRow(a.id, s.id)}
-                          onCancelEdit={() => setActiveCell(null)}
-                        />
-                      )}
-                    </td>
-                  );
-                })}
+    const sub = r.subMap[a.id];
+    const lateInfo = getLateInfo(a, sub); // ★ เปลี่ยนจาก isOnTime(a, sub)
+    return (
+      <td key={a.id} className="text-center px-3 py-3">
+        {readOnly ? (
+          !sub ? (
+            <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-red-50 text-red-600">ไม่ส่งงาน</span>
+          ) : sub.score === null ? (
+            <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600">รอตรวจ</span>
+          ) : (
+            <div className="flex flex-col items-center gap-0.5">
+              <span className="text-sm font-black text-slate-700">{sub.score}</span>
+              {lateInfo.hasData && lateInfo.isLate && (
+                <span className="text-[9px] font-black text-red-500">
+                  ⏰ ส่งช้า{lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}
+                </span>
+              )}
+              {lateInfo.hasData && !lateInfo.isLate && (
+                <span className="text-[9px] font-black text-emerald-500">✅ ตรงเวลา</span>
+              )}
+            </div>
+          )
+        ) : (
+          <EditableScoreCell
+            submission={sub}
+            maxScore={a.max_score}
+            lateInfo={lateInfo}   // ★ เปลี่ยนจาก onTimeResult
+            isEditing={activeCell?.assignmentId === a.id && activeCell?.studentId === s.id}
+            onRequestEdit={() => setActiveCell({ assignmentId: a.id, studentId: s.id })}
+            onCommit={newScore => onUpdateScore(s.id, a.id, newScore)}
+            onEnterNext={() => moveToNextRow(a.id, s.id)}
+            onCancelEdit={() => setActiveCell(null)}
+          />
+        )}
+      </td>
+    );
+  })}
                 {presets.map(p => (
                   <td key={p.id} className="text-center px-3 py-3">
                     {readOnly ? (
@@ -595,7 +620,7 @@ function GradeTable({
 function EditableScoreCell({
   submission,
   maxScore,
-  onTimeResult,
+  lateInfo, // ★ เปลี่ยนจาก onTimeResult: boolean | null
   isEditing,
   onRequestEdit,
   onCommit,
@@ -604,7 +629,7 @@ function EditableScoreCell({
 }: {
   submission?: Submission;
   maxScore: number;
-  onTimeResult: boolean | null;
+  lateInfo: LateInfo; // ★
   isEditing: boolean;
   onRequestEdit: () => void;
   onCommit: (newScore: number) => void;
@@ -695,8 +720,17 @@ function EditableScoreCell({
 
   return (
     <button onClick={onRequestEdit} title="คลิกเพื่อแก้ไขคะแนน" className="flex flex-col items-center gap-0.5 mx-auto">
-      <span className="text-sm font-black text-slate-700 hover:bg-slate-100 rounded-lg px-2 py-0.5 transition-colors">{submission.score}</span>
-      {onTimeResult === false && <span className="text-[9px] font-black text-red-500">⏰ ส่งช้า</span>}
+      <span className="text-sm font-black text-slate-700 hover:bg-slate-100 rounded-lg px-2 py-0.5 transition-colors">
+        {submission.score}
+      </span>
+      {lateInfo.hasData && lateInfo.isLate && (
+        <span className="text-[9px] font-black text-red-500">
+          ⏰ ส่งช้า{lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}
+        </span>
+      )}
+      {lateInfo.hasData && !lateInfo.isLate && (
+        <span className="text-[9px] font-black text-emerald-500">✅ ตรงเวลา</span>
+      )}
     </button>
   );
 }
@@ -749,6 +783,7 @@ function buildRowsType() {
     assignmentTotal: number;
     submittedCount: number;
     onTimeCount: number;
+    totalDaysLate: number;
     lateCount: number;
     onTimeRate: number | null;
     specialTotal: number;
@@ -1004,23 +1039,29 @@ function StudentReportModal({
           ) : (
             <div className="rounded-xl border border-slate-100 overflow-hidden">
               {assignments.map((a, i) => {
-                const sub = row.subMap[a.id];
-                return (
-                  <div key={a.id} className={`flex items-center justify-between px-3 py-2 text-xs ${i % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
-                    <span className="font-bold text-slate-600 truncate pr-2">{a.title}</span>
-                    <span className="font-black text-slate-700 whitespace-nowrap">
-                      {sub?.score ?? (sub ? "รอตรวจ" : "ไม่ส่งงาน")} / {a.max_score}
-                    </span>
-                  </div>
-                );
-              })}
+  const sub = row.subMap[a.id];
+  const info = getLateInfo(a, sub); // ★ เรียกตรง ๆ ได้เลย เพราะเป็น top-level function
+  return (
+    <div key={a.id} className={`flex items-center justify-between px-3 py-2 text-xs ${i % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
+      <span className="font-bold text-slate-600 truncate pr-2">{a.title}</span>
+      <span className="font-black text-slate-700 whitespace-nowrap flex items-center gap-1.5">
+        {sub?.score ?? (sub ? "รอตรวจ" : "ไม่ส่งงาน")} / {a.max_score}
+        {info.hasData && info.isLate && (
+          <span className="text-red-500">⏰{info.isManual ? "" : ` สาย ${info.daysLate}วัน`}</span>
+        )}
+      </span>
+    </div>
+  );
+})}
             </div>
           )}
           <div className="mt-2 flex items-center justify-between text-[11px] font-black text-slate-500">
             <span>ส่งงานแล้ว {row.submittedCount} / {assignments.length} ชิ้น · รวม {row.assignmentTotal} / {assignments.reduce((a, b) => a + (b.max_score ?? 0), 0)} คะแนน</span>
             <span>
-              {row.onTimeRate === null ? "ไม่มีข้อมูลส่งตรงเวลา" : `⏱️ ตรงเวลา ${row.onTimeCount} / ส่งช้า ${row.lateCount} (${row.onTimeRate.toFixed(0)}%)`}
-            </span>
+  {row.onTimeRate === null
+    ? "ไม่มีข้อมูลส่งตรงเวลา"
+    : `⏱️ ตรงเวลา ${row.onTimeCount} / ส่งช้า ${row.lateCount} (${row.onTimeRate.toFixed(0)}%)${row.totalDaysLate > 0 ? ` · สายรวม ${row.totalDaysLate} วัน` : ""}`}
+</span>
           </div>
         </div>
 
