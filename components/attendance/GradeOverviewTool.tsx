@@ -419,6 +419,9 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           onSave={saveCriteria}
         />
       )}
+      {!loading && !error && (
+      <SummaryStats rows={rows} totalMaxScore={totalMaxScore} assignmentsCount={assignments.length} />
+    )}
 
       <div className="flex items-start justify-between flex-wrap gap-3 print:hidden">
         <div>
@@ -428,9 +431,6 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {!loading && !error && (
-  <SummaryStats rows={rows} totalMaxScore={totalMaxScore} assignmentsCount={assignments.length} />
-)}
           <button
   onClick={() => setTab(tab === "table" ? "podium" : "table")}
   className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-500 hover:to-orange-500 text-white font-black text-sm flex items-center gap-1.5 shadow-sm"
@@ -554,6 +554,7 @@ function GradeTable({
 <th className="px-3 py-3 text-center min-w-[90px] bg-amber-50/70">
   <p className="text-[11px] font-black text-amber-700">ส่งตรงเวลา</p>
 </th>
+
   </tr>
 </thead>
       <tbody>
@@ -640,10 +641,19 @@ function GradeTable({
                   </td>
                 ))}
                 <td className="text-center px-3 py-3">
-                  <span className="inline-flex items-center justify-center min-w-[44px] px-2.5 py-1.5 rounded-xl font-black text-sm bg-slate-100 text-slate-700">
-                    {r.grandTotal}
-                  </span>
-                </td>
+  <div className="inline-flex flex-col items-center gap-1 min-w-[70px]">
+    <span className="font-black text-sm text-slate-700">
+      {r.grandTotal}<span className="text-slate-400 font-bold">/{totalMaxScore}</span>
+    </span>
+    <div className="w-16 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+      <div
+        className={`h-full rounded-full ${r.percentage >= 80 ? "bg-emerald-400" : r.percentage >= 50 ? "bg-amber-400" : "bg-rose-400"}`}
+        style={{ width: `${Math.min(100, Math.max(0, r.percentage))}%` }}
+      />
+    </div>
+    <span className="text-[9px] font-bold text-slate-400">{r.percentage.toFixed(0)}%</span>
+  </div>
+</td>
                 <td className="text-center px-3 py-3">
                   <span className="inline-flex items-center justify-center min-w-[36px] px-2.5 py-1.5 rounded-xl font-black text-sm bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white">
                     {r.grade}
