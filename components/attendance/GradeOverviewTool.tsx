@@ -45,23 +45,37 @@ type ViewTab = "table" | "podium";
 // ★ ย้ายมาไว้ module scope เพื่อให้ GradeTable / EditableScoreCell / StudentReportModal เรียกใช้ได้
 type LateInfo = { hasData: boolean; isLate: boolean; daysLate: number; isManual: boolean };
 
-// ต้องมีคะแนนแล้ว (ครูให้คะแนนแล้ว) ถึงจะเริ่มคำนวณสถานะตรงเวลา/สาย
+// คำนวณสถานะตรงเวลา/สาย
 function getLateInfo(assignment: Assignment, sub?: Submission): LateInfo {
-  const hasScore = !!sub && sub.score !== null && sub.score !== undefined;
-  if (!hasScore) return { hasData: false, isLate: false, daysLate: 0, isManual: false };
-
-  // 1) ครูกำหนดสถานะเอง -> ใช้ค่านั้นเสมอ ไม่คำนวณทับ
-  if (sub!.is_late !== null && sub!.is_late !== undefined) {
-    return { hasData: true, isLate: sub!.is_late, daysLate: 0, isManual: true };
+  // เคส 1: ไม่มีการส่งงานเลย
+  if (!sub) {
+    if (!assignment.due_date) {
+      // ไม่มีกำหนดส่ง -> ยังประเมินไม่ได้ ไม่นับในสถิติ
+      return { hasData: false, isLate: false, daysLate: 0, isManual: false };
+    }
+    const due = new Date(assignment.due_date).getTime();
+    const now = Date.now();
+    if (now <= due) {
+      // ยังไม่ถึงกำหนดส่ง -> ยังตัดสินไม่ได้ตอนนี้ ไม่นับ (ไม่ยุติธรรมกับเด็ก)
+      return { hasData: false, isLate: false, daysLate: 0, isManual: false };
+    }
+    // เลยกำหนดส่งไปแล้วและยังไม่ส่ง -> นับเป็น "ไม่ตรงเวลา"
+    const daysLate = Math.max(1, Math.ceil((now - due) / (1000 * 60 * 60 * 24)));
+    return { hasData: true, isLate: true, daysLate, isManual: false };
   }
 
-  // 2) ชิ้นงานนี้ไม่ได้ตั้งกำหนดส่ง -> ถือว่าตรงเวลาทั้งหมด
+  // เคส 2: ครูกำหนดสถานะเอง -> ใช้ค่านั้นเสมอ ไม่คำนวณทับ
+  if (sub.is_late !== null && sub.is_late !== undefined) {
+    return { hasData: true, isLate: sub.is_late, daysLate: 0, isManual: true };
+  }
+
+  // เคส 3: ชิ้นงานนี้ไม่ได้ตั้งกำหนดส่ง -> ถือว่าตรงเวลาทั้งหมด
   if (!assignment.due_date) {
     return { hasData: true, isLate: false, daysLate: 0, isManual: false };
   }
 
-  // 3) เทียบกำหนดส่งกับเวลาที่ส่งจริง ถ้าไม่มีให้ใช้เวลาที่ตรวจ/ให้คะแนนแทน
-  const referenceIso = sub!.submitted_at || sub!.graded_at || new Date().toISOString();
+  // เคส 4: มีการส่งงานแล้ว (ไม่ว่าจะให้คะแนนแล้วหรือรอตรวจ) -> เทียบเวลาส่งจริงกับกำหนดส่ง
+  const referenceIso = sub.submitted_at || sub.graded_at || new Date().toISOString();
   const due = new Date(assignment.due_date).getTime();
   const ref = new Date(referenceIso).getTime();
 
@@ -345,7 +359,39 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   function handlePrint() {
     window.print();
   }
+  function SummaryStats({ rows, totalMaxScore, assignmentsCount }: {
+  rows: ReturnType<typeof buildRowsType>;
+  totalMaxScore: number;
+  assignmentsCount: number;
+}) {
+  if (rows.length === 0) return null;
+  const avgPercentage = rows.reduce((sum, r) => sum + r.percentage, 0) / rows.length;
+  const avgOnTime = (() => {
+    const withData = rows.filter(r => r.onTimeRate !== null);
+    if (withData.length === 0) return null;
+    return withData.reduce((sum, r) => sum + (r.onTimeRate ?? 0), 0) / withData.length;
+  })();
+  const top = [...rows].sort((a, b) => b.grandTotal - a.grandTotal)[0];
 
+  const cards = [
+    { label: "จำนวนนักเรียน", value: `${rows.length} คน`, icon: "👥", grad: "from-violet-500 to-indigo-500" },
+    { label: "จำนวนชิ้นงาน", value: `${assignmentsCount} ชิ้น (${totalMaxScore} คะแนนเต็ม)`, icon: "📚", grad: "from-sky-500 to-cyan-500" },
+    { label: "คะแนนเฉลี่ยของห้อง", value: `${avgPercentage.toFixed(1)}%`, icon: "📈", grad: "from-emerald-500 to-teal-500" },
+    { label: "อัตราส่งตรงเวลาเฉลี่ย", value: avgOnTime === null ? "ไม่มีข้อมูล" : `${avgOnTime.toFixed(0)}%`, icon: "⏱️", grad: "from-amber-500 to-orange-500" },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 print:hidden">
+      {cards.map(c => (
+        <div key={c.label} className={`rounded-2xl bg-gradient-to-br ${c.grad} p-4 text-white shadow-sm`}>
+          <p className="text-lg leading-none mb-2">{c.icon}</p>
+          <p className="text-[11px] font-bold opacity-90">{c.label}</p>
+          <p className="text-lg font-black mt-0.5">{c.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
   return (
     <div className="space-y-6">
       {reportStudent && (
@@ -382,20 +428,23 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {!loading && !error && (
+  <SummaryStats rows={rows} totalMaxScore={totalMaxScore} assignmentsCount={assignments.length} />
+)}
           <button
-            onClick={() => setTab(tab === "table" ? "podium" : "table")}
-            className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
-          >
-            {tab === "table" ? "🏆 อันดับคะแนน" : "🔢 ตาราง"}
-          </button>
-          {!readOnly && (
-            <button
-              onClick={() => setShowGradeSetting(true)}
-              className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
-            >
-              ⚙️ ตั้งค่าคำนวณเกรด
-            </button>
-          )}
+  onClick={() => setTab(tab === "table" ? "podium" : "table")}
+  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-500 hover:to-orange-500 text-white font-black text-sm flex items-center gap-1.5 shadow-sm"
+>
+  {tab === "table" ? "🏆 อันดับคะแนน" : "🔢 ตาราง"}
+</button>
+{!readOnly && (
+  <button
+    onClick={() => setShowGradeSetting(true)}
+    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-400 to-pink-400 hover:from-fuchsia-500 hover:to-pink-500 text-white font-black text-sm flex items-center gap-1.5 shadow-sm"
+  >
+    ⚙️ ตั้งค่าคำนวณเกรด
+  </button>
+)}
           {readOnly && (
             <button
               onClick={handlePrint}
@@ -419,6 +468,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       ) : error ? (
         <p className="text-red-600 text-xs font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-3">❌ {error}</p>
       ) : tab === "table" ? (
+
         <GradeTable
   rows={rows}
   assignments={assignments}
@@ -477,37 +527,35 @@ function GradeTable({
   <div className="bg-white rounded-2xl border border-slate-100 overflow-auto max-h-[75vh]">
     <table className="w-full min-w-[960px] border-collapse">
       <thead className="sticky top-0 z-20">
-        <tr className="bg-slate-50">
-          <th className="text-left text-[11px] font-black text-slate-500 px-5 py-3 sticky left-0 top-0 bg-slate-50 z-30">
-            Name
-          </th>
-          <th className="px-3 py-3 text-center text-[11px] font-black text-slate-400 bg-slate-50">
-            Report
-          </th>
-          {assignments.map(a => (
-            <th key={a.id} className="px-3 py-3 text-center min-w-[110px] bg-slate-50">
-              <p className="text-[11px] font-black text-slate-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
-              <p className="text-[9px] text-slate-300 font-bold">{a.max_score} คะแนนเต็ม</p>
-            </th>
-          ))}
-          {presets.map(p => (
-            <th key={p.id} className="px-3 py-3 text-center min-w-[100px] bg-slate-50">
-              <p className="text-[11px] font-black text-sky-600">{p.emoji} {p.label}</p>
-              <p className="text-[9px] text-slate-300 font-bold">คะแนนพิเศษ</p>
-            </th>
-          ))}
-          <th className="px-3 py-3 text-center min-w-[90px] bg-slate-50">
-            <p className="text-[11px] font-black text-slate-700">Total Score</p>
-            <p className="text-[9px] text-slate-300 font-bold">({totalMaxScore} คะแนนเต็ม)</p>
-          </th>
-          <th className="px-3 py-3 text-center min-w-[70px] bg-slate-50">
-            <p className="text-[11px] font-black text-slate-700">Grade</p>
-          </th>
-          <th className="px-3 py-3 text-center min-w-[90px] bg-slate-50">
-            <p className="text-[11px] font-black text-slate-700">ส่งตรงเวลา</p>
-          </th>
-        </tr>
-      </thead>
+  <tr className="bg-gradient-to-r from-indigo-50 via-sky-50 to-fuchsia-50">
+    <th className="text-left text-[11px] font-black text-slate-600 px-5 py-3 sticky left-0 top-0 bg-gradient-to-r from-indigo-50 to-sky-50 z-30">
+      Name
+    </th>
+    <th className="px-3 py-3 text-center text-[11px] font-black text-slate-400 bg-sky-50">Report</th>
+    {assignments.map(a => (
+      <th key={a.id} className="px-3 py-3 text-center min-w-[110px] bg-sky-50/70">
+        <p className="text-[11px] font-black text-indigo-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
+        <p className="text-[9px] text-indigo-300 font-bold">เต็ม {a.max_score} คะแนน</p>
+      </th>
+    ))}
+    {presets.map(p => (
+  <th key={p.id} className="px-3 py-3 text-center min-w-[100px] bg-fuchsia-50/70">
+    <p className="text-[11px] font-black text-fuchsia-600">{p.emoji} {p.label}</p>
+    <p className="text-[9px] text-fuchsia-300 font-bold">คะแนนพิเศษ</p>
+  </th>
+))}
+<th className="px-3 py-3 text-center min-w-[100px] bg-emerald-50/70">
+  <p className="text-[11px] font-black text-emerald-700">Total Score</p>
+  <p className="text-[9px] text-emerald-400 font-bold">เต็ม {totalMaxScore} คะแนน</p>
+</th>
+<th className="px-3 py-3 text-center min-w-[70px] bg-fuchsia-50/70">
+  <p className="text-[11px] font-black text-fuchsia-700">Grade</p>
+</th>
+<th className="px-3 py-3 text-center min-w-[90px] bg-amber-50/70">
+  <p className="text-[11px] font-black text-amber-700">ส่งตรงเวลา</p>
+</th>
+  </tr>
+</thead>
       <tbody>
           {rows.map(r => {
             const s = r.student;
@@ -547,22 +595,24 @@ function GradeTable({
   ) : sub.score === null ? (
     <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600">รอตรวจ</span>
   ) : (
-    (() => {
-      const isLate = lateInfo.hasData && lateInfo.isLate;
-      const bgClass = isLate ? "bg-orange-50" : "bg-emerald-50";
-      const textClass = isLate ? "text-orange-600" : "text-emerald-600";
-      return (
-        <div className={`inline-flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg ${bgClass}`}>
-          <span className={`text-sm font-black ${textClass}`}>{sub.score}</span>
-          {lateInfo.hasData && (
-            <span className={`text-[9px] font-black ${textClass}`}>
-              {isLate ? `⏰ ส่งช้า${lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}` : "✅ ตรงเวลา"}
-            </span>
-          )}
-        </div>
-      );
-    })()
-  )
+  (() => {
+    const isLate = lateInfo.hasData && lateInfo.isLate;
+    const bgClass = isLate ? "bg-orange-50 ring-1 ring-orange-200" : "bg-emerald-50 ring-1 ring-emerald-200";
+    const textClass = isLate ? "text-orange-600" : "text-emerald-600";
+    return (
+      <div className={`inline-flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl ${bgClass}`}>
+        <span className={`text-sm font-black ${textClass}`}>
+          {sub.score}<span className="text-slate-400 font-bold">/{a.max_score}</span>
+        </span>
+        {lateInfo.hasData && (
+          <span className={`text-[9px] font-black ${textClass}`}>
+            {isLate ? `⏰ ส่งช้า${lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}` : "✅ ตรงเวลา"}
+          </span>
+        )}
+      </div>
+    );
+  })()
+)
 ) : (
   <EditableScoreCell
     submission={sub}
@@ -748,19 +798,21 @@ function EditableScoreCell({
   const textClass = isLate ? "text-orange-600" : "text-emerald-600";
 
   return (
-    <button
-      onClick={onRequestEdit}
-      title="คลิกเพื่อแก้ไขคะแนน"
-      className={`flex flex-col items-center gap-0.5 mx-auto px-2 py-1 rounded-lg transition-colors ${bgClass}`}
-    >
-      <span className={`text-sm font-black ${textClass}`}>{submission.score}</span>
-      {lateInfo.hasData && (
-        <span className={`text-[9px] font-black ${isLate ? "text-orange-600" : "text-emerald-600"}`}>
-          {isLate ? `⏰ ส่งช้า${lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}` : "✅ ตรงเวลา"}
-        </span>
-      )}
-    </button>
-  );
+  <button
+    onClick={onRequestEdit}
+    title="คลิกเพื่อแก้ไขคะแนน"
+    className={`flex flex-col items-center gap-0.5 mx-auto px-2.5 py-1.5 rounded-xl transition-colors ${bgClass} ring-1 ${isLate ? "ring-orange-200" : "ring-emerald-200"}`}
+  >
+    <span className={`text-sm font-black ${textClass}`}>
+      {submission.score}<span className="text-slate-400 font-bold">/{maxScore}</span>
+    </span>
+    {lateInfo.hasData && (
+      <span className={`text-[9px] font-black ${isLate ? "text-orange-600" : "text-emerald-600"}`}>
+        {isLate ? `⏰ ส่งช้า${lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}` : "✅ ตรงเวลา"}
+      </span>
+    )}
+  </button>
+);
 }
 
 function EditablePresetCell({ value, onSave }: { value: number; onSave: (newValue: number) => void }) {
