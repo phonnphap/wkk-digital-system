@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
             .from("assignment_submissions")
             // เพิ่ม submitted_at: ใช้เทียบกับ assignments.due_date เพื่อตัดสิน "ตรงเวลา/ส่งช้า"
             // ⚠️ ต้องมีคอลัมน์ submitted_at ในตาราง assignment_submissions จริงก่อน
-            .select("id, assignment_id, student_id, status, score, teacher_comment, graded_at, submitted_at")
+            .select("id, assignment_id, student_id, status, score, teacher_comment, graded_at, submitted_at, is_late")
             .in("assignment_id", assignmentIds)
         : Promise.resolve({ data: [], error: null }),
       // score_events ผูกกับ subject_section_id ตรง ๆ อยู่แล้ว ไม่ต้องกรองด้วย preset_id ก็ได้
