@@ -139,7 +139,27 @@ function toLocalInput(iso: string | null) {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+type LateInfo = { isLate: boolean; daysLate: number; isManual: boolean };
 
+function getLateInfo(
+  dueDateIso: string | null,
+  submittedAtIso: string | null,
+  manualIsLate: boolean | null
+): LateInfo {
+  // ครูกำหนดสถานะเอง (true/false) -> ใช้ค่านั้นเสมอ ไม่คำนวณทับ
+  if (manualIsLate !== null && manualIsLate !== undefined) {
+    return { isLate: manualIsLate, daysLate: 0, isManual: true };
+  }
+  // ไม่ได้กำหนดวันส่ง หรือนักเรียนยังไม่ส่ง -> ถือว่าตรงเวลาอัตโนมัติ
+  if (!dueDateIso || !submittedAtIso) {
+    return { isLate: false, daysLate: 0, isManual: false };
+  }
+  const due = new Date(dueDateIso).getTime();
+  const submitted = new Date(submittedAtIso).getTime();
+  if (submitted <= due) return { isLate: false, daysLate: 0, isManual: false };
+  const daysLate = Math.max(1, Math.ceil((submitted - due) / (1000 * 60 * 60 * 24)));
+  return { isLate: true, daysLate, isManual: false };
+}
 // ตัดอักขระที่ OneDrive ห้ามใช้ในชื่อโฟลเดอร์/ไฟล์ออก (\ / : * ? " < > | และช่องว่างหัวท้าย)
 function sanitizeFolderName(name: string): string {
   const cleaned = name.replace(/[\\/:*?"<>|]/g, "").trim();
@@ -170,6 +190,7 @@ export default function AssignmentsTool({
   currentUserId: string;
 }) {
   const [loading, setLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [studentLinks, setStudentLinks] = useState<AssignmentStudentLink[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
@@ -192,7 +213,9 @@ async function loadAnnouncements() {
 }
 
   async function loadAll() {
-    setLoading(true);
+    // ★ โชว์ full-page loading เฉพาะครั้งแรก ไม่ทำแบบนี้ทุกครั้งที่ refresh
+    // เพราะจะ unmount SubmissionsTab ทิ้ง ทำให้ state (นักเรียนที่เลือกอยู่) หายไป
+    if (!hasLoadedRef.current) setLoading(true);
     try {
       const { data: aRows } = await supabase
         .from("assignments")
@@ -205,7 +228,7 @@ async function loadAnnouncements() {
       if (ids.length > 0) {
         const [{ data: links }, { data: subs }] = await Promise.all([
           supabase.from("assignment_students").select("id, assignment_id, student_id").in("assignment_id", ids),
-          supabase.from("assignment_submissions").select("id, assignment_id, student_id, status, content, submitted_at, score, teacher_comment").in("assignment_id", ids),
+          supabase.from("assignment_submissions").select("id, assignment_id, student_id, status, content, submitted_at, score, teacher_comment, is_late").in("assignment_id", ids),
         ]);
         setStudentLinks((links ?? []) as AssignmentStudentLink[]);
         setSubmissions((subs ?? []) as Submission[]);
@@ -215,8 +238,10 @@ async function loadAnnouncements() {
       }
     } catch {
       setAssignments([]);
+    } finally {
+      setLoading(false);      // ★
+      hasLoadedRef.current = true; // ★
     }
-    setLoading(false);
   }
 
   useEffect(() => {
@@ -1757,28 +1782,48 @@ function SubmissionsTab({
 </div>
 
 {/* ★ เพิ่มส่วนนี้ */}
-<div className="rounded-xl bg-slate-50 border border-slate-100 p-3 flex items-center justify-between">
-  <div>
-    <p className="text-xs font-black text-slate-600">ส่งช้าหรือไม่</p>
-    <p className="text-[10px] text-slate-400 font-bold mt-0.5">ใช้สำหรับคำนวณสถิติ "ส่งงานตรงเวลา" ในข้อมูลเชิงลึก</p>
-  </div>
-  <div className="flex gap-2 shrink-0">
-    <button
-      type="button"
-      onClick={() => setLateDraft(false)}
-      className={`px-3 py-1.5 rounded-lg font-black text-xs ${lateDraft === false ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}
-    >
-      ✅ ตรงเวลา
-    </button>
-    <button
-      type="button"
-      onClick={() => setLateDraft(true)}
-      className={`px-3 py-1.5 rounded-lg font-black text-xs ${lateDraft === true ? "bg-rose-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}
-    >
-      ⏰ ส่งช้า
-    </button>
-  </div>
-</div>
+{(() => {
+  const info = getLateInfo(assignment.due_date, selectedSub?.submitted_at ?? null, lateDraft);
+  return (
+    <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-black text-slate-600">ส่งช้าหรือไม่</p>
+          <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+            {info.isManual
+              ? "ครูกำหนดสถานะนี้เอง"
+              : assignment.due_date
+              ? "คำนวณอัตโนมัติจากกำหนดส่ง"
+              : "ชิ้นงานนี้ไม่ได้กำหนดวันส่ง จึงถือว่าตรงเวลาโดยอัตโนมัติ"}
+          </p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button type="button" onClick={() => setLateDraft(false)}
+            className={`px-3 py-1.5 rounded-lg font-black text-xs ${lateDraft === false ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+            ✅ ตรงเวลา
+          </button>
+          <button type="button" onClick={() => setLateDraft(true)}
+            className={`px-3 py-1.5 rounded-lg font-black text-xs ${lateDraft === true ? "bg-rose-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+            ⏰ ส่งช้า
+          </button>
+          {lateDraft !== null && (
+            <button type="button" onClick={() => setLateDraft(null)} title="กลับไปใช้การคำนวณอัตโนมัติ"
+              className="px-2 py-1.5 rounded-lg font-black text-xs bg-white border border-slate-200 text-slate-400 hover:text-indigo-500">
+              ↺ อัตโนมัติ
+            </button>
+          )}
+        </div>
+      </div>
+
+      {info.isLate && (
+        <p className="mt-2 text-[11px] font-black text-rose-500">
+          ⏰ ส่งเกินกำหนด {info.daysLate} วัน
+          {assignment.due_date && <> (กำหนดส่ง <DateTimeText iso={assignment.due_date} />)</>}
+        </p>
+      )}
+    </div>
+  );
+})()}
 
             <div>
               <label className="text-xs font-black text-slate-500">คอมเมนต์ให้นักเรียน</label>
