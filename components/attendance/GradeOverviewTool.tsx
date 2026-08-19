@@ -39,6 +39,13 @@ type Submission = {
 type ScoreEvent = { id: string; student_id: string; preset_id: string; points: number };
 
 type Criterion = { id?: string; max_percent: number; min_percent: number; grade: string; sort_order?: number };
+type GroupSummary = {
+  grouped: boolean;
+  groupCode?: string;
+  subjects?: { id: string; subject_code: string; name_th: string }[];
+  totalMaxScore?: number;
+  totalsByStudent?: Record<string, number>;
+};
 
 type ViewTab = "table" | "podium";
 
@@ -126,7 +133,7 @@ export default function GradeOverviewTool({
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [scoreEvents, setScoreEvents] = useState<ScoreEvent[]>([]);
   const [attendanceMap, setAttendanceMap] = useState<Record<string, { present: number; total: number }>>({});
-
+  const [groupSummary, setGroupSummary] = useState<GroupSummary>({ grouped: false });
   const [showGradeSetting, setShowGradeSetting] = useState(false);
   const [reportStudent, setReportStudent] = useState<Student | null>(null);
   const [hideScores, setHideScores] = useState(false);
@@ -135,10 +142,11 @@ export default function GradeOverviewTool({
     setLoading(true);
     setError("");
     try {
-      const [gradeRes, attRes] = await Promise.all([
-        fetch(`/api/subject-grades/summary?subject_section_id=${sectionId}`),
-        fetch(`/api/subject-attendance/summary?subject_section_id=${sectionId}`),
-      ]);
+      const [gradeRes, attRes, groupRes] = await Promise.all([
+  fetch(`/api/subject-grades/summary?subject_section_id=${sectionId}`),
+  fetch(`/api/subject-attendance/summary?subject_section_id=${sectionId}`),
+  fetch(`/api/subject-grades/group-summary?subject_section_id=${sectionId}`),
+]);
       const json = await gradeRes.json();
       if (!gradeRes.ok) throw new Error(json.error ?? "โหลดข้อมูลไม่สำเร็จ");
       setAssignments(json.assignments ?? []);
@@ -159,6 +167,13 @@ export default function GradeOverviewTool({
           });
           setAttendanceMap(map);
         }
+        try {
+  const groupJson = await groupRes.json();
+  if (groupRes.ok) setGroupSummary(groupJson);
+  else setGroupSummary({ grouped: false });
+} catch {
+  setGroupSummary({ grouped: false });
+}
       } catch {
         // ไม่ critical
       }
@@ -355,7 +370,61 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       setExporting(false);
     }
   }
+  function GroupScoreCard({
+  groupSummary,
+  rows,
+}: {
+  groupSummary: GroupSummary;
+  rows: ReturnType<typeof buildRowsType>;
+}) {
+  if (!groupSummary.grouped) return null;
+  const subjectNames = (groupSummary.subjects ?? []).map(s => s.name_th).join(" + ");
+  const totalMaxScore = groupSummary.totalMaxScore ?? 0;
 
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 print:hidden">
+      <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+        <h3 className="font-black text-slate-800 text-sm flex items-center gap-1.5">🧮 คะแนนรวมกลุ่ม</h3>
+        <span className="text-[10px] font-black text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full">
+          รหัสกลุ่ม: {groupSummary.groupCode}
+        </span>
+      </div>
+      <p className="text-[11px] text-slate-400 font-bold mb-4">รวมคะแนนจากวิชา: {subjectNames}</p>
+
+      {rows.length === 0 ? (
+        <p className="text-center text-slate-300 text-xs font-bold py-6">ไม่มีนักเรียน</p>
+      ) : (
+        <div className="divide-y divide-slate-50">
+          {rows.map(r => {
+            const s = r.student;
+            const total = groupSummary.totalsByStudent?.[s.id] ?? 0;
+            const pct = totalMaxScore > 0 ? (total / totalMaxScore) * 100 : 0;
+            return (
+              <div key={s.id} className="flex items-center gap-3 py-2.5">
+                {s.avatar_url ? (
+                  <img src={s.avatar_url} className="w-8 h-8 rounded-full object-cover" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-violet-100 text-violet-600 text-xs font-black flex items-center justify-center">
+                    {s.first_name[0]}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-black text-slate-700 truncate">
+                    {s.prefix}{s.first_name} {s.last_name}
+                  </p>
+                  <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
+                </div>
+                <span className="px-3 py-1 rounded-full bg-gradient-to-r from-violet-500 to-indigo-400 text-white text-xs font-black shrink-0">
+                  {total} / {totalMaxScore} ({pct.toFixed(0)}%)
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
   function handlePrint() {
     window.print();
   }
@@ -468,7 +537,6 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       ) : error ? (
         <p className="text-red-600 text-xs font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-3">❌ {error}</p>
       ) : tab === "table" ? (
-
         <GradeTable
   rows={rows}
   assignments={assignments}
@@ -483,8 +551,9 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       ) : (
         <PodiumView top5={podiumTop5} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
       )}
-    </div>
-  );
+    {!loading && !error && <GroupScoreCard groupSummary={groupSummary} rows={rows} />}
+</div>
+);
 }
 
 // ★ คีย์บอกว่า "ช่องไหน" กำลังถูกแก้ไขอยู่ (ใช้คู่ assignment_id + student_id เพราะ 1 คอลัมน์มีได้หลายแถว)
