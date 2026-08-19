@@ -82,7 +82,7 @@ export const LEAVE_TYPE_CONFIG: Record<LeaveType, {
   maternity:  { label: 'ลาคลอดบุตร/ ช่วยเหลือภริยาคลอด',   icon: '👶', color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200", quota: 90   },
   ordination: { label: 'ลาอุปสมบท/ ประกอบพิธีฮัจย์',         icon: '🙏', color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-200", quota: 120  },
   official:   { label: 'ไปราชการ',                            icon: '🏛️', color: "text-green-600", bg: "bg-green-50", border: "border-green-200", quota: null },
-  other:      { label: 'ลาประเภทอื่นๆ',                       icon: '📌', color: "text-gray-600", bg: "bg-gray-50", border: "border-gray-200", quota: null },
+  other:      { label: 'ลากิจฉุกเฉิน',                       icon: '📌', color: "text-gray-600", bg: "bg-gray-50", border: "border-gray-200", quota: null },
 };
 
 // ── Leave status config ───────────────────────────────────────────────────────
