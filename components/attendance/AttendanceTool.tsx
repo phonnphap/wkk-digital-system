@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { fetchSingleHoliday, HolidayInfo } from "@/lib/holidays";
 
@@ -32,9 +32,203 @@ const AVATAR_GRADIENTS = [
   "from-pink-400 to-rose-400",
 ];
 
+/* ---------------- ตัวช่วยจัดการวันที่แบบไทย ---------------- */
+
+const THAI_DAY_NAMES = ["วันอาทิตย์", "วันจันทร์", "วันอังคาร", "วันพุธ", "วันพฤหัสบดี", "วันศุกร์", "วันเสาร์"];
+const THAI_DAY_SHORT = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
+const THAI_MONTH_NAMES = [
+  "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+];
+
+function toDateObj(dateStr: string): Date {
+  return new Date(dateStr + "T00:00:00");
+}
+function toDateStr(y: number, m: number, d: number): string {
+  const mm = String(m + 1).padStart(2, "0");
+  const dd = String(d).padStart(2, "0");
+  return `${y}-${mm}-${dd}`;
+}
+// แสดงวันที่แบบเต็มภาษาไทย เช่น "วันจันทร์ ที่ 1 มกราคม 2569" (ปี พ.ศ.)
+function formatThaiDateFull(dateStr: string): string {
+  if (!dateStr) return "";
+  const d = toDateObj(dateStr);
+  const dayName = THAI_DAY_NAMES[d.getDay()];
+  const day = d.getDate();
+  const month = THAI_MONTH_NAMES[d.getMonth()];
+  const buddhistYear = d.getFullYear() + 543;
+  return `${dayName} ที่ ${day} ${month} ${buddhistYear}`;
+}
+function formatThaiMonthYear(y: number, m: number): string {
+  return `${THAI_MONTH_NAMES[m]} ${y + 543}`;
+}
+
+/* ---------------- ปฏิทินเลือกวันที่เช็กชื่อ: แดง = ยังไม่ได้เช็ก, เขียว = เช็กแล้ว, เทา = วันหยุด ---------------- */
+
+type DayState = "checked" | "pending" | "holiday" | "none";
+
+function AttendanceCalendarPicker({
+  subjectSectionId,
+  selectedDate,
+  onSelectDate,
+}: {
+  subjectSectionId?: string;
+  selectedDate: string;
+  onSelectDate?: (date: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const initial = toDateObj(selectedDate || new Date().toISOString().slice(0, 10));
+  const [viewYear, setViewYear] = useState(initial.getFullYear());
+  const [viewMonth, setViewMonth] = useState(initial.getMonth());
+  const [dayStates, setDayStates] = useState<Record<string, DayState>>({});
+  const [loadingMonth, setLoadingMonth] = useState(false);
+  const cacheRef = useRef<Record<string, Record<string, DayState>>>({});
+
+  const monthKey = `${viewYear}-${viewMonth}`;
+
+  const loadMonth = useCallback(async () => {
+    if (!subjectSectionId) return;
+    if (cacheRef.current[monthKey]) {
+      setDayStates(cacheRef.current[monthKey]);
+      return;
+    }
+    setLoadingMonth(true);
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+    const dateStrs = Array.from({ length: daysInMonth }, (_, i) => toDateStr(viewYear, viewMonth, i + 1));
+
+    try {
+      const results = await Promise.all(
+        dateStrs.map(async (dateStr): Promise<[string, DayState]> => {
+          try {
+            const holiday = await fetchSingleHoliday(dateStr);
+            if (holiday) return [dateStr, "holiday"];
+
+            const res = await fetch(`/api/timetable/periods?subject_section_id=${subjectSectionId}&attendance_date=${dateStr}`);
+            const json = await res.json();
+            const periods = json.periods ?? [];
+            if (periods.length === 0) return [dateStr, "none"];
+
+            const entryId = periods[0].timetable_entry_id;
+            const attRes = await fetch(`/api/subject-attendance?timetable_entry_id=${entryId}&attendance_date=${dateStr}`);
+            const attJson = await attRes.json();
+            const records = attJson.records ?? [];
+            return [dateStr, records.length > 0 ? "checked" : "pending"];
+          } catch {
+            return [dateStr, "none"];
+          }
+        })
+      );
+      const map: Record<string, DayState> = {};
+      results.forEach(([dateStr, state]) => { map[dateStr] = state; });
+      cacheRef.current[monthKey] = map;
+      setDayStates(map);
+    } finally {
+      setLoadingMonth(false);
+    }
+  }, [subjectSectionId, viewYear, viewMonth, monthKey]);
+
+  useEffect(() => {
+    if (open) loadMonth();
+  }, [open, loadMonth]);
+
+  function goPrevMonth() {
+    if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); }
+    else setViewMonth(m => m - 1);
+  }
+  function goNextMonth() {
+    if (viewMonth === 11) { setViewYear(y => y + 1); setViewMonth(0); }
+    else setViewMonth(m => m + 1);
+  }
+
+  const firstWeekday = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const cells: (number | null)[] = [
+    ...Array.from({ length: firstWeekday }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+
+  const DAY_STYLES: Record<DayState, string> = {
+    checked: "bg-emerald-500 text-white hover:bg-emerald-600",
+    pending: "bg-red-500 text-white hover:bg-red-600",
+    holiday: "bg-slate-300 text-slate-600 cursor-not-allowed",
+    none: "bg-white text-slate-300 cursor-not-allowed",
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full sm:w-auto flex items-center gap-2 bg-slate-50 border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm font-black text-slate-700 hover:border-fuchsia-300 transition-colors"
+      >
+        📅 {selectedDate ? formatThaiDateFull(selectedDate) : "เลือกวันที่"}
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute z-40 top-full left-0 mt-2 w-80 bg-white rounded-2xl border border-slate-200 shadow-2xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <button onClick={goPrevMonth} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 font-black">‹</button>
+              <p className="font-black text-slate-700 text-sm">{formatThaiMonthYear(viewYear, viewMonth)}</p>
+              <button onClick={goNextMonth} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 font-black">›</button>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 mb-1">
+              {THAI_DAY_SHORT.map(d => (
+                <div key={d} className="text-center text-[10px] font-black text-slate-400 py-1">{d}</div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-7 gap-1">
+              {cells.map((day, i) => {
+                if (day === null) return <div key={`empty-${i}`} />;
+                const dateStr = toDateStr(viewYear, viewMonth, day);
+                const state: DayState = subjectSectionId ? (dayStates[dateStr] ?? "none") : "none";
+                const clickable = state === "checked" || state === "pending";
+                const isSelected = dateStr === selectedDate;
+                return (
+                  <button
+                    key={dateStr}
+                    disabled={!clickable}
+                    onClick={() => {
+                      if (!clickable) return;
+                      onSelectDate?.(dateStr);
+                      setOpen(false);
+                    }}
+                    title={
+                      state === "checked" ? "เช็กชื่อแล้ว"
+                        : state === "pending" ? "ยังไม่ได้เช็กชื่อ"
+                        : state === "holiday" ? "วันหยุด"
+                        : "ไม่มีคาบเรียนวันนี้"
+                    }
+                    className={`aspect-square rounded-lg text-xs font-black flex items-center justify-center transition-colors ${DAY_STYLES[state]} ${
+                      isSelected ? "ring-2 ring-offset-1 ring-fuchsia-500" : ""
+                    }`}
+                  >
+                    {day}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap mt-3 pt-3 border-t border-slate-100">
+              <span className="flex items-center gap-1 text-[10px] font-bold text-slate-500"><span className="w-2.5 h-2.5 rounded-sm bg-red-500 inline-block" /> ยังไม่เช็ก</span>
+              <span className="flex items-center gap-1 text-[10px] font-bold text-slate-500"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> เช็กแล้ว</span>
+              <span className="flex items-center gap-1 text-[10px] font-bold text-slate-500"><span className="w-2.5 h-2.5 rounded-sm bg-slate-300 inline-block" /> วันหยุด</span>
+              {loadingMonth && <span className="text-[10px] font-bold text-fuchsia-400 animate-pulse ml-auto">กำลังโหลด...</span>}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function AttendanceTool({
   timetableEntryId, date, students, currentUserId,
   referenceMap, referenceLabel = "โฮมรูม",
+  subjectSectionId, onSelectDate,
 }: {
   timetableEntryId: string;
   date: string;
@@ -42,6 +236,8 @@ export default function AttendanceTool({
   currentUserId?: string;
   referenceMap?: Record<string, ReferenceInfo>;
   referenceLabel?: string;
+  subjectSectionId?: string;
+  onSelectDate?: (date: string) => void;
 }) {
   const [statusMap, setStatusMap] = useState<Record<string, Status>>({});
   const [noteMap, setNoteMap] = useState<Record<string, string>>({});
@@ -142,18 +338,6 @@ export default function AttendanceTool({
     return acc;
   }, {} as Record<Status, number>);
 
-  if (loading) {
-    return <div className="p-10 text-center text-slate-400 font-bold animate-pulse">กำลังโหลดข้อมูลเช็กชื่อ...</div>;
-  }
-  if (students.length === 0) {
-    return (
-      <div className="p-10 text-center text-slate-400">
-        <p className="text-3xl mb-2">📭</p>
-        <p className="font-bold text-sm">ยังไม่มีนักเรียนเข้าร่วมวิชานี้ ไม่สามารถเช็กชื่อได้</p>
-      </div>
-    );
-  }
-
   return (
     <div className="rounded-2xl overflow-hidden">
       {/* หัวการ์ด */}
@@ -173,10 +357,24 @@ export default function AttendanceTool({
         </button>
       </div>
 
+      {/* ปฏิทินเลือกวันที่เช็กชื่อ: แดง = ยังไม่เช็ก, เขียว = เช็กแล้ว, เทา = วันหยุด แสดงวันที่แบบเต็มภาษาไทย */}
+      <div className="px-5 mt-4">
+        <AttendanceCalendarPicker subjectSectionId={subjectSectionId} selectedDate={date} onSelectDate={onSelectDate} />
+      </div>
+
       <div className="px-5 mt-4">
         <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500 text-white text-xs font-black">Default</span>
       </div>
 
+      {loading ? (
+        <div className="p-10 text-center text-slate-400 font-bold animate-pulse">กำลังโหลดข้อมูลเช็กชื่อ...</div>
+      ) : students.length === 0 ? (
+        <div className="p-10 text-center text-slate-400">
+          <p className="text-3xl mb-2">📭</p>
+          <p className="font-bold text-sm">ยังไม่มีนักเรียนเข้าร่วมวิชานี้ ไม่สามารถเช็กชื่อได้</p>
+        </div>
+      ) : (
+        <>
       {/* ช่วงเวลา (แสดงผลอย่างเดียว ยังไม่ส่งเข้า API) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 px-5 mt-4">
         <div>
@@ -310,6 +508,8 @@ export default function AttendanceTool({
           {saving ? "⏳ กำลังบันทึก..." : saved ? "✅ บันทึกแล้ว — กดซ้ำเพื่ออัปเดต" : "✏️ บันทึก"}
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 }
