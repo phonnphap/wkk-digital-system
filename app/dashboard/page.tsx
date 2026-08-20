@@ -706,6 +706,43 @@ function StatusBadge({ status }: { status: ItemStatus }) {
 };
 
 useEffect(() => {
+  async function loadSchoolEvents() {
+    const today = new Date().toISOString().split("T")[0];
+    const { data, error } = await supabase
+      .from("calendar_events")
+      .select("id, title, start_date, categories, color_override")
+      .eq("status", "approved")
+      .gte("end_date", today)
+      .order("start_date", { ascending: true })
+      .limit(5);
+
+    if (error) {
+      console.warn("[loadSchoolEvents] โหลดปฏิทินไม่สำเร็จ:", error.message);
+      return;
+    }
+
+    const CATEGORY_COLORS: Record<string, string> = {
+      academic: "#185FA5", budget: "#0F6E56", general: "#6B7280",
+      personnel: "#854F0B", parent: "#534AB7", student: "#3B6D11",
+      holiday: "#A32D2D", meeting: "#1e40af", training: "#7c3aed",
+      important: "#b45309",
+    };
+    const TH_MONTH_SHORT = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+
+    setSchoolEvents((data || []).map((ev: any) => {
+      const d = new Date(ev.start_date + "T00:00:00");
+      return {
+        date: `${d.getDate()} ${TH_MONTH_SHORT[d.getMonth()]}`,
+        title: ev.title,
+        color: "bg-blue-500", // fallback (ไม่ได้ใช้จริงเพราะมี colorHex override)
+        colorHex: ev.color_override || CATEGORY_COLORS[ev.categories?.[0]] || "#6B7280",
+      };
+    }));
+  }
+  loadSchoolEvents();
+}, [supabase]);
+
+useEffect(() => {
   async function loadAttendanceStats() {
     const today = new Date().toISOString().split("T")[0];
 

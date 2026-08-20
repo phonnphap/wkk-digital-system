@@ -363,26 +363,30 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
 }
 
   async function handleSave(asDraft: boolean) {
-    if (!title || !startDate) { alert("กรุณากรอกชื่อกิจกรรมและวันที่"); return; }
-    if (cats.length === 0) { alert("กรุณาเลือกหมวดหมู่อย่างน้อย 1 หมวด"); return; }
-    setLoading(true);
-    await onSave({
-  title, description: desc, schedule, categories: cats, location,
-  start_date: startDate, end_date: endDate || startDate,
-  start_time: isAllDay ? null : startTime+":00",
-  end_time:   isAllDay||!hasEndTime ? null : endTime+":00",
-  is_all_day: isAllDay,
-  color_override: colorOvr || null,
-  status: asDraft ? "draft" : "pending",
-  created_by: user.id,
-  is_public: true,
-  target_roles: audiences,
-  attachment_urls: attachments.map(a => a.url),
-  attachment_mimes: attachments.map(a => a.mime || ""), // ★ เพิ่ม
-  attachment_paths: attachments.map(a => a.path ?? null),
-});
-    setLoading(false);
-  }
+  if (!title || !startDate) { alert("กรุณากรอกชื่อกิจกรรมและวันที่"); return; }
+  if (cats.length === 0) { alert("กรุณาเลือกหมวดหมู่อย่างน้อย 1 หมวด"); return; }
+  setLoading(true);
+
+  const autoApprove = isApprover && !asDraft; // ★ ผู้อนุมัติ (admin/ผู้บริหาร/ผู้อนุมัติปฏิทิน) สร้างแล้วอนุมัติทันที
+
+  await onSave({
+    title, description: desc, schedule, categories: cats, location,
+    start_date: startDate, end_date: endDate || startDate,
+    start_time: isAllDay ? null : startTime+":00",
+    end_time:   isAllDay||!hasEndTime ? null : endTime+":00",
+    is_all_day: isAllDay,
+    color_override: colorOvr || null,
+    status: asDraft ? "draft" : (autoApprove ? "approved" : "pending"),
+    created_by: user.id,
+    is_public: true,
+    target_roles: audiences,
+    attachment_urls: attachments.map(a => a.url),
+    attachment_mimes: attachments.map(a => a.mime || ""),
+    attachment_paths: attachments.map(a => a.path ?? null),
+    ...(autoApprove ? { approved_by: user.id, approved_at: new Date().toISOString() } : {}),
+  });
+  setLoading(false);
+}
 
   async function handleApprove() {
     if (!event?.id) return;
@@ -784,7 +788,7 @@ function EventModal({ event, user, isApprover, onSave, onDelete, onClose }: {
               </button>
               <button onClick={()=>handleSave(false)} disabled={loading||!title||cats.length===0}
                 className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold disabled:opacity-50">
-                {loading?"กำลังส่ง...":(isEdit?"💾 บันทึก":"📤 ส่งอนุมัติ")}
+                {loading ? "กำลังส่ง..." : (isEdit ? "💾 บันทึก" : (isApprover ? "✅ สร้างและอนุมัติ" : "📤 ส่งอนุมัติ"))}
               </button>
             </>
           )}
@@ -1050,8 +1054,11 @@ export default function CalendarPage() {
   const [modalEv,     setModalEv]    = useState<Partial<CalEvent>|null|false>(false);
   const [catFilter,   setCatFilter]  = useState<Set<string>>(new Set(Object.keys(CATEGORIES)));
   const [showPending, setShowPending]= useState(false);
-
-  const isApprover = !!(user&&APPROVER_ROLES.includes(user.role));
+  const EXTRA_CALENDAR_APPROVER_EMAILS = ["nantawan@khienkhet.ac.th"];
+  const isApprover = !!(user && (
+  APPROVER_ROLES.includes(user.role) ||
+  EXTRA_CALENDAR_APPROVER_EMAILS.includes((user.email || "").toLowerCase())
+));
 
   // Auth
   useEffect(()=>{
