@@ -10,6 +10,7 @@ import AssignmentsTool from "@/components/assignments/AssignmentsTool";
 import AttendanceOverviewTool from "@/components/attendance/AttendanceOverviewTool";
 import GradeOverviewTool from "@/components/attendance/GradeOverviewTool";
 import InsightsTool from "@/components/insights/InsightsTool";
+import ReportsHubTool from "@/components/reports/ReportsHubTool";
 
 const supabase = createClient();
 
@@ -36,7 +37,7 @@ type Student = { id: string; prefix?: string; first_name: string; last_name: str
 type ScorePreset = { id: string; label: string; points: number; emoji: string; sort_order: number };
 
 type TabKey = "roster" | "attendance" | "random" | "tools";
-type BannerMenuKey = "assignments" | "attendanceInfo" | "totalScore" | "insights" | "settings";
+type BannerMenuKey = "assignments" | "attendanceInfo" | "totalScore" | "insights" | "settings" | "reports";
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: "roster", label: "รายชื่อ", icon: "👥" },
@@ -49,6 +50,7 @@ const BANNER_MENU: { key: BannerMenuKey; label: string; icon: string }[] = [
   { key: "assignments", label: "มอบหมายงาน", icon: "📌" },
   { key: "attendanceInfo", label: "ข้อมูลเช็กชื่อ", icon: "🗓️" },
   { key: "totalScore", label: "คะแนนรวม", icon: "⭐" },
+  { key: "reports", label: "เอกสาร/รายงาน", icon: "📁" },
   { key: "insights", label: "ข้อมูลเชิงลึก", icon: "📊" },
   { key: "settings", label: "ตั้งค่ารายวิชา", icon: "⚙️" },
 ];
@@ -1894,6 +1896,18 @@ function SubjectSettingsTab({
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [gradingStructure, setGradingStructure] = useState<"formative_final" | "formative_midterm_final">(
+    (section as any).grading_structure ?? "formative_final"
+  );
+  const [formativeMax, setFormativeMax] = useState(String((section as any).formative_max_score ?? 70));
+  const [midtermMax, setMidtermMax] = useState(String((section as any).midterm_max_score ?? 0));
+  const [finalMax, setFinalMax] = useState(String((section as any).final_max_score ?? 30));
+
+  const useMidterm = gradingStructure === "formative_midterm_final";
+  const scoreSum =
+    (Number(formativeMax) || 0) + (useMidterm ? (Number(midtermMax) || 0) : 0) + (Number(finalMax) || 0);
+  const scoreSumInvalid = Math.abs(scoreSum - 100) > 0.01;   // ★ ต้องรวมให้ได้ 100 พอดี
+
   const dirty =
     subjectType !== (subject?.subject_type ?? "basic") ||
     creditHours !== (subject?.credit_hours != null ? String(subject.credit_hours) : "") ||
@@ -1903,9 +1917,17 @@ function SubjectSettingsTab({
     passThreshold !== String(subject?.pass_threshold_percent ?? 50) ||                          // ★ เพิ่ม
     studentPortalEnabled !== (section.student_portal_enabled ?? true) ||
     allowLateSubmission !== (section.allow_late_submission ?? true);
+    gradingStructure !== ((section as any).grading_structure ?? "formative_final") ||
+    formativeMax !== String((section as any).formative_max_score ?? 70) ||
+    midtermMax !== String((section as any).midterm_max_score ?? 0) ||
+    finalMax !== String((section as any).final_max_score ?? 30);
 
   async function handleSave() {
     if (!subject || readOnly) return;
+    if (scoreSumInvalid) {
+      setError("คะแนนแต่ละส่วนต้องรวมกันได้ 100 พอดี");
+      return;
+    }
     setSaving(true);
     setError(null);
 
@@ -2061,6 +2083,68 @@ function SubjectSettingsTab({
             วิชาแบบ "ผ่าน/ไม่ผ่าน" จะไม่ถูกนำไปคิดรวมในเกรดเฉลี่ยของนักเรียน และหน้า "คะแนนรวม" จะตัดสินผ่าน/ไม่ผ่านจากอัตราเข้าเรียนแทนคะแนนสอบ
           </p>
         </div>
+        {/* ★ เพิ่มใหม่: โครงสร้างคะแนน — แสดงเฉพาะตอนตัดเกรดแบบ numeric */}
+        {gradingMode === "numeric" && (
+          <div>
+            <p className="text-xs font-black text-slate-500 mb-2">โครงสร้างคะแนน (เต็ม 100)</p>
+            <div className="flex gap-2 mb-3">
+              {[
+                { key: "formative_final", label: "คะแนนเก็บ + ปลายภาค" },
+                { key: "formative_midterm_final", label: "คะแนนเก็บ + กลางภาค + ปลายภาค" },
+              ].map(opt => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() => setGradingStructure(opt.key as any)}
+                  className={`px-4 py-2 rounded-xl font-black text-xs border-2 transition-colors disabled:opacity-50 ${
+                    gradingStructure === opt.key
+                      ? "bg-fuchsia-500 border-fuchsia-500 text-white"
+                      : "bg-white border-slate-200 text-slate-500 hover:border-fuchsia-300"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            <div className={`grid gap-2 ${useMidterm ? "grid-cols-3" : "grid-cols-2"}`}>
+              <div className="bg-slate-50 border-2 border-slate-100 rounded-xl px-3 py-2">
+                <p className="text-[10px] font-black text-slate-400 mb-1">คะแนนเก็บ</p>
+                <input
+                  type="number" min={0} max={100} disabled={readOnly}
+                  value={formativeMax} onChange={e => setFormativeMax(e.target.value)}
+                  className="w-full text-center border-2 border-slate-200 rounded-lg py-1 text-sm font-black bg-white disabled:bg-slate-50"
+                />
+              </div>
+              {useMidterm && (
+                <div className="bg-slate-50 border-2 border-slate-100 rounded-xl px-3 py-2">
+                  <p className="text-[10px] font-black text-slate-400 mb-1">กลางภาค</p>
+                  <input
+                    type="number" min={0} max={100} disabled={readOnly}
+                    value={midtermMax} onChange={e => setMidtermMax(e.target.value)}
+                    className="w-full text-center border-2 border-slate-200 rounded-lg py-1 text-sm font-black bg-white disabled:bg-slate-50"
+                  />
+                </div>
+              )}
+              <div className="bg-slate-50 border-2 border-slate-100 rounded-xl px-3 py-2">
+                <p className="text-[10px] font-black text-slate-400 mb-1">ปลายภาค</p>
+                <input
+                  type="number" min={0} max={100} disabled={readOnly}
+                  value={finalMax} onChange={e => setFinalMax(e.target.value)}
+                  className="w-full text-center border-2 border-slate-200 rounded-lg py-1 text-sm font-black bg-white disabled:bg-slate-50"
+                />
+              </div>
+            </div>
+
+            <p className={`text-[11px] font-black mt-1.5 ${scoreSumInvalid ? "text-amber-500" : "text-emerald-500"}`}>
+              {scoreSumInvalid ? `⚠️ รวมตอนนี้ = ${scoreSum} (ต้องรวมให้ได้ 100 พอดี)` : "✅ รวม 100 พอดี"}
+            </p>
+            <p className="text-[11px] text-slate-400 font-bold mt-1">
+              คะแนนเก็บจะถูกคำนวณจากคะแนนงานทั้งหมดที่ให้ไว้ แล้วสเกลให้พอดีกับคะแนนเต็มที่ตั้งไว้ตรงนี้อัตโนมัติ
+            </p>
+          </div>
+        )}
 
         {/* รหัสกลุ่มรวมคะแนน */}
         <div>
@@ -2116,15 +2200,13 @@ function SubjectSettingsTab({
         </div>
       </div>
 
-      {error && (
-        <p className="mt-4 text-xs font-black text-red-500 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>
-      )}
+      {error && <p className="mt-4 text-xs font-black text-red-500 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
 
       {!readOnly && (
         <div className="flex items-center gap-3 mt-6">
           <button
             onClick={handleSave}
-            disabled={saving || !dirty}
+            disabled={saving || !dirty || scoreSumInvalid} 
             className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-sm shadow"
           >
             {saving ? "กำลังบันทึก..." : "💾 บันทึกการตั้งค่า"}
@@ -2178,6 +2260,7 @@ export default function SmartClassRosterPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [scoreTargets, setScoreTargets] = useState<Student[] | null>(null);
   const [academicYearLabel, setAcademicYearLabel] = useState("");
+  const [academicYearId, setAcademicYearId] = useState<string | null>(null);
   const [homeroomTeacherName, setHomeroomTeacherName] = useState("");
   const [subjectTeacherName, setSubjectTeacherName] = useState("");
 
@@ -2191,13 +2274,14 @@ export default function SmartClassRosterPage() {
         .maybeSingle();
 
       if (sectionFull?.academic_year_id) {
-        const { data: year } = await supabase
-          .from("academic_years")
-          .select("year_name, semester")
-          .eq("id", sectionFull.academic_year_id)
-          .maybeSingle();
-        if (year) setAcademicYearLabel(`${year.year_name} ภาคเรียนที่ ${year.semester}`);
-      }
+  setAcademicYearId(sectionFull.academic_year_id); // ★ เพิ่มบรรทัดนี้
+  const { data: year } = await supabase
+    .from("academic_years")
+    .select("year_name, semester")
+    .eq("id", sectionFull.academic_year_id)
+    .maybeSingle();
+  if (year) setAcademicYearLabel(`${year.year_name} ภาคเรียนที่ ${year.semester}`);
+}
       if (sectionFull?.teacher_id) {
         const { data: t } = await supabase
           .from("users").select("full_name, first_name, last_name")
@@ -2497,7 +2581,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
 
         <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-between mt-4">
           <div className="flex items-center gap-2 flex-wrap justify-center">
-            {(isAdmin ? BANNER_MENU.filter(m => m.key === "attendanceInfo" || m.key === "totalScore") : BANNER_MENU).map(m => (
+            {(isAdmin ? BANNER_MENU.filter(m => ["attendanceInfo","totalScore","reports"].includes(m.key)) : BANNER_MENU).map(m => (
               <button
                 key={m.key}
                 onClick={() => handleBannerMenuClick(m.key)}
@@ -2543,6 +2627,19 @@ const [{ data: subj }, { data: room }] = await Promise.all([
             classroomId={classroom.id}
           />
         )}
+        {bannerMenu === "reports" && section && (
+  <ReportsHubTool
+    sectionId={section.id}
+    subjectId={subjectId}
+    academicYearId={academicYearId}
+    subjectTitle={subject.name_th}
+    subjectCode={subject.subject_code}
+    classroomLabel={`${classroom?.grade_group ?? ""} ${classroom?.room_name ?? ""}`}
+    students={students}
+    currentUserId={currentUserId}
+    readOnly={isAdmin}
+  />
+)}
         {bannerMenu === "attendanceInfo" && section && (
           <AttendanceOverviewTool
             sectionId={section.id}
@@ -2568,8 +2665,12 @@ const [{ data: subj }, { data: room }] = await Promise.all([
             subjectTeacherName={subjectTeacherName}
             currentUserId={currentUserId}
             readOnly={isAdmin}
-            gradingMode={subject.grading_mode}                   
-            passThresholdPercent={subject.pass_threshold_percent} 
+            gradingMode={subject.grading_mode}
+    passThresholdPercent={subject.pass_threshold_percent}
+    gradingStructure={(section as any).grading_structure}   
+    formativeMaxScore={(section as any).formative_max_score}
+    midtermMaxScore={(section as any).midterm_max_score}
+    finalMaxScore={(section as any).final_max_score} 
           />
         )}
         {bannerMenu === "settings" && section && subject && (
