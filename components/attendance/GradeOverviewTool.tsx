@@ -56,9 +56,38 @@ type GroupSummary = {
   combinedPercentByStudent?: Record<string, number>;
 };
 type ViewTab = "table" | "podium";
+type NavDir = "up" | "down" | "left" | "right"; // ★ ทิศทางลูกศรสำหรับย้ายช่องกรอกคะแนน
 
 // ★ ย้ายมาไว้ module scope เพื่อให้ GradeTable / EditableScoreCell / StudentReportModal เรียกใช้ได้
 type LateInfo = { hasData: boolean; isLate: boolean; daysLate: number; isManual: boolean };
+
+// ★ Toast แจ้งเตือนแบบลอยมุมขวาบน แทนที่ alert() เดิม
+type ToastItem = { id: number; message: string; type: "success" | "error" | "info" };
+
+function ToastContainer({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: number) => void }) {
+  if (toasts.length === 0) return null;
+  return (
+    <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 print:hidden">
+      {toasts.map(t => (
+        <div
+          key={t.id}
+          onClick={() => onDismiss(t.id)}
+          className={`cursor-pointer max-w-xs px-4 py-3 rounded-xl shadow-lg font-black text-xs text-white flex items-start gap-2 ${
+            t.type === "error" ? "bg-red-500" : t.type === "success" ? "bg-emerald-500" : "bg-slate-700"
+          }`}
+          style={{ animation: "toast-in 0.2s ease-out" }}
+        >
+          <span>{t.type === "error" ? "⚠️" : t.type === "success" ? "✅" : "ℹ️"}</span>
+          <span className="leading-snug">{t.message}</span>
+        </div>
+      ))}
+      <style>{`
+        @keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
+    </div>
+  );
+}
+
 // ---- น้ำหนักชิ้นงาน (Weighted score) ----
 // สูตร: คะแนนจริงที่ได้ = (คะแนนที่นักเรียนได้ / คะแนนเต็ม) × น้ำหนักชิ้นงาน
 // ถ้าไม่ได้เปิดใช้น้ำหนัก หรือไม่ได้ระบุ % ไว้ ให้ใช้คะแนนดิบตามปกติ
@@ -120,12 +149,68 @@ function getLateInfo(assignment: Assignment, sub?: Submission): LateInfo {
   return { hasData: true, isLate: true, daysLate, isManual: false };
 }
 
+// ★ คำนวณอันดับ: คะแนนเท่ากัน = อันดับเดียวกัน (standard competition ranking เช่น 1,1,3,4)
+function computeRanked(rows: ReturnType<typeof buildRowsType>) {
+  const sorted = [...rows].sort((a, b) => b.grandTotal - a.grandTotal);
+  let rank = 0;
+  let prevScore: number | null = null;
+  return sorted.map((r, i) => {
+    if (prevScore === null || r.grandTotal !== prevScore) {
+      rank = i + 1;
+      prevScore = r.grandTotal;
+    }
+    return { ...r, rank };
+  });
+}
+
+// ★ เอฟเฟกต์พลุกระดาษ (confetti) — สุ่มชิ้นสี่เหลี่ยมสีสันหล่นจากบนลงล่าง
+const CONFETTI_COLORS = ["#f472b6", "#a78bfa", "#38bdf8", "#4ade80", "#facc15", "#fb923c", "#f87171", "#2dd4bf"];
+
+function ConfettiBurst() {
+  const [pieces] = useState(() =>
+    Array.from({ length: 70 }).map((_, i) => ({
+      id: i,
+      left: Math.random() * 100,
+      delay: Math.random() * 0.5,
+      duration: 1.8 + Math.random() * 1.4,
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+      rotate: Math.random() * 360,
+      size: 6 + Math.random() * 6,
+    }))
+  );
+  return (
+    <div className="pointer-events-none fixed inset-0 z-[90] overflow-hidden">
+      {pieces.map(p => (
+        <span
+          key={p.id}
+          style={{
+            position: "absolute",
+            left: `${p.left}%`,
+            top: "-24px",
+            width: p.size,
+            height: p.size * 1.6,
+            backgroundColor: p.color,
+            transform: `rotate(${p.rotate}deg)`,
+            animation: `confetti-fall ${p.duration}s ease-in ${p.delay}s forwards`,
+          }}
+        />
+      ))}
+      <style>{`
+        @keyframes confetti-fall {
+          to { transform: translateY(105vh) rotate(720deg); opacity: 0; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 /* =========================================================================
    Component
    readOnly: สำหรับแอดมิน/ผู้บริหาร — ดู/export/print ได้ แต่แก้ไขคะแนนพิเศษ,
    คะแนนงาน, ตั้งค่าเกณฑ์เกรด, และคอมเมนต์ครู ไม่ได้
    ครูประจำวิชา (readOnly=false): แก้ไขคะแนนงานที่มอบหมายได้โดยตรงจากตารางนี้
-   (คลิกที่คะแนน/ป้าย "รอตรวจ"/"ไม่ส่งงาน" เพื่อกรอกคะแนนได้ทันที)
+   (คลิกที่คะแนน/ป้าย "รอตรวจ"/"ไม่ส่งงาน" เพื่อกรอกคะแนนได้ทันที กด Enter/ลูกศร
+   เพื่อบันทึกแล้วย้ายไปช่องข้างเคียงได้เหมือนกรอกใน Excel)
    ========================================================================= */
 
 export default function GradeOverviewTool({
@@ -180,6 +265,20 @@ export default function GradeOverviewTool({
   const [examScores, setExamScores] = useState<{ student_id: string; exam_type: "midterm" | "final"; score: number | null }[]>([]);   // ★ เพิ่ม
   const useMidterm = gradingStructure === "formative_midterm_final";
 
+  // ★ ลำดับคอลัมน์ชิ้นงานที่ครูลากสลับเอง (จำไว้ต่อห้องเรียนใน localStorage)
+  const [assignmentOrder, setAssignmentOrder] = useState<string[]>([]);
+
+  // ★ Toast state
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  function showToast(message: string, type: ToastItem["type"] = "info") {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+  }
+  function dismissToast(id: number) {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }
+
   async function loadData() {
     setLoading(true);
     setError("");
@@ -231,6 +330,44 @@ export default function GradeOverviewTool({
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionId]);
+
+  // ★ โหลดลำดับคอลัมน์ที่บันทึกไว้ของห้องนี้
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`grade-assignment-order-${sectionId}`);
+      if (saved) setAssignmentOrder(JSON.parse(saved));
+      else setAssignmentOrder([]);
+    } catch {
+      setAssignmentOrder([]);
+    }
+  }, [sectionId]);
+
+  // ★ เมื่อชิ้นงานเปลี่ยน (โหลดใหม่/เพิ่มชิ้นใหม่) ให้รวมเข้ากับลำดับที่จำไว้ ชิ้นใหม่ที่ยังไม่เคยเรียงจะถูกต่อท้าย
+  useEffect(() => {
+    setAssignmentOrder(prev => {
+      const known = new Set(assignments.map(a => a.id));
+      const filtered = prev.filter(id => known.has(id));
+      const missing = assignments.map(a => a.id).filter(id => !filtered.includes(id));
+      return [...filtered, ...missing];
+    });
+  }, [assignments]);
+
+  // ★ บันทึกลำดับคอลัมน์ลง localStorage ทุกครั้งที่เปลี่ยน
+  useEffect(() => {
+    if (assignmentOrder.length === 0) return;
+    try {
+      localStorage.setItem(`grade-assignment-order-${sectionId}`, JSON.stringify(assignmentOrder));
+    } catch {
+      // ไม่ critical
+    }
+  }, [assignmentOrder, sectionId]);
+
+  const orderedAssignments = useMemo(() => {
+    const map = new Map(assignments.map(a => [a.id, a]));
+    const ordered = assignmentOrder.map(id => map.get(id)).filter((a): a is Assignment => !!a);
+    // เผื่อกรณี assignmentOrder ยังไม่ทันอัปเดต (โหลดครั้งแรก) ให้ fallback เป็นลำดับต้นฉบับ
+    return ordered.length === assignments.length ? ordered : assignments;
+  }, [assignments, assignmentOrder]);
 
   const totalMaxScore = useMemo(
   () => assignments.reduce((sum, a) => sum + getAssignmentMaxContribution(a), 0),
@@ -313,10 +450,6 @@ export default function GradeOverviewTool({
 }, [students, submissions, assignments, presets, scoreEvents, criteria, totalMaxScore,
     attendanceMap, gradingMode, passThresholdPercent, examScores, formativeMaxScore, midtermMaxScore, finalMaxScore, useMidterm]); // ★ เพิ่ม dependency
 
-  const podiumTop5 = useMemo(() => {
-    return [...rows].sort((a, b) => b.grandTotal - a.grandTotal).slice(0, 5);
-  }, [rows]);
-
   async function handleAdjustPreset(studentId: string, presetId: string, currentValue: number, newValue: number) {
     if (readOnly) return;
     const delta = newValue - currentValue;
@@ -334,10 +467,10 @@ export default function GradeOverviewTool({
       if (!res.ok) throw new Error(json.error ?? "แก้ไขคะแนนไม่สำเร็จ");
       setScoreEvents(prev => [...prev, { id: json.event?.id ?? `local-${Date.now()}`, student_id: studentId, preset_id: presetId, points: delta }]);
     } catch (e: any) {
-      alert("แก้ไขคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+      showToast("แก้ไขคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error"); // ★ toast แทน alert
     }
   }
-  
+
   // ให้คะแนนงานที่มอบหมายแบบ inline จากตารางคะแนนรวมนี้โดยตรง (เฉพาะครูประจำวิชา ไม่ใช่ readOnly)
   // NOTE: endpoint /api/assignment-submissions/grade ต้อง upsert สถานะเป็น "reviewed"
   // (ไม่ใช่ "graded") ให้ตรงกับ CHECK constraint ของตาราง assignment_submissions
@@ -345,7 +478,7 @@ export default function GradeOverviewTool({
   if (readOnly) return;
   const maxScore = examType === "midterm" ? midtermMaxScore : finalMaxScore;
   if (Number.isNaN(newScore) || newScore < 0 || newScore > maxScore) {
-    alert(`คะแนนต้องอยู่ระหว่าง 0 - ${maxScore} คะแนน`);
+    showToast(`คะแนนต้องอยู่ระหว่าง 0 - ${maxScore} คะแนน`, "error"); // ★ toast แทน alert
     return;
   }
   try {
@@ -362,7 +495,7 @@ export default function GradeOverviewTool({
       return [...prev, { student_id: studentId, exam_type: examType, score: newScore }];
     });
   } catch (e: any) {
-    alert("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    showToast("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error"); // ★ toast แทน alert
   }
 }
 async function handleUpdateScore(studentId: string, assignmentId: string, newScore: number) {
@@ -370,7 +503,7 @@ async function handleUpdateScore(studentId: string, assignmentId: string, newSco
   const assignment = assignments.find(a => a.id === assignmentId);
   if (!assignment) return;
   if (Number.isNaN(newScore) || newScore < 0 || newScore > (assignment.max_score ?? 0)) {
-    alert(`คะแนนต้องอยู่ระหว่าง 0 - ${assignment.max_score} คะแนน`);
+    showToast(`คะแนนต้องอยู่ระหว่าง 0 - ${assignment.max_score} คะแนน`, "error"); // ★ toast แทน alert
     return;
   }
   try {
@@ -403,7 +536,7 @@ async function handleUpdateScore(studentId: string, assignmentId: string, newSco
       return [...prev, updated];
     });
   } catch (e: any) {
-    alert("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    showToast("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error"); // ★ toast แทน alert
   }
 }
 
@@ -418,8 +551,9 @@ async function handleUpdateScore(studentId: string, assignmentId: string, newSco
       if (!res.ok) throw new Error(json.error ?? "บันทึกไม่สำเร็จ");
       setCriteria(json.criteria ?? []);
       setShowGradeSetting(false);
+      showToast("บันทึกเกณฑ์เกรดสำเร็จ", "success"); // ★ toast
     } catch (e: any) {
-      alert("บันทึกเกณฑ์เกรดไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+      showToast("บันทึกเกณฑ์เกรดไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error"); // ★ toast แทน alert
     }
   }
 
@@ -433,7 +567,7 @@ async function handleUpdateScore(studentId: string, assignmentId: string, newSco
           "เลขที่": r.student.seat_number,
           "ชื่อ-นามสกุล": `${r.student.prefix ?? ""}${r.student.first_name} ${r.student.last_name}`.trim(),
         };
-        assignments.forEach(a => {
+        orderedAssignments.forEach(a => {
   const sub = r.subMap[a.id];
   const info = getLateInfo(a, sub);
   const onTimeTag = !info.hasData ? "" : info.isLate ? ` (ส่งช้า${info.isManual ? "" : ` ${info.daysLate} วัน`})` : " (ตรงเวลา)";
@@ -463,7 +597,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       const fileName = `คะแนนรวม_${subjectCode || subjectTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`;
       XLSX.writeFile(wb, fileName);
     } catch (e: any) {
-      alert("ดาวน์โหลดไฟล์ไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+      showToast("ดาวน์โหลดไฟล์ไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error"); // ★ toast แทน alert
     } finally {
       setExporting(false);
     }
@@ -515,7 +649,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e: any) {
-      alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+      showToast("บันทึกไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error"); // ★ toast แทน alert
     } finally {
       setSaving(false);
     }
@@ -648,7 +782,6 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
     if (withData.length === 0) return null;
     return withData.reduce((sum, r) => sum + (r.onTimeRate ?? 0), 0) / withData.length;
   })();
-  const top = [...rows].sort((a, b) => b.grandTotal - a.grandTotal)[0];
 
   const cards = [
     { label: "จำนวนนักเรียน", value: `${rows.length} คน`, icon: "👥", grad: "from-violet-500 to-indigo-500" },
@@ -671,10 +804,12 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
 }
   return (
     <div className="space-y-6">
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
       {reportStudent && (
         <StudentReportModal
           row={rows.find(r => r.student.id === reportStudent.id)!}
-          assignments={assignments}
+          assignments={orderedAssignments}
           sectionId={sectionId}
           currentUserId={currentUserId}
           attendance={attendanceMap[reportStudent.id] ?? { present: 0, total: 0 }}
@@ -687,6 +822,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           readOnly={readOnly} 
           gradingMode={gradingMode}
           onClose={() => setReportStudent(null)}
+          onToast={showToast}
         />
       )}
 
@@ -705,7 +841,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
         <div>
           <h2 className="font-black text-slate-800 text-lg">คะแนนรวม</h2>
           <p className="text-slate-400 text-xs font-bold">
-            {readOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที · กด Enter เพื่อบันทึกและไปนักเรียนคนถัดไป"}
+            {readOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที · กด Enter หรือลูกศร ↑↓←→ เพื่อบันทึกและย้ายไปช่องข้างเคียง · ลากหัวตารางชิ้นงานเพื่อสลับลำดับได้"}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -748,7 +884,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       ) : tab === "table" ? (
         <GradeTable
   rows={rows}
-  assignments={assignments}
+  assignments={orderedAssignments}
   presets={presets}
   totalMaxScore={totalMaxScore}
   onOpenReport={s => setReportStudent(s)}
@@ -762,9 +898,10 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   formativeMaxScore={formativeMaxScore}          // ★ add
   midtermMaxScore={midtermMaxScore}              // ★ add
   finalMaxScore={finalMaxScore}                  // ★ add
+  onReorderAssignments={setAssignmentOrder}      // ★ ลากสลับลำดับหัวตาราง
 />
       ) : (
-        <PodiumView top5={podiumTop5} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
+        <PodiumView rows={rows} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
       )}
     {!loading && !error && (
   <GroupScoreCard
@@ -778,14 +915,16 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
 );
 }
 
-// ★ คีย์บอกว่า "ช่องไหน" กำลังถูกแก้ไขอยู่ (ใช้คู่ assignment_id + student_id เพราะ 1 คอลัมน์มีได้หลายแถว)
-type ActiveCell = { assignmentId: string; studentId: string } | null;
+// ★ ตอนนี้ activeCell อ้างอิงด้วย "col" (assignment id / preset:id / midterm / final) + studentId
+// เพื่อให้ย้ายด้วยลูกศรข้ามระหว่างคอลัมน์ประเภทต่างกันได้ในระบบเดียวกัน
+type ActiveCell = { col: string; studentId: string } | null;
 
 // ★ ตำแหน่ง: บรรทัดเปิดฟังก์ชัน function GradeTable({...}: {...}) {...}
 function GradeTable({
   rows, assignments, presets, totalMaxScore, onOpenReport, onAdjustPreset, onUpdateScore,
   onUpdateExamScore, getLateInfo, readOnly, gradingMode = "numeric",
   useMidterm = false, formativeMaxScore = 0, midtermMaxScore = 0, finalMaxScore = 0,   // ★ เพิ่ม 5 ตัวนี้
+  onReorderAssignments,                                                                // ★ เพิ่ม
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
@@ -802,17 +941,58 @@ function GradeTable({
   formativeMaxScore?: number;        // ★ เพิ่ม
   midtermMaxScore?: number;          // ★ เพิ่ม
   finalMaxScore?: number;            // ★ เพิ่ม
+  onReorderAssignments: (newOrderIds: string[]) => void; // ★ เพิ่ม
 }) {
-  // ★ ช่องที่กำลังกรอกคะแนนอยู่ตอนนี้ (คุมจากที่นี่ เพื่อให้กด Enter แล้วสั่งเปิดช่องถัดไปในคอลัมน์เดียวกันได้)
+  // ★ ช่องที่กำลังกรอกคะแนนอยู่ตอนนี้ (คุมจากที่นี่ เพื่อให้กด Enter/ลูกศร แล้วสั่งเปิดช่องถัดไปได้)
   const [activeCell, setActiveCell] = useState<ActiveCell>(null);
+  // ★ id ชิ้นงานที่กำลังลากอยู่ (สำหรับลากสลับหัวตาราง)
+  const [draggedId, setDraggedId] = useState<string | null>(null);
 
-  function moveToNextRow(assignmentId: string, studentId: string) {
-    const idx = rows.findIndex(r => r.student.id === studentId);
-    if (idx >= 0 && idx < rows.length - 1) {
-      setActiveCell({ assignmentId, studentId: rows[idx + 1].student.id });
-    } else {
-      setActiveCell(null); // แถวสุดท้ายแล้ว ไม่มีคนถัดไป ปิดโหมดแก้ไข
+  // ★ รายการ "คอลัมน์กรอกคะแนนได้" ทั้งหมดตามลำดับที่แสดงจริงในตาราง ใช้คำนวณตำแหน่งตอนกดลูกศร
+  const navColumns = useMemo(() => {
+    const cols: string[] = assignments.map(a => a.id);
+    presets.forEach(p => cols.push(`preset:${p.id}`));
+    if (gradingMode === "numeric") {
+      if (useMidterm) cols.push("midterm");
+      cols.push("final");
     }
+    return cols;
+  }, [assignments, presets, gradingMode, useMidterm]);
+
+  function handleNavigate(fromCol: string, studentId: string, dir: NavDir) {
+    const rowIdx = rows.findIndex(r => r.student.id === studentId);
+    const colIdx = navColumns.indexOf(fromCol);
+    if (rowIdx === -1 || colIdx === -1) { setActiveCell(null); return; }
+    let newRowIdx = rowIdx;
+    let newColIdx = colIdx;
+    if (dir === "down") newRowIdx = Math.min(rows.length - 1, rowIdx + 1);
+    if (dir === "up") newRowIdx = Math.max(0, rowIdx - 1);
+    if (dir === "right") newColIdx = Math.min(navColumns.length - 1, colIdx + 1);
+    if (dir === "left") newColIdx = Math.max(0, colIdx - 1);
+    setActiveCell({ col: navColumns[newColIdx], studentId: rows[newRowIdx].student.id });
+  }
+
+  // ★ ลากหัวตารางชิ้นงานเพื่อสลับลำดับก่อน-หลัง
+  function handleDragStart(id: string) {
+    if (readOnly) return;
+    setDraggedId(id);
+  }
+  function handleDragOverTh(e: React.DragEvent) {
+    if (readOnly) return;
+    e.preventDefault();
+  }
+  function handleDropTh(overId: string) {
+    if (readOnly || !draggedId || draggedId === overId) { setDraggedId(null); return; }
+    const ids = assignments.map(a => a.id);
+    const fromIdx = ids.indexOf(draggedId);
+    const toIdx = ids.indexOf(overId);
+    if (fromIdx !== -1 && toIdx !== -1) {
+      const newIds = [...ids];
+      newIds.splice(fromIdx, 1);
+      newIds.splice(toIdx, 0, draggedId);
+      onReorderAssignments(newIds);
+    }
+    setDraggedId(null);
   }
 
   if (rows.length === 0) {
@@ -833,12 +1013,23 @@ function GradeTable({
     </th>
     <th className="px-3 py-3 text-center text-[11px] font-black text-slate-400 bg-sky-50">Report</th>
     {assignments.map(a => (
-      // column header, inside GradeTable's <thead>
-<th key={a.id} className="px-3 py-3 text-center min-w-[110px] bg-sky-50/70">
+      // ★ column header ลากสลับลำดับได้ (ไม่ readOnly เท่านั้น)
+<th
+  key={a.id}
+  draggable={!readOnly}
+  onDragStart={() => handleDragStart(a.id)}
+  onDragOver={handleDragOverTh}
+  onDrop={() => handleDropTh(a.id)}
+  className={`px-3 py-3 text-center min-w-[110px] bg-sky-50/70 transition-opacity ${
+    !readOnly ? "cursor-move" : ""
+  } ${draggedId === a.id ? "opacity-40" : ""}`}
+  title={!readOnly ? "ลากเพื่อย้ายลำดับคอลัมน์นี้" : undefined}
+>
   <p className="text-[11px] font-black text-indigo-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
   <p className="text-[9px] text-indigo-300 font-bold">
     {isWeighted(a) ? `กรอกเต็ม ${a.max_score} → นน. ${a.weight_percent}%` : `เต็ม ${a.max_score} คะแนน`}
   </p>
+  {!readOnly && <p className="text-[8px] text-indigo-300/70 font-bold mt-0.5">⠿ ลากย้ายได้</p>}
 </th>
     ))}
     {presets.map(p => (
@@ -866,14 +1057,17 @@ function GradeTable({
     </th>
   </>
 )}
+{/* ★ สลับลำดับ/ป้ายชื่อ 2 คอลัมน์นี้ให้ตรงกับข้อมูลจริงที่แสดงใน tbody:
+     คอลัมน์แรก = เกรด/สถานะ (เดิมป้ายผิดเป็น "รวม") คอลัมน์ถัดมา = คะแนนรวม (เดิมป้ายผิดเป็น "ระดับผลการเรียน")
+     ตอนนี้ "รวม" อยู่ติดกับ "ส่งตรงเวลา" ตามที่ต้องการ */}
+<th className="px-3 py-3 text-center min-w-[70px] bg-fuchsia-50/70">
+  <p className="text-[11px] font-black text-fuchsia-700">
+    {gradingMode === "pass_fail" ? "สถานะ" : "ระดับผลการเรียน"}
+  </p>
+</th>
 <th className="px-3 py-3 text-center min-w-[100px] bg-emerald-50/70">
   <p className="text-[11px] font-black text-emerald-700">รวม</p>
   <p className="text-[9px] text-emerald-400 font-bold">เต็ม {totalMaxScore} คะแนน</p>
-</th>
-<th className="px-3 py-3 text-center min-w-[70px] bg-fuchsia-50/70">
-  <p className="text-[11px] font-black text-fuchsia-700">
-    {gradingMode === "pass_fail" ? "สถานะ" : "ระดับผลการเรียน"}   {/* ★ เปลี่ยนข้อความหัวตาราง */}
-  </p>
 </th>
 <th className="px-3 py-3 text-center min-w-[90px] bg-amber-50/70">
   <p className="text-[11px] font-black text-amber-700">ส่งตรงเวลา</p>
@@ -945,12 +1139,12 @@ function GradeTable({
 ) : (
   <EditableScoreCell
   submission={sub}
-  assignment={a}             // ★ fix
+  assignment={a}
   lateInfo={lateInfo}
-  isEditing={activeCell?.assignmentId === a.id && activeCell?.studentId === s.id}
-  onRequestEdit={() => setActiveCell({ assignmentId: a.id, studentId: s.id })}
+  isEditing={activeCell?.col === a.id && activeCell?.studentId === s.id}
+  onRequestEdit={() => setActiveCell({ col: a.id, studentId: s.id })}
   onCommit={newScore => onUpdateScore(s.id, a.id, newScore)}
-  onEnterNext={() => moveToNextRow(a.id, s.id)}
+  onNavigate={dir => handleNavigate(a.id, s.id, dir)}
   onCancelEdit={() => setActiveCell(null)}
 />
 )}
@@ -964,7 +1158,14 @@ function GradeTable({
                         {r.presetTotals[p.id] ?? 0}
                       </span>
                     ) : (
-                      <EditablePresetCell value={r.presetTotals[p.id] ?? 0} onSave={newValue => onAdjustPreset(s.id, p.id, r.presetTotals[p.id] ?? 0, newValue)} />
+                      <EditablePresetCell
+                        value={r.presetTotals[p.id] ?? 0}
+                        isEditing={activeCell?.col === `preset:${p.id}` && activeCell?.studentId === s.id}
+                        onRequestEdit={() => setActiveCell({ col: `preset:${p.id}`, studentId: s.id })}
+                        onCommit={newValue => onAdjustPreset(s.id, p.id, r.presetTotals[p.id] ?? 0, newValue)}
+                        onNavigate={dir => handleNavigate(`preset:${p.id}`, s.id, dir)}
+                        onCancelEdit={() => setActiveCell(null)}
+                      />
                     )}
                   </td>
                 ))}
@@ -981,7 +1182,11 @@ function GradeTable({
           value={r.midtermScore}
           maxScore={midtermMaxScore}
           readOnly={readOnly}
-          onSave={v => onUpdateExamScore(s.id, "midterm", v)}
+          isEditing={activeCell?.col === "midterm" && activeCell?.studentId === s.id}
+          onRequestEdit={() => setActiveCell({ col: "midterm", studentId: s.id })}
+          onCommit={v => onUpdateExamScore(s.id, "midterm", v)}
+          onNavigate={dir => handleNavigate("midterm", s.id, dir)}
+          onCancelEdit={() => setActiveCell(null)}
         />
       </td>
     )}
@@ -990,13 +1195,18 @@ function GradeTable({
         value={r.finalScore}
         maxScore={finalMaxScore}
         readOnly={readOnly}
-        onSave={v => onUpdateExamScore(s.id, "final", v)}
+        isEditing={activeCell?.col === "final" && activeCell?.studentId === s.id}
+        onRequestEdit={() => setActiveCell({ col: "final", studentId: s.id })}
+        onCommit={v => onUpdateExamScore(s.id, "final", v)}
+        onNavigate={dir => handleNavigate("final", s.id, dir)}
+        onCancelEdit={() => setActiveCell(null)}
       />
     </td>
   </>
 )}
+{/* ★ คอลัมน์เกรด/สถานะ — ตอนนี้เป็นคอลัมน์แรกใน 3 คอลัมน์ท้าย ตรงกับหัวตารางที่สลับป้ายแล้ว */}
                 <td className="text-center px-3 py-3">
-  {gradingMode === "pass_fail" ? (   // ★ เพิ่มเงื่อนไขทั้งบล็อก
+  {gradingMode === "pass_fail" ? (
     r.passFailStatus === null ? (
       <span className="text-[10px] text-slate-300 font-bold">ไม่มีข้อมูล</span>
     ) : (
@@ -1012,7 +1222,7 @@ function GradeTable({
     </span>
   )}
 </td>
-{/* ★ ตำแหน่ง: อยู่หลังก้อนคะแนนเก็บ/กลางภาค/ปลายภาค (จากบั๊กที่ 2) และก่อน <td> เกรด/สถานะ */}
+{/* ★ คอลัมน์ "รวม" — อยู่ติดกับ "ส่งตรงเวลา" ตามที่ต้องการ */}
 <td className="text-center px-3 py-3">
   <div className="inline-flex flex-col items-center gap-1 min-w-[70px]">
     <span className="font-black text-sm text-slate-700">
@@ -1051,18 +1261,18 @@ function GradeTable({
    - ยังไม่มีการส่งงานเลย ("ไม่ส่งงาน") -> คลิกเพื่อกรอกคะแนนได้เลย (ให้คะแนนย้อนหลัง/กรณีส่งงานกระดาษ)
    - ส่งงานแล้วแต่ยังไม่ตรวจ ("รอตรวจ") -> คลิกเพื่อกรอกคะแนน
    - มีคะแนนแล้ว -> คลิกที่ตัวเลขเพื่อแก้ไข
-   ★ "isEditing" ถูกควบคุมจาก GradeTable (แทนที่จะเป็น state ภายในตัวเอง) เพื่อให้กด Enter
-   แล้วสั่งเปิดโหมดแก้ไขของ "แถวถัดไป คอลัมน์เดียวกัน" ต่อได้ทันที เหมือนกรอกคะแนนใน Excel */
+   ★ "isEditing" ถูกควบคุมจาก GradeTable เพื่อให้กด Enter/ลูกศร แล้วสั่งเปิดโหมดแก้ไขของ
+   "ช่องข้างเคียง" (บน/ล่าง/ซ้าย/ขวา) ต่อได้ทันที เหมือนกรอกคะแนนใน Excel */
 function EditableScoreCell({
-  submission, assignment, lateInfo, isEditing, onRequestEdit, onCommit, onEnterNext, onCancelEdit,
+  submission, assignment, lateInfo, isEditing, onRequestEdit, onCommit, onNavigate, onCancelEdit,
 }: {
   submission?: Submission;
-  assignment: Assignment;      // ★ was maxScore: number
+  assignment: Assignment;
   lateInfo: LateInfo;
   isEditing: boolean;
   onRequestEdit: () => void;
   onCommit: (newScore: number) => void;
-  onEnterNext: () => void;
+  onNavigate: (dir: NavDir) => void;
   onCancelEdit: () => void;
 }) {
   const maxScore = assignment.max_score;
@@ -1071,7 +1281,6 @@ function EditableScoreCell({
   const justActedRef = useRef(false);
   // ★ ใช้หน่วงเวลา (debounce) เพื่อ auto-save หลังพิมพ์เสร็จ ไม่ต้องกด Enter/blur
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
 
   useEffect(() => {
     setDraft(currentValueText);
@@ -1098,19 +1307,44 @@ function EditableScoreCell({
     debounceRef.current = setTimeout(() => tryCommit(value), 500);
   }
 
+  // ★ Enter/ลูกศร = commit ค่าปัจจุบันก่อน แล้วสั่งย้ายไปช่องข้างเคียงตามทิศทาง
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
       e.preventDefault();
       justActedRef.current = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       tryCommit(draft);
-      onEnterNext(); // ★ บันทึกแล้วกระโดดไปช่องกรอกของนักเรียนคนถัดไปในคอลัมน์เดียวกัน (เหมือนเดิม)
+      onNavigate("down");
     } else if (e.key === "Escape") {
       e.preventDefault();
       justActedRef.current = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       setDraft(currentValueText);
       onCancelEdit();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      justActedRef.current = true;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      tryCommit(draft);
+      onNavigate("up");
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      justActedRef.current = true;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      tryCommit(draft);
+      onNavigate("down");
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      justActedRef.current = true;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      tryCommit(draft);
+      onNavigate("left");
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      justActedRef.current = true;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      tryCommit(draft);
+      onNavigate("right");
     }
   }
 
@@ -1169,9 +1403,7 @@ function EditableScoreCell({
   const isLate = lateInfo.hasData && lateInfo.isLate;
   const bgClass = isLate ? "bg-orange-50 hover:bg-orange-100" : "bg-emerald-50 hover:bg-emerald-100";
   const textClass = isLate ? "text-orange-600" : "text-emerald-600";
-
-  // ★ ตำแหน่ง: ท้ายสุดของฟังก์ชัน EditableScoreCell (แทนที่ทั้งสองก้อนด้านบนด้วยก้อนเดียวนี้)
-const weighted = isWeighted(assignment) ? getAssignmentWeightedScore(assignment, submission.score) : null;
+  const weighted = isWeighted(assignment) ? getAssignmentWeightedScore(assignment, submission.score) : null;
 
 return (
   <button onClick={onRequestEdit} title="คลิกเพื่อแก้ไขคะแนน"
@@ -1189,73 +1421,121 @@ return (
     )}
   </button>
 );
-}   
+}
+
+// ★ คะแนนกลางภาค/ปลายภาค — เปลี่ยนเป็น controlled (isEditing มาจาก GradeTable) เพื่อรองรับกดลูกศรย้ายช่อง
 function EditableExamCell({
-  value, maxScore, readOnly, onSave,
+  value, maxScore, readOnly, isEditing, onRequestEdit, onCommit, onNavigate, onCancelEdit,
 }: {
   value: number | null;
   maxScore: number;
   readOnly: boolean;
-  onSave: (v: number) => void;
+  isEditing: boolean;
+  onRequestEdit: () => void;
+  onCommit: (v: number) => void;
+  onNavigate: (dir: NavDir) => void;
+  onCancelEdit: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value !== null ? String(value) : "");
+  const currentText = value !== null ? String(value) : "";
+  const [draft, setDraft] = useState(currentText);
+  const justActedRef = useRef(false);
 
-  useEffect(() => { setDraft(value !== null ? String(value) : ""); }, [value]);
+  useEffect(() => { setDraft(currentText); }, [value, isEditing]);
 
   function commit() {
-    setEditing(false);
     const parsed = Number(draft);
     if (draft.trim() === "" || Number.isNaN(parsed)) return;
-    if (parsed !== value) onSave(parsed);
+    if (parsed !== value) onCommit(parsed);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") { e.preventDefault(); justActedRef.current = true; commit(); onNavigate("down"); }
+    else if (e.key === "Escape") { e.preventDefault(); justActedRef.current = true; setDraft(currentText); onCancelEdit(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); justActedRef.current = true; commit(); onNavigate("up"); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); justActedRef.current = true; commit(); onNavigate("down"); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); justActedRef.current = true; commit(); onNavigate("left"); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); justActedRef.current = true; commit(); onNavigate("right"); }
+  }
+
+  function handleBlur() {
+    if (justActedRef.current) { justActedRef.current = false; return; }
+    commit();
+    onCancelEdit();
   }
 
   if (readOnly) {
     return <span className="text-sm font-black text-slate-700">{value ?? "-"}<span className="text-slate-400 font-bold">/{maxScore}</span></span>;
   }
 
-  if (editing) {
+  if (isEditing) {
     return (
       <input
         type="number" autoFocus min={0} max={maxScore}
         value={draft} onChange={e => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(value !== null ? String(value) : ""); setEditing(false); } }}
-        className="w-16 text-center border-2 border-sky-300 rounded-lg py-1 text-sm font-black focus:outline-none"
+        onFocus={e => e.currentTarget.select()}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        className="w-16 mx-auto block text-center border-2 border-sky-300 rounded-lg py-1 text-sm font-black focus:outline-none"
       />
     );
   }
 
   return (
-    <button onClick={() => setEditing(true)} title="คลิกเพื่อกรอกคะแนน"
+    <button onClick={onRequestEdit} title="คลิกเพื่อกรอกคะแนน"
       className="text-sm font-black px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-700">
       {value !== null ? value : <span className="text-amber-500 text-[10px]">ยังไม่กรอก</span>}
       {value !== null && <span className="text-slate-400 font-bold">/{maxScore}</span>}
     </button>
   );
 }
-function EditablePresetCell({ value, onSave }: { value: number; onSave: (newValue: number) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(String(value));
 
-  useEffect(() => { setDraft(String(value)); }, [value]);
+// ★ คะแนนพิเศษ — เปลี่ยนเป็น controlled เช่นกัน เพื่อรองรับกดลูกศรย้ายช่อง
+function EditablePresetCell({
+  value, isEditing, onRequestEdit, onCommit, onNavigate, onCancelEdit,
+}: {
+  value: number;
+  isEditing: boolean;
+  onRequestEdit: () => void;
+  onCommit: (newValue: number) => void;
+  onNavigate: (dir: NavDir) => void;
+  onCancelEdit: () => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const justActedRef = useRef(false);
+
+  useEffect(() => { setDraft(String(value)); }, [value, isEditing]);
 
   function commit() {
     const parsed = Number(draft);
-    setEditing(false);
     if (Number.isNaN(parsed)) { setDraft(String(value)); return; }
-    if (parsed !== value) onSave(parsed);
+    if (parsed !== value) onCommit(parsed);
   }
 
-  if (editing) {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") { e.preventDefault(); justActedRef.current = true; commit(); onNavigate("down"); }
+    else if (e.key === "Escape") { e.preventDefault(); justActedRef.current = true; setDraft(String(value)); onCancelEdit(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); justActedRef.current = true; commit(); onNavigate("up"); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); justActedRef.current = true; commit(); onNavigate("down"); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); justActedRef.current = true; commit(); onNavigate("left"); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); justActedRef.current = true; commit(); onNavigate("right"); }
+  }
+
+  function handleBlur() {
+    if (justActedRef.current) { justActedRef.current = false; return; }
+    commit();
+    onCancelEdit();
+  }
+
+  if (isEditing) {
     return (
       <input
         type="number"
         autoFocus
         value={draft}
         onChange={e => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(String(value)); setEditing(false); } }}
+        onFocus={e => e.currentTarget.select()}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
         className="w-16 text-center border-2 border-sky-300 rounded-lg py-1 text-sm font-black focus:outline-none"
       />
     );
@@ -1263,7 +1543,7 @@ function EditablePresetCell({ value, onSave }: { value: number; onSave: (newValu
 
   return (
     <button
-      onClick={() => setEditing(true)}
+      onClick={onRequestEdit}
       title="คลิกเพื่อแก้ไขคะแนน"
       className={`text-sm font-black px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors ${
         value > 0 ? "text-emerald-600" : value < 0 ? "text-red-500" : "text-slate-300"
@@ -1298,14 +1578,28 @@ function buildRowsType() {
   }[];
 }
 
+// ★ อันดับคะแนน: คะแนนเท่ากันได้อันดับเดียวกัน + เอฟเฟกต์พลุกระดาษก่อนอันดับ 1-5 ปรากฏ
+// + รายชื่อที่เหลือ (อันดับ 6 ขึ้นไป) พร้อมคะแนนแสดงเป็นลิสต์ด้านล่าง
 function PodiumView({
-  top5, hideScores, onToggleHide,
+  rows, hideScores, onToggleHide,
 }: {
-  top5: ReturnType<typeof buildRowsType>;
+  rows: ReturnType<typeof buildRowsType>;
   hideScores: boolean;
   onToggleHide: () => void;
 }) {
-  if (top5.length === 0) {
+  const ranked = useMemo(() => computeRanked(rows), [rows]);
+  const [showConfetti, setShowConfetti] = useState(true);
+  const [revealed, setRevealed] = useState(false);
+
+  useEffect(() => {
+    setShowConfetti(true);
+    setRevealed(false);
+    const revealTimer = setTimeout(() => setRevealed(true), 1600);
+    const confettiTimer = setTimeout(() => setShowConfetti(false), 2400);
+    return () => { clearTimeout(revealTimer); clearTimeout(confettiTimer); };
+  }, [rows]);
+
+  if (ranked.length === 0) {
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
         <p className="font-bold text-sm">ยังไม่มีข้อมูลคะแนน</p>
@@ -1313,40 +1607,96 @@ function PodiumView({
     );
   }
 
-  const order = [2, 0, 1, 3, 4].filter(i => i < top5.length);
-  const heights: Record<number, string> = { 0: "h-40", 1: "h-28", 2: "h-20", 3: "h-14", 4: "h-14" };
-  const medalEmoji: Record<number, string> = { 0: "🥇", 1: "🥈", 2: "🥉", 3: "🏅", 4: "🏅" };
+  const podiumRanked = ranked.filter(r => r.rank <= 5);
+  const restRanked = ranked.filter(r => r.rank > 5);
+
+  // จัดกลุ่มตามอันดับ (เผื่อคะแนนเท่ากันหลายคนในอันดับเดียว)
+  const byRank = new Map<number, typeof podiumRanked>();
+  podiumRanked.forEach(r => {
+    if (!byRank.has(r.rank)) byRank.set(r.rank, []);
+    byRank.get(r.rank)!.push(r);
+  });
+
+  // ลำดับการจัดวางแบบโพเดียม: 3(ซ้าย) - 1(กลาง) - 2(ขวา) - 4 - 5
+  const visualRankOrder = [3, 1, 2, 4, 5].filter(n => byRank.has(n));
+  const heights: Record<number, string> = { 1: "h-40", 2: "h-28", 3: "h-20", 4: "h-14", 5: "h-14" };
+  const medalEmoji: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉", 4: "🏅", 5: "🏅" };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 p-6 sm:p-10">
-      <div className="flex justify-end mb-6 print:hidden">
-        <button onClick={onToggleHide} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-bold text-xs">
-          {hideScores ? "👁️ แสดงคะแนน" : "🙈 ซ่อนคะแนน"}
-        </button>
-      </div>
-      <div className="flex items-end justify-center gap-3 sm:gap-6 flex-wrap">
-        {order.map(rank => {
-          const r = top5[rank];
-          if (!r) return null;
-          const s = r.student;
-          return (
-            <div key={s.id} className="flex flex-col items-center">
-              <p className="text-3xl mb-1">{medalEmoji[rank]}</p>
-              {s.avatar_url ? (
-                <img src={s.avatar_url} className="w-16 h-16 rounded-full object-cover border-4 border-amber-200 shadow" />
-              ) : (
-                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-fuchsia-400 to-purple-400 text-white text-xl font-black flex items-center justify-center border-4 border-amber-200 shadow">
-                  {s.first_name[0]}
+    <div className="relative">
+      {showConfetti && <ConfettiBurst />}
+      <div className="bg-white rounded-2xl border border-slate-100 p-6 sm:p-10">
+        <div className="flex justify-end mb-6 print:hidden">
+          <button onClick={onToggleHide} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-bold text-xs">
+            {hideScores ? "👁️ แสดงคะแนน" : "🙈 ซ่อนคะแนน"}
+          </button>
+        </div>
+
+        <div
+          className={`flex items-end justify-center gap-3 sm:gap-6 flex-wrap transition-all duration-500 ${
+            revealed ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+          }`}
+        >
+          {visualRankOrder.map(rankNum => {
+            const group = byRank.get(rankNum)!;
+            return (
+              <div key={rankNum} className="flex flex-col items-center">
+                <p className="text-3xl mb-1">{medalEmoji[rankNum]}</p>
+                <div className="flex items-end gap-2 flex-wrap justify-center max-w-[220px]">
+                  {group.map(r => {
+                    const s = r.student;
+                    return (
+                      <div key={s.id} className="flex flex-col items-center">
+                        {s.avatar_url ? (
+                          <img src={s.avatar_url} className="w-16 h-16 rounded-full object-cover border-4 border-amber-200 shadow" />
+                        ) : (
+                          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-fuchsia-400 to-purple-400 text-white text-xl font-black flex items-center justify-center border-4 border-amber-200 shadow">
+                            {s.first_name[0]}
+                          </div>
+                        )}
+                        <p className="mt-2 text-sm font-black text-slate-700 text-center max-w-[100px] truncate">{s.first_name} {s.last_name}</p>
+                      </div>
+                    );
+                  })}
                 </div>
-              )}
-              <p className="mt-2 text-sm font-black text-slate-700 text-center max-w-[110px] truncate">{s.first_name} {s.last_name}</p>
-              <p className="text-[11px] font-black text-fuchsia-500 mb-2">{hideScores ? "•••" : `${r.grandTotal} คะแนน`}</p>
-              <div className={`w-20 sm:w-28 ${heights[rank]} rounded-t-xl bg-gradient-to-b from-amber-300 to-amber-400 flex items-start justify-center pt-2`}>
-                <span className="text-white font-black text-lg">{rank + 1}</span>
+                <p className="text-[11px] font-black text-fuchsia-500 my-2">
+                  {hideScores ? "•••" : `${fmtScore(group[0].grandTotal)} คะแนน`}
+                </p>
+                <div className={`w-20 sm:w-28 ${heights[rankNum]} rounded-t-xl bg-gradient-to-b from-amber-300 to-amber-400 flex items-start justify-center pt-2`}>
+                  <span className="text-white font-black text-lg">{rankNum}</span>
+                </div>
               </div>
+            );
+          })}
+        </div>
+
+        {restRanked.length > 0 && (
+          <div className={`mt-8 pt-6 border-t border-slate-100 transition-opacity duration-500 ${revealed ? "opacity-100" : "opacity-0"}`}>
+            <p className="font-black text-slate-600 text-sm mb-3">📋 อันดับที่เหลือ</p>
+            <div className="divide-y divide-slate-50">
+              {restRanked.map(r => {
+                const s = r.student;
+                return (
+                  <div key={s.id} className="flex items-center gap-3 py-2">
+                    <span className="w-9 text-center text-xs font-black text-slate-400">#{r.rank}</span>
+                    {s.avatar_url ? (
+                      <img src={s.avatar_url} className="w-8 h-8 rounded-full object-cover" />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-xs font-black flex items-center justify-center">
+                        {s.first_name[0]}
+                      </div>
+                    )}
+                    <p className="flex-1 text-xs font-bold text-slate-600 truncate">{s.prefix}{s.first_name} {s.last_name}</p>
+                    <span className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</span>
+                    <span className="text-xs font-black text-fuchsia-500 shrink-0 min-w-[70px] text-right">
+                      {hideScores ? "•••" : `${fmtScore(r.grandTotal)} คะแนน`}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1425,7 +1775,7 @@ function GradeSettingModal({
 
 function StudentReportModal({
   row, assignments, sectionId, currentUserId, attendance, subjectTitle, subjectCode,
-  academicYearLabel, classroomLabel, homeroomTeacherName, subjectTeacherName, readOnly, onClose, gradingMode = "numeric", 
+  academicYearLabel, classroomLabel, homeroomTeacherName, subjectTeacherName, readOnly, onClose, gradingMode = "numeric", onToast,
 }: {
   row: ReturnType<typeof buildRowsType>[number];
   assignments: Assignment[];
@@ -1439,7 +1789,9 @@ function StudentReportModal({
   homeroomTeacherName?: string;
   subjectTeacherName?: string;
   readOnly?: boolean;
-  onClose: () => void; gradingMode?: "numeric" | "pass_fail";
+  onClose: () => void;
+  gradingMode?: "numeric" | "pass_fail";
+  onToast: (message: string, type?: "success" | "error" | "info") => void; // ★ toast แทน alert
 }) {
   const s = row.student;
 
@@ -1473,7 +1825,7 @@ function StudentReportModal({
       setCommentSaved(true);
       setTimeout(() => setCommentSaved(false), 2000);
     } catch (e: any) {
-      alert("บันทึกคอมเมนต์ไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+      onToast("บันทึกคอมเมนต์ไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error"); // ★ toast แทน alert
     } finally {
       setSavingComment(false);
     }
