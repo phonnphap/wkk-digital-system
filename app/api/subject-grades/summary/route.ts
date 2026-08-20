@@ -18,6 +18,8 @@ export async function GET(req: NextRequest) {
       { data: assignments, error: aErr },
       { data: presets, error: pErr },
       { data: criteria, error: cErr },
+      // ★ เพิ่ม: ดึงค่าตั้งค่าโครงสร้างคะแนน (เก็บ/กลางภาค/ปลายภาค) ของ section นี้พร้อมกันเลย
+      { data: sectionGradingConfig, error: gErr },
     ] = await Promise.all([
       admin
         .from("assignments")
@@ -36,15 +38,27 @@ export async function GET(req: NextRequest) {
         .select("id, max_percent, min_percent, grade, sort_order")
         .eq("subject_section_id", subject_section_id)
         .order("sort_order", { ascending: true }),
+      // ★ เพิ่ม: grading_structure รองรับสัดส่วนอิสระ เช่น 70+10+20, 80+20, 60+20+20 ฯลฯ
+      // ขอแค่ formative_max_score + midterm_max_score(ถ้ามี) + final_max_score รวมกัน = 100
+      admin
+        .from("subject_sections")
+        .select("grading_structure, formative_max_score, midterm_max_score, final_max_score")
+        .eq("id", subject_section_id)
+        .maybeSingle(),
     ]);
     if (aErr) throw aErr;
     if (pErr) throw pErr;
     if (cErr) throw cErr;
+    if (gErr) throw gErr;
 
     const assignmentIds = (assignments ?? []).map((a: any) => a.id);
-    const presetIds = (presets ?? []).map((p: any) => p.id);
 
-    const [{ data: submissions, error: sErr }, { data: scoreEvents, error: eErr }] = await Promise.all([
+    const [
+      { data: submissions, error: sErr },
+      { data: scoreEvents, error: eErr },
+      // ★ เพิ่ม: คะแนนกลางภาค/ปลายภาค (คนละตารางจาก assignments เพราะไม่มี rubric ย่อย)
+      { data: examScoreRows, error: exErr },
+    ] = await Promise.all([
       assignmentIds.length > 0
         ? admin
             .from("assignment_submissions")
@@ -59,16 +73,30 @@ export async function GET(req: NextRequest) {
         .from("score_events")
         .select("id, student_id, preset_id, points")
         .eq("subject_section_id", subject_section_id),
+      // ★ เพิ่ม: ดึงคะแนนกลางภาค/ปลายภาคของทุกคนใน section นี้ในครั้งเดียว
+      admin
+        .from("subject_exam_scores")
+        .select("id, student_id, exam_type, score")
+        .eq("subject_section_id", subject_section_id),
     ]);
     if (sErr) throw sErr;
     if (eErr) throw eErr;
+    if (exErr) throw exErr;
 
     return NextResponse.json({
-      assignments: assignments ?? [],
-      presets: presets ?? [],
-      criteria: criteria ?? [],
-      submissions: submissions ?? [],
-      scoreEvents: scoreEvents ?? [],
+      assignments,
+      presets,
+      criteria,
+      submissions,
+      scoreEvents,
+      // ★ เพิ่ม: คะแนนสอบ + ค่าตั้งค่าโครงสร้างคะแนน ส่งกลับพร้อมกันในก้อนเดียว
+      examScores: examScoreRows ?? [],
+      gradingConfig: sectionGradingConfig ?? {
+        grading_structure: "formative_final",
+        formative_max_score: 70,
+        midterm_max_score: 0,
+        final_max_score: 30,
+      },
     });
   } catch (err: any) {
     console.error("[GET /api/subject-grades/summary] error:", err);

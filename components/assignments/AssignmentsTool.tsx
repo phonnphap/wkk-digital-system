@@ -277,16 +277,14 @@ async function loadAnnouncements() {
 
   if (view === "create") {
     content = (
-      <AssignmentForm
-        sectionId={sectionId}
-        subjectId={subjectId}
-        currentUserId={currentUserId}
-        onCancel={backToList}
-        // CHANGED: publishing now returns to the "มอบหมายงาน" list tab
-        // instead of jumping into the assignment detail view.
-        onPublished={() => backToList()}
-        onSavedDraft={() => backToList()}
-      />
+  <AssignmentForm
+    sectionId={sectionId}
+    subjectId={subjectId}
+    currentUserId={currentUserId}
+    onCancel={backToList}
+    onPublished={(id) => openDetail(id)}   // ★ เปิดหน้ารายละเอียดของงานที่เพิ่งเผยแพร่
+    onSavedDraft={() => backToList()}      // draft ยังกลับไปหน้า list เหมือนเดิม
+  />
     );
   } else if (view === "detail" && activeAssignment) {
     content = (
@@ -1223,8 +1221,8 @@ function AssignmentDetail({
         currentUserId={currentUserId}
         existing={assignment}
         onCancel={() => setEditing(false)}
-        onPublished={() => { setEditing(false); onRefresh(); }}
-        onSavedDraft={() => { setEditing(false); onRefresh(); }}
+        onPublished={() => { setEditing(false); setTab("assign"); onRefresh(); }}  // ★
+      onSavedDraft={() => { setEditing(false); onRefresh(); }}
       />
     );
   }

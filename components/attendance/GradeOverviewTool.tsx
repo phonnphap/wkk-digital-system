@@ -59,7 +59,28 @@ type ViewTab = "table" | "podium";
 
 // ★ ย้ายมาไว้ module scope เพื่อให้ GradeTable / EditableScoreCell / StudentReportModal เรียกใช้ได้
 type LateInfo = { hasData: boolean; isLate: boolean; daysLate: number; isManual: boolean };
+// ---- น้ำหนักชิ้นงาน (Weighted score) ----
+// สูตร: คะแนนจริงที่ได้ = (คะแนนที่นักเรียนได้ / คะแนนเต็ม) × น้ำหนักชิ้นงาน
+// ถ้าไม่ได้เปิดใช้น้ำหนัก หรือไม่ได้ระบุ % ไว้ ให้ใช้คะแนนดิบตามปกติ
+function isWeighted(a: Assignment): boolean {
+  return !!(a.allow_weight && a.weight_percent !== null && a.weight_percent !== undefined && (a.max_score ?? 0) > 0);
+}
 
+// คะแนนเต็มที่ "นับเข้าคะแนนรวม" ของชิ้นนี้ — ถ้ามีน้ำหนัก เต็มจะกลายเป็นค่าน้ำหนัก ไม่ใช่คะแนนดิบเดิม
+function getAssignmentMaxContribution(a: Assignment): number {
+  return isWeighted(a) ? (a.weight_percent as number) : (a.max_score ?? 0);
+}
+
+// แปลงคะแนนดิบที่กรอก -> คะแนนจริงตามน้ำหนัก (ครูยังกรอกคะแนนดิบตามปกติ ระบบแปลงให้ตรงนี้)
+function getAssignmentWeightedScore(a: Assignment, rawScore: number | null | undefined): number {
+  if (rawScore === null || rawScore === undefined) return 0;
+  if (isWeighted(a)) return (rawScore / (a.max_score || 1)) * (a.weight_percent as number);
+  return rawScore;
+}
+
+function fmtScore(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
 // คำนวณสถานะตรงเวลา/สาย
 function getLateInfo(assignment: Assignment, sub?: Submission): LateInfo {
   // เคส 1: ไม่มีการส่งงานเลย
@@ -118,6 +139,12 @@ export default function GradeOverviewTool({
   students,
   currentUserId,
   readOnly = false,
+  gradingMode = "numeric",              // ★ เพิ่ม
+  passThresholdPercent = 50,   
+  gradingStructure = "formative_final",       // ★ เพิ่ม
+  formativeMaxScore = 70,                      // ★ เพิ่ม
+  midtermMaxScore = 0,                         // ★ เพิ่ม
+  finalMaxScore = 30, 
 }: {
   sectionId: string;
   subjectTitle: string;
@@ -129,12 +156,17 @@ export default function GradeOverviewTool({
   students: Student[];
   currentUserId?: string;
   readOnly?: boolean;
+  gradingMode?: "numeric" | "pass_fail";   // ★ เพิ่ม
+  passThresholdPercent?: number; 
+  gradingStructure?: "formative_final" | "formative_midterm_final";
+  formativeMaxScore?: number;
+  midtermMaxScore?: number;
+  finalMaxScore?: number;
 }) {
   const [tab, setTab] = useState<ViewTab>("table");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
-
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [criteria, setCriteria] = useState<Criterion[]>([]);
@@ -145,6 +177,8 @@ export default function GradeOverviewTool({
   const [showGradeSetting, setShowGradeSetting] = useState(false);
   const [reportStudent, setReportStudent] = useState<Student | null>(null);
   const [hideScores, setHideScores] = useState(false);
+  const [examScores, setExamScores] = useState<{ student_id: string; exam_type: "midterm" | "final"; score: number | null }[]>([]);   // ★ เพิ่ม
+  const useMidterm = gradingStructure === "formative_midterm_final";
 
   async function loadData() {
     setLoading(true);
@@ -157,11 +191,12 @@ export default function GradeOverviewTool({
 ]);
       const json = await gradeRes.json();
       if (!gradeRes.ok) throw new Error(json.error ?? "โหลดข้อมูลไม่สำเร็จ");
-      setAssignments(json.assignments ?? []);
+      setAssignments((json.assignments ?? []).filter((a: Assignment) => a.status !== "draft"));
       setPresets(json.presets ?? []);
       setCriteria(json.criteria ?? []);
       setSubmissions(json.submissions ?? []);
       setScoreEvents(json.scoreEvents ?? []);
+      setExamScores(json.examScores ?? []);
 
       try {
         const attJson = await attRes.json();
@@ -198,17 +233,24 @@ export default function GradeOverviewTool({
   }, [sectionId]);
 
   const totalMaxScore = useMemo(
-    () => assignments.reduce((sum, a) => sum + (a.max_score ?? 0), 0),
-    [assignments]
-  );
+  () => assignments.reduce((sum, a) => sum + getAssignmentMaxContribution(a), 0),
+  [assignments]
+);
 
   const rows = useMemo(() => {
   return students.map(s => {
     const subMap: Record<string, Submission> = {};
     submissions.filter(sub => sub.student_id === s.id).forEach(sub => { subMap[sub.assignment_id] = sub; });
 
-    const assignmentTotal = assignments.reduce((sum, a) => sum + (subMap[a.id]?.score ?? 0), 0);
+    const assignmentTotal = assignments.reduce(
+  (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
+  0
+);
     const submittedCount = assignments.filter(a => subMap[a.id]?.score !== null && subMap[a.id]?.score !== undefined).length;
+    const midtermRow = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm");
+    const finalRow = examScores.find(e => e.student_id === s.id && e.exam_type === "final");
+    const midtermScore = midtermRow?.score ?? null;
+    const finalScore = finalRow?.score ?? null;
 
     // ★ นับตรงเวลา/สาย จาก getLateInfo แทน isOnTime เดิม
     let onTimeCount = 0;
@@ -230,7 +272,26 @@ export default function GradeOverviewTool({
       .forEach(ev => { presetTotals[ev.preset_id] += ev.points; });
     const specialTotal = Object.values(presetTotals).reduce((a, b) => a + b, 0);
 
-    const percentage = totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * 100 : 0;
+    const att = attendanceMap[s.id];
+    const attendanceRate = att && att.total > 0 ? (att.present / att.total) * 100 : null;
+    const passFailStatus: "ผ่าน" | "ไม่ผ่าน" | null =
+      gradingMode === "pass_fail"
+        ? (attendanceRate === null ? null : attendanceRate >= passThresholdPercent ? "ผ่าน" : "ไม่ผ่าน")
+        : null;
+
+    // ★ เพิ่ม: สเกลคะแนนเก็บให้พอดีกับคะแนนเต็มที่ตั้งไว้
+    const scaledFormative = totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * formativeMaxScore : 0;
+
+    // ★ เพิ่ม: รวมคะแนนสุดท้าย (แทนที่ grandTotal เดิมที่ใช้ assignmentTotal+specialTotal ตรงๆ)
+    const usesComponentGrading = gradingMode === "numeric"; // โครงสร้างเก็บ/กลาง/ปลาย ใช้เฉพาะโหมด numeric
+    const componentTotal = usesComponentGrading
+      ? scaledFormative + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0)
+      : null;
+    const componentPercentage = usesComponentGrading ? componentTotal! : null; // เต็ม 100 อยู่แล้วโดยดีไซน์
+
+    const percentage = usesComponentGrading
+      ? (componentPercentage ?? 0)
+      : (totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * 100 : 0);   // fallback เดิมเผื่อยังไม่ตั้งค่า
 
     let grade = "-";
     const sortedCriteria = [...criteria].sort((a, b) => b.min_percent - a.min_percent);
@@ -238,15 +299,19 @@ export default function GradeOverviewTool({
       if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
     }
 
+    // grandTotal เดิม (คะแนนดิบ+พิเศษ) ยังเก็บไว้โชว์ในตารางแบบเดิมได้ ไม่กระทบของเดิม
     const grandTotal = assignmentTotal + specialTotal;
 
     return {
       student: s, subMap, presetTotals, assignmentTotal, submittedCount,
-      onTimeCount, lateCount, onTimeRate, totalDaysLate, // ★ เพิ่ม totalDaysLate
+      onTimeCount, lateCount, onTimeRate, totalDaysLate,
       specialTotal, percentage, grade, grandTotal,
+      attendanceRate, passFailStatus,
+      scaledFormative, midtermScore, finalScore, componentTotal,   // ★ เพิ่ม
     };
   });
-}, [students, submissions, assignments, presets, scoreEvents, criteria, totalMaxScore]);
+}, [students, submissions, assignments, presets, scoreEvents, criteria, totalMaxScore,
+    attendanceMap, gradingMode, passThresholdPercent, examScores, formativeMaxScore, midtermMaxScore, finalMaxScore, useMidterm]); // ★ เพิ่ม dependency
 
   const podiumTop5 = useMemo(() => {
     return [...rows].sort((a, b) => b.grandTotal - a.grandTotal).slice(0, 5);
@@ -272,53 +337,75 @@ export default function GradeOverviewTool({
       alert("แก้ไขคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"));
     }
   }
-
+  
   // ให้คะแนนงานที่มอบหมายแบบ inline จากตารางคะแนนรวมนี้โดยตรง (เฉพาะครูประจำวิชา ไม่ใช่ readOnly)
   // NOTE: endpoint /api/assignment-submissions/grade ต้อง upsert สถานะเป็น "reviewed"
   // (ไม่ใช่ "graded") ให้ตรงกับ CHECK constraint ของตาราง assignment_submissions
-  async function handleUpdateScore(studentId: string, assignmentId: string, newScore: number) {
-    if (readOnly) return;
-    const assignment = assignments.find(a => a.id === assignmentId);
-    if (!assignment) return;
-    if (Number.isNaN(newScore) || newScore < 0 || newScore > (assignment.max_score ?? 0)) {
-      alert(`คะแนนต้องอยู่ระหว่าง 0 - ${assignment.max_score} คะแนน`);
-      return;
-    }
-    try {
-      const res = await fetch("/api/assignment-submissions/grade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject_section_id: sectionId,
-          assignment_id: assignmentId,
-          student_id: studentId,
-          score: newScore,
-          graded_by: currentUserId || null,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "บันทึกคะแนนไม่สำเร็จ");
-
-      const updated: Submission = json.submission ?? {
-        id: `local-${Date.now()}`,
+  async function handleUpdateExamScore(studentId: string, examType: "midterm" | "final", newScore: number) {
+  if (readOnly) return;
+  const maxScore = examType === "midterm" ? midtermMaxScore : finalMaxScore;
+  if (Number.isNaN(newScore) || newScore < 0 || newScore > maxScore) {
+    alert(`คะแนนต้องอยู่ระหว่าง 0 - ${maxScore} คะแนน`);
+    return;
+  }
+  try {
+    const res = await fetch("/api/subject-grades/exam-score", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject_section_id: sectionId, student_id: studentId, exam_type: examType, score: newScore, graded_by: currentUserId || null }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? "บันทึกคะแนนไม่สำเร็จ");
+    setExamScores(prev => {
+      const exists = prev.some(e => e.student_id === studentId && e.exam_type === examType);
+      if (exists) return prev.map(e => (e.student_id === studentId && e.exam_type === examType ? { ...e, score: newScore } : e));
+      return [...prev, { student_id: studentId, exam_type: examType, score: newScore }];
+    });
+  } catch (e: any) {
+    alert("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+  }
+}
+async function handleUpdateScore(studentId: string, assignmentId: string, newScore: number) {
+  if (readOnly) return;
+  const assignment = assignments.find(a => a.id === assignmentId);
+  if (!assignment) return;
+  if (Number.isNaN(newScore) || newScore < 0 || newScore > (assignment.max_score ?? 0)) {
+    alert(`คะแนนต้องอยู่ระหว่าง 0 - ${assignment.max_score} คะแนน`);
+    return;
+  }
+  try {
+    const res = await fetch("/api/assignment-submissions/grade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject_section_id: sectionId,
         assignment_id: assignmentId,
         student_id: studentId,
-        status: "reviewed",
         score: newScore,
-        graded_at: new Date().toISOString(),
-      };
+        graded_by: currentUserId || null,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? "บันทึกคะแนนไม่สำเร็จ");
 
-      setSubmissions(prev => {
-        const exists = prev.some(s => s.assignment_id === assignmentId && s.student_id === studentId);
-        if (exists) {
-          return prev.map(s => (s.assignment_id === assignmentId && s.student_id === studentId ? { ...s, ...updated } : s));
-        }
-        return [...prev, updated];
-      });
-    } catch (e: any) {
-      alert("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"));
-    }
+    const updated: Submission = json.submission ?? {
+      id: `local-${Date.now()}`,
+      assignment_id: assignmentId,
+      student_id: studentId,
+      status: "reviewed",
+      score: newScore,
+      graded_at: new Date().toISOString(),
+    };
+
+    setSubmissions(prev => {
+      const exists = prev.some(s => s.assignment_id === assignmentId && s.student_id === studentId);
+      if (exists) return prev.map(s => (s.assignment_id === assignmentId && s.student_id === studentId ? { ...s, ...updated } : s));
+      return [...prev, updated];
+    });
+  } catch (e: any) {
+    alert("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"));
   }
+}
 
   async function saveCriteria(newRows: Criterion[]) {
     if (readOnly) return;
@@ -348,10 +435,13 @@ export default function GradeOverviewTool({
         };
         assignments.forEach(a => {
   const sub = r.subMap[a.id];
-  const info = getLateInfo(a, sub); // ★ แทน isOnTime
+  const info = getLateInfo(a, sub);
   const onTimeTag = !info.hasData ? "" : info.isLate ? ` (ส่งช้า${info.isManual ? "" : ` ${info.daysLate} วัน`})` : " (ตรงเวลา)";
+  const weightedTag = isWeighted(a) && sub?.score !== null && sub?.score !== undefined
+    ? ` [คะแนนจริง ${fmtScore(getAssignmentWeightedScore(a, sub.score))}/${a.weight_percent}]`
+    : "";
   row[a.title] = sub?.score !== null && sub?.score !== undefined
-    ? `${sub.score}${onTimeTag}`
+    ? `${sub.score}${onTimeTag}${weightedTag}`
     : (sub ? "ส่งแล้ว-ยังไม่ให้คะแนน" : "ไม่ส่งงาน");
 });
         presets.forEach(p => { row[p.label] = r.presetTotals[p.id] ?? 0; });
@@ -359,7 +449,7 @@ export default function GradeOverviewTool({
         row["คะแนนพิเศษรวม"] = r.specialTotal;
         row["คะแนนรวมทั้งหมด"] = r.grandTotal;
         row["เปอร์เซ็นต์"] = Number(r.percentage.toFixed(2));
-        row["เกรด"] = r.grade;
+        row["เกรด"] = gradingMode === "pass_fail" ? (r.passFailStatus ?? "ไม่มีข้อมูล") : r.grade;   // ★ แก้บรรทัดนี้
         row["ส่งตรงเวลา (ชิ้น)"] = r.onTimeCount;
 row["ส่งช้า (ชิ้น)"] = r.lateCount;
 row["รวมจำนวนวันที่สายทั้งหมด"] = r.totalDaysLate; // ★ เพิ่ม
@@ -594,7 +684,8 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           classroomLabel={classroomLabel}
           homeroomTeacherName={homeroomTeacherName}
           subjectTeacherName={subjectTeacherName}
-          readOnly={readOnly}
+          readOnly={readOnly} 
+          gradingMode={gradingMode}
           onClose={() => setReportStudent(null)}
         />
       )}
@@ -624,7 +715,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
 >
   {tab === "table" ? "🏆 อันดับคะแนน" : "🔢 ตาราง"}
 </button>
-{!readOnly && (
+{!readOnly && gradingMode === "numeric" && (
   <button
     onClick={() => setShowGradeSetting(true)}
     className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-400 to-pink-400 hover:from-fuchsia-500 hover:to-pink-500 text-white font-black text-sm flex items-center gap-1.5 shadow-sm"
@@ -663,8 +754,14 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   onOpenReport={s => setReportStudent(s)}
   onAdjustPreset={handleAdjustPreset}
   onUpdateScore={handleUpdateScore}
-  getLateInfo={getLateInfo}   // ★ เปลี่ยนจาก isOnTime
+  onUpdateExamScore={handleUpdateExamScore}     // ★ add
+  getLateInfo={getLateInfo}
   readOnly={readOnly}
+  gradingMode={gradingMode}
+  useMidterm={useMidterm}                       // ★ add
+  formativeMaxScore={formativeMaxScore}          // ★ add
+  midtermMaxScore={midtermMaxScore}              // ★ add
+  finalMaxScore={finalMaxScore}                  // ★ add
 />
       ) : (
         <PodiumView top5={podiumTop5} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
@@ -684,8 +781,11 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
 // ★ คีย์บอกว่า "ช่องไหน" กำลังถูกแก้ไขอยู่ (ใช้คู่ assignment_id + student_id เพราะ 1 คอลัมน์มีได้หลายแถว)
 type ActiveCell = { assignmentId: string; studentId: string } | null;
 
+// ★ ตำแหน่ง: บรรทัดเปิดฟังก์ชัน function GradeTable({...}: {...}) {...}
 function GradeTable({
-  rows, assignments, presets, totalMaxScore, onOpenReport, onAdjustPreset, onUpdateScore, getLateInfo, readOnly,
+  rows, assignments, presets, totalMaxScore, onOpenReport, onAdjustPreset, onUpdateScore,
+  onUpdateExamScore, getLateInfo, readOnly, gradingMode = "numeric",
+  useMidterm = false, formativeMaxScore = 0, midtermMaxScore = 0, finalMaxScore = 0,   // ★ เพิ่ม 5 ตัวนี้
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
@@ -694,8 +794,14 @@ function GradeTable({
   onOpenReport: (s: Student) => void;
   onAdjustPreset: (studentId: string, presetId: string, currentValue: number, newValue: number) => void;
   onUpdateScore: (studentId: string, assignmentId: string, newScore: number) => void;
-  getLateInfo: (assignment: Assignment, sub?: Submission) => LateInfo; // ★
+  onUpdateExamScore: (studentId: string, examType: "midterm" | "final", newScore: number) => void;   // ★ เพิ่ม
+  getLateInfo: (assignment: Assignment, sub?: Submission) => LateInfo;
   readOnly: boolean;
+  gradingMode?: "numeric" | "pass_fail";
+  useMidterm?: boolean;              // ★ เพิ่ม
+  formativeMaxScore?: number;        // ★ เพิ่ม
+  midtermMaxScore?: number;          // ★ เพิ่ม
+  finalMaxScore?: number;            // ★ เพิ่ม
 }) {
   // ★ ช่องที่กำลังกรอกคะแนนอยู่ตอนนี้ (คุมจากที่นี่ เพื่อให้กด Enter แล้วสั่งเปิดช่องถัดไปในคอลัมน์เดียวกันได้)
   const [activeCell, setActiveCell] = useState<ActiveCell>(null);
@@ -727,10 +833,13 @@ function GradeTable({
     </th>
     <th className="px-3 py-3 text-center text-[11px] font-black text-slate-400 bg-sky-50">Report</th>
     {assignments.map(a => (
-      <th key={a.id} className="px-3 py-3 text-center min-w-[110px] bg-sky-50/70">
-        <p className="text-[11px] font-black text-indigo-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
-        <p className="text-[9px] text-indigo-300 font-bold">เต็ม {a.max_score} คะแนน</p>
-      </th>
+      // column header, inside GradeTable's <thead>
+<th key={a.id} className="px-3 py-3 text-center min-w-[110px] bg-sky-50/70">
+  <p className="text-[11px] font-black text-indigo-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
+  <p className="text-[9px] text-indigo-300 font-bold">
+    {isWeighted(a) ? `กรอกเต็ม ${a.max_score} → นน. ${a.weight_percent}%` : `เต็ม ${a.max_score} คะแนน`}
+  </p>
+</th>
     ))}
     {presets.map(p => (
   <th key={p.id} className="px-3 py-3 text-center min-w-[100px] bg-fuchsia-50/70">
@@ -738,12 +847,33 @@ function GradeTable({
     <p className="text-[9px] text-fuchsia-300 font-bold">คะแนนพิเศษ</p>
   </th>
 ))}
+
+{gradingMode === "numeric" && (
+  <>
+    <th className="px-3 py-3 text-center min-w-[90px] bg-indigo-50/70">
+      <p className="text-[11px] font-black text-indigo-700">คะแนนเก็บ</p>
+      <p className="text-[9px] text-indigo-300 font-bold">เต็ม {formativeMaxScore}</p>
+    </th>
+    {useMidterm && (
+      <th className="px-3 py-3 text-center min-w-[90px] bg-teal-50/70">
+        <p className="text-[11px] font-black text-teal-700">กลางภาค</p>
+        <p className="text-[9px] text-teal-300 font-bold">เต็ม {midtermMaxScore}</p>
+      </th>
+    )}
+    <th className="px-3 py-3 text-center min-w-[90px] bg-orange-50/70">
+      <p className="text-[11px] font-black text-orange-700">ปลายภาค</p>
+      <p className="text-[9px] text-orange-300 font-bold">เต็ม {finalMaxScore}</p>
+    </th>
+  </>
+)}
 <th className="px-3 py-3 text-center min-w-[100px] bg-emerald-50/70">
   <p className="text-[11px] font-black text-emerald-700">รวม</p>
   <p className="text-[9px] text-emerald-400 font-bold">เต็ม {totalMaxScore} คะแนน</p>
 </th>
 <th className="px-3 py-3 text-center min-w-[70px] bg-fuchsia-50/70">
-  <p className="text-[11px] font-black text-fuchsia-700">ระดับผลการเรียน</p>
+  <p className="text-[11px] font-black text-fuchsia-700">
+    {gradingMode === "pass_fail" ? "สถานะ" : "ระดับผลการเรียน"}   {/* ★ เปลี่ยนข้อความหัวตาราง */}
+  </p>
 </th>
 <th className="px-3 py-3 text-center min-w-[90px] bg-amber-50/70">
   <p className="text-[11px] font-black text-amber-700">ส่งตรงเวลา</p>
@@ -792,17 +922,21 @@ function GradeTable({
   ) : (
   (() => {
     const isLate = lateInfo.hasData && lateInfo.isLate;
-    const bgClass = isLate ? "bg-orange-50 ring-1 ring-orange-200" : "bg-emerald-50 ring-1 ring-emerald-200";
-    const textClass = isLate ? "text-orange-600" : "text-emerald-600";
-    return (
-      <div className={`inline-flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl ${bgClass}`}>
-        <span className={`text-sm font-black ${textClass}`}>
-          {sub.score}<span className="text-slate-400 font-bold">/{a.max_score}</span>
+  const bgClass = isLate ? "bg-orange-50 ring-1 ring-orange-200" : "bg-emerald-50 ring-1 ring-emerald-200";
+  const textClass = isLate ? "text-orange-600" : "text-emerald-600";
+  const weighted = isWeighted(a) ? getAssignmentWeightedScore(a, sub.score) : null;
+  return (
+    <div className={`inline-flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl ${bgClass}`}>
+      <span className={`text-sm font-black ${textClass}`}>
+        {sub.score}<span className="text-slate-400 font-bold">/{a.max_score}</span>
+      </span>
+      {weighted !== null && (
+        <span className="text-[9px] font-black text-violet-500">= {fmtScore(weighted)} คะแนนจริง</span>
+      )}
+      {lateInfo.hasData && (
+        <span className={`text-[9px] font-black ${textClass}`}>
+          {isLate ? `⏰ ส่งช้า${lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}` : "✅ ตรงเวลา"}
         </span>
-        {lateInfo.hasData && (
-          <span className={`text-[9px] font-black ${textClass}`}>
-            {isLate ? `⏰ ส่งช้า${lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}` : "✅ ตรงเวลา"}
-          </span>
         )}
       </div>
     );
@@ -810,15 +944,15 @@ function GradeTable({
 )
 ) : (
   <EditableScoreCell
-    submission={sub}
-    maxScore={a.max_score}
-    lateInfo={lateInfo}
-    isEditing={activeCell?.assignmentId === a.id && activeCell?.studentId === s.id}
-    onRequestEdit={() => setActiveCell({ assignmentId: a.id, studentId: s.id })}
-    onCommit={newScore => onUpdateScore(s.id, a.id, newScore)}
-    onEnterNext={() => moveToNextRow(a.id, s.id)}
-    onCancelEdit={() => setActiveCell(null)}
-  />
+  submission={sub}
+  assignment={a}             // ★ fix
+  lateInfo={lateInfo}
+  isEditing={activeCell?.assignmentId === a.id && activeCell?.studentId === s.id}
+  onRequestEdit={() => setActiveCell({ assignmentId: a.id, studentId: s.id })}
+  onCommit={newScore => onUpdateScore(s.id, a.id, newScore)}
+  onEnterNext={() => moveToNextRow(a.id, s.id)}
+  onCancelEdit={() => setActiveCell(null)}
+/>
 )}
       </td>
     );
@@ -834,10 +968,55 @@ function GradeTable({
                     )}
                   </td>
                 ))}
+                
+{gradingMode === "numeric" && (
+  <>
+    <td className="text-center px-3 py-3">
+      <span className="text-sm font-black text-indigo-600">{fmtScore(r.scaledFormative)}</span>
+      <span className="text-slate-400 font-bold text-xs">/{formativeMaxScore}</span>
+    </td>
+    {useMidterm && (
+      <td className="text-center px-3 py-3">
+        <EditableExamCell
+          value={r.midtermScore}
+          maxScore={midtermMaxScore}
+          readOnly={readOnly}
+          onSave={v => onUpdateExamScore(s.id, "midterm", v)}
+        />
+      </td>
+    )}
+    <td className="text-center px-3 py-3">
+      <EditableExamCell
+        value={r.finalScore}
+        maxScore={finalMaxScore}
+        readOnly={readOnly}
+        onSave={v => onUpdateExamScore(s.id, "final", v)}
+      />
+    </td>
+  </>
+)}
                 <td className="text-center px-3 py-3">
+  {gradingMode === "pass_fail" ? (   // ★ เพิ่มเงื่อนไขทั้งบล็อก
+    r.passFailStatus === null ? (
+      <span className="text-[10px] text-slate-300 font-bold">ไม่มีข้อมูล</span>
+    ) : (
+      <span className={`inline-flex items-center justify-center min-w-[36px] px-2.5 py-1.5 rounded-xl font-black text-xs text-white ${
+        r.passFailStatus === "ผ่าน" ? "bg-gradient-to-r from-emerald-500 to-teal-400" : "bg-gradient-to-r from-rose-500 to-red-400"
+      }`}>
+        {r.passFailStatus}
+      </span>
+    )
+  ) : (
+    <span className="inline-flex items-center justify-center min-w-[36px] px-2.5 py-1.5 rounded-xl font-black text-sm bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white">
+      {r.grade}
+    </span>
+  )}
+</td>
+{/* ★ ตำแหน่ง: อยู่หลังก้อนคะแนนเก็บ/กลางภาค/ปลายภาค (จากบั๊กที่ 2) และก่อน <td> เกรด/สถานะ */}
+<td className="text-center px-3 py-3">
   <div className="inline-flex flex-col items-center gap-1 min-w-[70px]">
     <span className="font-black text-sm text-slate-700">
-      {r.grandTotal}<span className="text-slate-400 font-bold">/{totalMaxScore}</span>
+      {fmtScore(r.grandTotal)}<span className="text-slate-400 font-bold">/{fmtScore(totalMaxScore)}</span>
     </span>
     <div className="w-16 h-1.5 rounded-full bg-slate-100 overflow-hidden">
       <div
@@ -848,11 +1027,6 @@ function GradeTable({
     <span className="text-[9px] font-bold text-slate-400">{r.percentage.toFixed(0)}%</span>
   </div>
 </td>
-                <td className="text-center px-3 py-3">
-                  <span className="inline-flex items-center justify-center min-w-[36px] px-2.5 py-1.5 rounded-xl font-black text-sm bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white">
-                    {r.grade}
-                  </span>
-                </td>
                 <td className="text-center px-3 py-3">
                   {r.onTimeRate === null ? (
                     <span className="text-[10px] text-slate-300 font-bold">ไม่มีข้อมูล</span>
@@ -880,17 +1054,10 @@ function GradeTable({
    ★ "isEditing" ถูกควบคุมจาก GradeTable (แทนที่จะเป็น state ภายในตัวเอง) เพื่อให้กด Enter
    แล้วสั่งเปิดโหมดแก้ไขของ "แถวถัดไป คอลัมน์เดียวกัน" ต่อได้ทันที เหมือนกรอกคะแนนใน Excel */
 function EditableScoreCell({
-  submission,
-  maxScore,
-  lateInfo,
-  isEditing,
-  onRequestEdit,
-  onCommit,
-  onEnterNext,
-  onCancelEdit,
+  submission, assignment, lateInfo, isEditing, onRequestEdit, onCommit, onEnterNext, onCancelEdit,
 }: {
   submission?: Submission;
-  maxScore: number;
+  assignment: Assignment;      // ★ was maxScore: number
   lateInfo: LateInfo;
   isEditing: boolean;
   onRequestEdit: () => void;
@@ -898,11 +1065,13 @@ function EditableScoreCell({
   onEnterNext: () => void;
   onCancelEdit: () => void;
 }) {
+  const maxScore = assignment.max_score;
   const currentValueText = submission?.score !== null && submission?.score !== undefined ? String(submission.score) : "";
   const [draft, setDraft] = useState(currentValueText);
   const justActedRef = useRef(false);
   // ★ ใช้หน่วงเวลา (debounce) เพื่อ auto-save หลังพิมพ์เสร็จ ไม่ต้องกด Enter/blur
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
 
   useEffect(() => {
     setDraft(currentValueText);
@@ -971,7 +1140,7 @@ function EditableScoreCell({
       />
     );
   }
-
+  
   if (!submission) {
     return (
       <button
@@ -1001,15 +1170,18 @@ function EditableScoreCell({
   const bgClass = isLate ? "bg-orange-50 hover:bg-orange-100" : "bg-emerald-50 hover:bg-emerald-100";
   const textClass = isLate ? "text-orange-600" : "text-emerald-600";
 
-  return (
-  <button
-    onClick={onRequestEdit}
-    title="คลิกเพื่อแก้ไขคะแนน"
-    className={`flex flex-col items-center gap-0.5 mx-auto px-2.5 py-1.5 rounded-xl transition-colors ${bgClass} ring-1 ${isLate ? "ring-orange-200" : "ring-emerald-200"}`}
-  >
+  // ★ ตำแหน่ง: ท้ายสุดของฟังก์ชัน EditableScoreCell (แทนที่ทั้งสองก้อนด้านบนด้วยก้อนเดียวนี้)
+const weighted = isWeighted(assignment) ? getAssignmentWeightedScore(assignment, submission.score) : null;
+
+return (
+  <button onClick={onRequestEdit} title="คลิกเพื่อแก้ไขคะแนน"
+    className={`flex flex-col items-center gap-0.5 mx-auto px-2.5 py-1.5 rounded-xl transition-colors ${bgClass} ring-1 ${isLate ? "ring-orange-200" : "ring-emerald-200"}`}>
     <span className={`text-sm font-black ${textClass}`}>
       {submission.score}<span className="text-slate-400 font-bold">/{maxScore}</span>
     </span>
+    {weighted !== null && (
+      <span className="text-[9px] font-black text-violet-500">= {fmtScore(weighted)} คะแนนจริง</span>
+    )}
     {lateInfo.hasData && (
       <span className={`text-[9px] font-black ${isLate ? "text-orange-600" : "text-emerald-600"}`}>
         {isLate ? `⏰ ส่งช้า${lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}` : "✅ ตรงเวลา"}
@@ -1017,8 +1189,51 @@ function EditableScoreCell({
     )}
   </button>
 );
-}
+}   
+function EditableExamCell({
+  value, maxScore, readOnly, onSave,
+}: {
+  value: number | null;
+  maxScore: number;
+  readOnly: boolean;
+  onSave: (v: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value !== null ? String(value) : "");
 
+  useEffect(() => { setDraft(value !== null ? String(value) : ""); }, [value]);
+
+  function commit() {
+    setEditing(false);
+    const parsed = Number(draft);
+    if (draft.trim() === "" || Number.isNaN(parsed)) return;
+    if (parsed !== value) onSave(parsed);
+  }
+
+  if (readOnly) {
+    return <span className="text-sm font-black text-slate-700">{value ?? "-"}<span className="text-slate-400 font-bold">/{maxScore}</span></span>;
+  }
+
+  if (editing) {
+    return (
+      <input
+        type="number" autoFocus min={0} max={maxScore}
+        value={draft} onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(value !== null ? String(value) : ""); setEditing(false); } }}
+        className="w-16 text-center border-2 border-sky-300 rounded-lg py-1 text-sm font-black focus:outline-none"
+      />
+    );
+  }
+
+  return (
+    <button onClick={() => setEditing(true)} title="คลิกเพื่อกรอกคะแนน"
+      className="text-sm font-black px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-700">
+      {value !== null ? value : <span className="text-amber-500 text-[10px]">ยังไม่กรอก</span>}
+      {value !== null && <span className="text-slate-400 font-bold">/{maxScore}</span>}
+    </button>
+  );
+}
 function EditablePresetCell({ value, onSave }: { value: number; onSave: (newValue: number) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
@@ -1074,6 +1289,12 @@ function buildRowsType() {
     percentage: number;
     grade: string;
     grandTotal: number;
+    attendanceRate: number | null;
+    passFailStatus: "ผ่าน" | "ไม่ผ่าน" | null;
+    scaledFormative: number;        // ★ add
+    midtermScore: number | null;    // ★ add
+    finalScore: number | null;      // ★ add
+    componentTotal: number | null;  // ★ add
   }[];
 }
 
@@ -1204,7 +1425,7 @@ function GradeSettingModal({
 
 function StudentReportModal({
   row, assignments, sectionId, currentUserId, attendance, subjectTitle, subjectCode,
-  academicYearLabel, classroomLabel, homeroomTeacherName, subjectTeacherName, readOnly, onClose,
+  academicYearLabel, classroomLabel, homeroomTeacherName, subjectTeacherName, readOnly, onClose, gradingMode = "numeric", 
 }: {
   row: ReturnType<typeof buildRowsType>[number];
   assignments: Assignment[];
@@ -1218,7 +1439,7 @@ function StudentReportModal({
   homeroomTeacherName?: string;
   subjectTeacherName?: string;
   readOnly?: boolean;
-  onClose: () => void;
+  onClose: () => void; gradingMode?: "numeric" | "pass_fail";
 }) {
   const s = row.student;
 
@@ -1298,15 +1519,17 @@ function StudentReportModal({
         </div>
 
         <div className="rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white p-4 flex items-center justify-between mb-5">
-          <div>
-            <p className="text-[11px] font-bold opacity-90">คะแนนรวมทั้งหมด</p>
-            <p className="text-2xl font-black">{row.grandTotal} คะแนน</p>
-          </div>
-          <div className="text-right">
-            <p className="text-[11px] font-bold opacity-90">เกรด</p>
-            <p className="text-2xl font-black">{row.grade}</p>
-          </div>
-        </div>
+  <div>
+    <p className="text-[11px] font-bold opacity-90">คะแนนรวมทั้งหมด</p>
+    <p className="text-2xl font-black">{row.grandTotal} คะแนน</p>
+  </div>
+  <div className="text-right">
+    <p className="text-[11px] font-bold opacity-90">{gradingMode === "pass_fail" ? "สถานะ" : "เกรด"}</p>   {/* ★ */}
+    <p className="text-2xl font-black">
+      {gradingMode === "pass_fail" ? (row.passFailStatus ?? "-") : row.grade}   {/* ★ */}
+    </p>
+  </div>
+</div>
 
         <div className="mb-5">
           <p className="text-xs font-black text-slate-600 mb-2">🗓️ การเข้าเรียน</p>

@@ -21,6 +21,8 @@ type Subject = {
   credit_hours: number | null;
   hours_per_year: number | null;
   score_group_code: string | null;
+  grading_mode: "numeric" | "pass_fail";          // ★ เพิ่ม
+  pass_threshold_percent: number;  
 };
 type Classroom = { id: string; room_name?: string; grade_group?: string };
 type SectionRow = {
@@ -1869,12 +1871,7 @@ function TotalScoreTab({ students, studentScores }: { students: Student[]; stude
 /* ---------------- แท็บ ตั้งค่ารายวิชา (จากเมนูมุมซ้ายล่างของแบนเนอร์) ---------------- */
 
 function SubjectSettingsTab({
-  subject,
-  classroom,
-  section,
-  readOnly,
-  onSubjectSaved,
-  onSectionSaved,
+  subject, classroom, section, readOnly, onSubjectSaved, onSectionSaved,
 }: {
   subject: Subject | null;
   classroom: Classroom | null;
@@ -1887,6 +1884,9 @@ function SubjectSettingsTab({
   const [creditHours, setCreditHours] = useState<string>(subject?.credit_hours != null ? String(subject.credit_hours) : "");
   const [hoursPerYear, setHoursPerYear] = useState<string>(subject?.hours_per_year != null ? String(subject.hours_per_year) : "");
   const [scoreGroupCode, setScoreGroupCode] = useState<string>(subject?.score_group_code ?? "");
+  // ★ เพิ่ม
+  const [gradingMode, setGradingMode] = useState<"numeric" | "pass_fail">(subject?.grading_mode ?? "numeric");
+  const [passThreshold, setPassThreshold] = useState<string>(String(subject?.pass_threshold_percent ?? 50));
   const [studentPortalEnabled, setStudentPortalEnabled] = useState<boolean>(section.student_portal_enabled ?? true);
   const [allowLateSubmission, setAllowLateSubmission] = useState<boolean>(section.allow_late_submission ?? true);
 
@@ -1899,6 +1899,8 @@ function SubjectSettingsTab({
     creditHours !== (subject?.credit_hours != null ? String(subject.credit_hours) : "") ||
     hoursPerYear !== (subject?.hours_per_year != null ? String(subject.hours_per_year) : "") ||
     scoreGroupCode !== (subject?.score_group_code ?? "") ||
+    gradingMode !== (subject?.grading_mode ?? "numeric") ||                                    // ★ เพิ่ม
+    passThreshold !== String(subject?.pass_threshold_percent ?? 50) ||                          // ★ เพิ่ม
     studentPortalEnabled !== (section.student_portal_enabled ?? true) ||
     allowLateSubmission !== (section.allow_late_submission ?? true);
 
@@ -1912,6 +1914,8 @@ function SubjectSettingsTab({
       credit_hours: creditHours.trim() === "" ? null : Number(creditHours),
       hours_per_year: hoursPerYear.trim() === "" ? null : Number(hoursPerYear),
       score_group_code: scoreGroupCode.trim() === "" ? null : scoreGroupCode.trim(),
+      grading_mode: gradingMode,                                                                 // ★ เพิ่ม
+      pass_threshold_percent: Math.max(0, Math.min(100, Number(passThreshold) || 50)),            // ★ เพิ่ม
     };
     const sectionUpdate = {
       student_portal_enabled: studentPortalEnabled,
@@ -2017,6 +2021,45 @@ function SubjectSettingsTab({
               className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold disabled:bg-slate-50 disabled:text-slate-400"
             />
           </div>
+        </div>
+        {/* ★ เพิ่มใหม่: รูปแบบการตัดเกรด */}
+        <div>
+          <p className="text-xs font-black text-slate-500 mb-2">รูปแบบการวัดผล</p>
+          <div className="flex gap-2 mb-2">
+            {[
+              { key: "numeric", label: "ตัดเกรด 0–4 (ปกติ)" },
+              { key: "pass_fail", label: "ผ่าน/ไม่ผ่าน (เช่น ชุมนุม, ลูกเสือ, แนะแนว)" },
+            ].map(opt => (
+              <button
+                key={opt.key}
+                type="button"
+                disabled={readOnly}
+                onClick={() => setGradingMode(opt.key as "numeric" | "pass_fail")}
+                className={`px-4 py-2 rounded-xl font-black text-xs border-2 transition-colors disabled:opacity-50 ${
+                  gradingMode === opt.key
+                    ? "bg-fuchsia-500 border-fuchsia-500 text-white"
+                    : "bg-white border-slate-200 text-slate-500 hover:border-fuchsia-300"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {gradingMode === "pass_fail" && (
+            <div className="rounded-xl border-2 border-dashed border-fuchsia-200 bg-fuchsia-50/40 p-3 flex items-center gap-2">
+              <span className="text-xs font-black text-fuchsia-600">เกณฑ์ "ผ่าน" ต้องมีอัตราเข้าเรียนอย่างน้อย</span>
+              <input
+                type="number" min={0} max={100} disabled={readOnly}
+                value={passThreshold}
+                onChange={e => setPassThreshold(e.target.value)}
+                className="w-16 text-center border-2 border-fuchsia-200 rounded-lg py-1 text-xs font-black disabled:bg-slate-50"
+              />
+              <span className="text-xs font-black text-fuchsia-600">%</span>
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400 font-bold mt-1.5">
+            วิชาแบบ "ผ่าน/ไม่ผ่าน" จะไม่ถูกนำไปคิดรวมในเกรดเฉลี่ยของนักเรียน และหน้า "คะแนนรวม" จะตัดสินผ่าน/ไม่ผ่านจากอัตราเข้าเรียนแทนคะแนนสอบ
+          </p>
         </div>
 
         {/* รหัสกลุ่มรวมคะแนน */}
@@ -2186,7 +2229,7 @@ setSection(sec as SectionRow);
 
 const [{ data: subj }, { data: room }] = await Promise.all([
   supabase.from("subjects")
-    .select("id, subject_code, name_th, subject_type, credit_hours, hours_per_year, score_group_code")
+    .select("id, subject_code, name_th, subject_type, credit_hours, hours_per_year, score_group_code, grading_mode, pass_threshold_percent") // ★ เพิ่ม 2 ฟิลด์
     .eq("id", subjectId).maybeSingle(),
         sec?.classroom_id
           ? supabase.from("classrooms").select("id, room_name, grade_group").eq("id", sec.classroom_id).maybeSingle()
@@ -2510,7 +2553,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
             onCreateNew={() => { setBannerMenu(null); setTab("attendance"); }}
             onOpenSettings={() => setBannerMenu("settings")}
             onOpenDate={(date) => { setSelectedDate(date); setBannerMenu(null); setTab("attendance"); }}
-            readOnly={isAdmin}
+            readOnly={isAdmin} 
           />
         )}
         {bannerMenu === "totalScore" && section && (
@@ -2525,6 +2568,8 @@ const [{ data: subj }, { data: room }] = await Promise.all([
             subjectTeacherName={subjectTeacherName}
             currentUserId={currentUserId}
             readOnly={isAdmin}
+            gradingMode={subject.grading_mode}                   
+            passThresholdPercent={subject.pass_threshold_percent} 
           />
         )}
         {bannerMenu === "settings" && section && subject && (
