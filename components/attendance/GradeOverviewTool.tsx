@@ -39,14 +39,22 @@ type Submission = {
 type ScoreEvent = { id: string; student_id: string; preset_id: string; points: number };
 
 type Criterion = { id?: string; max_percent: number; min_percent: number; grade: string; sort_order?: number };
+type GroupSubjectInfo = {
+  id: string;
+  subject_code: string;
+  name_th: string;
+  weight_percent: number;
+  section_id: string;
+  total_max_score: number;
+};
 type GroupSummary = {
   grouped: boolean;
   groupCode?: string;
-  subjects?: { id: string; subject_code: string; name_th: string }[];
-  totalMaxScore?: number;
-  totalsByStudent?: Record<string, number>;
+  displayName?: string | null;
+  isGuessed?: boolean;
+  subjects?: GroupSubjectInfo[];
+  combinedPercentByStudent?: Record<string, number>;
 };
-
 type ViewTab = "table" | "podium";
 
 // ★ ย้ายมาไว้ module scope เพื่อให้ GradeTable / EditableScoreCell / StudentReportModal เรียกใช้ได้
@@ -373,13 +381,55 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   function GroupScoreCard({
   groupSummary,
   rows,
+  readOnly,
+  onGroupSettingsSaved,
 }: {
   groupSummary: GroupSummary;
   rows: ReturnType<typeof buildRowsType>;
+  readOnly?: boolean;
+  onGroupSettingsSaved: (updated: Partial<GroupSummary>) => void;
 }) {
+  const [displayName, setDisplayName] = useState(groupSummary.displayName ?? "");
+  const [weightDrafts, setWeightDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setDisplayName(groupSummary.displayName ?? "");
+    const drafts: Record<string, string> = {};
+    (groupSummary.subjects ?? []).forEach(s => { drafts[s.id] = String(s.weight_percent); });
+    setWeightDrafts(drafts);
+  }, [groupSummary.groupCode, groupSummary.displayName, groupSummary.subjects]);
+
   if (!groupSummary.grouped) return null;
-  const subjectNames = (groupSummary.subjects ?? []).map(s => s.name_th).join(" + ");
-  const totalMaxScore = groupSummary.totalMaxScore ?? 0;
+
+  const weightSum = Object.values(weightDrafts).reduce((sum, v) => sum + (Number(v) || 0), 0);
+  const weightWarning = Math.abs(weightSum - 100) > 0.5;
+
+  async function handleSave() {
+    if (readOnly) return;
+    setSaving(true);
+    try {
+      const weights = (groupSummary.subjects ?? []).map(s => ({
+        subject_id: s.id,
+        weight_percent: Number(weightDrafts[s.id] ?? s.weight_percent),
+      }));
+      const res = await fetch("/api/subject-grades/group-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group_code: groupSummary.groupCode, display_name: displayName.trim() || null, weights }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "บันทึกไม่สำเร็จ");
+      onGroupSettingsSaved({ displayName: displayName.trim() || null });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e: any) {
+      alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 print:hidden">
@@ -389,16 +439,84 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           รหัสกลุ่ม: {groupSummary.groupCode}
         </span>
       </div>
-      <p className="text-[11px] text-slate-400 font-bold mb-4">รวมคะแนนจากวิชา: {subjectNames}</p>
 
+      {groupSummary.isGuessed && (
+        <p className="text-[11px] text-amber-500 font-bold mb-3 bg-amber-50 rounded-lg px-3 py-1.5 inline-block">
+          ⚡ ระบบเดากลุ่มนี้จากรหัสวิชาอัตโนมัติ (ยังไม่ได้ตั้งค่าถาวร) — ถ้าต้องการให้คงกลุ่มนี้ไว้แน่นอน ไปตั้งค่าที่หน้า "ตั้งค่ารายวิชา"
+        </p>
+      )}
+
+      {/* ช่องรหัสวิชาในกลุ่ม เรียงติดกัน */}
+      <div className="flex items-center gap-2 flex-wrap mb-4">
+        {(groupSummary.subjects ?? []).map(s => (
+          <span key={s.id} className="px-3 py-1.5 rounded-xl bg-violet-50 border border-violet-100 text-violet-700 text-xs font-black">
+            {s.subject_code} · {s.name_th}
+          </span>
+        ))}
+      </div>
+
+      {/* ตั้งชื่อวิชารวม + % น้ำหนัก */}
+       <div className="rounded-xl border-2 border-dashed border-violet-200 bg-violet-50/40 p-4 mb-5 space-y-3">
+        <div>
+          <p className="text-[11px] font-black text-violet-500 mb-1.5">ชื่อวิชารวม (ไม่บังคับ)</p>
+          <input
+            type="text"
+            disabled={readOnly}
+            value={displayName}
+            onChange={e => setDisplayName(e.target.value)}
+            placeholder={`เช่น สุขศึกษาและพลศึกษา (${groupSummary.groupCode})`}
+            className="w-full border-2 border-violet-200 rounded-xl px-3 py-2 text-sm font-bold bg-white disabled:bg-slate-50 disabled:text-slate-400"
+          />
+        </div>
+
+        <div>
+          <p className="text-[11px] font-black text-violet-500 mb-1.5">% น้ำหนักคะแนนของแต่ละวิชาในกลุ่ม</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {(groupSummary.subjects ?? []).map(s => (
+              <div key={s.id} className="flex items-center gap-2 bg-white rounded-lg border border-violet-100 px-3 py-2">
+                <span className="text-xs font-bold text-slate-600 flex-1 truncate">{s.subject_code}</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  disabled={readOnly}
+                  value={weightDrafts[s.id] ?? ""}
+                  onChange={e => setWeightDrafts(prev => ({ ...prev, [s.id]: e.target.value }))}
+                  className="w-16 text-center border-2 border-slate-200 rounded-lg py-1 text-xs font-black disabled:bg-slate-50"
+                />
+                <span className="text-xs font-bold text-slate-400">%</span>
+              </div>
+            ))}
+          </div>
+          {weightWarning && (
+            <p className="text-[11px] font-black text-amber-500 mt-1.5">
+              ⚠️ รวม % ตอนนี้ = {weightSum.toFixed(1)}% (ควรรวมให้ได้ 100% พอดี)
+            </p>
+          )}
+        </div>
+
+        {!readOnly && (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-500 to-indigo-500 hover:from-violet-600 hover:to-indigo-600 disabled:opacity-50 text-white font-black text-xs shadow"
+            >
+              {saving ? "กำลังบันทึก..." : "💾 บันทึกการตั้งค่ากลุ่ม"}
+            </button>
+            {saved && <span className="text-xs font-black text-emerald-500">✅ บันทึกแล้ว</span>}
+          </div>
+        )}
+      </div>
+
+      {/* ตารางคะแนนรวมกลุ่ม (ถ่วงน้ำหนักแล้ว) */}
       {rows.length === 0 ? (
         <p className="text-center text-slate-300 text-xs font-bold py-6">ไม่มีนักเรียน</p>
       ) : (
         <div className="divide-y divide-slate-50">
           {rows.map(r => {
             const s = r.student;
-            const total = groupSummary.totalsByStudent?.[s.id] ?? 0;
-            const pct = totalMaxScore > 0 ? (total / totalMaxScore) * 100 : 0;
+            const combinedPct = groupSummary.combinedPercentByStudent?.[s.id] ?? 0;
             return (
               <div key={s.id} className="flex items-center gap-3 py-2.5">
                 {s.avatar_url ? (
@@ -415,7 +533,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
                   <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                 </div>
                 <span className="px-3 py-1 rounded-full bg-gradient-to-r from-violet-500 to-indigo-400 text-white text-xs font-black shrink-0">
-                  {total} / {totalMaxScore} ({pct.toFixed(0)}%)
+                  {combinedPct.toFixed(1)}%
                 </span>
               </div>
             );
@@ -551,7 +669,14 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       ) : (
         <PodiumView top5={podiumTop5} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
       )}
-    {!loading && !error && <GroupScoreCard groupSummary={groupSummary} rows={rows} />}
+    {!loading && !error && (
+  <GroupScoreCard
+    groupSummary={groupSummary}
+    rows={rows}
+    readOnly={readOnly}
+    onGroupSettingsSaved={updated => setGroupSummary(prev => ({ ...prev, ...updated }))}
+  />
+)}
 </div>
 );
 }
