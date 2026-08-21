@@ -226,7 +226,7 @@ export default function GradeOverviewTool({
   readOnly = false,
   gradingMode = "numeric",              // ★ เพิ่ม
   passThresholdPercent = 50,   
-  gradingStructure = "formative_final",       // ★ เพิ่ม
+  gradingStructure = "formative_midterm_final",       // ★ เพิ่ม: โครงสร้างคะแนนเหลือแบบเดียว (เก็บ+กลางภาค+ปลายภาค)
   formativeMaxScore = 70,                      // ★ เพิ่ม
   midtermMaxScore = 0,                         // ★ เพิ่ม
   finalMaxScore = 30, 
@@ -263,7 +263,9 @@ export default function GradeOverviewTool({
   const [reportStudent, setReportStudent] = useState<Student | null>(null);
   const [hideScores, setHideScores] = useState(false);
   const [examScores, setExamScores] = useState<{ student_id: string; exam_type: "midterm" | "final"; score: number | null }[]>([]);   // ★ เพิ่ม
-  const useMidterm = gradingStructure === "formative_midterm_final";
+  // ★ โครงสร้างคะแนนเหลือแบบเดียว (เก็บ+กลางภาค+ปลายภาค) จึงแสดงคอลัมน์กลางภาคเสมอ
+  // ไม่ผูกกับค่า gradingStructure ที่อาจเป็นข้อมูลเก่าจากฐานข้อมูลอีกต่อไป
+  const useMidterm = true;
 
   // ★ ลำดับคอลัมน์ชิ้นงานที่ครูลากสลับเอง (จำไว้ต่อห้องเรียนใน localStorage)
   const [assignmentOrder, setAssignmentOrder] = useState<string[]>([]);
@@ -1057,17 +1059,15 @@ function GradeTable({
     </th>
   </>
 )}
-{/* ★ สลับลำดับ/ป้ายชื่อ 2 คอลัมน์นี้ให้ตรงกับข้อมูลจริงที่แสดงใน tbody:
-     คอลัมน์แรก = เกรด/สถานะ (เดิมป้ายผิดเป็น "รวม") คอลัมน์ถัดมา = คะแนนรวม (เดิมป้ายผิดเป็น "ระดับผลการเรียน")
-     ตอนนี้ "รวม" อยู่ติดกับ "ส่งตรงเวลา" ตามที่ต้องการ */}
+{/* ★ ลำดับคอลัมน์ท้ายตาราง: รวม -> ระดับผลการเรียน/สถานะ -> ส่งตรงเวลา (ย้ายระดับผลการเรียนไปไว้หลังคอลัมน์รวมตามที่ต้องการ) */}
+<th className="px-3 py-3 text-center min-w-[100px] bg-emerald-50/70">
+  <p className="text-[11px] font-black text-emerald-700">รวม</p>
+  <p className="text-[9px] text-emerald-400 font-bold">เต็ม {totalMaxScore} คะแนน</p>
+</th>
 <th className="px-3 py-3 text-center min-w-[70px] bg-fuchsia-50/70">
   <p className="text-[11px] font-black text-fuchsia-700">
     {gradingMode === "pass_fail" ? "สถานะ" : "ระดับผลการเรียน"}
   </p>
-</th>
-<th className="px-3 py-3 text-center min-w-[100px] bg-emerald-50/70">
-  <p className="text-[11px] font-black text-emerald-700">รวม</p>
-  <p className="text-[9px] text-emerald-400 font-bold">เต็ม {totalMaxScore} คะแนน</p>
 </th>
 <th className="px-3 py-3 text-center min-w-[90px] bg-amber-50/70">
   <p className="text-[11px] font-black text-amber-700">ส่งตรงเวลา</p>
@@ -1204,7 +1204,22 @@ function GradeTable({
     </td>
   </>
 )}
-{/* ★ คอลัมน์เกรด/สถานะ — ตอนนี้เป็นคอลัมน์แรกใน 3 คอลัมน์ท้าย ตรงกับหัวตารางที่สลับป้ายแล้ว */}
+{/* ★ คอลัมน์ "รวม" — มาก่อนคอลัมน์เกรด/สถานะ ตามลำดับใหม่ (รวม -> ระดับผลการเรียน -> ส่งตรงเวลา) */}
+<td className="text-center px-3 py-3">
+  <div className="inline-flex flex-col items-center gap-1 min-w-[70px]">
+    <span className="font-black text-sm text-slate-700">
+      {fmtScore(r.grandTotal)}<span className="text-slate-400 font-bold">/{fmtScore(totalMaxScore)}</span>
+    </span>
+    <div className="w-16 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+      <div
+        className={`h-full rounded-full ${r.percentage >= 80 ? "bg-emerald-400" : r.percentage >= 50 ? "bg-amber-400" : "bg-rose-400"}`}
+        style={{ width: `${Math.min(100, Math.max(0, r.percentage))}%` }}
+      />
+    </div>
+    <span className="text-[9px] font-bold text-slate-400">{r.percentage.toFixed(0)}%</span>
+  </div>
+</td>
+{/* ★ คอลัมน์เกรด/สถานะ — ย้ายมาไว้หลังคอลัมน์ "รวม" ตามที่ต้องการ */}
                 <td className="text-center px-3 py-3">
   {gradingMode === "pass_fail" ? (
     r.passFailStatus === null ? (
@@ -1221,21 +1236,6 @@ function GradeTable({
       {r.grade}
     </span>
   )}
-</td>
-{/* ★ คอลัมน์ "รวม" — อยู่ติดกับ "ส่งตรงเวลา" ตามที่ต้องการ */}
-<td className="text-center px-3 py-3">
-  <div className="inline-flex flex-col items-center gap-1 min-w-[70px]">
-    <span className="font-black text-sm text-slate-700">
-      {fmtScore(r.grandTotal)}<span className="text-slate-400 font-bold">/{fmtScore(totalMaxScore)}</span>
-    </span>
-    <div className="w-16 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-      <div
-        className={`h-full rounded-full ${r.percentage >= 80 ? "bg-emerald-400" : r.percentage >= 50 ? "bg-amber-400" : "bg-rose-400"}`}
-        style={{ width: `${Math.min(100, Math.max(0, r.percentage))}%` }}
-      />
-    </div>
-    <span className="text-[9px] font-bold text-slate-400">{r.percentage.toFixed(0)}%</span>
-  </div>
 </td>
                 <td className="text-center px-3 py-3">
                   {r.onTimeRate === null ? (

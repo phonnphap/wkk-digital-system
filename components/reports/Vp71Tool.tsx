@@ -61,6 +61,9 @@ function indicatorLinesOf(u: Unit): string[] {
 export default function Vp71Tool({
   subjectId, academicYearId, subjectTitle, subjectCode, currentUserId, readOnly, onBack,
   sectionId, students,           // ★ NEW: ต้องส่งเข้ามาจาก parent เพื่อให้ดูรายงานได้ (เหมือน AssignmentsTool)
+  subjectType = "basic",         // ★ NEW: มาจากตั้งค่ารายวิชา — "basic" = วิชาพื้นฐาน (ใช้คำว่า "ตัวชี้วัด"), "additional" = วิชาเพิ่มเติม (ใช้คำว่า "ผลการเรียนรู้")
+  midtermMaxScore = 0,           // ★ NEW: คะแนนเต็มกลางภาค — ดึงมาจากตั้งค่ารายวิชา ไม่ให้กรอกซ้ำที่นี่อีก
+  finalMaxScore = 0,             // ★ NEW: คะแนนเต็มปลายภาค — ดึงมาจากตั้งค่ารายวิชา ไม่ให้กรอกซ้ำที่นี่อีก
 }: {
   subjectId: string;
   academicYearId?: string | null;
@@ -71,11 +74,19 @@ export default function Vp71Tool({
   onBack: () => void;
   sectionId?: string;            // ★ NEW
   students?: Student[];          // ★ NEW
+  subjectType?: "basic" | "additional";  // ★ NEW
+  midtermMaxScore?: number;              // ★ NEW
+  finalMaxScore?: number;                // ★ NEW
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
+
+  // ★ ป้ายชื่อคอลัมน์ตัวชี้วัด/ผลการเรียนรู้ — สัมพันธ์กับ "ประเภทวิชา" ที่ตั้งไว้ในตั้งค่ารายวิชา
+  // วิชาพื้นฐาน (basic) ใช้คำว่า "ตัวชี้วัด" / วิชาเพิ่มเติม (additional) ใช้คำว่า "ผลการเรียนรู้"
+  const indicatorLabel = subjectType === "additional" ? "ผลการเรียนรู้" : "ตัวชี้วัด";
+  const indicatorAbbr = subjectType === "additional" ? "ผช." : "ตช.";
 
   // ★ สรุปคะแนนชิ้นงานที่ผูกแต่ละหน่วย (คีย์ = unit_no) — ใช้ในแท็บ "แก้ไขแผน"
   const [unitScores, setUnitScores] = useState<Record<number, UnitScoreInfo>>({});
@@ -229,6 +240,7 @@ export default function Vp71Tool({
           addUnit={addUnit}
           totalHours={totalHours}
           totalScore={totalScore}
+          indicatorLabel={indicatorLabel}
         />
       ) : (
         <ReportView
@@ -241,6 +253,10 @@ export default function Vp71Tool({
           students={students}
           units={units}
           readOnly={readOnly}
+          indicatorLabel={indicatorLabel}
+          indicatorAbbr={indicatorAbbr}
+          midtermMaxScore={midtermMaxScore}
+          finalMaxScore={finalMaxScore}
         />
       )}
     </div>
@@ -253,7 +269,7 @@ export default function Vp71Tool({
 
 function EditPlanView({
   loading, units, unitScores, loadingUnitScores, expandedUnit, setExpandedUnit,
-  readOnly, updateUnit, removeUnit, addUnit, totalHours, totalScore,
+  readOnly, updateUnit, removeUnit, addUnit, totalHours, totalScore, indicatorLabel,
 }: {
   loading: boolean;
   units: Unit[];
@@ -267,6 +283,7 @@ function EditPlanView({
   addUnit: () => void;
   totalHours: number;
   totalScore: number;
+  indicatorLabel: string;   // ★ NEW: "ตัวชี้วัด" หรือ "ผลการเรียนรู้" ตามประเภทวิชา
 }) {
   if (loading) {
     return <div className="text-center py-16 text-slate-300 font-bold text-sm">กำลังโหลด...</div>;
@@ -279,7 +296,7 @@ function EditPlanView({
             <tr>
               <th className="px-2 py-3 font-black text-slate-600 w-10">หน่วยที่</th>
               <th className="px-3 py-3 text-left font-black text-slate-600 min-w-[180px]">ชื่อหน่วยการเรียนรู้</th>
-              <th className="px-3 py-3 text-left font-black text-slate-600 min-w-[280px]">ตัวชี้วัด (พิมพ์ 1 บรรทัดต่อ 1 ข้อ)</th>
+              <th className="px-3 py-3 text-left font-black text-slate-600 min-w-[280px]">{indicatorLabel} (พิมพ์ 1 บรรทัดต่อ 1 ข้อ)</th>
               <th className="px-2 py-3 font-black text-slate-600 w-24">จำนวนชั่วโมง</th>
               <th className="px-2 py-3 font-black text-slate-600 w-24">คะแนนเก็บ</th>
               <th className="px-3 py-3 text-left font-black text-slate-600 min-w-[140px]">หมายเหตุ</th>
@@ -404,13 +421,16 @@ function EditPlanView({
 
 /* =========================================================================
    ★★ NEW — หน้ารายงานคะแนน นร.ทั้งหมด (แบบบันทึกคะแนนการวัดและประเมินผลรายวิชา)
-   จัดกลุ่มคอลัมน์ตามหน่วยการเรียนรู้ → คอลัมน์ย่อยตามตัวชี้วัด + คอลัมน์ "สรุป" ของหน่วย
+   จัดกลุ่มคอลัมน์ตามหน่วยการเรียนรู้ → คอลัมน์ย่อยตามตัวชี้วัด/ผลการเรียนรู้ + คอลัมน์ "สรุป" ของหน่วย
    ตามด้วย รวมคะแนนเก็บ / กลางภาค / ปลายภาค / รวม / ระดับผลการเรียน
+   ★ คะแนนเต็มกลางภาค/ปลายภาค ไม่ให้กรอกเองในหน้านี้อีกต่อไป — ดึงมาจาก "ตั้งค่ารายวิชา" โดยตรง
+   เพื่อให้ตรงกับหน้า "คะแนนรวม" (GradeOverviewTool) เสมอ
    ========================================================================= */
 
 function ReportView({
   subjectId, subjectCode, subjectTitle, academicYearId, currentUserId,
-  sectionId, students, units, readOnly,
+  sectionId, students, units, readOnly, indicatorLabel, indicatorAbbr,
+  midtermMaxScore, finalMaxScore,
 }: {
   subjectId: string;
   subjectCode: string;
@@ -421,14 +441,20 @@ function ReportView({
   students?: Student[];
   units: Unit[];
   readOnly?: boolean;
+  indicatorLabel: string;   // ★ NEW
+  indicatorAbbr: string;    // ★ NEW
+  midtermMaxScore: number;  // ★ NEW: มาจากตั้งค่ารายวิชา
+  finalMaxScore: number;    // ★ NEW: มาจากตั้งค่ารายวิชา
 }) {
   const [loading, setLoading] = useState(true);
   const [assignments, setAssignments] = useState<ReportAssignment[]>([]);
   const [submissions, setSubmissions] = useState<ReportSubmission[]>([]);
   const [examScores, setExamScores] = useState<Record<string, ExamScoreRow>>({});
-  const [midtermMax, setMidtermMax] = useState(20);
-  const [finalMax, setFinalMax] = useState(20);
   const [savingExamFor, setSavingExamFor] = useState<string | null>(null);
+
+  // ★ คะแนนเต็มกลางภาค/ปลายภาค ดึงจาก props (ตั้งค่ารายวิชา) แทนการกรอกเองในหน้านี้
+  const midtermMax = midtermMaxScore;
+  const finalMax = finalMaxScore;
 
   const unitsWithScore = useMemo(() => units.filter(u => u.unit_no && u.score_points), [units]);
 
@@ -456,7 +482,8 @@ function ReportView({
           setSubmissions([]);
         }
 
-        // ★ ตารางใหม่ subject_exam_scores — ดูหมายเหตุ SQL ท้ายไฟล์แชท
+        // ★ ตารางเดียวกับที่ใช้ในหน้า "คะแนนรวม" (GradeOverviewTool) — คะแนนสอบกลางภาค/ปลายภาค
+        // ต้องเป็นแหล่งข้อมูลเดียวกันเพื่อไม่ให้ตัวเลขไม่ตรงกันระหว่าง 2 หน้า
         const { data: examRows } = await supabase
           .from("subject_exam_scores")
           .select("student_id, midterm, final")
@@ -502,7 +529,7 @@ function ReportView({
     }, 0);
   }
 
-  // ★ ผ่าน/ไม่ผ่านตัวชี้วัด: ผ่านถ้ามีชิ้นงานที่ผูกตัวชี้วัดนี้ ที่ นร. ได้คะแนน ≥ 50%
+  // ★ ผ่าน/ไม่ผ่านตัวชี้วัด/ผลการเรียนรู้: ผ่านถ้ามีชิ้นงานที่ผูกข้อนี้ ที่ นร. ได้คะแนน ≥ 50%
   function passedIndicator(unit: Unit, line: string, studentId: string): boolean {
     const related = assignments.filter(
       a => a.teaching_unit_no === unit.unit_no && (a.selected_indicator_lines ?? []).includes(line)
@@ -552,20 +579,12 @@ function ReportView({
 
   return (
     <div>
-      {/* ตั้งคะแนนเต็ม กลางภาค/ปลายภาค */}
+      {/* ★ แสดงคะแนนเต็มกลางภาค/ปลายภาคเป็นข้อมูลอ้างอิงเท่านั้น (ดึงจากตั้งค่ารายวิชา แก้ไขได้ที่หน้าตั้งค่ารายวิชาเท่านั้น) */}
       <div className="flex items-center gap-3 flex-wrap mb-3 print:hidden">
-        <label className="text-xs font-black text-slate-500 flex items-center gap-1.5">
-          คะแนนเต็มกลางภาค
-          <input type="number" value={midtermMax} onChange={e => setMidtermMax(Number(e.target.value) || 0)}
-            className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1 text-center font-bold" />
-        </label>
-        <label className="text-xs font-black text-slate-500 flex items-center gap-1.5">
-          คะแนนเต็มปลายภาค
-          <input type="number" value={finalMax} onChange={e => setFinalMax(Number(e.target.value) || 0)}
-            className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1 text-center font-bold" />
-        </label>
-        <span className="text-[11px] text-slate-400 font-bold">
-          น้ำหนักคะแนนเก็บ : คะแนนสอบ = {sumUnitScorePoints} : {midtermMax + finalMax} · คะแนนเต็มรวมทั้งวิชา = {totalPossible}
+        <span className="text-[11px] text-slate-400 font-bold bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5">
+          น้ำหนักคะแนนเก็บ : คะแนนสอบ = {sumUnitScorePoints} : {midtermMax + finalMax} (กลางภาค {midtermMax} + ปลายภาค {finalMax}) ·
+          คะแนนเต็มรวมทั้งวิชา = {totalPossible} คะแนน
+          <span className="ml-1 text-slate-300">— แก้ไขคะแนนเต็มกลางภาค/ปลายภาคได้ที่หน้า "ตั้งค่ารายวิชา"</span>
         </span>
       </div>
 
@@ -605,7 +624,7 @@ function ReportView({
                 <>
                   {indicatorLinesOf(u).map((line, idx) => (
                     <th key={`${u.unit_no}-i${idx}`} className="border border-slate-300 px-1 py-1 font-bold w-7" title={line}>
-                      ตช.{idx + 1}
+                      {indicatorAbbr}{idx + 1}
                     </th>
                   ))}
                   <th className="border border-slate-300 px-1 py-1 font-black w-12 bg-fuchsia-50 print:bg-slate-100">สรุป</th>
@@ -664,15 +683,15 @@ function ReportView({
         </table>
       </div>
 
-      {/* คำอธิบายตัวชี้วัดแต่ละข้อ (ตช.1, ตช.2, ...) */}
+      {/* คำอธิบายตัวชี้วัด/ผลการเรียนรู้แต่ละข้อ */}
       <div className="mt-4 bg-white rounded-2xl border border-slate-100 p-4 space-y-3 text-xs print:mt-2 print:border-0 print:p-0 vp-print-legend">
-        <p className="font-black text-slate-600">คำอธิบายตัวชี้วัด</p>
+        <p className="font-black text-slate-600">คำอธิบาย{indicatorLabel}</p>
         {unitsWithScore.map(u => (
           <div key={u.unit_no}>
             <p className="font-black text-slate-500">หน่วยที่ {u.unit_no} {u.unit_name}</p>
             <ul className="pl-4 list-disc space-y-0.5">
               {indicatorLinesOf(u).map((line, idx) => (
-                <li key={idx} className="font-bold text-slate-500"><span className="text-slate-400">ตช.{idx + 1}:</span> {line}</li>
+                <li key={idx} className="font-bold text-slate-500"><span className="text-slate-400">{indicatorAbbr}{idx + 1}:</span> {line}</li>
               ))}
             </ul>
           </div>
