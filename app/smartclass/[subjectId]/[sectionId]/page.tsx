@@ -1895,15 +1895,11 @@ function SubjectSettingsTab({
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const [gradingStructure, setGradingStructure] = useState<"formative_final" | "formative_midterm_final">(
-    (section as any).grading_structure ?? "formative_final"
-  );
+  const gradingStructure = "formative_midterm_final" as const;
+  const useMidterm = true;
   const [formativeMax, setFormativeMax] = useState(String((section as any).formative_max_score ?? 70));
   const [midtermMax, setMidtermMax] = useState(String((section as any).midterm_max_score ?? 0));
   const [finalMax, setFinalMax] = useState(String((section as any).final_max_score ?? 30));
-
-  const useMidterm = gradingStructure === "formative_midterm_final";
   const scoreSum =
     (Number(formativeMax) || 0) + (useMidterm ? (Number(midtermMax) || 0) : 0) + (Number(finalMax) || 0);
   const scoreSumInvalid = Math.abs(scoreSum - 100) > 0.01;   // ★ ต้องรวมให้ได้ 100 พอดี
@@ -1942,6 +1938,7 @@ function SubjectSettingsTab({
     const sectionUpdate = {
       student_portal_enabled: studentPortalEnabled,
       allow_late_submission: allowLateSubmission,
+      grading_structure: "formative_midterm_final",
     };
 
     try {
@@ -2086,27 +2083,7 @@ function SubjectSettingsTab({
         {/* ★ เพิ่มใหม่: โครงสร้างคะแนน — แสดงเฉพาะตอนตัดเกรดแบบ numeric */}
         {gradingMode === "numeric" && (
           <div>
-            <p className="text-xs font-black text-slate-500 mb-2">โครงสร้างคะแนน (เต็ม 100)</p>
-            <div className="flex gap-2 mb-3">
-              {[
-                { key: "formative_final", label: "คะแนนเก็บ + ปลายภาค" },
-                { key: "formative_midterm_final", label: "คะแนนเก็บ + กลางภาค + ปลายภาค" },
-              ].map(opt => (
-                <button
-                  key={opt.key}
-                  type="button"
-                  disabled={readOnly}
-                  onClick={() => setGradingStructure(opt.key as any)}
-                  className={`px-4 py-2 rounded-xl font-black text-xs border-2 transition-colors disabled:opacity-50 ${
-                    gradingStructure === opt.key
-                      ? "bg-fuchsia-500 border-fuchsia-500 text-white"
-                      : "bg-white border-slate-200 text-slate-500 hover:border-fuchsia-300"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+  <p className="text-xs font-black text-slate-500 mb-2">โครงสร้างคะแนน (เต็ม 100) — เก็บ + กลางภาค + ปลายภาค</p>
 
             <div className={`grid gap-2 ${useMidterm ? "grid-cols-3" : "grid-cols-2"}`}>
               <div className="bg-slate-50 border-2 border-slate-100 rounded-xl px-3 py-2">

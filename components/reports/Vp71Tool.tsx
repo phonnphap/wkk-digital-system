@@ -64,6 +64,7 @@ export default function Vp71Tool({
   subjectType = "basic",         // ★ NEW: มาจากตั้งค่ารายวิชา — "basic" = วิชาพื้นฐาน (ใช้คำว่า "ตัวชี้วัด"), "additional" = วิชาเพิ่มเติม (ใช้คำว่า "ผลการเรียนรู้")
   midtermMaxScore = 0,           // ★ NEW: คะแนนเต็มกลางภาค — ดึงมาจากตั้งค่ารายวิชา ไม่ให้กรอกซ้ำที่นี่อีก
   finalMaxScore = 0,             // ★ NEW: คะแนนเต็มปลายภาค — ดึงมาจากตั้งค่ารายวิชา ไม่ให้กรอกซ้ำที่นี่อีก
+  formativeMaxScore = 0,
 }: {
   subjectId: string;
   academicYearId?: string | null;
@@ -77,6 +78,7 @@ export default function Vp71Tool({
   subjectType?: "basic" | "additional";  // ★ NEW
   midtermMaxScore?: number;              // ★ NEW
   finalMaxScore?: number;                // ★ NEW
+  formativeMaxScore?: number;
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -257,6 +259,7 @@ export default function Vp71Tool({
           indicatorAbbr={indicatorAbbr}
           midtermMaxScore={midtermMaxScore}
           finalMaxScore={finalMaxScore}
+          formativeMaxScore={formativeMaxScore}
         />
       )}
     </div>
@@ -430,7 +433,7 @@ function EditPlanView({
 function ReportView({
   subjectId, subjectCode, subjectTitle, academicYearId, currentUserId,
   sectionId, students, units, readOnly, indicatorLabel, indicatorAbbr,
-  midtermMaxScore, finalMaxScore,
+  midtermMaxScore, finalMaxScore, formativeMaxScore, 
 }: {
   subjectId: string;
   subjectCode: string;
@@ -445,6 +448,7 @@ function ReportView({
   indicatorAbbr: string;    // ★ NEW
   midtermMaxScore: number;  // ★ NEW: มาจากตั้งค่ารายวิชา
   finalMaxScore: number;    // ★ NEW: มาจากตั้งค่ารายวิชา
+  formativeMaxScore: number;
 }) {
   const [loading, setLoading] = useState(true);
   const [assignments, setAssignments] = useState<ReportAssignment[]>([]);
@@ -455,7 +459,7 @@ function ReportView({
   // ★ คะแนนเต็มกลางภาค/ปลายภาค ดึงจาก props (ตั้งค่ารายวิชา) แทนการกรอกเองในหน้านี้
   const midtermMax = midtermMaxScore;
   const finalMax = finalMaxScore;
-
+  
   const unitsWithScore = useMemo(() => units.filter(u => u.unit_no && u.score_points), [units]);
 
   useEffect(() => {
@@ -518,17 +522,6 @@ function ReportView({
     return sub?.score ?? null;
   }
 
-  // ★ คะแนนรวมที่ นร. ได้ในหน่วยนั้น (เทียบกับคะแนนเก็บของหน่วย)
-  function unitAchievedScore(unit: Unit, studentId: string): number {
-    const inUnit = assignments.filter(a => a.teaching_unit_no === unit.unit_no);
-    return inUnit.reduce((sum, a) => {
-      const score = studentScoreForAssignment(a.id, studentId);
-      if (score == null || !a.max_score) return sum;
-      const weight = computedWeightByAssignment[a.id] ?? 0;
-      return sum + (score / a.max_score) * weight;
-    }, 0);
-  }
-
   // ★ ผ่าน/ไม่ผ่านตัวชี้วัด/ผลการเรียนรู้: ผ่านถ้ามีชิ้นงานที่ผูกข้อนี้ ที่ นร. ได้คะแนน ≥ 50%
   function passedIndicator(unit: Unit, line: string, studentId: string): boolean {
     const related = assignments.filter(
@@ -558,7 +551,18 @@ function ReportView({
   }
 
   const sumUnitScorePoints = unitsWithScore.reduce((s, u) => s + (Number(u.score_points) || 0), 0);
-  const totalPossible = sumUnitScorePoints + midtermMax + finalMax;
+  const formativeScale = sumUnitScorePoints > 0 ? formativeMaxScore / sumUnitScorePoints : 0;
+  function unitAchievedScore(unit: Unit, studentId: string): number {
+    const inUnit = assignments.filter(a => a.teaching_unit_no === unit.unit_no);
+    const raw = inUnit.reduce((sum, a) => {
+      const score = studentScoreForAssignment(a.id, studentId);
+      if (score == null || !a.max_score) return sum;
+      const weight = computedWeightByAssignment[a.id] ?? 0;
+      return sum + (score / a.max_score) * weight;
+    }, 0);
+    return raw * formativeScale;   // ★ สเกลให้ตรงกับคะแนนรวม
+  }
+  const totalPossible = formativeMaxScore + midtermMax + finalMax;
 
   if (!sectionId || !students) {
     return (
