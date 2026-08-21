@@ -404,8 +404,8 @@ function EditPlanView({
 
 /* =========================================================================
    ★★ NEW — หน้ารายงานคะแนน นร.ทั้งหมด (แบบบันทึกคะแนนการวัดและประเมินผลรายวิชา)
-   จัดกลุ่มคอลัมน์ตามหน่วยการเรียนรู้ → คอลัมน์ย่อยตามตัวชี้วัด + คอลัมน์สรุปของหน่วย
-   ตามด้วย กลางภาค / ปลายภาค / รวม / ระดับผลการเรียน
+   จัดกลุ่มคอลัมน์ตามหน่วยการเรียนรู้ → คอลัมน์ย่อยตามตัวชี้วัด + คอลัมน์ "สรุป" ของหน่วย
+   ตามด้วย รวมคะแนนเก็บ / กลางภาค / ปลายภาค / รวม / ระดับผลการเรียน
    ========================================================================= */
 
 function ReportView({
@@ -530,7 +530,8 @@ function ReportView({
     setSavingExamFor(null);
   }
 
-  const totalPossible = unitsWithScore.reduce((s, u) => s + (Number(u.score_points) || 0), 0) + midtermMax + finalMax;
+  const sumUnitScorePoints = unitsWithScore.reduce((s, u) => s + (Number(u.score_points) || 0), 0);
+  const totalPossible = sumUnitScorePoints + midtermMax + finalMax;
 
   if (!sectionId || !students) {
     return (
@@ -563,40 +564,51 @@ function ReportView({
           <input type="number" value={finalMax} onChange={e => setFinalMax(Number(e.target.value) || 0)}
             className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1 text-center font-bold" />
         </label>
-        <span className="text-[11px] text-slate-400 font-bold">คะแนนเต็มรวมทั้งวิชา = {totalPossible}</span>
+        <span className="text-[11px] text-slate-400 font-bold">
+          น้ำหนักคะแนนเก็บ : คะแนนสอบ = {sumUnitScorePoints} : {midtermMax + finalMax} · คะแนนเต็มรวมทั้งวิชา = {totalPossible}
+        </span>
       </div>
 
-      {/* หัวกระดาษสำหรับพิมพ์เท่านั้น */}
-      <div className="hidden print:block text-center mb-3">
-        <p className="font-black text-base">แบบบันทึกคะแนนการวัดและประเมินผลรายวิชา</p>
-        <p className="text-sm font-bold">{subjectCode} · {subjectTitle}</p>
+      {/* หัวกระดาษสำหรับพิมพ์เท่านั้น — เลียนแบบฟอร์มแบบบันทึกคะแนนของโรงเรียน */}
+      <div className="hidden print:block text-center mb-2 leading-tight">
+        <p className="font-black text-[13px]">แบบบันทึกคะแนนการวัดและประเมินผลระหว่างเรียนและปลายภาค</p>
+        <p className="text-[11px] font-bold">
+          รหัสวิชา {subjectCode} &nbsp; รายวิชา {subjectTitle}
+        </p>
+        <p className="text-[11px] font-bold">
+          คะแนนเก็บระหว่างเรียน {sumUnitScorePoints} คะแนน &nbsp; คะแนนสอบ (กลางภาค {midtermMax} + ปลายภาค {finalMax}) {midtermMax + finalMax} คะแนน &nbsp;
+          น้ำหนักคะแนนรวม {sumUnitScorePoints} : {midtermMax + finalMax} = {totalPossible} คะแนน
+        </p>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 overflow-auto vp-print-report">
-        <table className="w-full border-collapse text-[10px]">
+        <table className="w-full border-collapse text-[10px] vp-report-table">
           <thead className="bg-gradient-to-r from-indigo-50 to-fuchsia-50 print:bg-white">
             <tr>
-              <th rowSpan={2} className="border border-slate-200 px-1 py-2 font-black w-8">เลขที่</th>
-              <th rowSpan={2} className="border border-slate-200 px-2 py-2 font-black min-w-[140px] text-left">ชื่อ-สกุล</th>
+              <th rowSpan={2} className="border border-slate-300 px-1 py-2 font-black w-8">ที่</th>
+              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black min-w-[140px] text-left">ชื่อ-นามสกุล</th>
               {unitsWithScore.map(u => (
-                <th key={u.unit_no} colSpan={indicatorLinesOf(u).length + 1} className="border border-slate-200 px-1 py-2 font-black">
-                  หน่วยที่ {u.unit_no} {u.unit_name ? `· ${u.unit_name}` : ""} ({fmtScore(u.score_points ?? 0)} คะแนน)
+                <th key={u.unit_no} colSpan={indicatorLinesOf(u).length + 1} className="border border-slate-300 px-1 py-1 font-black">
+                  หน่วยที่ {u.unit_no}{u.unit_name ? ` · ${u.unit_name}` : ""}
+                  <br />
+                  <span className="font-bold text-slate-500">({fmtScore(u.score_points ?? 0)} คะแนน)</span>
                 </th>
               ))}
-              <th rowSpan={2} className="border border-slate-200 px-2 py-2 font-black w-16">กลางภาค<br />({midtermMax})</th>
-              <th rowSpan={2} className="border border-slate-200 px-2 py-2 font-black w-16">ปลายภาค<br />({finalMax})</th>
-              <th rowSpan={2} className="border border-slate-200 px-2 py-2 font-black w-16">รวม<br />({totalPossible})</th>
-              <th rowSpan={2} className="border border-slate-200 px-2 py-2 font-black w-14">ระดับ<br />ผลการเรียน</th>
+              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black w-16">รวมคะแนนเก็บ<br />({sumUnitScorePoints})</th>
+              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black w-14">กลางภาค<br />({midtermMax})</th>
+              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black w-14">ปลายภาค<br />({finalMax})</th>
+              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black w-16">รวม<br />({totalPossible})</th>
+              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black w-14">ระดับ<br />ผลการเรียน</th>
             </tr>
             <tr>
               {unitsWithScore.map(u => (
                 <>
-                  {indicatorLinesOf(u).map((_, idx) => (
-                    <th key={`${u.unit_no}-i${idx}`} className="border border-slate-200 px-1 py-1 font-bold w-7" title={indicatorLinesOf(u)[idx]}>
+                  {indicatorLinesOf(u).map((line, idx) => (
+                    <th key={`${u.unit_no}-i${idx}`} className="border border-slate-300 px-1 py-1 font-bold w-7" title={line}>
                       ตช.{idx + 1}
                     </th>
                   ))}
-                  <th className="border border-slate-200 px-1 py-1 font-black w-12 bg-fuchsia-50 print:bg-white">รวม</th>
+                  <th className="border border-slate-300 px-1 py-1 font-black w-12 bg-fuchsia-50 print:bg-slate-100">สรุป</th>
                 </>
               ))}
             </tr>
@@ -610,40 +622,41 @@ function ReportView({
               const percent = totalPossible > 0 ? (total / totalPossible) * 100 : 0;
               return (
                 <tr key={s.id} className="hover:bg-slate-50">
-                  <td className="border border-slate-200 text-center px-1 py-1 font-bold">{s.seat_number}</td>
-                  <td className="border border-slate-200 px-2 py-1 font-bold whitespace-nowrap">
+                  <td className="border border-slate-300 text-center px-1 py-1 font-bold">{s.seat_number}</td>
+                  <td className="border border-slate-300 px-2 py-1 font-bold whitespace-nowrap">
                     {s.prefix ?? ""}{s.first_name} {s.last_name}
                   </td>
                   {unitsWithScore.map((u, ui) => (
                     <>
                       {indicatorLinesOf(u).map((line, idx) => (
-                        <td key={`${u.unit_no}-${s.id}-i${idx}`} className="border border-slate-200 text-center px-1 py-1">
+                        <td key={`${u.unit_no}-${s.id}-i${idx}`} className="border border-slate-300 text-center px-1 py-1">
                           {passedIndicator(u, line, s.id) ? "✓" : "–"}
                         </td>
                       ))}
-                      <td className="border border-slate-200 text-center px-1 py-1 font-black bg-fuchsia-50/40 print:bg-white">
+                      <td className="border border-slate-300 text-center px-1 py-1 font-black bg-fuchsia-50/40 print:bg-white">
                         {fmtScore(unitTotals[ui])}
                       </td>
                     </>
                   ))}
-                  <td className="border border-slate-200 text-center px-1 py-1">
+                  <td className="border border-slate-300 text-center px-1 py-1 font-black">{fmtScore(sumUnits)}</td>
+                  <td className="border border-slate-300 text-center px-1 py-1">
                     <input
                       type="number" disabled={readOnly}
                       value={exam.midterm ?? ""}
                       onChange={e => saveExamScore(s.id, "midterm", e.target.value === "" ? null : Number(e.target.value))}
-                      className="w-12 text-center border border-slate-200 rounded px-1 py-0.5 font-bold print:border-0"
+                      className="w-12 text-center border border-slate-200 rounded px-1 py-0.5 font-bold print:border-0 print:bg-transparent"
                     />
                   </td>
-                  <td className="border border-slate-200 text-center px-1 py-1">
+                  <td className="border border-slate-300 text-center px-1 py-1">
                     <input
                       type="number" disabled={readOnly}
                       value={exam.final ?? ""}
                       onChange={e => saveExamScore(s.id, "final", e.target.value === "" ? null : Number(e.target.value))}
-                      className="w-12 text-center border border-slate-200 rounded px-1 py-0.5 font-bold print:border-0"
+                      className="w-12 text-center border border-slate-200 rounded px-1 py-0.5 font-bold print:border-0 print:bg-transparent"
                     />
                   </td>
-                  <td className="border border-slate-200 text-center px-1 py-1 font-black">{fmtScore(total)}</td>
-                  <td className="border border-slate-200 text-center px-1 py-1 font-black">{gradeLevel(percent)}</td>
+                  <td className="border border-slate-300 text-center px-1 py-1 font-black">{fmtScore(total)}</td>
+                  <td className="border border-slate-300 text-center px-1 py-1 font-black">{gradeLevel(percent)}</td>
                 </tr>
               );
             })}
@@ -652,7 +665,7 @@ function ReportView({
       </div>
 
       {/* คำอธิบายตัวชี้วัดแต่ละข้อ (ตช.1, ตช.2, ...) */}
-      <div className="mt-4 bg-white rounded-2xl border border-slate-100 p-4 space-y-3 text-xs print:mt-2">
+      <div className="mt-4 bg-white rounded-2xl border border-slate-100 p-4 space-y-3 text-xs print:mt-2 print:border-0 print:p-0 vp-print-legend">
         <p className="font-black text-slate-600">คำอธิบายตัวชี้วัด</p>
         {unitsWithScore.map(u => (
           <div key={u.unit_no}>
@@ -667,13 +680,27 @@ function ReportView({
         {savingExamFor && <p className="text-slate-300 font-bold print:hidden">กำลังบันทึก...</p>}
       </div>
 
-      {/* ★ CSS สำหรับพิมพ์: บังคับแนวนอน + ซ่อนส่วนที่ไม่เกี่ยวกับรายงาน */}
+      {/* ★ CSS สำหรับพิมพ์: บังคับแนวนอน + เส้นขอบดำชัดเจน + ซ่อนส่วนที่ไม่เกี่ยวกับรายงาน */}
       <style jsx global>{`
         @media print {
-          @page { size: A4 landscape; margin: 10mm; }
+          @page { size: A4 landscape; margin: 8mm; }
           body * { visibility: hidden; }
-          .vp-print-report, .vp-print-report * { visibility: visible; }
-          .vp-print-report { position: absolute; left: 0; top: 0; width: 100%; }
+          .vp-print-report, .vp-print-report *,
+          .vp-print-legend, .vp-print-legend * { visibility: visible; }
+          .vp-print-report {
+            position: absolute; left: 0; top: 0; width: 100%;
+            border: none; border-radius: 0; overflow: visible;
+          }
+          .vp-print-legend { position: relative; }
+          .vp-report-table { font-size: 9px; }
+          .vp-report-table th, .vp-report-table td {
+            border: 1px solid #000 !important;
+            color: #000 !important;
+            background: #fff !important;
+            padding: 2px 3px !important;
+          }
+          .vp-report-table thead { display: table-header-group; }
+          .vp-report-table tr { break-inside: avoid; }
         }
       `}</style>
     </div>
