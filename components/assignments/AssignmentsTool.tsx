@@ -27,8 +27,8 @@ type Assignment = {
   allow_weight: boolean;
   weight_percent: number | null;
   grading_criteria_note: string | null;
-  /* NOTE: new column — see migration SQL (assignments.rubric_id) */
   rubric_id?: string | null;
+  learning_unit_id?: string | null; 
   status: AssignmentStatus;
   published_at: string | null;
   created_by: string | null;
@@ -47,6 +47,11 @@ type Submission = {
   score: number | null;
   teacher_comment: string | null;
   is_late: boolean | null; 
+};
+type LearningUnit = { id: string; subject_id: string; unit_name: string; order_index: number };
+type LearningIndicator = {
+  id: string; unit_id: string; subject_id: string;
+  indicator_code: string | null; indicator_text: string; order_index: number;
 };
 
 type TeacherSection = { id: string; label: string };
@@ -276,16 +281,18 @@ async function loadAnnouncements() {
   let content: React.ReactNode;
 
   if (view === "create") {
-    content = (
+content = (
   <AssignmentForm
     sectionId={sectionId}
     subjectId={subjectId}
     currentUserId={currentUserId}
+    students={students}          // ★ forward
     onCancel={backToList}
-    onPublished={(id) => openDetail(id)}   // ★ เปิดหน้ารายละเอียดของงานที่เพิ่งเผยแพร่
-    onSavedDraft={() => backToList()}      // draft ยังกลับไปหน้า list เหมือนเดิม
+    onRefresh={loadAll}          // ★ add
+    onPublished={(id) => openDetail(id)}   // now safe: assignments[] already has it
+    onSavedDraft={() => backToList()}
   />
-    );
+);
   } else if (view === "detail" && activeAssignment) {
     content = (
       <AssignmentDetail
@@ -663,18 +670,22 @@ function AssignmentForm({
   sectionId,
   subjectId,
   currentUserId,
+  students,                              // ★ add
   existing,
   onCancel,
   onPublished,
   onSavedDraft,
+  onRefresh,                             // ★ add
 }: {
   sectionId: string;
   subjectId: string;
   currentUserId: string;
+  students: Student[];                   // ★ add
   existing?: Assignment;
   onCancel: () => void;
   onPublished: (id: string) => void;
   onSavedDraft: () => void;
+  onRefresh: () => Promise<void> | void; // ★ add
 }) {
   const [title, setTitle] = useState(existing?.title ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
@@ -685,19 +696,27 @@ function AssignmentForm({
   const [allowWeight, setAllowWeight] = useState(existing?.allow_weight ?? false);
   const [weightPercent, setWeightPercent] = useState<number | "">(existing?.weight_percent ?? "");
   const [gradingNote, setGradingNote] = useState(existing?.grading_criteria_note ?? "");
-  // NEW: link to a saved rubric (assignments.rubric_id)
   const [rubricId, setRubricId] = useState<string | null>(existing?.rubric_id ?? null);
   const [savedRubrics, setSavedRubrics] = useState<SavedRubric[]>([]);
   const [showRubricPicker, setShowRubricPicker] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [links, setLinks] = useState<{ id?: string; url: string }[]>([]);
   const [files, setFiles] = useState<File[]>([]);
-const [previews, setPreviews] = useState<{ file: File; url: string; isImage: boolean }[]>([]);
+  const [previews, setPreviews] = useState<{ file: File; url: string; isImage: boolean }[]>([]);
   const [saving, setSaving] = useState<"draft" | "publish" | null>(null);
   const [teacherEmail, setTeacherEmail] = useState<string | null>(null);
   const [existingAttachments, setExistingAttachments] = useState<AssignmentAttachment[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [subjectName, setSubjectName] = useState<string>("");
+  const [units, setUnits] = useState<LearningUnit[]>([]);
+const [unitId, setUnitId] = useState<string | null>(existing?.learning_unit_id ?? null);
+const [indicators, setIndicators] = useState<LearningIndicator[]>([]);
+const [selectedIndicatorIds, setSelectedIndicatorIds] = useState<Set<string>>(new Set());
+const [showAddUnit, setShowAddUnit] = useState(false);
+const [newUnitName, setNewUnitName] = useState("");
+const [showAddIndicator, setShowAddIndicator] = useState(false);
+const [newIndicatorCode, setNewIndicatorCode] = useState("");
+const [newIndicatorText, setNewIndicatorText] = useState("");
 
   useEffect(() => {
     if (!subjectId) return;
@@ -722,6 +741,60 @@ const [previews, setPreviews] = useState<{ file: File; url: string; isImage: boo
       .then(({ data }) => setSavedRubrics((data ?? []) as SavedRubric[]));
   }, [subjectId]);
 
+  useEffect(() => {
+  if (!subjectId) return;
+  supabase.from("learning_units").select("id, subject_id, unit_name, order_index")
+    .eq("subject_id", subjectId).order("order_index")
+    .then(({ data }) => setUnits((data ?? []) as LearningUnit[]));
+}, [subjectId]);
+useEffect(() => {
+  if (!unitId) { setIndicators([]); return; }
+  supabase.from("learning_indicators")
+    .select("id, unit_id, subject_id, indicator_code, indicator_text, order_index")
+    .eq("unit_id", unitId).order("order_index")
+    .then(({ data }) => setIndicators((data ?? []) as LearningIndicator[]));
+}, [unitId]);
+
+// โหลดตัวชี้วัดที่เคยเลือกไว้ (ตอนแก้ไขชิ้นงานเดิม)
+useEffect(() => {
+  if (!existing) return;
+  supabase.from("assignment_indicators").select("indicator_id").eq("assignment_id", existing.id)
+    .then(({ data }) => setSelectedIndicatorIds(new Set((data ?? []).map((r: any) => r.indicator_id))));
+}, [existing?.id]);
+
+async function addUnit() {
+  if (!newUnitName.trim()) return;
+  const { data } = await supabase.from("learning_units")
+    .insert({ subject_id: subjectId, unit_name: newUnitName.trim(), order_index: units.length, created_by: currentUserId || null })
+    .select().maybeSingle();
+  if (data) { setUnits(prev => [...prev, data as LearningUnit]); setUnitId(data.id); }
+  setNewUnitName(""); setShowAddUnit(false);
+}
+
+async function addIndicator() {
+  if (!unitId || !newIndicatorText.trim()) return;
+  const { data } = await supabase.from("learning_indicators")
+    .insert({
+      unit_id: unitId, subject_id: subjectId,
+      indicator_code: newIndicatorCode.trim() || null,
+      indicator_text: newIndicatorText.trim(),
+      order_index: indicators.length, created_by: currentUserId || null,
+    })
+    .select().maybeSingle();
+  if (data) {
+    setIndicators(prev => [...prev, data as LearningIndicator]);
+    setSelectedIndicatorIds(prev => new Set(prev).add(data.id));
+  }
+  setNewIndicatorCode(""); setNewIndicatorText(""); setShowAddIndicator(false);
+}
+
+function toggleIndicator(id: string) {
+  setSelectedIndicatorIds(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+}
   function pickRubric(r: SavedRubric) {
     setRubricId(r.id);
     setGradingNote(r.name);
@@ -814,6 +887,7 @@ function removeFile(index: number) {
       weight_percent: allowWeight && weightPercent !== "" ? Number(weightPercent) : null,
       grading_criteria_note: allowWeight && gradingNote.trim() ? gradingNote.trim() : null,
       rubric_id: allowWeight ? rubricId : null,
+      learning_unit_id: unitId, 
       status,
       published_at: status === "published" ? new Date().toISOString() : null,
       created_by: currentUserId || null,
@@ -828,6 +902,26 @@ function removeFile(index: number) {
         const { data, error } = await supabase.from("assignments").insert(payload).select().maybeSingle();
         if (error) throw error;
         assignmentId = data.id;
+      }
+      try {
+        await supabase.from("assignment_indicators").delete().eq("assignment_id", assignmentId);
+        if (selectedIndicatorIds.size > 0) {
+          await supabase.from("assignment_indicators").insert(
+            Array.from(selectedIndicatorIds).map(indicator_id => ({ assignment_id: assignmentId, indicator_id }))
+          );
+        }
+      } catch {}
+      // ★ ให้คะแนนงานทั้งหมดเข้ากับ นร.อัตโนมัติเมื่อเผยแพร่ครั้งแรก (ดูข้อ 2 ด้านล่าง)
+      const wasDraftBefore = !existing || existing.status === "draft";
+      if (status === "published" && wasDraftBefore && students.length > 0) {
+        try {
+          const rows = students.map(s => ({
+            assignment_id: assignmentId,
+            student_id: s.id,
+            assigned_by: currentUserId || null,
+          }));
+          await supabase.from("assignment_students").upsert(rows, { onConflict: "assignment_id,student_id" });
+        } catch {}
       }
 
       // แนบไฟล์ → อัปโหลดขึ้น OneDrive ของ "ครูที่สร้างชิ้นงาน" ผ่าน /api/upload-onedrive
@@ -872,6 +966,8 @@ function removeFile(index: number) {
           );
         } catch {}
       }
+
+       await onRefresh?.();
 
       if (status === "published") {
         onPublished(assignmentId);
@@ -1020,7 +1116,74 @@ function removeFile(index: number) {
             )}
           </div>
         </div>
+        <div className="rounded-2xl border-2 border-slate-100 bg-white p-4 space-y-3">
+  <p className="text-xs font-black text-slate-600">หน่วยการเรียนรู้ และตัวชี้วัด (วผ.7.1)</p>
 
+  <div>
+    <label className="text-[11px] font-black text-slate-400">หน่วยการเรียนรู้</label>
+    <div className="mt-1 flex gap-1.5">
+      <select
+        value={unitId ?? ""}
+        onChange={e => { setUnitId(e.target.value || null); setSelectedIndicatorIds(new Set()); }}
+        className="flex-1 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+      >
+        <option value="">— ไม่ระบุหน่วย —</option>
+        {units.map(u => <option key={u.id} value={u.id}>{u.unit_name}</option>)}
+      </select>
+      <button type="button" onClick={() => setShowAddUnit(v => !v)}
+        className="px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-[11px] shrink-0">
+        + หน่วยใหม่
+      </button>
+    </div>
+    {showAddUnit && (
+      <div className="mt-2 flex gap-1.5">
+        <input value={newUnitName} onChange={e => setNewUnitName(e.target.value)}
+          placeholder="ชื่อหน่วยการเรียนรู้ใหม่"
+          className="flex-1 border-2 border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none" />
+        <button type="button" onClick={addUnit} className="px-3 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-[11px]">บันทึก</button>
+      </div>
+    )}
+  </div>
+
+  {unitId && (
+    <div>
+      <label className="text-[11px] font-black text-slate-400">
+        ตัวชี้วัด (เลือกได้หลายข้อ — คะแนนของชิ้นงานนี้จะถูกนำไปหารเฉลี่ยกับตัวชี้วัดที่เลือก)
+      </label>
+      <div className="mt-1.5 space-y-1.5 max-h-52 overflow-y-auto border-2 border-slate-100 rounded-xl p-2">
+        {indicators.length === 0 ? (
+          <p className="text-xs font-bold text-slate-300 text-center py-4">หน่วยนี้ยังไม่มีตัวชี้วัด</p>
+        ) : (
+          indicators.map(ind => (
+            <label key={ind.id} className="flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 cursor-pointer">
+              <input type="checkbox" checked={selectedIndicatorIds.has(ind.id)} onChange={() => toggleIndicator(ind.id)} className="mt-0.5 w-4 h-4 shrink-0" />
+              <span className="text-xs font-bold text-slate-600">
+                {ind.indicator_code && <span className="text-indigo-500 mr-1">{ind.indicator_code}</span>}
+                {ind.indicator_text}
+              </span>
+            </label>
+          ))
+        )}
+      </div>
+      <button type="button" onClick={() => setShowAddIndicator(v => !v)} className="mt-1.5 text-indigo-500 font-black text-[11px]">
+        + เพิ่มตัวชี้วัดใหม่ในหน่วยนี้
+      </button>
+      {showAddIndicator && (
+        <div className="mt-2 space-y-1.5">
+          <input value={newIndicatorCode} onChange={e => setNewIndicatorCode(e.target.value)}
+            placeholder="รหัสตัวชี้วัด เช่น ว 1.1 ป.4/1 (ไม่บังคับ)"
+            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none" />
+          <div className="flex gap-1.5">
+            <input value={newIndicatorText} onChange={e => setNewIndicatorText(e.target.value)}
+              placeholder="คำอธิบายตัวชี้วัด"
+              className="flex-1 border-2 border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none" />
+            <button type="button" onClick={addIndicator} className="px-3 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-[11px] shrink-0">บันทึก</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )}
+</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-black text-slate-500">เลือกประเภทชิ้นงาน</label>
@@ -1077,6 +1240,7 @@ function removeFile(index: number) {
               <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${allowWeight ? "translate-x-5" : "translate-x-0.5"}`} />
             </button>
           </div>
+
           {allowWeight && (
             <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -1214,18 +1378,20 @@ function AssignmentDetail({
   ];
 
   if (editing) {
-    return (
-      <AssignmentForm
-        sectionId={sectionId}
-        subjectId={subjectId}
-        currentUserId={currentUserId}
-        existing={assignment}
-        onCancel={() => setEditing(false)}
-        onPublished={() => { setEditing(false); setTab("assign"); onRefresh(); }}  // ★
-      onSavedDraft={() => { setEditing(false); onRefresh(); }}
-      />
-    );
-  }
+  return (
+    <AssignmentForm
+      sectionId={sectionId}
+      subjectId={subjectId}
+      currentUserId={currentUserId}
+      students={students}          // ★ forward (already a prop of AssignmentDetail)
+      existing={assignment}
+      onCancel={() => setEditing(false)}
+      onRefresh={onRefresh}        // ★ add — AssignmentDetail already receives onRefresh
+      onPublished={() => { setEditing(false); setTab("assign"); }}   // onRefresh already ran inside save()
+      onSavedDraft={() => { setEditing(false); }}
+    />
+  );
+}
 
   return (
     <div className="space-y-4">
