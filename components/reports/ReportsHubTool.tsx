@@ -81,6 +81,8 @@ export default function ReportsHubTool({
         subjectTitle={subjectTitle} subjectCode={subjectCode}
         currentUserId={currentUserId} readOnly={readOnly}
         onBack={() => setActive(null)}
+        sectionId={sectionId}
+        students={students}
       />
     );
   }
