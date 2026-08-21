@@ -20,6 +20,8 @@ type Assignment = {
   allow_weight?: boolean;
   status?: string;
   due_date?: string | null;
+  teaching_unit_no?: number | null;  // ★ เพิ่ม
+  unit_name?: string | null;         // ★ เพิ่ม (ถ้า API ส่งมาให้)
 };
 
 type Preset = { id: string; label: string; points: number; emoji: string; sort_order: number };
@@ -949,7 +951,27 @@ function GradeTable({
   const [activeCell, setActiveCell] = useState<ActiveCell>(null);
   // ★ id ชิ้นงานที่กำลังลากอยู่ (สำหรับลากสลับหัวตาราง)
   const [draggedId, setDraggedId] = useState<string | null>(null);
+const unitHeaderGroups = useMemo(() => {
+  const groups: { key: string; label: string; span: number }[] = [];
+  assignments.forEach(a => {
+    const key = a.teaching_unit_no != null ? `unit-${a.teaching_unit_no}` : `none-${a.id}`;
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) {
+      last.span += 1;
+    } else {
+      groups.push({
+        key,
+        label: a.teaching_unit_no != null
+          ? `หน่วยที่ ${a.teaching_unit_no}${a.unit_name ? " · " + a.unit_name : ""}`
+          : "",
+        span: 1,
+      });
+    }
+  });
+  return groups;
+}, [assignments]);
 
+const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   // ★ รายการ "คอลัมน์กรอกคะแนนได้" ทั้งหมดตามลำดับที่แสดงจริงในตาราง ใช้คำนวณตำแหน่งตอนกดลูกศร
   const navColumns = useMemo(() => {
     const cols: string[] = assignments.map(a => a.id);
@@ -1008,7 +1030,25 @@ function GradeTable({
   return (
   <div className="bg-white rounded-2xl border border-slate-100 overflow-auto max-h-[75vh]">
     <table className="w-full min-w-[960px] border-collapse">
-      <thead className="sticky top-0 z-20">
+  <thead className="sticky top-0 z-20">
+  {hasAnyUnitGroup && (
+    <tr className="bg-indigo-100/70">
+      <th className="sticky left-0 bg-indigo-100/70" />
+      <th className="bg-indigo-100/70" />
+      {unitHeaderGroups.map(g => (
+        <th
+          key={g.key}
+          colSpan={g.span}
+          className="px-2 py-1.5 text-center text-[10px] font-black text-indigo-700 border-b border-indigo-200"
+        >
+          {g.label}
+        </th>
+      ))}
+      {presets.length > 0 && <th colSpan={presets.length} />}
+      {gradingMode === "numeric" && <th colSpan={useMidterm ? 3 : 2} />}
+      <th colSpan={3} />
+    </tr>
+  )}
   <tr className="bg-gradient-to-r from-indigo-50 via-sky-50 to-fuchsia-50">
     <th className="text-left text-[11px] font-black text-slate-600 px-5 py-3 sticky left-0 top-0 bg-gradient-to-r from-indigo-50 to-sky-50 z-30">
       Name

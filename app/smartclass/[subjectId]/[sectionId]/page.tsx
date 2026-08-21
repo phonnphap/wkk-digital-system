@@ -32,7 +32,7 @@ type SectionRow = {
   classroom_id: string;
   student_portal_enabled: boolean;
   allow_late_submission: boolean;
-  student_access_mode?: "name_only" | "name_and_student_id" | "student_id_and_dob"; // ★ เพิ่ม
+  student_access_mode?: "name_only" | "name_and_id" | "id_and_dob"; // ★ แก้ค่าให้ตรง DB
 };
 type Student = { id: string; prefix?: string; first_name: string; last_name: string; nick_name?: string; seat_number: number; avatar_url?: string };
 type ScorePreset = { id: string; label: string; points: number; emoji: string; sort_order: number };
@@ -1895,7 +1895,7 @@ function SubjectSettingsTab({
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [studentAccessMode, setStudentAccessMode] = useState<
-  "name_only" | "name_and_student_id" | "student_id_and_dob"
+  "name_only" | "name_and_id" | "id_and_dob"
 >(section.student_access_mode ?? "name_only");
   const gradingStructure = "formative_midterm_final" as const;
   const useMidterm = true;
@@ -2154,54 +2154,49 @@ function SubjectSettingsTab({
 
   {/* ★ เพิ่ม: เลือกรูปแบบการยืนยันตัวตน นร. */}
   <div>
-    <p className="text-[11px] font-black text-slate-400 mb-1.5">รูปแบบการยืนยันตัวตนก่อนเข้าดูข้อมูล</p>
-    <div className="space-y-2">
-      {[
-        {
-          key: "name_only",
-          title: "1. เลือกชื่อจากรายชื่อ",
-          desc: "นร. เลือกชื่อตัวเองจากรายชื่อในห้อง แล้วเข้าดูงาน/การมาเรียน/คะแนนได้ทันที",
-        },
-        {
-          key: "name_and_student_id",
-          title: "2. เลือกชื่อ + กรอกรหัสนักเรียน",
-          desc: "นร. เลือกชื่อตัวเอง แล้วกรอกรหัสประจำตัวเพื่อยืนยันก่อนเข้าดูข้อมูล",
-        },
-        {
-          key: "student_id_and_dob",
-          title: "3. กรอกรหัสนักเรียน + วันเกิด",
-          desc: "นร. กรอกรหัสประจำตัวและวันเกิดของตัวเองเพื่อเข้าสู่ระบบ (ไม่ต้องเลือกชื่อ)",
-        },
-      ].map(opt => (
-        <label
-          key={opt.key}
-          className={`flex items-start gap-3 rounded-xl border-2 px-4 py-3 cursor-pointer transition-colors ${
-            studentAccessMode === opt.key
-              ? "border-fuchsia-400 bg-fuchsia-50/50"
-              : "border-slate-100 hover:border-slate-200"
-          } ${readOnly ? "opacity-60 pointer-events-none" : ""}`}
-        >
-          <input
-            type="radio"
-            name="student_access_mode"
-            disabled={readOnly}
-            checked={studentAccessMode === opt.key}
-            onChange={() => setStudentAccessMode(opt.key as typeof studentAccessMode)}
-            className="mt-1 w-4 h-4 accent-fuchsia-500 shrink-0"
-          />
-          <div>
-            <p className="text-sm font-black text-slate-700">{opt.title}</p>
-            <p className="text-[11px] text-slate-400 font-bold mt-0.5">{opt.desc}</p>
-          </div>
-        </label>
-      ))}
-    </div>
-    {studentAccessMode !== "name_only" && (
-  <p className="text-[11px] text-amber-500 font-bold mt-2 bg-amber-50 rounded-lg px-3 py-1.5">
-    ⚠️ โหมดนี้ต้องมีข้อมูล{studentAccessMode === "name_and_student_id" ? "รหัสนักเรียน (student_code)" : "รหัสนักเรียนและวันเกิด (student_code + birth_date)"}ของ นร. ในระบบครบทุกคนก่อน ไม่งั้น นร. คนนั้นจะเข้าไม่ได้
-  </p>
-)}
+  <p className="text-[11px] font-black text-slate-400 mb-1.5">รูปแบบการยืนยันตัวตนก่อนเข้าดูข้อมูล</p>
+  <div className="space-y-2">
+    {[
+      {
+        key: "name_only",
+        title: "1. เลือกชื่อจากรายชื่อ",
+        desc: "นร. เลือกชื่อตัวเองจากรายชื่อในห้อง แล้วเข้าดูงาน/การมาเรียน/คะแนนได้ทันที",
+      },
+      {
+        key: "name_and_id",
+        title: "2. เลือกชื่อ + กรอกรหัสนักเรียน",
+        desc: "นร. เลือกชื่อตัวเอง แล้วกรอกรหัสประจำตัว (student_code) เพื่อยืนยันก่อนเข้าดูข้อมูล",
+      },
+      {
+        key: "id_and_dob",
+        title: "3. กรอกรหัสนักเรียน + วันเกิด",
+        desc: "นร. กรอกรหัสประจำตัว (student_code) และวันเกิด (birth_date) ของตัวเองเพื่อเข้าสู่ระบบ (ไม่ต้องเลือกชื่อ)",
+      },
+    ].map(opt => (
+      <label
+        key={opt.key}
+        className={`flex items-start gap-3 rounded-xl border-2 px-4 py-3 cursor-pointer transition-colors ${
+          studentAccessMode === opt.key
+            ? "border-fuchsia-400 bg-fuchsia-50/50"
+            : "border-slate-100 hover:border-slate-200"
+        } ${readOnly ? "opacity-60 pointer-events-none" : ""}`}
+      >
+        <input
+          type="radio"
+          name="student_access_mode"
+          disabled={readOnly}
+          checked={studentAccessMode === opt.key}
+          onChange={() => setStudentAccessMode(opt.key as typeof studentAccessMode)}
+          className="mt-1 w-4 h-4 accent-fuchsia-500 shrink-0"
+        />
+        <div>
+          <p className="text-sm font-black text-slate-700">{opt.title}</p>
+          <p className="text-[11px] text-slate-400 font-bold mt-0.5">{opt.desc}</p>
+        </div>
+      </label>
+    ))}
   </div>
+</div>
 
           <label className="flex items-center justify-between rounded-xl border-2 border-slate-100 px-4 py-3 cursor-pointer">
             <div>

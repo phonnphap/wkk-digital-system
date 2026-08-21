@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 const supabase = createClient();
@@ -85,11 +85,6 @@ export default function Vp71Tool({
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
 
-  // ★ ป้ายชื่อคอลัมน์ตัวชี้วัด/ผลการเรียนรู้ — สัมพันธ์กับ "ประเภทวิชา" ที่ตั้งไว้ในตั้งค่ารายวิชา
-  // วิชาพื้นฐาน (basic) ใช้คำว่า "ตัวชี้วัด" / วิชาเพิ่มเติม (additional) ใช้คำว่า "ผลการเรียนรู้"
-  const indicatorLabel = subjectType === "additional" ? "ผลการเรียนรู้" : "ตัวชี้วัด";
-  const indicatorAbbr = subjectType === "additional" ? "ผช." : "ตช.";
-
   // ★ สรุปคะแนนชิ้นงานที่ผูกแต่ละหน่วย (คีย์ = unit_no) — ใช้ในแท็บ "แก้ไขแผน"
   const [unitScores, setUnitScores] = useState<Record<number, UnitScoreInfo>>({});
   const [loadingUnitScores, setLoadingUnitScores] = useState(false);
@@ -97,6 +92,22 @@ export default function Vp71Tool({
 
   // ★★ NEW — สลับมุมมอง: แก้ไขแผน / รายงานคะแนน นร.ทั้งหมด
   const [view, setView] = useState<"edit" | "report">("edit");
+
+  // ★ เพิ่มตรงนี้ — ยังขาดอยู่ ทำให้ indicatorLabel/indicatorAbbr/indicatorItemLabel ไม่มีนิยาม
+  const [resolvedSubjectType, setResolvedSubjectType] = useState<"basic" | "additional">(subjectType);
+  useEffect(() => { setResolvedSubjectType(subjectType); }, [subjectType]);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data } = await supabase.from("subjects").select("subject_type").eq("id", subjectId).maybeSingle();
+      if (active && data?.subject_type) setResolvedSubjectType(data.subject_type);
+    })();
+    return () => { active = false; };
+  }, [subjectId]);
+
+  const indicatorLabel = resolvedSubjectType === "additional" ? "ผลการเรียนรู้" : "ตัวชี้วัด";
+  const indicatorAbbr = resolvedSubjectType === "additional" ? "ผช." : "ตช.";
+  const indicatorItemLabel = resolvedSubjectType === "additional" ? "ผลการเรียนรู้ข้อที่" : "ตัวชี้วัดที่";
 
   useEffect(() => {
     (async () => {
@@ -243,6 +254,7 @@ export default function Vp71Tool({
           totalHours={totalHours}
           totalScore={totalScore}
           indicatorLabel={indicatorLabel}
+          indicatorItemLabel={indicatorItemLabel}
         />
       ) : (
         <ReportView
@@ -257,6 +269,7 @@ export default function Vp71Tool({
           readOnly={readOnly}
           indicatorLabel={indicatorLabel}
           indicatorAbbr={indicatorAbbr}
+          indicatorItemLabel={indicatorItemLabel} 
           midtermMaxScore={midtermMaxScore}
           finalMaxScore={finalMaxScore}
           formativeMaxScore={formativeMaxScore}
@@ -269,10 +282,9 @@ export default function Vp71Tool({
 /* =========================================================================
    หน้าแก้ไขแผน (โค้ดเดิม แยกออกมาเป็นคอมโพเนนต์ย่อยเพื่อความอ่านง่าย)
    ========================================================================= */
-
 function EditPlanView({
   loading, units, unitScores, loadingUnitScores, expandedUnit, setExpandedUnit,
-  readOnly, updateUnit, removeUnit, addUnit, totalHours, totalScore, indicatorLabel,
+  readOnly, updateUnit, removeUnit, addUnit, totalHours, totalScore, indicatorLabel, indicatorItemLabel,
 }: {
   loading: boolean;
   units: Unit[];
@@ -287,6 +299,7 @@ function EditPlanView({
   totalHours: number;
   totalScore: number;
   indicatorLabel: string;   // ★ NEW: "ตัวชี้วัด" หรือ "ผลการเรียนรู้" ตามประเภทวิชา
+  indicatorItemLabel: string;
 }) {
   if (loading) {
     return <div className="text-center py-16 text-slate-300 font-bold text-sm">กำลังโหลด...</div>;
@@ -299,7 +312,9 @@ function EditPlanView({
             <tr>
               <th className="px-2 py-3 font-black text-slate-600 w-10">หน่วยที่</th>
               <th className="px-3 py-3 text-left font-black text-slate-600 min-w-[180px]">ชื่อหน่วยการเรียนรู้</th>
-              <th className="px-3 py-3 text-left font-black text-slate-600 min-w-[280px]">{indicatorLabel} (พิมพ์ 1 บรรทัดต่อ 1 ข้อ)</th>
+              <th className="px-3 py-3 text-left font-black text-slate-600 min-w-[280px]">
+  {indicatorItemLabel} (พิมพ์ 1 บรรทัดต่อ 1 ข้อ)
+</th>
               <th className="px-2 py-3 font-black text-slate-600 w-24">จำนวนชั่วโมง</th>
               <th className="px-2 py-3 font-black text-slate-600 w-24">คะแนนเก็บ</th>
               <th className="px-3 py-3 text-left font-black text-slate-600 min-w-[140px]">หมายเหตุ</th>
@@ -432,8 +447,8 @@ function EditPlanView({
 
 function ReportView({
   subjectId, subjectCode, subjectTitle, academicYearId, currentUserId,
-  sectionId, students, units, readOnly, indicatorLabel, indicatorAbbr,
-  midtermMaxScore, finalMaxScore, formativeMaxScore, 
+  sectionId, students, units, readOnly, indicatorLabel, indicatorAbbr, indicatorItemLabel,
+  midtermMaxScore, finalMaxScore, formativeMaxScore,
 }: {
   subjectId: string;
   subjectCode: string;
@@ -444,23 +459,44 @@ function ReportView({
   students?: Student[];
   units: Unit[];
   readOnly?: boolean;
-  indicatorLabel: string;   // ★ NEW
-  indicatorAbbr: string;    // ★ NEW
-  midtermMaxScore: number;  // ★ NEW: มาจากตั้งค่ารายวิชา
-  finalMaxScore: number;    // ★ NEW: มาจากตั้งค่ารายวิชา
+  indicatorLabel: string;
+  indicatorAbbr: string;
+  indicatorItemLabel: string;   // ★ เพิ่ม — แก้ error "Cannot find name 'indicatorItemLabel'"
+  midtermMaxScore: number;
+  finalMaxScore: number;
   formativeMaxScore: number;
 }) {
   const [loading, setLoading] = useState(true);
   const [assignments, setAssignments] = useState<ReportAssignment[]>([]);
   const [submissions, setSubmissions] = useState<ReportSubmission[]>([]);
-  const [examScores, setExamScores] = useState<Record<string, ExamScoreRow>>({});
-  const [savingExamFor, setSavingExamFor] = useState<string | null>(null);
-
-  // ★ คะแนนเต็มกลางภาค/ปลายภาค ดึงจาก props (ตั้งค่ารายวิชา) แทนการกรอกเองในหน้านี้
+  const [examScores, setExamScores] = useState<Record<string, { midterm: number | null; final: number | null }>>({});
+  // ★ ลบ: resolvedSubjectType/setResolvedSubjectType ของ ReportView เอง — ย้ายไปอยู่ที่ Vp71Tool
+  // (ตัวหลัก) แล้วส่ง indicatorLabel/indicatorAbbr/indicatorItemLabel ที่คำนวณเสร็จแล้วลงมาเป็น prop แทน
   const midtermMax = midtermMaxScore;
   const finalMax = finalMaxScore;
-  
+
   const unitsWithScore = useMemo(() => units.filter(u => u.unit_no && u.score_points), [units]);
+
+  // ★ แหล่งข้อมูลคะแนนสอบเดียว — ใช้ /api/subject-grades/summary (schema: student_id, exam_type, score)
+  // ให้ตรงกับที่ GradeOverviewTool ใช้จริง (ก่อนหน้านี้มี query ตรงจาก subject_exam_scores
+  // ด้วย schema คนละแบบ (midterm, final เป็นคอลัมน์) ซึ่งขัดกันเองและทำให้ตัวเลขผิดแบบเงียบๆ — ลบทิ้งแล้ว)
+  useEffect(() => {
+    if (!sectionId) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/subject-grades/summary?subject_section_id=${sectionId}`);
+        const json = await res.json();
+        const map: Record<string, { midterm: number | null; final: number | null }> = {};
+        (json.examScores ?? []).forEach((e: { student_id: string; exam_type: "midterm" | "final"; score: number | null }) => {
+          if (!map[e.student_id]) map[e.student_id] = { midterm: null, final: null };
+          map[e.student_id][e.exam_type] = e.score;
+        });
+        setExamScores(map);
+      } catch {
+        setExamScores({});
+      }
+    })();
+  }, [sectionId]);
 
   useEffect(() => {
     if (!sectionId) { setLoading(false); return; }
@@ -485,16 +521,8 @@ function ReportView({
         } else {
           setSubmissions([]);
         }
-
-        // ★ ตารางเดียวกับที่ใช้ในหน้า "คะแนนรวม" (GradeOverviewTool) — คะแนนสอบกลางภาค/ปลายภาค
-        // ต้องเป็นแหล่งข้อมูลเดียวกันเพื่อไม่ให้ตัวเลขไม่ตรงกันระหว่าง 2 หน้า
-        const { data: examRows } = await supabase
-          .from("subject_exam_scores")
-          .select("student_id, midterm, final")
-          .eq("subject_section_id", sectionId);
-        const map: Record<string, ExamScoreRow> = {};
-        (examRows ?? []).forEach((r: any) => { map[r.student_id] = r; });
-        setExamScores(map);
+        // ★ ลบ query subject_exam_scores(student_id, midterm, final) ที่นี่ออกทั้งหมด
+        // (schema ผิด + แย่งเขียนทับ examScores ที่ useEffect ด้านบนดึงมาถูกต้องแล้ว)
       } catch {
         setAssignments([]);
         setSubmissions([]);
@@ -504,7 +532,7 @@ function ReportView({
     })();
   }, [sectionId]);
 
-  // ★ น้ำหนักคะแนนต่อชิ้นงาน (เท่ากับที่ระบบใช้ในแท็บแก้ไขแผน): score_points ของหน่วย × (max_score ของชิ้นงานนี้ / รวม max_score ทุกชิ้นในหน่วย)
+  // ★ น้ำหนักคะแนนต่อชิ้นงาน: score_points ของหน่วย × (max_score ของชิ้นงานนี้ / รวม max_score ทุกชิ้นในหน่วย)
   const computedWeightByAssignment = useMemo(() => {
     const map: Record<string, number> = {};
     unitsWithScore.forEach(u => {
@@ -523,31 +551,21 @@ function ReportView({
   }
 
   // ★ ผ่าน/ไม่ผ่านตัวชี้วัด/ผลการเรียนรู้: ผ่านถ้ามีชิ้นงานที่ผูกข้อนี้ ที่ นร. ได้คะแนน ≥ 50%
-  function passedIndicator(unit: Unit, line: string, studentId: string): boolean {
+  function indicatorAchievement(unit: Unit, line: string, studentId: string): { display: string; state: "none" | "pending" | "pass" | "fail" } {
     const related = assignments.filter(
       a => a.teaching_unit_no === unit.unit_no && (a.selected_indicator_lines ?? []).includes(line)
     );
-    return related.some(a => {
-      const score = studentScoreForAssignment(a.id, studentId);
-      return score != null && a.max_score > 0 && score / a.max_score >= 0.5;
-    });
-  }
+    if (related.length === 0) return { display: "–", state: "none" };
 
-  async function saveExamScore(studentId: string, field: "midterm" | "final", value: number | null) {
-    if (!sectionId || readOnly) return;
-    setSavingExamFor(studentId);
-    const current = examScores[studentId] ?? { student_id: studentId, midterm: null, final: null };
-    const next = { ...current, [field]: value };
-    setExamScores(prev => ({ ...prev, [studentId]: next }));
-    try {
-      await supabase.from("subject_exam_scores").upsert(
-        { subject_section_id: sectionId, student_id: studentId, midterm: next.midterm, final: next.final, updated_by: currentUserId || null },
-        { onConflict: "subject_section_id,student_id" }
-      );
-    } catch (e: any) {
-      alert("บันทึกคะแนนสอบไม่สำเร็จ: " + (e?.message ?? "unknown error"));
-    }
-    setSavingExamFor(null);
+    let sumScore = 0, sumMax = 0, anyGraded = false;
+    related.forEach(a => {
+      sumMax += a.max_score || 0;
+      const score = studentScoreForAssignment(a.id, studentId);
+      if (score != null) { sumScore += score; anyGraded = true; }
+    });
+    if (!anyGraded) return { display: "–", state: "pending" };
+    const passed = sumMax > 0 && sumScore / sumMax >= 0.5;
+    return { display: `${fmtScore(sumScore)}/${fmtScore(sumMax)}`, state: passed ? "pass" : "fail" };
   }
 
   const sumUnitScorePoints = unitsWithScore.reduce((s, u) => s + (Number(u.score_points) || 0), 0);
@@ -560,7 +578,7 @@ function ReportView({
       const weight = computedWeightByAssignment[a.id] ?? 0;
       return sum + (score / a.max_score) * weight;
     }, 0);
-    return raw * formativeScale;   // ★ สเกลให้ตรงกับคะแนนรวม
+    return raw * formativeScale;
   }
   const totalPossible = formativeMaxScore + midtermMax + finalMax;
 
@@ -583,16 +601,14 @@ function ReportView({
 
   return (
     <div>
-      {/* ★ แสดงคะแนนเต็มกลางภาค/ปลายภาคเป็นข้อมูลอ้างอิงเท่านั้น (ดึงจากตั้งค่ารายวิชา แก้ไขได้ที่หน้าตั้งค่ารายวิชาเท่านั้น) */}
       <div className="flex items-center gap-3 flex-wrap mb-3 print:hidden">
         <span className="text-[11px] text-slate-400 font-bold bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5">
           น้ำหนักคะแนนเก็บ : คะแนนสอบ = {sumUnitScorePoints} : {midtermMax + finalMax} (กลางภาค {midtermMax} + ปลายภาค {finalMax}) ·
           คะแนนเต็มรวมทั้งวิชา = {totalPossible} คะแนน
-          <span className="ml-1 text-slate-300">— แก้ไขคะแนนเต็มกลางภาค/ปลายภาคได้ที่หน้า "ตั้งค่ารายวิชา"</span>
+          <span className="ml-1 text-slate-300">— แก้ไขคะแนนกลางภาค/ปลายภาคได้ที่หน้า "คะแนนรวม" เท่านั้น เพื่อให้ตัวเลขตรงกันเสมอ</span>
         </span>
       </div>
 
-      {/* หัวกระดาษสำหรับพิมพ์เท่านั้น — เลียนแบบฟอร์มแบบบันทึกคะแนนของโรงเรียน */}
       <div className="hidden print:block text-center mb-2 leading-tight">
         <p className="font-black text-[13px]">แบบบันทึกคะแนนการวัดและประเมินผลระหว่างเรียนและปลายภาค</p>
         <p className="text-[11px] font-bold">
@@ -625,20 +641,20 @@ function ReportView({
             </tr>
             <tr>
               {unitsWithScore.map(u => (
-                <>
+                <Fragment key={u.unit_no}>
                   {indicatorLinesOf(u).map((line, idx) => (
                     <th key={`${u.unit_no}-i${idx}`} className="border border-slate-300 px-1 py-1 font-bold w-7" title={line}>
                       {indicatorAbbr}{idx + 1}
                     </th>
                   ))}
                   <th className="border border-slate-300 px-1 py-1 font-black w-12 bg-fuchsia-50 print:bg-slate-100">สรุป</th>
-                </>
+                </Fragment>
               ))}
             </tr>
           </thead>
           <tbody>
             {sortedStudents.map(s => {
-              const exam = examScores[s.id] ?? { student_id: s.id, midterm: null, final: null };
+              const exam = examScores[s.id] ?? { midterm: null, final: null };
               const unitTotals = unitsWithScore.map(u => unitAchievedScore(u, s.id));
               const sumUnits = unitTotals.reduce((a, b) => a + b, 0);
               const total = sumUnits + (exam.midterm ?? 0) + (exam.final ?? 0);
@@ -650,34 +666,31 @@ function ReportView({
                     {s.prefix ?? ""}{s.first_name} {s.last_name}
                   </td>
                   {unitsWithScore.map((u, ui) => (
-                    <>
-                      {indicatorLinesOf(u).map((line, idx) => (
-                        <td key={`${u.unit_no}-${s.id}-i${idx}`} className="border border-slate-300 text-center px-1 py-1">
-                          {passedIndicator(u, line, s.id) ? "✓" : "–"}
-                        </td>
-                      ))}
+                    <Fragment key={u.unit_no}>
+                      {indicatorLinesOf(u).map((line, idx) => {
+                        const info = indicatorAchievement(u, line, s.id);
+                        return (
+                          <td
+                            key={`${u.unit_no}-${s.id}-i${idx}`}
+                            className={`border border-slate-300 text-center px-1 py-1 font-black ${
+                              info.state === "pass" ? "text-emerald-600" : info.state === "fail" ? "text-rose-500" : "text-slate-300"
+                            }`}
+                          >
+                            {info.display}
+                          </td>
+                        );
+                      })}
                       <td className="border border-slate-300 text-center px-1 py-1 font-black bg-fuchsia-50/40 print:bg-white">
                         {fmtScore(unitTotals[ui])}
                       </td>
-                    </>
+                    </Fragment>
                   ))}
-                  <td className="border border-slate-300 text-center px-1 py-1 font-black">{fmtScore(sumUnits)}</td>
-                  <td className="border border-slate-300 text-center px-1 py-1">
-                    <input
-                      type="number" disabled={readOnly}
-                      value={exam.midterm ?? ""}
-                      onChange={e => saveExamScore(s.id, "midterm", e.target.value === "" ? null : Number(e.target.value))}
-                      className="w-12 text-center border border-slate-200 rounded px-1 py-0.5 font-bold print:border-0 print:bg-transparent"
-                    />
-                  </td>
-                  <td className="border border-slate-300 text-center px-1 py-1">
-                    <input
-                      type="number" disabled={readOnly}
-                      value={exam.final ?? ""}
-                      onChange={e => saveExamScore(s.id, "final", e.target.value === "" ? null : Number(e.target.value))}
-                      className="w-12 text-center border border-slate-200 rounded px-1 py-0.5 font-bold print:border-0 print:bg-transparent"
-                    />
-                  </td>
+                  <td className="border border-slate-300 text-center px-1 py-1 font-black">{sumUnitScorePoints ? fmtScore(sumUnits) : "-"}</td>
+                  {/* ★ เดิมมี 3 <td> ตรงนี้ (midterm, final, แล้วซ้ำ input กรอก final อีกรอบ) ทำให้จำนวนคอลัมน์
+                      ไม่ตรงกับ header ที่มีแค่ 2 ช่อง (กลางภาค/ปลายภาค) — ลบ input ออก เหลือแค่ 2 ช่องแสดงผลอย่างเดียว
+                      ตรงตาม comment ด้านบนที่บอกว่าห้ามแก้ไขคะแนนสอบจากหน้านี้ */}
+                  <td className="border border-slate-300 text-center px-1 py-1 font-black">{exam.midterm ?? "-"}</td>
+                  <td className="border border-slate-300 text-center px-1 py-1 font-black">{exam.final ?? "-"}</td>
                   <td className="border border-slate-300 text-center px-1 py-1 font-black">{fmtScore(total)}</td>
                   <td className="border border-slate-300 text-center px-1 py-1 font-black">{gradeLevel(percent)}</td>
                 </tr>
@@ -687,7 +700,6 @@ function ReportView({
         </table>
       </div>
 
-      {/* คำอธิบายตัวชี้วัด/ผลการเรียนรู้แต่ละข้อ */}
       <div className="mt-4 bg-white rounded-2xl border border-slate-100 p-4 space-y-3 text-xs print:mt-2 print:border-0 print:p-0 vp-print-legend">
         <p className="font-black text-slate-600">คำอธิบาย{indicatorLabel}</p>
         {unitsWithScore.map(u => (
@@ -695,15 +707,15 @@ function ReportView({
             <p className="font-black text-slate-500">หน่วยที่ {u.unit_no} {u.unit_name}</p>
             <ul className="pl-4 list-disc space-y-0.5">
               {indicatorLinesOf(u).map((line, idx) => (
-                <li key={idx} className="font-bold text-slate-500"><span className="text-slate-400">{indicatorAbbr}{idx + 1}:</span> {line}</li>
+                <li key={idx} className="font-bold text-slate-500">
+                  <span className="text-slate-400">{indicatorItemLabel} {idx + 1}:</span> {line}
+                </li>
               ))}
             </ul>
           </div>
         ))}
-        {savingExamFor && <p className="text-slate-300 font-bold print:hidden">กำลังบันทึก...</p>}
       </div>
 
-      {/* ★ CSS สำหรับพิมพ์: บังคับแนวนอน + เส้นขอบดำชัดเจน + ซ่อนส่วนที่ไม่เกี่ยวกับรายงาน */}
       <style jsx global>{`
         @media print {
           @page { size: A4 landscape; margin: 8mm; }
