@@ -11,8 +11,16 @@ type Unit = {
   note: string | null;
 };
 
+// ★ เพิ่ม: ข้อมูลชิ้นงานที่ผูกหน่วยนี้ + น้ำหนักคะแนนที่คำนวณอัตโนมัติ
+type UnitLinkedAssignment = { id: string; title: string; max_score: number; computed_weight: number };
+type UnitScoreInfo = { totalMaxScore: number; scorePoints: number; assignments: UnitLinkedAssignment[] };
+
 function emptyUnit(no: number): Unit {
   return { unit_no: no, unit_name: "", indicators: "", learning_hours: null, score_points: null, note: "" };
+}
+
+function fmtScore(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
 export default function Vp71Tool({
@@ -30,6 +38,11 @@ export default function Vp71Tool({
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
+
+  // ★ เพิ่ม: สรุปคะแนนชิ้นงานที่ผูกแต่ละหน่วย (คีย์ = unit_no)
+  const [unitScores, setUnitScores] = useState<Record<number, UnitScoreInfo>>({});
+  const [loadingUnitScores, setLoadingUnitScores] = useState(false);
+  const [expandedUnit, setExpandedUnit] = useState<number | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -49,6 +62,27 @@ export default function Vp71Tool({
         setLoading(false);
       }
     })();
+  }, [subjectId, academicYearId]);
+
+  // ★ เพิ่ม: โหลดสรุปคะแนนชิ้นงานที่ผูกแต่ละหน่วย (รวมทุกห้อง/ทุกครูที่สอนวิชานี้)
+  async function loadUnitScores() {
+    setLoadingUnitScores(true);
+    try {
+      const qs = new URLSearchParams({ subject_id: subjectId, ...(academicYearId ? { academic_year_id: academicYearId } : {}) });
+      const res = await fetch(`/api/subject-teaching-units/unit-scores?${qs.toString()}`);
+      const json = await res.json();
+      if (res.ok) setUnitScores(json.unitScores ?? {});
+    } catch {
+      // ไม่ critical — แค่ไม่แสดงสรุป ตารางหลักยังใช้งานได้ปกติ
+    } finally {
+      setLoadingUnitScores(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!subjectId) return;
+    loadUnitScores();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subjectId, academicYearId]);
 
   function updateUnit(i: number, field: keyof Unit, value: any) {
@@ -81,6 +115,7 @@ export default function Vp71Tool({
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "บันทึกไม่สำเร็จ");
       setSavedAt(Date.now());
+      loadUnitScores(); // ★ เพิ่ม: คะแนนเก็บอาจเปลี่ยน ให้รีเฟรชสรุปน้ำหนักด้วย
     } catch (e: any) {
       alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "unknown error"));
     } finally {
@@ -122,7 +157,7 @@ export default function Vp71Tool({
         <div className="text-center py-16 text-slate-300 font-bold text-sm">กำลังโหลด...</div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-100 overflow-auto">
-          <table className="w-full min-w-[880px] border-collapse text-xs">
+          <table className="w-full min-w-[960px] border-collapse text-xs">
             <thead className="bg-gradient-to-r from-indigo-50 to-fuchsia-50">
               <tr>
                 <th className="px-2 py-3 font-black text-slate-600 w-10">หน่วยที่</th>
@@ -131,11 +166,19 @@ export default function Vp71Tool({
                 <th className="px-2 py-3 font-black text-slate-600 w-24">จำนวนชั่วโมง</th>
                 <th className="px-2 py-3 font-black text-slate-600 w-24">คะแนนเก็บ</th>
                 <th className="px-3 py-3 text-left font-black text-slate-600 min-w-[140px]">หมายเหตุ</th>
+                {/* ★ เพิ่มคอลัมน์: สรุปชิ้นงานที่ผูกหน่วยนี้ */}
+                <th className="px-3 py-3 text-left font-black text-slate-600 min-w-[200px]">ชิ้นงานที่ผูกหน่วยนี้</th>
                 <th className="px-2 py-3 w-8 print:hidden"></th>
               </tr>
             </thead>
             <tbody>
-              {units.map((u, i) => (
+              {units.map((u, i) => {
+                // ★ เพิ่ม: สรุปคะแนนของหน่วยนี้
+                const info = unitScores[u.unit_no];
+                const linkedCount = info?.assignments.length ?? 0;
+                const isExpanded = expandedUnit === u.unit_no;
+                return (
+                <>
                 <tr key={i} className="border-t border-slate-100 align-top">
                   <td className="text-center px-2 py-2 font-black text-slate-500">{u.unit_no}</td>
                   <td className="px-2 py-2">
@@ -175,20 +218,63 @@ export default function Vp71Tool({
                       className="w-full border-2 border-slate-200 rounded-lg px-2 py-1.5 font-bold disabled:bg-slate-50"
                     />
                   </td>
+                  {/* ★ เพิ่ม: ป้ายสรุปสถานะการผูกชิ้นงาน + ปุ่มดูรายละเอียด */}
+                  <td className="px-2 py-2">
+                    {loadingUnitScores ? (
+                      <span className="text-[10px] text-slate-300 font-bold">กำลังโหลด...</span>
+                    ) : !u.score_points ? (
+                      <span className="text-[10px] text-slate-300 font-bold">— ยังไม่ตั้งคะแนนเก็บ —</span>
+                    ) : linkedCount === 0 ? (
+                      <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600">
+                        ⚠️ ยังไม่มีชิ้นงานผูก
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedUnit(isExpanded ? null : u.unit_no)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                      >
+                        ✅ ผูกแล้ว {linkedCount} ชิ้น (รวม {fmtScore(info!.totalMaxScore)} คะแนนดิบ) {isExpanded ? "▲" : "▼"}
+                      </button>
+                    )}
+                  </td>
                   <td className="text-center px-1 py-2 print:hidden">
                     {!readOnly && units.length > 1 && (
                       <button onClick={() => removeUnit(i)} className="text-red-400 hover:text-red-600 font-black">✕</button>
                     )}
                   </td>
                 </tr>
-              ))}
+                {/* ★ เพิ่ม: แถวขยาย แสดงรายชื่อชิ้นงานที่ผูกหน่วยนี้ + น้ำหนักคะแนนที่คำนวณอัตโนมัติ */}
+                {isExpanded && info && (
+                  <tr className="bg-emerald-50/40">
+                    <td></td>
+                    <td colSpan={7} className="px-4 py-3">
+                      <p className="text-[11px] font-black text-emerald-700 mb-2">
+                        ระบบคำนวณน้ำหนักคะแนนของแต่ละชิ้นงานอัตโนมัติ ให้รวมกันเท่ากับคะแนนเก็บที่ตั้งไว้ ({fmtScore(u.score_points ?? 0)} คะแนน) เสมอ
+                      </p>
+                      <div className="space-y-1">
+                        {info.assignments.map(a => (
+                          <div key={a.id} className="flex items-center justify-between bg-white rounded-lg border border-emerald-100 px-3 py-1.5">
+                            <span className="font-bold text-slate-600 truncate pr-2">{a.title}</span>
+                            <span className="text-slate-400 font-bold shrink-0">
+                              เต็ม {fmtScore(a.max_score)} → <span className="text-emerald-600 font-black">{fmtScore(a.computed_weight)} คะแนนจริง</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </>
+                );
+              })}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-slate-200 bg-slate-50 font-black">
                 <td colSpan={3} className="px-3 py-2 text-right">รวม</td>
                 <td className="text-center px-2 py-2">{totalHours || "-"}</td>
                 <td className="text-center px-2 py-2">{totalScore || "-"}</td>
-                <td colSpan={2}></td>
+                <td colSpan={3}></td>
               </tr>
             </tfoot>
           </table>

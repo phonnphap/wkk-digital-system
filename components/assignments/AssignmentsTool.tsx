@@ -719,14 +719,15 @@ function AssignmentForm({
   }, [subjectId]);
 
   useEffect(() => {
-    if (!subjectId) return;
-    supabase
-      .from("teaching_units")
-      .select("unit_no, unit_name, indicators, learning_hours, score_points, note")
-      .eq("subject_id", subjectId)
-      .order("unit_no", { ascending: true })
-      .then(({ data }) => setTeachingUnits((data ?? []) as TeachingUnit[]));
-  }, [subjectId]);
+  if (!subjectId) return;
+  let query = supabase
+    .from("subject_teaching_units")           // ★ แก้จาก "teaching_units"
+    .select("unit_no, unit_name, indicators, learning_hours, score_points, note")
+    .eq("subject_id", subjectId)
+    .order("unit_no", { ascending: true });
+  if (academicYearId) query = query.eq("academic_year_id", academicYearId); // ★ เพิ่ม
+  query.then(({ data }) => setTeachingUnits((data ?? []) as TeachingUnit[]));
+}, [subjectId, academicYearId]);
 
   const selectedUnit = useMemo(
     () => teachingUnits.find(u => u.unit_no === unitNo) ?? null,
