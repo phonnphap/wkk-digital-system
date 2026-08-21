@@ -28,7 +28,8 @@ type Assignment = {
   weight_percent: number | null;
   grading_criteria_note: string | null;
   rubric_id?: string | null;
-  learning_unit_id?: string | null; 
+  teaching_unit_no?: number | null;              // ★ แทน learning_unit_id
+  selected_indicator_lines?: string[] | null;
   status: AssignmentStatus;
   published_at: string | null;
   created_by: string | null;
@@ -47,11 +48,6 @@ type Submission = {
   score: number | null;
   teacher_comment: string | null;
   is_late: boolean | null; 
-};
-type LearningUnit = { id: string; subject_id: string; unit_name: string; order_index: number };
-type LearningIndicator = {
-  id: string; unit_id: string; subject_id: string;
-  indicator_code: string | null; indicator_text: string; order_index: number;
 };
 
 type TeacherSection = { id: string; label: string };
@@ -74,10 +70,14 @@ type Announcement = {
   creator?: { full_name: string | null; email: string } | null;
 };
 
-/* ---- NEW: rubric / announcement / import types ----
-   These map to the tables added in the migration SQL. Adjust field
-   names if your real schema differs. */
-
+type TeachingUnit = {
+  unit_no: number;
+  unit_name: string;
+  indicators: string;
+  learning_hours: number | null;
+  score_points: number | null;
+  note: string | null;
+};
 type SavedRubric = {
   id: string;
   subject_id: string;
@@ -151,11 +151,9 @@ function getLateInfo(
   submittedAtIso: string | null,
   manualIsLate: boolean | null
 ): LateInfo {
-  // ครูกำหนดสถานะเอง (true/false) -> ใช้ค่านั้นเสมอ ไม่คำนวณทับ
   if (manualIsLate !== null && manualIsLate !== undefined) {
     return { isLate: manualIsLate, daysLate: 0, isManual: true };
   }
-  // ไม่ได้กำหนดวันส่ง หรือนักเรียนยังไม่ส่ง -> ถือว่าตรงเวลาอัตโนมัติ
   if (!dueDateIso || !submittedAtIso) {
     return { isLate: false, daysLate: 0, isManual: false };
   }
@@ -165,13 +163,11 @@ function getLateInfo(
   const daysLate = Math.max(1, Math.ceil((submitted - due) / (1000 * 60 * 60 * 24)));
   return { isLate: true, daysLate, isManual: false };
 }
-// ตัดอักขระที่ OneDrive ห้ามใช้ในชื่อโฟลเดอร์/ไฟล์ออก (\ / : * ? " < > | และช่องว่างหัวท้าย)
 function sanitizeFolderName(name: string): string {
   const cleaned = name.replace(/[\\/:*?"<>|]/g, "").trim();
   return cleaned || "ไม่มีชื่อ";
 }
 
-// เช็คว่าไฟล์แนบเป็นไฟล์รูปภาพหรือไม่ จากนามสกุลไฟล์
 function isImageFilename(name?: string | null): boolean {
   return !!name && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
 }
@@ -184,15 +180,14 @@ type ViewMode = "list" | "create" | "detail";
 type ModalMode = null | "rubric" | "import" | "announcement";
 
 export default function AssignmentsTool({
-  sectionId,
-  subjectId,
-  students,
-  currentUserId,
+  sectionId, subjectId, students, currentUserId,
+  academicYearId,
 }: {
   sectionId: string;
   subjectId: string;
   students: Student[];
   currentUserId: string;
+  academicYearId?: string | null;
 }) {
   const [loading, setLoading] = useState(true);
   const hasLoadedRef = useRef(false);
@@ -203,23 +198,20 @@ export default function AssignmentsTool({
   const [view, setView] = useState<ViewMode>("list");
   const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null);
 
-  // NEW: which top-level modal (rubric manager / import / announcement) is open
   const [modal, setModal] = useState<ModalMode>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
 
-async function loadAnnouncements() {
-  try {
-    const res = await fetch(`/api/subject-announcements?subject_section_id=${sectionId}`);
-    const result = await res.json();
-    setAnnouncements(result.announcements ?? []);
-  } catch {
-    setAnnouncements([]);
+  async function loadAnnouncements() {
+    try {
+      const res = await fetch(`/api/subject-announcements?subject_section_id=${sectionId}`);
+      const result = await res.json();
+      setAnnouncements(result.announcements ?? []);
+    } catch {
+      setAnnouncements([]);
+    }
   }
-}
 
   async function loadAll() {
-    // ★ โชว์ full-page loading เฉพาะครั้งแรก ไม่ทำแบบนี้ทุกครั้งที่ refresh
-    // เพราะจะ unmount SubmissionsTab ทิ้ง ทำให้ state (นักเรียนที่เลือกอยู่) หายไป
     if (!hasLoadedRef.current) setLoading(true);
     try {
       const { data: aRows } = await supabase
@@ -244,8 +236,8 @@ async function loadAnnouncements() {
     } catch {
       setAssignments([]);
     } finally {
-      setLoading(false);      // ★
-      hasLoadedRef.current = true; // ★
+      setLoading(false);
+      hasLoadedRef.current = true;
     }
   }
 
@@ -281,18 +273,19 @@ async function loadAnnouncements() {
   let content: React.ReactNode;
 
   if (view === "create") {
-content = (
-  <AssignmentForm
-    sectionId={sectionId}
-    subjectId={subjectId}
-    currentUserId={currentUserId}
-    students={students}          // ★ forward
-    onCancel={backToList}
-    onRefresh={loadAll}          // ★ add
-    onPublished={(id) => openDetail(id)}   // now safe: assignments[] already has it
-    onSavedDraft={() => backToList()}
-  />
-);
+    content = (
+      <AssignmentForm
+        sectionId={sectionId}
+        subjectId={subjectId}
+        currentUserId={currentUserId}
+        students={students}
+        academicYearId={academicYearId}
+        onCancel={backToList}
+        onRefresh={loadAll}
+        onPublished={(id) => openDetail(id)}
+        onSavedDraft={() => backToList()}
+      />
+    );
   } else if (view === "detail" && activeAssignment) {
     content = (
       <AssignmentDetail
@@ -301,6 +294,7 @@ content = (
         sectionId={sectionId}
         students={students}
         currentUserId={currentUserId}
+        academicYearId={academicYearId}
         studentLinks={studentLinks.filter(l => l.assignment_id === activeAssignment.id)}
         submissions={submissions.filter(s => s.assignment_id === activeAssignment.id)}
         onBack={backToList}
@@ -309,21 +303,21 @@ content = (
     );
   } else {
     content = (
-  <AssignmentList
-    assignments={assignments}
-    students={students}
-    studentLinks={studentLinks}
-    submissions={submissions}
-    announcements={announcements}                 // ★
-    onAnnouncementsChanged={loadAnnouncements}      // ★
-    currentUserId={currentUserId}                   // ★ ใช้เช็คว่าประกาศเป็นของครูคนนี้ไหม (โชว์ปุ่มแก้/ลบ)
-    onCreate={openCreate}
-    onOpen={openDetail}
-    onManageRubrics={() => setModal("rubric")}
-    onImport={() => setModal("import")}
-    onAnnouncement={() => setModal("announcement")}
-  />
-);
+      <AssignmentList
+        assignments={assignments}
+        students={students}
+        studentLinks={studentLinks}
+        submissions={submissions}
+        announcements={announcements}
+        onAnnouncementsChanged={loadAnnouncements}
+        currentUserId={currentUserId}
+        onCreate={openCreate}
+        onOpen={openDetail}
+        onManageRubrics={() => setModal("rubric")}
+        onImport={() => setModal("import")}
+        onAnnouncement={() => setModal("announcement")}
+      />
+    );
   }
 
   return (
@@ -352,22 +346,22 @@ content = (
       )}
 
       {modal === "announcement" && (
-  <AnnouncementModal
-    sectionId={sectionId}
-    currentUserId={currentUserId}
-    onClose={() => setModal(null)}
-    onPosted={() => {
-      setModal(null);
-      loadAnnouncements(); // ★ เพิ่มบรรทัดนี้
-    }}
-  />
-)}
+        <AnnouncementModal
+          sectionId={sectionId}
+          currentUserId={currentUserId}
+          onClose={() => setModal(null)}
+          onPosted={() => {
+            setModal(null);
+            loadAnnouncements();
+          }}
+        />
+      )}
     </>
   );
 }
 
 /* =========================================================================
-   List view — การ์ดชิ้นงานเรียงตามวันที่มอบหมาย
+   List view
    ========================================================================= */
 function AnnouncementsFeed({
   announcements,
@@ -449,7 +443,6 @@ function AnnouncementsFeed({
               />
             )}
 
-            {/* ★ แสดงตัวอย่างรูปภาพ / ไฟล์แนบ */}
             {files.length > 0 && (
               <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {files.map(f => {
@@ -502,7 +495,6 @@ function AnnouncementsFeed({
         );
       })}
 
-      {/* lightbox ดูรูปเต็ม */}
       {lightbox && (
         <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-6" onClick={() => setLightbox(null)}>
           <div className="relative max-w-3xl max-h-[85vh] w-full" onClick={e => e.stopPropagation()}>
@@ -515,7 +507,6 @@ function AnnouncementsFeed({
         </div>
       )}
 
-      {/* modal แก้ไขประกาศ — reuse AnnouncementModal เดิม โดยส่ง existing เข้าไป */}
       {editing && (
         <AnnouncementModal
           sectionId={editing.subject_section_id}
@@ -534,7 +525,7 @@ function AnnouncementsFeed({
 
 function AssignmentList({
   assignments, students, studentLinks, submissions,
-  announcements, onAnnouncementsChanged, currentUserId,   // ★ props ใหม่
+  announcements, onAnnouncementsChanged, currentUserId,
   onCreate, onOpen, onManageRubrics, onImport, onAnnouncement,
 }: {
   assignments: Assignment[];
@@ -557,7 +548,6 @@ function AssignmentList({
         <p className="text-slate-400 text-xs font-bold">คุณสามารถมอบหมายงานนักเรียน และดูความคืบหน้าของชิ้นงานได้ที่นี่</p>
       </div>
 
-      {/* แถบปุ่มเมนู: จัดการเกณฑ์รูบิก / นำเข้าชิ้นงาน / สร้างประกาศใหม่ / สร้างชิ้นงาน */}
       <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={onManageRubrics}
@@ -627,9 +617,9 @@ function AssignmentList({
                         <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 text-[10px] font-black">{TYPE_LABELS[a.type]}</span>
                       </div>
                       <p className="text-slate-400 text-xs font-bold mt-0.5">
-  มอบหมายเมื่อ <DateTimeText iso={a.assigned_at} />
-  {a.due_date && <> · กำหนดส่ง <DateTimeText iso={a.due_date} /></>}
-</p>
+                        มอบหมายเมื่อ <DateTimeText iso={a.assigned_at} />
+                        {a.due_date && <> · กำหนดส่ง <DateTimeText iso={a.due_date} /></>}
+                      </p>
                     </div>
                   </div>
 
@@ -661,31 +651,32 @@ function AssignmentList({
   );
 }
 
-
 /* =========================================================================
-   Create form — สร้างชิ้นงานใหม่
+   Create form
    ========================================================================= */
 
 function AssignmentForm({
   sectionId,
   subjectId,
   currentUserId,
-  students,                              // ★ add
+  students,
+  academicYearId,
   existing,
   onCancel,
   onPublished,
   onSavedDraft,
-  onRefresh,                             // ★ add
+  onRefresh,
 }: {
   sectionId: string;
   subjectId: string;
   currentUserId: string;
-  students: Student[];                   // ★ add
+  students: Student[];
+  academicYearId?: string | null;
   existing?: Assignment;
   onCancel: () => void;
   onPublished: (id: string) => void;
   onSavedDraft: () => void;
-  onRefresh: () => Promise<void> | void; // ★ add
+  onRefresh: () => Promise<void> | void;
 }) {
   const [title, setTitle] = useState(existing?.title ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
@@ -708,15 +699,12 @@ function AssignmentForm({
   const [existingAttachments, setExistingAttachments] = useState<AssignmentAttachment[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [subjectName, setSubjectName] = useState<string>("");
-  const [units, setUnits] = useState<LearningUnit[]>([]);
-const [unitId, setUnitId] = useState<string | null>(existing?.learning_unit_id ?? null);
-const [indicators, setIndicators] = useState<LearningIndicator[]>([]);
-const [selectedIndicatorIds, setSelectedIndicatorIds] = useState<Set<string>>(new Set());
-const [showAddUnit, setShowAddUnit] = useState(false);
-const [newUnitName, setNewUnitName] = useState("");
-const [showAddIndicator, setShowAddIndicator] = useState(false);
-const [newIndicatorCode, setNewIndicatorCode] = useState("");
-const [newIndicatorText, setNewIndicatorText] = useState("");
+
+  const [teachingUnits, setTeachingUnits] = useState<TeachingUnit[]>([]);
+  const [unitNo, setUnitNo] = useState<number | null>(existing?.teaching_unit_no ?? null);
+  const [selectedIndicatorLines, setSelectedIndicatorLines] = useState<Set<string>>(
+    new Set(existing?.selected_indicator_lines ?? [])
+  );
 
   useEffect(() => {
     if (!subjectId) return;
@@ -730,7 +718,45 @@ const [newIndicatorText, setNewIndicatorText] = useState("");
       });
   }, [subjectId]);
 
-  // NEW: load the saved rubrics ("เลือกจากที่ตั้งไว้") for this subject
+  useEffect(() => {
+    if (!subjectId) return;
+    supabase
+      .from("teaching_units")
+      .select("unit_no, unit_name, indicators, learning_hours, score_points, note")
+      .eq("subject_id", subjectId)
+      .order("unit_no", { ascending: true })
+      .then(({ data }) => setTeachingUnits((data ?? []) as TeachingUnit[]));
+  }, [subjectId]);
+
+  const selectedUnit = useMemo(
+    () => teachingUnits.find(u => u.unit_no === unitNo) ?? null,
+    [teachingUnits, unitNo]
+  );
+
+  const indicatorLines = useMemo(
+    () => (selectedUnit?.indicators ?? "").split("\n").map(s => s.trim()).filter(Boolean),
+    [selectedUnit]
+  );
+
+  function handleUnitChange(no: number | null) {
+    setUnitNo(no);
+    setSelectedIndicatorLines(new Set());
+  }
+
+  function toggleIndicatorLine(line: string) {
+    setSelectedIndicatorLines(prev => {
+      const next = new Set(prev);
+      next.has(line) ? next.delete(line) : next.add(line);
+      return next;
+    });
+  }
+
+  function pickRubric(r: SavedRubric) {
+    setRubricId(r.id);
+    setGradingNote(r.name);
+    setShowRubricPicker(false);
+  }
+
   useEffect(() => {
     if (!subjectId) return;
     supabase
@@ -742,131 +768,71 @@ const [newIndicatorText, setNewIndicatorText] = useState("");
   }, [subjectId]);
 
   useEffect(() => {
-  if (!subjectId) return;
-  supabase.from("learning_units").select("id, subject_id, unit_name, order_index")
-    .eq("subject_id", subjectId).order("order_index")
-    .then(({ data }) => setUnits((data ?? []) as LearningUnit[]));
-}, [subjectId]);
-useEffect(() => {
-  if (!unitId) { setIndicators([]); return; }
-  supabase.from("learning_indicators")
-    .select("id, unit_id, subject_id, indicator_code, indicator_text, order_index")
-    .eq("unit_id", unitId).order("order_index")
-    .then(({ data }) => setIndicators((data ?? []) as LearningIndicator[]));
-}, [unitId]);
+    if (!existing) return;
+    supabase
+      .from("assignment_attachments")
+      .select("*")
+      .eq("assignment_id", existing.id)
+      .then(({ data }) => {
+        const rows = (data ?? []) as AssignmentAttachment[];
+        setExistingAttachments(rows.filter(a => a.kind === "file"));
+        setLinks(rows.filter(a => a.kind === "link").map(a => ({ id: a.id, url: a.url })));
+      });
+  }, [existing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-// โหลดตัวชี้วัดที่เคยเลือกไว้ (ตอนแก้ไขชิ้นงานเดิม)
-useEffect(() => {
-  if (!existing) return;
-  supabase.from("assignment_indicators").select("indicator_id").eq("assignment_id", existing.id)
-    .then(({ data }) => setSelectedIndicatorIds(new Set((data ?? []).map((r: any) => r.indicator_id))));
-}, [existing?.id]);
-
-async function addUnit() {
-  if (!newUnitName.trim()) return;
-  const { data } = await supabase.from("learning_units")
-    .insert({ subject_id: subjectId, unit_name: newUnitName.trim(), order_index: units.length, created_by: currentUserId || null })
-    .select().maybeSingle();
-  if (data) { setUnits(prev => [...prev, data as LearningUnit]); setUnitId(data.id); }
-  setNewUnitName(""); setShowAddUnit(false);
-}
-
-async function addIndicator() {
-  if (!unitId || !newIndicatorText.trim()) return;
-  const { data } = await supabase.from("learning_indicators")
-    .insert({
-      unit_id: unitId, subject_id: subjectId,
-      indicator_code: newIndicatorCode.trim() || null,
-      indicator_text: newIndicatorText.trim(),
-      order_index: indicators.length, created_by: currentUserId || null,
-    })
-    .select().maybeSingle();
-  if (data) {
-    setIndicators(prev => [...prev, data as LearningIndicator]);
-    setSelectedIndicatorIds(prev => new Set(prev).add(data.id));
-  }
-  setNewIndicatorCode(""); setNewIndicatorText(""); setShowAddIndicator(false);
-}
-
-function toggleIndicator(id: string) {
-  setSelectedIndicatorIds(prev => {
-    const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
-  });
-}
-  function pickRubric(r: SavedRubric) {
-    setRubricId(r.id);
-    setGradingNote(r.name);
-    setShowRubricPicker(false);
+  function addLink() {
+    if (!linkUrl.trim()) return;
+    setLinks(prev => [...prev, { url: linkUrl.trim() }]);
+    setLinkUrl("");
   }
 
-useEffect(() => {
-  if (!existing) return;
-  supabase
-    .from("assignment_attachments")
-    .select("*")
-    .eq("assignment_id", existing.id)
-    .then(({ data }) => {
-      const rows = (data ?? []) as AssignmentAttachment[];
-      setExistingAttachments(rows.filter(a => a.kind === "file"));
-      setLinks(rows.filter(a => a.kind === "link").map(a => ({ id: a.id, url: a.url })));
+  async function removeLink(index: number) {
+    const item = links[index];
+    if (item.id) {
+      if (!confirm("ลบลิงก์นี้ออกจากชิ้นงาน?")) return;
+      try { await supabase.from("assignment_attachments").delete().eq("id", item.id); } catch {}
+    }
+    setLinks(prev => prev.filter((_, i) => i !== index));
+  }
+
+  function isImageFile(name?: string | null) {
+    return !!name && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
+  }
+
+  async function removeExistingAttachment(att: AssignmentAttachment) {
+    if (!confirm(`ลบไฟล์ "${att.file_name || "ไฟล์นี้"}" ออกจากชิ้นงาน?`)) return;
+    try {
+      await supabase.from("assignment_attachments").delete().eq("id", att.id);
+      setExistingAttachments(prev => prev.filter(a => a.id !== att.id));
+    } catch (e: any) {
+      alert("ลบไฟล์ไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+  }
+
+  useEffect(() => {
+    const next = files.map(f => ({
+      file: f,
+      url: URL.createObjectURL(f),
+      isImage: f.type.startsWith("image/"),
+    }));
+    setPreviews(next);
+    return () => next.forEach(p => URL.revokeObjectURL(p.url));
+  }, [files]);
+
+  function addFiles(list: FileList | null) {
+    if (!list || list.length === 0) return;
+    const newFiles = Array.from(list);
+    setFiles(prev => [...prev, ...newFiles]);
+  }
+  function removeFile(index: number) {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  }
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setTeacherEmail(data.user?.email ?? null);
     });
-}, [existing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-function addLink() {
-  if (!linkUrl.trim()) return;
-  setLinks(prev => [...prev, { url: linkUrl.trim() }]);
-  setLinkUrl("");
-}
-
-async function removeLink(index: number) {
-  const item = links[index];
-  if (item.id) {
-    if (!confirm("ลบลิงก์นี้ออกจากชิ้นงาน?")) return;
-    try { await supabase.from("assignment_attachments").delete().eq("id", item.id); } catch {}
-  }
-  setLinks(prev => prev.filter((_, i) => i !== index));
-}
-
-function isImageFile(name?: string | null) {
-  return !!name && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
-}
-
-async function removeExistingAttachment(att: AssignmentAttachment) {
-  if (!confirm(`ลบไฟล์ "${att.file_name || "ไฟล์นี้"}" ออกจากชิ้นงาน?`)) return;
-  try {
-    await supabase.from("assignment_attachments").delete().eq("id", att.id);
-    setExistingAttachments(prev => prev.filter(a => a.id !== att.id));
-  } catch (e: any) {
-    alert("ลบไฟล์ไม่สำเร็จ: " + (e?.message ?? "unknown error"));
-  }
-}
-
-  useEffect(() => {
-  const next = files.map(f => ({
-    file: f,
-    url: URL.createObjectURL(f),
-    isImage: f.type.startsWith("image/"),
-  }));
-  setPreviews(next);
-  return () => next.forEach(p => URL.revokeObjectURL(p.url));
-}, [files]);
-
-function addFiles(list: FileList | null) {
-  if (!list || list.length === 0) return;
-  const newFiles = Array.from(list); // ★ แปลงเป็น array ทันที ก่อนที่ input.value = "" จะเคลียร์ live FileList ตัวนี้
-  setFiles(prev => [...prev, ...newFiles]);
-}
-function removeFile(index: number) {
-  setFiles(prev => prev.filter((_, i) => i !== index));
-}
-
-  useEffect(() => {
-  supabase.auth.getUser().then(({ data }) => {
-    setTeacherEmail(data.user?.email ?? null);
-  });
-}, []);
+  }, []);
 
   async function save(status: AssignmentStatus) {
     if (!title.trim()) {
@@ -887,7 +853,8 @@ function removeFile(index: number) {
       weight_percent: allowWeight && weightPercent !== "" ? Number(weightPercent) : null,
       grading_criteria_note: allowWeight && gradingNote.trim() ? gradingNote.trim() : null,
       rubric_id: allowWeight ? rubricId : null,
-      learning_unit_id: unitId, 
+      teaching_unit_no: unitNo,
+      selected_indicator_lines: unitNo !== null ? Array.from(selectedIndicatorLines) : null,
       status,
       published_at: status === "published" ? new Date().toISOString() : null,
       created_by: currentUserId || null,
@@ -903,15 +870,6 @@ function removeFile(index: number) {
         if (error) throw error;
         assignmentId = data.id;
       }
-      try {
-        await supabase.from("assignment_indicators").delete().eq("assignment_id", assignmentId);
-        if (selectedIndicatorIds.size > 0) {
-          await supabase.from("assignment_indicators").insert(
-            Array.from(selectedIndicatorIds).map(indicator_id => ({ assignment_id: assignmentId, indicator_id }))
-          );
-        }
-      } catch {}
-      // ★ ให้คะแนนงานทั้งหมดเข้ากับ นร.อัตโนมัติเมื่อเผยแพร่ครั้งแรก (ดูข้อ 2 ด้านล่าง)
       const wasDraftBefore = !existing || existing.status === "draft";
       if (status === "published" && wasDraftBefore && students.length > 0) {
         try {
@@ -924,7 +882,6 @@ function removeFile(index: number) {
         } catch {}
       }
 
-      // แนบไฟล์ → อัปโหลดขึ้น OneDrive ของ "ครูที่สร้างชิ้นงาน" ผ่าน /api/upload-onedrive
       if (files.length > 0) {
         if (!teacherEmail) {
           alert("ไม่พบอีเมลของครูผู้สอน จึงไม่สามารถแนบไฟล์ขึ้น OneDrive ได้");
@@ -957,7 +914,6 @@ function removeFile(index: number) {
           }
         }
       }
-      // แนบลิงก์ — insert เฉพาะลิงก์ใหม่ที่ยังไม่มีในฐานข้อมูล
       const newLinks = links.filter(l => !l.id);
       if (newLinks.length > 0) {
         try {
@@ -967,7 +923,7 @@ function removeFile(index: number) {
         } catch {}
       }
 
-       await onRefresh?.();
+      await onRefresh?.();
 
       if (status === "published") {
         onPublished(assignmentId);
@@ -983,7 +939,6 @@ function removeFile(index: number) {
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-50 overflow-y-auto">
-      {/* Header แบบ sticky */}
       <div className="sticky top-0 z-20 bg-white border-b border-slate-100 px-4 sm:px-8 py-4 flex items-center justify-between">
         <h2 className="font-black text-slate-800 text-lg sm:text-xl">
           {existing ? "แก้ไขชิ้นงาน" : "สร้างชิ้นงานใหม่"}
@@ -996,7 +951,6 @@ function removeFile(index: number) {
         </button>
       </div>
 
-      {/* เนื้อหาฟอร์ม — จำกัดความกว้างและจัดกึ่งกลาง ไม่ให้ชิดขอบจอ */}
       <div className="max-w-3xl mx-auto px-4 sm:px-8 py-6 space-y-6 pb-28">
         <div>
           <label className="text-xs font-black text-slate-500">ชื่องาน</label>
@@ -1020,7 +974,6 @@ function removeFile(index: number) {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* แนบไฟล์ — ทำเป็นกล่อง dropzone แทน input ดิบๆ */}
           <div>
             <label className="text-xs font-black text-slate-500">แนบไฟล์ / รูปภาพ (แนบได้หลายไฟล์)</label>
             <button
@@ -1043,50 +996,49 @@ function removeFile(index: number) {
             />
 
             {(existingAttachments.length > 0 || previews.length > 0) && (
-  <div className="mt-2 grid grid-cols-3 gap-2">
-    {existingAttachments.map(att => (
-      <div key={att.id} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white aspect-square">
-        {isImageFile(att.file_name) ? (
-          <img src={att.url} className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
-            <span className="text-xl">📄</span>
-            <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{att.file_name}</span>
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={() => removeExistingAttachment(att)}
-          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-[10px] flex items-center justify-center hover:bg-black/70"
-        >
-          ✕
-        </button>
-      </div>
-    ))}
-    {previews.map((p, i) => (
-      <div key={i} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white aspect-square">
-        {p.isImage ? (
-          <img src={p.url} className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
-            <span className="text-xl">📄</span>
-            <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{p.file.name}</span>
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={() => removeFile(i)}
-          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-[10px] flex items-center justify-center hover:bg-black/70"
-        >
-          ✕
-        </button>
-      </div>
-    ))}
-  </div>
-)}
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                {existingAttachments.map(att => (
+                  <div key={att.id} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white aspect-square">
+                    {isImageFile(att.file_name) ? (
+                      <img src={att.url} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
+                        <span className="text-xl">📄</span>
+                        <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{att.file_name}</span>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeExistingAttachment(att)}
+                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-[10px] flex items-center justify-center hover:bg-black/70"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                {previews.map((p, i) => (
+                  <div key={i} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white aspect-square">
+                    {p.isImage ? (
+                      <img src={p.url} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
+                        <span className="text-xl">📄</span>
+                        <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{p.file.name}</span>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeFile(i)}
+                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-[10px] flex items-center justify-center hover:bg-black/70"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* แนบลิงก์ */}
           <div>
             <label className="text-xs font-black text-slate-500">แนบลิงก์</label>
             <div className="mt-1.5 flex gap-2">
@@ -1107,198 +1059,184 @@ function removeFile(index: number) {
             {links.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {links.map((l, i) => (
-  <span key={i} className="inline-flex items-center gap-1.5 text-[11px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full pl-3 pr-1.5 py-1 max-w-full">
-    <span className="truncate max-w-[160px]">🔗 {l.url}</span>
-    <button onClick={() => removeLink(i)} className="w-4 h-4 rounded-full bg-indigo-100 hover:bg-rose-100 hover:text-rose-500 flex items-center justify-center shrink-0">✕</button>
-  </span>
-))}
+                  <span key={i} className="inline-flex items-center gap-1.5 text-[11px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full pl-3 pr-1.5 py-1 max-w-full">
+                    <span className="truncate max-w-[160px]">🔗 {l.url}</span>
+                    <button onClick={() => removeLink(i)} className="w-4 h-4 rounded-full bg-indigo-100 hover:bg-rose-100 hover:text-rose-500 flex items-center justify-center shrink-0">✕</button>
+                  </span>
+                ))}
               </div>
             )}
           </div>
         </div>
+
         <div className="rounded-2xl border-2 border-slate-100 bg-white p-4 space-y-3">
-  <p className="text-xs font-black text-slate-600">หน่วยการเรียนรู้ และตัวชี้วัด (วผ.7.1)</p>
+          <p className="text-xs font-black text-slate-600">หน่วยการเรียนรู้ และตัวชี้วัด (วผ.7.1)</p>
 
-  <div>
-    <label className="text-[11px] font-black text-slate-400">หน่วยการเรียนรู้</label>
-    <div className="mt-1 flex gap-1.5">
-      <select
-        value={unitId ?? ""}
-        onChange={e => { setUnitId(e.target.value || null); setSelectedIndicatorIds(new Set()); }}
-        className="flex-1 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
-      >
-        <option value="">— ไม่ระบุหน่วย —</option>
-        {units.map(u => <option key={u.id} value={u.id}>{u.unit_name}</option>)}
-      </select>
-      <button type="button" onClick={() => setShowAddUnit(v => !v)}
-        className="px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-[11px] shrink-0">
-        + หน่วยใหม่
-      </button>
-    </div>
-    {showAddUnit && (
-      <div className="mt-2 flex gap-1.5">
-        <input value={newUnitName} onChange={e => setNewUnitName(e.target.value)}
-          placeholder="ชื่อหน่วยการเรียนรู้ใหม่"
-          className="flex-1 border-2 border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none" />
-        <button type="button" onClick={addUnit} className="px-3 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-[11px]">บันทึก</button>
-      </div>
-    )}
-  </div>
-
-  {unitId && (
-    <div>
-      <label className="text-[11px] font-black text-slate-400">
-        ตัวชี้วัด (เลือกได้หลายข้อ — คะแนนของชิ้นงานนี้จะถูกนำไปหารเฉลี่ยกับตัวชี้วัดที่เลือก)
-      </label>
-      <div className="mt-1.5 space-y-1.5 max-h-52 overflow-y-auto border-2 border-slate-100 rounded-xl p-2">
-        {indicators.length === 0 ? (
-          <p className="text-xs font-bold text-slate-300 text-center py-4">หน่วยนี้ยังไม่มีตัวชี้วัด</p>
-        ) : (
-          indicators.map(ind => (
-            <label key={ind.id} className="flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 cursor-pointer">
-              <input type="checkbox" checked={selectedIndicatorIds.has(ind.id)} onChange={() => toggleIndicator(ind.id)} className="mt-0.5 w-4 h-4 shrink-0" />
-              <span className="text-xs font-bold text-slate-600">
-                {ind.indicator_code && <span className="text-indigo-500 mr-1">{ind.indicator_code}</span>}
-                {ind.indicator_text}
-              </span>
-            </label>
-          ))
-        )}
-      </div>
-      <button type="button" onClick={() => setShowAddIndicator(v => !v)} className="mt-1.5 text-indigo-500 font-black text-[11px]">
-        + เพิ่มตัวชี้วัดใหม่ในหน่วยนี้
-      </button>
-      {showAddIndicator && (
-        <div className="mt-2 space-y-1.5">
-          <input value={newIndicatorCode} onChange={e => setNewIndicatorCode(e.target.value)}
-            placeholder="รหัสตัวชี้วัด เช่น ว 1.1 ป.4/1 (ไม่บังคับ)"
-            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none" />
-          <div className="flex gap-1.5">
-            <input value={newIndicatorText} onChange={e => setNewIndicatorText(e.target.value)}
-              placeholder="คำอธิบายตัวชี้วัด"
-              className="flex-1 border-2 border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none" />
-            <button type="button" onClick={addIndicator} className="px-3 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-[11px] shrink-0">บันทึก</button>
-          </div>
-        </div>
-      )}
-    </div>
-  )}
-</div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="text-xs font-black text-slate-500">เลือกประเภทชิ้นงาน</label>
+            <label className="text-[11px] font-black text-slate-400">หน่วยการเรียนรู้</label>
             <select
-              value={type}
-              onChange={e => setType(e.target.value as AssignmentType)}
-              className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none bg-white"
+              value={unitNo ?? ""}
+              onChange={e => handleUnitChange(e.target.value === "" ? null : Number(e.target.value))}
+              className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
             >
-              {Object.entries(TYPE_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
+              <option value="">— ไม่ระบุหน่วย —</option>
+              {teachingUnits.map(u => (
+                <option key={u.unit_no} value={u.unit_no}>
+                  หน่วยที่ {u.unit_no} · {u.unit_name || "(ยังไม่ตั้งชื่อ)"}
+                </option>
               ))}
             </select>
-          </div>
-          <div>
-            <label className="text-xs font-black text-slate-500">คะแนนเต็ม</label>
-            <input
-              type="number"
-              value={maxScore}
-              onChange={e => setMaxScore(Number(e.target.value))}
-              className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs font-black text-slate-500">มอบหมายเมื่อ</label>
-            <input
-              type="datetime-local"
-              value={assignedAt}
-              onChange={e => setAssignedAt(e.target.value)}
-              className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-black text-slate-500">กำหนดส่ง</label>
-            <input
-              type="datetime-local"
-              value={dueDate}
-              onChange={e => setDueDate(e.target.value)}
-              className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="rounded-2xl border-2 border-slate-100 bg-white p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-black text-slate-600">อนุญาตให้มีน้ำหนักชิ้นงาน</p>
-            <button
-              type="button"
-              onClick={() => setAllowWeight(v => !v)}
-              className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${allowWeight ? "bg-indigo-500" : "bg-slate-200"}`}
-            >
-              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${allowWeight ? "translate-x-5" : "translate-x-0.5"}`} />
-            </button>
+            {teachingUnits.length === 0 && (
+              <p className="text-[11px] text-amber-500 font-bold mt-1">
+                ยังไม่มีหน่วยการเรียนรู้ใน วผ.7.1 ของวิชานี้ — ไปตั้งค่าที่เมนู "เอกสาร/รายงาน → วผ.7.1" ก่อน
+              </p>
+            )}
           </div>
 
-          {allowWeight && (
-            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] font-black text-slate-400">เปอร์เซ็นต์น้ำหนักของชิ้นงาน (ไม่บังคับ)</label>
-                <input
-                  type="number"
-                  value={weightPercent}
-                  onChange={e => setWeightPercent(e.target.value === "" ? "" : Number(e.target.value))}
-                  placeholder="เช่น 10"
-                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-                />
-              </div>
-              {/* NEW: grading-criteria field now lets you pick a saved rubric */}
-              <div className="relative">
-                <label className="text-[11px] font-black text-slate-400">เกณฑ์การให้คะแนน (ไม่บังคับ)</label>
-                <div className="mt-1 flex gap-1.5">
-                  <input
-                    value={gradingNote}
-                    onChange={e => {
-                      setGradingNote(e.target.value);
-                      setRubricId(null); // free-typed text detaches from a saved rubric
-                    }}
-                    placeholder="พิมพ์เกณฑ์ หรือเลือกจากที่ตั้งไว้"
-                    className="flex-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowRubricPicker(v => !v)}
-                    className="px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-[11px] shrink-0"
-                  >
-                    เลือกจากที่ตั้งไว้
-                  </button>
-                </div>
-                {showRubricPicker && (
-                  <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
-                    {savedRubrics.length === 0 ? (
-                      <p className="text-xs font-bold text-slate-300 text-center py-4">ยังไม่มีเกณฑ์การให้คะแนนที่บันทึกไว้</p>
-                    ) : (
-                      savedRubrics.map(r => (
-                        <button
-                          key={r.id}
-                          type="button"
-                          onClick={() => pickRubric(r)}
-                          className={`w-full text-left px-3 py-2.5 hover:bg-indigo-50 text-xs font-bold text-slate-600 border-b border-slate-50 last:border-0 ${rubricId === r.id ? "bg-indigo-50 text-indigo-600" : ""}`}
-                        >
-                          {r.name} <span className="text-slate-300 font-normal">· คะแนนดิบสูงสุด {r.max_score}</span>
-                        </button>
-                      ))
-                    )}
-                  </div>
+          {selectedUnit && (
+            <div>
+              <label className="text-[11px] font-black text-slate-400">
+                ตัวชี้วัด (เลือกได้หลายข้อ — คะแนนของชิ้นงานนี้จะถูกรวมคำนวณเป็นคะแนนของหน่วยนี้
+                เทียบกับคะแนนเก็บ {selectedUnit.score_points ?? "-"} คะแนน)
+              </label>
+              <div className="mt-1.5 space-y-1.5 max-h-52 overflow-y-auto border-2 border-slate-100 rounded-xl p-2">
+                {indicatorLines.length === 0 ? (
+                  <p className="text-xs font-bold text-slate-300 text-center py-4">
+                    หน่วยนี้ยังไม่ได้พิมพ์ตัวชี้วัดไว้ใน วผ.7.1
+                  </p>
+                ) : (
+                  indicatorLines.map((line, idx) => (
+                    <label key={idx} className="flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedIndicatorLines.has(line)}
+                        onChange={() => toggleIndicatorLine(line)}
+                        className="mt-0.5 w-4 h-4 shrink-0"
+                      />
+                      <span className="text-xs font-bold text-slate-600">{line}</span>
+                    </label>
+                  ))
                 )}
               </div>
             </div>
           )}
         </div>
+
+        <div className="rounded-2xl border-2 border-slate-100 bg-white p-4 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-black text-slate-500">เลือกประเภทชิ้นงาน</label>
+              <select
+                value={type}
+                onChange={e => setType(e.target.value as AssignmentType)}
+                className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none bg-white"
+              >
+                {Object.entries(TYPE_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-black text-slate-500">คะแนนเต็ม</label>
+              <input
+                type="number"
+                value={maxScore}
+                onChange={e => setMaxScore(Number(e.target.value))}
+                className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-black text-slate-500">มอบหมายเมื่อ</label>
+              <input
+                type="datetime-local"
+                value={assignedAt}
+                onChange={e => setAssignedAt(e.target.value)}
+                className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-black text-slate-500">กำหนดส่ง</label>
+              <input
+                type="datetime-local"
+                value={dueDate}
+                onChange={e => setDueDate(e.target.value)}
+                className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-2xl border-2 border-slate-100 bg-white p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-black text-slate-600">อนุญาตให้มีน้ำหนักชิ้นงาน</p>
+              <button
+                type="button"
+                onClick={() => setAllowWeight(v => !v)}
+                className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${allowWeight ? "bg-indigo-500" : "bg-slate-200"}`}
+              >
+                <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${allowWeight ? "translate-x-5" : "translate-x-0.5"}`} />
+              </button>
+            </div>
+
+            {allowWeight && (
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-black text-slate-400">เปอร์เซ็นต์น้ำหนักของชิ้นงาน (ไม่บังคับ)</label>
+                  <input
+                    type="number"
+                    value={weightPercent}
+                    onChange={e => setWeightPercent(e.target.value === "" ? "" : Number(e.target.value))}
+                    placeholder="เช่น 10"
+                    className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                  />
+                </div>
+                <div className="relative">
+                  <label className="text-[11px] font-black text-slate-400">เกณฑ์การให้คะแนน (ไม่บังคับ)</label>
+                  <div className="mt-1 flex gap-1.5">
+                    <input
+                      value={gradingNote}
+                      onChange={e => {
+                        setGradingNote(e.target.value);
+                        setRubricId(null);
+                      }}
+                      placeholder="พิมพ์เกณฑ์ หรือเลือกจากที่ตั้งไว้"
+                      className="flex-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowRubricPicker(v => !v)}
+                      className="px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-[11px] shrink-0"
+                    >
+                      เลือกจากที่ตั้งไว้
+                    </button>
+                  </div>
+                  {showRubricPicker && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                      {savedRubrics.length === 0 ? (
+                        <p className="text-xs font-bold text-slate-300 text-center py-4">ยังไม่มีเกณฑ์การให้คะแนนที่บันทึกไว้</p>
+                      ) : (
+                        savedRubrics.map(r => (
+                          <button
+                            key={r.id}
+                            type="button"
+                            onClick={() => pickRubric(r)}
+                            className={`w-full text-left px-3 py-2.5 hover:bg-indigo-50 text-xs font-bold text-slate-600 border-b border-slate-50 last:border-0 ${rubricId === r.id ? "bg-indigo-50 text-indigo-600" : ""}`}
+                          >
+                            {r.name} <span className="text-slate-300 font-normal">· คะแนนดิบสูงสุด {r.max_score}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Footer แบบ sticky — ปุ่มบันทึก */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 px-4 sm:px-8 py-3 z-10">
         <div className="max-w-3xl mx-auto flex gap-3">
           <button
@@ -1322,7 +1260,7 @@ function removeFile(index: number) {
 }
 
 /* =========================================================================
-   Detail view — แท็บ ชิ้นงาน / งานผู้เรียน / การมอบหมาย / มอบหมายให้รายวิชาอื่น
+   Detail view
    ========================================================================= */
 
 type DetailTab = "info" | "submissions" | "assign" | "cross";
@@ -1332,7 +1270,7 @@ function AssignmentDetail({
   subjectId,
   sectionId,
   students,
-  currentUserId,
+  currentUserId, academicYearId, 
   studentLinks,
   submissions,
   onBack,
@@ -1341,34 +1279,32 @@ function AssignmentDetail({
   assignment: Assignment;
   subjectId: string;
   sectionId: string;
-  students: Student[];
+  students: Student[]; academicYearId?: string | null;
   currentUserId: string;
   studentLinks: AssignmentStudentLink[];
   submissions: Submission[];
   onBack: () => void;
   onRefresh: () => void;
 }) {
-  // ถ้าเพิ่งกดเผยแพร่มาใหม่ ๆ ให้เปิดแท็บ "การมอบหมาย" ไว้ก่อนเลย
   const [tab, setTab] = useState<DetailTab>(studentLinks.length === 0 ? "assign" : "submissions");
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   async function handleDelete() {
-  if (!confirm(`ต้องการลบชิ้นงาน "${assignment.title}" ใช่หรือไม่?\nการลบนี้ไม่สามารถย้อนกลับได้ และจะลบข้อมูลการส่งงาน/คะแนนของนักเรียนทั้งหมดที่ผูกกับชิ้นงานนี้ด้วย`)) return;
-  setDeleting(true);
-  try {
-    // ลบข้อมูลที่เกี่ยวข้องก่อน เผื่อ DB ยังไม่ได้ตั้ง ON DELETE CASCADE
-    await supabase.from("assignment_submissions").delete().eq("assignment_id", assignment.id);
-    await supabase.from("assignment_students").delete().eq("assignment_id", assignment.id);
-    await supabase.from("assignment_attachments").delete().eq("assignment_id", assignment.id);
-    await supabase.from("assignment_cross_sections").delete().eq("source_assignment_id", assignment.id);
-    await supabase.from("assignments").delete().eq("id", assignment.id);
-    onBack();
-  } catch (e: any) {
-    alert("ลบชิ้นงานไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    if (!confirm(`ต้องการลบชิ้นงาน "${assignment.title}" ใช่หรือไม่?\nการลบนี้ไม่สามารถย้อนกลับได้ และจะลบข้อมูลการส่งงาน/คะแนนของนักเรียนทั้งหมดที่ผูกกับชิ้นงานนี้ด้วย`)) return;
+    setDeleting(true);
+    try {
+      await supabase.from("assignment_submissions").delete().eq("assignment_id", assignment.id);
+      await supabase.from("assignment_students").delete().eq("assignment_id", assignment.id);
+      await supabase.from("assignment_attachments").delete().eq("assignment_id", assignment.id);
+      await supabase.from("assignment_cross_sections").delete().eq("source_assignment_id", assignment.id);
+      await supabase.from("assignments").delete().eq("id", assignment.id);
+      onBack();
+    } catch (e: any) {
+      alert("ลบชิ้นงานไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+    setDeleting(false);
   }
-  setDeleting(false);
-}
 
   const DETAIL_TABS: { key: DetailTab; label: string }[] = [
     { key: "info", label: "ชิ้นงาน" },
@@ -1378,20 +1314,21 @@ function AssignmentDetail({
   ];
 
   if (editing) {
-  return (
-    <AssignmentForm
-      sectionId={sectionId}
-      subjectId={subjectId}
-      currentUserId={currentUserId}
-      students={students}          // ★ forward (already a prop of AssignmentDetail)
-      existing={assignment}
-      onCancel={() => setEditing(false)}
-      onRefresh={onRefresh}        // ★ add — AssignmentDetail already receives onRefresh
-      onPublished={() => { setEditing(false); setTab("assign"); }}   // onRefresh already ran inside save()
-      onSavedDraft={() => { setEditing(false); }}
-    />
-  );
-}
+    return (
+      <AssignmentForm
+        sectionId={sectionId}
+        subjectId={subjectId}
+        currentUserId={currentUserId}
+        students={students}   
+        academicYearId={academicYearId}       
+        existing={assignment}
+        onCancel={() => setEditing(false)}
+        onRefresh={onRefresh}       
+        onPublished={() => { setEditing(false); setTab("assign"); }}   
+        onSavedDraft={() => { setEditing(false); }}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -1400,18 +1337,18 @@ function AssignmentDetail({
         <div className="flex-1 min-w-0">
           <p className="font-black text-slate-800 truncate">{assignment.title}</p>
           <p className="text-slate-400 text-xs font-bold">
-  {assignment.status === "draft" ? "แบบร่าง" : <>เผยแพร่แล้ว · <DateTimeText iso={assignment.published_at} /></>}
-</p>
+            {assignment.status === "draft" ? "แบบร่าง" : <>เผยแพร่แล้ว · <DateTimeText iso={assignment.published_at} /></>}
+          </p>
         </div>
         <button onClick={() => setEditing(true)} className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs">✏️ แก้ไขชิ้นงาน</button>
       </div>
 
       <div className="flex items-center gap-2">
-  <button onClick={() => setEditing(true)} className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs">✏️ แก้ไขชิ้นงาน</button>
-  <button onClick={handleDelete} disabled={deleting} className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-black text-xs disabled:opacity-50">
-    {deleting ? "กำลังลบ..." : "🗑️ ลบชิ้นงาน"}
-  </button>
-</div>
+        <button onClick={() => setEditing(true)} className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs">✏️ แก้ไขชิ้นงาน</button>
+        <button onClick={handleDelete} disabled={deleting} className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-black text-xs disabled:opacity-50">
+          {deleting ? "กำลังลบ..." : "🗑️ ลบชิ้นงาน"}
+        </button>
+      </div>
 
       <div className="flex gap-1 bg-white rounded-xl border border-slate-100 p-1 overflow-x-auto">
         {DETAIL_TABS.map(t => (
@@ -1479,8 +1416,6 @@ function AssignmentInfoTab({ assignment }: { assignment: Assignment }) {
     </div>
   );
 }
-
-/* --------- ไฟล์แนบ / รูปภาพของชิ้นงาน (แสดงตัวอย่างรูป + ปุ่มดาวน์โหลด) --------- */
 
 function AssignmentAttachmentsPanel({ assignmentId }: { assignmentId: string }) {
   const [attachments, setAttachments] = useState<AssignmentAttachment[]>([]);
@@ -1620,7 +1555,7 @@ function InfoBox({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-/* --------- แท็บ งานผู้เรียน (ตรวจงาน/ให้คะแนน) --------- */
+/* --------- แท็บ งานผู้เรียน --------- */
 
 function SubmissionsTab({
   assignment,
@@ -1645,7 +1580,6 @@ function SubmissionsTab({
   const [savingLate, setSavingLate] = useState(false);
   const scoreInputRef = useRef<HTMLInputElement>(null);
 
-  // ★ โหมดเลือกหลายคน (bulk grading)
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkScore, setBulkScore] = useState<number | "">("");
@@ -1668,7 +1602,6 @@ function SubmissionsTab({
     const idx = filtered.findIndex(s => s.id === selectedId);
     if (idx >= 0 && idx < filtered.length - 1) {
       setSelectedId(filtered[idx + 1].id);
-      // เลื่อนโฟกัสกลับไปที่ช่องคะแนนของนักเรียนคนถัดไป
       setTimeout(() => scoreInputRef.current?.focus(), 50);
     }
   }
@@ -1697,34 +1630,33 @@ function SubmissionsTab({
     setSaving(false);
   }
   async function saveLateStatus(value: boolean | null) {
-  if (!selectedStudent) return;
-  const prev = lateDraft;
-  setLateDraft(value);      // อัปเดต UI ทันที
-  setSavingLate(true);
-  const payload = {
-    assignment_id: assignment.id,
-    student_id: selectedStudent.id,
-    status: statusDraft,
-    score: scoreDraft === "" ? null : Number(scoreDraft),
-    teacher_comment: commentDraft || null,
-    is_late: value,
-    graded_by: currentUserId || null,
-    graded_at: new Date().toISOString(),
-  };
-  try {
-    const { error } = await supabase
-      .from("assignment_submissions")
-      .upsert(payload, { onConflict: "assignment_id,student_id" });
-    if (error) throw error;
-    onChanged();
-  } catch (e: any) {
-    setLateDraft(prev); // ย้อนค่ากลับถ้าบันทึกไม่สำเร็จ
-    alert("บันทึกสถานะการส่งช้าไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    if (!selectedStudent) return;
+    const prev = lateDraft;
+    setLateDraft(value);
+    setSavingLate(true);
+    const payload = {
+      assignment_id: assignment.id,
+      student_id: selectedStudent.id,
+      status: statusDraft,
+      score: scoreDraft === "" ? null : Number(scoreDraft),
+      teacher_comment: commentDraft || null,
+      is_late: value,
+      graded_by: currentUserId || null,
+      graded_at: new Date().toISOString(),
+    };
+    try {
+      const { error } = await supabase
+        .from("assignment_submissions")
+        .upsert(payload, { onConflict: "assignment_id,student_id" });
+      if (error) throw error;
+      onChanged();
+    } catch (e: any) {
+      setLateDraft(prev);
+      alert("บันทึกสถานะการส่งช้าไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+    setSavingLate(false);
   }
-  setSavingLate(false);
-}
 
-  // ★ กรอกคะแนนแล้วเปลี่ยนสถานะเป็น "ตรวจแล้ว" อัตโนมัติ (ถ้ายังไม่เคยถูกตั้งสถานะเองเป็นอย่างอื่น)
   function onScoreChange(value: number | "") {
     setScoreDraft(value);
     if (value !== "" && (statusDraft === "pending_review" || statusDraft === "not_submitted" as any)) {
@@ -1732,7 +1664,6 @@ function SubmissionsTab({
     }
   }
 
-  // ★ กด Enter ในช่องคะแนน = บันทึกทันที แล้วไปนักเรียนคนถัดไป
   function onScoreKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -1740,7 +1671,6 @@ function SubmissionsTab({
     }
   }
 
-  // ★ ลบงานของนักเรียน (แทนสถานะ "ไม่ผ่าน" เดิม) — ทำให้กลับไปเป็น "ไม่มีงาน"
   async function deleteSubmission() {
     if (!selectedStudent) return;
     if (!confirm(`ต้องการลบงานของ "${selectedStudent.first_name} ${selectedStudent.last_name}" ใช่หรือไม่?\nสถานะจะกลับไปเป็น "ไม่มีงาน"`)) return;
@@ -1773,7 +1703,6 @@ function SubmissionsTab({
     }
   }
 
-  // ★ ให้คะแนนหลายคนพร้อมกัน
   async function saveBulkGrade() {
     if (checkedIds.size === 0) return;
     setBulkSaving(true);
@@ -1946,77 +1875,75 @@ function SubmissionsTab({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-  <div>
-    <label className="text-xs font-black text-slate-500">คะแนน (เต็ม {assignment.max_score})</label>
-    <input
-      ref={scoreInputRef}
-      type="number"
-      value={scoreDraft}
-      onChange={e => onScoreChange(e.target.value === "" ? "" : Number(e.target.value))}
-      onKeyDown={onScoreKeyDown}
-      max={assignment.max_score}
-      className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-    />
-    <p className="text-[10px] text-slate-300 font-bold mt-1">กด Enter เพื่อบันทึกและไปนักเรียนคนถัดไป</p>
-  </div>
-  <div>
-    <label className="text-xs font-black text-slate-500">สถานะ</label>
-    <select
-      value={statusDraft}
-      onChange={e => setStatusDraft(e.target.value as SubmissionStatus)}
-      className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
-    >
-      <option value="pending_review">รอตรวจ</option>
-      <option value="reviewed">ตรวจแล้ว</option>
-      <option value="needs_revision">ต้องแก้ไข</option>
-    </select>
-  </div>
-</div>
+              <div>
+                <label className="text-xs font-black text-slate-500">คะแนน (เต็ม {assignment.max_score})</label>
+                <input
+                  ref={scoreInputRef}
+                  type="number"
+                  value={scoreDraft}
+                  onChange={e => onScoreChange(e.target.value === "" ? "" : Number(e.target.value))}
+                  onKeyDown={onScoreKeyDown}
+                  max={assignment.max_score}
+                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                />
+                <p className="text-[10px] text-slate-300 font-bold mt-1">กด Enter เพื่อบันทึกและไปนักเรียนคนถัดไป</p>
+              </div>
+              <div>
+                <label className="text-xs font-black text-slate-500">สถานะ</label>
+                <select
+                  value={statusDraft}
+                  onChange={e => setStatusDraft(e.target.value as SubmissionStatus)}
+                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+                >
+                  <option value="pending_review">รอตรวจ</option>
+                  <option value="reviewed">ตรวจแล้ว</option>
+                  <option value="needs_revision">ต้องแก้ไข</option>
+                </select>
+              </div>
+            </div>
 
-{/* ★ เพิ่มส่วนนี้ */}
-{(() => {
-  const info = getLateInfo(assignment.due_date, selectedSub?.submitted_at ?? null, lateDraft);
-  return (
-    <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs font-black text-slate-600">ส่งช้าหรือไม่</p>
-          <p className="text-[10px] text-slate-400 font-bold mt-0.5">
-            {info.isManual
-              ? "ครูกำหนดสถานะนี้เอง"
-              : assignment.due_date
-              ? "คำนวณอัตโนมัติจากกำหนดส่ง"
-              : "ชิ้นงานนี้ไม่ได้กำหนดวันส่ง จึงถือว่าตรงเวลาโดยอัตโนมัติ"}
-          </p>
-        </div>
-        <div className="flex gap-2 shrink-0">
-          <button type="button" disabled={savingLate} onClick={() => saveLateStatus(false)}
-            className={`px-3 py-1.5 rounded-lg font-black text-xs disabled:opacity-50 ${lateDraft === false ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
-            ✅ ตรงเวลา
-          </button>
-          <button type="button" disabled={savingLate} onClick={() => saveLateStatus(true)}
-            className={`px-3 py-1.5 rounded-lg font-black text-xs disabled:opacity-50 ${lateDraft === true ? "bg-rose-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
-            ⏰ ส่งช้า
-          </button>
-          {lateDraft !== null && (
-            <button type="button" disabled={savingLate} onClick={() => saveLateStatus(null)} title="กลับไปใช้การคำนวณอัตโนมัติ"
-              className="px-2 py-1.5 rounded-lg font-black text-xs bg-white border border-slate-200 text-slate-400 hover:text-indigo-500 disabled:opacity-50">
-              {savingLate ? "..." : "↺ อัตโนมัติ"}
-            </button>
-          )}
-        </div>
-      </div>
+            {(() => {
+              const info = getLateInfo(assignment.due_date, selectedSub?.submitted_at ?? null, lateDraft);
+              return (
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-black text-slate-600">ส่งช้าหรือไม่</p>
+                      <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+                        {info.isManual
+                          ? "ครูกำหนดสถานะนี้เอง"
+                          : assignment.due_date
+                          ? "คำนวณอัตโนมัติจากกำหนดส่ง"
+                          : "ชิ้นงานนี้ไม่ได้กำหนดวันส่ง จึงถือว่าตรงเวลาโดยอัตโนมัติ"}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button type="button" disabled={savingLate} onClick={() => saveLateStatus(false)}
+                        className={`px-3 py-1.5 rounded-lg font-black text-xs disabled:opacity-50 ${lateDraft === false ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+                        ✅ ตรงเวลา
+                      </button>
+                      <button type="button" disabled={savingLate} onClick={() => saveLateStatus(true)}
+                        className={`px-3 py-1.5 rounded-lg font-black text-xs disabled:opacity-50 ${lateDraft === true ? "bg-rose-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+                        ⏰ ส่งช้า
+                      </button>
+                      {lateDraft !== null && (
+                        <button type="button" disabled={savingLate} onClick={() => saveLateStatus(null)} title="กลับไปใช้การคำนวณอัตโนมัติ"
+                          className="px-2 py-1.5 rounded-lg font-black text-xs bg-white border border-slate-200 text-slate-400 hover:text-indigo-500 disabled:opacity-50">
+                          {savingLate ? "..." : "↺ อัตโนมัติ"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
 
-      {/* ★ แสดงผลเสมอ ทั้งตรงเวลาและส่งช้า */}
-      <p className={`mt-2 text-[11px] font-black ${info.isLate ? "text-rose-500" : "text-emerald-500"}`}>
-        {info.isLate
-          ? `⏰ ส่งเกินกำหนด ${info.daysLate} วัน`
-          : "✅ ส่งตรงเวลา"}
-        {assignment.due_date && <> (กำหนดส่ง <DateTimeText iso={assignment.due_date} />)</>}
-      </p>
-    </div>
-  );
-})()}
+                  <p className={`mt-2 text-[11px] font-black ${info.isLate ? "text-rose-500" : "text-emerald-500"}`}>
+                    {info.isLate
+                      ? `⏰ ส่งเกินกำหนด ${info.daysLate} วัน`
+                      : "✅ ส่งตรงเวลา"}
+                    {assignment.due_date && <> (กำหนดส่ง <DateTimeText iso={assignment.due_date} />)</>}
+                  </p>
+                </div>
+              );
+            })()}
 
             <div>
               <label className="text-xs font-black text-slate-500">คอมเมนต์ให้นักเรียน</label>
@@ -2052,7 +1979,7 @@ function SubmissionsTab({
   );
 }
 
-/* --------- แท็บ การมอบหมาย (checklist Assign All / รายคน / ช่วงเลขที่) --------- */
+/* --------- แท็บ การมอบหมาย --------- */
 
 function AssignTab({
   assignmentId,
@@ -2107,7 +2034,6 @@ function AssignTab({
     onChanged();
   }
 
-  // มอบหมายทีละกลุ่ม: เลือกตามช่วงเลขที่ (seat_number) แล้วมอบหมายทั้งหมดในช่วงนั้น
   async function assignRange() {
     if (rangeFrom === "" || rangeTo === "") return;
     const targets = students.filter(s => s.seat_number >= Number(rangeFrom) && s.seat_number <= Number(rangeTo));
@@ -2186,58 +2112,56 @@ function CrossSectionTab({
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-  (async () => {
-    try {
-      // หาว่าครูคนนี้สอนวิชาไหนบ้าง จากตารางสอน (เช็คทั้ง teacher_id และ teacher_id_2 เพราะบางคาบมีครูคู่)
-      const { data: entries } = await supabase
-        .from("timetable_entries")
-        .select("subject_id")
-        .or(`teacher_id.eq.${currentUserId},teacher_id_2.eq.${currentUserId}`);
+    (async () => {
+      try {
+        const { data: entries } = await supabase
+          .from("timetable_entries")
+          .select("subject_id")
+          .or(`teacher_id.eq.${currentUserId},teacher_id_2.eq.${currentUserId}`);
 
-      const subjectIds = Array.from(new Set((entries ?? []).map((e: any) => e.subject_id).filter(Boolean)));
-      if (subjectIds.length === 0) {
+        const subjectIds = Array.from(new Set((entries ?? []).map((e: any) => e.subject_id).filter(Boolean)));
+        if (subjectIds.length === 0) {
+          setSections([]);
+          setLoading(false);
+          return;
+        }
+
+        const { data: mySubjects } = await supabase
+          .from("subjects")
+          .select("id, subject_code, name_th")
+          .in("id", subjectIds);
+
+        const { data: allSections } = await supabase
+          .from("subject_sections")
+          .select("id, subject_id, join_code, classroom_id")
+          .in("subject_id", subjectIds);
+
+        const classroomIds = Array.from(
+          new Set((allSections ?? []).map((sec: any) => sec.classroom_id).filter(Boolean))
+        );
+        const { data: classroomRows } = classroomIds.length
+          ? await supabase.from("classrooms").select("id, room_name, room_number").in("id", classroomIds)
+          : { data: [] as any[] };
+
+        const list: TeacherSection[] = (allSections ?? [])
+          .filter((sec: any) => sec.id !== sectionId)
+          .map((sec: any) => {
+            const subj = (mySubjects ?? []).find((s: any) => s.id === sec.subject_id);
+            const classroom = (classroomRows ?? []).find((c: any) => c.id === sec.classroom_id);
+            const classroomLabel =
+              classroom?.room_name || (classroom?.room_number ? `ห้อง ${classroom.room_number}` : sec.join_code || "-");
+            return {
+              id: sec.id,
+              label: subj ? `${subj.subject_code} · ${subj.name_th} · ${classroomLabel}` : `${sec.join_code} · ${classroomLabel}`,
+            };
+          });
+        setSections(list);
+      } catch {
         setSections([]);
-        setLoading(false);
-        return;
       }
-
-      const { data: mySubjects } = await supabase
-        .from("subjects")
-        .select("id, subject_code, name_th")
-        .in("id", subjectIds);
-
-      const { data: allSections } = await supabase
-        .from("subject_sections")
-        .select("id, subject_id, join_code, classroom_id")
-        .in("subject_id", subjectIds);
-
-      // ★ ดึงข้อมูลห้องเรียน เพื่อโชว์ชื่อห้องเรียนประกอบชื่อวิชา
-      const classroomIds = Array.from(
-        new Set((allSections ?? []).map((sec: any) => sec.classroom_id).filter(Boolean))
-      );
-      const { data: classroomRows } = classroomIds.length
-        ? await supabase.from("classrooms").select("id, room_name, room_number").in("id", classroomIds)
-        : { data: [] as any[] };
-
-      const list: TeacherSection[] = (allSections ?? [])
-        .filter((sec: any) => sec.id !== sectionId)
-        .map((sec: any) => {
-          const subj = (mySubjects ?? []).find((s: any) => s.id === sec.subject_id);
-          const classroom = (classroomRows ?? []).find((c: any) => c.id === sec.classroom_id);
-          const classroomLabel =
-            classroom?.room_name || (classroom?.room_number ? `ห้อง ${classroom.room_number}` : sec.join_code || "-");
-          return {
-            id: sec.id,
-            label: subj ? `${subj.subject_code} · ${subj.name_th} · ${classroomLabel}` : `${sec.join_code} · ${classroomLabel}`,
-          };
-        });
-      setSections(list);
-    } catch {
-      setSections([]);
-    }
-    setLoading(false);
-  })();
-}, [currentUserId, sectionId]);
+      setLoading(false);
+    })();
+  }, [currentUserId, sectionId]);
 
   function toggle(id: string) {
     setSelected(prev => {
@@ -2316,9 +2240,7 @@ function CrossSectionTab({
 }
 
 /* =========================================================================
-   NEW — จัดการเกณฑ์รูบิก (Rubric manager)
-   Tables used: grading_rubrics, rubric_levels, rubric_criteria,
-   rubric_criteria_level_notes (see migration SQL).
+   จัดการเกณฑ์รูบิก
    ========================================================================= */
 
 function RubricManagerModal({
@@ -2455,10 +2377,8 @@ function RubricManagerModal({
   );
 }
 
-/* ------- สร้าง/แก้ไข เกณฑ์การให้คะแนนแบบรูบิก (matrix: เกณฑ์ × ระดับ) ------- */
-
 type EditorLevel = { id: string; name: string; score: number };
-type EditorCriterion = { id: string; name: string; weight: number; notes: Record<string, string> }; // notes keyed by level id
+type EditorCriterion = { id: string; name: string; weight: number; notes: Record<string, string> };
 
 function RubricEditor({
   subjectId,
@@ -2551,7 +2471,6 @@ function RubricEditor({
     }
     setSaving(true);
     try {
-      // ดึง uid จาก session ตรงๆ เพื่อให้ตรงกับ auth.uid() ที่ RLS ใช้เช็คเสมอ
       const { data: userData, error: userErr } = await supabase.auth.getUser();
       if (userErr || !userData?.user?.id) {
         alert("ไม่พบผู้ใช้ที่ล็อกอินอยู่ กรุณาล็อกอินใหม่แล้วลองอีกครั้ง");
@@ -2571,7 +2490,6 @@ function RubricEditor({
       if (existing) {
         await supabase.from("grading_rubrics").update(rubricPayload).eq("id", existing.id);
         rubricId = existing.id;
-        // เคลียร์ของเก่าแล้วเขียนใหม่ทั้งหมด (ง่ายกว่าการ diff ทีละแถว)
         const { data: oldCrit } = await supabase.from("rubric_criteria").select("id").eq("rubric_id", rubricId);
         const oldCritIds = (oldCrit ?? []).map((c: any) => c.id);
         if (oldCritIds.length) await supabase.from("rubric_criteria_level_notes").delete().in("criterion_id", oldCritIds);
@@ -2583,7 +2501,6 @@ function RubricEditor({
         rubricId = data.id;
       }
 
-      // levels — insert and remember the real (new) ids, mapping from temp ids
       const levelIdMap: Record<string, string> = {};
       for (let i = 0; i < levels.length; i++) {
         const l = levels[i];
@@ -2596,7 +2513,6 @@ function RubricEditor({
         levelIdMap[l.id] = data.id;
       }
 
-      // criteria + per-cell notes
       for (let i = 0; i < criteria.length; i++) {
         const c = criteria[i];
         const { data: critData, error: critErr } = await supabase
@@ -2649,70 +2565,68 @@ function RubricEditor({
             />
 
             <div className="overflow-x-auto">
-  <div
-    className="grid gap-2"
-    style={{ gridTemplateColumns: `200px repeat(${levels.length}, minmax(180px, 1fr)) 140px` }}
-  >
-    {/* หัวตาราง */}
-    <div className="text-left text-xs font-black text-slate-500 px-1 self-end pb-2">เกณฑ์การประเมิน</div>
-    {levels.map(l => (
-      <div key={l.id} className="border-2 border-slate-100 rounded-xl p-2">
-        <div className="flex items-center gap-1">
-          <input
-            value={l.name}
-            onChange={e => updateLevel(l.id, { name: e.target.value })}
-            placeholder="ชื่อระดับ"
-            className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
-          />
-          <button onClick={() => removeLevel(l.id)} className="w-5 h-5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-500 text-[10px] font-black shrink-0">✕</button>
-        </div>
-        <input
-          type="number"
-          value={l.score}
-          onChange={e => updateLevel(l.id, { score: Number(e.target.value) })}
-          className="mt-1.5 w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-center"
-        />
-        <span className="text-[10px] text-slate-400 font-bold ml-1">คะแนน</span>
-      </div>
-    ))}
-    <div className="self-end pb-1">
-      <button onClick={addLevel} className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 font-black text-xs whitespace-nowrap w-full">+ เพิ่มระดับ</button>
-    </div>
+              <div
+                className="grid gap-2"
+                style={{ gridTemplateColumns: `200px repeat(${levels.length}, minmax(180px, 1fr)) 140px` }}
+              >
+                <div className="text-left text-xs font-black text-slate-500 px-1 self-end pb-2">เกณฑ์การประเมิน</div>
+                {levels.map(l => (
+                  <div key={l.id} className="border-2 border-slate-100 rounded-xl p-2">
+                    <div className="flex items-center gap-1">
+                      <input
+                        value={l.name}
+                        onChange={e => updateLevel(l.id, { name: e.target.value })}
+                        placeholder="ชื่อระดับ"
+                        className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
+                      />
+                      <button onClick={() => removeLevel(l.id)} className="w-5 h-5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-500 text-[10px] font-black shrink-0">✕</button>
+                    </div>
+                    <input
+                      type="number"
+                      value={l.score}
+                      onChange={e => updateLevel(l.id, { score: Number(e.target.value) })}
+                      className="mt-1.5 w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-center"
+                    />
+                    <span className="text-[10px] text-slate-400 font-bold ml-1">คะแนน</span>
+                  </div>
+                ))}
+                <div className="self-end pb-1">
+                  <button onClick={addLevel} className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 font-black text-xs whitespace-nowrap w-full">+ เพิ่มระดับ</button>
+                </div>
 
-    {/* แถวของแต่ละเกณฑ์ */}
-    {criteria.map(c => (
-      <div key={c.id} className="contents">
-        <div className="border-2 border-slate-100 rounded-xl p-2">
-          <input
-            value={c.name}
-            onChange={e => updateCriterion(c.id, { name: e.target.value })}
-            placeholder="ชื่อเกณฑ์"
-            className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
-          />
-          <p className="text-[10px] text-slate-400 font-bold mt-1.5">น้ำหนัก</p>
-          <input
-            type="number"
-            value={c.weight}
-            onChange={e => updateCriterion(c.id, { weight: Number(e.target.value) })}
-            className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-center"
-          />
-          <button onClick={() => removeCriterion(c.id)} className="mt-2 text-rose-500 font-black text-[11px] block">✕ ลบเกณฑ์</button>
-        </div>
-        {levels.map(l => (
-          <textarea
-            key={l.id}
-            value={c.notes[l.id] ?? ""}
-            onChange={e => updateNote(c.id, l.id, e.target.value)}
-            placeholder="คำอธิบายระดับ (ไม่บังคับ)"
-            rows={3}
-            className="w-full border-2 border-slate-100 rounded-xl px-2 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none resize-none"
-          />
-        ))}
-        <div />
-      </div>
-    ))}
-  </div>
-</div>
+                {criteria.map(c => (
+                  <div key={c.id} className="contents">
+                    <div className="border-2 border-slate-100 rounded-xl p-2">
+                      <input
+                        value={c.name}
+                        onChange={e => updateCriterion(c.id, { name: e.target.value })}
+                        placeholder="ชื่อเกณฑ์"
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
+                      />
+                      <p className="text-[10px] text-slate-400 font-bold mt-1.5">น้ำหนัก</p>
+                      <input
+                        type="number"
+                        value={c.weight}
+                        onChange={e => updateCriterion(c.id, { weight: Number(e.target.value) })}
+                        className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-center"
+                      />
+                      <button onClick={() => removeCriterion(c.id)} className="mt-2 text-rose-500 font-black text-[11px] block">✕ ลบเกณฑ์</button>
+                    </div>
+                    {levels.map(l => (
+                      <textarea
+                        key={l.id}
+                        value={c.notes[l.id] ?? ""}
+                        onChange={e => updateNote(c.id, l.id, e.target.value)}
+                        placeholder="คำอธิบายระดับ (ไม่บังคับ)"
+                        rows={3}
+                        className="w-full border-2 border-slate-100 rounded-xl px-2 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none resize-none"
+                      />
+                    ))}
+                    <div />
+                  </div>
+                ))}
+              </div>
+            </div>
 
             <button onClick={addCriterion} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">+ เพิ่มเกณฑ์</button>
 
@@ -2740,8 +2654,6 @@ function RubricEditor({
   );
 }
 
-/* ------- คัดลอกเกณฑ์การให้คะแนนจากวิชาอื่นที่ครูคนนี้สอน ------- */
-
 function RubricCopyFromOtherSubject({
   subjectId,
   currentUserId,
@@ -2762,7 +2674,7 @@ function RubricCopyFromOtherSubject({
     supabase
       .from("subjects")
       .select("id, subject_code, name_th")
-      .eq("created_by", currentUserId) // NOTE: adjust to your actual ownership column
+      .eq("created_by", currentUserId)
       .neq("id", subjectId)
       .then(({ data }) => {
         setOtherSubjects(((data ?? []) as any[]).map(s => ({ id: s.id, label: `${s.subject_code ?? ""} · ${s.name_th ?? ""}` })));
@@ -2883,10 +2795,7 @@ function RubricCopyFromOtherSubject({
 }
 
 /* =========================================================================
-   NEW — นำเข้าชิ้นงาน (Import assignment from the same subject, across
-   sections/teachers). Table used for lookups: subjects, subject_sections,
-   assignments. Adjust the "same subject" match rule (currently subject_code)
-   and the teacher lookup (uses your `users` table: id, email, title, first_name, last_name).
+   นำเข้าชิ้นงาน
    ========================================================================= */
 
 type AcademicYear = { id: string; year_name: string; semester: number; is_current: boolean };
@@ -2929,14 +2838,12 @@ function ImportAssignmentModal({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copying, setCopying] = useState(false);
 
-  // โหลดรายชื่อครู (สำหรับ dropdown filter)
   useEffect(() => {
     supabase.from("profiles").select("id, email, full_name").then(({ data }) => {
       setTeachers((data ?? []) as SchoolTeacher[]);
     });
   }, []);
 
-  // โหลดปีการศึกษา/ภาคเรียนทั้งหมด และตั้งค่าเริ่มต้นเป็นปีปัจจุบัน (is_current)
   useEffect(() => {
     supabase
       .from("academic_years")
@@ -2954,8 +2861,6 @@ function ImportAssignmentModal({
   async function runSearch() {
     setLoadingCards(true);
     try {
-      // 1) หาว่าวิชาปัจจุบันมีรหัสวิชาอะไร แล้วรวบรวม subject id ที่ "ถือว่าเป็นวิชาเดียวกัน"
-      //    (รวม id ปัจจุบัน + id อื่นที่ subject_code ตรงกัน เผื่อมีข้อมูลซ้ำคนละแถว)
       const { data: currentSubject } = await supabase
         .from("subjects")
         .select("id, subject_code, name_th")
@@ -2986,7 +2891,6 @@ function ImportAssignmentModal({
         return;
       }
 
-      // 2) หา section ของวิชาเหล่านี้ ยกเว้นห้องปัจจุบัน กรองตามปี/ครูถ้าเลือกไว้
       let secQuery = supabase
         .from("subject_sections")
         .select("id, subject_id, classroom_id, academic_year_id, teacher_id, co_teacher_id, join_code")
@@ -3003,7 +2907,6 @@ function ImportAssignmentModal({
         return;
       }
 
-      // 3) โหลดข้อมูลประกอบ: วิชา / ห้องเรียน / ปีการศึกษา / ครู
       const secSubjectIds = Array.from(new Set(sectionRows.map((s: any) => s.subject_id)));
       const classroomIds = Array.from(new Set(sectionRows.map((s: any) => s.classroom_id).filter(Boolean)));
       const yearIds = Array.from(new Set(sectionRows.map((s: any) => s.academic_year_id).filter(Boolean)));
@@ -3250,8 +3153,7 @@ function ImportAssignmentModal({
 }
 
 /* =========================================================================
-   NEW — สร้างประกาศใหม่ (Announcement)
-   Tables: subject_announcements, subject_announcement_attachments.
+   สร้างประกาศใหม่
    ========================================================================= */
 
 function AnnouncementModal({
@@ -3263,7 +3165,7 @@ function AnnouncementModal({
 }: {
   sectionId: string;
   currentUserId: string;
-  existing?: Announcement;      // ★
+  existing?: Announcement;
   onClose: () => void;
   onPosted: () => void;
 }) {
@@ -3293,7 +3195,6 @@ function AnnouncementModal({
     editorRef.current?.focus();
   }
 
-  // helper for createLink (needs 3rd arg)
   function exec2(cmd: string, value: string) {
     document.execCommand(cmd, false, value);
     editorRef.current?.focus();
@@ -3326,12 +3227,11 @@ function AnnouncementModal({
         }
       }
 
-      // 2) ยิงไป API route ของเราแทนการเรียก Supabase ตรง ๆ
       const res = await fetch("/api/subject-announcements", {
-        method: existing ? "PATCH" : "POST",           // ★
+        method: existing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: existing?.id,                              // ★ ใช้ตอนแก้ไข
+          id: existing?.id,
           subject_section_id: sectionId,
           title: title.trim(),
           content,

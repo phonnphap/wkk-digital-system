@@ -2617,9 +2617,15 @@ const [{ data: subj }, { data: room }] = await Promise.all([
         : tab === "random" ? "max-w-[1900px]"
         : "max-w-4xl"
       }`}>
-        {bannerMenu === "assignments" && section && (
-          <AssignmentsTool sectionId={section.id} subjectId={subjectId} students={students} currentUserId={currentUserId} />
-        )}
+{bannerMenu === "assignments" && section && (
+  <AssignmentsTool
+    sectionId={section.id}
+    subjectId={subjectId}
+    students={students}
+    currentUserId={currentUserId}
+    academicYearId={academicYearId}   // ★ เพิ่ม
+  />
+)}
         {bannerMenu === "insights" && classroom && (
           <InsightsTool
             currentUserId={currentUserId}

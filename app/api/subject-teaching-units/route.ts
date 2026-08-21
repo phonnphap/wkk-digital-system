@@ -24,6 +24,9 @@ export async function GET(req: Request) {
 
 // POST: บันทึกทั้งชุด (ลบของเดิมแล้วใส่ใหม่ทั้งหมดของวิชา+ปีนี้)
 export async function POST(req: Request) {
+  const supabase = await createClient(); // ★ เพิ่ม await
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  console.log("DEBUG current user:", user?.id, "error:", authErr?.message);
   const body = await req.json();
   const { subject_id, academic_year_id, rows, updated_by } = body as {
     subject_id: string;
@@ -33,8 +36,6 @@ export async function POST(req: Request) {
   };
   if (!subject_id) return NextResponse.json({ error: "missing subject_id" }, { status: 400 });
   if (!Array.isArray(rows)) return NextResponse.json({ error: "rows must be an array" }, { status: 400 });
-
-  const supabase = await createClient(); // ★ เพิ่ม await
 
   const delQuery = supabase.from("subject_teaching_units").delete().eq("subject_id", subject_id);
   const { error: delErr } = academic_year_id
