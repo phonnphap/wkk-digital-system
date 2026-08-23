@@ -107,7 +107,7 @@ export default function Vp71Tool({
 
   const indicatorLabel = resolvedSubjectType === "additional" ? "ผลการเรียนรู้" : "ตัวชี้วัด";
   const indicatorAbbr = resolvedSubjectType === "additional" ? "ผช." : "ตช.";
-  const indicatorItemLabel = resolvedSubjectType === "additional" ? "ผลการเรียนรู้ข้อที่" : "ตัวชี้วัดที่";
+  const indicatorItemLabel = resolvedSubjectType === "additional" ? "ผลการเรียนรู้" : "ตัวชี้วัด";
 
   useEffect(() => {
     (async () => {
@@ -564,8 +564,15 @@ function ReportView({
       if (score != null) { sumScore += score; anyGraded = true; }
     });
     if (!anyGraded) return { display: "–", state: "pending" };
-    const passed = sumMax > 0 && sumScore / sumMax >= 0.5;
-    return { display: `${fmtScore(sumScore)}/${fmtScore(sumMax)}`, state: passed ? "pass" : "fail" };
+const passed = sumMax > 0 && sumScore / sumMax >= 0.5;
+if (related.length === 1) {
+  const a = related[0];
+  const weight = computedWeightByAssignment[a.id] ?? 0;
+  const score = studentScoreForAssignment(a.id, studentId) ?? 0;
+  const achieved = a.max_score > 0 ? (score / a.max_score) * weight : 0;
+  return { display: fmtScore(achieved), state: passed ? "pass" : "fail" };
+}
+return { display: `${fmtScore(sumScore)}/${fmtScore(sumMax)}`, state: passed ? "pass" : "fail" };
   }
 
   const sumUnitScorePoints = unitsWithScore.reduce((s, u) => s + (Number(u.score_points) || 0), 0);
@@ -644,7 +651,7 @@ function ReportView({
                 <Fragment key={u.unit_no}>
                   {indicatorLinesOf(u).map((line, idx) => (
                     <th key={`${u.unit_no}-i${idx}`} className="border border-slate-300 px-1 py-1 font-bold w-7" title={line}>
-                      {indicatorAbbr}{idx + 1}
+                      {idx + 1}
                     </th>
                   ))}
                   <th className="border border-slate-300 px-1 py-1 font-black w-12 bg-fuchsia-50 print:bg-slate-100">สรุป</th>

@@ -1898,6 +1898,9 @@ function SubjectSettingsTab({
   "name_only" | "name_and_id" | "id_and_dob"
 >(section.student_access_mode ?? "name_only");
   const gradingStructure = "formative_midterm_final" as const;
+  const [gradeRounding, setGradeRounding] = useState<"up" | "truncate">(
+  (subject as any)?.grade_rounding_mode ?? "truncate"
+);
   const useMidterm = true;
   const [formativeMax, setFormativeMax] = useState(String((section as any).formative_max_score ?? 70));
   const [midtermMax, setMidtermMax] = useState(String((section as any).midterm_max_score ?? 0));
@@ -1914,6 +1917,7 @@ function SubjectSettingsTab({
     hoursPerYear !== (subject?.hours_per_year != null ? String(subject.hours_per_year) : "") ||
     scoreGroupCode !== (subject?.score_group_code ?? "") ||
     gradingMode !== (subject?.grading_mode ?? "numeric") ||
+    gradeRounding !== ((subject as any)?.grade_rounding_mode ?? "truncate") ||
     studentAccessMode !== (section.student_access_mode ?? "name_only") ||
     passThreshold !== String(subject?.pass_threshold_percent ?? 50) ||
     studentPortalEnabled !== (section.student_portal_enabled ?? true) ||
@@ -1921,6 +1925,23 @@ function SubjectSettingsTab({
     formativeMax !== String((section as any).formative_max_score ?? 70) ||
     midtermMax !== String((section as any).midterm_max_score ?? 0) ||
     finalMax !== String((section as any).final_max_score ?? 30);
+    const [suggestedGroup, setSuggestedGroup] = useState<{id:string; subject_code:string; name_th:string}[]>([]);
+const [groupWeights, setGroupWeights] = useState<Record<string, string>>({});
+
+useEffect(() => {
+  if (!subject?.subject_code || subject.subject_code.length < 6) return;
+  const prefix = subject.subject_code.slice(0, 6);
+  supabase
+    .from("subjects")
+    .select("id, subject_code, name_th")
+    .like("subject_code", `${prefix}%`)
+    .neq("id", subject.id)
+    .then(({ data }) => setSuggestedGroup(data ?? []));
+}, [subject?.subject_code, subject?.id]);
+
+    function applyRounding(percent: number, mode: "up" | "truncate"): number {
+  return mode === "up" ? Math.ceil(percent) : Math.floor(percent);
+}
 
   async function handleSave() {
     if (!subject || readOnly) return;
@@ -1936,7 +1957,8 @@ function SubjectSettingsTab({
       credit_hours: creditHours.trim() === "" ? null : Number(creditHours),
       hours_per_year: hoursPerYear.trim() === "" ? null : Number(hoursPerYear),
       score_group_code: scoreGroupCode.trim() === "" ? null : scoreGroupCode.trim(),
-      grading_mode: gradingMode,                                                                 // ★ เพิ่ม
+      grading_mode: gradingMode,         
+      grade_rounding_mode: gradeRounding,                                                        // ★ เพิ่ม
       pass_threshold_percent: Math.max(0, Math.min(100, Number(passThreshold) || 50)),            // ★ เพิ่ม
     };
     const sectionUpdate = {
@@ -2149,7 +2171,23 @@ function SubjectSettingsTab({
             </p>
           </div>
         )}
-
+        <div>
+  <p className="text-xs font-black text-slate-500 mb-2">การปัดเศษคะแนน/เกรด</p>
+  <div className="flex gap-2">
+    {[
+      { key: "up", label: "ปัดขึ้นเมื่อมีเศษ" },
+      { key: "truncate", label: "ตัดเศษทิ้ง" },
+    ].map(opt => (
+      <button key={opt.key} type="button" disabled={readOnly}
+        onClick={() => setGradeRounding(opt.key as any)}
+        className={`px-4 py-2 rounded-xl font-black text-xs border-2 disabled:opacity-50 ${
+          gradeRounding === opt.key ? "bg-fuchsia-500 border-fuchsia-500 text-white" : "bg-white border-slate-200 text-slate-500"
+        }`}>
+        {opt.label}
+      </button>
+    ))}
+  </div>
+</div>
         {/* รหัสกลุ่มรวมคะแนน */}
         <div>
           <p className="text-xs font-black text-slate-500 mb-1.5">
@@ -2167,6 +2205,38 @@ function SubjectSettingsTab({
             วิชาที่ตั้งรหัสกลุ่มเดียวกัน ระบบจะนำคะแนนมารวมกันตอนออกเกรดในหน้า "คะแนนรวม"
           </p>
         </div>
+        {suggestedGroup.length > 0 && !readOnly && (
+  <div className="rounded-xl border-2 border-dashed border-violet-200 bg-violet-50/40 p-3 mt-2">
+    <p className="text-[11px] font-black text-violet-600 mb-2">
+      ⚡ พบวิชาอื่นที่รหัสขึ้นต้นเหมือนกัน ({subject!.subject_code.slice(0,6)}) — ต้องการรวมคะแนนด้วยกันไหม?
+    </p>
+    <div className="space-y-1.5">
+      {suggestedGroup.map(s => (
+        <div key={s.id} className="flex items-center gap-2 bg-white rounded-lg border border-violet-100 px-3 py-2">
+          <span className="text-xs font-bold text-slate-600 flex-1">{s.subject_code} · {s.name_th}</span>
+          <input
+            type="number" min={0} max={100} placeholder="น้ำหนัก %"
+            value={groupWeights[s.id] ?? ""}
+            onChange={e => setGroupWeights(prev => ({ ...prev, [s.id]: e.target.value }))}
+            className="w-20 text-center border-2 border-slate-200 rounded-lg py-1 text-xs font-black"
+          />
+          <span className="text-xs font-bold text-slate-400">%</span>
+        </div>
+      ))}
+    </div>
+    <button
+      type="button"
+      onClick={() => {
+        const prefix = subject!.subject_code.slice(0, 6);
+        setScoreGroupCode(prefix); // ใช้ 6 หลักแรกเป็นรหัสกลุ่มอัตโนมัติ
+        // TODO: เรียก /api/subject-grades/group-settings เพื่อบันทึกน้ำหนักแต่ละวิชาด้วย
+      }}
+      className="mt-2 w-full py-2 rounded-lg bg-violet-500 hover:bg-violet-600 text-white font-black text-xs"
+    >
+      ✅ ใช้กลุ่มนี้ + บันทึกน้ำหนักคะแนน
+    </button>
+  </div>
+)}
 
         <div className="h-px bg-slate-100" />
 
@@ -2694,6 +2764,9 @@ const [{ data: subj }, { data: room }] = await Promise.all([
     students={students}
     currentUserId={currentUserId}
     readOnly={isAdmin}
+    formativeMaxScore={(section as any).formative_max_score}
+  midtermMaxScore={(section as any).midterm_max_score}
+  finalMaxScore={(section as any).final_max_score}
   />
 )}
         {bannerMenu === "attendanceInfo" && section && (
