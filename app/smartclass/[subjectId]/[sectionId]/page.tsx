@@ -1905,6 +1905,9 @@ function SubjectSettingsTab({
   const scoreSum =
     (Number(formativeMax) || 0) + (useMidterm ? (Number(midtermMax) || 0) : 0) + (Number(finalMax) || 0);
   const scoreSumInvalid = Math.abs(scoreSum - 100) > 0.01;   // ★ ต้องรวมให้ได้ 100 พอดี
+  const [scorePeriodMode, setScorePeriodMode] = useState<"semester" | "yearly">(
+  (subject as any)?.score_period_mode ?? "semester"
+);
   const dirty =
     subjectType !== (subject?.subject_type ?? "basic") ||
     creditHours !== (subject?.credit_hours != null ? String(subject.credit_hours) : "") ||
@@ -2017,7 +2020,26 @@ function SubjectSettingsTab({
             ))}
           </div>
         </div>
-
+        <div>
+  <p className="text-xs font-black text-slate-500 mb-2">รอบการบันทึกคะแนน</p>
+  <div className="flex gap-2">
+    {[
+      { key: "semester", label: "แยกเทอม 1-2 (มัธยม)" },
+      { key: "yearly", label: "ตลอดปีการศึกษา (อนุบาล-ประถม)" },
+    ].map(opt => (
+      <button key={opt.key} type="button" disabled={readOnly}
+        onClick={() => setScorePeriodMode(opt.key as any)}
+        className={`px-4 py-2 rounded-xl font-black text-xs border-2 disabled:opacity-50 ${
+          scorePeriodMode === opt.key ? "bg-fuchsia-500 border-fuchsia-500 text-white" : "bg-white border-slate-200 text-slate-500"
+        }`}>
+        {opt.label}
+      </button>
+    ))}
+  </div>
+  <p className="text-[11px] text-slate-400 font-bold mt-1.5">
+    "ตลอดปีการศึกษา" = วิชานี้จะมีห้อง/section เดียวคลุมทั้งปี ไม่ต้องสร้างซ้ำตอนขึ้นเทอม 2
+  </p>
+</div>
         {/* หน่วยกิต + ชม./ปี */}
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -2335,7 +2357,7 @@ export default function SmartClassRosterPage() {
 
       const { data: sec } = await supabase
   .from("subject_sections")
-  .select("id, join_code, classroom_id, student_portal_enabled, allow_late_submission")
+  .select("id, join_code, classroom_id, student_portal_enabled, allow_late_submission, student_access_mode, grading_structure, formative_max_score, midterm_max_score, final_max_score")
   .eq("id", sectionId).maybeSingle();
 setSection(sec as SectionRow);
 
