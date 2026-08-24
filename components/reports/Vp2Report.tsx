@@ -1,18 +1,71 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 const supabase = createClient();
 
-type Student = { id: string; prefix?: string; first_name: string; last_name: string; seat_number: number; student_code?: string };
-
-type ScoreRow = {
-  student_id: string;
-  unit_score: number | null;   // คะแนนหน่วยการเรียน
-  midterm_score: number | null; // คะแนนกลางภาค
-  remark: string | null;
+type Student = {
+  id: string;
+  prefix?: string;
+  first_name: string;
+  last_name: string;
+  seat_number: number;
 };
+
+type ExtraStudentInfo = {
+  student_code: string | null;
+  birth_date: string | null;
+  gender: string | null; // "male" | "female"
+};
+
+type Assignment = {
+  id: string;
+  max_score: number;
+  weight_percent?: number;
+  allow_weight?: boolean;
+  status?: string;
+};
+type Submission = { assignment_id: string; student_id: string; score: number | null };
+type ExamScore = { student_id: string; exam_type: "midterm" | "final"; score: number | null };
+
+function isWeighted(a: Assignment): boolean {
+  return !!(a.allow_weight && a.weight_percent != null && (a.max_score ?? 0) > 0);
+}
+function getAssignmentMaxContribution(a: Assignment): number {
+  return isWeighted(a) ? (a.weight_percent as number) : (a.max_score ?? 0);
+}
+function getAssignmentWeightedScore(a: Assignment, raw: number | null | undefined): number {
+  if (raw === null || raw === undefined) return 0;
+  if (isWeighted(a)) return (raw / (a.max_score || 1)) * (a.weight_percent as number);
+  return raw;
+}
+function fmtScore(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+
+// ★ คำนวณอายุ ณ วันนี้ (ปี)
+function calcAge(birthDateStr: string): number {
+  const bd = new Date(birthDateStr);
+  const now = new Date();
+  let age = now.getFullYear() - bd.getFullYear();
+  const m = now.getMonth() - bd.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < bd.getDate())) age--;
+  return age;
+}
+
+// ★ คำนำหน้าอัตโนมัติจากเพศ+อายุ (เกิน 15 ปี => นาย/นางสาว) ตามที่ตกลง — อิงอายุ ณ วันที่พิมพ์เอกสาร
+function computePrefix(gender: string | null, birthDate: string | null, fallback: string | null): string {
+  if (gender === "male") {
+    if (birthDate && calcAge(birthDate) > 15) return "นาย";
+    return fallback ?? "เด็กชาย";
+  }
+  if (gender === "female") {
+    if (birthDate && calcAge(birthDate) > 15) return "นางสาว";
+    return fallback ?? "เด็กหญิง";
+  }
+  return fallback ?? "";
+}
 
 export default function Vp2Report({
   sectionId,
@@ -24,8 +77,8 @@ export default function Vp2Report({
   students,
   currentUserId,
   readOnly,
-  unitMaxScore,     // คะแนนเต็มหน่วยการเรียน (ถ้ามีตั้งไว้ในรายวิชา)
-  midtermMaxScore,  // คะแนนเต็มกลางภาค
+  unitMaxScore = 70,
+  midtermMaxScore = 0,
   onBack,
 }: {
   sectionId: string;
@@ -46,13 +99,17 @@ export default function Vp2Report({
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [gradeLevel, setGradeLevel] = useState("");     // ชั้นมัธยมศึกษาปีที่ ...
-  const [semester, setSemester] = useState("");          // ภาคเรียนที่ ...
-  const [yearLabel, setYearLabel] = useState("");         // ปีการศึกษา ...
-  const [subjectType, setSubjectType] = useState("");     // ประเภท (พื้นฐาน/เพิ่มเติม)
+  const [gradeLevel, setGradeLevel] = useState("");
+  const [semester, setSemester] = useState("");
+  const [yearLabel, setYearLabel] = useState("");
+  const [subjectType, setSubjectType] = useState("");
   const [creditHours, setCreditHours] = useState<string>("");
 
-  const [rows, setRows] = useState<Record<string, ScoreRow>>({});
+  const [extraInfo, setExtraInfo] = useState<Record<string, ExtraStudentInfo>>({});
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [examScores, setExamScores] = useState<ExamScore[]>([]);
+  const [remarks, setRemarks] = useState<Record<string, string>>({});
 
   const [teacherSignatureName, setTeacherSignatureName] = useState("");
   const [deptHeadName, setDeptHeadName] = useState("");
@@ -63,7 +120,7 @@ export default function Vp2Report({
       setLoading(true);
       setError(null);
       try {
-        // ข้อมูลรายวิชา (ประเภท / หน่วยกิต)
+        // ข้อมูลรายวิชา
         const { data: subj } = await supabase
           .from("subjects")
           .select("subject_type, credit_hours")
@@ -74,7 +131,7 @@ export default function Vp2Report({
           setCreditHours(subj.credit_hours != null ? String(subj.credit_hours) : "");
         }
 
-        // ครูประจำวิชา + หัวหน้ากลุ่มสาระ (มาจาก department_id ของครูคนนี้)
+        // ครูประจำวิชา + หัวหน้ากลุ่มสาระ
         const { data: sectionRow } = await supabase
           .from("subject_sections")
           .select("teacher_id")
@@ -92,9 +149,7 @@ export default function Vp2Report({
             setTeacherSignatureName(
               teacher.full_name || `${teacher.prefix ?? ""}${teacher.first_name} ${teacher.last_name}`
             );
-
             if (teacher.department_id) {
-              // ★ ใช้ role 'subject_dept_head' (ไม่ใช่ 'dept_head' เฉย ๆ) เพื่อไม่ชนกับหัวหน้ากลุ่มงาน
               const { data: deptHead } = await supabase
                 .from("users")
                 .select("prefix, first_name, last_name, full_name")
@@ -110,7 +165,7 @@ export default function Vp2Report({
           }
         }
 
-        // ข้อมูลปีการศึกษา / ภาคเรียน / ชั้น
+        // ปีการศึกษา / ภาคเรียน / ชั้น
         if (academicYearId) {
           const { data: year } = await supabase
             .from("academic_years")
@@ -124,27 +179,39 @@ export default function Vp2Report({
         }
         if (classroomLabel) setGradeLevel(classroomLabel.trim());
 
-        // คะแนนที่เคยกรอกไว้ (ถ้ามีตาราง vp2_progress_scores)
-        const { data: scoreRows, error: scoreErr } = await supabase
-          .from("vp2_progress_scores")
-          .select("student_id, unit_score, midterm_score, remark")
-          .eq("subject_section_id", sectionId);
-
-        const map: Record<string, ScoreRow> = {};
-        students.forEach(s => {
-          map[s.id] = { student_id: s.id, unit_score: null, midterm_score: null, remark: null };
-        });
-        if (!scoreErr && scoreRows) {
-          scoreRows.forEach((r: any) => {
-            map[r.student_id] = {
-              student_id: r.student_id,
-              unit_score: r.unit_score,
-              midterm_score: r.midterm_score,
-              remark: r.remark,
-            };
+        // ★ ข้อมูลนักเรียนเพิ่มเติม: รหัส นร. / วันเกิด / เพศ (ใช้คำนวณคำนำหน้าอัตโนมัติ)
+        const ids = students.map(s => s.id);
+        if (ids.length > 0) {
+          const { data: extraRows } = await supabase
+            .from("students")
+            .select("id, student_code, birth_date, gender")
+            .in("id", ids);
+          const map: Record<string, ExtraStudentInfo> = {};
+          (extraRows ?? []).forEach((r: any) => {
+            map[r.id] = { student_code: r.student_code, birth_date: r.birth_date, gender: r.gender };
           });
+          setExtraInfo(map);
         }
-        setRows(map);
+
+        // ★ คะแนนจริง — ดึงจาก endpoint เดียวกับหน้า "คะแนนรวม" (ไม่กรอกซ้ำเอง)
+        const gradeRes = await fetch(`/api/subject-grades/summary?subject_section_id=${sectionId}`);
+        const gradeJson = await gradeRes.json();
+        if (gradeRes.ok) {
+          setAssignments((gradeJson.assignments ?? []).filter((a: Assignment) => a.status !== "draft"));
+          setSubmissions(gradeJson.submissions ?? []);
+          setExamScores(gradeJson.examScores ?? []);
+        }
+
+        // หมายเหตุที่เคยกรอกไว้ (ถ้ามี)
+        const { data: remarkRows, error: remarkErr } = await supabase
+          .from("vp2_progress_scores")
+          .select("student_id, remark")
+          .eq("subject_section_id", sectionId);
+        if (!remarkErr && remarkRows) {
+          const rmap: Record<string, string> = {};
+          remarkRows.forEach((r: any) => { rmap[r.student_id] = r.remark ?? ""; });
+          setRemarks(rmap);
+        }
       } catch (e: any) {
         setError(e?.message ?? "โหลดข้อมูลไม่สำเร็จ");
       } finally {
@@ -153,25 +220,29 @@ export default function Vp2Report({
     })();
   }, [sectionId, subjectId, academicYearId, classroomLabel, students]);
 
-  function updateRow(studentId: string, field: "unit_score" | "midterm_score" | "remark", value: string) {
-    setRows(prev => ({
-      ...prev,
-      [studentId]: {
-        ...prev[studentId],
-        [field]: field === "remark" ? (value === "" ? null : value) : (value === "" ? null : Number(value)),
-      },
-    }));
-  }
+  // ★ คำนวณคะแนนต่อคน ด้วยสูตรเดียวกับหน้า "คะแนนรวม"
+  const totalMaxScore = useMemo(
+    () => assignments.reduce((sum, a) => sum + getAssignmentMaxContribution(a), 0),
+    [assignments]
+  );
 
-  const totalByStudent = useMemo(() => {
-    const t: Record<string, number> = {};
-    Object.values(rows).forEach(r => {
-      t[r.student_id] = (r.unit_score ?? 0) + (r.midterm_score ?? 0);
+  const scoreByStudent = useMemo(() => {
+    const map: Record<string, { unit: number; midterm: number | null; total: number }> = {};
+    students.forEach(s => {
+      const subMap: Record<string, Submission> = {};
+      submissions.filter(sub => sub.student_id === s.id).forEach(sub => { subMap[sub.assignment_id] = sub; });
+      const assignmentTotal = assignments.reduce(
+        (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
+        0
+      );
+      const scaledUnit = totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * unitMaxScore : 0;
+      const midterm = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm")?.score ?? null;
+      map[s.id] = { unit: scaledUnit, midterm, total: scaledUnit + (midterm ?? 0) };
     });
-    return t;
-  }, [rows]);
+    return map;
+  }, [students, submissions, assignments, examScores, totalMaxScore, unitMaxScore]);
 
-  async function handleSave() {
+  async function handleSaveRemarks() {
     if (readOnly) return;
     setSaving(true);
     setError(null);
@@ -179,9 +250,7 @@ export default function Vp2Report({
       const payload = students.map(s => ({
         subject_section_id: sectionId,
         student_id: s.id,
-        unit_score: rows[s.id]?.unit_score ?? null,
-        midterm_score: rows[s.id]?.midterm_score ?? null,
-        remark: rows[s.id]?.remark ?? null,
+        remark: remarks[s.id] ?? null,
         updated_by: currentUserId || null,
       }));
       const { error: upsertErr } = await supabase
@@ -190,7 +259,7 @@ export default function Vp2Report({
       if (upsertErr) throw upsertErr;
       setSavedAt(Date.now());
     } catch (e: any) {
-      setError(e?.message ?? "บันทึกไม่สำเร็จ (ตรวจสอบว่ามีตาราง vp2_progress_scores แล้วหรือยัง)");
+      setError(e?.message ?? "บันทึกหมายเหตุไม่สำเร็จ");
     } finally {
       setSaving(false);
     }
@@ -206,7 +275,17 @@ export default function Vp2Report({
 
   return (
     <div className="space-y-4">
-      {/* แถบควบคุม (ซ่อนตอนพิมพ์) */}
+      <style>{`
+        @media print {
+          @page { size: A4 portrait; margin: 10mm; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .vp2-print-area { font-size: 9px !important; }
+          .vp2-print-area table { font-size: 9px !important; }
+          .vp2-print-area th, .vp2-print-area td { padding-top: 2px !important; padding-bottom: 2px !important; }
+          thead { display: table-header-group; }
+        }
+      `}</style>
+
       <div className="print:hidden flex items-center justify-between flex-wrap gap-2">
         <button onClick={onBack} className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">
           ← กลับ
@@ -214,11 +293,11 @@ export default function Vp2Report({
         <div className="flex items-center gap-2">
           {!readOnly && (
             <button
-              onClick={handleSave}
+              onClick={handleSaveRemarks}
               disabled={saving}
               className="px-4 py-2 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 disabled:opacity-50 text-white font-black text-xs shadow"
             >
-              {saving ? "กำลังบันทึก..." : "💾 บันทึกคะแนน"}
+              {saving ? "กำลังบันทึก..." : "💾 บันทึกหมายเหตุ"}
             </button>
           )}
           <button onClick={handlePrint} className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-black text-xs shadow">
@@ -229,125 +308,101 @@ export default function Vp2Report({
 
       {error && <p className="print:hidden text-xs font-black text-red-500 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
       {savedAt && !error && (
-        <p className="print:hidden text-xs font-black text-emerald-500">✅ บันทึกคะแนนล่าสุดแล้ว</p>
+        <p className="print:hidden text-xs font-black text-emerald-500">✅ บันทึกหมายเหตุล่าสุดแล้ว</p>
       )}
 
-      {/* ตัวเอกสารสำหรับพิมพ์ */}
-      <div className="relative bg-white rounded-2xl border border-slate-100 shadow-sm p-6 sm:p-10 print:border-0 print:shadow-none print:p-0 max-w-3xl mx-auto font-['TH_Sarabun_New',_sans-serif]">
-        <img src="/school-logo.png" alt="ตราโรงเรียน" className="absolute left-6 top-6 print:left-0 print:top-0 w-14 h-14 object-contain" />
+      <div className="vp2-print-area relative bg-white rounded-2xl border border-slate-100 shadow-sm p-6 sm:p-10 print:border-0 print:shadow-none print:p-0 max-w-[190mm] mx-auto font-['TH_Sarabun_New',_sans-serif]">
+        <img src="/school-logo.png" alt="ตราโรงเรียน" className="absolute left-6 top-6 print:left-0 print:top-0 w-12 h-12 print:w-10 print:h-10 object-contain" />
         <div className="flex items-start justify-between mb-2">
           <div className="flex-1 text-center">
-            <p className="font-black text-base">แบบประกาศผลคะแนนระหว่างเรียนรายวิชาของนักเรียนโรงเรียนวัดเขียนเขต</p>
-            <p className="text-sm mt-1">
+            <p className="font-black text-base print:text-sm">แบบประกาศผลคะแนนระหว่างเรียนรายวิชาของนักเรียนโรงเรียนวัดเขียนเขต</p>
+            <p className="text-sm print:text-xs mt-1">
               ชั้น{" "}
               {readOnly ? (
                 <span className="font-bold">{gradeLevel || "…………"}</span>
               ) : (
-                <input value={gradeLevel} onChange={e => setGradeLevel(e.target.value)} className="border-b border-slate-400 text-center w-32 focus:outline-none" />
+                <input value={gradeLevel} onChange={e => setGradeLevel(e.target.value)} className="border-b border-slate-400 text-center w-32 focus:outline-none print:border-none" />
               )}{" "}
               ภาคเรียนที่{" "}
               {readOnly ? (
                 <span className="font-bold">{semester || "…"}</span>
               ) : (
-                <input value={semester} onChange={e => setSemester(e.target.value)} className="border-b border-slate-400 text-center w-10 focus:outline-none" />
+                <input value={semester} onChange={e => setSemester(e.target.value)} className="border-b border-slate-400 text-center w-10 focus:outline-none print:border-none" />
               )}{" "}
               ปีการศึกษา{" "}
               {readOnly ? (
                 <span className="font-bold">{yearLabel || "…………"}</span>
               ) : (
-                <input value={yearLabel} onChange={e => setYearLabel(e.target.value)} className="border-b border-slate-400 text-center w-24 focus:outline-none" />
+                <input value={yearLabel} onChange={e => setYearLabel(e.target.value)} className="border-b border-slate-400 text-center w-24 focus:outline-none print:border-none" />
               )}
             </p>
-            <p className="text-sm mt-1">
+            <p className="text-sm print:text-xs mt-1">
               รหัสวิชา <span className="font-bold">{subjectCode}</span> รายวิชา <span className="font-bold">{subjectTitle}</span> ประเภท{" "}
               {readOnly ? (
                 <span className="font-bold">{subjectType || "…………"}</span>
               ) : (
-                <input value={subjectType} onChange={e => setSubjectType(e.target.value)} className="border-b border-slate-400 text-center w-24 focus:outline-none" />
+                <input value={subjectType} onChange={e => setSubjectType(e.target.value)} className="border-b border-slate-400 text-center w-24 focus:outline-none print:border-none" />
               )}{" "}
               จำนวน{" "}
               {readOnly ? (
                 <span className="font-bold">{creditHours || "…"}</span>
               ) : (
-                <input value={creditHours} onChange={e => setCreditHours(e.target.value)} className="border-b border-slate-400 text-center w-10 focus:outline-none" />
+                <input value={creditHours} onChange={e => setCreditHours(e.target.value)} className="border-b border-slate-400 text-center w-10 focus:outline-none print:border-none" />
               )}{" "}
               หน่วยกิต
             </p>
           </div>
-          <div className="border border-slate-400 rounded px-2 py-1 text-[10px] font-bold shrink-0">แบบฟอร์ม 2</div>
+          <div className="border border-slate-400 rounded px-2 py-1 text-[10px] font-bold shrink-0">แบบวัดผล 2</div>
         </div>
 
-        <table className="w-full border-collapse text-xs mt-4">
+        <table className="w-full border-collapse text-xs print:text-[9px] mt-4">
           <thead>
             <tr>
-              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-10">เลขที่</th>
-              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-20">เลขประจำตัว</th>
+              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-8">เลขที่</th>
+              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-16">เลขประจำตัว</th>
               <th rowSpan={2} className="border border-slate-400 px-1 py-1.5">ชื่อ นามสกุล</th>
               <th colSpan={3} className="border border-slate-400 px-1 py-1">คะแนน</th>
-              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-20">หมายเหตุ</th>
+              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-16">หมายเหตุ</th>
             </tr>
             <tr>
-              <th className="border border-slate-400 px-1 py-1 font-normal">
-                หน่วยการเรียน{unitMaxScore != null ? ` (${unitMaxScore})` : " (……)"}
-              </th>
-              <th className="border border-slate-400 px-1 py-1 font-normal">
-                กลางภาค{midtermMaxScore != null ? ` (${midtermMaxScore})` : " (……)"}
-              </th>
-              <th className="border border-slate-400 px-1 py-1 font-normal">
-                รวม{unitMaxScore != null && midtermMaxScore != null ? ` (${unitMaxScore + midtermMaxScore})` : " (……)"}
-              </th>
+              <th className="border border-slate-400 px-1 py-1 font-normal">หน่วยการเรียน ({unitMaxScore})</th>
+              <th className="border border-slate-400 px-1 py-1 font-normal">กลางภาค ({midtermMaxScore})</th>
+              <th className="border border-slate-400 px-1 py-1 font-normal">รวม ({unitMaxScore + midtermMaxScore})</th>
             </tr>
           </thead>
           <tbody>
-            {students.map((s, i) => (
-              <tr key={s.id}>
-                <td className="border border-slate-400 text-center py-1">{i + 1}</td>
-                <td className="border border-slate-400 text-center py-1">{s.student_code ?? ""}</td>
-                <td className="border border-slate-400 px-2 py-1">
-                  {s.prefix ?? ""}{s.first_name} {s.last_name}
-                </td>
-                <td className="border border-slate-400 text-center py-1">
-                  {readOnly ? (
-                    rows[s.id]?.unit_score ?? ""
-                  ) : (
-                    <input
-                      type="number"
-                      value={rows[s.id]?.unit_score ?? ""}
-                      onChange={e => updateRow(s.id, "unit_score", e.target.value)}
-                      className="w-14 text-center focus:outline-none print:appearance-none"
-                    />
-                  )}
-                </td>
-                <td className="border border-slate-400 text-center py-1">
-                  {readOnly ? (
-                    rows[s.id]?.midterm_score ?? ""
-                  ) : (
-                    <input
-                      type="number"
-                      value={rows[s.id]?.midterm_score ?? ""}
-                      onChange={e => updateRow(s.id, "midterm_score", e.target.value)}
-                      className="w-14 text-center focus:outline-none"
-                    />
-                  )}
-                </td>
-                <td className="border border-slate-400 text-center py-1 font-bold">{totalByStudent[s.id] ?? 0}</td>
-                <td className="border border-slate-400 text-center py-1">
-                  {readOnly ? (
-                    rows[s.id]?.remark ?? ""
-                  ) : (
-                    <input
-                      value={rows[s.id]?.remark ?? ""}
-                      onChange={e => updateRow(s.id, "remark", e.target.value)}
-                      className="w-full text-center focus:outline-none"
-                    />
-                  )}
-                </td>
-              </tr>
-            ))}
+            {students.map((s, i) => {
+              const info = extraInfo[s.id];
+              const displayPrefix = computePrefix(info?.gender ?? null, info?.birth_date ?? null, s.prefix ?? null);
+              const sc = scoreByStudent[s.id] ?? { unit: 0, midterm: null, total: 0 };
+              return (
+                <tr key={s.id}>
+                  <td className="border border-slate-400 text-center py-1">{i + 1}</td>
+                  <td className="border border-slate-400 text-center py-1">{info?.student_code ?? ""}</td>
+                  <td className="border border-slate-400 px-2 py-1">
+                    {displayPrefix}{s.first_name} {s.last_name}
+                  </td>
+                  <td className="border border-slate-400 text-center py-1">{fmtScore(sc.unit)}</td>
+                  <td className="border border-slate-400 text-center py-1">{sc.midterm ?? "-"}</td>
+                  <td className="border border-slate-400 text-center py-1 font-bold">{fmtScore(sc.total)}</td>
+                  <td className="border border-slate-400 text-center py-1">
+                    {readOnly ? (
+                      remarks[s.id] ?? ""
+                    ) : (
+                      <input
+                        value={remarks[s.id] ?? ""}
+                        onChange={e => setRemarks(prev => ({ ...prev, [s.id]: e.target.value }))}
+                        className="w-full text-center focus:outline-none print:border-none"
+                      />
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
 
-        <div className="grid grid-cols-2 gap-8 mt-10 text-sm text-center">
+        <div className="grid grid-cols-2 gap-8 mt-8 print:mt-6 text-sm print:text-xs text-center">
           <div>
             <p>ลงชื่อ.......................................ครูประจำวิชา</p>
             <p>({teacherSignatureName || "......................................."})</p>
@@ -357,7 +412,7 @@ export default function Vp2Report({
             <p>({deptHeadName || "......................................."})</p>
           </div>
         </div>
-        <div className="text-center mt-8 text-sm">
+        <div className="text-center mt-6 print:mt-4 text-sm print:text-xs">
           <p>ลงชื่อ.......................................</p>
           <p>({directorName})</p>
           <p>ผู้อำนวยการโรงเรียนวัดเขียนเขต</p>
