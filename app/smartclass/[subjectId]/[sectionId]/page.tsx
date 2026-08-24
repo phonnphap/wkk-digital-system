@@ -1922,6 +1922,8 @@ const [selectedSemester, setSelectedSemester] = useState<1 | 2>(
     scoreGroupCode !== (subject?.score_group_code ?? "") ||
     gradingMode !== (subject?.grading_mode ?? "numeric") ||
     gradeRounding !== ((subject as any)?.grade_rounding_mode ?? "truncate") ||
+    scorePeriodMode !== ((subject as any)?.score_period_mode ?? "semester") ||
+    selectedSemester !== ((subject as any)?.default_semester ?? 1) ||
     selectedSemester !== ((subject as any)?.default_semester ?? 1) ||
     studentAccessMode !== (section.student_access_mode ?? "name_only") ||
     passThreshold !== String(subject?.pass_threshold_percent ?? 50) ||

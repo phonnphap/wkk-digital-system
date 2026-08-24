@@ -611,42 +611,51 @@ function ReportView({
   }
 
   // ★ ผ่าน/ไม่ผ่านตัวชี้วัด/ผลการเรียนรู้: ผ่านถ้ามีชิ้นงานที่ผูกข้อนี้ ที่ นร. ได้คะแนน ≥ 50%
-  function indicatorAchievement(unit: Unit, line: string, studentId: string): { display: string; state: "none" | "pending" | "pass" | "fail" } {
-    const related = assignments.filter(
-      a => a.teaching_unit_no === unit.unit_no && (a.selected_indicator_lines ?? []).includes(line)
-    );
-    if (related.length === 0) return { display: "–", state: "none" };
+  function indicatorLineScore(
+  unit: Unit,
+  line: string,
+  studentId: string,
+  assignments: ReportAssignment[],
+  submissions: ReportSubmission[]
+): { achieved: number; lineShare: number; state: "none" | "pending" | "pass" | "fail" } {
+  const totalLines = indicatorLinesOf(unit).length;
+  const lineShare = totalLines > 0 ? (Number(unit.score_points) || 0) / totalLines : 0;
 
-    let sumScore = 0, sumMax = 0, anyGraded = false;
-    related.forEach(a => {
-      sumMax += a.max_score || 0;
-      const score = studentScoreForAssignment(a.id, studentId);
-      if (score != null) { sumScore += score; anyGraded = true; }
-    });
-    if (!anyGraded) return { display: "–", state: "pending" };
-const passed = sumMax > 0 && sumScore / sumMax >= 0.5;
-if (related.length === 1) {
-  const a = related[0];
-  const weight = computedWeightByAssignment[a.id] ?? 0;
-  const score = studentScoreForAssignment(a.id, studentId) ?? 0;
-  const achieved = a.max_score > 0 ? (score / a.max_score) * weight : 0;
-  return { display: fmtScore(achieved), state: passed ? "pass" : "fail" };
+  const related = assignments.filter(
+    a => a.teaching_unit_no === unit.unit_no && (a.selected_indicator_lines ?? []).includes(line)
+  );
+  if (related.length === 0) return { achieved: 0, lineShare, state: "none" };
+
+  const totalMax = related.reduce((s, a) => s + (a.max_score || 0), 0);
+
+  let sumScore = 0, sumMax = 0, anyGraded = false, achieved = 0;
+  related.forEach(a => {
+    sumMax += a.max_score || 0;
+    const sub = submissions.find(s => s.assignment_id === a.id && s.student_id === studentId);
+    const score = sub?.score ?? null;
+    if (score != null) {
+      sumScore += score;
+      anyGraded = true;
+      const weightOfThisAssignment = totalMax > 0 ? (a.max_score / totalMax) * lineShare : 0;
+      achieved += a.max_score > 0 ? (score / a.max_score) * weightOfThisAssignment : 0;
+    }
+  });
+
+  if (!anyGraded) return { achieved: 0, lineShare, state: "pending" };
+  const passed = sumMax > 0 && sumScore / sumMax >= 0.5;
+  return { achieved, lineShare, state: passed ? "pass" : "fail" };
 }
-return { display: `${fmtScore(sumScore)}/${fmtScore(sumMax)}`, state: passed ? "pass" : "fail" };
-  }
 
   const sumUnitScorePoints = unitsWithScore.reduce((s, u) => s + (Number(u.score_points) || 0), 0);
   const formativeScale = sumUnitScorePoints > 0 ? formativeMaxScore / sumUnitScorePoints : 0;
   function unitAchievedScore(unit: Unit, studentId: string): number {
-    const inUnit = assignments.filter(a => a.teaching_unit_no === unit.unit_no);
-    const raw = inUnit.reduce((sum, a) => {
-      const score = studentScoreForAssignment(a.id, studentId);
-      if (score == null || !a.max_score) return sum;
-      const weight = computedWeightByAssignment[a.id] ?? 0;
-      return sum + (score / a.max_score) * weight;
-    }, 0);
-    return raw * formativeScale;
-  }
+  const lines = indicatorLinesOf(unit);
+  if (lines.length === 0) return 0;
+  return lines.reduce((sum, line) => {
+    const info = indicatorLineScore(unit, line, studentId, assignments, submissions);
+    return sum + info.achieved;
+  }, 0);
+}
   const totalPossible = formativeMaxScore + midtermMax + finalMax;
 
   if (!sectionId || !students) {
@@ -735,18 +744,18 @@ return { display: `${fmtScore(sumScore)}/${fmtScore(sumMax)}`, state: passed ? "
                   {unitsWithScore.map((u, ui) => (
                     <Fragment key={u.unit_no}>
                       {indicatorLinesOf(u).map((line, idx) => {
-                        const info = indicatorAchievement(u, line, s.id);
-                        return (
-                          <td
-                            key={`${u.unit_no}-${s.id}-i${idx}`}
-                            className={`border border-slate-300 text-center px-1 py-1 font-black ${
-                              info.state === "pass" ? "text-emerald-600" : info.state === "fail" ? "text-rose-500" : "text-slate-300"
-                            }`}
-                          >
-                            {info.display}
-                          </td>
-                        );
-                      })}
+  const info = indicatorLineScore(u, line, s.id, assignments, submissions);
+  return (
+    <td
+      key={`${u.unit_no}-${s.id}-i${idx}`}
+      className={`border border-slate-300 text-center px-1 py-1 font-black ${
+        info.state === "pass" ? "text-emerald-600" : info.state === "fail" ? "text-rose-500" : "text-slate-300"
+      }`}
+    >
+      {info.state === "none" ? "–" : info.state === "pending" ? "–" : fmtScore(info.achieved)}
+    </td>
+  );
+})}
                       <td className="border border-slate-300 text-center px-1 py-1 font-black bg-fuchsia-50/40 print:bg-white">
                         {fmtScore(unitTotals[ui])}
                       </td>
@@ -775,7 +784,7 @@ return { display: `${fmtScore(sumScore)}/${fmtScore(sumMax)}`, state: passed ? "
             <ul className="pl-4 list-disc space-y-0.5">
   {indicatorLinesOf(u).map((line, idx) => (
     <li key={idx} className="font-bold text-slate-500">
-      <span className="text-slate-400">{indicatorItemLabel} {indicatorNumberOf(line)}:</span> {line}
+      <span className="text-slate-400">{indicatorLabel} ข้อที่ {indicatorNumberOf(line)}:</span> {line}
     </li>
   ))}
 </ul>
