@@ -1924,7 +1924,6 @@ const [selectedSemester, setSelectedSemester] = useState<1 | 2>(
     gradeRounding !== ((subject as any)?.grade_rounding_mode ?? "truncate") ||
     scorePeriodMode !== ((subject as any)?.score_period_mode ?? "semester") ||
     selectedSemester !== ((subject as any)?.default_semester ?? 1) ||
-    selectedSemester !== ((subject as any)?.default_semester ?? 1) ||
     studentAccessMode !== (section.student_access_mode ?? "name_only") ||
     passThreshold !== String(subject?.pass_threshold_percent ?? 50) ||
     studentPortalEnabled !== (section.student_portal_enabled ?? true) ||
@@ -1967,6 +1966,8 @@ useEffect(() => {
       grading_mode: gradingMode,         
       grade_rounding_mode: gradeRounding,                                                        // ★ เพิ่ม
       pass_threshold_percent: Math.max(0, Math.min(100, Number(passThreshold) || 50)),            // ★ เพิ่ม
+      score_period_mode: scorePeriodMode,                                    // ★ เพิ่มบรรทัดนี้
+  default_semester: scorePeriodMode === "semester" ? selectedSemester : null,
     };
     const sectionUpdate = {
   student_portal_enabled: studentPortalEnabled,

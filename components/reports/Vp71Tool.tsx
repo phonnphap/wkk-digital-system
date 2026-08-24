@@ -61,6 +61,9 @@ function indicatorNumberOf(line: string): string {
   const match = line.match(/^(\d+)/);
   return match ? match[1] : "-";
 }
+function indicatorTextOnly(line: string): string {
+  return line.replace(/^\d+\s*/, "");
+}
 export default function Vp71Tool({
   subjectId, academicYearId, subjectTitle, subjectCode, currentUserId, readOnly, onBack,
   sectionId, students,           // ★ NEW: ต้องส่งเข้ามาจาก parent เพื่อให้ดูรายงานได้ (เหมือน AssignmentsTool)
@@ -784,7 +787,7 @@ function ReportView({
             <ul className="pl-4 list-disc space-y-0.5">
   {indicatorLinesOf(u).map((line, idx) => (
     <li key={idx} className="font-bold text-slate-500">
-      <span className="text-slate-400">{indicatorLabel} ข้อที่ {indicatorNumberOf(line)}:</span> {line}
+      <span className="text-slate-400">{indicatorLabel} ข้อที่ {indicatorNumberOf(line)}:</span> {indicatorTextOnly(line)}
     </li>
   ))}
 </ul>
