@@ -57,7 +57,10 @@ function gradeLevel(percent: number): string {
 function indicatorLinesOf(u: Unit): string[] {
   return (u.indicators ?? "").split("\n").map(s => s.trim()).filter(Boolean);
 }
-
+function indicatorNumberOf(line: string): string {
+  const match = line.match(/^(\d+)/);
+  return match ? match[1] : "-";
+}
 export default function Vp71Tool({
   subjectId, academicYearId, subjectTitle, subjectCode, currentUserId, readOnly, onBack,
   sectionId, students,           // ★ NEW: ต้องส่งเข้ามาจาก parent เพื่อให้ดูรายงานได้ (เหมือน AssignmentsTool)
@@ -143,12 +146,41 @@ export default function Vp71Tool({
       setLoadingUnitScores(false);
     }
   }
+  async function handleUnlinkAssignment(assignmentId: string) {
+  if (readOnly) return;
+  if (!confirm("เอาชิ้นงานนี้ออกจากหน่วยการเรียนรู้นี้? (ชิ้นงานจะยังอยู่ในห้องเรียนเดิม แค่ไม่ถูกนับคะแนนในหน่วยนี้อีก)")) return;
+  try {
+    const { error } = await supabase
+      .from("assignments")
+      .update({ teaching_unit_no: null, selected_indicator_lines: null })
+      .eq("id", assignmentId);
+    if (error) throw error;
+    loadUnitScores();
+  } catch (e: any) {
+    alert("เอาออกไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+  }
+}
 
+async function handleDeleteLinkedAssignment(assignmentId: string, title: string) {
+  if (readOnly) return;
+  if (!confirm(`ลบชิ้นงาน "${title}" ถาวร?\nข้อมูลการส่งงาน/คะแนนของนักเรียนที่ผูกกับชิ้นนี้ทั้งหมดจะถูกลบไปด้วย และย้อนกลับไม่ได้`)) return;
+  try {
+    await supabase.from("assignment_submissions").delete().eq("assignment_id", assignmentId);
+    await supabase.from("assignment_students").delete().eq("assignment_id", assignmentId);
+    await supabase.from("assignment_attachments").delete().eq("assignment_id", assignmentId);
+    await supabase.from("assignment_cross_sections").delete().eq("source_assignment_id", assignmentId);
+    await supabase.from("assignments").delete().eq("id", assignmentId);
+    loadUnitScores();
+  } catch (e: any) {
+    alert("ลบไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+  }
+}
   useEffect(() => {
     if (!subjectId) return;
     loadUnitScores();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subjectId, academicYearId]);
+
 
   function updateUnit(i: number, field: keyof Unit, value: any) {
     setUnits(prev => prev.map((u, idx) => (idx === i ? { ...u, [field]: value } : u)));
@@ -255,6 +287,8 @@ export default function Vp71Tool({
           totalScore={totalScore}
           indicatorLabel={indicatorLabel}
           indicatorItemLabel={indicatorItemLabel}
+  onUnlinkAssignment={handleUnlinkAssignment}        // ★ เพิ่ม
+  onDeleteAssignment={handleDeleteLinkedAssignment}
         />
       ) : (
         <ReportView
@@ -273,6 +307,7 @@ export default function Vp71Tool({
           midtermMaxScore={midtermMaxScore}
           finalMaxScore={finalMaxScore}
           formativeMaxScore={formativeMaxScore}
+          
         />
       )}
     </div>
@@ -285,6 +320,7 @@ export default function Vp71Tool({
 function EditPlanView({
   loading, units, unitScores, loadingUnitScores, expandedUnit, setExpandedUnit,
   readOnly, updateUnit, removeUnit, addUnit, totalHours, totalScore, indicatorLabel, indicatorItemLabel,
+  onUnlinkAssignment, onDeleteAssignment,
 }: {
   loading: boolean;
   units: Unit[];
@@ -298,8 +334,10 @@ function EditPlanView({
   addUnit: () => void;
   totalHours: number;
   totalScore: number;
-  indicatorLabel: string;   // ★ NEW: "ตัวชี้วัด" หรือ "ผลการเรียนรู้" ตามประเภทวิชา
+  indicatorLabel: string;   
   indicatorItemLabel: string;
+  onUnlinkAssignment: (assignmentId: string) => void;         
+  onDeleteAssignment: (assignmentId: string, title: string) => void; 
 }) {
   if (loading) {
     return <div className="text-center py-16 text-slate-300 font-bold text-sm">กำลังโหลด...</div>;
@@ -394,25 +432,47 @@ function EditPlanView({
                 </td>
               </tr>
               {isExpanded && info && (
-                <tr className="bg-emerald-50/40">
-                  <td></td>
-                  <td colSpan={7} className="px-4 py-3">
-                    <p className="text-[11px] font-black text-emerald-700 mb-2">
-                      ระบบคำนวณน้ำหนักคะแนนของแต่ละชิ้นงานอัตโนมัติ ให้รวมกันเท่ากับคะแนนเก็บที่ตั้งไว้ ({fmtScore(u.score_points ?? 0)} คะแนน) เสมอ
-                    </p>
-                    <div className="space-y-1">
-                      {info.assignments.map(a => (
-                        <div key={a.id} className="flex items-center justify-between bg-white rounded-lg border border-emerald-100 px-3 py-1.5">
-                          <span className="font-bold text-slate-600 truncate pr-2">{a.title}</span>
-                          <span className="text-slate-400 font-bold shrink-0">
-                            เต็ม {fmtScore(a.max_score)} → <span className="text-emerald-600 font-black">{fmtScore(a.computed_weight)} คะแนนจริง</span>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
+  <tr className="bg-emerald-50/40">
+    <td></td>
+    <td colSpan={7} className="px-4 py-3">
+      <p className="text-[11px] font-black text-emerald-700 mb-2">
+        ระบบคำนวณน้ำหนักคะแนนของแต่ละชิ้นงานอัตโนมัติ ให้รวมกันเท่ากับคะแนนเก็บที่ตั้งไว้ ({fmtScore(u.score_points ?? 0)} คะแนน) เสมอ
+      </p>
+      <div className="space-y-1">
+        {info.assignments.map(a => (
+          <div key={a.id} className="flex items-center justify-between bg-white rounded-lg border border-emerald-100 px-3 py-1.5">
+            <span className="font-bold text-slate-600 truncate pr-2">{a.title}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-slate-400 font-bold">
+                เต็ม {fmtScore(a.max_score)} → <span className="text-emerald-600 font-black">{fmtScore(a.computed_weight)} คะแนนจริง</span>
+              </span>
+              {!readOnly && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onUnlinkAssignment(a.id)}
+                    title="เอาออกจากหน่วยนี้ (ชิ้นงานยังอยู่ในห้องเรียนเดิม)"
+                    className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-600 font-black text-[10px]"
+                  >
+                    🔗 เอาออก
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDeleteAssignment(a.id, a.title)}
+                    title="ลบชิ้นงานนี้ถาวร"
+                    className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-black text-[10px]"
+                  >
+                    🗑️ ลบถาวร
+                  </button>
+                </>
               )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </td>
+  </tr>
+)}
               </>
               );
             })}
@@ -650,10 +710,10 @@ return { display: `${fmtScore(sumScore)}/${fmtScore(sumMax)}`, state: passed ? "
               {unitsWithScore.map(u => (
                 <Fragment key={u.unit_no}>
                   {indicatorLinesOf(u).map((line, idx) => (
-                    <th key={`${u.unit_no}-i${idx}`} className="border border-slate-300 px-1 py-1 font-bold w-7" title={line}>
-                      {idx + 1}
-                    </th>
-                  ))}
+  <th key={`${u.unit_no}-i${idx}`} className="border border-slate-300 px-1 py-1 font-bold w-7" title={line}>
+    {indicatorNumberOf(line)}
+  </th>
+))}
                   <th className="border border-slate-300 px-1 py-1 font-black w-12 bg-fuchsia-50 print:bg-slate-100">สรุป</th>
                 </Fragment>
               ))}
@@ -713,12 +773,12 @@ return { display: `${fmtScore(sumScore)}/${fmtScore(sumMax)}`, state: passed ? "
           <div key={u.unit_no}>
             <p className="font-black text-slate-500">หน่วยที่ {u.unit_no} {u.unit_name}</p>
             <ul className="pl-4 list-disc space-y-0.5">
-              {indicatorLinesOf(u).map((line, idx) => (
-                <li key={idx} className="font-bold text-slate-500">
-                  <span className="text-slate-400">{indicatorItemLabel} {idx + 1}:</span> {line}
-                </li>
-              ))}
-            </ul>
+  {indicatorLinesOf(u).map((line, idx) => (
+    <li key={idx} className="font-bold text-slate-500">
+      <span className="text-slate-400">{indicatorItemLabel} {indicatorNumberOf(line)}:</span> {line}
+    </li>
+  ))}
+</ul>
           </div>
         ))}
       </div>

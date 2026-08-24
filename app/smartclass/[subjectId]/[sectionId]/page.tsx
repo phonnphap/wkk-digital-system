@@ -1912,6 +1912,9 @@ function SubjectSettingsTab({
   const [scorePeriodMode, setScorePeriodMode] = useState<"semester" | "yearly">(
   (subject as any)?.score_period_mode ?? "semester"
 );
+const [selectedSemester, setSelectedSemester] = useState<1 | 2>(
+  (subject as any)?.default_semester ?? 1
+);
   const dirty =
     subjectType !== (subject?.subject_type ?? "basic") ||
     creditHours !== (subject?.credit_hours != null ? String(subject.credit_hours) : "") ||
@@ -1919,6 +1922,7 @@ function SubjectSettingsTab({
     scoreGroupCode !== (subject?.score_group_code ?? "") ||
     gradingMode !== (subject?.grading_mode ?? "numeric") ||
     gradeRounding !== ((subject as any)?.grade_rounding_mode ?? "truncate") ||
+    selectedSemester !== ((subject as any)?.default_semester ?? 1) ||
     studentAccessMode !== (section.student_access_mode ?? "name_only") ||
     passThreshold !== String(subject?.pass_threshold_percent ?? 50) ||
     studentPortalEnabled !== (section.student_portal_enabled ?? true) ||
@@ -2059,6 +2063,22 @@ useEffect(() => {
       </button>
     ))}
   </div>
+
+  {/* ★ เพิ่ม: เลือกเทอมเมื่อเป็นมัธยม */}
+  {scorePeriodMode === "semester" && (
+    <div className="flex gap-2 mt-2">
+      {[1, 2].map(sem => (
+        <button key={sem} type="button" disabled={readOnly}
+          onClick={() => setSelectedSemester(sem as 1 | 2)}
+          className={`px-4 py-2 rounded-xl font-black text-xs border-2 disabled:opacity-50 ${
+            selectedSemester === sem ? "bg-indigo-500 border-indigo-500 text-white" : "bg-white border-slate-200 text-slate-500"
+          }`}>
+          ภาคเรียนที่ {sem}
+        </button>
+      ))}
+    </div>
+  )}
+
   <p className="text-[11px] text-slate-400 font-bold mt-1.5">
     "ตลอดปีการศึกษา" = วิชานี้จะมีห้อง/section เดียวคลุมทั้งปี ไม่ต้องสร้างซ้ำตอนขึ้นเทอม 2
   </p>
