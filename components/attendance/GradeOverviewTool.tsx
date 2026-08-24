@@ -7,7 +7,7 @@ type Student = {
   prefix?: string;
   first_name: string;
   last_name: string;
-  nickname?: string;
+  nick_name?: string;
   seat_number: number;
   avatar_url?: string;
 };
@@ -1130,7 +1130,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
                       </div>
                     )}
                     <div>
-                      <p className="text-xs font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nickname})</p>
+                      <p className="text-xs font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
                       <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                     </div>
                   </div>
@@ -1899,7 +1899,7 @@ function StudentReportModal({
               {s.first_name[0]}
             </div>
           )}
-          <p className="mt-3 font-black text-slate-800 text-lg">{s.prefix}{s.first_name} {s.last_name} ({s.nickname})</p>
+          <p className="mt-3 font-black text-slate-800 text-lg">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
           <p className="text-slate-400 text-xs font-bold">เลขที่ {s.seat_number} · {classroomLabel ?? "-"}</p>
         </div>
 
