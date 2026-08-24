@@ -2879,16 +2879,20 @@ const [{ data: subj }, { data: room }] = await Promise.all([
               )}
             </div>
             {periods.length === 0 ? (
-              <div className="p-10 text-center text-slate-400">
-                <p className="text-3xl mb-2">🗓️</p>
-                <p className="font-bold text-sm">วันนี้ไม่มีคาบเรียนวิชานี้ตามตารางสอน</p>
-              </div>
-            ) : (
-              <AttendanceTool
-                timetableEntryId={timetableEntryId} date={selectedDate} students={students} currentUserId={currentUserId}
-                referenceMap={homeroomMap} referenceLabel="โฮมรูม"
-              />
-            )}
+  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-center text-slate-400">
+    <p className="text-3xl mb-2">🗓️</p>
+    <p className="font-bold text-sm">วันนี้ไม่มีคาบเรียนวิชานี้ตามตารางสอน</p>
+    <p className="text-xs mt-2 text-slate-400">
+      ถ้าต้องการเรียนชดเชย/สลับคาบมาวันนี้ ให้ไปเปิดหน้าของ<b>วันที่มีคาบเดิม</b> แล้วกด "🔄 สลับคาบวันเรียน" เลือกวันที่ใหม่เป็นวันนี้
+    </p>
+  </div>
+) : (
+  <AttendanceTool
+    timetableEntryId={timetableEntryId} date={selectedDate} students={students} currentUserId={currentUserId}
+    referenceMap={homeroomMap} referenceLabel="โฮมรูม"
+    onDateSwapped={(fromDate, toDate) => setSelectedDate(toDate)}
+  />
+)}
           </div>
         )}
         {!bannerMenu && !isAdmin && tab === "random" && (
