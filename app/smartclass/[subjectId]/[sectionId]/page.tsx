@@ -2703,7 +2703,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
       {/* ตัวจับเวลาลอย: อยู่นอกเนื้อหาของแท็บ จึงใช้งานได้ต่อเนื่องแม้สลับแท็บ/เมนูอื่น */}
       <FloatingTimer open={timerOpen} onClose={() => setTimerOpen(false)} />
 
-      <div className="bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-4 pt-4 pb-6">
+      <div className="bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-4 pt-4 pb-6 print:hidden">
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
             <button onClick={() => router.push("/dashboard")}
@@ -2789,8 +2789,9 @@ const [{ data: subj }, { data: room }] = await Promise.all([
     currentUserId={currentUserId}
     readOnly={isAdmin}
     formativeMaxScore={(section as any).formative_max_score}
-  midtermMaxScore={(section as any).midterm_max_score}
-  finalMaxScore={(section as any).final_max_score}
+    midtermMaxScore={(section as any).midterm_max_score}
+    finalMaxScore={(section as any).final_max_score}
+    gradeRoundingMode={(subject as any).grade_rounding_mode ?? "truncate"}
   />
 )}
         {bannerMenu === "attendanceInfo" && section && (
@@ -2928,7 +2929,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
 
       {/* แท็บด้านล่าง */}
       {!isAdmin && (
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-2px_8px_rgba(0,0,0,0.04)] z-40">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-2px_8px_rgba(0,0,0,0.04)] z-40 print:hidden">
         {randomMenuOpen && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setRandomMenuOpen(false)} />

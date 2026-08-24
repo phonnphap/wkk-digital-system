@@ -47,6 +47,9 @@ function getAssignmentWeightedScore(a: Assignment, raw: number | null | undefine
 function fmtScore(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
+function applyRounding(n: number, mode: "up" | "truncate"): number {
+  return mode === "up" ? Math.ceil(n) : Math.floor(n);
+}
 
 // ★ คำนวณอายุ ณ วันนี้ (ปี)
 function calcAge(birthDateStr: string): number {
@@ -83,6 +86,7 @@ export default function Vp2Report({
   readOnly,
   unitMaxScore = 70,
   midtermMaxScore = 0,
+  gradeRoundingMode = "truncate", 
   onBack,
 }: {
   sectionId: string;
@@ -96,6 +100,7 @@ export default function Vp2Report({
   readOnly?: boolean;
   unitMaxScore?: number;
   midtermMaxScore?: number;
+  gradeRoundingMode?: "up" | "truncate";
   onBack: () => void;
 }) {
   const [loading, setLoading] = useState(true);
@@ -137,6 +142,9 @@ export default function Vp2Report({
           setSubjectType(subj.subject_type === "additional" ? "เพิ่มเติม" : "พื้นฐาน");
           setCreditHours(subj.credit_hours != null ? String(subj.credit_hours) : "");
         }
+        function applyRounding(n: number, mode: "up" | "truncate"): number {
+  return mode === "up" ? Math.ceil(n) : Math.floor(n);
+}
 
         // ครูประจำวิชา + หัวหน้ากลุ่มสาระ
         const { data: sectionRow } = await supabase
@@ -237,31 +245,30 @@ export default function Vp2Report({
   );
 
   const scoreByStudent = useMemo(() => {
-    const map: Record<string, { unit: number; midterm: number | null; total: number }> = {};
-    students.forEach(s => {
-      const subMap: Record<string, Submission> = {};
-      submissions.filter(sub => sub.student_id === s.id).forEach(sub => { subMap[sub.assignment_id] = sub; });
-      const assignmentTotal = assignments.reduce(
-        (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
-        0
-      );
+  const map: Record<string, { unit: number; midterm: number | null; total: number }> = {};
+  students.forEach(s => {
+    const subMap: Record<string, Submission> = {};
+    submissions.filter(sub => sub.student_id === s.id).forEach(sub => { subMap[sub.assignment_id] = sub; });
+    const assignmentTotal = assignments.reduce(
+      (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
+      0
+    );
+    const specialTotal = scoreEvents
+      .filter(ev => ev.student_id === s.id)
+      .reduce((sum, ev) => sum + ev.points, 0);
 
-      // ★ คะแนนพิเศษรวมของนักเรียนคนนี้ (ให้ตรงกับ specialTotal ในหน้าคะแนนรวม)
-      const specialTotal = scoreEvents
-        .filter(ev => ev.student_id === s.id)
-        .reduce((sum, ev) => sum + ev.points, 0);
+    const rawUnit = totalMaxScore > 0
+      ? ((assignmentTotal + specialTotal) / totalMaxScore) * unitMaxScore
+      : 0;
 
-      // ★ "คะแนนเก็บ" ต้องคิดจากฐานเดียวกับช่อง "รวม" ในหน้าคะแนนรวม
-      // (ช่อง "รวม" = assignmentTotal + specialTotal, อยู่หน้าช่อง "ระดับผลการเรียน")
-      const scaledUnit = totalMaxScore > 0
-        ? ((assignmentTotal + specialTotal) / totalMaxScore) * unitMaxScore
-        : 0;
+    // ★ ตัดเศษตามที่ตั้งค่าไว้ในรายวิชา แทนการโชว์ทศนิยม
+    const scaledUnit = applyRounding(rawUnit, gradeRoundingMode);
 
-      const midterm = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm")?.score ?? null;
-      map[s.id] = { unit: scaledUnit, midterm, total: scaledUnit + (midterm ?? 0) };
-    });
-    return map;
-  }, [students, submissions, assignments, examScores, scoreEvents, totalMaxScore, unitMaxScore]);
+    const midterm = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm")?.score ?? null;
+    map[s.id] = { unit: scaledUnit, midterm, total: scaledUnit + (midterm ?? 0) };
+  });
+  return map;
+}, [students, submissions, assignments, examScores, scoreEvents, totalMaxScore, unitMaxScore, gradeRoundingMode]);
 
   async function handleSaveRemarks() {
     if (readOnly) return;
@@ -297,36 +304,53 @@ export default function Vp2Report({
   return (
     <div className="space-y-4">
       <style>{`
-        /* ★ ประกาศฟอนต์ TH Sarabun New จากไฟล์ที่มีอยู่ในระบบ
-           แก้ path ด้านล่างให้ตรงกับตำแหน่งไฟล์จริงในโปรเจกต์ (เช่น /public/fonts/...) */
-        @font-face {
-          font-family: 'TH Sarabun New';
-          src: url('/fonts/THSarabunNew.woff2') format('woff2'),
-               url('/fonts/THSarabunNew.ttf') format('truetype');
-          font-weight: 400;
-          font-style: normal;
-          font-display: swap;
-        }
-        @font-face {
-          font-family: 'TH Sarabun New';
-          src: url('/fonts/THSarabunNew-Bold.woff2') format('woff2'),
-               url('/fonts/THSarabunNew-Bold.ttf') format('truetype');
-          font-weight: 700;
-          font-style: normal;
-          font-display: swap;
-        }
-        .vp2-report-root, .vp2-report-root * {
-          font-family: 'TH Sarabun New', 'TH Sarabun New UI', sans-serif;
-        }
-        @media print {
-          @page { size: A4 portrait; margin: 10mm; }
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .vp2-print-area { font-size: 15px !important; }
-          .vp2-print-area table { font-size: 14px !important; }
-          .vp2-print-area th, .vp2-print-area td { padding-top: 2px !important; padding-bottom: 2px !important; }
-          thead { display: table-header-group; }
-        }
-      `}</style>
+  @font-face {
+    font-family: 'TH Sarabun New';
+    src: url('/fonts/THSarabunNew.woff2') format('woff2'),
+         url('/fonts/THSarabunNew.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: 'TH Sarabun New';
+    src: url('/fonts/THSarabunNew-Bold.woff2') format('woff2'),
+         url('/fonts/THSarabunNew-Bold.ttf') format('truetype');
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+  }
+
+  /* ★ บังคับฟอนต์ทุก element รวมถึง input/button/select ที่ปกติไม่รับฟอนต์ต่อจาก parent */
+  .vp2-report-root,
+  .vp2-report-root * ,
+  .vp2-report-root input,
+  .vp2-report-root button,
+  .vp2-report-root select,
+  .vp2-report-root textarea {
+    font-family: 'TH Sarabun New', 'TH Sarabun New UI', sans-serif !important;
+  }
+
+  @media print {
+    @page { size: A4 portrait; margin: 10mm; }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+    /* ★ ซ่อนทุกอย่างในหน้าเว็บ แล้วโชว์เฉพาะกระดาษรายงาน กันแบนเนอร์/เมนูหลุดมาตอนพิมพ์แน่ๆ */
+    body * { visibility: hidden; }
+    .vp2-report-root, .vp2-report-root * { visibility: visible; }
+    .vp2-report-root {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+    }
+
+    .vp2-print-area { font-size: 15px !important; }
+    .vp2-print-area table { font-size: 14px !important; }
+    .vp2-print-area th, .vp2-print-area td { padding-top: 2px !important; padding-bottom: 2px !important; }
+    thead { display: table-header-group; }
+  }
+`}</style>
 
       <div className="vp2-report-root">
       <div className="print:hidden flex items-center justify-between flex-wrap gap-2">
