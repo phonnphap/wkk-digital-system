@@ -179,10 +179,11 @@ async function handleDeleteLinkedAssignment(assignmentId: string, title: string)
   }
 }
   useEffect(() => {
-    if (!subjectId) return;
-    loadUnitScores();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subjectId, academicYearId]);
+  if (!subjectId) return;
+  if (view !== "edit") return;   // ★ รีเฟรชเฉพาะตอนอยู่หน้าแก้ไขแผน
+  loadUnitScores();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [subjectId, academicYearId, view]);
 
 
   function updateUnit(i: number, field: keyof Unit, value: any) {
@@ -244,24 +245,34 @@ async function handleDeleteLinkedAssignment(assignmentId: string, title: string)
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* ★★ NEW: ปุ่มสลับแท็บ แก้ไขแผน / รายงานคะแนน */}
-          <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1">
-            <button
-              onClick={() => setView("edit")}
-              className={`px-3 py-2 rounded-lg text-xs font-black transition-colors ${view === "edit" ? "bg-fuchsia-500 text-white" : "text-slate-500 hover:bg-slate-50"}`}
-            >
-              📝 แก้ไขแผน
-            </button>
-            <button
-              onClick={() => setView("report")}
-              className={`px-3 py-2 rounded-lg text-xs font-black transition-colors ${view === "report" ? "bg-fuchsia-500 text-white" : "text-slate-500 hover:bg-slate-50"}`}
-            >
-              📊 รายงานคะแนน นร.
-            </button>
-          </div>
-          <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm">
-            🖨️ พิมพ์
-          </button>
+  {/* ★★ NEW: ปุ่มสลับแท็บ แก้ไขแผน / รายงานคะแนน */}
+  <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1">
+    <button
+      onClick={() => setView("edit")}
+      className={`px-3 py-2 rounded-lg text-xs font-black transition-colors ${view === "edit" ? "bg-fuchsia-500 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+    >
+      📝 แก้ไขแผน
+    </button>
+    <button
+      onClick={() => setView("report")}
+      className={`px-3 py-2 rounded-lg text-xs font-black transition-colors ${view === "report" ? "bg-fuchsia-500 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+    >
+      📊 รายงานคะแนน นร.
+    </button>
+  </div>
+  {view === "edit" && (
+    <button
+      onClick={loadUnitScores}
+      disabled={loadingUnitScores}
+      title="ดึงข้อมูลชิ้นงานที่ผูกล่าสุด"
+      className="px-3 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm disabled:opacity-50"
+    >
+      {loadingUnitScores ? "⏳" : "🔄"} รีเฟรช
+    </button>
+  )}
+  <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm">
+    🖨️ พิมพ์
+  </button>
           {!readOnly && view === "edit" && (
             <button onClick={handleSave} disabled={saving}
               className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 disabled:opacity-50 text-white font-black text-sm">
