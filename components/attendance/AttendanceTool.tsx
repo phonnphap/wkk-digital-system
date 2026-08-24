@@ -15,6 +15,17 @@ type Student = {
 
 type ReferenceInfo = { status: Status };
 
+type SwapReason = "makeup" | "emergency" | "other";
+
+type ClassReschedule = {
+  id: string;
+  timetable_entry_id: string;
+  original_date: string;
+  new_date: string;
+  reason: SwapReason;
+  reason_note?: string | null;
+};
+
 const STATUS_CONFIG: Record<Status, { label: string; emoji: string; dot: string; ring: string; chipBg: string; chipText: string }> = {
   present: { label: "มา", emoji: "✅", dot: "bg-emerald-500", ring: "ring-emerald-300", chipBg: "bg-emerald-50", chipText: "text-emerald-700" },
   late: { label: "สาย", emoji: "⏰", dot: "bg-amber-500", ring: "ring-amber-300", chipBg: "bg-amber-50", chipText: "text-amber-700" },
@@ -24,6 +35,12 @@ const STATUS_CONFIG: Record<Status, { label: string; emoji: string; dot: string;
 };
 const STATUS_ORDER: Status[] = ["present", "late", "excused", "leave", "absent"]; // มา-สาย-ไปกิจกรรม-ลา-ขาด
 
+const REASON_CONFIG: Record<SwapReason, { label: string; emoji: string }> = {
+  makeup: { label: "เรียนชดเชย", emoji: "📚" },
+  emergency: { label: "สลับคาบฉุกเฉิน", emoji: "🚨" },
+  other: { label: "อื่นๆ", emoji: "📌" },
+};
+
 const AVATAR_GRADIENTS = [
   "from-teal-400 to-emerald-400",
   "from-sky-400 to-blue-400",
@@ -32,9 +49,14 @@ const AVATAR_GRADIENTS = [
   "from-pink-400 to-rose-400",
 ];
 
+function formatThaiDate(d: string) {
+  return new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+}
+
 export default function AttendanceTool({
   timetableEntryId, date, students, currentUserId,
   referenceMap, referenceLabel = "โฮมรูม",
+  onDateSwapped,
 }: {
   timetableEntryId: string;
   date: string;
@@ -42,6 +64,8 @@ export default function AttendanceTool({
   currentUserId?: string;
   referenceMap?: Record<string, ReferenceInfo>;
   referenceLabel?: string;
+  /** เรียกหลังสลับวันสำเร็จ ให้หน้าพ่อแม่ (ผู้ถือ state ของ date) จัดการต่อ เช่น refetch หรือเปลี่ยนวันที่แสดงผล */
+  onDateSwapped?: (fromDate: string, toDate: string) => void;
 }) {
   const [statusMap, setStatusMap] = useState<Record<string, Status>>({});
   const [noteMap, setNoteMap] = useState<Record<string, string>>({});
@@ -53,6 +77,15 @@ export default function AttendanceTool({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   const [holidayInfo, setHolidayInfo] = useState<HolidayInfo | null>(null);
+
+  // --- สลับคาบวันเรียน (เรียนชดเชย / สลับคาบฉุกเฉิน) ---
+  const [showSwapDate, setShowSwapDate] = useState(false);
+  const [swapToDate, setSwapToDate] = useState("");
+  const [swapReason, setSwapReason] = useState<SwapReason>("makeup");
+  const [swapNote, setSwapNote] = useState("");
+  const [swapping, setSwapping] = useState(false);
+  const [swapError, setSwapError] = useState("");
+  const [reschedules, setReschedules] = useState<ClassReschedule[]>([]);
 
   useEffect(() => {
   if (!date) return;
@@ -82,6 +115,24 @@ export default function AttendanceTool({
   }, [timetableEntryId, date]);
 
   useEffect(() => { loadAttendance(); }, [loadAttendance]);
+
+  const loadReschedules = useCallback(async () => {
+    if (!timetableEntryId || !date) return;
+    try {
+      const res = await fetch(`/api/subject-attendance/swap-date?timetable_entry_id=${timetableEntryId}&date=${date}`);
+      const json = await res.json();
+      setReschedules(json.reschedules ?? []);
+    } catch {
+      setReschedules([]);
+    }
+  }, [timetableEntryId, date]);
+
+  useEffect(() => { loadReschedules(); }, [loadReschedules]);
+
+  // คาบนี้ถูกย้าย "ออกไป" วันอื่น (วันนี้คือวันเดิม)
+  const movedAway = reschedules.find(r => r.original_date === date);
+  // คาบนี้ถูกย้าย "เข้ามา" วันนี้ (วันนี้คือวันใหม่)
+  const movedIn = reschedules.find(r => r.new_date === date);
 
   function setStatus(studentId: string, status: Status) {
     setStatusMap(prev => ({ ...prev, [studentId]: prev[studentId] === status ? (undefined as any) : status }));
@@ -135,6 +186,54 @@ export default function AttendanceTool({
     }
   }
 
+  async function handleSwapDate() {
+    setSwapError("");
+    if (!swapToDate) {
+      setSwapError("กรุณาเลือกวันที่ใหม่");
+      return;
+    }
+    if (swapToDate === date) {
+      setSwapError("วันที่ใหม่ต้องไม่ตรงกับวันเดิม");
+      return;
+    }
+    setSwapping(true);
+    try {
+      const res = await fetch("/api/subject-attendance/swap-date", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          timetable_entry_id: timetableEntryId,
+          from_date: date,
+          to_date: swapToDate,
+          reason: swapReason,
+          reason_note: swapNote || undefined,
+          created_by: currentUserId,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "สลับวันไม่สำเร็จ");
+      await loadReschedules();
+      onDateSwapped?.(date, swapToDate);
+      setShowSwapDate(false);
+      setSwapToDate("");
+      setSwapNote("");
+      setSwapReason("makeup");
+    } catch (err: any) {
+      setSwapError(err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ");
+    } finally {
+      setSwapping(false);
+    }
+  }
+
+  async function handleCancelReschedule(id: string) {
+    try {
+      await fetch(`/api/subject-attendance/swap-date?id=${id}`, { method: "DELETE" });
+      await loadReschedules();
+    } catch {
+      // เงียบไว้ ผู้ใช้กดใหม่ได้ถ้าไม่สำเร็จ
+    }
+  }
+
   const markedCount = useMemo(() => students.filter(s => statusMap[s.id]).length, [students, statusMap]);
   const summary = students.reduce((acc, s) => {
     const st = statusMap[s.id];
@@ -165,13 +264,113 @@ export default function AttendanceTool({
             <p className="text-slate-400 text-xs italic mt-1">ตารางเช็คชื่อสำหรับคาบเรียนนี้</p>
           </div>
         </div>
-        <button
-          onClick={() => setShowNoteCol(v => !v)}
-          className="shrink-0 px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-600 font-black text-xs flex items-center gap-1.5 transition-colors"
-        >
-          📝 {showNoteCol ? "ซ่อนโน้ต" : "เพิ่มโน้ต"}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => { setShowSwapDate(v => !v); setSwapError(""); }}
+            className="shrink-0 px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs flex items-center gap-1.5 transition-colors"
+          >
+            🔄 สลับคาบวันเรียน
+          </button>
+          <button
+            onClick={() => setShowNoteCol(v => !v)}
+            className="shrink-0 px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-600 font-black text-xs flex items-center gap-1.5 transition-colors"
+          >
+            📝 {showNoteCol ? "ซ่อนโน้ต" : "เพิ่มโน้ต"}
+          </button>
+        </div>
       </div>
+
+      {/* แผงสลับคาบวันเรียน */}
+      {showSwapDate && (
+        <div className="mx-5 mt-3 rounded-xl border-2 border-indigo-200 bg-indigo-50 px-4 py-3">
+          <p className="text-xs font-black text-indigo-700 mb-2">🔄 สลับคาบวันเรียน (เรียนชดเชย / สลับคาบฉุกเฉิน)</p>
+
+          <div className="flex items-center gap-2 flex-wrap mb-3">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-slate-500">จาก</span>
+              <span className="px-2.5 py-1 rounded-lg bg-white border-2 border-slate-200 text-xs font-black text-slate-700">
+                {formatThaiDate(date)}
+              </span>
+            </div>
+            <span className="text-slate-400 font-black">→</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-slate-500">เป็น</span>
+              <input
+                type="date"
+                value={swapToDate}
+                onChange={e => setSwapToDate(e.target.value)}
+                className="border-2 border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="mb-3">
+            <p className="text-[11px] font-bold text-slate-500 mb-1.5">เหตุผล</p>
+            <div className="flex gap-2 flex-wrap">
+              {(Object.keys(REASON_CONFIG) as SwapReason[]).map(r => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setSwapReason(r)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 transition-colors ${
+                    swapReason === r
+                      ? "bg-indigo-600 border-indigo-600 text-white"
+                      : "bg-white border-slate-200 text-slate-500 hover:border-indigo-300"
+                  }`}
+                >
+                  {REASON_CONFIG[r].emoji} {REASON_CONFIG[r].label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <input
+            value={swapNote}
+            onChange={e => setSwapNote(e.target.value)}
+            placeholder="หมายเหตุเพิ่มเติม (ถ้ามี) เช่น เหตุผลของการสลับคาบ"
+            className="w-full border-2 border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none mb-3"
+          />
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleSwapDate}
+              disabled={swapping}
+              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs disabled:opacity-50"
+            >
+              {swapping ? "⏳ กำลังสลับ..." : "✅ ยืนยันสลับวัน"}
+            </button>
+            <button
+              onClick={() => { setShowSwapDate(false); setSwapToDate(""); setSwapNote(""); setSwapError(""); }}
+              className="px-3 py-1.5 rounded-xl border-2 border-slate-200 text-slate-500 font-black text-xs"
+            >
+              ยกเลิก
+            </button>
+          </div>
+          {swapError && <p className="text-red-600 text-[11px] font-bold mt-2">❌ {swapError}</p>}
+        </div>
+      )}
+
+      {/* แจ้งเตือนถ้าคาบนี้ถูกย้าย */}
+      {movedAway && (
+        <div className="mx-5 mt-3 rounded-xl border-2 border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs font-bold text-indigo-600 flex items-center justify-between gap-2 flex-wrap">
+          <span>
+            {REASON_CONFIG[movedAway.reason].emoji} คาบนี้ถูกย้ายไปสอนวันที่ {formatThaiDate(movedAway.new_date)}
+            {" "}({REASON_CONFIG[movedAway.reason].label}) — ไม่ต้องเช็คชื่อวันนี้
+          </span>
+          <button
+            onClick={() => handleCancelReschedule(movedAway.id)}
+            className="px-2.5 py-1 rounded-lg border-2 border-indigo-200 text-indigo-500 font-black text-[11px] shrink-0"
+          >
+            ยกเลิกการสลับ
+          </button>
+        </div>
+      )}
+      {movedIn && (
+        <div className="mx-5 mt-3 rounded-xl border-2 border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs font-bold text-indigo-600">
+          {REASON_CONFIG[movedIn.reason].emoji} คาบนี้ย้ายมาจากวันที่ {formatThaiDate(movedIn.original_date)}
+          {" "}({REASON_CONFIG[movedIn.reason].label}) — เช็คชื่อที่นี่แทน
+        </div>
+      )}
 
       <div className="px-5 mt-4">
         <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500 text-white text-xs font-black">Default</span>

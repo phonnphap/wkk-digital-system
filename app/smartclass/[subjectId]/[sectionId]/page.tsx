@@ -258,6 +258,7 @@ function QrCodeModal({ inviteUrl, onClose }: { inviteUrl: string; onClose: () =>
   );
 }
 
+
 /* ---------------- การ์ดนักเรียน (ตามภาพต้นแบบ) ---------------- */
 
 function StudentCard({
