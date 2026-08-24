@@ -29,7 +29,7 @@ const REPORT_CARDS: { key: ReportKey; label: string; icon: string; desc: string 
 
 export default function ReportsHubTool({
   sectionId, subjectId, academicYearId, subjectTitle, subjectCode, classroomLabel, students, currentUserId, readOnly,formativeMaxScore,
-  midtermMaxScore, gradeRoundingMode, finalMaxScore,
+  midtermMaxScore, gradeRoundingMode, finalMaxScore, subjectTeacherName, 
 }: {
   sectionId: string;
   subjectId: string;
@@ -44,6 +44,7 @@ export default function ReportsHubTool({
   midtermMaxScore?: number;     // ★ เพิ่ม
   finalMaxScore?: number; 
   gradeRoundingMode?: "up" | "truncate"; 
+  subjectTeacherName?: string;
 }) {
   const [active, setActive] = useState<ReportKey | null>(null);
 
@@ -102,7 +103,8 @@ export default function ReportsHubTool({
       sectionId={sectionId} subjectId={subjectId} academicYearId={academicYearId}
       subjectTitle={subjectTitle} subjectCode={subjectCode} classroomLabel={classroomLabel}
       students={students} currentUserId={currentUserId} readOnly={readOnly}
-      unitMaxScore={formativeMaxScore} midtermMaxScore={midtermMaxScore} gradeRoundingMode={gradeRoundingMode}
+      unitMaxScore={formativeMaxScore} midtermMaxScore={midtermMaxScore} gradeRoundingMode={gradeRoundingMode} 
+      subjectTeacherNameFallback={subjectTeacherName} 
       onBack={() => setActive(null)}
     />
   );

@@ -2792,6 +2792,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
     midtermMaxScore={(section as any).midterm_max_score}
     finalMaxScore={(section as any).final_max_score}
     gradeRoundingMode={(subject as any).grade_rounding_mode ?? "truncate"}
+    subjectTeacherName={subjectTeacherName}
   />
 )}
         {bannerMenu === "attendanceInfo" && section && (

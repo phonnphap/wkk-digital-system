@@ -87,6 +87,7 @@ export default function Vp2Report({
   unitMaxScore = 70,
   midtermMaxScore = 0,
   gradeRoundingMode = "truncate", 
+  subjectTeacherNameFallback,
   onBack,
 }: {
   sectionId: string;
@@ -101,6 +102,7 @@ export default function Vp2Report({
   unitMaxScore?: number;
   midtermMaxScore?: number;
   gradeRoundingMode?: "up" | "truncate";
+  subjectTeacherNameFallback?: string;
   onBack: () => void;
 }) {
   const [loading, setLoading] = useState(true);
@@ -154,31 +156,40 @@ export default function Vp2Report({
           .maybeSingle();
 
         if (sectionRow?.teacher_id) {
-          const { data: teacher } = await supabase
-            .from("users")
-            .select("prefix, first_name, last_name, full_name, department_id")
-            .eq("id", sectionRow.teacher_id)
-            .maybeSingle();
+  const { data: teacher, error: teacherErr } = await supabase
+    .from("users")
+    .select("prefix, first_name, last_name, full_name, department_id")
+    .eq("id", sectionRow.teacher_id)
+    .maybeSingle();
 
-          if (teacher) {
-            setTeacherSignatureName(
-              teacher.full_name || `${teacher.prefix ?? ""}${teacher.first_name} ${teacher.last_name}`
-            );
-            if (teacher.department_id) {
-              const { data: deptHead } = await supabase
-                .from("users")
-                .select("prefix, first_name, last_name, full_name")
-                .eq("department_id", teacher.department_id)
-                .contains("extra_roles", ["subject_dept_head"])
-                .maybeSingle();
-              if (deptHead) {
-                setDeptHeadName(
-                  deptHead.full_name || `${deptHead.prefix ?? ""}${deptHead.first_name} ${deptHead.last_name}`
-                );
-              }
-            }
-          }
-        }
+  if (teacherErr) console.error("[Vp2Report] โหลดชื่อครูประจำวิชาไม่สำเร็จ:", teacherErr);
+
+  if (teacher) {
+    setTeacherSignatureName(
+      teacher.full_name || `${teacher.prefix ?? ""}${teacher.first_name} ${teacher.last_name}`
+    );
+    if (teacher.department_id) {
+      const { data: deptHead, error: deptErr } = await supabase
+        .from("users")
+        .select("prefix, first_name, last_name, full_name")
+        .eq("department_id", teacher.department_id)
+        .contains("extra_roles", ["subject_dept_head"])
+        .maybeSingle();
+
+      if (deptErr) console.error("[Vp2Report] โหลดชื่อหัวหน้ากลุ่มสาระไม่สำเร็จ:", deptErr);
+
+      if (deptHead) {
+        setDeptHeadName(
+          deptHead.full_name || `${deptHead.prefix ?? ""}${deptHead.first_name} ${deptHead.last_name}`
+        );
+      }
+    }
+  } else {
+    console.warn("[Vp2Report] ไม่พบข้อมูลครูประจำวิชา teacher_id =", sectionRow.teacher_id);
+  }
+} else {
+  console.warn("[Vp2Report] section นี้ยังไม่มี teacher_id ผูกไว้");
+}
 
         // ปีการศึกษา / ภาคเรียน / ชั้น
         if (academicYearId) {
@@ -192,7 +203,7 @@ export default function Vp2Report({
             setSemester(String(year.semester ?? ""));
           }
         }
-        if (classroomLabel) setGradeLevel(classroomLabel.trim());
+        if (classroomLabel) setGradeLevel(formatGradeLevel(classroomLabel));
 
         // ★ ข้อมูลนักเรียนเพิ่มเติม: รหัส นร. / วันเกิด / เพศ (ใช้คำนวณคำนำหน้าอัตโนมัติ)
         const ids = students.map(s => s.id);
@@ -264,11 +275,21 @@ export default function Vp2Report({
     // ★ ตัดเศษตามที่ตั้งค่าไว้ในรายวิชา แทนการโชว์ทศนิยม
     const scaledUnit = applyRounding(rawUnit, gradeRoundingMode);
 
-    const midterm = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm")?.score ?? null;
-    map[s.id] = { unit: scaledUnit, midterm, total: scaledUnit + (midterm ?? 0) };
+    const midtermRaw = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm")?.score ?? null;
+const midterm = midtermRaw !== null ? applyRounding(midtermRaw, gradeRoundingMode) : null;
+const total = applyRounding(scaledUnit + (midterm ?? 0), gradeRoundingMode);
+map[s.id] = { unit: scaledUnit, midterm, total };
   });
   return map;
 }, [students, submissions, assignments, examScores, scoreEvents, totalMaxScore, unitMaxScore, gradeRoundingMode]);
+
+function formatGradeLevel(label?: string): string {
+  if (!label) return "";
+  const nums = label.match(/\d+/g);
+  if (!nums || nums.length === 0) return label.trim();
+  if (nums.length === 1) return nums[0];
+  return `${nums[0]}/${nums[nums.length - 1]}`;
+}
 
   async function handleSaveRemarks() {
     if (readOnly) return;
@@ -305,21 +326,19 @@ export default function Vp2Report({
     <div className="space-y-4">
       <style>{`
   @font-face {
-    font-family: 'TH Sarabun New';
-    src: url('/fonts/THSarabunNew.woff2') format('woff2'),
-         url('/fonts/THSarabunNew.ttf') format('truetype');
-    font-weight: 400;
-    font-style: normal;
-    font-display: swap;
-  }
-  @font-face {
-    font-family: 'TH Sarabun New';
-    src: url('/fonts/THSarabunNew-Bold.woff2') format('woff2'),
-         url('/fonts/THSarabunNew-Bold.ttf') format('truetype');
-    font-weight: 700;
-    font-style: normal;
-    font-display: swap;
-  }
+  font-family: 'TH Sarabun New';
+  src: url('/fonts/THSarabun.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'TH Sarabun New';
+  src: url('/fonts/THSarabun-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
 
   /* ★ บังคับฟอนต์ทุก element รวมถึง input/button/select ที่ปกติไม่รับฟอนต์ต่อจาก parent */
   .vp2-report-root,
@@ -332,24 +351,21 @@ export default function Vp2Report({
   }
 
   @media print {
-    @page { size: A4 portrait; margin: 10mm; }
-    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page { size: A4 portrait; margin: 8mm; }
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body * { visibility: hidden; }
+  .vp2-report-root, .vp2-report-root * { visibility: visible; }
+  .vp2-report-root { position: absolute; left: 0; top: 0; width: 100%; }
 
-    /* ★ ซ่อนทุกอย่างในหน้าเว็บ แล้วโชว์เฉพาะกระดาษรายงาน กันแบนเนอร์/เมนูหลุดมาตอนพิมพ์แน่ๆ */
-    body * { visibility: hidden; }
-    .vp2-report-root, .vp2-report-root * { visibility: visible; }
-    .vp2-report-root {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-    }
-
-    .vp2-print-area { font-size: 15px !important; }
-    .vp2-print-area table { font-size: 14px !important; }
-    .vp2-print-area th, .vp2-print-area td { padding-top: 2px !important; padding-bottom: 2px !important; }
-    thead { display: table-header-group; }
-  }
+  .vp2-print-area { font-size: 13px !important; padding: 0 !important; }
+  .vp2-print-area table { font-size: 12px !important; }
+  .vp2-print-area th, .vp2-print-area td { padding-top: 1px !important; padding-bottom: 1px !important; }
+  .vp2-header-block { margin-bottom: 4px !important; }
+  .vp2-header-block p { margin: 0 !important; line-height: 1.25 !important; }
+  .vp2-signature-block { margin-top: 10px !important; }
+  tr { page-break-inside: avoid; }
+  thead { display: table-header-group; }
+}
 `}</style>
 
       <div className="vp2-report-root">
@@ -381,7 +397,7 @@ export default function Vp2Report({
       <div className="vp2-print-area relative bg-white rounded-2xl border border-slate-100 shadow-sm p-6 sm:p-10 print:border-0 print:shadow-none print:p-0 max-w-[190mm] mx-auto">
         {/* ★ เปลี่ยนหัวกระดาษเป็น flex 3 ช่อง (โลโก้ | ข้อความกึ่งกลาง | ป้ายแบบวัดผล 2)
             แทนการใช้ absolute เดิม เพื่อไม่ให้โลโก้ไปทับข้อความไม่ว่าข้อความจะยาวแค่ไหน */}
-        <div className="flex items-start gap-2 mb-2">
+        <div className="flex items-start gap-2 mb-2 vp2-header-block">
           <div className="w-12 h-12 print:w-10 print:h-10 shrink-0 flex items-center justify-center">
             <img src="/school-logo.png" alt="ตราโรงเรียน" className="w-full h-full object-contain" />
           </div>
@@ -475,10 +491,10 @@ export default function Vp2Report({
           </tbody>
         </table>
 
-        <div className="grid grid-cols-2 gap-8 mt-8 print:mt-6 text-sm print:text-xs text-center">
+        <div className="grid grid-cols-2 gap-8 mt-8 print:mt-6 text-sm print:text-xs text-center vp2-signature-block">
           <div>
             <p>ลงชื่อ.......................................ครูประจำวิชา</p>
-            <p>({teacherSignatureName || "......................................."})</p>
+<p>({teacherSignatureName || subjectTeacherNameFallback || "......................................."})</p>
           </div>
           <div>
             <p>ลงชื่อ.......................................หัวหน้ากลุ่มสาระฯ</p>
