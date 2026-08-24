@@ -1062,16 +1062,18 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   onDragStart={() => handleDragStart(a.id)}
   onDragOver={handleDragOverTh}
   onDrop={() => handleDropTh(a.id)}
-  className={`px-3 py-3 text-center min-w-[110px] bg-sky-50/70 transition-opacity ${
+  className={`relative px-3 py-3 text-center min-w-[110px] bg-sky-50/70 transition-opacity ${
     !readOnly ? "cursor-move" : ""
   } ${draggedId === a.id ? "opacity-40" : ""}`}
   title={!readOnly ? "ลากเพื่อย้ายลำดับคอลัมน์นี้" : undefined}
 >
+  {!readOnly && (
+    <span className="absolute top-1 left-1.5 text-indigo-400 text-xs leading-none select-none">⠿</span>
+  )}
   <p className="text-[11px] font-black text-indigo-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
-  <p className="text-[9px] text-indigo-300 font-bold">
+  <p className="text-[9px] text-indigo-600 font-bold">
     {isWeighted(a) ? `กรอกเต็ม ${a.max_score} → นน. ${a.weight_percent}%` : `เต็ม ${a.max_score} คะแนน`}
   </p>
-  {!readOnly && <p className="text-[8px] text-indigo-300/70 font-bold mt-0.5">⠿ ลากย้ายได้</p>}
 </th>
     ))}
     {presets.map(p => (
