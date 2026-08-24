@@ -89,7 +89,26 @@ function ToastContainer({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss:
     </div>
   );
 }
+type ExamScore = {
+  student_id: string;
+  exam_type: "midterm" | "final";
+  score: number | null;
+  raw_score?: number | null;
+  raw_max_score?: number | null;
+};
 
+function isExamWeighted(rawMax: number | null | undefined, maxScore: number): boolean {
+  return !!(rawMax && rawMax > 0 && rawMax !== maxScore);
+}
+function getExamWeightedScore(
+  rawScore: number | null | undefined,
+  rawMax: number | null | undefined,
+  maxScore: number
+): number {
+  if (rawScore === null || rawScore === undefined) return 0;
+  if (rawMax && rawMax > 0) return (rawScore / rawMax) * maxScore;
+  return rawScore;
+}
 // ---- น้ำหนักชิ้นงาน (Weighted score) ----
 // สูตร: คะแนนจริงที่ได้ = (คะแนนที่นักเรียนได้ / คะแนนเต็ม) × น้ำหนักชิ้นงาน
 // ถ้าไม่ได้เปิดใช้น้ำหนัก หรือไม่ได้ระบุ % ไว้ ให้ใช้คะแนนดิบตามปกติ
@@ -264,11 +283,12 @@ export default function GradeOverviewTool({
   const [showGradeSetting, setShowGradeSetting] = useState(false);
   const [reportStudent, setReportStudent] = useState<Student | null>(null);
   const [hideScores, setHideScores] = useState(false);
-  const [examScores, setExamScores] = useState<{ student_id: string; exam_type: "midterm" | "final"; score: number | null }[]>([]);   // ★ เพิ่ม
+  const [examScores, setExamScores] = useState<ExamScore[]>([]);
   // ★ โครงสร้างคะแนนเหลือแบบเดียว (เก็บ+กลางภาค+ปลายภาค) จึงแสดงคอลัมน์กลางภาคเสมอ
   // ไม่ผูกกับค่า gradingStructure ที่อาจเป็นข้อมูลเก่าจากฐานข้อมูลอีกต่อไป
   const useMidterm = true;
-
+  const [rawMidtermMax, setRawMidtermMax] = useState<number | null>(null);
+const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
   // ★ ลำดับคอลัมน์ชิ้นงานที่ครูลากสลับเอง (จำไว้ต่อห้องเรียนใน localStorage)
   const [assignmentOrder, setAssignmentOrder] = useState<string[]>([]);
 
@@ -300,6 +320,8 @@ export default function GradeOverviewTool({
       setSubmissions(json.submissions ?? []);
       setScoreEvents(json.scoreEvents ?? []);
       setExamScores(json.examScores ?? []);
+      setRawMidtermMax(json.rawMidtermMaxScore ?? null);   // ★ เพิ่ม
+      setRawFinalMax(json.rawFinalMaxScore ?? null);       // ★ เพิ่ม
 
       try {
         const attJson = await attRes.json();
@@ -390,8 +412,10 @@ export default function GradeOverviewTool({
     const submittedCount = assignments.filter(a => subMap[a.id]?.score !== null && subMap[a.id]?.score !== undefined).length;
     const midtermRow = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm");
     const finalRow = examScores.find(e => e.student_id === s.id && e.exam_type === "final");
-    const midtermScore = midtermRow?.score ?? null;
-    const finalScore = finalRow?.score ?? null;
+    const midtermRaw = midtermRow?.raw_score ?? midtermRow?.score ?? null;
+    const finalRaw = finalRow?.raw_score ?? finalRow?.score ?? null;
+    const midtermScore = getExamWeightedScore(midtermRaw, midtermRow?.raw_max_score ?? rawMidtermMax, midtermMaxScore);
+    const finalScore   = getExamWeightedScore(finalRaw, finalRow?.raw_max_score ?? rawFinalMax, finalMaxScore);
 
     // ★ นับตรงเวลา/สาย จาก getLateInfo แทน isOnTime เดิม
     let onTimeCount = 0;
@@ -448,7 +472,7 @@ export default function GradeOverviewTool({
       onTimeCount, lateCount, onTimeRate, totalDaysLate,
       specialTotal, percentage, grade, grandTotal,
       attendanceRate, passFailStatus,
-      scaledFormative, midtermScore, finalScore, componentTotal,   // ★ เพิ่ม
+      scaledFormative, midtermScore, finalScore, componentTotal, midtermRaw, finalRaw, 
     };
   });
 }, [students, submissions, assignments, presets, scoreEvents, criteria, totalMaxScore,
@@ -474,32 +498,66 @@ export default function GradeOverviewTool({
       showToast("แก้ไขคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error"); // ★ toast แทน alert
     }
   }
-
+  async function saveExamConfig(examType: "midterm" | "final", rawMax: number | null) {
+  if (readOnly) return;
+  try {
+    const res = await fetch("/api/subject-grades/exam-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject_section_id: sectionId, exam_type: examType, raw_max_score: rawMax }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? "บันทึกไม่สำเร็จ");
+    showToast("บันทึกคะแนนเต็มดิบสำเร็จ", "success");
+  } catch (e: any) {
+    showToast("บันทึกไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error");
+  }
+}
   // ให้คะแนนงานที่มอบหมายแบบ inline จากตารางคะแนนรวมนี้โดยตรง (เฉพาะครูประจำวิชา ไม่ใช่ readOnly)
   // NOTE: endpoint /api/assignment-submissions/grade ต้อง upsert สถานะเป็น "reviewed"
   // (ไม่ใช่ "graded") ให้ตรงกับ CHECK constraint ของตาราง assignment_submissions
-  async function handleUpdateExamScore(studentId: string, examType: "midterm" | "final", newScore: number) {
+  async function handleUpdateExamScore(
+  studentId: string,
+  examType: "midterm" | "final",
+  rawScore: number,
+  rawMax?: number | null // ถ้าไม่ส่งมา จะ fallback ไปใช้ rawMidtermMax/rawFinalMax ของวิชา
+) {
   if (readOnly) return;
-  const maxScore = examType === "midterm" ? midtermMaxScore : finalMaxScore;
-  if (Number.isNaN(newScore) || newScore < 0 || newScore > maxScore) {
-    showToast(`คะแนนต้องอยู่ระหว่าง 0 - ${maxScore} คะแนน`, "error"); // ★ toast แทน alert
+  const effectiveRawMax = rawMax ?? (examType === "midterm" ? rawMidtermMax : rawFinalMax);
+  const ceiling = effectiveRawMax && effectiveRawMax > 0 ? effectiveRawMax : (examType === "midterm" ? midtermMaxScore : finalMaxScore);
+
+  if (Number.isNaN(rawScore) || rawScore < 0 || rawScore > ceiling) {
+    showToast(`คะแนนต้องอยู่ระหว่าง 0 - ${ceiling} คะแนน`, "error");
     return;
   }
+
+  const maxScore = examType === "midterm" ? midtermMaxScore : finalMaxScore;
+  const weighted = getExamWeightedScore(rawScore, effectiveRawMax, maxScore);
+
   try {
     const res = await fetch("/api/subject-grades/exam-score", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject_section_id: sectionId, student_id: studentId, exam_type: examType, score: newScore, graded_by: currentUserId || null }),
+      body: JSON.stringify({
+        subject_section_id: sectionId,
+        student_id: studentId,
+        exam_type: examType,
+        score: weighted,          // ★ ค่า scale แล้ว ใช้คำนวณเกรดต่อได้เลย
+        raw_score: rawScore,      // ★ เก็บดิบไว้โชว์ย้อนหลัง
+        raw_max_score: effectiveRawMax ?? null,
+        graded_by: currentUserId || null,
+      }),
     });
     const json = await res.json();
     if (!res.ok) throw new Error(json.error ?? "บันทึกคะแนนไม่สำเร็จ");
     setExamScores(prev => {
       const exists = prev.some(e => e.student_id === studentId && e.exam_type === examType);
-      if (exists) return prev.map(e => (e.student_id === studentId && e.exam_type === examType ? { ...e, score: newScore } : e));
-      return [...prev, { student_id: studentId, exam_type: examType, score: newScore }];
+      const next = { student_id: studentId, exam_type: examType, score: weighted, raw_score: rawScore, raw_max_score: effectiveRawMax ?? null };
+      if (exists) return prev.map(e => (e.student_id === studentId && e.exam_type === examType ? { ...e, ...next } : e));
+      return [...prev, next];
     });
   } catch (e: any) {
-    showToast("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error"); // ★ toast แทน alert
+    showToast("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error");
   }
 }
 async function handleUpdateScore(studentId: string, assignmentId: string, newScore: number) {
@@ -903,6 +961,11 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   midtermMaxScore={midtermMaxScore}              // ★ add
   finalMaxScore={finalMaxScore}                  // ★ add
   onReorderAssignments={setAssignmentOrder}      // ★ ลากสลับลำดับหัวตาราง
+  rawMidtermMax={rawMidtermMax}              // ★ เพิ่ม
+  rawFinalMax={rawFinalMax}                  // ★ เพิ่ม
+  onChangeRawMidtermMax={setRawMidtermMax}   // ★ เพิ่ม
+  onChangeRawFinalMax={setRawFinalMax}       // ★ เพิ่ม
+  onSaveExamConfig={saveExamConfig}   
 />
       ) : (
         <PodiumView rows={rows} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
@@ -927,8 +990,9 @@ type ActiveCell = { col: string; studentId: string } | null;
 function GradeTable({
   rows, assignments, presets, totalMaxScore, onOpenReport, onAdjustPreset, onUpdateScore,
   onUpdateExamScore, getLateInfo, readOnly, gradingMode = "numeric",
-  useMidterm = false, formativeMaxScore = 0, midtermMaxScore = 0, finalMaxScore = 0,   // ★ เพิ่ม 5 ตัวนี้
-  onReorderAssignments,                                                                // ★ เพิ่ม
+  useMidterm = false, formativeMaxScore = 0, midtermMaxScore = 0, finalMaxScore = 0,
+  onReorderAssignments,
+  rawMidtermMax, rawFinalMax, onChangeRawMidtermMax, onChangeRawFinalMax, onSaveExamConfig,  // ★ เพิ่ม
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
@@ -937,15 +1001,20 @@ function GradeTable({
   onOpenReport: (s: Student) => void;
   onAdjustPreset: (studentId: string, presetId: string, currentValue: number, newValue: number) => void;
   onUpdateScore: (studentId: string, assignmentId: string, newScore: number) => void;
-  onUpdateExamScore: (studentId: string, examType: "midterm" | "final", newScore: number) => void;   // ★ เพิ่ม
+  onUpdateExamScore: (studentId: string, examType: "midterm" | "final", rawScore: number, rawMax?: number | null) => void; // ★ แก้ signature
   getLateInfo: (assignment: Assignment, sub?: Submission) => LateInfo;
   readOnly: boolean;
   gradingMode?: "numeric" | "pass_fail";
-  useMidterm?: boolean;              // ★ เพิ่ม
-  formativeMaxScore?: number;        // ★ เพิ่ม
-  midtermMaxScore?: number;          // ★ เพิ่ม
-  finalMaxScore?: number;            // ★ เพิ่ม
-  onReorderAssignments: (newOrderIds: string[]) => void; // ★ เพิ่ม
+  useMidterm?: boolean;
+  formativeMaxScore?: number;
+  midtermMaxScore?: number;
+  finalMaxScore?: number;
+  onReorderAssignments: (newOrderIds: string[]) => void;
+  rawMidtermMax: number | null;                                   // ★ เพิ่ม
+  rawFinalMax: number | null;                                     // ★ เพิ่ม
+  onChangeRawMidtermMax: (v: number | null) => void;              // ★ เพิ่ม
+  onChangeRawFinalMax: (v: number | null) => void;                // ★ เพิ่ม
+  onSaveExamConfig: (examType: "midterm" | "final", rawMax: number | null) => void; // ★ เพิ่ม
 }) {
   // ★ ช่องที่กำลังกรอกคะแนนอยู่ตอนนี้ (คุมจากที่นี่ เพื่อให้กด Enter/ลูกศร แล้วสั่งเปิดช่องถัดไปได้)
   const [activeCell, setActiveCell] = useState<ActiveCell>(null);
@@ -1090,15 +1159,43 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
       <p className="text-[9px] text-indigo-300 font-bold">เต็ม {formativeMaxScore}</p>
     </th>
     {useMidterm && (
-      <th className="px-3 py-3 text-center min-w-[90px] bg-teal-50/70">
-        <p className="text-[11px] font-black text-teal-700">กลางภาค</p>
-        <p className="text-[9px] text-teal-300 font-bold">เต็ม {midtermMaxScore}</p>
-      </th>
+  <th className="px-3 py-3 text-center min-w-[90px] bg-teal-50/70">
+    <p className="text-[11px] font-black text-teal-700">กลางภาค</p>
+    {readOnly ? (
+      <p className="text-[9px] text-teal-300 font-bold">
+        {rawMidtermMax ? `กรอกเต็ม ${rawMidtermMax} → นน. ${midtermMaxScore}` : `เต็ม ${midtermMaxScore}`}
+      </p>
+    ) : (
+      <input
+        type="number" min={0}
+        value={rawMidtermMax ?? ""}
+        placeholder={`เต็ม ${midtermMaxScore}`}
+        onChange={e => onChangeRawMidtermMax(e.target.value === "" ? null : Number(e.target.value))}
+        onBlur={() => onSaveExamConfig("midterm", rawMidtermMax)}
+        className="w-14 text-center text-[9px] border-b border-teal-300 bg-transparent focus:outline-none"
+        title="ใส่คะแนนเต็มดิบของข้อสอบจริง (ถ้าเต็มไม่เท่ากับที่ตั้งไว้)"
+      />
     )}
-    <th className="px-3 py-3 text-center min-w-[90px] bg-orange-50/70">
-      <p className="text-[11px] font-black text-orange-700">ปลายภาค</p>
-      <p className="text-[9px] text-orange-300 font-bold">เต็ม {finalMaxScore}</p>
-    </th>
+  </th>
+)}
+<th className="px-3 py-3 text-center min-w-[90px] bg-orange-50/70">
+  <p className="text-[11px] font-black text-orange-700">ปลายภาค</p>
+  {readOnly ? (
+    <p className="text-[9px] text-orange-300 font-bold">
+      {rawFinalMax ? `กรอกเต็ม ${rawFinalMax} → นน. ${finalMaxScore}` : `เต็ม ${finalMaxScore}`}
+    </p>
+  ) : (
+    <input
+      type="number" min={0}
+      value={rawFinalMax ?? ""}
+      placeholder={`เต็ม ${finalMaxScore}`}
+      onChange={e => onChangeRawFinalMax(e.target.value === "" ? null : Number(e.target.value))}
+      onBlur={() => onSaveExamConfig("final", rawFinalMax)}
+      className="w-14 text-center text-[9px] border-b border-orange-300 bg-transparent focus:outline-none"
+      title="ใส่คะแนนเต็มดิบของข้อสอบจริง (ถ้าเต็มไม่เท่ากับที่ตั้งไว้)"
+    />
+  )}
+</th>
   </>
 )}
 {/* ★ ลำดับคอลัมน์ท้ายตาราง: รวม -> ระดับผลการเรียน/สถานะ -> ส่งตรงเวลา (ย้ายระดับผลการเรียนไปไว้หลังคอลัมน์รวมตามที่ต้องการ) */}
@@ -1219,31 +1316,35 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
       <span className="text-slate-400 font-bold text-xs">/{formativeMaxScore}</span>
     </td>
     {useMidterm && (
-      <td className="text-center px-3 py-3">
-        <EditableExamCell
-          value={r.midtermScore}
-          maxScore={midtermMaxScore}
-          readOnly={readOnly}
-          isEditing={activeCell?.col === "midterm" && activeCell?.studentId === s.id}
-          onRequestEdit={() => setActiveCell({ col: "midterm", studentId: s.id })}
-          onCommit={v => onUpdateExamScore(s.id, "midterm", v)}
-          onNavigate={dir => handleNavigate("midterm", s.id, dir)}
-          onCancelEdit={() => setActiveCell(null)}
-        />
-      </td>
-    )}
-    <td className="text-center px-3 py-3">
-      <EditableExamCell
-        value={r.finalScore}
-        maxScore={finalMaxScore}
-        readOnly={readOnly}
-        isEditing={activeCell?.col === "final" && activeCell?.studentId === s.id}
-        onRequestEdit={() => setActiveCell({ col: "final", studentId: s.id })}
-        onCommit={v => onUpdateExamScore(s.id, "final", v)}
-        onNavigate={dir => handleNavigate("final", s.id, dir)}
-        onCancelEdit={() => setActiveCell(null)}
-      />
-    </td>
+  <td className="text-center px-3 py-3">
+    <EditableExamCell
+      value={r.midtermScore}
+      rawValue={r.midtermRaw}          // ★ เพิ่ม
+      rawMax={rawMidtermMax}           // ★ เพิ่ม
+      maxScore={midtermMaxScore}
+      readOnly={readOnly}
+      isEditing={activeCell?.col === "midterm" && activeCell?.studentId === s.id}
+      onRequestEdit={() => setActiveCell({ col: "midterm", studentId: s.id })}
+      onCommit={v => onUpdateExamScore(s.id, "midterm", v, rawMidtermMax)}
+      onNavigate={dir => handleNavigate("midterm", s.id, dir)}
+      onCancelEdit={() => setActiveCell(null)}
+    />
+  </td>
+)}
+<td className="text-center px-3 py-3">
+  <EditableExamCell
+    value={r.finalScore}
+    rawValue={r.finalRaw}              // ★ เพิ่ม
+    rawMax={rawFinalMax}               // ★ เพิ่ม
+    maxScore={finalMaxScore}
+    readOnly={readOnly}
+    isEditing={activeCell?.col === "final" && activeCell?.studentId === s.id}
+    onRequestEdit={() => setActiveCell({ col: "final", studentId: s.id })}
+    onCommit={v => onUpdateExamScore(s.id, "final", v, rawFinalMax)}
+    onNavigate={dir => handleNavigate("final", s.id, dir)}
+    onCancelEdit={() => setActiveCell(null)}
+  />
+</td>
   </>
 )}
 {/* ★ คอลัมน์ "รวม" — มาก่อนคอลัมน์เกรด/สถานะ ตามลำดับใหม่ (รวม -> ระดับผลการเรียน -> ส่งตรงเวลา) */}
@@ -1467,27 +1568,30 @@ return (
 
 // ★ คะแนนกลางภาค/ปลายภาค — เปลี่ยนเป็น controlled (isEditing มาจาก GradeTable) เพื่อรองรับกดลูกศรย้ายช่อง
 function EditableExamCell({
-  value, maxScore, readOnly, isEditing, onRequestEdit, onCommit, onNavigate, onCancelEdit,
+  value, rawValue, rawMax, maxScore, readOnly, isEditing, onRequestEdit, onCommit, onNavigate, onCancelEdit,
 }: {
-  value: number | null;
+  value: number | null;        // ค่าที่ scale แล้ว ใช้แค่โชว์ "= X คะแนนจริง"
+  rawValue: number | null;     // ค่าดิบที่กรอก/แก้ไข
+  rawMax: number | null;
   maxScore: number;
   readOnly: boolean;
   isEditing: boolean;
   onRequestEdit: () => void;
-  onCommit: (v: number) => void;
+  onCommit: (rawScore: number) => void;
   onNavigate: (dir: NavDir) => void;
   onCancelEdit: () => void;
 }) {
-  const currentText = value !== null ? String(value) : "";
+  const inputMax = rawMax && rawMax > 0 ? rawMax : maxScore;
+  const currentText = rawValue !== null ? String(rawValue) : "";   // ★ แก้ จาก value -> rawValue
   const [draft, setDraft] = useState(currentText);
   const justActedRef = useRef(false);
 
-  useEffect(() => { setDraft(currentText); }, [value, isEditing]);
+  useEffect(() => { setDraft(currentText); }, [rawValue, isEditing]);   // ★ แก้ dep
 
   function commit() {
     const parsed = Number(draft);
     if (draft.trim() === "" || Number.isNaN(parsed)) return;
-    if (parsed !== value) onCommit(parsed);
+    if (parsed !== rawValue) onCommit(parsed);   // ★ เทียบกับ rawValue
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -1506,13 +1610,20 @@ function EditableExamCell({
   }
 
   if (readOnly) {
-    return <span className="text-sm font-black text-slate-700">{value ?? "-"}<span className="text-slate-400 font-bold">/{maxScore}</span></span>;
+    return (
+      <span className="text-sm font-black text-slate-700 flex flex-col items-center">
+        <span>{rawValue ?? "-"}<span className="text-slate-400 font-bold">/{inputMax}</span></span>
+        {isExamWeighted(rawMax, maxScore) && value !== null && (
+          <span className="text-[9px] font-black text-violet-500">= {fmtScore(value)} คะแนนจริง</span>
+        )}
+      </span>
+    );
   }
 
   if (isEditing) {
     return (
       <input
-        type="number" autoFocus min={0} max={maxScore}
+        type="number" autoFocus min={0} max={inputMax}
         value={draft} onChange={e => setDraft(e.target.value)}
         onFocus={e => e.currentTarget.select()}
         onBlur={handleBlur}
@@ -1522,11 +1633,19 @@ function EditableExamCell({
     );
   }
 
+  const weighted = isExamWeighted(rawMax, maxScore) && value !== null ? value : null;
+
   return (
     <button onClick={onRequestEdit} title="คลิกเพื่อกรอกคะแนน"
-      className="text-sm font-black px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-700">
-      {value !== null ? value : <span className="text-amber-500 text-[10px]">ยังไม่กรอก</span>}
-      {value !== null && <span className="text-slate-400 font-bold">/{maxScore}</span>}
+      className="flex flex-col items-center gap-0.5 mx-auto text-sm font-black px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-700">
+      {rawValue !== null ? (
+        <span>{rawValue}<span className="text-slate-400 font-bold">/{inputMax}</span></span>
+      ) : (
+        <span className="text-amber-500 text-[10px]">ยังไม่กรอก</span>
+      )}
+      {weighted !== null && (
+        <span className="text-[9px] font-black text-violet-500">= {fmtScore(weighted)} คะแนนจริง</span>
+      )}
     </button>
   );
 }
@@ -1613,10 +1732,12 @@ function buildRowsType() {
     grandTotal: number;
     attendanceRate: number | null;
     passFailStatus: "ผ่าน" | "ไม่ผ่าน" | null;
-    scaledFormative: number;        // ★ add
-    midtermScore: number | null;    // ★ add
-    finalScore: number | null;      // ★ add
-    componentTotal: number | null;  // ★ add
+    scaledFormative: number;        
+    midtermScore: number | null;    
+    finalScore: number | null;      
+    componentTotal: number | null;  
+    midtermRaw: number | null;      
+    finalRaw: number | null; 
   }[];
 }
 

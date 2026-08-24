@@ -28,6 +28,10 @@ type Assignment = {
 };
 type Submission = { assignment_id: string; student_id: string; score: number | null };
 type ExamScore = { student_id: string; exam_type: "midterm" | "final"; score: number | null };
+// ★ เพิ่ม: ต้องดึงคะแนนพิเศษ (preset/scoreEvents) มาด้วย เพื่อให้ "คะแนนเก็บ" ตรงกับ
+// ช่อง "รวม" (grandTotal = assignmentTotal + specialTotal) ในหน้าคะแนนรวม (GradeOverviewTool)
+type Preset = { id: string; label: string; points: number; emoji: string; sort_order: number };
+type ScoreEvent = { id: string; student_id: string; preset_id: string; points: number };
 
 function isWeighted(a: Assignment): boolean {
   return !!(a.allow_weight && a.weight_percent != null && (a.max_score ?? 0) > 0);
@@ -109,6 +113,9 @@ export default function Vp2Report({
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [examScores, setExamScores] = useState<ExamScore[]>([]);
+  // ★ เพิ่ม state คะแนนพิเศษ ให้สอดคล้องกับหน้าคะแนนรวม
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [scoreEvents, setScoreEvents] = useState<ScoreEvent[]>([]);
   const [remarks, setRemarks] = useState<Record<string, string>>({});
 
   const [teacherSignatureName, setTeacherSignatureName] = useState("");
@@ -200,6 +207,9 @@ export default function Vp2Report({
           setAssignments((gradeJson.assignments ?? []).filter((a: Assignment) => a.status !== "draft"));
           setSubmissions(gradeJson.submissions ?? []);
           setExamScores(gradeJson.examScores ?? []);
+          // ★ เพิ่ม: ดึงคะแนนพิเศษ (preset/scoreEvents) เหมือนหน้าคะแนนรวม
+          setPresets(gradeJson.presets ?? []);
+          setScoreEvents(gradeJson.scoreEvents ?? []);
         }
 
         // หมายเหตุที่เคยกรอกไว้ (ถ้ามี)
@@ -235,12 +245,23 @@ export default function Vp2Report({
         (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
         0
       );
-      const scaledUnit = totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * unitMaxScore : 0;
+
+      // ★ คะแนนพิเศษรวมของนักเรียนคนนี้ (ให้ตรงกับ specialTotal ในหน้าคะแนนรวม)
+      const specialTotal = scoreEvents
+        .filter(ev => ev.student_id === s.id)
+        .reduce((sum, ev) => sum + ev.points, 0);
+
+      // ★ "คะแนนเก็บ" ต้องคิดจากฐานเดียวกับช่อง "รวม" ในหน้าคะแนนรวม
+      // (ช่อง "รวม" = assignmentTotal + specialTotal, อยู่หน้าช่อง "ระดับผลการเรียน")
+      const scaledUnit = totalMaxScore > 0
+        ? ((assignmentTotal + specialTotal) / totalMaxScore) * unitMaxScore
+        : 0;
+
       const midterm = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm")?.score ?? null;
       map[s.id] = { unit: scaledUnit, midterm, total: scaledUnit + (midterm ?? 0) };
     });
     return map;
-  }, [students, submissions, assignments, examScores, totalMaxScore, unitMaxScore]);
+  }, [students, submissions, assignments, examScores, scoreEvents, totalMaxScore, unitMaxScore]);
 
   async function handleSaveRemarks() {
     if (readOnly) return;
@@ -276,16 +297,38 @@ export default function Vp2Report({
   return (
     <div className="space-y-4">
       <style>{`
+        /* ★ ประกาศฟอนต์ TH Sarabun New จากไฟล์ที่มีอยู่ในระบบ
+           แก้ path ด้านล่างให้ตรงกับตำแหน่งไฟล์จริงในโปรเจกต์ (เช่น /public/fonts/...) */
+        @font-face {
+          font-family: 'TH Sarabun New';
+          src: url('/fonts/THSarabunNew.woff2') format('woff2'),
+               url('/fonts/THSarabunNew.ttf') format('truetype');
+          font-weight: 400;
+          font-style: normal;
+          font-display: swap;
+        }
+        @font-face {
+          font-family: 'TH Sarabun New';
+          src: url('/fonts/THSarabunNew-Bold.woff2') format('woff2'),
+               url('/fonts/THSarabunNew-Bold.ttf') format('truetype');
+          font-weight: 700;
+          font-style: normal;
+          font-display: swap;
+        }
+        .vp2-report-root, .vp2-report-root * {
+          font-family: 'TH Sarabun New', 'TH Sarabun New UI', sans-serif;
+        }
         @media print {
           @page { size: A4 portrait; margin: 10mm; }
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .vp2-print-area { font-size: 9px !important; }
-          .vp2-print-area table { font-size: 9px !important; }
+          .vp2-print-area { font-size: 15px !important; }
+          .vp2-print-area table { font-size: 14px !important; }
           .vp2-print-area th, .vp2-print-area td { padding-top: 2px !important; padding-bottom: 2px !important; }
           thead { display: table-header-group; }
         }
       `}</style>
 
+      <div className="vp2-report-root">
       <div className="print:hidden flex items-center justify-between flex-wrap gap-2">
         <button onClick={onBack} className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">
           ← กลับ
@@ -311,48 +354,54 @@ export default function Vp2Report({
         <p className="print:hidden text-xs font-black text-emerald-500">✅ บันทึกหมายเหตุล่าสุดแล้ว</p>
       )}
 
-      <div className="vp2-print-area relative bg-white rounded-2xl border border-slate-100 shadow-sm p-6 sm:p-10 print:border-0 print:shadow-none print:p-0 max-w-[190mm] mx-auto font-['TH_Sarabun_New',_sans-serif]">
-        <img src="/school-logo.png" alt="ตราโรงเรียน" className="absolute left-6 top-6 print:left-0 print:top-0 w-12 h-12 print:w-10 print:h-10 object-contain" />
-        <div className="flex items-start justify-between mb-2">
-          <div className="flex-1 text-center">
-            <p className="font-black text-base print:text-sm">แบบประกาศผลคะแนนระหว่างเรียนรายวิชาของนักเรียนโรงเรียนวัดเขียนเขต</p>
-            <p className="text-sm print:text-xs mt-1">
-              ชั้น{" "}
+      <div className="vp2-print-area relative bg-white rounded-2xl border border-slate-100 shadow-sm p-6 sm:p-10 print:border-0 print:shadow-none print:p-0 max-w-[190mm] mx-auto">
+        {/* ★ เปลี่ยนหัวกระดาษเป็น flex 3 ช่อง (โลโก้ | ข้อความกึ่งกลาง | ป้ายแบบวัดผล 2)
+            แทนการใช้ absolute เดิม เพื่อไม่ให้โลโก้ไปทับข้อความไม่ว่าข้อความจะยาวแค่ไหน */}
+        <div className="flex items-start gap-2 mb-2">
+          <div className="w-12 h-12 print:w-10 print:h-10 shrink-0 flex items-center justify-center">
+            <img src="/school-logo.png" alt="ตราโรงเรียน" className="w-full h-full object-contain" />
+          </div>
+          <div className="flex-1 text-center min-w-0">
+            <p className="font-black text-base print:text-sm leading-snug">แบบประกาศผลคะแนนระหว่างเรียนรายวิชาของนักเรียนโรงเรียนวัดเขียนเขต</p>
+            <p className="text-sm print:text-xs mt-1 whitespace-nowrap">
+              ชั้นมัธยมศึกษาปีที่{" "}
               {readOnly ? (
                 <span className="font-bold">{gradeLevel || "…………"}</span>
               ) : (
-                <input value={gradeLevel} onChange={e => setGradeLevel(e.target.value)} className="border-b border-slate-400 text-center w-32 focus:outline-none print:border-none" />
+                <input value={gradeLevel} onChange={e => setGradeLevel(e.target.value)} placeholder="เช่น 3/1" className="border-b border-slate-400 text-center w-16 focus:outline-none print:border-none" />
               )}{" "}
               ภาคเรียนที่{" "}
               {readOnly ? (
                 <span className="font-bold">{semester || "…"}</span>
               ) : (
-                <input value={semester} onChange={e => setSemester(e.target.value)} className="border-b border-slate-400 text-center w-10 focus:outline-none print:border-none" />
+                <input value={semester} onChange={e => setSemester(e.target.value)} className="border-b border-slate-400 text-center w-8 focus:outline-none print:border-none" />
               )}{" "}
               ปีการศึกษา{" "}
               {readOnly ? (
                 <span className="font-bold">{yearLabel || "…………"}</span>
               ) : (
-                <input value={yearLabel} onChange={e => setYearLabel(e.target.value)} className="border-b border-slate-400 text-center w-24 focus:outline-none print:border-none" />
+                <input value={yearLabel} onChange={e => setYearLabel(e.target.value)} className="border-b border-slate-400 text-center w-20 focus:outline-none print:border-none" />
               )}
             </p>
-            <p className="text-sm print:text-xs mt-1">
+            <p className="text-sm print:text-xs mt-1 whitespace-nowrap">
               รหัสวิชา <span className="font-bold">{subjectCode}</span> รายวิชา <span className="font-bold">{subjectTitle}</span> ประเภท{" "}
               {readOnly ? (
                 <span className="font-bold">{subjectType || "…………"}</span>
               ) : (
-                <input value={subjectType} onChange={e => setSubjectType(e.target.value)} className="border-b border-slate-400 text-center w-24 focus:outline-none print:border-none" />
+                <input value={subjectType} onChange={e => setSubjectType(e.target.value)} className="border-b border-slate-400 text-center w-20 focus:outline-none print:border-none" />
               )}{" "}
               จำนวน{" "}
               {readOnly ? (
                 <span className="font-bold">{creditHours || "…"}</span>
               ) : (
-                <input value={creditHours} onChange={e => setCreditHours(e.target.value)} className="border-b border-slate-400 text-center w-10 focus:outline-none print:border-none" />
+                <input value={creditHours} onChange={e => setCreditHours(e.target.value)} className="border-b border-slate-400 text-center w-8 focus:outline-none print:border-none" />
               )}{" "}
               หน่วยกิต
             </p>
           </div>
-          <div className="border border-slate-400 rounded px-2 py-1 text-[10px] font-bold shrink-0">แบบวัดผล 2</div>
+          <div className="w-12 print:w-10 shrink-0 flex items-start justify-end">
+            <div className="border border-slate-400 rounded px-2 py-1 text-[10px] font-bold whitespace-nowrap">แบบวัดผล 2</div>
+          </div>
         </div>
 
         <table className="w-full border-collapse text-xs print:text-[9px] mt-4">
@@ -417,6 +466,7 @@ export default function Vp2Report({
           <p>({directorName})</p>
           <p>ผู้อำนวยการโรงเรียนวัดเขียนเขต</p>
         </div>
+      </div>
       </div>
     </div>
   );
