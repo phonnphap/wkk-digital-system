@@ -75,7 +75,7 @@ function computePrefix(gender: string | null, birthDate: string | null, fallback
 }
 
 // ★ รวมคำนำหน้า (title) + ชื่อเต็ม ให้แน่ใจว่ามีคำนำหน้าเสมอ (แม้ full_name จะไม่มีคำนำหน้าติดมาด้วยก็ตาม)
-// หมายเหตุ: ตาราง "users" เก็บคำนำหน้าไว้ในคอลัมน์ชื่อ "title" (ไม่ใช่ "prefix")
+// หมายเหตุ: ตาราง "users" เก็บคำนำหน้าไว้ในคอลัมน์ชื่อ "title" (ไม่ใช่ "prefix") — ถ้าคอลัมน์จริงชื่ออื่น แจ้งได้เลย
 function buildNameWithTitle(person: {
   title?: string | null;
   first_name?: string | null;
@@ -173,8 +173,8 @@ export default function Vp2Report({
           .maybeSingle();
 
         if (sectionRow?.teacher_id) {
-          // ★ แก้ไข: ดึงคำนำหน้าจากคอลัมน์ "title" ของตาราง users (ของเดิมใช้ "prefix" ซึ่งไม่มีคอลัมน์นี้จริง เลยไม่ขึ้นค่า)
-          // ★ แก้ไข: join ตาราง departments ผ่าน department_id เพื่อเอาค่า "name" (ชื่อกลุ่มสาระ) แทนที่จะโชว์ id
+          // ★ ดึงคำนำหน้าจากคอลัมน์ "title" ของตาราง users
+          // ★ join ตาราง departments ผ่าน department_id เพื่อเอาค่า "name" (ชื่อกลุ่มสาระ) แทนที่จะโชว์ id
           const { data: teacher, error: teacherErr } = await supabase
             .from("users")
             .select("title, first_name, last_name, full_name, department_id, departments:department_id(name)")
@@ -184,6 +184,7 @@ export default function Vp2Report({
           if (teacherErr) console.error("[Vp2Report] โหลดชื่อครูประจำวิชาไม่สำเร็จ:", teacherErr);
 
           if (teacher) {
+            console.log("[Vp2Report] teacher row:", teacher); // ★ debug: เปิด console ดูว่าคอลัมน์ title/departments มาจริงไหม
             setTeacherSignatureName(buildNameWithTitle(teacher as any));
 
             const deptRel: any = (teacher as any).departments;
@@ -201,6 +202,7 @@ export default function Vp2Report({
               if (deptErr) console.error("[Vp2Report] โหลดชื่อหัวหน้ากลุ่มสาระไม่สำเร็จ:", deptErr);
 
               if (deptHead) {
+                console.log("[Vp2Report] deptHead row:", deptHead); // ★ debug
                 setDeptHeadName(buildNameWithTitle(deptHead as any));
               }
             }
@@ -269,12 +271,14 @@ export default function Vp2Report({
     })();
   }, [sectionId, subjectId, academicYearId, classroomLabel, students]);
 
-  // ★ คำนวณคะแนนต่อคน ด้วยสูตรเดียวกับหน้า "คะแนนรวม"
+  // ★ คะแนนเต็มรวมของชุดงานทั้งหมด (ใช้แสดงหัวตาราง แทนเลข 70 ตายตัว)
   const totalMaxScore = useMemo(
     () => assignments.reduce((sum, a) => sum + getAssignmentMaxContribution(a), 0),
     [assignments]
   );
 
+  // ★ แก้ไข: "หน่วยการเรียน" ต้องเป็นคะแนนดิบรวม (assignmentTotal + specialTotal) เหมือนช่อง "รวม"
+  // ในหน้าคะแนนรวม (GradeOverviewTool) ตรงๆ ไม่ต้อง scale เทียบกับ unitMaxScore (70) อีกต่อไป
   const scoreByStudent = useMemo(() => {
   const map: Record<string, { unit: number; midterm: number | null; total: number }> = {};
   students.forEach(s => {
@@ -288,9 +292,8 @@ export default function Vp2Report({
       .filter(ev => ev.student_id === s.id)
       .reduce((sum, ev) => sum + ev.points, 0);
 
-    const rawUnit = totalMaxScore > 0
-      ? ((assignmentTotal + specialTotal) / totalMaxScore) * unitMaxScore
-      : 0;
+    // ★ คะแนนดิบรวม ตรงกับช่อง "รวม" ในหน้าคะแนนรวม
+    const rawUnit = assignmentTotal + specialTotal;
 
     // ★ ตัดเศษตามที่ตั้งค่าไว้ในรายวิชา แทนการโชว์ทศนิยม
     const scaledUnit = applyRounding(rawUnit, gradeRoundingMode);
@@ -301,7 +304,7 @@ const total = applyRounding(scaledUnit + (midterm ?? 0), gradeRoundingMode);
 map[s.id] = { unit: scaledUnit, midterm, total };
   });
   return map;
-}, [students, submissions, assignments, examScores, scoreEvents, totalMaxScore, unitMaxScore, gradeRoundingMode]);
+}, [students, submissions, assignments, examScores, scoreEvents, gradeRoundingMode]);
 
 function formatGradeLevel(label?: string): string {
   if (!label) return "";
@@ -360,9 +363,7 @@ function formatGradeLevel(label?: string): string {
   font-display: swap;
 }
 
-  /* ★ แก้ไข: บังคับฟอนต์ THSarabun เฉพาะภายในตัวเอกสาร (.vp2-print-area) เท่านั้น
-     เดิมบังคับทั้ง .vp2-report-root ซึ่งครอบคลุมแถบปุ่มด้านบน (กลับ/บันทึก/พิมพ์) ไปด้วย
-     ทำให้ปุ่มและตัวหนังสือแถบเมนูเปลี่ยนไปใช้ฟอนต์ไทยที่ตัวเล็กกว่าปกติ ดูเหมือน "หน้าเว็บเล็กลง" */
+  /* บังคับฟอนต์ THSarabun เฉพาะภายในตัวเอกสาร (.vp2-print-area) เท่านั้น ไม่กระทบแถบปุ่มด้านบน */
   .vp2-print-area,
   .vp2-print-area * ,
   .vp2-print-area input,
@@ -416,7 +417,10 @@ function formatGradeLevel(label?: string): string {
         <p className="print:hidden text-xs font-black text-emerald-500">✅ บันทึกหมายเหตุล่าสุดแล้ว</p>
       )}
 
-      <div className="vp2-print-area relative bg-white rounded-2xl border border-slate-100 shadow-sm p-6 sm:p-10 print:border-0 print:shadow-none print:p-0 max-w-[190mm] mx-auto">
+      {/* ★ แก้ไข: เจอสาเหตุจริงที่ "หน้าเล็กลง" — เดิม max-w-[190mm] (~718px, ขนาดกระดาษ A4) ถูกบังคับใช้ตลอด
+          แม้ตอนไม่ได้พิมพ์ ทำให้การ์ดแคบกว่าเครื่องมืออื่นมาก ตอนนี้ให้ใช้ความกว้างเต็ม container ตามปกติ
+          แล้วค่อยจำกัดเหลือ 190mm เฉพาะตอนสั่งพิมพ์ (print:) เท่านั้น */}
+      <div className="vp2-print-area relative bg-white rounded-2xl border border-slate-100 shadow-sm p-6 sm:p-10 print:border-0 print:shadow-none print:p-0 w-full print:max-w-[190mm] mx-auto">
         {/* ★ เปลี่ยนหัวกระดาษเป็น flex 3 ช่อง (โลโก้ | ข้อความกึ่งกลาง | ป้ายแบบวัดผล 2)
             แทนการใช้ absolute เดิม เพื่อไม่ให้โลโก้ไปทับข้อความไม่ว่าข้อความจะยาวแค่ไหน */}
         <div className="flex items-start gap-2 mb-2 vp2-header-block">
@@ -476,9 +480,10 @@ function formatGradeLevel(label?: string): string {
               <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-16">หมายเหตุ</th>
             </tr>
             <tr>
-              <th className="border border-slate-400 px-1 py-1 font-normal">หน่วยการเรียน ({unitMaxScore})</th>
+              {/* ★ โชว์คะแนนเต็มจริงจากชุดงานทั้งหมด (totalMaxScore) แทนเลข 70 ตายตัว */}
+              <th className="border border-slate-400 px-1 py-1 font-normal">หน่วยการเรียน ({totalMaxScore})</th>
               <th className="border border-slate-400 px-1 py-1 font-normal">กลางภาค ({midtermMaxScore})</th>
-              <th className="border border-slate-400 px-1 py-1 font-normal">รวม ({unitMaxScore + midtermMaxScore})</th>
+              <th className="border border-slate-400 px-1 py-1 font-normal">รวม ({totalMaxScore + midtermMaxScore})</th>
             </tr>
           </thead>
           <tbody>
@@ -519,7 +524,7 @@ function formatGradeLevel(label?: string): string {
 <p>({teacherSignatureName || subjectTeacherNameFallback || "......................................."})</p>
           </div>
           <div>
-            {/* ★ "หัวหน้ากลุ่มสาระฯ" -> "หัวหน้ากลุ่มสาระ" + ชื่อกลุ่มสาระจริง (เช่น วิทยาศาสตร์และเทคโนโลยี) */}
+            {/* "หัวหน้ากลุ่มสาระฯ" -> "หัวหน้ากลุ่มสาระ" + ชื่อกลุ่มสาระจริง (เช่น วิทยาศาสตร์และเทคโนโลยี) */}
             <p>ลงชื่อ.......................................หัวหน้ากลุ่มสาระ{deptName || "ฯ"}</p>
             <p>({deptHeadName || "......................................."})</p>
           </div>
