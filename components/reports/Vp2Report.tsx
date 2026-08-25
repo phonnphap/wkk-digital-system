@@ -92,6 +92,47 @@ function buildNameWithTitle(person: {
   return `${title}${base}`;
 }
 
+/* =========================================================================
+   ★ ช่องลงชื่อ — ทำให้ "ชื่อในวงเล็บ" อยู่กึ่งกลางใต้ "เส้นประ" เป๊ะเสมอ
+   ไม่ว่าคำต่อท้ายเส้นประ (เช่น "ครูประจำวิชา") จะสั้นหรือยาวแค่ไหนก็ตาม
+   หลักการ: เส้นประเป็น span ความกว้างคงที่ (lineWidth) ที่มี position:relative
+   แล้ววางชื่อ (และบรรทัดตำแหน่งเพิ่มเติมถ้ามี) เป็น position:absolute ยึดกับ
+   span นั้นโดยตรง จึงกึ่งกลางตรงกับเส้นประเสมอ ไม่ขึ้นกับความยาวข้อความรอบข้าง
+   ========================================================================= */
+function SignatureField({
+  role,
+  name,
+  extraLine,
+  lineWidth = "9rem",
+}: {
+  role?: string;
+  name: string;
+  extraLine?: string;
+  lineWidth?: string;
+}) {
+  return (
+    <div
+      className="inline-block text-center"
+      style={{ paddingBottom: extraLine ? "3.4rem" : "1.9rem" }}
+    >
+      <p className="whitespace-nowrap inline-flex items-baseline justify-center">
+        <span>ลงชื่อ</span>
+        <span className="relative inline-block mx-1" style={{ width: lineWidth }}>
+          <span className="block border-b border-dotted border-slate-500">&nbsp;</span>
+          <span
+            className="absolute left-0 right-0 top-full mt-1 text-center"
+            style={{ whiteSpace: extraLine ? "normal" : "nowrap" }}
+          >
+            <span className="block whitespace-nowrap">({name})</span>
+            {extraLine && <span className="block whitespace-nowrap mt-0.5">{extraLine}</span>}
+          </span>
+        </span>
+        {role && <span>{role}</span>}
+      </p>
+    </div>
+  );
+}
+
 export default function Vp2Report({
   sectionId,
   subjectId,
@@ -363,29 +404,34 @@ function formatGradeLevel(label?: string): string {
   return (
     <div className="space-y-4">
       <style>{`
+  /* ★ ตั้งชื่อฟอนต์เฉพาะของรายงานนี้ (THSarabunReport) ไม่ใช้ชื่อ 'TH Sarabun New' ตรงๆ
+     เพราะ @font-face ไม่ได้ถูก scope ด้วย class ได้ — มันลงทะเบียนฟอนต์ให้ "ทั้งหน้าเว็บ" เสมอ
+     ถ้าใช้ชื่อเดียวกับที่หน้า page.tsx ใช้อยู่ (font-['TH_Sarabun_New']) จะทำให้ฟอนต์ทั้งหน้า
+     (รวมเมนูด้านบน/ปุ่มต่างๆ) เปลี่ยนไปใช้ฟอนต์นี้ไปด้วย ซึ่งตัวเล็กกว่า sans-serif ปกติมาก
+     ทำให้ตัวหนังสือส่วนอื่นของหน้าดู "เล็กลง" ทั้งที่ font-size เท่าเดิม */
   @font-face {
-  font-family: 'TH Sarabun New';
+  font-family: 'THSarabunReport';
   src: url('/fonts/THSarabun.ttf') format('truetype');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
-  font-family: 'TH Sarabun New';
+  font-family: 'THSarabunReport';
   src: url('/fonts/THSarabun-Bold.ttf') format('truetype');
   font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
 
-  /* บังคับฟอนต์ THSarabun เฉพาะภายในตัวเอกสาร (.vp2-print-area) เท่านั้น ไม่กระทบแถบปุ่มด้านบน */
+  /* บังคับฟอนต์ THSarabunReport เฉพาะภายในตัวเอกสาร (.vp2-print-area) เท่านั้น ไม่กระทบแถบปุ่มด้านบน */
   .vp2-print-area,
   .vp2-print-area * ,
   .vp2-print-area input,
   .vp2-print-area button,
   .vp2-print-area select,
   .vp2-print-area textarea {
-    font-family: 'TH Sarabun New', 'TH Sarabun New UI', sans-serif !important;
+    font-family: 'THSarabunReport', 'TH Sarabun New UI', sans-serif !important;
   }
 
   .vp2-print-area { font-size: 16px; }
@@ -403,7 +449,9 @@ function formatGradeLevel(label?: string): string {
   .vp2-print-area th, .vp2-print-area td { padding-top: 1px !important; padding-bottom: 1px !important; }
   .vp2-header-block { margin-bottom: 4px !important; }
   .vp2-header-block p { margin: 0 !important; line-height: 1.25 !important; }
-  .vp2-signature-block { margin-top: 10px !important; }
+  /* ★ เว้นระยะก่อนส่วนลงชื่อให้มีที่ว่างพอสมควร ทั้งตอนพิมพ์และตอนดูปกติ */
+  .vp2-signature-block { margin-top: 28px !important; }
+  .vp2-director-block { margin-top: 22px !important; }
   tr { page-break-inside: avoid; }
   thead { display: table-header-group; }
 }
@@ -541,21 +589,29 @@ function formatGradeLevel(label?: string): string {
           </tbody>
         </table>
 
-                <div className="grid grid-cols-2 gap-8 mt-8 print:mt-6 text-center vp2-signature-block">
-          <div>
-            <p className="text-center">ลงชื่อ.......................................ครูประจำวิชา</p>
-            <p className="text-center mt-1">({teacherSignatureName || subjectTeacherNameFallback || "......................................."})</p>
+        {/* ★ ส่วนลงชื่อ — เว้นระยะห่างจากตารางมากขึ้น (mt-16 แทน mt-8 เดิม)
+            และใช้ SignatureField ใหม่ ที่ทำให้ "ชื่อในวงเล็บ" อยู่กึ่งกลางใต้เส้นประจริงๆ */}
+        <div className="grid grid-cols-2 gap-8 mt-16 print:mt-10 vp2-signature-block">
+          <div className="flex justify-center">
+            <SignatureField
+              role="ครูประจำวิชา"
+              name={teacherSignatureName || subjectTeacherNameFallback || "......................................."}
+            />
           </div>
-          <div>
+          <div className="flex justify-center">
             {/* "หัวหน้ากลุ่มสาระฯ" -> "หัวหน้ากลุ่มสาระ" + ชื่อกลุ่มสาระจริง (เช่น วิทยาศาสตร์และเทคโนโลยี) */}
-            <p className="text-center">ลงชื่อ.......................................หัวหน้ากลุ่มสาระ{deptName || "ฯ"}</p>
-            <p className="text-center mt-1">({deptHeadName || "......................................."})</p>
+            <SignatureField
+              role={`หัวหน้ากลุ่มสาระ${deptName || "ฯ"}`}
+              name={deptHeadName || "......................................."}
+            />
           </div>
         </div>
-        <div className="text-center mt-6 print:mt-4">
-          <p className="text-center">ลงชื่อ.......................................</p>
-          <p className="text-center mt-1">({directorName})</p>
-          <p className="text-center">ผู้อำนวยการโรงเรียนวัดเขียนเขต</p>
+        <div className="flex justify-center mt-10 print:mt-8 vp2-director-block">
+          <SignatureField
+            name={directorName}
+            extraLine="ผู้อำนวยการโรงเรียนวัดเขียนเขต"
+            lineWidth="9rem"
+          />
         </div>
         </div>
       </div>
