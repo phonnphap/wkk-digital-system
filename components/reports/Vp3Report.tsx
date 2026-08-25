@@ -374,9 +374,15 @@ export default function Vp3Report({
                 ],
               }),
               new TableCell({
-                width: { size: 34, type: WidthType.PERCENTAGE },
-                children: [new Paragraph({ text: "" })],
-              }),
+  width: { size: 34, type: WidthType.PERCENTAGE },
+  verticalAlign: VerticalAlign.CENTER,
+  children: [
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: "บันทึกข้อความ", font: FONT_NAME, size: 44, bold: true })],
+    }),
+  ],
+}),
               new TableCell({
                 width: { size: 33, type: WidthType.PERCENTAGE },
                 verticalAlign: VerticalAlign.TOP,
@@ -401,11 +407,6 @@ export default function Vp3Report({
       });
 
       // ---------- ย่อหน้าต่างๆ ----------
-      const titlePara = new Paragraph({
-  alignment: AlignmentType.CENTER,
-  spacing: { before: 60, after: 150 },  // ★ ลดระยะห่างก่อน/หลัง เพื่อให้ไม่เกินฐานโลโก้
-  children: [new TextRun({ text: "บันทึกข้อความ", font: FONT_NAME, size: 44, bold: true })],
-});
 
       const orgPara = new Paragraph({
         spacing: { after: 100 },
@@ -614,7 +615,6 @@ export default function Vp3Report({
             },
             children: [
               headerTable,
-              titlePara,
               orgPara,
               datePara,
               subjectPara,
@@ -715,16 +715,17 @@ export default function Vp3Report({
             paddingRight: "2.22cm",
           }}
         >
-          <div className="flex items-end justify-between mb-1">
-  <div style={{ width: "2cm" }} className="shrink-0 flex items-start justify-center">
+          <div className="grid mb-4" style={{ gridTemplateColumns: "2cm 1fr auto" }}>
+  <div className="flex items-center">
     <img src="/images.jpg" alt="ตราครุฑ" style={{ width: "100%", height: "auto" }} />
   </div>
-  <div className="border border-slate-400 rounded px-2 py-1 font-bold whitespace-nowrap self-start">
+  <p className="text-center font-bold self-center" style={{ fontSize: "22px" }}>
+    บันทึกข้อความ
+  </p>
+  <div className="border border-slate-400 rounded px-2 py-1 font-bold whitespace-nowrap self-start h-fit">
     แบบวัดผล 3
   </div>
 </div>
-
-<p className="text-center font-bold mb-2" style={{ fontSize: "22px" }}>บันทึกข้อความ</p>
 
           <div className="space-y-1">
             <p><span className="font-bold">ส่วนราชการ</span>&nbsp;&nbsp;กลุ่มสาระการเรียนรู้{deptGroupName || "......................................."}</p>
