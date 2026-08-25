@@ -194,38 +194,33 @@ export default function Vp2Report({
             if (teacher.department_id) {
   // ★ debug: ดึงผู้ใช้ทุกคนที่มี role "subject_dept_head" มาดูก่อน ไม่กรอง department_id
   // เพื่อเช็คว่า department_id ของแต่ละคนตรงกับของครูประจำวิชาจริงไหม
-  const { data: allDeptHeads, error: allHeadsErr } = await supabase
-    .from("users")
-    .select("title, first_name, last_name, full_name, department_id, extra_roles")
-    .contains("extra_roles", ["subject_dept_head"]);
+  const { data: deptUsers, error: allHeadsErr } = await supabase
+  .from("users")
+  .select("title, first_name, last_name, full_name, department_id, extra_roles")
+  .eq("department_id", teacher.department_id);
 
-  if (allHeadsErr) {
-    console.error("[Vp2Report] โหลดรายชื่อหัวหน้ากลุ่มสาระทั้งหมดไม่สำเร็จ:", allHeadsErr);
-  } else {
-    console.log(
-      "[Vp2Report] ครูประจำวิชานี้ department_id =",
-      teacher.department_id
-    );
-    (allDeptHeads ?? []).forEach((u: any) => {
-      console.log(
-        `[Vp2Report] หัวหน้ากลุ่มสาระ: ${u.first_name} ${u.last_name} | department_id = ${u.department_id} | ตรงกับครูวิชานี้ไหม: ${u.department_id === teacher.department_id}`
-      );
-    });
-
-    const head = (allDeptHeads ?? []).find(
-      (u: any) => u.department_id === teacher.department_id
-    );
-
-    if (head) {
-      console.log("[Vp2Report] deptHead row (matched):", head);
-      setDeptHeadName(buildNameWithTitle(head as any));
-    } else {
-      console.warn(
-        "[Vp2Report] มีหัวหน้ากลุ่มสาระในระบบ แต่ไม่มีใคร department_id ตรงกับครูประจำวิชาคนนี้ — ดู log ด้านบนเพื่อเทียบค่า department_id"
-      );
+if (allHeadsErr) {
+  console.error("[Vp2Report] โหลดรายชื่อผู้ใช้ในกลุ่มสาระไม่สำเร็จ:", allHeadsErr);
+} else {
+  // ★ เช็คแบบ substring กันกรณีข้อมูลเก่าเก็บ role รวมกันเป็น string เดียว
+  // เช่น ["subject_teacher, subject_dept_head"] แทนที่จะเป็น ["subject_teacher", "subject_dept_head"]
+  const head = (deptUsers ?? []).find((u: any) => {
+    const roles: unknown = u.extra_roles;
+    if (Array.isArray(roles)) {
+      return roles.some((r: any) => typeof r === "string" && r.includes("subject_dept_head"));
     }
+    return false;
+  });
+
+  if (head) {
+    console.log("[Vp2Report] deptHead row (matched):", head);
+    setDeptHeadName(buildNameWithTitle(head as any));
+  } else {
+    console.warn("[Vp2Report] ไม่พบหัวหน้ากลุ่มสาระในกลุ่มสาระ department_id =", teacher.department_id);
   }
 }
+            }
+
           } else {
             console.warn("[Vp2Report] ไม่พบข้อมูลครูประจำวิชา teacher_id =", sectionRow.teacher_id);
           }
@@ -442,8 +437,8 @@ function formatGradeLevel(label?: string): string {
           แล้วค่อยจำกัดเหลือ 190mm เฉพาะตอนสั่งพิมพ์ (print:) เท่านั้น */}
       <div className="bg-slate-100 print:bg-transparent rounded-2xl p-4 sm:p-8 print:p-0 overflow-x-auto">
 <div
-  className="vp2-print-area relative bg-white rounded-2xl border border-slate-200 shadow-lg p-8 sm:p-12 print:border-0 print:shadow-none print:rounded-none print:p-0 mx-auto"
-  style={{ width: "210mm" }}
+  className="vp2-print-area relative bg-white rounded-2xl border border-slate-200 shadow-lg p-6 sm:p-12 print:border-0 print:shadow-none print:rounded-none print:p-0 mx-auto"
+  style={{ maxWidth: "210mm", width: "100%" }}
 >
         {/* ★ เปลี่ยนหัวกระดาษเป็น flex 3 ช่อง (โลโก้ | ข้อความกึ่งกลาง | ป้ายแบบวัดผล 2)
             แทนการใช้ absolute เดิม เพื่อไม่ให้โลโก้ไปทับข้อความไม่ว่าข้อความจะยาวแค่ไหน */}
