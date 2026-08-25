@@ -192,20 +192,36 @@ export default function Vp2Report({
             if (teacherDeptName) setDeptName(teacherDeptName);
 
             if (teacher.department_id) {
-              const { data: deptHead, error: deptErr } = await supabase
-                .from("users")
-                .select("title, first_name, last_name, full_name")
-                .eq("department_id", teacher.department_id)
-                .contains("extra_roles", ["subject_dept_head"])
-                .maybeSingle();
+  const { data: deptUsers, error: deptUsersErr } = await supabase
+    .from("users")
+    .select("title, first_name, last_name, full_name, extra_roles")
+    .eq("department_id", teacher.department_id);
 
-              if (deptErr) console.error("[Vp2Report] โหลดชื่อหัวหน้ากลุ่มสาระไม่สำเร็จ:", deptErr);
+  if (deptUsersErr) {
+    console.error("[Vp2Report] โหลดรายชื่อผู้ใช้ในกลุ่มสาระไม่สำเร็จ:", deptUsersErr);
+  } else {
+    // ★ debug: เปิด console ดูค่า extra_roles จริงของทุกคนในกลุ่มสาระนี้
+    console.log("[Vp2Report] users ในกลุ่มสาระนี้:", deptUsers);
 
-              if (deptHead) {
-                console.log("[Vp2Report] deptHead row:", deptHead); // ★ debug
-                setDeptHeadName(buildNameWithTitle(deptHead as any));
-              }
-            }
+    const head = (deptUsers ?? []).find((u: any) => {
+      const roles = u.extra_roles;
+      if (Array.isArray(roles)) return roles.includes("subject_dept_head");
+      if (typeof roles === "string") return roles.includes("subject_dept_head"); // เผื่อเก็บเป็น string/JSON string
+      return false;
+    });
+
+    if (head) {
+      console.log("[Vp2Report] deptHead row:", head);
+      setDeptHeadName(buildNameWithTitle(head as any));
+    } else {
+      console.warn(
+        "[Vp2Report] ไม่พบผู้ใช้ที่มี extra_roles = 'subject_dept_head' ในกลุ่มสาระ department_id =",
+        teacher.department_id,
+        "— ตรวจสอบว่าตั้งค่า role นี้ให้ใครไว้หรือยัง หรือรูปแบบข้อมูลตรงกันไหม (ดูค่า extra_roles จริงใน log ด้านบน)"
+      );
+    }
+  }
+}
           } else {
             console.warn("[Vp2Report] ไม่พบข้อมูลครูประจำวิชา teacher_id =", sectionRow.teacher_id);
           }
@@ -393,24 +409,24 @@ function formatGradeLevel(label?: string): string {
 
       <div className="vp2-report-root">
       <div className="print:hidden flex items-center justify-between flex-wrap gap-2">
-        <button onClick={onBack} className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">
-          ← กลับ
-        </button>
-        <div className="flex items-center gap-2">
-          {!readOnly && (
-            <button
-              onClick={handleSaveRemarks}
-              disabled={saving}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 disabled:opacity-50 text-white font-black text-xs shadow"
-            >
-              {saving ? "กำลังบันทึก..." : "💾 บันทึกหมายเหตุ"}
-            </button>
-          )}
-          <button onClick={handlePrint} className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-black text-xs shadow">
-            🖨️ พิมพ์ / บันทึกเป็น PDF
-          </button>
-        </div>
-      </div>
+  <button onClick={onBack} className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm">
+    ← กลับ
+  </button>
+  <div className="flex items-center gap-2">
+    {!readOnly && (
+      <button
+        onClick={handleSaveRemarks}
+        disabled={saving}
+        className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 disabled:opacity-50 text-white font-black text-sm shadow"
+      >
+        {saving ? "กำลังบันทึก..." : "💾 บันทึกหมายเหตุ"}
+      </button>
+    )}
+    <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-black text-sm shadow">
+      🖨️ พิมพ์ / บันทึกเป็น PDF
+    </button>
+  </div>
+</div>
 
       {error && <p className="print:hidden text-xs font-black text-red-500 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
       {savedAt && !error && (
@@ -420,7 +436,11 @@ function formatGradeLevel(label?: string): string {
       {/* ★ แก้ไข: เจอสาเหตุจริงที่ "หน้าเล็กลง" — เดิม max-w-[190mm] (~718px, ขนาดกระดาษ A4) ถูกบังคับใช้ตลอด
           แม้ตอนไม่ได้พิมพ์ ทำให้การ์ดแคบกว่าเครื่องมืออื่นมาก ตอนนี้ให้ใช้ความกว้างเต็ม container ตามปกติ
           แล้วค่อยจำกัดเหลือ 190mm เฉพาะตอนสั่งพิมพ์ (print:) เท่านั้น */}
-      <div className="vp2-print-area relative bg-white rounded-2xl border border-slate-100 shadow-sm p-6 sm:p-10 print:border-0 print:shadow-none print:p-0 w-full print:max-w-[190mm] mx-auto">
+      <div className="bg-slate-100 print:bg-transparent rounded-2xl p-4 sm:p-8 print:p-0 overflow-x-auto">
+<div
+  className="vp2-print-area relative bg-white rounded-2xl border border-slate-200 shadow-lg p-8 sm:p-12 print:border-0 print:shadow-none print:rounded-none print:p-0 mx-auto"
+  style={{ width: "210mm", minHeight: "297mm" }}
+>
         {/* ★ เปลี่ยนหัวกระดาษเป็น flex 3 ช่อง (โลโก้ | ข้อความกึ่งกลาง | ป้ายแบบวัดผล 2)
             แทนการใช้ absolute เดิม เพื่อไม่ให้โลโก้ไปทับข้อความไม่ว่าข้อความจะยาวแค่ไหน */}
         <div className="flex items-start gap-2 mb-2 vp2-header-block">
@@ -470,14 +490,15 @@ function formatGradeLevel(label?: string): string {
           </div>
         </div>
 
-        <table className="w-full border-collapse text-xs print:text-[9px] mt-4">
+        <table className="w-full table-fixed border-collapse text-sm print:text-[11px] mt-4">
           <thead>
             <tr>
-              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-8">เลขที่</th>
-              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-16">เลขประจำตัว</th>
-              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5">ชื่อ นามสกุล</th>
+              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-10">เลขที่</th>
+<th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-20">เลขประจำตัว</th>
+<th rowSpan={2} className="border border-slate-400 px-2 py-1.5 text-left">ชื่อ นามสกุล</th>
+
               <th colSpan={3} className="border border-slate-400 px-1 py-1">คะแนน</th>
-              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-16">หมายเหตุ</th>
+              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-20">หมายเหตุ</th>
             </tr>
             <tr>
               {/* ★ โชว์คะแนนเต็มจริงจากชุดงานทั้งหมด (totalMaxScore) แทนเลข 70 ตายตัว */}
@@ -536,6 +557,7 @@ function formatGradeLevel(label?: string): string {
         </div>
       </div>
       </div>
+      </div>  
     </div>
   );
 }
