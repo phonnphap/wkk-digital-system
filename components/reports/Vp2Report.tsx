@@ -192,32 +192,36 @@ export default function Vp2Report({
             if (teacherDeptName) setDeptName(teacherDeptName);
 
             if (teacher.department_id) {
-  const { data: deptUsers, error: deptUsersErr } = await supabase
+  // ★ debug: ดึงผู้ใช้ทุกคนที่มี role "subject_dept_head" มาดูก่อน ไม่กรอง department_id
+  // เพื่อเช็คว่า department_id ของแต่ละคนตรงกับของครูประจำวิชาจริงไหม
+  const { data: allDeptHeads, error: allHeadsErr } = await supabase
     .from("users")
-    .select("title, first_name, last_name, full_name, extra_roles")
-    .eq("department_id", teacher.department_id);
+    .select("title, first_name, last_name, full_name, department_id, extra_roles")
+    .contains("extra_roles", ["subject_dept_head"]);
 
-  if (deptUsersErr) {
-    console.error("[Vp2Report] โหลดรายชื่อผู้ใช้ในกลุ่มสาระไม่สำเร็จ:", deptUsersErr);
+  if (allHeadsErr) {
+    console.error("[Vp2Report] โหลดรายชื่อหัวหน้ากลุ่มสาระทั้งหมดไม่สำเร็จ:", allHeadsErr);
   } else {
-    // ★ debug: เปิด console ดูค่า extra_roles จริงของทุกคนในกลุ่มสาระนี้
-    console.log("[Vp2Report] users ในกลุ่มสาระนี้:", deptUsers);
-
-    const head = (deptUsers ?? []).find((u: any) => {
-      const roles = u.extra_roles;
-      if (Array.isArray(roles)) return roles.includes("subject_dept_head");
-      if (typeof roles === "string") return roles.includes("subject_dept_head"); // เผื่อเก็บเป็น string/JSON string
-      return false;
+    console.log(
+      "[Vp2Report] ครูประจำวิชานี้ department_id =",
+      teacher.department_id
+    );
+    (allDeptHeads ?? []).forEach((u: any) => {
+      console.log(
+        `[Vp2Report] หัวหน้ากลุ่มสาระ: ${u.first_name} ${u.last_name} | department_id = ${u.department_id} | ตรงกับครูวิชานี้ไหม: ${u.department_id === teacher.department_id}`
+      );
     });
 
+    const head = (allDeptHeads ?? []).find(
+      (u: any) => u.department_id === teacher.department_id
+    );
+
     if (head) {
-      console.log("[Vp2Report] deptHead row:", head);
+      console.log("[Vp2Report] deptHead row (matched):", head);
       setDeptHeadName(buildNameWithTitle(head as any));
     } else {
       console.warn(
-        "[Vp2Report] ไม่พบผู้ใช้ที่มี extra_roles = 'subject_dept_head' ในกลุ่มสาระ department_id =",
-        teacher.department_id,
-        "— ตรวจสอบว่าตั้งค่า role นี้ให้ใครไว้หรือยัง หรือรูปแบบข้อมูลตรงกันไหม (ดูค่า extra_roles จริงใน log ด้านบน)"
+        "[Vp2Report] มีหัวหน้ากลุ่มสาระในระบบ แต่ไม่มีใคร department_id ตรงกับครูประจำวิชาคนนี้ — ดู log ด้านบนเพื่อเทียบค่า department_id"
       );
     }
   }
@@ -439,7 +443,7 @@ function formatGradeLevel(label?: string): string {
       <div className="bg-slate-100 print:bg-transparent rounded-2xl p-4 sm:p-8 print:p-0 overflow-x-auto">
 <div
   className="vp2-print-area relative bg-white rounded-2xl border border-slate-200 shadow-lg p-8 sm:p-12 print:border-0 print:shadow-none print:rounded-none print:p-0 mx-auto"
-  style={{ width: "210mm", minHeight: "297mm" }}
+  style={{ width: "210mm" }}
 >
         {/* ★ เปลี่ยนหัวกระดาษเป็น flex 3 ช่อง (โลโก้ | ข้อความกึ่งกลาง | ป้ายแบบวัดผล 2)
             แทนการใช้ absolute เดิม เพื่อไม่ให้โลโก้ไปทับข้อความไม่ว่าข้อความจะยาวแค่ไหน */}
@@ -493,12 +497,12 @@ function formatGradeLevel(label?: string): string {
         <table className="w-full table-fixed border-collapse text-sm print:text-[11px] mt-4">
           <thead>
             <tr>
-              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-10">เลขที่</th>
-<th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-20">เลขประจำตัว</th>
-<th rowSpan={2} className="border border-slate-400 px-2 py-1.5 text-left">ชื่อ นามสกุล</th>
+              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5" style={{ width: "5%" }}>เลขที่</th>
+<th rowSpan={2} className="border border-slate-400 px-1 py-1.5" style={{ width: "10%" }}>เลขประจำตัว</th>
+<th rowSpan={2} className="border border-slate-400 px-2 py-1.5 text-left whitespace-nowrap" style={{ width: "38%" }}>ชื่อ นามสกุล</th>
 
-              <th colSpan={3} className="border border-slate-400 px-1 py-1">คะแนน</th>
-              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 w-20">หมายเหตุ</th>
+<th colSpan={3} className="border border-slate-400 px-1 py-1" style={{ width: "35%" }}>คะแนน</th>
+<th rowSpan={2} className="border border-slate-400 px-1 py-1.5" style={{ width: "12%" }}>หมายเหตุ</th>
             </tr>
             <tr>
               {/* ★ โชว์คะแนนเต็มจริงจากชุดงานทั้งหมด (totalMaxScore) แทนเลข 70 ตายตัว */}
@@ -516,9 +520,9 @@ function formatGradeLevel(label?: string): string {
                 <tr key={s.id}>
                   <td className="border border-slate-400 text-center py-1">{i + 1}</td>
                   <td className="border border-slate-400 text-center py-1">{info?.student_code ?? ""}</td>
-                  <td className="border border-slate-400 px-2 py-1">
-                    {displayPrefix}{s.first_name} {s.last_name}
-                  </td>
+                  <td className="border border-slate-400 px-2 py-1 whitespace-nowrap overflow-hidden text-ellipsis">
+  {displayPrefix}{s.first_name} {s.last_name}
+</td>
                   <td className="border border-slate-400 text-center py-1">{fmtScore(sc.unit)}</td>
                   <td className="border border-slate-400 text-center py-1">{sc.midterm ?? "-"}</td>
                   <td className="border border-slate-400 text-center py-1 font-bold">{fmtScore(sc.total)}</td>
