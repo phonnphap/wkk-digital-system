@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+// ★ ส่งออก Excel — ใช้ไลบรารี SheetJS (ฝั่ง client, ไม่ต้องมี backend)
+// ถ้ายังไม่มีในโปรเจกต์ ให้รัน: npm install xlsx
+import * as XLSX from "xlsx";
 
 const supabase = createClient();
 
@@ -397,6 +400,74 @@ function formatGradeLevel(label?: string): string {
     window.print();
   }
 
+  // ★ ส่งออกเป็นไฟล์ Excel — โครงสร้างคอลัมน์ตรงกับตารางที่แสดงในหน้ารายงาน
+  function handleExportExcel() {
+    const headerLine1 = "แบบประกาศผลคะแนนระหว่างเรียนรายวิชาของนักเรียนโรงเรียนวัดเขียนเขต";
+    const headerLine2 = `ชั้นมัธยมศึกษาปีที่ ${gradeLevel || "-"} ภาคเรียนที่ ${semester || "-"} ปีการศึกษา ${yearLabel || "-"}`;
+    const headerLine3 = `รหัสวิชา ${subjectCode} รายวิชา ${subjectTitle} ประเภท ${subjectType || "-"} จำนวน ${creditHours || "-"} หน่วยกิต`;
+
+    const colHeaders = [
+      "เลขที่",
+      "เลขประจำตัว",
+      "ชื่อ นามสกุล",
+      `หน่วยการเรียน (${totalMaxScore})`,
+      `กลางภาค (${midtermMaxScore})`,
+      `รวม (${totalMaxScore + midtermMaxScore})`,
+      "หมายเหตุ",
+    ];
+
+    const dataRows = students.map((s, i) => {
+      const info = extraInfo[s.id];
+      const displayPrefix = computePrefix(info?.gender ?? null, info?.birth_date ?? null, s.prefix ?? null);
+      const sc = scoreByStudent[s.id] ?? { unit: 0, midterm: null, total: 0 };
+      return [
+        i + 1,
+        info?.student_code ?? "",
+        `${displayPrefix}${s.first_name} ${s.last_name}`,
+        sc.unit,
+        sc.midterm ?? "",
+        sc.total,
+        remarks[s.id] ?? "",
+      ];
+    });
+
+    const aoa: (string | number)[][] = [
+      [headerLine1],
+      [headerLine2],
+      [headerLine3],
+      [],
+      colHeaders,
+      ...dataRows,
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // รวมเซลล์หัวกระดาษ 3 บรรทัดแรกให้กว้างเท่าจำนวนคอลัมน์ (7 คอลัมน์ = index 0-6)
+    ws["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } },
+    ];
+
+    // ความกว้างคอลัมน์ ให้อ่านง่าย ไม่ล้นจอ
+    ws["!cols"] = [
+      { wch: 6 },  // เลขที่
+      { wch: 12 }, // เลขประจำตัว
+      { wch: 30 }, // ชื่อ นามสกุล
+      { wch: 16 }, // หน่วยการเรียน
+      { wch: 12 }, // กลางภาค
+      { wch: 10 }, // รวม
+      { wch: 20 }, // หมายเหตุ
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "แบบวัดผล 2");
+
+    const fileClassroom = gradeLevel ? `_ม.${gradeLevel.replace("/", "-")}` : "";
+    const fileName = `แบบวัดผล2_${subjectCode}${fileClassroom}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  }
+
   if (loading) {
     return <div className="text-center py-10 text-fuchsia-500 font-black animate-pulse">กำลังโหลด...</div>;
   }
@@ -472,6 +543,9 @@ function formatGradeLevel(label?: string): string {
         {saving ? "กำลังบันทึก..." : "💾 บันทึกหมายเหตุ"}
       </button>
     )}
+    <button onClick={handleExportExcel} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm shadow">
+      📊 ส่งออก Excel
+    </button>
     <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-black text-sm shadow">
       🖨️ พิมพ์ / บันทึกเป็น PDF
     </button>
