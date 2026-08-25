@@ -1,7 +1,14 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 
-const secret = new TextEncoder().encode(process.env.STUDENT_JWT_SECRET!);
+const rawSecret = process.env.STUDENT_JWT_SECRET;
+if (!rawSecret) {
+  throw new Error(
+    "Missing STUDENT_JWT_SECRET environment variable. Set it in Vercel Project Settings."
+  );
+}
+const secret = new TextEncoder().encode(rawSecret);
+
 const COOKIE_NAME = "student_session";
 const EXPIRES_IN = "12h";
 
