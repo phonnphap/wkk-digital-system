@@ -205,31 +205,45 @@ export default function Vp3Report({
         // หมายเหตุ: สมมติว่ารูปแบบใน extra_roles เป็น string ที่มีทั้งคำว่า "grade_head"
         // และเลขชั้นปีอยู่ด้วย เช่น "grade_head_3" — ถ้ารูปแบบจริงต่างจากนี้ ปรับเงื่อนไข includes() ด้านล่างได้เลย
         const gradeNumber = extractGradeNumber(classroomLabel);
-        if (gradeNumber) {
-          const { data: gradeHeadUsers, error: gradeHeadErr } = await supabase
-            .from("users")
-            .select("title, first_name, last_name, full_name, extra_roles")
-            .not("extra_roles", "is", null);
+if (gradeNumber) {
+  // ★ users.grade_level เป็น FK ไปยังตารางระดับชั้น (เช่น grade_levels)
+  // join เพื่อดึงคอลัมน์ "name" ของระดับชั้นนั้นมาด้วย
+  const { data: gradeHeadUsers, error: gradeHeadErr } = await supabase
+    .from("users")
+    .select("title, first_name, last_name, full_name, extra_roles, grade_level:grade_level(name)")
+    .not("extra_roles", "is", null)
+    .not("grade_level", "is", null);
 
-          if (gradeHeadErr) {
-            console.error("[Vp3Report] โหลดรายชื่อหัวหน้าสายชั้นไม่สำเร็จ:", gradeHeadErr);
-          } else {
-            const head = (gradeHeadUsers ?? []).find((u: any) => {
-              const roles: unknown = u.extra_roles;
-              if (Array.isArray(roles)) {
-                return roles.some(
-                  (r: any) => typeof r === "string" && r.includes("grade_head") && r.includes(gradeNumber)
-                );
-              }
-              return false;
-            });
-            if (head) {
-              setGradeHeadName(buildNameWithTitle(head as any));
-            } else {
-              console.warn("[Vp3Report] ไม่พบหัวหน้าสายชั้นที่ตรงกับชั้น", gradeNumber);
-            }
-          }
-        }
+  if (gradeHeadErr) {
+    console.error("[Vp3Report] โหลดรายชื่อหัวหน้าสายชั้นไม่สำเร็จ:", gradeHeadErr);
+  } else {
+    console.log("[Vp3Report] gradeHeadUsers:", gradeHeadUsers); // ★ debug: เปิด console เช็ค shape ของ grade_level.name
+
+    const head = (gradeHeadUsers ?? []).find((u: any) => {
+      const roles: unknown = u.extra_roles;
+      const isGradeHead =
+        Array.isArray(roles) &&
+        roles.some((r: any) => typeof r === "string" && r.includes("grade_head"));
+      if (!isGradeHead) return false;
+
+      const gradeLevelRel: any = u.grade_level;
+      const gradeName: string | undefined = Array.isArray(gradeLevelRel)
+        ? gradeLevelRel[0]?.name
+        : gradeLevelRel?.name;
+      if (!gradeName) return false;
+
+      // ★ เทียบแบบ substring กันกรณีชื่อชั้นเก็บเป็น "ม.3", "มัธยมศึกษาปีที่ 3", หรือ "3" เฉยๆ
+      const gradeNameNumbers = gradeName.match(/\d+/g);
+      return gradeNameNumbers?.includes(gradeNumber) ?? false;
+    });
+
+    if (head) {
+      setGradeHeadName(buildNameWithTitle(head as any));
+    } else {
+      console.warn("[Vp3Report] ไม่พบหัวหน้าสายชั้นที่ตรงกับชั้น", gradeNumber);
+    }
+  }
+}
 
         const ids = students.map(s => s.id);
         if (ids.length > 0) {
