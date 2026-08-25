@@ -417,12 +417,12 @@ function formatGradeLevel(label?: string): string {
     { width: 22 },
   ];
 
-  // ---------- โลโก้ (มุมซ้ายบน ~2.5cm) ----------
+  // ---------- โลโก้ (มุมซ้ายบน ~2cm) ----------
   try {
     const logoRes = await fetch("/school-logo.png");
     const logoBuffer = await logoRes.arrayBuffer();
     const logoId = wb.addImage({ buffer: logoBuffer, extension: "png" });
-    // 2.5cm ≈ 113px ที่ 96dpi
+    // 2cm ≈ 113px ที่ 96dpi
     ws.addImage(logoId, {
       tl: { col: 0, row: 0 },
       ext: { width: 75, height: 78 },
@@ -678,7 +678,7 @@ function formatGradeLevel(label?: string): string {
         <div className="flex items-start gap-2 mb-2 vp2-header-block">
           <div
   className="shrink-0 flex items-center justify-center"
-  style={{ width: "2.5cm", height: "2.5cm" }}
+  style={{ width: "2cm", height: "2cm" }}
 >
   <img src="/school-logo.png" alt="ตราโรงเรียน" className="w-full h-full object-contain" />
 </div>

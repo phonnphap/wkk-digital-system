@@ -505,7 +505,7 @@ if (gradeNumber) {
           style={{ maxWidth: "210mm", width: "100%" }}
         >
           <div className="flex items-start justify-between mb-2">
-            <div style={{ width: "2.5cm", height: "2.5cm" }} className="shrink-0 flex items-center justify-center">
+            <div style={{ width: "2cm", height: "2cm" }} className="shrink-0 flex items-center justify-center">
               {/* ★ ตราครุฑ — ดึงจาก public/images.jpg (D:\WEB\school-app\public\images.jpg) */}
               <img src="/images.jpg" alt="ตราครุฑ" className="w-full h-full object-contain" />
             </div>
