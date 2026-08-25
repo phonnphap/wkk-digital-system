@@ -702,7 +702,7 @@ export default function Vp3Report({
           }}
         >
           <div className="flex items-start justify-between mb-2">
-            <div style={{ width: "2.5cm", height: "2.5cm" }} className="shrink-0 flex items-center justify-center">
+            <div style={{ width: "2cm", height: "2cm" }} className="shrink-0 flex items-center justify-center">
               <img src="/images.jpg" alt="ตราครุฑ" className="w-full h-full object-contain" />
             </div>
             <div className="border border-slate-400 rounded px-2 py-1 font-bold whitespace-nowrap self-start">
