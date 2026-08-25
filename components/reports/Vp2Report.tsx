@@ -74,21 +74,22 @@ function computePrefix(gender: string | null, birthDate: string | null, fallback
   return fallback ?? "";
 }
 
-// ★ รวมคำนำหน้า + ชื่อเต็ม ให้แน่ใจว่ามีคำนำหน้าเสมอ (แม้ full_name จะไม่มีคำนำหน้าติดมาด้วยก็ตาม)
-function buildNameWithPrefix(person: {
-  prefix?: string | null;
+// ★ รวมคำนำหน้า (title) + ชื่อเต็ม ให้แน่ใจว่ามีคำนำหน้าเสมอ (แม้ full_name จะไม่มีคำนำหน้าติดมาด้วยก็ตาม)
+// หมายเหตุ: ตาราง "users" เก็บคำนำหน้าไว้ในคอลัมน์ชื่อ "title" (ไม่ใช่ "prefix")
+function buildNameWithTitle(person: {
+  title?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   full_name?: string | null;
 } | null | undefined): string {
   if (!person) return "";
-  const prefix = person.prefix ?? "";
+  const title = person.title ?? "";
   const base =
     person.full_name?.trim() ||
     `${person.first_name ?? ""} ${person.last_name ?? ""}`.trim();
   // ถ้า full_name ที่ดึงมามีคำนำหน้าติดอยู่แล้ว ไม่ต้องซ้ำ
-  if (prefix && base.startsWith(prefix)) return base;
-  return `${prefix}${base}`;
+  if (title && base.startsWith(title)) return base;
+  return `${title}${base}`;
 }
 
 export default function Vp2Report({
@@ -144,7 +145,7 @@ export default function Vp2Report({
 
   const [teacherSignatureName, setTeacherSignatureName] = useState("");
   const [deptHeadName, setDeptHeadName] = useState("");
-  // ★ เพิ่ม: ชื่อกลุ่มสาระของหัวหน้า (เช่น "วิทยาศาสตร์และเทคโนโลยี") เพื่อใช้แสดง "หัวหน้ากลุ่มสาระ..."
+  // ★ ชื่อกลุ่มสาระของหัวหน้า (เช่น "วิทยาศาสตร์และเทคโนโลยี") ดึงจาก users.department_id -> departments.name
   const [deptName, setDeptName] = useState("");
   const directorName = "นายธนณัฐ ศิระวงษ์";
 
@@ -172,32 +173,27 @@ export default function Vp2Report({
           .maybeSingle();
 
         if (sectionRow?.teacher_id) {
+          // ★ แก้ไข: ดึงคำนำหน้าจากคอลัมน์ "title" ของตาราง users (ของเดิมใช้ "prefix" ซึ่งไม่มีคอลัมน์นี้จริง เลยไม่ขึ้นค่า)
+          // ★ แก้ไข: join ตาราง departments ผ่าน department_id เพื่อเอาค่า "name" (ชื่อกลุ่มสาระ) แทนที่จะโชว์ id
           const { data: teacher, error: teacherErr } = await supabase
             .from("users")
-            .select("prefix, first_name, last_name, full_name, department_id")
+            .select("title, first_name, last_name, full_name, department_id, departments:department_id(name)")
             .eq("id", sectionRow.teacher_id)
             .maybeSingle();
 
           if (teacherErr) console.error("[Vp2Report] โหลดชื่อครูประจำวิชาไม่สำเร็จ:", teacherErr);
 
           if (teacher) {
-            // ★ แก้ไข: ให้มีคำนำหน้าครูประจำวิชาเสมอ (เดิม ถ้ามี full_name จะไม่มีคำนำหน้าติดมาด้วย)
-            setTeacherSignatureName(buildNameWithPrefix(teacher));
+            setTeacherSignatureName(buildNameWithTitle(teacher as any));
+
+            const deptRel: any = (teacher as any).departments;
+            const teacherDeptName = Array.isArray(deptRel) ? deptRel[0]?.name : deptRel?.name;
+            if (teacherDeptName) setDeptName(teacherDeptName);
 
             if (teacher.department_id) {
-              // ★ เพิ่ม: ดึงชื่อกลุ่มสาระ ของหัวหน้า มาแสดงต่อท้าย "หัวหน้ากลุ่มสาระ..."
-              const { data: dept, error: deptNameErr } = await supabase
-                .from("departments")
-                .select("name")
-                .eq("id", teacher.department_id)
-                .maybeSingle();
-
-              if (deptNameErr) console.error("[Vp2Report] โหลดชื่อกลุ่มสาระไม่สำเร็จ:", deptNameErr);
-              if (dept?.name) setDeptName(dept.name);
-
               const { data: deptHead, error: deptErr } = await supabase
                 .from("users")
-                .select("prefix, first_name, last_name, full_name")
+                .select("title, first_name, last_name, full_name")
                 .eq("department_id", teacher.department_id)
                 .contains("extra_roles", ["subject_dept_head"])
                 .maybeSingle();
@@ -205,8 +201,7 @@ export default function Vp2Report({
               if (deptErr) console.error("[Vp2Report] โหลดชื่อหัวหน้ากลุ่มสาระไม่สำเร็จ:", deptErr);
 
               if (deptHead) {
-                // ★ แก้ไข: ให้มีคำนำหน้าหัวหน้ากลุ่มสาระเสมอเช่นกัน
-                setDeptHeadName(buildNameWithPrefix(deptHead));
+                setDeptHeadName(buildNameWithTitle(deptHead as any));
               }
             }
           } else {
@@ -365,13 +360,15 @@ function formatGradeLevel(label?: string): string {
   font-display: swap;
 }
 
-  /* ★ บังคับฟอนต์ทุก element รวมถึง input/button/select ที่ปกติไม่รับฟอนต์ต่อจาก parent */
-  .vp2-report-root,
-  .vp2-report-root * ,
-  .vp2-report-root input,
-  .vp2-report-root button,
-  .vp2-report-root select,
-  .vp2-report-root textarea {
+  /* ★ แก้ไข: บังคับฟอนต์ THSarabun เฉพาะภายในตัวเอกสาร (.vp2-print-area) เท่านั้น
+     เดิมบังคับทั้ง .vp2-report-root ซึ่งครอบคลุมแถบปุ่มด้านบน (กลับ/บันทึก/พิมพ์) ไปด้วย
+     ทำให้ปุ่มและตัวหนังสือแถบเมนูเปลี่ยนไปใช้ฟอนต์ไทยที่ตัวเล็กกว่าปกติ ดูเหมือน "หน้าเว็บเล็กลง" */
+  .vp2-print-area,
+  .vp2-print-area * ,
+  .vp2-print-area input,
+  .vp2-print-area button,
+  .vp2-print-area select,
+  .vp2-print-area textarea {
     font-family: 'TH Sarabun New', 'TH Sarabun New UI', sans-serif !important;
   }
 
@@ -522,7 +519,7 @@ function formatGradeLevel(label?: string): string {
 <p>({teacherSignatureName || subjectTeacherNameFallback || "......................................."})</p>
           </div>
           <div>
-            {/* ★ แก้ไข: "หัวหน้ากลุ่มสาระฯ" -> "หัวหน้ากลุ่มสาระ" + ชื่อกลุ่มสาระจริง (เช่น วิทยาศาสตร์และเทคโนโลยี) */}
+            {/* ★ "หัวหน้ากลุ่มสาระฯ" -> "หัวหน้ากลุ่มสาระ" + ชื่อกลุ่มสาระจริง (เช่น วิทยาศาสตร์และเทคโนโลยี) */}
             <p>ลงชื่อ.......................................หัวหน้ากลุ่มสาระ{deptName || "ฯ"}</p>
             <p>({deptHeadName || "......................................."})</p>
           </div>
