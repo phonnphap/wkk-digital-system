@@ -27,12 +27,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ดึงข้อมูลการเช็คชื่อไม่สำเร็จ" }, { status: 500 });
   }
 
+  const counts = {
+    present: records?.filter((r) => r.status === "present").length ?? 0,
+    absent: records?.filter((r) => r.status === "absent").length ?? 0,
+    late: records?.filter((r) => r.status === "late").length ?? 0,
+    leave: records?.filter((r) => r.status === "leave").length ?? 0,
+    excused: records?.filter((r) => r.status === "excused").length ?? 0,
+  };
+
   const summary = {
   present: records?.filter((r) => r.status === "present").length ?? 0,
   absent: records?.filter((r) => r.status === "absent").length ?? 0,
   late: records?.filter((r) => r.status === "late").length ?? 0,
   leave: records?.filter((r) => r.status === "leave").length ?? 0, // เปลี่ยนจาก excused
-};
+  totalPresent: counts.present + counts.late,
+  };
 
   return NextResponse.json({ records, summary });
 }
