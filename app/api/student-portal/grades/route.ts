@@ -28,11 +28,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ไม่พบข้อมูลนักเรียน" }, { status: 404 });
   }
 
-  const { data: section } = await supabase
-    .from("subject_sections")
-    .select("id")
-    .eq("classroom_id", student.classroom_id)
-    .maybeSingle();
+  const sectionId = searchParams.get("subject_section_id");
+if (!sectionId) {
+  return NextResponse.json({ error: "ไม่ระบุวิชา" }, { status: 400 });
+}
+// เช็คว่า section นี้อยู่ใน classroom ของ นร. คนนี้จริง (กันดูวิชาห้องอื่น)
+const { data: section } = await supabase
+  .from("subject_sections")
+  .select("id")
+  .eq("id", sectionId)
+  .eq("classroom_id", student.classroom_id)
+  .maybeSingle();
 
   if (!section) {
     return NextResponse.json({ error: "ไม่พบวิชาของนักเรียนคนนี้" }, { status: 404 });

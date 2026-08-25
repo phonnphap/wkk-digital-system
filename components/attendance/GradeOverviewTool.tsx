@@ -1261,7 +1261,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   return (
     <div className={`inline-flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl ${bgClass}`}>
       <span className={`text-sm font-black ${textClass}`}>
-        {sub.score}<span className="text-slate-400 font-bold">/{a.max_score}</span>
+        {sub.score}
       </span>
       {weighted !== null && (
         <span className="text-[9px] font-black text-violet-500">= {fmtScore(weighted)} คะแนนจริง</span>
@@ -1552,7 +1552,7 @@ return (
   <button onClick={onRequestEdit} title="คลิกเพื่อแก้ไขคะแนน"
     className={`flex flex-col items-center gap-0.5 mx-auto px-2.5 py-1.5 rounded-xl transition-colors ${bgClass} ring-1 ${isLate ? "ring-orange-200" : "ring-emerald-200"}`}>
     <span className={`text-sm font-black ${textClass}`}>
-      {submission.score}<span className="text-slate-400 font-bold">/{maxScore}</span>
+      {submission.score}
     </span>
     {weighted !== null && (
       <span className="text-[9px] font-black text-violet-500">= {fmtScore(weighted)} คะแนนจริง</span>
