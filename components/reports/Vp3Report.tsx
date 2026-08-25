@@ -402,10 +402,10 @@ export default function Vp3Report({
 
       // ---------- ย่อหน้าต่างๆ ----------
       const titlePara = new Paragraph({
-        alignment: AlignmentType.CENTER,
-        spacing: { before: 200, after: 300 },
-        children: [new TextRun({ text: "บันทึกข้อความ", font: FONT_NAME, size: 44, bold: true })],
-      });
+  alignment: AlignmentType.CENTER,
+  spacing: { before: 60, after: 150 },  // ★ ลดระยะห่างก่อน/หลัง เพื่อให้ไม่เกินฐานโลโก้
+  children: [new TextRun({ text: "บันทึกข้อความ", font: FONT_NAME, size: 44, bold: true })],
+});
 
       const orgPara = new Paragraph({
         spacing: { after: 100 },
@@ -614,7 +614,6 @@ export default function Vp3Report({
             },
             children: [
               headerTable,
-              new Paragraph({ text: "" }),
               titlePara,
               orgPara,
               datePara,
@@ -716,16 +715,16 @@ export default function Vp3Report({
             paddingRight: "2.22cm",
           }}
         >
-          <div className="flex items-start justify-between mb-2">
-            <div style={{ width: "2cm", height: "2cm" }} className="shrink-0 flex items-center justify-center">
-              <img src="/images.jpg" alt="ตราครุฑ" className="w-full h-full object-contain" />
-            </div>
-            <div className="border border-slate-400 rounded px-2 py-1 font-bold whitespace-nowrap self-start">
-              แบบวัดผล 3
-            </div>
-          </div>
+          <div className="flex items-end justify-between mb-1">
+  <div style={{ width: "2cm" }} className="shrink-0 flex items-start justify-center">
+    <img src="/images.jpg" alt="ตราครุฑ" style={{ width: "100%", height: "auto" }} />
+  </div>
+  <div className="border border-slate-400 rounded px-2 py-1 font-bold whitespace-nowrap self-start">
+    แบบวัดผล 3
+  </div>
+</div>
 
-          <p className="text-center font-bold mb-4" style={{ fontSize: "22px" }}>บันทึกข้อความ</p>
+<p className="text-center font-bold mb-2" style={{ fontSize: "22px" }}>บันทึกข้อความ</p>
 
           <div className="space-y-1">
             <p><span className="font-bold">ส่วนราชการ</span>&nbsp;&nbsp;กลุ่มสาระการเรียนรู้{deptGroupName || "......................................."}</p>
