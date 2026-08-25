@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import ExcelJS from "exceljs";
+import {
+  Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+  WidthType, BorderStyle, AlignmentType, TabStopType, ImageRun, VerticalAlign,
+} from "docx";
 
 const supabase = createClient();
 
@@ -32,6 +35,18 @@ const THAI_MONTHS = [
   "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
   "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
 ];
+
+// ★ ขนาดกระดาษ/ขอบกระดาษ A4 แนวตั้ง ตามภาพที่แนบ (หน่วย twips: 1 นิ้ว = 1440 twips, 2.54cm = 1 นิ้ว)
+const CM_TO_TWIPS = (cm: number) => Math.round((cm / 2.54) * 1440);
+const PAGE_WIDTH_TWIPS = CM_TO_TWIPS(21); // A4 กว้าง 21cm
+const MARGIN_TOP = CM_TO_TWIPS(2.54);
+const MARGIN_BOTTOM = CM_TO_TWIPS(2.54);
+const MARGIN_LEFT = CM_TO_TWIPS(2.54);
+const MARGIN_RIGHT = CM_TO_TWIPS(2.22);
+const USABLE_WIDTH = PAGE_WIDTH_TWIPS - MARGIN_LEFT - MARGIN_RIGHT;
+const CENTER_TAB_POS = Math.round(USABLE_WIDTH / 2); // ★ ตำแหน่งกึ่งกลางหน้ากระดาษ สำหรับให้ "วันที่" เริ่มตรงนี้
+
+const FONT_NAME = "TH Sarabun New";
 
 function calcAge(birthDateStr: string): number {
   const bd = new Date(birthDateStr);
@@ -77,17 +92,21 @@ function formatGradeLevel(label?: string): string {
   return `${nums[0]}/${nums[nums.length - 1]}`;
 }
 
-// ★ ดึงเฉพาะ "เลขชั้นปี" ตัวแรก เช่น "ม.3/6" หรือ "3/6" -> "3" (ใช้จับคู่กับหัวหน้าสายชั้น)
+// ★ ดึงเฉพาะเลขชั้นปี (ตัวแรก) เช่น "3/6" -> "3" — ใช้จับคู่หัวหน้าสายชั้น
 function extractGradeNumber(label?: string): string {
   if (!label) return "";
   const nums = label.match(/\d+/g);
-  if (!nums || nums.length === 0) return "";
-  return nums[0];
+  return nums && nums.length > 0 ? nums[0] : "";
 }
 
-// ★ แก้ปัญหาเดิม: ชื่อในวงเล็บซ้อนทับกับคำว่า "ครูประจำวิชา" —
-// ใช้วิธีเดียวกับ Vp2Report คือวาง (ชื่อ) และตำแหน่ง (role) ซ้อนกันเป็น block
-// ภายใน span เดียวกันที่ position:absolute ใต้เส้นประ แทนการแยกเป็นคนละ <p>
+// ★ ตรวจว่าชื่อระดับชั้น (จากตาราง grade_levels.name) เป็นระดับ "มัธยม" หรือไม่
+// ป้องกันปัญหาเดิม: จับคำว่า "ม" เฉยๆ จะ match ผิดกับ "ประถม" (ป.3) เพราะคำว่า "ประถม" ก็มีตัว ม อยู่ด้วย
+function isSecondaryLevelName(name: string): boolean {
+  const trimmed = name.trim();
+  if (trimmed.includes("ประถม")) return false; // กันชนกับคำว่า ป.3 ที่มีตัว ม ปนอยู่ในคำว่า "ประถม"
+  return trimmed.includes("มัธยม") || /^ม\.?\s*\d/.test(trimmed);
+}
+
 function SignatureField({
   role,
   name,
@@ -143,6 +162,7 @@ export default function Vp3Report({
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const [gradeLevel, setGradeLevel] = useState("");
   const [semester, setSemester] = useState("");
@@ -156,11 +176,13 @@ export default function Vp3Report({
   const [teacherSignatureName, setTeacherSignatureName] = useState("");
   const [gradeHeadName, setGradeHeadName] = useState("");
 
-  // ★ วันที่ปัจจุบัน ณ ตอนเปิดหน้านี้ (ไม่ผูกกับข้อมูลอื่น)
   const now = useMemo(() => new Date(), []);
   const currentDay = now.getDate();
   const currentMonthTh = THAI_MONTHS[now.getMonth()];
   const currentYearBE = now.getFullYear() + 543;
+
+  // ★ เลขชั้นปีล้วนๆ (ไม่มีเลขห้อง) ใช้แสดงในตำแหน่งหัวหน้าสายชั้น เช่น "3" ไม่ใช่ "3/6"
+  const gradeNumberOnly = useMemo(() => extractGradeNumber(classroomLabel), [classroomLabel]);
 
   useEffect(() => {
     (async () => {
@@ -201,49 +223,45 @@ export default function Vp3Report({
         if (classroomLabel) setGradeLevel(formatGradeLevel(classroomLabel));
 
         // ★ หัวหน้าสายชั้น — ดึงจาก users.extra_roles ที่มีคำว่า "grade_head"
-        // และตรงกับเลขชั้นปีของห้องที่ครูสอน (เช่น สอน ม.3/6 -> เลขชั้น "3")
-        // หมายเหตุ: สมมติว่ารูปแบบใน extra_roles เป็น string ที่มีทั้งคำว่า "grade_head"
-        // และเลขชั้นปีอยู่ด้วย เช่น "grade_head_3" — ถ้ารูปแบบจริงต่างจากนี้ ปรับเงื่อนไข includes() ด้านล่างได้เลย
-        const gradeNumber = extractGradeNumber(classroomLabel);
-if (gradeNumber) {
-  // ★ users.grade_level เป็น FK ไปยังตารางระดับชั้น (เช่น grade_levels)
-  // join เพื่อดึงคอลัมน์ "name" ของระดับชั้นนั้นมาด้วย
-  const { data: gradeHeadUsers, error: gradeHeadErr } = await supabase
-    .from("users")
-    .select("title, first_name, last_name, full_name, extra_roles, grade_level:grade_level(name)")
-    .not("extra_roles", "is", null)
-    .not("grade_level", "is", null);
+        // join ผ่าน users.grade_level -> grade_levels.name เพื่อดึงชื่อระดับชั้นจริง
+        // แก้บั๊กเดิม: ต้องกรองว่าเป็นระดับ "มัธยม" เท่านั้น ไม่ให้ปนกับ "ประถม" ที่เลขชั้นตรงกันบังเอิญ (เช่น ป.3 กับ ม.3)
+        if (gradeNumberOnly) {
+          const { data: gradeHeadUsers, error: gradeHeadErr } = await supabase
+            .from("users")
+            .select("title, first_name, last_name, full_name, extra_roles, grade_level:grade_level(name)")
+            .not("extra_roles", "is", null)
+            .not("grade_level", "is", null);
 
-  if (gradeHeadErr) {
-    console.error("[Vp3Report] โหลดรายชื่อหัวหน้าสายชั้นไม่สำเร็จ:", gradeHeadErr);
-  } else {
-    console.log("[Vp3Report] gradeHeadUsers:", gradeHeadUsers); // ★ debug: เปิด console เช็ค shape ของ grade_level.name
+          if (gradeHeadErr) {
+            console.error("[Vp3Report] โหลดรายชื่อหัวหน้าสายชั้นไม่สำเร็จ:", gradeHeadErr);
+          } else {
+            const head = (gradeHeadUsers ?? []).find((u: any) => {
+              const roles: unknown = u.extra_roles;
+              const isGradeHead =
+                Array.isArray(roles) &&
+                roles.some((r: any) => typeof r === "string" && r.includes("grade_head"));
+              if (!isGradeHead) return false;
 
-    const head = (gradeHeadUsers ?? []).find((u: any) => {
-      const roles: unknown = u.extra_roles;
-      const isGradeHead =
-        Array.isArray(roles) &&
-        roles.some((r: any) => typeof r === "string" && r.includes("grade_head"));
-      if (!isGradeHead) return false;
+              const gradeLevelRel: any = u.grade_level;
+              const gradeName: string | undefined = Array.isArray(gradeLevelRel)
+                ? gradeLevelRel[0]?.name
+                : gradeLevelRel?.name;
+              if (!gradeName) return false;
 
-      const gradeLevelRel: any = u.grade_level;
-      const gradeName: string | undefined = Array.isArray(gradeLevelRel)
-        ? gradeLevelRel[0]?.name
-        : gradeLevelRel?.name;
-      if (!gradeName) return false;
+              // ★ ต้องเป็นระดับมัธยมเท่านั้น (กันชนกับ ป.3)
+              if (!isSecondaryLevelName(gradeName)) return false;
 
-      // ★ เทียบแบบ substring กันกรณีชื่อชั้นเก็บเป็น "ม.3", "มัธยมศึกษาปีที่ 3", หรือ "3" เฉยๆ
-      const gradeNameNumbers = gradeName.match(/\d+/g);
-      return gradeNameNumbers?.includes(gradeNumber) ?? false;
-    });
+              const gradeNameNumbers = gradeName.match(/\d+/g);
+              return gradeNameNumbers?.includes(gradeNumberOnly) ?? false;
+            });
 
-    if (head) {
-      setGradeHeadName(buildNameWithTitle(head as any));
-    } else {
-      console.warn("[Vp3Report] ไม่พบหัวหน้าสายชั้นที่ตรงกับชั้น", gradeNumber);
-    }
-  }
-}
+            if (head) {
+              setGradeHeadName(buildNameWithTitle(head as any));
+            } else {
+              console.warn("[Vp3Report] ไม่พบหัวหน้าสายชั้นมัธยมที่ตรงกับชั้น", gradeNumberOnly);
+            }
+          }
+        }
 
         const ids = students.map(s => s.id);
         if (ids.length > 0) {
@@ -272,7 +290,7 @@ if (gradeNumber) {
         setLoading(false);
       }
     })();
-  }, [sectionId, subjectId, academicYearId, classroomLabel, students]);
+  }, [sectionId, subjectId, academicYearId, classroomLabel, students, gradeNumberOnly]);
 
   const belowThresholdStudents = useMemo(() => {
     const total = attendanceDates.length;
@@ -298,150 +316,317 @@ if (gradeNumber) {
     window.print();
   }
 
-  async function handleExportExcel() {
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("แบบวัดผล 3");
-    const COLS = 5 + presentThresholds.length + 2;
-
-    // ★ ฟอนต์ default ของทั้งชีท ให้ตรงกับที่ใช้ในหน้าเว็บ (TH Sarabun New, 16)
-    ws.properties.defaultRowHeight = 20;
-
+  // ★ ส่งออกเป็นไฟล์ Word (.docx) แทน Excel — คงหน้าตาให้ตรงกับต้นฉบับ (แบบวัดผล 3)
+  async function handleExportWord() {
+    setExporting(true);
     try {
-      // ★ ตราครุฑ — ดึงจาก public/images.jpg (D:\WEB\school-app\public\images.jpg)
-      const logoRes = await fetch("/images.jpg");
-      const logoBuffer = await logoRes.arrayBuffer();
-      const logoId = wb.addImage({ buffer: logoBuffer, extension: "jpeg" });
-      ws.addImage(logoId, { tl: { col: 0, row: 0 }, ext: { width: 85, height: 85 } });
-    } catch (e) {
-      console.warn("โหลดโลโก้ไม่สำเร็จ:", e);
-    }
+      let logoImageRun: ImageRun | null = null;
+      try {
+        const logoRes = await fetch("/images.jpg");
+        const logoBuffer = await logoRes.arrayBuffer();
+        logoImageRun = new ImageRun({
+          data: logoBuffer,
+          transformation: { width: 70, height: 70 },
+          type: "jpg",
+        });
+      } catch (e) {
+        console.warn("โหลดโลโก้ไม่สำเร็จ:", e);
+      }
 
-    const tagCell = ws.getCell(1, COLS);
-    tagCell.value = "แบบวัดผล 3";
-    tagCell.font = { name: "TH Sarabun New", size: 16, bold: true };
-    tagCell.alignment = { horizontal: "center", vertical: "middle" };
-    tagCell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+      const dateRunText = `วันที่ ${currentDay} เดือน ${currentMonthTh} พ.ศ. ${currentYearBE}`;
 
-    let row = 6;
-    ws.mergeCells(row, 1, row, COLS);
-    const titleCell = ws.getCell(row, 1);
-    titleCell.value = "บันทึกข้อความ";
-    titleCell.font = { name: "TH Sarabun New", size: 22, bold: true };
-    titleCell.alignment = { horizontal: "center" };
-    row++;
-
-    const dateText = `วันที่ ${currentDay} เดือน ${currentMonthTh} พ.ศ. ${currentYearBE}`;
-    const memoLines: { label: string; rest: string }[] = [
-      { label: "ส่วนราชการ", rest: `  กลุ่มสาระการเรียนรู้${deptGroupName || "......................................."}` },
-      { label: "ที่", rest: `  โรงเรียนวัดเขียนเขต                                    ${dateText}` },
-      { label: "เรื่อง", rest: `  ขอส่งรายชื่อนักเรียนที่มีเวลาเรียนไม่ถึง ${presentThresholds.join("% และ ")}% ของเวลาเรียนทั้งหมด` },
-    ];
-    memoLines.forEach(({ label, rest }) => {
-      ws.mergeCells(row, 1, row, COLS);
-      const c = ws.getCell(row, 1);
-      c.value = `${label}${rest}`;
-      c.font = { name: "TH Sarabun New", size: 16 };
-      c.alignment = { horizontal: "left", wrapText: true };
-      row++;
-    });
-
-    row++;
-    ws.mergeCells(row, 1, row, COLS);
-    const toCell = ws.getCell(row, 1);
-    toCell.value = "เรียน  ผู้อำนวยการโรงเรียนวัดเขียนเขต";
-    toCell.font = { name: "TH Sarabun New", size: 16 };
-    row++;
-
-    ws.mergeCells(row, 1, row, COLS);
-    const bodyCell = ws.getCell(row, 1);
-    bodyCell.value = `ด้วยครูประจำวิชา ${teacherSignatureName || subjectTeacherNameFallback || "......."} รหัสวิชา ${subjectCode} ระดับชั้นมัธยมศึกษาปีที่ ${gradeLevel || "...."} กลุ่มสาระการเรียนรู้${deptGroupName || "...."} ได้สำรวจเวลาเรียนของนักเรียนในภาคเรียนที่ ${semester || "...."} ปีการศึกษา ${yearLabel || "...."} พบว่ามีนักเรียนที่มีเวลาเรียนไม่ถึง ${presentThresholds.join("% และ ")}% ของเวลาเรียนทั้งหมด จำนวน ${belowThresholdStudents.length} คน ดังรายชื่อต่อไปนี้`;
-    bodyCell.font = { name: "TH Sarabun New", size: 16 };
-    bodyCell.alignment = { horizontal: "left", wrapText: true };
-    row += 2;
-
-    const headers = ["ที่", "ชั้น/ห้อง", "เลขที่", "เลขประจำตัว", "ชื่อ-สกุล", "เต็ม (คาบ)", "ขาดเรียน", ...presentThresholds.map(t => `ไม่ถึง ${t}%`)];
-    headers.forEach((h, i) => {
-      const c = ws.getCell(row, i + 1);
-      c.value = h;
-      c.font = { name: "TH Sarabun New", size: 16, bold: true };
-      c.alignment = { horizontal: "center", wrapText: true };
-      c.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-    });
-    row++;
-
-    belowThresholdStudents.forEach((r, i) => {
-      const info = extraInfo[r.student.id];
-      const prefix = computePrefix(info?.gender ?? null, info?.birth_date ?? null, r.student.prefix ?? null);
-      const values = [
-        i + 1,
-        gradeLevel,
-        r.student.seat_number,
-        info?.student_code ?? "",
-        `${prefix}${r.student.first_name} ${r.student.last_name}`,
-        r.total,
-        r.absent,
-        ...r.belowFlags.map(f => (f ? "✓" : "")),
-      ];
-      values.forEach((v, ci) => {
-        const c = ws.getCell(row, ci + 1);
-        c.value = v;
-        c.font = { name: "TH Sarabun New", size: 16 };
-        c.alignment = { horizontal: ci === 4 ? "left" : "center" };
-        c.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+      // ---------- หัวกระดาษ: โลโก้ + ป้าย "แบบวัดผล 3" ----------
+      const headerTable = new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: {
+          top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+          bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+          left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+          right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+          insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+          insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+        },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                width: { size: 33, type: WidthType.PERCENTAGE },
+                verticalAlign: VerticalAlign.TOP,
+                children: [
+                  new Paragraph({
+                    children: logoImageRun ? [logoImageRun] : [new TextRun({ text: "" })],
+                  }),
+                ],
+              }),
+              new TableCell({
+                width: { size: 34, type: WidthType.PERCENTAGE },
+                children: [new Paragraph({ text: "" })],
+              }),
+              new TableCell({
+                width: { size: 33, type: WidthType.PERCENTAGE },
+                verticalAlign: VerticalAlign.TOP,
+                children: [
+                  new Paragraph({
+                    alignment: AlignmentType.RIGHT,
+                    border: {
+                      top: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+                      bottom: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+                      left: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+                      right: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+                    },
+                    children: [
+                      new TextRun({ text: "  แบบวัดผล 3  ", font: FONT_NAME, size: 32, bold: true }),
+                    ],
+                  }),
+                ],
+              }),
+            ],
+          }),
+        ],
       });
-      row++;
-    });
 
-    row += 2;
-    ws.mergeCells(row, 1, row, COLS);
-    const closingCell = ws.getCell(row, 1);
-    closingCell.value = "จึงเรียนมาเพื่อโปรดทราบและพิจารณาดำเนินการ";
-    closingCell.font = { name: "TH Sarabun New", size: 16 };
-    row += 3;
+      // ---------- ย่อหน้าต่างๆ ----------
+      const titlePara = new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 200, after: 300 },
+        children: [new TextRun({ text: "บันทึกข้อความ", font: FONT_NAME, size: 44, bold: true })],
+      });
 
-    const writeSignature = (r: number, colStart: number, colEnd: number, name: string, role: string) => {
-      ws.mergeCells(r, colStart, r, colEnd);
-      const lineCell = ws.getCell(r, colStart);
-      lineCell.value = "ลงชื่อ.......................................";
-      lineCell.font = { name: "TH Sarabun New", size: 16 };
-      lineCell.alignment = { horizontal: "center" };
+      const orgPara = new Paragraph({
+        spacing: { after: 100 },
+        children: [
+          new TextRun({ text: "ส่วนราชการ", font: FONT_NAME, size: 32, bold: true }),
+          new TextRun({ text: `  กลุ่มสาระการเรียนรู้${deptGroupName || "......................................."}`, font: FONT_NAME, size: 32 }),
+        ],
+      });
 
-      ws.mergeCells(r + 1, colStart, r + 1, colEnd);
-      const nameCell = ws.getCell(r + 1, colStart);
-      nameCell.value = `(${name})`;
-      nameCell.font = { name: "TH Sarabun New", size: 16 };
-      nameCell.alignment = { horizontal: "center" };
+      // ★ "วันที่" เริ่มตรงกลางหน้ากระดาษ — ใช้ tab stop กึ่งกลาง usable width
+      const datePara = new Paragraph({
+        spacing: { after: 100 },
+        tabStops: [{ type: TabStopType.LEFT, position: CENTER_TAB_POS }],
+        children: [
+          new TextRun({ text: "ที่", font: FONT_NAME, size: 32, bold: true }),
+          new TextRun({ text: "  โรงเรียนวัดเขียนเขต", font: FONT_NAME, size: 32 }),
+          new TextRun({ text: `\t${dateRunText}`, font: FONT_NAME, size: 32 }),
+        ],
+      });
 
-      ws.mergeCells(r + 2, colStart, r + 2, colEnd);
-      const roleCell = ws.getCell(r + 2, colStart);
-      roleCell.value = role;
-      roleCell.font = { name: "TH Sarabun New", size: 16 };
-      roleCell.alignment = { horizontal: "center" };
-    };
-    const half = Math.floor(COLS / 2);
-    writeSignature(row, 1, half, teacherSignatureName || subjectTeacherNameFallback || ".......................................", "ครูประจำวิชา");
-    writeSignature(row, half + 1, COLS, gradeHeadName || ".......................................", `หัวหน้าสายชั้นมัธยมศึกษาปีที่ ${gradeLevel || "...."}`);
+      const subjectPara = new Paragraph({
+        spacing: { after: 100 },
+        children: [
+          new TextRun({ text: "เรื่อง", font: FONT_NAME, size: 32, bold: true }),
+          new TextRun({
+            text: `  ขอส่งรายชื่อนักเรียนที่มีเวลาเรียนไม่ถึง ${presentThresholds.join("% และ ")}% ของเวลาเรียนทั้งหมด`,
+            font: FONT_NAME, size: 32,
+          }),
+        ],
+      });
 
-    // ★ ปรับความกว้างคอลัมน์ให้พอดีเนื้อหา (โดยเฉพาะคอลัมน์ชื่อ-สกุล)
-    ws.columns = [
-      { width: 6 },
-      { width: 10 },
-      { width: 8 },
-      { width: 14 },
-      { width: 32 },
-      { width: 10 },
-      { width: 10 },
-      ...presentThresholds.map(() => ({ width: 10 })),
-    ];
+      const dividerPara = new Paragraph({
+        spacing: { after: 200 },
+        border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: "000000" } },
+        children: [new TextRun({ text: "", font: FONT_NAME, size: 32 })],
+      });
 
-    const buffer = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `แบบวัดผล3_${subjectCode}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
+      const toPara = new Paragraph({
+        spacing: { after: 150 },
+        children: [
+          new TextRun({ text: "เรียน", font: FONT_NAME, size: 32, bold: true }),
+          new TextRun({ text: "  ผู้อำนวยการโรงเรียนวัดเขียนเขต", font: FONT_NAME, size: 32 }),
+        ],
+      });
+
+      const bodyText = `ด้วยครูประจำวิชา ${teacherSignatureName || subjectTeacherNameFallback || "......."} รหัสวิชา ${subjectCode} ระดับชั้นมัธยมศึกษาปีที่ ${gradeNumberOnly || "...."} กลุ่มสาระการเรียนรู้${deptGroupName || "...."} ได้สำรวจเวลาเรียนของนักเรียนในภาคเรียนที่ ${semester || "...."} ปีการศึกษา ${yearLabel || "...."} พบว่ามีนักเรียนที่มีเวลาเรียนไม่ถึง ${presentThresholds.join("% และ ")}% ของเวลาเรียนทั้งหมด จำนวน ${belowThresholdStudents.length} คน ดังรายชื่อต่อไปนี้`;
+      const bodyPara = new Paragraph({
+        spacing: { after: 250 },
+        indent: { firstLine: 400 },
+        children: [new TextRun({ text: bodyText, font: FONT_NAME, size: 32 })],
+      });
+
+      // ---------- ตารางรายชื่อ ----------
+      const headerCellStyle = (text: string, colSpan = 1) =>
+        new TableCell({
+          columnSpan: colSpan,
+          verticalAlign: VerticalAlign.CENTER,
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [new TextRun({ text, font: FONT_NAME, size: 28, bold: true })],
+            }),
+          ],
+        });
+
+      const dataCell = (text: string, align: typeof AlignmentType[keyof typeof AlignmentType] = AlignmentType.CENTER) =>
+        new TableCell({
+          verticalAlign: VerticalAlign.CENTER,
+          children: [
+            new Paragraph({
+              alignment: align,
+              children: [new TextRun({ text, font: FONT_NAME, size: 28 })],
+            }),
+          ],
+        });
+
+      const headerRow1 = new TableRow({
+        tableHeader: true,
+        children: [
+          headerCellStyle("ที่"),
+          headerCellStyle("ชั้น/ห้อง"),
+          headerCellStyle("เลขที่"),
+          headerCellStyle("เลขประจำตัว"),
+          headerCellStyle("ชื่อ-สกุล"),
+          headerCellStyle("เวลาเรียน(คาบ)", 2),
+          headerCellStyle("มีเวลาเรียนไม่ถึง", presentThresholds.length),
+        ],
+      });
+      const headerRow2 = new TableRow({
+        tableHeader: true,
+        children: [
+          new TableCell({ children: [new Paragraph("")] }),
+          new TableCell({ children: [new Paragraph("")] }),
+          new TableCell({ children: [new Paragraph("")] }),
+          new TableCell({ children: [new Paragraph("")] }),
+          new TableCell({ children: [new Paragraph("")] }),
+          headerCellStyle("เต็ม"),
+          headerCellStyle("ขาดเรียน"),
+          ...presentThresholds.map(t => headerCellStyle(`${t}%`)),
+        ],
+      });
+
+      const dataRows = belowThresholdStudents.map((r, i) => {
+        const info = extraInfo[r.student.id];
+        const prefix = computePrefix(info?.gender ?? null, info?.birth_date ?? null, r.student.prefix ?? null);
+        return new TableRow({
+          children: [
+            dataCell(String(i + 1)),
+            dataCell(gradeLevel),
+            dataCell(String(r.student.seat_number)),
+            dataCell(info?.student_code ?? ""),
+            dataCell(`${prefix}${r.student.first_name} ${r.student.last_name}`, AlignmentType.LEFT),
+            dataCell(String(r.total)),
+            dataCell(String(r.absent)),
+            ...r.belowFlags.map(f => dataCell(f ? "✓" : "")),
+          ],
+        });
+      });
+
+      const totalCols = 7 + presentThresholds.length;
+      const emptyRow =
+        belowThresholdStudents.length === 0
+          ? [
+              new TableRow({
+                children: [
+                  new TableCell({
+                    columnSpan: totalCols,
+                    children: [
+                      new Paragraph({
+                        alignment: AlignmentType.CENTER,
+                        children: [new TextRun({ text: "ไม่พบนักเรียนที่เวลาเรียนต่ำกว่าเกณฑ์", font: FONT_NAME, size: 28 })],
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+            ]
+          : [];
+
+      const mainTable = new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: {
+          top: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+          bottom: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+          left: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+          right: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+          insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+          insideVertical: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+        },
+        rows: [headerRow1, headerRow2, ...dataRows, ...emptyRow],
+      });
+
+      const closingPara = new Paragraph({
+        spacing: { before: 250, after: 500 },
+        children: [new TextRun({ text: "จึงเรียนมาเพื่อโปรดทราบและพิจารณาดำเนินการ", font: FONT_NAME, size: 32 })],
+      });
+
+      // ---------- ส่วนลงชื่อ (2 ตำแหน่ง: ครูประจำวิชา / หัวหน้าสายชั้น) ----------
+      const teacherName = teacherSignatureName || subjectTeacherNameFallback || ".......................................";
+      const headName = gradeHeadName || ".......................................";
+      // ★ ตำแหน่งไม่มีเลขห้อง ใช้เฉพาะเลขชั้นปี เช่น "หัวหน้าสายชั้นมัธยมศึกษาปีที่ 3"
+      const headRoleText = `หัวหน้าสายชั้นมัธยมศึกษาปีที่ ${gradeNumberOnly || "...."}`;
+
+      const signatureTable = new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: {
+          top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+          bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+          left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+          right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+          insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+          insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+        },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                width: { size: 50, type: WidthType.PERCENTAGE },
+                children: [
+                  new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: "ลงชื่อ.......................................", font: FONT_NAME, size: 32 })] }),
+                  new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `(${teacherName})`, font: FONT_NAME, size: 32 })] }),
+                  new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: "ครูประจำวิชา", font: FONT_NAME, size: 32 })] }),
+                ],
+              }),
+              new TableCell({
+                width: { size: 50, type: WidthType.PERCENTAGE },
+                children: [
+                  new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: "ลงชื่อ.......................................", font: FONT_NAME, size: 32 })] }),
+                  new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `(${headName})`, font: FONT_NAME, size: 32 })] }),
+                  new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: headRoleText, font: FONT_NAME, size: 32 })] }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      });
+
+      const doc = new Document({
+        sections: [
+          {
+            properties: {
+              page: {
+                size: { width: PAGE_WIDTH_TWIPS, height: CM_TO_TWIPS(29.7) }, // A4: 21 x 29.7 cm
+                margin: { top: MARGIN_TOP, bottom: MARGIN_BOTTOM, left: MARGIN_LEFT, right: MARGIN_RIGHT },
+              },
+            },
+            children: [
+              headerTable,
+              new Paragraph({ text: "" }),
+              titlePara,
+              orgPara,
+              datePara,
+              subjectPara,
+              dividerPara,
+              toPara,
+              bodyPara,
+              mainTable,
+              closingPara,
+              signatureTable,
+            ],
+          },
+        ],
+      });
+
+      const blob = await Packer.toBlob(doc);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `แบบวัดผล3_${subjectCode}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert("ส่งออกไฟล์ Word ไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    } finally {
+      setExporting(false);
+    }
   }
 
   if (loading) {
@@ -472,8 +657,9 @@ if (gradeNumber) {
         }
         .vp3-print-area { font-size: 16px; }
 
+        /* ★ ขอบกระดาษ A4 แนวตั้ง ตามภาพที่แนบ: บน 2.54 / ล่าง 2.54 / ซ้าย 2.54 / ขวา 2.22 */
         @media print {
-          @page { size: A4 portrait; margin: 10mm; }
+          @page { size: A4 portrait; margin: 2.54cm 2.22cm 2.54cm 2.54cm; }
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           body * { visibility: hidden; }
           .vp3-report-root, .vp3-report-root * { visibility: visible; }
@@ -488,8 +674,12 @@ if (gradeNumber) {
           ← กลับ
         </button>
         <div className="flex items-center gap-2">
-          <button onClick={handleExportExcel} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm shadow">
-            📊 ส่งออก Excel
+          <button
+            onClick={handleExportWord}
+            disabled={exporting}
+            className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-sm shadow"
+          >
+            📄 {exporting ? "กำลังสร้างไฟล์..." : "ส่งออก Word"}
           </button>
           <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-black text-sm shadow">
             🖨️ พิมพ์ / บันทึกเป็น PDF
@@ -501,12 +691,18 @@ if (gradeNumber) {
 
       <div className="bg-slate-100 print:bg-transparent rounded-2xl p-4 sm:p-8 print:p-0 overflow-x-auto">
         <div
-          className="vp3-print-area relative bg-white rounded-2xl border border-slate-200 shadow-lg p-6 sm:p-12 print:border-0 print:shadow-none print:p-0 mx-auto"
-          style={{ maxWidth: "210mm", width: "100%" }}
+          className="vp3-print-area relative bg-white rounded-2xl border border-slate-200 shadow-lg print:border-0 print:shadow-none print:p-0 mx-auto"
+          style={{
+            maxWidth: "210mm",
+            width: "100%",
+            paddingTop: "2.54cm",
+            paddingBottom: "2.54cm",
+            paddingLeft: "2.54cm",
+            paddingRight: "2.22cm",
+          }}
         >
           <div className="flex items-start justify-between mb-2">
-            <div style={{ width: "2cm", height: "2cm" }} className="shrink-0 flex items-center justify-center">
-              {/* ★ ตราครุฑ — ดึงจาก public/images.jpg (D:\WEB\school-app\public\images.jpg) */}
+            <div style={{ width: "2.5cm", height: "2.5cm" }} className="shrink-0 flex items-center justify-center">
               <img src="/images.jpg" alt="ตราครุฑ" className="w-full h-full object-contain" />
             </div>
             <div className="border border-slate-400 rounded px-2 py-1 font-bold whitespace-nowrap self-start">
@@ -518,15 +714,18 @@ if (gradeNumber) {
 
           <div className="space-y-1">
             <p><span className="font-bold">ส่วนราชการ</span>&nbsp;&nbsp;กลุ่มสาระการเรียนรู้{deptGroupName || "......................................."}</p>
-            <p>
+            {/* ★ "วันที่" เริ่มตรงกลางหน้ากระดาษ — ใช้ absolute left-1/2 เทียบกับกล่องเอกสาร (ซึ่งกำหนด padding เป็นระยะขอบกระดาษแล้ว) */}
+            <p className="relative">
               <span className="font-bold">ที่</span>&nbsp;&nbsp;โรงเรียนวัดเขียนเขต
-              <span className="ml-16">วันที่ {currentDay} เดือน {currentMonthTh} พ.ศ. {currentYearBE}</span>
+              <span className="absolute" style={{ left: "50%" }}>
+                วันที่ {currentDay} เดือน {currentMonthTh} พ.ศ. {currentYearBE}
+              </span>
             </p>
             <p><span className="font-bold">เรื่อง</span>&nbsp;&nbsp;ขอส่งรายชื่อนักเรียนที่มีเวลาเรียนไม่ถึง {presentThresholds.join("% และ ")}% ของเวลาเรียนทั้งหมด</p>
             <div className="border-t border-slate-400 my-2" />
             <p><span className="font-bold">เรียน</span>&nbsp;&nbsp;ผู้อำนวยการโรงเรียนวัดเขียนเขต</p>
             <p className="indent-8 leading-relaxed">
-              ด้วยครูประจำวิชา {teacherSignatureName || subjectTeacherNameFallback || "......................"} รหัสวิชา {subjectCode} ระดับชั้นมัธยมศึกษาปีที่ {gradeLevel || "......"} กลุ่มสาระการเรียนรู้{deptGroupName || "......................"} ได้สำรวจเวลาเรียนของนักเรียนในภาคเรียนที่ {semester || "..."} ปีการศึกษา {yearLabel || "........"} พบว่ามีนักเรียนที่มีเวลาเรียนไม่ถึง {presentThresholds.join("% และ ")}% ของเวลาเรียนทั้งหมด จำนวน {belowThresholdStudents.length} คน ดังรายชื่อต่อไปนี้
+              ด้วยครูประจำวิชา {teacherSignatureName || subjectTeacherNameFallback || "......................"} รหัสวิชา {subjectCode} ระดับชั้นมัธยมศึกษาปีที่ {gradeNumberOnly || "......"} กลุ่มสาระการเรียนรู้{deptGroupName || "......................"} ได้สำรวจเวลาเรียนของนักเรียนในภาคเรียนที่ {semester || "..."} ปีการศึกษา {yearLabel || "........"} พบว่ามีนักเรียนที่มีเวลาเรียนไม่ถึง {presentThresholds.join("% และ ")}% ของเวลาเรียนทั้งหมด จำนวน {belowThresholdStudents.length} คน ดังรายชื่อต่อไปนี้
             </p>
           </div>
 
@@ -586,7 +785,7 @@ if (gradeNumber) {
             </div>
             <div className="flex justify-center">
               <SignatureField
-                role={`หัวหน้าสายชั้นมัธยมศึกษาปีที่ ${gradeLevel || "...."}`}
+                role={`หัวหน้าสายชั้นมัธยมศึกษาปีที่ ${gradeNumberOnly || "...."}`}
                 name={gradeHeadName || "......................................."}
               />
             </div>
