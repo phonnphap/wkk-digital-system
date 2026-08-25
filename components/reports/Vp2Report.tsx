@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 // ★ ส่งออก Excel — ใช้ไลบรารี SheetJS (ฝั่ง client, ไม่ต้องมี backend)
 // ถ้ายังไม่มีในโปรเจกต์ ให้รัน: npm install xlsx
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 const supabase = createClient();
 
@@ -401,72 +401,180 @@ function formatGradeLevel(label?: string): string {
   }
 
   // ★ ส่งออกเป็นไฟล์ Excel — โครงสร้างคอลัมน์ตรงกับตารางที่แสดงในหน้ารายงาน
-  function handleExportExcel() {
-    const headerLine1 = "แบบประกาศผลคะแนนระหว่างเรียนรายวิชาของนักเรียนโรงเรียนวัดเขียนเขต";
-    const headerLine2 = `ชั้นมัธยมศึกษาปีที่ ${gradeLevel || "-"} ภาคเรียนที่ ${semester || "-"} ปีการศึกษา ${yearLabel || "-"}`;
-    const headerLine3 = `รหัสวิชา ${subjectCode} รายวิชา ${subjectTitle} ประเภท ${subjectType || "-"} จำนวน ${creditHours || "-"} หน่วยกิต`;
+  async function handleExportExcel() {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("แบบวัดผล 2");
 
-    const colHeaders = [
-      "เลขที่",
-      "เลขประจำตัว",
-      "ชื่อ นามสกุล",
-      `หน่วยการเรียน (${totalMaxScore})`,
-      `กลางภาค (${midtermMaxScore})`,
-      `รวม (${totalMaxScore + midtermMaxScore})`,
-      "หมายเหตุ",
-    ];
+  const COLS = 7; // เลขที่, เลขประจำตัว, ชื่อ, หน่วยการเรียน, กลางภาค, รวม, หมายเหตุ
 
-    const dataRows = students.map((s, i) => {
-      const info = extraInfo[s.id];
-      const displayPrefix = computePrefix(info?.gender ?? null, info?.birth_date ?? null, s.prefix ?? null);
-      const sc = scoreByStudent[s.id] ?? { unit: 0, midterm: null, total: 0 };
-      return [
-        i + 1,
-        info?.student_code ?? "",
-        `${displayPrefix}${s.first_name} ${s.last_name}`,
-        sc.unit,
-        sc.midterm ?? "",
-        sc.total,
-        remarks[s.id] ?? "",
-      ];
+  ws.columns = [
+    { width: 6 },
+    { width: 12 },
+    { width: 30 },
+    { width: 16 },
+    { width: 12 },
+    { width: 10 },
+    { width: 22 },
+  ];
+
+  // ---------- โลโก้ (มุมซ้ายบน ~3cm) ----------
+  try {
+    const logoRes = await fetch("/school-logo.png");
+    const logoBuffer = await logoRes.arrayBuffer();
+    const logoId = wb.addImage({ buffer: logoBuffer, extension: "png" });
+    // 3cm ≈ 113px ที่ 96dpi
+    ws.addImage(logoId, {
+      tl: { col: 0, row: 0 },
+      ext: { width: 90, height: 90 },
     });
-
-    const aoa: (string | number)[][] = [
-      [headerLine1],
-      [headerLine2],
-      [headerLine3],
-      [],
-      colHeaders,
-      ...dataRows,
-    ];
-
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-    // รวมเซลล์หัวกระดาษ 3 บรรทัดแรกให้กว้างเท่าจำนวนคอลัมน์ (7 คอลัมน์ = index 0-6)
-    ws["!merges"] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
-      { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } },
-    ];
-
-    // ความกว้างคอลัมน์ ให้อ่านง่าย ไม่ล้นจอ
-    ws["!cols"] = [
-      { wch: 6 },  // เลขที่
-      { wch: 12 }, // เลขประจำตัว
-      { wch: 30 }, // ชื่อ นามสกุล
-      { wch: 16 }, // หน่วยการเรียน
-      { wch: 12 }, // กลางภาค
-      { wch: 10 }, // รวม
-      { wch: 20 }, // หมายเหตุ
-    ];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "แบบวัดผล 2");
-
-    const fileClassroom = gradeLevel ? `_ม.${gradeLevel.replace("/", "-")}` : "";
-    const fileName = `แบบวัดผล2_${subjectCode}${fileClassroom}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+  } catch (e) {
+    console.warn("โหลดโลโก้ไม่สำเร็จ ข้ามการฝังรูป:", e);
   }
+
+  // เว้นแถวให้พ้นความสูงโลโก้ก่อนเริ่มหัวกระดาษ (โลโก้กินราว 5 แถว)
+  ws.getRow(1).height = 20;
+  ws.getRow(2).height = 20;
+  ws.getRow(3).height = 20;
+  ws.getRow(4).height = 20;
+  ws.getRow(5).height = 20;
+
+  // ---------- ป้าย "แบบวัดผล 2" มุมขวาบน ----------
+  const tagCell = ws.getCell(1, COLS); // แถว 1 คอลัมน์สุดท้าย
+  tagCell.value = "แบบวัดผล 2";
+  tagCell.font = { bold: true };
+  tagCell.alignment = { horizontal: "center", vertical: "middle" };
+  tagCell.border = {
+    top: { style: "thin" }, bottom: { style: "thin" },
+    left: { style: "thin" }, right: { style: "thin" },
+  };
+
+  // ---------- หัวกระดาษ 3 บรรทัด (merge เต็มความกว้าง, เริ่มแถว 6) ----------
+  const headerLine1 = "แบบประกาศผลคะแนนระหว่างเรียนรายวิชาของนักเรียนโรงเรียนวัดเขียนเขต";
+  const headerLine2 = `ชั้นมัธยมศึกษาปีที่ ${gradeLevel || "-"} ภาคเรียนที่ ${semester || "-"} ปีการศึกษา ${yearLabel || "-"}`;
+  const headerLine3 = `รหัสวิชา ${subjectCode} รายวิชา ${subjectTitle} ประเภท ${subjectType || "-"} จำนวน ${creditHours || "-"} หน่วยกิต`;
+
+  const headerStartRow = 6;
+  [headerLine1, headerLine2, headerLine3].forEach((text, idx) => {
+    const rowNum = headerStartRow + idx;
+    ws.mergeCells(rowNum, 1, rowNum, COLS);
+    const cell = ws.getCell(rowNum, 1);
+    cell.value = text;
+    cell.font = { bold: true };
+    cell.alignment = { horizontal: "center" };
+  });
+
+  // ---------- หัวตาราง ----------
+  const tableHeaderRow = headerStartRow + 4; // เว้น 1 แถวว่าง
+  const colHeaders = [
+    "เลขที่",
+    "เลขประจำตัว",
+    "ชื่อ นามสกุล",
+    `หน่วยการเรียน (${totalMaxScore})`,
+    `กลางภาค (${midtermMaxScore})`,
+    `รวม (${totalMaxScore + midtermMaxScore})`,
+    "หมายเหตุ",
+  ];
+  colHeaders.forEach((text, i) => {
+    const cell = ws.getCell(tableHeaderRow, i + 1);
+    cell.value = text;
+    cell.font = { bold: true };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = {
+      top: { style: "thin" }, bottom: { style: "thin" },
+      left: { style: "thin" }, right: { style: "thin" },
+    };
+  });
+
+  // ---------- แถวข้อมูลนักเรียน ----------
+  students.forEach((s, i) => {
+    const info = extraInfo[s.id];
+    const displayPrefix = computePrefix(info?.gender ?? null, info?.birth_date ?? null, s.prefix ?? null);
+    const sc = scoreByStudent[s.id] ?? { unit: 0, midterm: null, total: 0 };
+    const rowNum = tableHeaderRow + 1 + i;
+
+    const rowValues = [
+      i + 1,
+      info?.student_code ?? "",
+      `${displayPrefix}${s.first_name} ${s.last_name}`,
+      sc.unit,
+      sc.midterm ?? "",
+      sc.total,
+      remarks[s.id] ?? "",
+    ];
+
+    rowValues.forEach((val, colIdx) => {
+      const cell = ws.getCell(rowNum, colIdx + 1);
+      cell.value = val;
+      cell.alignment = {
+        horizontal: colIdx === 2 ? "left" : "center",
+        vertical: "middle",
+      };
+      cell.border = {
+        top: { style: "thin" }, bottom: { style: "thin" },
+        left: { style: "thin" }, right: { style: "thin" },
+      };
+    });
+  });
+
+  const lastDataRow = tableHeaderRow + students.length;
+
+  // ---------- ส่วนลงชื่อ (3 ตำแหน่ง) ----------
+  const sigRow1 = lastDataRow + 3; // เว้นระยะจากตาราง
+
+  // ครูประจำวิชา (คอลัมน์ 2-3) และ หัวหน้ากลุ่มสาระ (คอลัมน์ 5-6)
+  const writeSignature = (
+  rowStart: number,
+  colStart: number,
+  colEnd: number,
+  name: string,
+  role: string
+) => {
+    ws.mergeCells(rowStart, colStart, rowStart, colEnd);
+    const lineCell = ws.getCell(rowStart, colStart);
+    lineCell.value = "ลงชื่อ.......................................";
+    lineCell.alignment = { horizontal: "center" };
+
+    ws.mergeCells(rowStart + 1, colStart, rowStart + 1, colEnd);
+    const nameCell = ws.getCell(rowStart + 1, colStart);
+    nameCell.value = `(${name})`;
+    nameCell.alignment = { horizontal: "center" };
+
+    ws.mergeCells(rowStart + 2, colStart, rowStart + 2, colEnd);
+    const roleCell = ws.getCell(rowStart + 2, colStart);
+    roleCell.value = role;
+    roleCell.alignment = { horizontal: "center" };
+  };
+
+  writeSignature(
+    sigRow1, 2, 3,
+    teacherSignatureName || subjectTeacherNameFallback || ".......................................",
+    "ครูประจำวิชา"
+  );
+  writeSignature(
+    sigRow1, 5, 6,
+    deptHeadName || ".......................................",
+    `หัวหน้ากลุ่มสาระ${deptName || "ฯ"}`
+  );
+
+  // ผู้อำนวยการ (กึ่งกลางทั้งแถว ใต้ 2 ลายเซ็นแรก)
+  const sigRow2 = sigRow1 + 4;
+  writeSignature(sigRow2, 3, 5, directorName, "ผู้อำนวยการโรงเรียนวัดเขียนเขต");
+
+  // ---------- บันทึกไฟล์ ----------
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const fileClassroom = gradeLevel ? `_ม.${gradeLevel.replace("/", "-")}` : "";
+  a.href = url;
+  a.download = `แบบวัดผล2_${subjectCode}${fileClassroom}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
   if (loading) {
     return <div className="text-center py-10 text-fuchsia-500 font-black animate-pulse">กำลังโหลด...</div>;
@@ -568,9 +676,12 @@ function formatGradeLevel(label?: string): string {
         {/* ★ เปลี่ยนหัวกระดาษเป็น flex 3 ช่อง (โลโก้ | ข้อความกึ่งกลาง | ป้ายแบบวัดผล 2)
             แทนการใช้ absolute เดิม เพื่อไม่ให้โลโก้ไปทับข้อความไม่ว่าข้อความจะยาวแค่ไหน */}
         <div className="flex items-start gap-2 mb-2 vp2-header-block">
-          <div className="w-12 h-12 print:w-10 print:h-10 shrink-0 flex items-center justify-center">
-            <img src="/school-logo.png" alt="ตราโรงเรียน" className="w-full h-full object-contain" />
-          </div>
+          <div
+  className="shrink-0 flex items-center justify-center"
+  style={{ width: "3cm", height: "3cm" }}
+>
+  <img src="/school-logo.png" alt="ตราโรงเรียน" className="w-full h-full object-contain" />
+</div>
                     <div className="flex-1 text-center min-w-0" style={{ fontSize: "18px" }}>
             <p className="font-bold leading-snug">แบบประกาศผลคะแนนระหว่างเรียนรายวิชาของนักเรียนโรงเรียนวัดเขียนเขต</p>
             <p className="font-bold mt-1 whitespace-nowrap">
