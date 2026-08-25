@@ -212,7 +212,7 @@ if (allHeadsErr) {
     return false;
   });
 
-  if (head) {
+   if (head) {
     console.log("[Vp2Report] deptHead row (matched):", head);
     setDeptHeadName(buildNameWithTitle(head as any));
   } else {
@@ -388,6 +388,9 @@ function formatGradeLevel(label?: string): string {
     font-family: 'TH Sarabun New', 'TH Sarabun New UI', sans-serif !important;
   }
 
+  .vp2-print-area { font-size: 16px; }
+  .vp2-print-area table { font-size: 16px; }
+
   @media print {
   @page { size: A4 portrait; margin: 8mm; }
   body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -395,8 +398,8 @@ function formatGradeLevel(label?: string): string {
   .vp2-report-root, .vp2-report-root * { visibility: visible; }
   .vp2-report-root { position: absolute; left: 0; top: 0; width: 100%; }
 
-  .vp2-print-area { font-size: 13px !important; padding: 0 !important; }
-  .vp2-print-area table { font-size: 12px !important; }
+    .vp2-print-area { font-size: 16px !important; padding: 0 !important; }
+  .vp2-print-area table { font-size: 16px !important; }
   .vp2-print-area th, .vp2-print-area td { padding-top: 1px !important; padding-bottom: 1px !important; }
   .vp2-header-block { margin-bottom: 4px !important; }
   .vp2-header-block p { margin: 0 !important; line-height: 1.25 !important; }
@@ -446,9 +449,9 @@ function formatGradeLevel(label?: string): string {
           <div className="w-12 h-12 print:w-10 print:h-10 shrink-0 flex items-center justify-center">
             <img src="/school-logo.png" alt="ตราโรงเรียน" className="w-full h-full object-contain" />
           </div>
-          <div className="flex-1 text-center min-w-0">
-            <p className="font-black text-base print:text-sm leading-snug">แบบประกาศผลคะแนนระหว่างเรียนรายวิชาของนักเรียนโรงเรียนวัดเขียนเขต</p>
-            <p className="text-sm print:text-xs mt-1 whitespace-nowrap">
+                    <div className="flex-1 text-center min-w-0" style={{ fontSize: "18px" }}>
+            <p className="font-bold leading-snug">แบบประกาศผลคะแนนระหว่างเรียนรายวิชาของนักเรียนโรงเรียนวัดเขียนเขต</p>
+            <p className="font-bold mt-1 whitespace-nowrap">
               ชั้นมัธยมศึกษาปีที่{" "}
               {readOnly ? (
                 <span className="font-bold">{gradeLevel || "…………"}</span>
@@ -468,7 +471,7 @@ function formatGradeLevel(label?: string): string {
                 <input value={yearLabel} onChange={e => setYearLabel(e.target.value)} className="border-b border-slate-400 text-center w-20 focus:outline-none print:border-none" />
               )}
             </p>
-            <p className="text-sm print:text-xs mt-1 whitespace-nowrap">
+                      <p className="font-bold mt-1 whitespace-nowrap">
               รหัสวิชา <span className="font-bold">{subjectCode}</span> รายวิชา <span className="font-bold">{subjectTitle}</span> ประเภท{" "}
               {readOnly ? (
                 <span className="font-bold">{subjectType || "…………"}</span>
@@ -484,26 +487,26 @@ function formatGradeLevel(label?: string): string {
               หน่วยกิต
             </p>
           </div>
-          <div className="w-12 print:w-10 shrink-0 flex items-start justify-end">
-            <div className="border border-slate-400 rounded px-2 py-1 text-[10px] font-bold whitespace-nowrap">แบบวัดผล 2</div>
+                    <div className="w-20 print:w-16 shrink-0 flex items-start justify-end">
+            <div className="border border-slate-400 rounded px-2 py-1 font-bold whitespace-nowrap" style={{ fontSize: "18px" }}>แบบวัดผล 2</div>
           </div>
         </div>
 
         <table className="w-full table-fixed border-collapse text-sm print:text-[11px] mt-4">
           <thead>
             <tr>
-              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5" style={{ width: "5%" }}>เลขที่</th>
-<th rowSpan={2} className="border border-slate-400 px-1 py-1.5" style={{ width: "10%" }}>เลขประจำตัว</th>
-<th rowSpan={2} className="border border-slate-400 px-2 py-1.5 text-left whitespace-nowrap" style={{ width: "38%" }}>ชื่อ นามสกุล</th>
+              <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "5%" }}>เลขที่</th>
+<th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "10%" }}>เลขประจำตัว</th>
+<th rowSpan={2} className="border border-slate-400 px-2 py-1.5 text-center font-bold" style={{ width: "38%" }}>ชื่อ นามสกุล</th>
 
-<th colSpan={3} className="border border-slate-400 px-1 py-1" style={{ width: "35%" }}>คะแนน</th>
-<th rowSpan={2} className="border border-slate-400 px-1 py-1.5" style={{ width: "12%" }}>หมายเหตุ</th>
+<th colSpan={3} className="border border-slate-400 px-1 py-1 font-bold" style={{ width: "35%" }}>คะแนน</th>
+<th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "12%" }}>หมายเหตุ</th>
             </tr>
             <tr>
               {/* ★ โชว์คะแนนเต็มจริงจากชุดงานทั้งหมด (totalMaxScore) แทนเลข 70 ตายตัว */}
-              <th className="border border-slate-400 px-1 py-1 font-normal">หน่วยการเรียน ({totalMaxScore})</th>
-              <th className="border border-slate-400 px-1 py-1 font-normal">กลางภาค ({midtermMaxScore})</th>
-              <th className="border border-slate-400 px-1 py-1 font-normal">รวม ({totalMaxScore + midtermMaxScore})</th>
+              <th className="border border-slate-400 px-1 py-1 font-bold">หน่วยการเรียน ({totalMaxScore})</th>
+              <th className="border border-slate-400 px-1 py-1 font-bold">กลางภาค ({midtermMaxScore})</th>
+              <th className="border border-slate-400 px-1 py-1 font-bold">รวม ({totalMaxScore + midtermMaxScore})</th>
             </tr>
           </thead>
           <tbody>
@@ -538,25 +541,25 @@ function formatGradeLevel(label?: string): string {
           </tbody>
         </table>
 
-        <div className="grid grid-cols-2 gap-8 mt-8 print:mt-6 text-sm print:text-xs text-center vp2-signature-block">
+                <div className="grid grid-cols-2 gap-8 mt-8 print:mt-6 text-center vp2-signature-block">
           <div>
-            <p>ลงชื่อ.......................................ครูประจำวิชา</p>
-<p>({teacherSignatureName || subjectTeacherNameFallback || "......................................."})</p>
+            <p className="text-center">ลงชื่อ.......................................ครูประจำวิชา</p>
+            <p className="text-center mt-1">({teacherSignatureName || subjectTeacherNameFallback || "......................................."})</p>
           </div>
           <div>
             {/* "หัวหน้ากลุ่มสาระฯ" -> "หัวหน้ากลุ่มสาระ" + ชื่อกลุ่มสาระจริง (เช่น วิทยาศาสตร์และเทคโนโลยี) */}
-            <p>ลงชื่อ.......................................หัวหน้ากลุ่มสาระ{deptName || "ฯ"}</p>
-            <p>({deptHeadName || "......................................."})</p>
+            <p className="text-center">ลงชื่อ.......................................หัวหน้ากลุ่มสาระ{deptName || "ฯ"}</p>
+            <p className="text-center mt-1">({deptHeadName || "......................................."})</p>
           </div>
         </div>
-        <div className="text-center mt-6 print:mt-4 text-sm print:text-xs">
-          <p>ลงชื่อ.......................................</p>
-          <p>({directorName})</p>
-          <p>ผู้อำนวยการโรงเรียนวัดเขียนเขต</p>
+        <div className="text-center mt-6 print:mt-4">
+          <p className="text-center">ลงชื่อ.......................................</p>
+          <p className="text-center mt-1">({directorName})</p>
+          <p className="text-center">ผู้อำนวยการโรงเรียนวัดเขียนเขต</p>
+        </div>
         </div>
       </div>
       </div>
       </div>  
-    </div>
   );
 }
