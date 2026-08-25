@@ -14,6 +14,30 @@ const HOMEROOM_PATH = "/homeroom";
 
 const PREFIX_OPTIONS = ["เด็กชาย", "เด็กหญิง", "นาย", "นางสาว"];
 
+// ★ เพิ่มใหม่: คำนวณอายุจากวันเกิด
+function calculateAge(birthDateStr: string): number | null {
+  if (!birthDateStr) return null;
+  const birth = new Date(birthDateStr);
+  if (isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  const dayDiff = today.getDate() - birth.getDate();
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+    age--;
+  }
+  return age;
+}
+
+// ★ เพิ่มใหม่: คำนวณคำนำหน้าที่ควรจะเป็น จากเพศ + อายุ
+function getAutoPrefix(gender: string, birthDateStr: string): string | null {
+  const age = calculateAge(birthDateStr);
+  if (age === null || !gender) return null;
+  if (gender === "male") return age > 15 ? "นาย" : "เด็กชาย";
+  if (gender === "female") return age > 15 ? "นางสาว" : "เด็กหญิง";
+  return null;
+}
+
 type Classroom = {
   classroom_id: string;
   room_name: string;
@@ -74,6 +98,15 @@ export default function StudentsPage() {
 const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
 const [loginUsername, setLoginUsername] = useState("");
 const [loginPassword, setLoginPassword] = useState("");
+
+// ★ เพิ่มใหม่: อัปเดตคำนำหน้าอัตโนมัติเมื่อวันเกิดหรือเพศเปลี่ยน (เฉพาะตอนที่ modal เปิดอยู่)
+useEffect(() => {
+  if (!showForm) return;
+  const autoPrefix = getAutoPrefix(form.gender, form.birth_date);
+  if (autoPrefix && autoPrefix !== form.prefix) {
+    setForm((f) => ({ ...f, prefix: autoPrefix }));
+  }
+}, [form.gender, form.birth_date, showForm]);
 
   useEffect(() => {
     supabase.rpc("get_my_classrooms").then(({ data }: { data: Classroom[] | null }) => {
@@ -407,18 +440,24 @@ const [loginPassword, setLoginPassword] = useState("");
                   <Field label="รหัสนักเรียน" value={form.student_code} onChange={(v) => setForm({ ...form, student_code: v })} />
 
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">คำนำหน้า</label>
-                    <select
-                      className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
-                      value={form.prefix}
-                      onChange={(e) => setForm({ ...form, prefix: e.target.value })}
-                    >
-                      <option value="">เลือก</option>
-                      {PREFIX_OPTIONS.map((p) => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                    </select>
-                  </div>
+  <label className="mb-1 block text-xs font-medium text-slate-500">
+    คำนำหน้า
+    {getAutoPrefix(form.gender, form.birth_date) && (
+      <span className="ml-1 text-[10px] font-normal text-indigo-400">(คำนวณอัตโนมัติจากอายุ)</span>
+    )}
+  </label>
+  <select
+    className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-400"
+    value={form.prefix}
+    onChange={(e) => setForm({ ...form, prefix: e.target.value })}
+    disabled={!!getAutoPrefix(form.gender, form.birth_date)}
+  >
+    <option value="">เลือก</option>
+    {PREFIX_OPTIONS.map((p) => (
+      <option key={p} value={p}>{p}</option>
+    ))}
+  </select>
+</div>
                   <div />
 
                   <Field label="ชื่อ" value={form.first_name} onChange={(v) => setForm({ ...form, first_name: v })} required />
