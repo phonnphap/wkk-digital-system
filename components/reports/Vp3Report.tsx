@@ -83,7 +83,22 @@ function buildNameWithTitle(person: {
   if (title && base.startsWith(title)) return base;
   return `${title}${base}`;
 }
-
+function getImageNaturalSize(buffer: ArrayBuffer): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const blob = new Blob([buffer]);
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      URL.revokeObjectURL(url);
+    };
+    img.onerror = (e) => {
+      URL.revokeObjectURL(url);
+      reject(e);
+    };
+    img.src = url;
+  });
+}
 function formatGradeLevel(label?: string): string {
   if (!label) return "";
   const nums = label.match(/\d+/g);
