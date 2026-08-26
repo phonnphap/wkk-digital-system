@@ -8,7 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { subject_section_id, student_id, exam_type, score, graded_by } = body;
+        const { subject_section_id, student_id, exam_type, score, raw_score, raw_max_score, graded_by } = body;
 
     // ★ validate ให้ครบตามที่ตาราง subject_exam_scores บังคับไว้ (CHECK constraint บน exam_type)
     if (!subject_section_id || !student_id) {
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
     const admin = createAdminClient();
 
-    const { data, error } = await admin
+        const { data, error } = await admin
       .from("subject_exam_scores")
       .upsert(
         {
@@ -33,6 +33,9 @@ export async function POST(req: NextRequest) {
           student_id,
           exam_type,
           score: numericScore,
+          // ★ เพิ่ม: เก็บคะแนนดิบ + เต็มดิบไว้ด้วย ไม่งั้นตอนโหลดกลับมาจะไม่รู้ค่าดิบที่ครูกรอกจริง
+          raw_score: raw_score !== undefined && raw_score !== null ? Number(raw_score) : null,
+          raw_max_score: raw_max_score !== undefined && raw_max_score !== null ? Number(raw_max_score) : null,
           graded_by: graded_by ?? null,
           graded_at: new Date().toISOString(),
         },

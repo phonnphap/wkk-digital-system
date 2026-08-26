@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   Users, ClipboardCheck, NotebookPen, UtensilsCrossed,
   UserCheck, FileEdit, Home, HeartHandshake, ArrowRight,
-  CalendarOff, BarChart3, FileText,
+  CalendarOff, BarChart3, FileText, KeyRound, Copy, QrCode,
   type LucideIcon,
 } from "lucide-react";
 
@@ -18,6 +18,8 @@ type Classroom = {
   classroom_id: string;
   room_name: string;
   room_number?: number;
+  join_code?: string | null;
+  student_portal_enabled?: boolean | null;
 };
 
 type MenuStatus = "live" | "in_progress";
@@ -32,7 +34,6 @@ type SubMenuItem = {
   status: MenuStatus;
 };
 
-// ★ เมนูย่อยทั้งหมดของครูประจำชั้น — เพิ่ม/ลบ/แก้ path ที่นี่ที่เดียว
 const SUBMENUS: SubMenuItem[] = [
   { key: "students", name: "ทะเบียนนักเรียน", desc: "รายชื่อ ข้อมูลพื้นฐาน และผู้ปกครอง", icon: Users, color: "bg-blue-600", path: "/students", status: "live" },
   { key: "attendance", name: "บันทึกเช็คชื่อ", desc: "มาเรียน / ขาด / ลา / มาสาย รายวัน", icon: ClipboardCheck, color: "bg-indigo-600", path: "/attendance", status: "live" },
@@ -45,7 +46,6 @@ const SUBMENUS: SubMenuItem[] = [
   { key: "por5", name: "ปพ.5", desc: "รายวิชา · สรุปผลคะแนน/การมาเรียน/เชิงลึกของทุกวิชา", icon: FileText, color: "bg-cyan-600", path: "/homeroom/por5", status: "live" },
 ];
 
-// ★ เมนูสำหรับผู้ดูแลระบบ (admin/director/deputy_director) เท่านั้น
 const ADMIN_SUBMENUS: SubMenuItem[] = [
   { key: "students_overview", name: "ทะเบียนนักเรียนทั้งโรงเรียน", desc: "ดูรายชื่อนักเรียนทุกห้อง เลือกกรองทีละห้องได้", icon: Users, color: "bg-blue-700", path: "/admin/students-overview", status: "live" },
   { key: "attendance_overview", name: "สถิติการมาเรียนทั้งโรงเรียน", desc: "ภาพรวมการมา/ขาด/ลา/สาย ทุกห้องเรียน", icon: BarChart3, color: "bg-purple-600", path: "/admin/attendance-overview", status: "live" },
@@ -57,14 +57,8 @@ const STATUS_LABEL: Record<MenuStatus, { text: string; cls: string }> = {
   in_progress: { text: "กำลังพัฒนา", cls: "bg-amber-100 text-amber-700" },
 };
 
-// ★ แก้ path นี้ให้ตรงกับหน้า dashboard จริงของระบบ (เช่น "/dashboard")
 const DASHBOARD_PATH = "/dashboard";
-
-// ★ role ที่ถือว่าเป็นผู้ดูแลระบบ — ปรับให้ตรงกับค่า role จริงในตาราง users ของระบบ
 const ADMIN_ROLES = new Set(["admin", "director", "deputy_director"]);
-
-// ★ เมนู (อ้างอิงด้วย key) ที่ไม่ต้องแสดงให้ผู้ดูแลระบบ/ผู้บริหารเห็นในฮับนี้
-//   เช่น "บันทึกเช็คชื่อ" รายวันเป็นงานของครูประจำชั้น แอดมินมีมุมมอง "สถิติการมาเรียนทั้งโรงเรียน" ของตัวเองแล้ว
 const HIDDEN_FOR_ADMIN_KEYS = new Set(["attendance", "students"]);
 
 function MenuCard({ item }: { item: SubMenuItem }) {
@@ -91,19 +85,100 @@ function MenuCard({ item }: { item: SubMenuItem }) {
   );
 }
 
+function ClassroomCodeCard({
+  classroom,
+  onShowQr,
+}: {
+  classroom: Classroom;
+  onShowQr: (c: Classroom) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  if (!classroom.join_code) return null;
+
+  async function copyInviteLink() {
+    const inviteUrl = `${window.location.origin}/join/${classroom.join_code}`;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard API ใช้ไม่ได้ — เงียบไว้ ไม่บล็อกครู
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3.5">
+      <div className="flex items-center gap-3">
+        <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-600 text-white shrink-0">
+          <KeyRound className="h-5 w-5" />
+        </div>
+        <div>
+          <p className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
+            รหัสเข้าห้อง {classroom.room_name}
+            {classroom.student_portal_enabled === false && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-700">
+                ยังไม่เปิดให้นักเรียนเข้า
+              </span>
+            )}
+          </p>
+          <p className="font-black text-slate-800 font-mono tracking-[0.2em] text-lg leading-tight">
+            {classroom.join_code}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={copyInviteLink}
+          className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700 shadow-sm transition-colors hover:bg-blue-50"
+        >
+          <Copy className="h-3.5 w-3.5" />
+          {copied ? "คัดลอกแล้ว ✅" : "คัดลอกลิงก์เชิญ"}
+        </button>
+        <button
+          onClick={() => onShowQr(classroom)}
+          className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700 shadow-sm transition-colors hover:bg-blue-50"
+        >
+          <QrCode className="h-3.5 w-3.5" />
+          QR
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ClassroomQrModal({ classroom, onClose }: { classroom: Classroom; onClose: () => void }) {
+  const inviteUrl = typeof window !== "undefined" ? `${window.location.origin}/join/${classroom.join_code}` : "";
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(inviteUrl)}`;
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-6 text-center" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-black text-slate-800 text-lg mb-3">📷 QR ห้อง {classroom.room_name}</h3>
+        <img src={qrSrc} alt="QR Code" className="mx-auto rounded-xl border-2 border-slate-100" width={260} height={260} />
+        <p className="text-slate-400 text-xs mt-3">สแกนเพื่อเข้าร่วมห้องนี้</p>
+        <button onClick={onClose} className="mt-4 w-full py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">
+          ปิด
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function HomeroomHubPage() {
   const router = useRouter();
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [qrClassroom, setQrClassroom] = useState<Classroom | null>(null);
 
   useEffect(() => {
+    // ★ ตอนนี้ get_my_classrooms() ส่ง join_code / student_portal_enabled มาให้ในก้อนเดียว
+    //   ไม่ต้อง query ตาราง classrooms แยกรอบสองอีกแล้ว
     supabase.rpc("get_my_classrooms").then(({ data }: { data: Classroom[] | null }) => {
       setClassrooms(data ?? []);
       setLoading(false);
     });
 
-    // ตรวจสิทธิ์ผู้ดูแลระบบ เพื่อแสดงเมนูฝั่งแอดมิน (สถิติทั้งโรงเรียน / จัดการวันหยุด)
     (async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) return;
@@ -116,12 +191,12 @@ export default function HomeroomHubPage() {
     })();
   }, []);
 
-  // ★ ผู้ดูแลระบบ/ผู้บริหาร ไม่ต้องเห็นเมนู "บันทึกเช็คชื่อ" รายวันในฮับนี้ (ยังเข้าตรง ๆ ผ่านลิงก์ /attendance ได้ถ้าจำเป็น)
   const visibleSubmenus = isAdmin ? SUBMENUS.filter((item) => !HIDDEN_FOR_ADMIN_KEYS.has(item.key)) : SUBMENUS;
 
   return (
-    // ✅ ขยายให้เต็มหน้าจอ (ตัด mx-auto max-w-6xl ออก)
     <div className="w-full px-4 sm:px-6 py-6 lg:px-8">
+      {qrClassroom && <ClassroomQrModal classroom={qrClassroom} onClose={() => setQrClassroom(null)} />}
+
       <div className="flex items-center gap-3">
         <button
           onClick={() => router.push(DASHBOARD_PATH)}
@@ -148,6 +223,14 @@ export default function HomeroomHubPage() {
           ))
         )}
       </div>
+
+      {!loading && classrooms.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {classrooms.map((c) => (
+            <ClassroomCodeCard key={c.classroom_id} classroom={c} onShowQr={setQrClassroom} />
+          ))}
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
         {visibleSubmenus.map((item) => <MenuCard key={item.key} item={item} />)}

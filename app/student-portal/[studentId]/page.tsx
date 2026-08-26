@@ -9,7 +9,7 @@ type Section = {
   timetable_entries: { id: string; day_of_week: number; slot_number: number; start_time: string; end_time: string }[];
 };
 
-type StudentInfo = { id: string; prefix?: string; first_name: string; last_name: string };
+type StudentInfo = { id: string; prefix?: string; first_name: string; last_name: string; student_no?: string };
 type ClassroomInfo = { room_name?: string; grade_group?: string };
 type TeacherInfo = { title?: string; first_name?: string; last_name?: string; full_name?: string };
 
@@ -38,6 +38,16 @@ function teacherDisplayName(t: TeacherInfo) {
   const ln = (t.last_name ?? "").trim();
   const namePart = fn || ln ? `${fn} ${ln}`.trim() : (t.full_name ?? "");
   return `${t.title ?? ""}${namePart}`.trim();
+}
+
+// ★ แปลง grade_group ที่เก็บแบบ "มัธยมศึกษาตอนต้น/ม.3" หรือ "ม.3" ให้เป็น "มัธยมศึกษาปีที่ 3/ห้อง"
+function formatClassLabel(classroom: ClassroomInfo | null) {
+  if (!classroom) return "";
+  const raw = classroom.grade_group ?? "";
+  const match = raw.match(/ม\.?\s*(\d)/); // ดึงเลขชั้นจากรูปแบบ ม.1 - ม.6
+  const gradeNum = match ? match[1] : raw;
+  const roomPart = classroom.room_name ? `/${classroom.room_name}` : "";
+  return gradeNum ? `มัธยมศึกษาปีที่ ${gradeNum}${roomPart}` : "";
 }
 
 export default function StudentDashboardPage() {
@@ -79,17 +89,15 @@ export default function StudentDashboardPage() {
     try {
       await fetch("/api/student-auth/logout", { method: "POST" });
     } finally {
-      router.push("/join/logged-out");
+      router.push("/login"); // ★ TODO: เปลี่ยนเป็น path หน้าล็อกอินจริงของระบบ (ดูหมายเหตุด้านล่าง)
     }
   }
 
-  // สีต่อวิชา (คงที่ตาม subject id)
   const subjectColorMap: Record<string, typeof SUBJECT_COLORS[0]> = {};
   sections.forEach((sec, i) => {
     if (sec.subject?.id) subjectColorMap[sec.subject.id] = SUBJECT_COLORS[i % SUBJECT_COLORS.length];
   });
 
-  // รวบรวมคาบเวลาที่ไม่ซ้ำกันทั้งหมด (เรียงตาม slot_number แล้วตามเวลาเริ่ม)
   type SlotKey = { slot_number: number; start_time: string; end_time: string };
   const slotMap = new Map<string, SlotKey>();
   sections.forEach(sec => {
@@ -116,11 +124,10 @@ export default function StudentDashboardPage() {
   const todayDow = new Date().getDay() === 0 ? 7 : new Date().getDay();
 
   const studentFullName = student ? `${student.prefix ?? ""}${student.first_name} ${student.last_name}`.trim() : "";
-  const classLabel = classroom ? `${classroom.grade_group ?? ""}${classroom.room_name ? "/" + classroom.room_name : ""}` : "";
+  const classLabel = formatClassLabel(classroom);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-fuchsia-50 via-white to-sky-50 font-['TH_Sarabun_New',_sans-serif] pb-14">
-      {/* Header */}
       <div className="relative overflow-hidden bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-5 pt-6 pb-8">
         <div className="absolute -top-8 -right-8 w-40 h-40 bg-white/10 rounded-full pointer-events-none" />
         <div className="absolute -bottom-10 -left-6 w-32 h-32 bg-white/10 rounded-full pointer-events-none" />
@@ -138,11 +145,16 @@ export default function StudentDashboardPage() {
                 <div className="h-6 w-40 bg-white/20 rounded-lg mt-1 animate-pulse" />
               ) : (
                 <>
+                  {/* ★ คำนำ */}
+                  <p className="text-white/80 text-[11px] font-bold">ยินดีต้อนรับเข้าสู่ระบบนักเรียนออนไลน์</p>
                   <h1 className="text-white font-black text-lg sm:text-xl leading-tight truncate">
-                    สวัสดี {studentFullName || "นักเรียน"} 👋
+                    ยินดีต้อนรับ {studentFullName || "นักเรียน"} 👋
                   </h1>
-                  {classLabel && (
-                    <p className="text-white/80 text-xs font-bold mt-0.5">ชั้น {classLabel}</p>
+                  {(classLabel || student?.student_no) && (
+                    <p className="text-white/80 text-xs font-bold mt-0.5">
+                      {classLabel && `ชั้น${classLabel}`}
+                      {student?.student_no && `  เลขที่ ${student.student_no}`}
+                    </p>
                   )}
                 </>
               )}

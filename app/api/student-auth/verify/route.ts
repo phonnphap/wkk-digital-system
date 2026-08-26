@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { issueStudentSession } from "@/lib/studentAuth";
 
+type ResolvedEntity = {
+  type: "subject" | "classroom";
+  classroomId: string;
+  accessMode: string;
+  sectionId: string | null; // non-null only when type === "subject"
+};
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -13,6 +20,7 @@ export async function POST(req: NextRequest) {
 
     const supabase = await createClient();
 
+    // 1) ลองหาเป็น "โค้ดรายวิชา" ก่อน
     const { data: section, error: sectionError } = await supabase
       .from("subject_sections")
       .select("id, classroom_id, student_portal_enabled, student_access_mode")
@@ -21,15 +29,46 @@ export async function POST(req: NextRequest) {
 
     if (sectionError) {
       console.error("[verify] section query error:", sectionError);
-      return NextResponse.json({ error: "เกิดข้อผิดพลาดในการค้นหาวิชา" }, { status: 500 });
+      return NextResponse.json({ error: "เกิดข้อผิดพลาดในการค้นหาข้อมูล" }, { status: 500 });
     }
-    if (!section) {
-      return NextResponse.json({ error: "ไม่พบวิชานี้" }, { status: 404 });
+
+    let entity: ResolvedEntity | null = null;
+
+    if (section && section.student_portal_enabled) {
+      entity = {
+        type: "subject",
+        classroomId: section.classroom_id,
+        accessMode: section.student_access_mode,
+        sectionId: section.id,
+      };
+    } else {
+      // 2) ไม่เจอ (หรือยังไม่เปิด) → ลองหาเป็น "โค้ดห้องเรียน"
+      const { data: cls, error: classroomError } = await supabase
+        .from("classrooms")
+        .select("id, student_portal_enabled, student_access_mode")
+        .eq("join_code", join_code)
+        .maybeSingle();
+
+      if (classroomError) {
+        console.error("[verify] classroom query error:", classroomError);
+        return NextResponse.json({ error: "เกิดข้อผิดพลาดในการค้นหาข้อมูล" }, { status: 500 });
+      }
+
+      if (cls && cls.student_portal_enabled) {
+        entity = {
+          type: "classroom",
+          classroomId: cls.id,
+          accessMode: cls.student_access_mode,
+          sectionId: null,
+        };
+      }
     }
-    if (!section.student_portal_enabled) {
-      return NextResponse.json({ error: "วิชานี้ยังไม่เปิดให้นักเรียนเข้าดู" }, { status: 403 });
+
+    if (!entity) {
+      return NextResponse.json({ error: "ไม่พบโค้ดนี้ หรือยังไม่เปิดให้เข้าใช้งาน" }, { status: 404 });
     }
-    if (section.student_access_mode !== mode) {
+
+    if (entity.accessMode !== mode) {
       return NextResponse.json({ error: "รูปแบบการเข้าใช้งานไม่ถูกต้อง" }, { status: 400 });
     }
 
@@ -43,7 +82,7 @@ export async function POST(req: NextRequest) {
         .from("students")
         .select("id")
         .eq("id", student_id)
-        .eq("classroom_id", section.classroom_id)
+        .eq("classroom_id", entity.classroomId)
         .maybeSingle();
       if (error) console.error("[verify] name_only error:", error);
       matchedId = s?.id ?? null;
@@ -57,7 +96,7 @@ export async function POST(req: NextRequest) {
         .from("students")
         .select("id")
         .eq("id", student_id)
-        .eq("classroom_id", section.classroom_id)
+        .eq("classroom_id", entity.classroomId)
         .eq("student_code", student_code)
         .maybeSingle();
       if (error) console.error("[verify] name_and_id error:", error);
@@ -71,7 +110,7 @@ export async function POST(req: NextRequest) {
       const { data: s, error } = await supabase
         .from("students")
         .select("id")
-        .eq("classroom_id", section.classroom_id)
+        .eq("classroom_id", entity.classroomId)
         .eq("student_code", student_code)
         .eq("birth_date", birth_date)
         .maybeSingle();
@@ -84,7 +123,11 @@ export async function POST(req: NextRequest) {
     }
 
     await issueStudentSession(matchedId);
-    return NextResponse.json({ student_id: matchedId });
+
+    return NextResponse.json({
+      student_id: matchedId,
+      redirect_section_id: entity.type === "subject" ? entity.sectionId : null,
+    });
   } catch (err: any) {
     console.error("[verify] unhandled error:", err);
     return NextResponse.json(

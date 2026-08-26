@@ -77,9 +77,11 @@ export async function GET(req: NextRequest) {
         .select("id, student_id, preset_id, points")
         .eq("subject_section_id", subject_section_id),
       // ★ เพิ่ม: ดึงคะแนนกลางภาค/ปลายภาคของทุกคนใน section นี้ในครั้งเดียว
-      admin
+            admin
         .from("subject_exam_scores")
-        .select("id, student_id, exam_type, score")
+        // ★ เพิ่ม raw_score, raw_max_score เพื่อให้ frontend แสดงคะแนนดิบที่ครูกรอกจริง
+        // ไม่ใช่ fallback ไปใช้ "score" (ค่าที่แปลงน้ำหนักแล้ว) ซึ่งทำให้ตัวเลขค้าง/ผิดตอนโหลดหน้าใหม่
+        .select("id, student_id, exam_type, score, raw_score, raw_max_score")
         .eq("subject_section_id", subject_section_id),
     ]);
         if (sErr) throw sErr;
