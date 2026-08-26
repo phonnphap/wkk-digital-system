@@ -14,17 +14,17 @@ export async function GET(req: NextRequest) {
 
     const admin = createAdminClient();
 
-    const [
+          const [
       { data: assignments, error: aErr },
       { data: presets, error: pErr },
       { data: criteria, error: cErr },
       // ★ เพิ่ม: ดึงค่าตั้งค่าโครงสร้างคะแนน (เก็บ/กลางภาค/ปลายภาค) ของ section นี้พร้อมกันเลย
       { data: sectionGradingConfig, error: gErr },
+      // ★ เพิ่ม: ดึง "คะแนนเต็มดิบ" ของข้อสอบกลางภาค/ปลายภาค (ตั้งค่าจากหน้าตารางคะแนนรวม)
+      { data: examConfigRows, error: ecErr },
     ] = await Promise.all([
       admin
         .from("assignments")
-        // เพิ่ม due_date: ใช้คำนวณอัตรา "ส่งตรงเวลา" ใน GradeOverviewTool.tsx
-        // ⚠️ ต้องมีคอลัมน์ due_date ในตาราง assignments จริงก่อน ไม่งั้นจะได้ null กลับมาทุกแถว
         .select("id, title, max_score, weight_percent, allow_weight, status, due_date")
         .eq("subject_section_id", subject_section_id)
         .order("assigned_at", { ascending: true }),
@@ -38,18 +38,21 @@ export async function GET(req: NextRequest) {
         .select("id, max_percent, min_percent, grade, sort_order")
         .eq("subject_section_id", subject_section_id)
         .order("sort_order", { ascending: true }),
-      // ★ เพิ่ม: grading_structure รองรับสัดส่วนอิสระ เช่น 70+10+20, 80+20, 60+20+20 ฯลฯ
-      // ขอแค่ formative_max_score + midterm_max_score(ถ้ามี) + final_max_score รวมกัน = 100
       admin
         .from("subject_sections")
         .select("grading_structure, formative_max_score, midterm_max_score, final_max_score")
         .eq("id", subject_section_id)
         .maybeSingle(),
+      admin
+        .from("subject_exam_config")
+        .select("exam_type, raw_max_score")
+        .eq("subject_section_id", subject_section_id),
     ]);
     if (aErr) throw aErr;
     if (pErr) throw pErr;
     if (cErr) throw cErr;
     if (gErr) throw gErr;
+    if (ecErr) throw ecErr;
 
     const assignmentIds = (assignments ?? []).map((a: any) => a.id);
 
@@ -79,9 +82,14 @@ export async function GET(req: NextRequest) {
         .select("id, student_id, exam_type, score")
         .eq("subject_section_id", subject_section_id),
     ]);
-    if (sErr) throw sErr;
+        if (sErr) throw sErr;
     if (eErr) throw eErr;
     if (exErr) throw exErr;
+
+    // ★ แปลง examConfigRows (array ของ {exam_type, raw_max_score}) เป็นค่าแยกฟิลด์
+    // ให้ตรงกับที่ frontend อ่าน: json.rawMidtermMaxScore / json.rawFinalMaxScore
+    const midtermConfig = (examConfigRows ?? []).find((r: any) => r.exam_type === "midterm");
+    const finalConfig = (examConfigRows ?? []).find((r: any) => r.exam_type === "final");
 
     return NextResponse.json({
       assignments,
@@ -97,6 +105,9 @@ export async function GET(req: NextRequest) {
         midterm_max_score: 0,
         final_max_score: 30,
       },
+      // ★ เพิ่ม: คะแนนเต็มดิบของกลางภาค/ปลายภาค (null ถ้ายังไม่เคยตั้งค่า)
+      rawMidtermMaxScore: midtermConfig?.raw_max_score ?? null,
+      rawFinalMaxScore: finalConfig?.raw_max_score ?? null,
     });
   } catch (err: any) {
     console.error("[GET /api/subject-grades/summary] error:", err);
