@@ -30,21 +30,77 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ไม่พบข้อมูลนักเรียน" }, { status: 404 });
   }
 
-  // ทุกวิชา (section) ของห้องนี้ + ตารางสอนที่ผูกกับแต่ละวิชา
-  const { data: sections, error } = await supabase
+  // 1) ทุกวิชา (section) ของห้องนี้ ที่เปิดให้นักเรียนเข้าดูได้
+  //    หมายเหตุสำคัญ: subject_sections ไม่มีความสัมพันธ์ (FK) ตรงกับ timetable_entries ในฐานข้อมูลจริง
+  //    timetable_entries ผูกกับห้อง/วิชาผ่าน classroom_id + subject_id เท่านั้น
+  //    (ไม่มีคอลัมน์ subject_section_id เลย) จึงต้อง query แยกแล้ว map เข้าด้วยกันเอง
+  //    แทนการใช้ nested select ของ Supabase ที่ต้องพึ่ง FK constraint
+  const { data: sections, error: sectionsErr } = await supabase
     .from("subject_sections")
     .select(`
-      id, student_portal_enabled,
-      subject:subjects ( id, subject_code, name_th ),
-      timetable_entries ( id, day_of_week, slot_number, start_time, end_time )
+      id, subject_id, classroom_id, student_portal_enabled,
+      subject:subjects ( id, subject_code, name_th )
     `)
     .eq("classroom_id", student.classroom_id)
     .eq("student_portal_enabled", true);
 
-  if (error) {
-    console.error("[timetable] sections query error:", error);
+  if (sectionsErr) {
+    console.error("[timetable] sections query error:", sectionsErr);
     return NextResponse.json({ error: "ดึงตารางเรียนไม่สำเร็จ" }, { status: 500 });
   }
 
-  return NextResponse.json({ sections: sections ?? [] });
+  const sectionList = sections ?? [];
+  if (sectionList.length === 0) {
+    return NextResponse.json({ sections: [] });
+  }
+
+  // 2) ดึง timetable_entries ของห้องนี้ (เก็บแค่ time_slot_id ไม่มีเวลาเริ่ม/จบตรงๆ)
+  const { data: entries, error: entriesErr } = await supabase
+    .from("timetable_entries")
+    .select("id, classroom_id, subject_id, day_of_week, time_slot_id")
+    .eq("classroom_id", student.classroom_id);
+
+  if (entriesErr) {
+    console.error("[timetable] entries query error:", entriesErr);
+    return NextResponse.json({ error: "ดึงตารางเรียนไม่สำเร็จ" }, { status: 500 });
+  }
+
+  const entryList = entries ?? [];
+
+  // 3) ดึงข้อมูลเวลาจริงจาก time_slots ตาม time_slot_id ที่ใช้จริงทั้งหมด
+  const slotIds = [...new Set(entryList.map((e) => e.time_slot_id).filter(Boolean))];
+  let slotMap = new Map<string, { slot_number: number; start_time: string; end_time: string; slot_label?: string }>();
+
+  if (slotIds.length > 0) {
+    const { data: slots, error: slotsErr } = await supabase
+      .from("time_slots")
+      .select("id, slot_number, start_time, end_time, slot_label")
+      .in("id", slotIds);
+
+    if (slotsErr) {
+      console.error("[timetable] time_slots query error:", slotsErr);
+      return NextResponse.json({ error: "ดึงข้อมูลคาบเวลาไม่สำเร็จ" }, { status: 500 });
+    }
+    slotMap = new Map((slots ?? []).map((s) => [s.id, s]));
+  }
+
+  // 4) ประกอบผลลัพธ์: แต่ละ section แนบ timetable_entries ที่มี subject_id ตรงกัน พร้อมเวลาเริ่ม/จบ
+  const result = sectionList.map((sec: any) => ({
+    id: sec.id,
+    subject: sec.subject ?? null,
+    timetable_entries: entryList
+      .filter((e) => e.subject_id === sec.subject_id)
+      .map((e) => {
+        const slot = slotMap.get(e.time_slot_id);
+        return {
+          id: e.id,
+          day_of_week: e.day_of_week,
+          slot_number: slot?.slot_number ?? 0,
+          start_time: slot?.start_time ?? "",
+          end_time: slot?.end_time ?? "",
+        };
+      }),
+  }));
+
+  return NextResponse.json({ sections: result });
 }
