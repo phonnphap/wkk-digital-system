@@ -2838,32 +2838,74 @@ function RejectModal({ onConfirm, onClose }: {
   );
 }
 // ══════════════════════════════════════════════════════════
-// ── fetchAllLeaveRequests — ดึงคำขอลาทั้งหมด กันโดน limit ตัด ──
+// ── users map + leave_requests loaders (ไม่ join ฝั่ง server แล้ว) ──
 // ══════════════════════════════════════════════════════════
-async function fetchAllLeaveRequests() {
-  const PAGE_SIZE = 1000;
-  const selectStr = `*, user:users!leave_requests_user_id_fkey!left(title,first_name,last_name,position,email,grade_level,phone,signature_url)`;
+type UserMapEntry = {
+  id: string; title?: string; first_name?: string; last_name?: string;
+  position?: string; email?: string; grade_level?: string; phone?: string; signature_url?: string;
+};
 
-  // 1. ขอจำนวนแถวทั้งหมดก่อน (เร็ว ไม่โหลดข้อมูลจริง)
+async function loadUsersMap(): Promise<Record<string, UserMapEntry>> {
+  const { data } = await supabase
+    .from("users")
+    .select("id,title,first_name,last_name,position,email,grade_level,phone,signature_url");
+  const map: Record<string, UserMapEntry> = {};
+  (data || []).forEach((u: any) => { map[u.id] = u; });
+  return map;
+}
+
+function attachUsers(rows: any[], usersMap: Record<string, UserMapEntry>) {
+  return rows.map(r => ({ ...r, user: usersMap[r.user_id] ?? null }));
+}
+
+async function fetchPendingLeaveRequests(usersMap: Record<string, UserMapEntry>) {
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .select("*")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true }); // ★ เก่าสุดขึ้นก่อน — รอนานสุดเห็นก่อน
+  if (error || !data) return [];
+  return attachUsers(data, usersMap);
+}
+
+async function fetchAllLeaveRequests(usersMap: Record<string, UserMapEntry>) {
+  const PAGE_SIZE = 1000;
   const { count, error: countErr } = await supabase
     .from("leave_requests")
     .select("id", { count: "exact", head: true });
-
   const totalCount = count ?? 0;
   if (countErr || totalCount === 0) return [];
 
-  // 2. คำนวณจำนวนหน้า แล้วยิงพร้อมกันทุกหน้า
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
   const pagePromises = Array.from({ length: totalPages }, (_, i) =>
-    supabase
-      .from("leave_requests")
-      .select(selectStr)
+    supabase.from("leave_requests").select("*")
       .order("created_at", { ascending: false })
       .range(i * PAGE_SIZE, i * PAGE_SIZE + PAGE_SIZE - 1)
   );
-
   const results = await Promise.all(pagePromises);
-  return results.flatMap(r => r.data ?? []);
+  const flat = results.flatMap(r => r.data ?? []);
+  return attachUsers(flat, usersMap);
+}
+
+// ★ ค้นหาใบลาจากชื่อครู — ยิงตรงด้วยชื่อ ไม่ต้องพึ่งข้อมูลที่โหลดไว้ก่อน
+async function searchLeaveRequestsByName(query: string, usersMap: Record<string, UserMapEntry>) {
+  const q = query.trim();
+  if (!q) return [];
+  const matchedIds = Object.values(usersMap)
+    .filter(u => `${u.title ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.toLowerCase().includes(q.toLowerCase())
+      || (u.first_name ?? "").toLowerCase().includes(q.toLowerCase())
+      || (u.last_name ?? "").toLowerCase().includes(q.toLowerCase()))
+    .map(u => u.id);
+  if (matchedIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .select("*")
+    .in("user_id", matchedIds)
+    .order("created_at", { ascending: false })
+    .limit(300);
+  if (error || !data) return [];
+  return attachUsers(data, usersMap);
 }
 // ══════════════════════════════════════════════════════════
 // ── AdminDashboard ─────────────────────────────────────────
@@ -2884,35 +2926,52 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
   const [rejectModal,setRejectModal]= useState<{id:string;slot:1|2|3}|null>(null);
   const [gradeLevelsMap, setGradeLevelsMap] = useState<Record<string,string>>({});
 
-  const loadPending = useCallback(async () => {
-  const { data, error } = await supabase
-    .from("leave_requests")
-    .select(`*, user:users!leave_requests_user_id_fkey!left(title,first_name,last_name,position,email,grade_level,phone,signature_url)`)
-    .eq("status", "pending")
-    .order("created_at", { ascending: false });
-  if (!error && data) {
-    setRequests(prev => {
-  const others = prev.filter(r => r.status !== "pending");
-  const map = new Map([...others, ...(data as unknown as LeaveRequest[])].map(r => [r.id, r]));
-  return Array.from(map.values());
-});
-  }
+  const [usersMap, setUsersMap] = useState<Record<string, UserMapEntry>>({});
+const usersMapLoadedRef = useRef(false);
+const fullDataLoadedRef = useRef(false);
+const [searchQuery, setSearchQuery] = useState("");
+const [searchResults, setSearchResults] = useState<LeaveRequest[] | null>(null);
+const [searching, setSearching] = useState(false);
+
+// ★ โหลด users map ครั้งเดียว แล้วต่อด้วยรายการรออนุมัติ (เร็ว)
+const initialLoad = useCallback(async () => {
+  setLoading(true);
+  const map = await loadUsersMap();
+  setUsersMap(map);
+  usersMapLoadedRef.current = true;
+  const pending = await fetchPendingLeaveRequests(map);
+  setRequests(pending as unknown as LeaveRequest[]);
+  setLoading(false);
 }, []);
 
-  const loadAll = useCallback(async () => {
+useEffect(()=>{ initialLoad(); }, [initialLoad]);
+
+// ★ โหลดข้อมูลทั้งหมด — เรียกเฉพาะตอนกดแท็บที่ต้องใช้ (ครั้งแรกครั้งเดียว)
+const ensureFullDataLoaded = useCallback(async () => {
+  if (fullDataLoadedRef.current || !usersMapLoadedRef.current) return;
+  fullDataLoadedRef.current = true;
   setLoading(true);
-  await loadPending();
-  setLoading(false);
-
   try {
-    const all = await fetchAllLeaveRequests();
-setRequests(all as unknown as LeaveRequest[]);
+    const all = await fetchAllLeaveRequests(usersMap);
+    setRequests(all as unknown as LeaveRequest[]);
   } catch (err) {
-    console.error("[loadAll] error:", err);
+    console.error("[ensureFullDataLoaded] error:", err);
+    fullDataLoadedRef.current = false; // ให้ลองใหม่ได้ถ้า error
   }
-}, [loadPending]);
+  setLoading(false);
+}, [usersMap]);
 
-  useEffect(()=>{loadAll();},[loadAll]);
+// ★ ค้นหาชื่อครู — debounce กันยิง query ถี่เกินไปตอนพิมพ์
+useEffect(() => {
+  if (!searchQuery.trim()) { setSearchResults(null); return; }
+  setSearching(true);
+  const timer = setTimeout(async () => {
+    const results = await searchLeaveRequestsByName(searchQuery, usersMap);
+    setSearchResults(results as unknown as LeaveRequest[]);
+    setSearching(false);
+  }, 400);
+  return () => clearTimeout(timer);
+}, [searchQuery, usersMap]);
   useEffect(()=>{
   supabase.from("grade_levels").select("id,name").then(({data})=>{
     if (data) setGradeLevelsMap(Object.fromEntries(data.map((g:any)=>[g.id, g.name])));
@@ -3007,10 +3066,20 @@ setRequests(all as unknown as LeaveRequest[]);
     }
 
     const {error}=await (supabase.from("leave_requests") as any).update(updates).eq("id",id);
-    if(error){alert("❌ บันทึกไม่สำเร็จ: "+error.message);return;}
-    await loadAll();
-    setPendingApproveId(null);
-    if(viewModal?.id===id)setViewModal(null);
+if(error){alert("❌ บันทึกไม่สำเร็จ: "+error.message);return;}
+
+// ✅ รีเฟรชข้อมูล — ถ้าเคยโหลดข้อมูลทั้งหมดแล้ว (กดแท็บอื่นมาก่อน) ให้โหลดใหม่ทั้งหมด
+// ถ้ายังไม่เคยโหลด ก็แค่รีเฟรชรายการรออนุมัติพอ
+if (fullDataLoadedRef.current) {
+  fullDataLoadedRef.current = false;
+  await ensureFullDataLoaded();
+} else {
+  const pending = await fetchPendingLeaveRequests(usersMap);
+  setRequests(pending as unknown as LeaveRequest[]);
+}
+
+setPendingApproveId(null);
+if(viewModal?.id===id)setViewModal(null);
   }
 
   function mySlot(r:LeaveRequest):1|2|3|null{return approverSlotByEmail(user.email);}
@@ -3060,6 +3129,59 @@ const allGrades = ["all", ...uniqueGrades];
       </div>
 
       <div className="px-4 py-5 space-y-5">
+  {/* ★ ช่องค้นหาชื่อครู */}
+  <div className="relative">
+    <input
+      type="text"
+      value={searchQuery}
+      onChange={e => setSearchQuery(e.target.value)}
+      placeholder="🔍 พิมพ์ชื่อครูเพื่อค้นหาใบลา..."
+      className="w-full bg-white border-2 border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm font-medium focus:border-indigo-400 focus:outline-none"
+    />
+    {searchQuery && (
+      <button onClick={()=>setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold">✕</button>
+    )}
+  </div>
+
+  {searchQuery.trim() && (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-slate-50 border-b px-5 py-3 flex items-center justify-between">
+        <h3 className="font-black text-slate-700">🔍 ผลการค้นหา "{searchQuery}"</h3>
+        <span className="text-xs text-slate-400">{searching ? "กำลังค้นหา..." : `${searchResults?.length ?? 0} รายการ`}</span>
+      </div>
+      {searching ? (
+        <div className="text-center py-10 text-slate-400">กำลังค้นหา...</div>
+      ) : !searchResults || searchResults.length === 0 ? (
+        <div className="text-center py-10 text-slate-400">ไม่พบใบลาของครูชื่อนี้</div>
+      ) : (
+        <div className="divide-y divide-slate-100">
+          {searchResults.map(r => {
+            const typeCfg = LEAVE_TYPE_CONFIG[r.leave_type];
+            const c = COLORS[r.leave_type] ?? COLORS.other;
+            return (
+              <div key={r.id} className="px-5 py-4 flex items-center justify-between gap-3 flex-wrap hover:bg-slate-50">
+                <div>
+                  <p className="font-black text-slate-800 text-sm">{fullName((r as any).user)}</p>
+                  <p className="text-slate-500 text-xs">{(r as any).user?.position}</p>
+                  <span className={`inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-lg border ${c.bg} ${c.border} ${c.text}`}>{typeCfg?.icon} {typeCfg?.label} · {r.days_count} วัน</span>
+                  <p className="text-slate-400 text-xs mt-1">{toThaiDate(r.start_date)} – {toThaiDate(r.end_date)}</p>
+                  <button onClick={()=>setViewModal(r)} className="text-xs font-bold text-blue-600 px-2 py-1 rounded-lg border border-blue-200 hover:bg-blue-50 mt-1">👁️ ดู</button>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <StatusBadge status={r.status}/>
+                  <button onClick={()=>printFullLeave(r,user,"")} className="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50">🖨️ พิมพ์</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  )}
+
+  {/* ★ ถ้ามีคำค้นหาอยู่ ซ่อน stats/tabs เดิมไว้ก่อน โฟกัสที่ผลค้นหา */}
+  {!searchQuery.trim() && (
+    <>
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 text-center shadow-sm"><div className="text-3xl font-black text-slate-800">{totalRequests}</div><div className="text-slate-500 text-xs font-bold mt-1">คำขอลาทั้งหมด</div><div className="text-slate-400 text-[10px]">{fiscalYearLabel(filterFY)}</div></div>
           <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 text-center shadow-sm"><div className="text-3xl font-black text-green-700">{totalApproved}</div><div className="text-green-600 text-xs font-bold mt-1">อนุมัติแล้ว</div><div className="text-green-400 text-[10px]">{totalRequests>0?Math.round(totalApproved/totalRequests*100):0}%</div></div>
@@ -3076,7 +3198,7 @@ const allGrades = ["all", ...uniqueGrades];
         </div>
         <div className="flex gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
           {[["pending","⏳ รออนุมัติ"],["history","📋 ทั้งหมด"],["summary","👥 รายบุคคล"],["official","🏛️ ไปราชการ"],["graph","📊 กราฟ"]].map(([k,l])=>(
-            <button key={k} onClick={()=>setTab(k as any)} className={`flex-1 py-2.5 rounded-xl text-sm font-black flex items-center justify-center gap-1 ${tab===k?"bg-white text-slate-800 shadow border border-slate-200":"text-slate-500 hover:text-slate-700"}`}>
+            <button key={k} onClick={()=>{ setTab(k as any); if (k !== "pending") ensureFullDataLoaded(); }} className={`flex-1 py-2.5 rounded-xl text-sm font-black flex items-center justify-center gap-1 ${tab===k?"bg-white text-slate-800 shadow border border-slate-200":"text-slate-500 hover:text-slate-700"}`}>
               {l}{k==="pending"&&pendingList.length>0&&<span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">{pendingList.length}</span>}
             </button>
           ))}
@@ -3272,6 +3394,8 @@ const allGrades = ["all", ...uniqueGrades];
             </div>
           </div>
         )}
+    </>
+  )}
       </div>
     </div>
   );
