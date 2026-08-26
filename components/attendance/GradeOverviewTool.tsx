@@ -470,15 +470,17 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
     // ★ แก้บั๊ก: คอลัมน์ "รวม" ต้องใช้สูตรเดียวกับ percentage ไม่งั้นตัวเลขกับ % จะไม่ตรงกัน
     // โหมด numeric (เก็บ+กลางภาค+ปลายภาค) -> ใช้ componentTotal เต็ม 100
     // โหมด pass_fail (ไม่ใช้ระบบนี้) -> ใช้ grandTotal/totalMaxScore แบบเดิม
-        // ★ แก้: "รวม" ต้องบวกคะแนนพิเศษ (+คะแนนสอบ ถ้าเป็นโหมด numeric) เข้าไปทั้งตัวเศษและตัวส่วน
-    const examMaxTotal = usesComponentGrading ? (useMidterm ? midtermMaxScore : 0) + finalMaxScore : 0;
+            // ★ แก้: นับเต็มกลางภาค/ปลายภาคเฉพาะตอนที่นักเรียนคนนั้นมีคะแนนแล้วเท่านั้น (ยังไม่กรอก = ไม่นับทั้งเต็มและคะแนน)
+    const examMaxTotal = usesComponentGrading
+      ? (useMidterm && midtermRaw !== null ? midtermMaxScore : 0) + (finalRaw !== null ? finalMaxScore : 0)
+      : 0;
 
     const displayTotal = usesComponentGrading
-      ? grandTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0) // งาน+พิเศษ (grandTotal) + สอบจริงที่ได้
+      ? grandTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0) // งาน+พิเศษ (grandTotal) + สอบจริงที่ได้ (เป็น 0 ถ้ายังไม่กรอกอยู่แล้ว)
       : grandTotal; // งาน+พิเศษ
 
     const displayMax = usesComponentGrading
-      ? totalMaxScore + specialTotal + examMaxTotal   // เต็มงาน + คะแนนพิเศษที่ได้ + เต็มสอบทั้งหมด
+      ? totalMaxScore + specialTotal + examMaxTotal   // เต็มงาน + คะแนนพิเศษที่ได้ + เต็มสอบเฉพาะที่มีคะแนนแล้ว
       : totalMaxScore + specialTotal;                  // เต็มงาน + คะแนนพิเศษที่ได้
 
     return {
