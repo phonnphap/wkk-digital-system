@@ -251,6 +251,7 @@ export default function GradeOverviewTool({
   formativeMaxScore = 70,                      // ★ เพิ่ม
   midtermMaxScore = 0,                         // ★ เพิ่ม
   finalMaxScore = 30, 
+  currentStudentId, 
 }: {
   sectionId: string;
   subjectTitle: string;
@@ -268,6 +269,7 @@ export default function GradeOverviewTool({
   formativeMaxScore?: number;
   midtermMaxScore?: number;
   finalMaxScore?: number;
+  currentStudentId?: string;
 }) {
   const [tab, setTab] = useState<ViewTab>("table");
   const [loading, setLoading] = useState(true);
@@ -409,6 +411,7 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
   (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
   0
 );
+
     const submittedCount = assignments.filter(a => subMap[a.id]?.score !== null && subMap[a.id]?.score !== undefined).length;
     const midtermRow = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm");
     const finalRow = examScores.find(e => e.student_id === s.id && e.exam_type === "final");
@@ -484,7 +487,7 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
     // ตอนนี้ตัวเต็มจะคงที่ตามคะแนนเต็มจริงของงาน/สอบเท่านั้น ส่วนคะแนนพิเศษยังถูกบวกอยู่ในตัวเศษ (displayTotal) ตามปกติ
     const displayMax = usesComponentGrading
       ? totalMaxScore + examMaxTotal   // เต็มงาน + เต็มสอบเฉพาะที่มีคะแนนแล้ว (ไม่รวมคะแนนพิเศษ)
-      : totalMaxScore;                  // เต็มงาน (ไม่รวมคะแนนพิเศษ)
+      : totalMaxScore;                  // เต็มงาน (ไม่รวมคะแนนพิเศษ)     
 
     return {
       student: s, subMap, presetTotals, assignmentTotal, submittedCount,
@@ -497,6 +500,14 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
   });
 }, [students, submissions, assignments, presets, scoreEvents, criteria, totalMaxScore,
     attendanceMap, gradingMode, passThresholdPercent, examScores, formativeMaxScore, midtermMaxScore, finalMaxScore, useMidterm]); // ★ เพิ่ม dependency
+  // ★ ถ้าเป็นมุมมองนักเรียน กรองให้เหลือแถวตัวเองเท่านั้น
+const visibleRows = useMemo(() => {
+  if (!currentStudentId) return rows;
+  return rows.filter(r => r.student.id === currentStudentId);
+}, [rows, currentStudentId]);
+
+// ★ บังคับ read-only เสมอเมื่อเป็นมุมมองนักเรียน กันพลาดตอนเรียกใช้
+const effectiveReadOnly = readOnly || !!currentStudentId;
 
   async function handleAdjustPreset(studentId: string, presetId: string, currentValue: number, newValue: number) {
     if (readOnly) return;
@@ -644,7 +655,7 @@ async function handleUpdateScore(studentId: string, assignmentId: string, newSco
     try {
       const XLSX = await import("xlsx");
 
-      const sheetRows = rows.map(r => {
+      const sheetRows = visibleRows.map(r => {
         const row: Record<string, string | number> = {
           "เลขที่": r.student.seat_number,
           "ชื่อ-นามสกุล": `${r.student.prefix ?? ""}${r.student.first_name} ${r.student.last_name}`.trim(),
@@ -901,7 +912,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           classroomLabel={classroomLabel}
           homeroomTeacherName={homeroomTeacherName}
           subjectTeacherName={subjectTeacherName}
-          readOnly={readOnly} 
+          readOnly={effectiveReadOnly}
           gradingMode={gradingMode}
           onClose={() => setReportStudent(null)}
           onToast={showToast}
@@ -923,19 +934,19 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
         <div>
           <h2 className="font-black text-slate-800 text-lg">คะแนนรวม</h2>
           <p className="text-slate-400 text-xs font-bold">
-            {readOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที · กด Enter หรือลูกศร ↑↓←→ เพื่อบันทึกและย้ายไปช่องข้างเคียง · ลากหัวตารางชิ้นงานเพื่อสลับลำดับได้"}
+            {effectiveReadOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที · กด Enter หรือลูกศร ↑↓←→ เพื่อบันทึกและย้ายไปช่องข้างเคียง · ลากหัวตารางชิ้นงานเพื่อสลับลำดับได้"}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button
+          {!currentStudentId && (
+            <button
   onClick={() => setTab(tab === "table" ? "podium" : "table")}
   className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-500 hover:to-orange-500 text-white font-black text-sm flex items-center gap-1.5 shadow-sm"
 >
   {tab === "table" ? "🏆 อันดับคะแนน" : "🔢 ตาราง"}
-</button>
-{!readOnly && gradingMode === "numeric" && (
-  <button
-    onClick={() => setShowGradeSetting(true)}
+</button> )}
+{!effectiveReadOnly && gradingMode === "numeric" && (
+  <button onClick={() => setShowGradeSetting(true)}
     className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-400 to-pink-400 hover:from-fuchsia-500 hover:to-pink-500 text-white font-black text-sm flex items-center gap-1.5 shadow-sm"
   >
     ⚙️ ตั้งค่าคำนวณเกรด
@@ -963,9 +974,8 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
         <div className="text-center py-16 text-slate-300 font-bold text-sm">กำลังโหลดข้อมูลคะแนน...</div>
       ) : error ? (
         <p className="text-red-600 text-xs font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-3">❌ {error}</p>
-      ) : tab === "table" ? (
-        <GradeTable
-  rows={rows}
+      ) : tab === "table" || currentStudentId ? (
+  <GradeTable rows={visibleRows}
   assignments={orderedAssignments}
   presets={presets}
   totalMaxScore={totalMaxScore}
@@ -974,7 +984,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   onUpdateScore={handleUpdateScore}
   onUpdateExamScore={handleUpdateExamScore}     // ★ add
   getLateInfo={getLateInfo}
-  readOnly={readOnly}
+  readOnly={effectiveReadOnly}
   gradingMode={gradingMode}
   useMidterm={useMidterm}                       // ★ add
   formativeMaxScore={formativeMaxScore}          // ★ add
@@ -989,12 +999,12 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
 />
       ) : (
         <PodiumView rows={rows} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
-      )}
+)}
     {!loading && !error && (
   <GroupScoreCard
     groupSummary={groupSummary}
-    rows={rows}
-    readOnly={readOnly}
+    rows={visibleRows}
+    readOnly={effectiveReadOnly}
     onGroupSettingsSaved={updated => setGroupSummary(prev => ({ ...prev, ...updated }))}
   />
 )}
