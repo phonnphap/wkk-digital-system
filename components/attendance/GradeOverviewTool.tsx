@@ -464,15 +464,22 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
       if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
     }
 
-    // grandTotal เดิม (คะแนนดิบ+พิเศษ) ยังเก็บไว้โชว์ในตารางแบบเดิมได้ ไม่กระทบของเดิม
+        // grandTotal เดิม (คะแนนดิบ+พิเศษ) ยังเก็บไว้ใช้ในที่อื่น (เช่น Export/PodiumView) ไม่กระทบของเดิม
     const grandTotal = assignmentTotal + specialTotal;
+
+    // ★ แก้บั๊ก: คอลัมน์ "รวม" ต้องใช้สูตรเดียวกับ percentage ไม่งั้นตัวเลขกับ % จะไม่ตรงกัน
+    // โหมด numeric (เก็บ+กลางภาค+ปลายภาค) -> ใช้ componentTotal เต็ม 100
+    // โหมด pass_fail (ไม่ใช้ระบบนี้) -> ใช้ grandTotal/totalMaxScore แบบเดิม
+    const displayTotal = usesComponentGrading ? (componentTotal ?? 0) : grandTotal;
+    const displayMax = usesComponentGrading ? 100 : totalMaxScore;
 
     return {
       student: s, subMap, presetTotals, assignmentTotal, submittedCount,
       onTimeCount, lateCount, onTimeRate, totalDaysLate,
       specialTotal, percentage, grade, grandTotal,
       attendanceRate, passFailStatus,
-      scaledFormative, midtermScore, finalScore, componentTotal, midtermRaw, finalRaw, 
+      scaledFormative, midtermScore, finalScore, componentTotal, midtermRaw, finalRaw,
+      displayTotal, displayMax, // ★ เพิ่ม
     };
   });
 }, [students, submissions, assignments, presets, scoreEvents, criteria, totalMaxScore,
@@ -1201,7 +1208,9 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 {/* ★ ลำดับคอลัมน์ท้ายตาราง: รวม -> ระดับผลการเรียน/สถานะ -> ส่งตรงเวลา (ย้ายระดับผลการเรียนไปไว้หลังคอลัมน์รวมตามที่ต้องการ) */}
 <th className="px-3 py-3 text-center min-w-[100px] bg-emerald-50/70">
   <p className="text-[11px] font-black text-emerald-700">รวม</p>
-  <p className="text-[9px] text-emerald-400 font-bold">เต็ม {totalMaxScore} คะแนน</p>
+  <p className="text-[9px] text-emerald-400 font-bold">
+    {gradingMode === "numeric" ? "เต็ม 100 คะแนน" : `เต็ม ${totalMaxScore} คะแนน`}
+  </p>
 </th>
 <th className="px-3 py-3 text-center min-w-[70px] bg-fuchsia-50/70">
   <p className="text-[11px] font-black text-fuchsia-700">
@@ -1351,7 +1360,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 <td className="text-center px-3 py-3">
   <div className="inline-flex flex-col items-center gap-1 min-w-[70px]">
     <span className="font-black text-sm text-slate-700">
-      {fmtScore(r.grandTotal)}<span className="text-slate-400 font-bold">/{fmtScore(totalMaxScore)}</span>
+      {fmtScore(r.displayTotal)}<span className="text-slate-400 font-bold">/{fmtScore(r.displayMax)}</span>
     </span>
     <div className="w-16 h-1.5 rounded-full bg-slate-100 overflow-hidden">
       <div
@@ -1738,6 +1747,8 @@ function buildRowsType() {
     componentTotal: number | null;  
     midtermRaw: number | null;      
     finalRaw: number | null; 
+    displayTotal: number;    // ★ เพิ่ม
+    displayMax: number; 
   }[];
 }
 
