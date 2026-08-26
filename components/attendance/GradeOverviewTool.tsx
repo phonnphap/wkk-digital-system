@@ -470,8 +470,16 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
     // ★ แก้บั๊ก: คอลัมน์ "รวม" ต้องใช้สูตรเดียวกับ percentage ไม่งั้นตัวเลขกับ % จะไม่ตรงกัน
     // โหมด numeric (เก็บ+กลางภาค+ปลายภาค) -> ใช้ componentTotal เต็ม 100
     // โหมด pass_fail (ไม่ใช้ระบบนี้) -> ใช้ grandTotal/totalMaxScore แบบเดิม
-    const displayTotal = usesComponentGrading ? (componentTotal ?? 0) : grandTotal;
-    const displayMax = usesComponentGrading ? 100 : totalMaxScore;
+        // ★ แก้: "รวม" ต้องบวกคะแนนพิเศษ (+คะแนนสอบ ถ้าเป็นโหมด numeric) เข้าไปทั้งตัวเศษและตัวส่วน
+    const examMaxTotal = usesComponentGrading ? (useMidterm ? midtermMaxScore : 0) + finalMaxScore : 0;
+
+    const displayTotal = usesComponentGrading
+      ? grandTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0) // งาน+พิเศษ (grandTotal) + สอบจริงที่ได้
+      : grandTotal; // งาน+พิเศษ
+
+    const displayMax = usesComponentGrading
+      ? totalMaxScore + specialTotal + examMaxTotal   // เต็มงาน + คะแนนพิเศษที่ได้ + เต็มสอบทั้งหมด
+      : totalMaxScore + specialTotal;                  // เต็มงาน + คะแนนพิเศษที่ได้
 
     return {
       student: s, subMap, presetTotals, assignmentTotal, submittedCount,
@@ -1208,9 +1216,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 {/* ★ ลำดับคอลัมน์ท้ายตาราง: รวม -> ระดับผลการเรียน/สถานะ -> ส่งตรงเวลา (ย้ายระดับผลการเรียนไปไว้หลังคอลัมน์รวมตามที่ต้องการ) */}
 <th className="px-3 py-3 text-center min-w-[100px] bg-emerald-50/70">
   <p className="text-[11px] font-black text-emerald-700">รวม</p>
-  <p className="text-[9px] text-emerald-400 font-bold">
-    {gradingMode === "numeric" ? "เต็ม 100 คะแนน" : `เต็ม ${totalMaxScore} คะแนน`}
-  </p>
+  <p className="text-[9px] text-emerald-400 font-bold">งาน+พิเศษ{gradingMode === "numeric" ? "+สอบ" : ""}</p>
 </th>
 <th className="px-3 py-3 text-center min-w-[70px] bg-fuchsia-50/70">
   <p className="text-[11px] font-black text-fuchsia-700">
