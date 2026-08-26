@@ -2292,13 +2292,18 @@ const reasonFull = leaveType==="official"
 // ── helper: print with stats for any request ──────────────
 // ══════════════════════════════════════════════════════════
 async function printFullLeave(r: any, userForPrint: UserProfile, savedSignature: string) {
-  // ✅ resolve เอกสารแนบใหม่ทุกครั้งก่อนพิมพ์ ผ่าน document_path (path จริงใน OneDrive)
-  //    เพราะ document_url ที่เก็บไว้ตอนยื่นอาจเป็นลิงก์เก่า/หมดอายุ ทำให้รูปไม่ขึ้นตอนพิมพ์
+  // ✅ เปิดหน้าต่างทันทีแบบ synchronous ก่อน await ใดๆ — กัน popup blocker
+  const win = window.open("", "_blank", "width=900,height=700");
+  if (win) {
+    win.document.write("<p style='font-family:sans-serif;padding:20px'>⏳ กำลังโหลดใบลา...</p>");
+  }
+
   const [stats, resolvedDocUrl] = await Promise.all([
     loadLeaveStats(r.user_id ?? userForPrint.id, r.id, r.start_date),
     resolveAttachmentUrl(r.document_path, r.document_url),
   ]);
-  printLeave(
+
+  const html = buildLeaveHTML(
     {
       fullName: fullName(r.user ?? userForPrint),
       position: (r.user ?? userForPrint)?.position ?? userForPrint.role,
@@ -2320,6 +2325,16 @@ async function printFullLeave(r: any, userForPrint: UserProfile, savedSignature:
     resolvedDocUrl ?? undefined,
     stats
   );
+
+  // ✅ เขียนเนื้อหาจริงลงในหน้าต่างที่เปิดไว้แล้ว แทนที่จะเปิดใหม่
+  if (win) {
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    win.onload = () => { win.focus(); win.print(); };
+  } else {
+    alert("⚠️ เบราว์เซอร์บล็อก popup กรุณาอนุญาต popup สำหรับเว็บนี้แล้วลองใหม่");
+  }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -2822,7 +2837,34 @@ function RejectModal({ onConfirm, onClose }: {
     </div>
   );
 }
+// ══════════════════════════════════════════════════════════
+// ── fetchAllLeaveRequests — ดึงคำขอลาทั้งหมด กันโดน limit ตัด ──
+// ══════════════════════════════════════════════════════════
+async function fetchAllLeaveRequests() {
+  const PAGE_SIZE = 1000;
+  const selectStr = `*, user:users!leave_requests_user_id_fkey!left(title,first_name,last_name,position,email,grade_level,phone,signature_url)`;
 
+  // 1. ขอจำนวนแถวทั้งหมดก่อน (เร็ว ไม่โหลดข้อมูลจริง)
+  const { count, error: countErr } = await supabase
+    .from("leave_requests")
+    .select("id", { count: "exact", head: true });
+
+  const totalCount = count ?? 0;
+  if (countErr || totalCount === 0) return [];
+
+  // 2. คำนวณจำนวนหน้า แล้วยิงพร้อมกันทุกหน้า
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  const pagePromises = Array.from({ length: totalPages }, (_, i) =>
+    supabase
+      .from("leave_requests")
+      .select(selectStr)
+      .order("created_at", { ascending: false })
+      .range(i * PAGE_SIZE, i * PAGE_SIZE + PAGE_SIZE - 1)
+  );
+
+  const results = await Promise.all(pagePromises);
+  return results.flatMap(r => r.data ?? []);
+}
 // ══════════════════════════════════════════════════════════
 // ── AdminDashboard ─────────────────────────────────────────
 // ══════════════════════════════════════════════════════════
@@ -2845,41 +2887,30 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
   const loadPending = useCallback(async () => {
   const { data, error } = await supabase
     .from("leave_requests")
-    .select(`*, user:users!leave_requests_user_id_fkey(title,first_name,last_name,position,email,grade_level,phone,signature_url)`)
+    .select(`*, user:users!leave_requests_user_id_fkey!left(title,first_name,last_name,position,email,grade_level,phone,signature_url)`)
     .eq("status", "pending")
     .order("created_at", { ascending: false });
   if (!error && data) {
     setRequests(prev => {
-      const others = prev.filter(r => r.status !== "pending");
-      const map = new Map([...others, ...(data as LeaveRequest[])].map(r => [r.id, r]));
-      return Array.from(map.values());
-    });
+  const others = prev.filter(r => r.status !== "pending");
+  const map = new Map([...others, ...(data as unknown as LeaveRequest[])].map(r => [r.id, r]));
+  return Array.from(map.values());
+});
   }
 }, []);
 
   const loadAll = useCallback(async () => {
   setLoading(true);
-  await loadPending();         // ★ แสดงรายการรออนุมัติให้เห็นก่อนไวๆ
+  await loadPending();
   setLoading(false);
 
-  // โหลดข้อมูลที่เหลือ (ทุกสถานะ สำหรับแท็บประวัติ/กราฟ/สรุป) ต่อแบบไม่บล็อก UI
-  const { data, error } = await supabase
-    .from("leave_requests")
-    .select(`*, user:users!leave_requests_user_id_fkey(title,first_name,last_name,position,email,grade_level,phone,signature_url)`)
-    .order("created_at", { ascending: false });
-  if (!error && data) {
-    setRequests(data as LeaveRequest[]);
-  } else {
-    const { data: reqs } = await supabase.from("leave_requests").select("*").order("created_at", { ascending: false });
-    if (reqs) {
-      const userIds = [...new Set(reqs.map(r => r.user_id))];
-      const { data: users } = await supabase.from("users").select("id,title,first_name,last_name,position,email,grade_level,phone,signature_url").in("id", userIds);
-      const userMap = Object.fromEntries((users || []).map(u => [u.id, u]));
-      setRequests(reqs.map(r => ({ ...r, user: userMap[r.user_id] || null })) as LeaveRequest[]);
-    }
+  try {
+    const all = await fetchAllLeaveRequests();
+setRequests(all as unknown as LeaveRequest[]);
+  } catch (err) {
+    console.error("[loadAll] error:", err);
   }
 }, [loadPending]);
-
 
   useEffect(()=>{loadAll();},[loadAll]);
   useEffect(()=>{
