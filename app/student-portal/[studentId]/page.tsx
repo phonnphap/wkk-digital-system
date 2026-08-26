@@ -9,9 +9,12 @@ type Section = {
   timetable_entries: { id: string; day_of_week: number; slot_number: number; start_time: string; end_time: string }[];
 };
 
+type StudentInfo = { id: string; prefix?: string; first_name: string; last_name: string };
+type ClassroomInfo = { room_name?: string; grade_group?: string };
+type TeacherInfo = { title?: string; first_name?: string; last_name?: string; full_name?: string };
+
 const DAYS = [1, 2, 3, 4, 5];
 const DAY_LABELS = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์"];
-const DAY_SHORT = ["จ.", "อ.", "พ.", "พฤ.", "ศ."];
 
 const SUBJECT_COLORS = [
   { bg: "bg-red-50", border: "border-red-200", text: "text-red-700" },
@@ -30,10 +33,20 @@ function formatTime(t: string) {
   return t ? t.slice(0, 5) : "";
 }
 
+function teacherDisplayName(t: TeacherInfo) {
+  const fn = (t.first_name ?? "").trim();
+  const ln = (t.last_name ?? "").trim();
+  const namePart = fn || ln ? `${fn} ${ln}`.trim() : (t.full_name ?? "");
+  return `${t.title ?? ""}${namePart}`.trim();
+}
+
 export default function StudentDashboardPage() {
   const router = useRouter();
   const { studentId } = useParams() as { studentId: string };
   const [sections, setSections] = useState<Section[]>([]);
+  const [student, setStudent] = useState<StudentInfo | null>(null);
+  const [classroom, setClassroom] = useState<ClassroomInfo | null>(null);
+  const [homeroomTeachers, setHomeroomTeachers] = useState<TeacherInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
@@ -49,6 +62,9 @@ export default function StudentDashboardPage() {
         if (!active) return;
         if (!res.ok) throw new Error(json.error ?? "โหลดตารางเรียนไม่สำเร็จ");
         setSections(json.sections ?? []);
+        setStudent(json.student ?? null);
+        setClassroom(json.classroom ?? null);
+        setHomeroomTeachers(json.homeroom_teachers ?? []);
       } catch (e: any) {
         if (active) setError(e.message ?? "เกิดข้อผิดพลาดในการโหลดข้อมูล");
       } finally {
@@ -87,7 +103,6 @@ export default function StudentDashboardPage() {
     return (a.start_time ?? "").localeCompare(b.start_time ?? "");
   });
 
-  // หา entry ที่ตรงกับ (day, slot)
   function findEntry(day: number, slot: SlotKey) {
     for (const sec of sections) {
       const entry = sec.timetable_entries.find(
@@ -100,28 +115,68 @@ export default function StudentDashboardPage() {
 
   const todayDow = new Date().getDay() === 0 ? 7 : new Date().getDay();
 
+  const studentFullName = student ? `${student.prefix ?? ""}${student.first_name} ${student.last_name}`.trim() : "";
+  const classLabel = classroom ? `${classroom.grade_group ?? ""}${classroom.room_name ? "/" + classroom.room_name : ""}` : "";
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-fuchsia-50 via-white to-sky-50 font-['TH_Sarabun_New',_sans-serif] pb-14">
       {/* Header */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-5 pt-8 pb-10 rounded-b-[2.5rem] shadow-lg">
-        <div className="absolute -top-8 -right-8 w-40 h-40 bg-white/10 rounded-full" />
-        <div className="absolute -bottom-10 -left-6 w-32 h-32 bg-white/10 rounded-full" />
-        <div className="relative flex items-center justify-between">
-          <div>
-            <p className="text-white/70 text-xs font-bold">สวัสดี 👋</p>
-            <h1 className="text-white font-black text-2xl mt-0.5">📚 ตารางเรียนของฉัน</h1>
+      <div className="relative overflow-hidden bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-5 pt-6 pb-8">
+        <div className="absolute -top-8 -right-8 w-40 h-40 bg-white/10 rounded-full pointer-events-none" />
+        <div className="absolute -bottom-10 -left-6 w-32 h-32 bg-white/10 rounded-full pointer-events-none" />
+
+        <div className="relative flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <img
+              src="/school-logo.png"
+              alt="ตราโรงเรียนวัดเขียนเขต"
+              className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white/90 object-contain p-1 shadow-md shrink-0"
+            />
+            <div className="min-w-0">
+              <p className="text-white/70 text-[11px] font-bold">โรงเรียนวัดเขียนเขต</p>
+              {loading ? (
+                <div className="h-6 w-40 bg-white/20 rounded-lg mt-1 animate-pulse" />
+              ) : (
+                <>
+                  <h1 className="text-white font-black text-lg sm:text-xl leading-tight truncate">
+                    สวัสดี {studentFullName || "นักเรียน"} 👋
+                  </h1>
+                  {classLabel && (
+                    <p className="text-white/80 text-xs font-bold mt-0.5">ชั้น {classLabel}</p>
+                  )}
+                </>
+              )}
+            </div>
           </div>
           <button
             onClick={handleLogout}
             disabled={loggingOut}
-            className="px-4 py-2.5 rounded-2xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-xs transition disabled:opacity-50"
+            className="shrink-0 px-3.5 py-2.5 rounded-2xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-xs transition disabled:opacity-50"
           >
             {loggingOut ? "กำลังออก..." : "🚪 ออกจากระบบ"}
           </button>
         </div>
+
+        {!loading && homeroomTeachers.length > 0 && (
+          <div className="relative mt-3 bg-white/15 backdrop-blur-sm rounded-2xl px-4 py-2.5">
+            <p className="text-white/70 text-[10px] font-bold uppercase tracking-wide">ครูประจำชั้น</p>
+            <p className="text-white font-black text-sm mt-0.5">
+              {homeroomTeachers.map(teacherDisplayName).filter(Boolean).join("  •  ")}
+            </p>
+          </div>
+        )}
       </div>
 
-      <div className="px-3 sm:px-4 -mt-5 max-w-5xl mx-auto space-y-4">
+      <div className="px-3 sm:px-4 pt-4 max-w-5xl mx-auto space-y-3">
+        {!loading && !error && allSlots.length > 0 && (
+          <div className="bg-fuchsia-50 border-2 border-fuchsia-100 rounded-2xl px-4 py-2.5 flex items-center gap-2">
+            <span className="text-lg">👆</span>
+            <p className="text-fuchsia-600 text-xs font-bold">
+              แตะที่วิชาในตารางเพื่อดูงานที่มอบหมาย คะแนน และการเช็คชื่อของวิชานั้น
+            </p>
+          </div>
+        )}
+
         {loading ? (
           <div className="bg-white rounded-3xl shadow-md border border-slate-100 p-10 text-center animate-pulse">
             <p className="text-slate-300 font-bold text-sm">กำลังโหลดตารางเรียน...</p>
