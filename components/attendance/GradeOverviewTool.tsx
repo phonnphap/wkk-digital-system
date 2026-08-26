@@ -479,9 +479,12 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
       ? grandTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0) // งาน+พิเศษ (grandTotal) + สอบจริงที่ได้ (เป็น 0 ถ้ายังไม่กรอกอยู่แล้ว)
       : grandTotal; // งาน+พิเศษ
 
+    // ★ แก้: ตัวเต็ม (displayMax) ไม่นับรวมคะแนนพิเศษ (specialTotal) เข้าไปด้วย
+    // เดิมบวก specialTotal เข้าไปในตัวส่วน ทำให้เต็มขยับตามคะแนนพิเศษที่ได้ (เช่น 48 -> 50)
+    // ตอนนี้ตัวเต็มจะคงที่ตามคะแนนเต็มจริงของงาน/สอบเท่านั้น ส่วนคะแนนพิเศษยังถูกบวกอยู่ในตัวเศษ (displayTotal) ตามปกติ
     const displayMax = usesComponentGrading
-      ? totalMaxScore + specialTotal + examMaxTotal   // เต็มงาน + คะแนนพิเศษที่ได้ + เต็มสอบเฉพาะที่มีคะแนนแล้ว
-      : totalMaxScore + specialTotal;                  // เต็มงาน + คะแนนพิเศษที่ได้
+      ? totalMaxScore + examMaxTotal   // เต็มงาน + เต็มสอบเฉพาะที่มีคะแนนแล้ว (ไม่รวมคะแนนพิเศษ)
+      : totalMaxScore;                  // เต็มงาน (ไม่รวมคะแนนพิเศษ)
 
     return {
       student: s, subMap, presetTotals, assignmentTotal, submittedCount,
