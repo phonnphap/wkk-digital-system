@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { ArrowLeft, Paperclip } from "lucide-react";
+import { ArrowLeft, Paperclip, LogOut } from "lucide-react";
 
 type Tab = "assignments" | "pending" | "grades" | "attendance";
 type GradingMode = "numeric" | "pass_fail";
@@ -69,6 +69,20 @@ function formatDate(iso: string | null | undefined) {
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+    });
+  } catch {
+    return "-";
+  }
+}
+
+// ★ วันที่แบบสั้น สำหรับหัวคอลัมน์ตารางเช็คชื่อ เช่น "06 ส.ค. 69"
+function formatShortDate(iso: string | null | undefined) {
+  if (!iso) return "-";
+  try {
+    return new Date(iso).toLocaleDateString("th-TH", {
+      day: "2-digit",
+      month: "short",
+      year: "2-digit",
     });
   } catch {
     return "-";
@@ -147,6 +161,8 @@ export default function StudentPortalSubjectPage() {
   }, [studentId]);
 
   // ★ ดึงข้อมูลรายวิชาสำหรับแบนเนอร์ (ไม่บล็อก loading หลักของแท็บ ถ้า endpoint ไม่มีจริงจะ fail เงียบ ๆ)
+  // หมายเหตุ: ถ้าชื่อวิชาไม่ขึ้น ให้ตรวจสอบว่า backend มี route
+  // /api/student-portal/subject-section?student_id=...&subject_section_id=... จริง (ปัจจุบันคืน 404)
   const fetchSubjectInfo = useCallback(async () => {
     if (!sectionId) return;
     try {
@@ -193,23 +209,63 @@ export default function StudentPortalSubjectPage() {
     setUploadingId(null);
   };
 
+  // ★ ออกจากระบบ: ล้างข้อมูล session ฝั่ง client แล้วพากลับหน้า login
+  // หมายเหตุ: ปรับ path "/login" และการเคลียร์ token ให้ตรงกับระบบ auth จริงที่ใช้งาน
+  const handleLogout = () => {
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm("ยืนยันออกจากระบบ?");
+      if (!confirmed) return;
+      localStorage.clear();
+      sessionStorage.clear();
+    }
+    router.push("/login");
+  };
+
   const pendingAssignments = assignments.filter((a) => a.submissions.length === 0);
+
+  // ★ เรียงงานในแท็บ "งานของฉัน" ตามวันกำหนดส่ง ใหม่ -> เก่า (ใหม่สุดอยู่บนสุด)
+  const sortedAssignments = [...assignments].sort((a, b) => {
+    const at = a.due_date ? new Date(a.due_date).getTime() : -Infinity;
+    const bt = b.due_date ? new Date(b.due_date).getTime() : -Infinity;
+    return bt - at;
+  });
+
+  // ★ คำนวณ % ส่งงานตรงเวลา จากงานที่ตรวจแล้วทั้งหมด (ใช้ในตารางคะแนนรวม)
+  const gradedRows = grades?.grades.filter((g) => g.score !== null || !!g.pass_fail_result) ?? [];
+  const onTimeCount = gradedRows.filter((g) => !g.is_late).length;
+  const onTimePercent = gradedRows.length > 0 ? Math.round((onTimeCount / gradedRows.length) * 100) : null;
+
+  // ★ คำนวณสรุปการเช็คชื่อ (จำนวนขาด/ลา/สาย และ % การมาเรียน) ในแท็บเช็คชื่อ
+  const attSummary = attendance?.summary ?? null;
+  const attExcused = attSummary ? attSummary.excused ?? attSummary.leave ?? 0 : 0;
+  const attTotal = attSummary
+    ? (attSummary.present ?? 0) + (attSummary.absent ?? 0) + (attSummary.late ?? 0) + attExcused
+    : 0;
+  const attPercent = attTotal > 0 ? Math.round(((attSummary?.present ?? 0) / attTotal) * 100) : null;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-fuchsia-50/40 font-['TH_Sarabun_New',_sans-serif] pb-16">
-      {/* ★ แบนเนอร์ด้านบน + ปุ่มย้อนกลับมุมบนซ้าย */}
+      {/* ★ แบนเนอร์ด้านบน + ปุ่มย้อนกลับมุมบนซ้าย (เล็กลง) + ปุ่มออกจากระบบมุมบนขวา */}
       <div className="relative bg-gradient-to-br from-fuchsia-500 via-pink-500 to-rose-400 pt-14 pb-8 px-4 sm:px-6 lg:px-8 rounded-b-[2rem] shadow-md">
         <button
           onClick={() => router.push(`/student-portal/${studentId}`)}
           aria-label="กลับตารางเรียน"
-          className="absolute top-4 left-4 sm:left-6 lg:left-8 inline-flex items-center justify-center h-11 w-11 rounded-full bg-white/20 backdrop-blur-sm text-white hover:bg-white/30 active:scale-95 transition-all shadow-sm"
+          className="absolute top-4 left-4 sm:left-6 lg:left-8 inline-flex items-center justify-center h-9 w-9 rounded-full bg-white/20 backdrop-blur-sm text-white hover:bg-white/30 active:scale-95 transition-all shadow-sm"
         >
-          <ArrowLeft className="h-6 w-6" />
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+
+        <button
+          onClick={handleLogout}
+          className="absolute top-4 right-4 sm:right-6 lg:right-8 inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full bg-white/20 backdrop-blur-sm text-white text-sm font-black hover:bg-white/30 active:scale-95 transition-all shadow-sm"
+        >
+          <LogOut className="h-4 w-4" />
+          <span className="hidden sm:inline">ออกจากระบบ</span>
         </button>
 
         <div className="max-w-6xl mx-auto mt-2">
           <p className="text-2xl sm:text-3xl font-black text-white truncate">
-            {subjectInfo?.subject_name ?? "รายวิชา"}
+            รายวิชา{subjectInfo?.subject_name ? `: ${subjectInfo.subject_name}` : ""}
           </p>
           {subjectInfo?.class_name && (
             <p className="text-base sm:text-lg font-bold text-white/85 mt-0.5 truncate">
@@ -268,10 +324,10 @@ export default function StudentPortalSubjectPage() {
         {/* งานของฉัน */}
         {tab === "assignments" && !loading && (
           <div className="space-y-4">
-            {assignments.length === 0 ? (
+            {sortedAssignments.length === 0 ? (
               <EmptyState icon="📋" text="ยังไม่มีงานที่มอบหมายในวิชานี้" />
             ) : (
-              assignments.map((a) => {
+              sortedAssignments.map((a) => {
                 const sub = a.submissions[0];
                 const late = !!sub?.is_late;
                 const isPassFail = a.grading_mode === "pass_fail";
@@ -385,29 +441,11 @@ export default function StudentPortalSubjectPage() {
                         )}
                       </div>
                     ) : (
-                      <div className="mt-4 flex items-center gap-3">
-                        <label
-                          className={`inline-flex items-center gap-2 px-5 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base cursor-pointer transition-colors ${
-                            uploadingId === a.id ? "opacity-60 pointer-events-none" : ""
-                          }`}
-                        >
-                          📎 เลือกไฟล์เพื่อส่งงาน
-                          <input
-                            type="file"
-                            disabled={uploadingId === a.id}
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) handleUpload(a.id, file);
-                            }}
-                            className="hidden"
-                          />
-                        </label>
-                        {uploadingId === a.id && (
-                          <span className="text-base font-bold text-slate-500 animate-pulse">
-                            กำลังอัปโหลด...
-                          </span>
-                        )}
-                      </div>
+                      <UploadButton
+                        assignmentId={a.id}
+                        uploadingId={uploadingId}
+                        onUpload={handleUpload}
+                      />
                     )}
                   </div>
                 );
@@ -427,24 +465,47 @@ export default function StudentPortalSubjectPage() {
                 return (
                   <div
                     key={a.id}
-                    className="bg-white rounded-2xl border border-rose-200 shadow-sm p-5 flex items-center gap-4"
+                    className="bg-white rounded-2xl border border-rose-200 shadow-sm p-5"
                   >
-                    <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl font-black text-white shrink-0 bg-gradient-to-br from-rose-400 to-orange-400">
-                      ⏰
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-black text-slate-900 text-xl truncate">{a.title}</p>
-                      <div className="flex items-center gap-2 flex-wrap mt-1.5">
-                        <p className="text-rose-500 text-base font-bold">
-                          กำหนดส่ง: {formatDate(a.due_date)}
-                        </p>
-                        {dueStatus && (
-                          <span className={`px-2.5 py-1 rounded-full text-xs font-black ${dueStatus.className}`}>
-                            {dueStatus.label}
-                          </span>
-                        )}
+                    <div className="flex items-start justify-between gap-4 flex-wrap">
+                      <div className="flex items-start gap-4 min-w-0">
+                        <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl font-black text-white shrink-0 bg-gradient-to-br from-rose-400 to-orange-400">
+                          ⏰
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-black text-slate-900 text-xl truncate">{a.title}</p>
+                          {a.description && (
+                            <p className="text-slate-600 text-base font-bold mt-1 line-clamp-2">
+                              {a.description}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-2 flex-wrap mt-2">
+                            <p className="text-rose-500 text-base font-bold">
+                              กำหนดส่ง: {formatDate(a.due_date)}
+                            </p>
+                            {dueStatus && (
+                              <span className={`px-2.5 py-1 rounded-full text-xs font-black ${dueStatus.className}`}>
+                                {dueStatus.label}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ★ แสดงคะแนนเต็มของงานนี้ */}
+                      <div className="shrink-0 ml-auto">
+                        <span className="inline-block px-5 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 text-lg font-black">
+                          เต็ม {a.max_score ?? "-"} คะแนน
+                        </span>
                       </div>
                     </div>
+
+                    {/* ★ ปุ่มส่งงานโดยตรงจากแท็บนี้ */}
+                    <UploadButton
+                      assignmentId={a.id}
+                      uploadingId={uploadingId}
+                      onUpload={handleUpload}
+                    />
                   </div>
                 );
               })
@@ -474,33 +535,56 @@ export default function StudentPortalSubjectPage() {
               )}
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            {/* ★ ตารางคะแนนแบบรายวิชา: แต่ละงานเป็นคอลัมน์ พร้อมคอลัมน์สรุปท้ายตาราง */}
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
               {grades.grades.length === 0 ? (
                 <p className="text-center text-slate-400 font-bold text-lg py-10">
                   ยังไม่มีคะแนนที่ตรวจแล้ว
                 </p>
               ) : (
-                <table className="w-full">
+                <table className="w-full min-w-max border-collapse">
                   <thead>
                     <tr className="bg-gradient-to-r from-indigo-50 via-sky-50 to-fuchsia-50">
-                      <th className="text-left text-sm font-black text-slate-600 px-5 py-3">ชื่องาน</th>
-                      <th className="text-center text-sm font-black text-slate-600 px-3 py-3">คะแนน</th>
-                      <th className="text-center text-sm font-black text-slate-600 px-3 py-3">น้ำหนัก</th>
-                      <th className="text-center text-sm font-black text-slate-600 px-3 py-3">สถานะ</th>
+                      <th className="sticky left-0 z-10 bg-indigo-50 text-left text-sm font-black text-slate-600 px-5 py-3 min-w-[140px]">
+                        รายการ
+                      </th>
+                      {grades.grades.map((g) => (
+                        <th
+                          key={g.assignment_id}
+                          className="text-center text-sm font-black text-slate-600 px-4 py-3 min-w-[120px] align-bottom"
+                          title={g.title}
+                        >
+                          <p className="truncate max-w-[120px] mx-auto">{g.title}</p>
+                          {g.weight_percent != null && (
+                            <p className="text-xs font-bold text-slate-400 mt-0.5">
+                              เต็ม {g.weight_percent}%
+                            </p>
+                          )}
+                        </th>
+                      ))}
+                      <th className="text-center text-sm font-black text-slate-600 px-4 py-3 min-w-[90px] bg-fuchsia-50">
+                        รวม
+                      </th>
+                      <th className="text-center text-sm font-black text-slate-600 px-4 py-3 min-w-[110px] bg-fuchsia-50">
+                        ระดับผลการเรียน
+                      </th>
+                      <th className="text-center text-sm font-black text-slate-600 px-4 py-3 min-w-[110px] bg-fuchsia-50">
+                        ส่งตรงเวลา
+                      </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {grades.grades.map((g) => {
-                      const isPassFail = g.grading_mode === "pass_fail";
-                      return (
-                        <tr key={g.assignment_id}>
-                          <td className="px-5 py-3.5">
-                            <p className="text-base font-bold text-slate-800">{g.title}</p>
-                          </td>
-                          <td className="text-center px-3 py-3.5">
+                  <tbody>
+                    <tr>
+                      <td className="sticky left-0 z-10 bg-white text-base font-bold text-slate-800 px-5 py-3.5">
+                        คะแนนของฉัน
+                      </td>
+                      {grades.grades.map((g) => {
+                        const isPassFail = g.grading_mode === "pass_fail";
+                        return (
+                          <td key={g.assignment_id} className="text-center px-4 py-3.5">
                             {isPassFail ? (
                               <span
-                                className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-xl font-black text-base ${
+                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-black text-sm ${
                                   g.pass_fail_result === "pass"
                                     ? "bg-emerald-50 text-emerald-600"
                                     : g.pass_fail_result === "fail"
@@ -514,7 +598,7 @@ export default function StudentPortalSubjectPage() {
                                   ? "❌ ไม่ผ่าน"
                                   : "⏳ รอตรวจ"}
                               </span>
-                            ) : (
+                            ) : g.score !== null && g.score !== undefined ? (
                               <span
                                 className={`inline-flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl font-black text-base ${
                                   g.is_late
@@ -522,24 +606,28 @@ export default function StudentPortalSubjectPage() {
                                     : "bg-emerald-50 text-emerald-600"
                                 }`}
                               >
-                                {g.score ?? "-"}
+                                {g.score}
                                 <span className="text-slate-500 font-bold text-sm">/{g.max_score ?? "-"}</span>
                               </span>
-                            )}
-                          </td>
-                          <td className="text-center px-3 py-3.5 text-base font-bold text-slate-600">
-                            {g.weight_percent != null ? `${g.weight_percent}%` : "-"}
-                          </td>
-                          <td className="text-center px-3 py-3.5">
-                            {g.is_late ? (
-                              <span className="text-xs font-black text-orange-500">⏰ ส่งช้า</span>
                             ) : (
-                              <span className="text-xs font-black text-emerald-600">✅ ตรงเวลา</span>
+                              <span className="text-slate-300 font-black text-lg">-</span>
+                            )}
+                            {g.is_late && (
+                              <p className="text-[10px] font-black text-orange-500 mt-1">⏰ ส่งช้า</p>
                             )}
                           </td>
-                        </tr>
-                      );
-                    })}
+                        );
+                      })}
+                      <td className="text-center px-4 py-3.5 font-black text-fuchsia-600 text-lg bg-fuchsia-50/40">
+                        {grades.summary.weighted_score}%
+                      </td>
+                      <td className="text-center px-4 py-3.5 font-black text-fuchsia-600 text-lg bg-fuchsia-50/40">
+                        {grades.summary.grade ?? "-"}
+                      </td>
+                      <td className="text-center px-4 py-3.5 font-black text-emerald-600 text-lg bg-fuchsia-50/40">
+                        {onTimePercent !== null ? `${onTimePercent}%` : "-"}
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               )}
@@ -550,7 +638,7 @@ export default function StudentPortalSubjectPage() {
         {/* เช็คชื่อ */}
         {tab === "attendance" && !loading && attendance && (
           <div className="space-y-5">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               <StatCard label="มา" value={attendance.summary.present} colorClass="from-emerald-500 to-teal-400" />
               <StatCard label="ขาด" value={attendance.summary.absent} colorClass="from-rose-500 to-red-400" />
               <StatCard label="สาย" value={attendance.summary.late} colorClass="from-amber-500 to-orange-400" />
@@ -559,22 +647,51 @@ export default function StudentPortalSubjectPage() {
                 value={attendance.summary.excused ?? attendance.summary.leave}
                 colorClass="from-sky-500 to-blue-400"
               />
+              {/* ★ การ์ดสรุป % การมาเรียนของวิชานี้ */}
+              <StatCard
+                label="% มาเรียน"
+                value={attPercent}
+                suffix="%"
+                colorClass="from-fuchsia-500 to-pink-400"
+              />
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-50">
+            {/* ★ ตารางเช็คชื่อ: วันที่เป็นคอลัมน์ สถานะแสดงในแถวเดียว */}
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
               {attendance.records.length === 0 ? (
                 <p className="text-center text-slate-400 font-bold text-lg py-10">
                   ยังไม่มีข้อมูลการเช็คชื่อ
                 </p>
               ) : (
-                attendance.records.map((r: any) => (
-                  <div key={r.id} className="flex items-center justify-between px-5 py-3.5">
-                    <span className="text-lg font-bold text-slate-700">
-                      {r.date ?? r.attendance_date}
-                    </span>
-                    <StatusPill status={r.status} />
-                  </div>
-                ))
+                <table className="w-full min-w-max border-collapse">
+                  <thead>
+                    <tr className="bg-gradient-to-r from-indigo-50 via-sky-50 to-fuchsia-50">
+                      <th className="sticky left-0 z-10 bg-indigo-50 text-left text-sm font-black text-slate-600 px-5 py-3 min-w-[140px]">
+                        รายการ
+                      </th>
+                      {attendance.records.map((r: any) => (
+                        <th
+                          key={r.id}
+                          className="text-center text-sm font-black text-slate-600 px-4 py-3 min-w-[90px]"
+                        >
+                          {formatShortDate(r.date ?? r.attendance_date)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="sticky left-0 z-10 bg-white text-base font-bold text-slate-800 px-5 py-3.5">
+                        สถานะ
+                      </td>
+                      {attendance.records.map((r: any) => (
+                        <td key={r.id} className="text-center px-4 py-3.5">
+                          <StatusPill status={r.status} />
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
               )}
             </div>
           </div>
@@ -593,11 +710,60 @@ function EmptyState({ icon, text }: { icon: string; text: string }) {
   );
 }
 
-function StatCard({ label, value, colorClass }: { label: string; value: number; colorClass: string }) {
+function StatCard({
+  label,
+  value,
+  colorClass,
+  suffix,
+}: {
+  label: string;
+  value: number | null;
+  colorClass: string;
+  suffix?: string;
+}) {
   return (
     <div className={`rounded-2xl bg-gradient-to-br ${colorClass} p-4 text-white shadow-sm text-center`}>
-      <p className="text-3xl font-black">{value ?? 0}</p>
+      <p className="text-3xl font-black">
+        {value ?? 0}
+        {suffix ?? ""}
+      </p>
       <p className="text-sm font-bold opacity-95 mt-1">{label}</p>
+    </div>
+  );
+}
+
+// ★ ปุ่มเลือกไฟล์/ส่งงาน ใช้ร่วมกันทั้งแท็บ "งานของฉัน" (งานที่ยังไม่ส่ง) และแท็บ "งานที่ยังไม่ส่ง"
+function UploadButton({
+  assignmentId,
+  uploadingId,
+  onUpload,
+}: {
+  assignmentId: string;
+  uploadingId: string | null;
+  onUpload: (assignmentId: string, file: File) => void;
+}) {
+  const isUploading = uploadingId === assignmentId;
+  return (
+    <div className="mt-4 flex items-center gap-3">
+      <label
+        className={`inline-flex items-center gap-2 px-5 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base cursor-pointer transition-colors ${
+          isUploading ? "opacity-60 pointer-events-none" : ""
+        }`}
+      >
+        📎 เลือกไฟล์เพื่อส่งงาน
+        <input
+          type="file"
+          disabled={isUploading}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) onUpload(assignmentId, file);
+          }}
+          className="hidden"
+        />
+      </label>
+      {isUploading && (
+        <span className="text-base font-bold text-slate-500 animate-pulse">กำลังอัปโหลด...</span>
+      )}
     </div>
   );
 }

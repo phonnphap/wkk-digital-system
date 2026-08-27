@@ -117,18 +117,18 @@ export default function SmartClassRoomsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-['TH_Sarabun_New',_sans-serif]">
-      <div className="bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-4 pt-3 pb-5">
+      <div className="bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-4 pt-3 pb-5 flex flex-col justify-center min-h-[132px]">
   <div className="flex items-center gap-2 mb-2">
     <button onClick={() => router.push("/dashboard")}
       title="กลับแดชบอร์ด"
-      className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl transition-colors">🏠</button>
+      className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">🏠</button>
     <button onClick={() => router.push("/smartclass")}
       title="กลับหน้ารายวิชา"
-      className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl font-black transition-colors">←</button>
+      className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg font-black transition-colors">←</button>
   </div>
   <div className="text-center px-2">
     <h1 className="text-3xl sm:text-4xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
-    <p className="text-white text-xl font-extrabold mt-1.5">
+    <p className="text-white text-xl font-black mt-1.5">
       {subject.subject_code} · {sections.length} ห้อง{isAdmin ? " (มุมมองแอดมิน)" : ""}
     </p>
   </div>
