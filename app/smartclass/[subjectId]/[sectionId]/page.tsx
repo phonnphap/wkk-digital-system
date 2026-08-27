@@ -290,7 +290,7 @@ function StudentCard({
       <div
         className={`absolute -top-3.5 left-1/2 -translate-x-1/2 min-w-[40px] h-8 px-2.5 rounded-full bg-gradient-to-r ${badgeGradient} text-white text-sm font-black flex items-center justify-center gap-1 shadow-lg ring-[3px] ring-white`}
       >
-        <span className="text-[10px] leading-none">{badgeIcon}</span>
+        <span className="text-[16px] leading-none">{badgeIcon}</span>
         <span>{score}</span>
       </div>
 
@@ -305,18 +305,18 @@ function StudentCard({
       )}
 
       {student.avatar_url ? (
-        <img src={student.avatar_url} className="w-16 h-16 rounded-full object-cover mx-auto border-2 border-white shadow" />
+        <img src={student.avatar_url} className="w-20 h-20 rounded-full object-cover mx-auto border-2 border-white shadow" />
       ) : (
-        <div className={`w-16 h-16 rounded-full bg-gradient-to-br ${gradient} text-white text-2xl font-black flex items-center justify-center mx-auto shadow-inner`}>
-          {student.first_name[0]}
-        </div>
+        <div className={`w-20 h-20 rounded-full bg-gradient-to-br ${gradient} text-white text-4xl font-black flex items-center justify-center mx-auto shadow-inner`}>
+      {student.first_name[0]}
+    </div>
       )}
 
-      {student.prefix && <p className="text-slate-400 text-[11px] font-bold mt-2">{student.prefix}</p>}
-      <p className="text-slate-700 font-black text-sm mt-0.5 truncate">{student.first_name} {student.last_name}</p>
-      {student.nick_name && <p className="text-slate-400 text-[11px] font-bold mt-0.5">({student.nick_name})</p>}
-      <p className="text-fuchsia-500 text-[11px] font-black">เลขที่ {student.seat_number}</p>
-    </button>
+      {student.prefix && <p className="text-slate-500 text-[14px] font-bold mt-1">{student.prefix}</p>}
+  <p className="text-slate-700 font-black text-m mt-0.5 truncate">{student.first_name} {student.last_name}</p>
+  {student.nick_name && <p className="text-slate-500 text-[16px] font-bold mt-0.5">({student.nick_name})</p>}
+  <p className="text-fuchsia-500 text-[14px] font-black">เลขที่ {student.seat_number}</p>
+</button>
   );
 }
 
@@ -2734,8 +2734,8 @@ const [{ data: subj }, { data: room }] = await Promise.all([
         </div>
 
         <div className="text-center px-2">
-          <h1 className="text-2xl sm:text-3xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
-<p className="text-white/80 text-base font-bold">
+          <h1 className="text-4xl sm:text-4xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
+<p className="text-white text-lg font-black mt-1 leading-snug">
   {subject.subject_code} · {classroom?.grade_group} {classroom?.room_name} · 👥 {students.length} คน
 </p>
         </div>
@@ -2746,7 +2746,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
               <button
   key={m.key}
   onClick={() => handleBannerMenuClick(m.key)}
-  className={`flex items-center gap-2 px-4 py-3 rounded-xl font-black text-sm backdrop-blur-sm transition-colors ${
+  className={`flex items-center gap-2 px-4 py-3 rounded-xl font-black text-m backdrop-blur-sm transition-colors ${
     bannerMenu === m.key ? "bg-white text-fuchsia-700 shadow-sm" : "bg-white/20 hover:bg-white/30 text-white"
   }`}
 >
@@ -2757,13 +2757,13 @@ const [{ data: subj }, { data: room }] = await Promise.all([
 
           <div className="flex items-center gap-2 flex-wrap justify-center">
             <div className="bg-white/20 backdrop-blur-sm rounded-xl px-4 py-2.5 flex items-center gap-2">
-  <span className="text-white/80 text-sm font-bold">รหัสเข้าวิชา</span>
+  <span className="text-white/80 text-m font-bold">รหัสเข้าวิชา</span>
   <span className="font-black text-white font-mono tracking-widest text-lg">{section.join_code}</span>
 </div>
-<button onClick={copyInvite} className="px-4 py-2.5 rounded-xl bg-white text-fuchsia-700 font-black text-sm hover:bg-pink-50 shadow-sm transition-colors">
+<button onClick={copyInvite} className="px-4 py-2.5 rounded-xl bg-white text-fuchsia-700 font-black text-m hover:bg-pink-50 shadow-sm transition-colors">
   {copied ? "✅ คัดลอกแล้ว" : "📋 คัดลอกลิงก์เชิญ"}
 </button>
-<button onClick={() => setShowQr(true)} className="px-4 py-2.5 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-sm transition-colors">
+<button onClick={() => setShowQr(true)} className="px-4 py-2.5 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-m transition-colors">
   📷 QR
 </button>
           </div>
@@ -2856,21 +2856,21 @@ const [{ data: subj }, { data: room }] = await Promise.all([
         {!bannerMenu && !isAdmin && tab === "roster" && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 w-full">
             <div className="flex items-center justify-between flex-wrap gap-2 mb-5">
-              <h2 className="font-black text-slate-700 text-sm flex items-center gap-1.5">👥 รายชื่อนักเรียน</h2>
+              <h2 className="font-black text-slate-700 text-m flex items-center gap-1.5">👥 รายชื่อนักเรียน</h2>
               <div className="flex items-center gap-2 flex-wrap">
                 {selectMode && (
-                  <button onClick={toggleSelectAll} className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs transition-colors">
+                  <button onClick={toggleSelectAll} className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-m transition-colors">
                     {selectedIds.size === students.length ? "ยกเลิกเลือกทั้งหมด" : "เลือกทั้งหมด"}
                   </button>
                 )}
                 {selectMode && selectedIds.size > 0 && (
-                  <button onClick={openScoreForSelected} className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 text-white font-black text-xs shadow-sm transition-colors">
+                  <button onClick={openScoreForSelected} className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 text-white font-black text-m shadow-sm transition-colors">
                     ⭐ ให้คะแนนที่เลือก ({selectedIds.size})
                   </button>
                 )}
                 <button
                   onClick={toggleSelectMode}
-                  className={`px-3 py-1.5 rounded-lg font-black text-xs shadow-sm transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg font-black text-m shadow-sm transition-colors ${
                     selectMode ? "bg-fuchsia-500 hover:bg-fuchsia-600 text-white" : "bg-purple-50 hover:bg-purple-100 text-purple-600 border border-purple-200"
                   }`}
                 >
@@ -2989,7 +2989,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
                   setRandomMenuOpen(false);
                 }
               }}
-               className={`flex flex-col items-center gap-1 py-3.5 text-sm font-black ${
+               className={`flex flex-col items-center gap-1 py-3.5 text-base font-black ${
     !bannerMenu && tab === t.key ? "text-fuchsia-600" : "text-slate-400"
   }`}>
   <span className="text-2xl leading-none">{t.icon}</span>

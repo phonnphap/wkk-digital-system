@@ -394,7 +394,7 @@ function AnnouncementsFeed({
 
   return (
     <div className="space-y-3">
-      <p className="text-xs font-black text-slate-400">ประกาศ</p>
+      <p className="text-base font-black text-slate-400">ประกาศ</p>
 
       {announcements.map(a => {
         const files = (a.attachments ?? []).filter(x => x.kind === "file");
@@ -406,12 +406,12 @@ function AnnouncementsFeed({
           <div key={a.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-indigo-200 text-indigo-700 font-black flex items-center justify-center text-sm shrink-0">
+                <div className="w-9 h-9 rounded-full bg-indigo-200 text-indigo-700 font-black flex items-center justify-center text-base shrink-0">
                   {authorName[0]}
                 </div>
                 <div>
-                  <p className="font-black text-slate-800 text-sm">{authorName}</p>
-                  <p className="text-slate-400 text-xs font-bold"><DateTimeText iso={a.created_at} /></p>
+                  <p className="font-black text-slate-800 text-base">{authorName}</p>
+                  <p className="text-slate-400 text-base font-bold"><DateTimeText iso={a.created_at} /></p>
                 </div>
               </div>
               {isOwner && (
@@ -438,7 +438,7 @@ function AnnouncementsFeed({
             <p className="font-black text-slate-800 mt-3">{a.title}</p>
             {a.content && (
               <div
-                className="text-sm font-bold text-slate-600 mt-1 prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-indigo-600 [&_a]:underline"
+                className="text-base font-bold text-slate-600 mt-1 prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-indigo-600 [&_a]:underline"
                 dangerouslySetInnerHTML={{ __html: a.content }}
               />
             )}
@@ -456,7 +456,7 @@ function AnnouncementsFeed({
                       ) : (
                         <a href={f.url} target="_blank" rel="noopener noreferrer" className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
                           <span className="text-2xl">📄</span>
-                          <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{f.file_name}</span>
+                          <span className="text-[12px] font-bold text-slate-500 truncate w-full mt-1">{f.file_name}</span>
                         </a>
                       )}
                       <a
@@ -466,7 +466,7 @@ function AnnouncementsFeed({
                         rel="noopener noreferrer"
                         onClick={e => e.stopPropagation()}
                         title="ดาวน์โหลดไฟล์"
-                        className="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 sm:opacity-100 transition-opacity"
+                        className="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-base opacity-0 group-hover:opacity-100 sm:opacity-100 transition-opacity"
                       >
                         ⬇️
                       </a>
@@ -484,7 +484,7 @@ function AnnouncementsFeed({
                     href={l.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-[11px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1.5 hover:bg-indigo-100 max-w-full"
+                    className="inline-flex items-center gap-1.5 text-[16px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1.5 hover:bg-indigo-100 max-w-full"
                   >
                     <span className="truncate max-w-[220px]">🔗 {l.url}</span>
                   </a>
@@ -500,8 +500,8 @@ function AnnouncementsFeed({
           <div className="relative max-w-3xl max-h-[85vh] w-full" onClick={e => e.stopPropagation()}>
             <img src={lightbox.url} alt={lightbox.name} className="w-full h-full max-h-[85vh] object-contain rounded-xl" />
             <div className="absolute top-2 right-2 flex gap-2">
-              <a href={lightbox.url} download={lightbox.name} target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center text-sm shadow">⬇️</a>
-              <button onClick={() => setLightbox(null)} className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center text-sm shadow">✕</button>
+              <a href={lightbox.url} download={lightbox.name} target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center text-base shadow">⬇️</a>
+              <button onClick={() => setLightbox(null)} className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center text-base shadow">✕</button>
             </div>
           </div>
         </div>
@@ -544,32 +544,32 @@ function AssignmentList({
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="font-black text-slate-800 text-lg">📌 มอบหมายงานในรายวิชา</h2>
-        <p className="text-slate-400 text-xs font-bold">คุณสามารถมอบหมายงานนักเรียน และดูความคืบหน้าของชิ้นงานได้ที่นี่</p>
+        <h2 className="font-black text-slate-800 ttext-xl">📌 มอบหมายงานในรายวิชา</h2>
+        <p className="text-slate-400 text-base font-bold">คุณสามารถมอบหมายงานนักเรียน และดูความคืบหน้าของชิ้นงานได้ที่นี่</p>
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={onManageRubrics}
-          className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
+          className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-base flex items-center gap-1.5"
         >
           <span>☑️</span> จัดการเกณฑ์รูบิก
         </button>
         <button
           onClick={onImport}
-          className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
+          className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-base flex items-center gap-1.5"
         >
           <span>📘</span> นำเข้าชิ้นงาน
         </button>
         <button
           onClick={onAnnouncement}
-          className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
+          className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-base flex items-center gap-1.5"
         >
           <span>📣</span> สร้างประกาศใหม่
         </button>
         <button
           onClick={onCreate}
-          className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow flex items-center gap-1.5"
+          className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base shadow flex items-center gap-1.5"
         >
           <span>+</span> สร้างชิ้นงาน
         </button>
@@ -583,7 +583,7 @@ function AssignmentList({
       {assignments.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
           <p className="text-3xl mb-2">📋</p>
-          <p className="font-bold text-sm">ยังไม่มีชิ้นงานในวิชานี้ กด "สร้างชิ้นงาน" เพื่อเริ่มมอบหมายงาน</p>
+          <p className="font-bold text-base">ยังไม่มีชิ้นงานในวิชานี้ กด "สร้างชิ้นงาน" เพื่อเริ่มมอบหมายงาน</p>
         </div>
       ) : (
         <div className="grid gap-3">
@@ -603,7 +603,7 @@ function AssignmentList({
               >
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="flex items-start gap-3">
-                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-lg font-black text-white shrink-0 ${
+                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center ttext-xl font-black text-white shrink-0 ${
                       a.status === "draft" ? "bg-slate-300" : "bg-gradient-to-br from-indigo-500 to-blue-500"
                     }`}>
                       📄
@@ -612,11 +612,11 @@ function AssignmentList({
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-black text-slate-800">{a.title}</p>
                         {a.status === "draft" && (
-                          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] font-black">แบบร่าง</span>
+                          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[14px] font-black">แบบร่าง</span>
                         )}
-                        <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 text-[10px] font-black">{TYPE_LABELS[a.type]}</span>
+                        <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 text-[14px] font-black">{TYPE_LABELS[a.type]}</span>
                       </div>
-                      <p className="text-slate-400 text-xs font-bold mt-0.5">
+                      <p className="text-slate-400 text-base font-bold mt-0.5">
                         มอบหมายเมื่อ <DateTimeText iso={a.assigned_at} />
                         {a.due_date && <> · กำหนดส่ง <DateTimeText iso={a.due_date} /></>}
                       </p>
@@ -624,21 +624,21 @@ function AssignmentList({
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
-                    <div className="text-center px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-100">
-                      <p className="text-sm font-black text-slate-700">{a.max_score}</p>
-                      <p className="text-[9px] text-slate-400 font-bold">คะแนน</p>
+                    <div className="text-center px-4 py-1.5 rounded-xl bg-slate-50 border border-slate-100">
+                      <p className="text-xl font-black text-slate-700">{a.max_score}</p>
+                      <p className="text-[12px] text-slate-400 font-bold">คะแนน</p>
                     </div>
-                    <div className="text-center px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-100">
-                      <p className="text-sm font-black text-rose-600">{notSubmitted}</p>
-                      <p className="text-[9px] text-rose-400 font-bold">ไม่ได้ส่ง</p>
+                    <div className="text-center px-4 py-1.5 rounded-xl bg-rose-50 border border-rose-100">
+                      <p className="text-xlm font-black text-rose-600">{notSubmitted}</p>
+                      <p className="text-[12px] text-rose-400 font-bold">ไม่ได้ส่ง</p>
                     </div>
-                    <div className="text-center px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-100">
-                      <p className="text-sm font-black text-amber-600">{pending}</p>
-                      <p className="text-[9px] text-amber-400 font-bold">รอตรวจ</p>
+                    <div className="text-center px-4 py-1.5 rounded-xl bg-amber-50 border border-amber-100">
+                      <p className="text-xl font-black text-amber-600">{pending}</p>
+                      <p className="text-[12px] text-amber-400 font-bold">รอตรวจ</p>
                     </div>
-                    <div className="text-center px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-100">
-                      <p className="text-sm font-black text-emerald-600">{done}</p>
-                      <p className="text-[9px] text-emerald-400 font-bold">ตรวจแล้ว</p>
+                    <div className="text-center px-4 py-1.5 rounded-xl bg-emerald-50 border border-emerald-100">
+                      <p className="text-xl font-black text-emerald-600">{done}</p>
+                      <p className="text-[12px] text-emerald-400 font-bold">ตรวจแล้ว</p>
                     </div>
                   </div>
                 </div>
@@ -941,7 +941,7 @@ function AssignmentForm({
   return (
     <div className="fixed inset-0 z-50 bg-slate-50 overflow-y-auto">
       <div className="sticky top-0 z-20 bg-white border-b border-slate-100 px-4 sm:px-8 py-4 flex items-center justify-between">
-        <h2 className="font-black text-slate-800 text-lg sm:text-xl">
+        <h2 className="font-black text-slate-800 ttext-xl sm:text-xl">
           {existing ? "แก้ไขชิ้นงาน" : "สร้างชิ้นงานใหม่"}
         </h2>
         <button
@@ -954,33 +954,33 @@ function AssignmentForm({
 
       <div className="max-w-3xl mx-auto px-4 sm:px-8 py-6 space-y-6 pb-28">
         <div>
-          <label className="text-xs font-black text-slate-500">ชื่องาน</label>
+          <label className="text-base font-black text-slate-500">ชื่องาน</label>
           <input
             value={title}
             onChange={e => setTitle(e.target.value)}
             placeholder="เช่น ใบงานที่ 1: การบวกลบเลข"
-            className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+            className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-base font-bold focus:border-indigo-400 focus:outline-none"
           />
         </div>
 
         <div>
-          <label className="text-xs font-black text-slate-500">คำอธิบาย</label>
+          <label className="text-base font-black text-slate-500">คำอธิบาย</label>
           <textarea
             value={description}
             onChange={e => setDescription(e.target.value)}
             rows={4}
             placeholder="รายละเอียด/คำสั่งของชิ้นงาน"
-            className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none resize-none"
+            className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-base font-bold focus:border-indigo-400 focus:outline-none resize-none"
           />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="text-xs font-black text-slate-500">แนบไฟล์ / รูปภาพ (แนบได้หลายไฟล์)</label>
+            <label className="text-base font-black text-slate-500">แนบไฟล์ / รูปภาพ (แนบได้หลายไฟล์)</label>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="mt-1.5 flex items-center justify-center gap-2 w-full border-2 border-dashed border-slate-200 rounded-xl px-4 py-3.5 text-xs font-bold text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50/40 cursor-pointer transition-colors"
+              className="mt-1.5 flex items-center justify-center gap-2 w-full border-2 border-dashed border-slate-200 rounded-xl px-4 py-3.5 text-base font-bold text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50/40 cursor-pointer transition-colors"
             >
               <span className="text-base">📎</span>
               <span>คลิกเพื่อเลือกไฟล์ (เลือกได้หลายไฟล์)</span>
@@ -1005,13 +1005,13 @@ function AssignmentForm({
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
                         <span className="text-xl">📄</span>
-                        <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{att.file_name}</span>
+                        <span className="text-[12px] font-bold text-slate-500 truncate w-full mt-1">{att.file_name}</span>
                       </div>
                     )}
                     <button
                       type="button"
                       onClick={() => removeExistingAttachment(att)}
-                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-[10px] flex items-center justify-center hover:bg-black/70"
+                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-[14px] flex items-center justify-center hover:bg-black/70"
                     >
                       ✕
                     </button>
@@ -1024,13 +1024,13 @@ function AssignmentForm({
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
                         <span className="text-xl">📄</span>
-                        <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{p.file.name}</span>
+                        <span className="text-[12px] font-bold text-slate-500 truncate w-full mt-1">{p.file.name}</span>
                       </div>
                     )}
                     <button
                       type="button"
                       onClick={() => removeFile(i)}
-                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-[10px] flex items-center justify-center hover:bg-black/70"
+                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white text-[14px] flex items-center justify-center hover:bg-black/70"
                     >
                       ✕
                     </button>
@@ -1041,18 +1041,18 @@ function AssignmentForm({
           </div>
 
           <div>
-            <label className="text-xs font-black text-slate-500">แนบลิงก์</label>
+            <label className="text-base font-black text-slate-500">แนบลิงก์</label>
             <div className="mt-1.5 flex gap-2">
               <input
                 value={linkUrl}
                 onChange={e => setLinkUrl(e.target.value)}
                 placeholder="https://..."
-                className="flex-1 border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                className="flex-1 border-2 border-slate-200 rounded-xl px-4 py-3 text-base font-bold focus:border-indigo-400 focus:outline-none"
               />
               <button
                 onClick={addLink}
                 type="button"
-                className="px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs shrink-0"
+                className="px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-base shrink-0"
               >
                 เพิ่ม
               </button>
@@ -1060,7 +1060,7 @@ function AssignmentForm({
             {links.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {links.map((l, i) => (
-                  <span key={i} className="inline-flex items-center gap-1.5 text-[11px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full pl-3 pr-1.5 py-1 max-w-full">
+                  <span key={i} className="inline-flex items-center gap-1.5 text-[16px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full pl-3 pr-1.5 py-1 max-w-full">
                     <span className="truncate max-w-[160px]">🔗 {l.url}</span>
                     <button onClick={() => removeLink(i)} className="w-4 h-4 rounded-full bg-indigo-100 hover:bg-rose-100 hover:text-rose-500 flex items-center justify-center shrink-0">✕</button>
                   </span>
@@ -1071,14 +1071,14 @@ function AssignmentForm({
         </div>
 
         <div className="rounded-2xl border-2 border-slate-100 bg-white p-4 space-y-3">
-          <p className="text-xs font-black text-slate-600">หน่วยการเรียนรู้ และตัวชี้วัด (วผ.7.1)</p>
+          <p className="text-base font-black text-slate-600">หน่วยการเรียนรู้ และตัวชี้วัด (วผ.7.1)</p>
 
           <div>
-            <label className="text-[11px] font-black text-slate-400">หน่วยการเรียนรู้</label>
+            <label className="text-[16px] font-black text-slate-400">หน่วยการเรียนรู้</label>
             <select
               value={unitNo ?? ""}
               onChange={e => handleUnitChange(e.target.value === "" ? null : Number(e.target.value))}
-              className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+              className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold bg-white focus:border-indigo-400 focus:outline-none"
             >
               <option value="">— ไม่ระบุหน่วย —</option>
               {teachingUnits.map(u => (
@@ -1088,7 +1088,7 @@ function AssignmentForm({
               ))}
             </select>
             {teachingUnits.length === 0 && (
-              <p className="text-[11px] text-amber-500 font-bold mt-1">
+              <p className="text-[16px] text-amber-500 font-bold mt-1">
                 ยังไม่มีหน่วยการเรียนรู้ใน วผ.7.1 ของวิชานี้ — ไปตั้งค่าที่เมนู "เอกสาร/รายงาน → วผ.7.1" ก่อน
               </p>
             )}
@@ -1096,13 +1096,13 @@ function AssignmentForm({
 
           {selectedUnit && (
             <div>
-              <label className="text-[11px] font-black text-slate-400">
+              <label className="text-[16px] font-black text-slate-400">
                 ตัวชี้วัด (เลือกได้หลายข้อ — คะแนนของชิ้นงานนี้จะถูกรวมคำนวณเป็นคะแนนของหน่วยนี้
                 เทียบกับคะแนนเก็บ {selectedUnit.score_points ?? "-"} คะแนน)
               </label>
               <div className="mt-1.5 space-y-1.5 max-h-52 overflow-y-auto border-2 border-slate-100 rounded-xl p-2">
                 {indicatorLines.length === 0 ? (
-                  <p className="text-xs font-bold text-slate-300 text-center py-4">
+                  <p className="text-base font-bold text-slate-300 text-center py-4">
                     หน่วยนี้ยังไม่ได้พิมพ์ตัวชี้วัดไว้ใน วผ.7.1
                   </p>
                 ) : (
@@ -1114,7 +1114,7 @@ function AssignmentForm({
                         onChange={() => toggleIndicatorLine(line)}
                         className="mt-0.5 w-4 h-4 shrink-0"
                       />
-                      <span className="text-xs font-bold text-slate-600">{line}</span>
+                      <span className="text-base font-bold text-slate-600">{line}</span>
                     </label>
                   ))
                 )}
@@ -1126,11 +1126,11 @@ function AssignmentForm({
         <div className="rounded-2xl border-2 border-slate-100 bg-white p-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-black text-slate-500">เลือกประเภทชิ้นงาน</label>
+              <label className="text-base font-black text-slate-500">เลือกประเภทชิ้นงาน</label>
               <select
                 value={type}
                 onChange={e => setType(e.target.value as AssignmentType)}
-                className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none bg-white"
+                className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-base font-bold focus:border-indigo-400 focus:outline-none bg-white"
               >
                 {Object.entries(TYPE_LABELS).map(([k, v]) => (
                   <option key={k} value={k}>{v}</option>
@@ -1138,40 +1138,40 @@ function AssignmentForm({
               </select>
             </div>
             <div>
-              <label className="text-xs font-black text-slate-500">คะแนนเต็ม</label>
+              <label className="text-base font-black text-slate-500">คะแนนเต็ม</label>
               <input
                 type="number"
                 value={maxScore}
                 onChange={e => setMaxScore(Number(e.target.value))}
-                className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-base font-bold focus:border-indigo-400 focus:outline-none"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-black text-slate-500">มอบหมายเมื่อ</label>
+              <label className="text-base font-black text-slate-500">มอบหมายเมื่อ</label>
               <input
                 type="datetime-local"
                 value={assignedAt}
                 onChange={e => setAssignedAt(e.target.value)}
-                className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-base font-bold focus:border-indigo-400 focus:outline-none"
               />
             </div>
             <div>
-              <label className="text-xs font-black text-slate-500">กำหนดส่ง</label>
+              <label className="text-base font-black text-slate-500">กำหนดส่ง</label>
               <input
                 type="datetime-local"
                 value={dueDate}
                 onChange={e => setDueDate(e.target.value)}
-                className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                className="mt-1.5 w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-base font-bold focus:border-indigo-400 focus:outline-none"
               />
             </div>
           </div>
 
           <div className="rounded-2xl border-2 border-slate-100 bg-white p-4">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-black text-slate-600">อนุญาตให้มีน้ำหนักชิ้นงาน</p>
+              <p className="text-base font-black text-slate-600">อนุญาตให้มีน้ำหนักชิ้นงาน</p>
               <button
                 type="button"
                 onClick={() => setAllowWeight(v => !v)}
@@ -1184,17 +1184,17 @@ function AssignmentForm({
             {allowWeight && (
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[11px] font-black text-slate-400">เปอร์เซ็นต์น้ำหนักของชิ้นงาน (ไม่บังคับ)</label>
+                  <label className="text-[16px] font-black text-slate-400">เปอร์เซ็นต์น้ำหนักของชิ้นงาน (ไม่บังคับ)</label>
                   <input
                     type="number"
                     value={weightPercent}
                     onChange={e => setWeightPercent(e.target.value === "" ? "" : Number(e.target.value))}
                     placeholder="เช่น 10"
-                    className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                    className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold focus:border-indigo-400 focus:outline-none"
                   />
                 </div>
                 <div className="relative">
-                  <label className="text-[11px] font-black text-slate-400">เกณฑ์การให้คะแนน (ไม่บังคับ)</label>
+                  <label className="text-[16px] font-black text-slate-400">เกณฑ์การให้คะแนน (ไม่บังคับ)</label>
                   <div className="mt-1 flex gap-1.5">
                     <input
                       value={gradingNote}
@@ -1203,12 +1203,12 @@ function AssignmentForm({
                         setRubricId(null);
                       }}
                       placeholder="พิมพ์เกณฑ์ หรือเลือกจากที่ตั้งไว้"
-                      className="flex-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                      className="flex-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold focus:border-indigo-400 focus:outline-none"
                     />
                     <button
                       type="button"
                       onClick={() => setShowRubricPicker(v => !v)}
-                      className="px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-[11px] shrink-0"
+                      className="px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-[16px] shrink-0"
                     >
                       เลือกจากที่ตั้งไว้
                     </button>
@@ -1216,14 +1216,14 @@ function AssignmentForm({
                   {showRubricPicker && (
                     <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
                       {savedRubrics.length === 0 ? (
-                        <p className="text-xs font-bold text-slate-300 text-center py-4">ยังไม่มีเกณฑ์การให้คะแนนที่บันทึกไว้</p>
+                        <p className="text-base font-bold text-slate-300 text-center py-4">ยังไม่มีเกณฑ์การให้คะแนนที่บันทึกไว้</p>
                       ) : (
                         savedRubrics.map(r => (
                           <button
                             key={r.id}
                             type="button"
                             onClick={() => pickRubric(r)}
-                            className={`w-full text-left px-3 py-2.5 hover:bg-indigo-50 text-xs font-bold text-slate-600 border-b border-slate-50 last:border-0 ${rubricId === r.id ? "bg-indigo-50 text-indigo-600" : ""}`}
+                            className={`w-full text-left px-3 py-2.5 hover:bg-indigo-50 text-base font-bold text-slate-600 border-b border-slate-50 last:border-0 ${rubricId === r.id ? "bg-indigo-50 text-indigo-600" : ""}`}
                           >
                             {r.name} <span className="text-slate-300 font-normal">· คะแนนดิบสูงสุด {r.max_score}</span>
                           </button>
@@ -1243,14 +1243,14 @@ function AssignmentForm({
           <button
             onClick={() => save("draft")}
             disabled={saving !== null}
-            className="flex-1 py-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm disabled:opacity-50"
+            className="flex-1 py-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-base disabled:opacity-50"
           >
             {saving === "draft" ? "กำลังบันทึก..." : "บันทึกแบบร่าง"}
           </button>
           <button
             onClick={() => save("published")}
             disabled={saving !== null}
-            className="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50"
+            className="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base shadow disabled:opacity-50"
           >
             {saving === "publish" ? "กำลังเผยแพร่..." : "เผยแพร่"}
           </button>
@@ -1337,16 +1337,16 @@ function AssignmentDetail({
         <button onClick={onBack} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center">←</button>
         <div className="flex-1 min-w-0">
           <p className="font-black text-slate-800 truncate">{assignment.title}</p>
-          <p className="text-slate-400 text-xs font-bold">
+          <p className="text-slate-400 text-base font-bold">
             {assignment.status === "draft" ? "แบบร่าง" : <>เผยแพร่แล้ว · <DateTimeText iso={assignment.published_at} /></>}
           </p>
         </div>
-        <button onClick={() => setEditing(true)} className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs">✏️ แก้ไขชิ้นงาน</button>
+        <button onClick={() => setEditing(true)} className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-base">✏️ แก้ไขชิ้นงาน</button>
       </div>
 
       <div className="flex items-center gap-2">
-        <button onClick={() => setEditing(true)} className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs">✏️ แก้ไขชิ้นงาน</button>
-        <button onClick={handleDelete} disabled={deleting} className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-black text-xs disabled:opacity-50">
+        <button onClick={() => setEditing(true)} className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-base">✏️ แก้ไขชิ้นงาน</button>
+        <button onClick={handleDelete} disabled={deleting} className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-black text-base disabled:opacity-50">
           {deleting ? "กำลังลบ..." : "🗑️ ลบชิ้นงาน"}
         </button>
       </div>
@@ -1356,7 +1356,7 @@ function AssignmentDetail({
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`px-3 py-2 rounded-lg text-xs font-black whitespace-nowrap transition-colors ${
+            className={`px-3 py-2 rounded-lg text-base font-black whitespace-nowrap transition-colors ${
               tab === t.key ? "bg-indigo-500 text-white" : "text-slate-500 hover:bg-slate-50"
             }`}
           >
@@ -1408,8 +1408,8 @@ function AssignmentInfoTab({ assignment }: { assignment: Assignment }) {
           </div>
         )}
         <div>
-          <p className="text-xs font-black text-slate-400 mb-1">คำอธิบาย</p>
-          <p className="text-sm font-bold text-slate-600 whitespace-pre-wrap">{assignment.description || "ไม่มีคำอธิบายเพิ่มเติม"}</p>
+          <p className="text-base font-black text-slate-400 mb-1">คำอธิบาย</p>
+          <p className="text-base font-bold text-slate-600 whitespace-pre-wrap">{assignment.description || "ไม่มีคำอธิบายเพิ่มเติม"}</p>
         </div>
       </div>
 
@@ -1445,12 +1445,12 @@ function AssignmentAttachmentsPanel({ assignmentId }: { assignmentId: string }) 
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-5 space-y-3">
-      <p className="text-xs font-black text-slate-400">📎 ไฟล์แนบ / รูปภาพ</p>
+      <p className="text-base font-black text-slate-400">📎 ไฟล์แนบ / รูปภาพ</p>
 
       {loadingAtt ? (
-        <p className="text-xs font-bold text-slate-300 py-4">กำลังโหลดไฟล์แนบ...</p>
+        <p className="text-base font-bold text-slate-300 py-4">กำลังโหลดไฟล์แนบ...</p>
       ) : files.length === 0 && links.length === 0 ? (
-        <p className="text-xs font-bold text-slate-300 py-4">ไม่มีไฟล์แนบสำหรับชิ้นงานนี้</p>
+        <p className="text-base font-bold text-slate-300 py-4">ไม่มีไฟล์แนบสำหรับชิ้นงานนี้</p>
       ) : (
         <>
           {files.length > 0 && (
@@ -1478,7 +1478,7 @@ function AssignmentAttachmentsPanel({ assignmentId }: { assignmentId: string }) 
                         className="w-full h-full flex flex-col items-center justify-center p-2 text-center"
                       >
                         <span className="text-2xl">📄</span>
-                        <span className="text-[9px] font-bold text-slate-500 truncate w-full mt-1">{att.file_name}</span>
+                        <span className="text-[12px] font-bold text-slate-500 truncate w-full mt-1">{att.file_name}</span>
                       </a>
                     )}
                     <a
@@ -1488,7 +1488,7 @@ function AssignmentAttachmentsPanel({ assignmentId }: { assignmentId: string }) 
                       rel="noopener noreferrer"
                       onClick={e => e.stopPropagation()}
                       title="ดาวน์โหลดไฟล์"
-                      className="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 sm:opacity-100 transition-opacity"
+                      className="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-base opacity-0 group-hover:opacity-100 sm:opacity-100 transition-opacity"
                     >
                       ⬇️
                     </a>
@@ -1506,7 +1506,7 @@ function AssignmentAttachmentsPanel({ assignmentId }: { assignmentId: string }) 
                   href={l.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-[11px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1.5 hover:bg-indigo-100 transition-colors max-w-full"
+                  className="inline-flex items-center gap-1.5 text-[16px] text-indigo-600 font-bold bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1.5 hover:bg-indigo-100 transition-colors max-w-full"
                 >
                   <span className="truncate max-w-[220px]">🔗 {l.url}</span>
                 </a>
@@ -1530,13 +1530,13 @@ function AssignmentAttachmentsPanel({ assignmentId }: { assignmentId: string }) 
                 target="_blank"
                 rel="noopener noreferrer"
                 title="ดาวน์โหลด"
-                className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center text-sm shadow"
+                className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center text-base shadow"
               >
                 ⬇️
               </a>
               <button
                 onClick={() => setLightbox(null)}
-                className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center text-sm shadow"
+                className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center text-base shadow"
               >
                 ✕
               </button>
@@ -1550,8 +1550,8 @@ function AssignmentAttachmentsPanel({ assignmentId }: { assignmentId: string }) 
 function InfoBox({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-      <p className="text-[10px] font-black text-slate-400">{label}</p>
-      <p className="text-sm font-black text-slate-700 mt-0.5">{value}</p>
+      <p className="text-[14px] font-black text-slate-400">{label}</p>
+      <p className="text-base font-black text-slate-700 mt-0.5">{value}</p>
     </div>
   );
 }
@@ -1737,18 +1737,18 @@ function SubmissionsTab({
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="ค้นหารายชื่อนักเรียน"
-          className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-xs font-bold mb-2 focus:border-indigo-400 focus:outline-none"
+          className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-base font-bold mb-2 focus:border-indigo-400 focus:outline-none"
         />
 
         <div className="flex items-center justify-between mb-2 px-1">
-          <label className="flex items-center gap-1.5 text-[11px] font-black text-slate-500 cursor-pointer">
+          <label className="flex items-center gap-1.5 text-[16px] font-black text-slate-500 cursor-pointer">
             <input type="checkbox" checked={filtered.length > 0 && checkedIds.size === filtered.length} onChange={toggleCheckAll} className="w-3.5 h-3.5" />
             เลือกทั้งหมด ({checkedIds.size})
           </label>
           {checkedIds.size > 1 && (
             <button
               onClick={() => setBulkMode(true)}
-              className="text-[11px] font-black text-indigo-600 hover:underline"
+              className="text-[16px] font-black text-indigo-600 hover:underline"
             >
               ให้คะแนนพร้อมกัน
             </button>
@@ -1781,18 +1781,18 @@ function SubmissionsTab({
                   {s.avatar_url ? (
                     <img src={s.avatar_url} className="w-8 h-8 rounded-full object-cover" />
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-indigo-200 text-indigo-700 text-xs font-black flex items-center justify-center">{s.first_name[0]}</div>
+                    <div className="w-8 h-8 rounded-full bg-indigo-200 text-indigo-700 text-base font-black flex items-center justify-center">{s.first_name[0]}</div>
                   )}
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
-                    <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
+                    <p className="text-base font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
+                    <p className="text-[14px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                   </div>
-                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${STATUS_COLORS[status]}`}>{STATUS_LABELS[status]}</span>
+                  <span className={`text-[12px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${STATUS_COLORS[status]}`}>{STATUS_LABELS[status]}</span>
                 </button>
               </div>
             );
           })}
-          {filtered.length === 0 && <p className="text-center text-slate-300 text-xs font-bold py-6">ไม่พบนักเรียน</p>}
+          {filtered.length === 0 && <p className="text-center text-slate-300 text-base font-bold py-6">ไม่พบนักเรียน</p>}
         </div>
       </div>
 
@@ -1801,29 +1801,29 @@ function SubmissionsTab({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <p className="font-black text-slate-800">ให้คะแนนพร้อมกัน ({checkedIds.size} คน)</p>
-              <button onClick={() => setBulkMode(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xs">✕ ยกเลิก</button>
+              <button onClick={() => setBulkMode(false)} className="text-slate-400 hover:text-slate-600 font-bold text-base">✕ ยกเลิก</button>
             </div>
-            <p className="text-xs font-bold text-slate-400">
+            <p className="text-base font-bold text-slate-400">
               {students.filter(s => checkedIds.has(s.id)).map(s => `${s.first_name} ${s.last_name}`).join(", ")}
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-black text-slate-500">คะแนน (เต็ม {assignment.max_score})</label>
+                <label className="text-base font-black text-slate-500">คะแนน (เต็ม {assignment.max_score})</label>
                 <input
                   type="number"
                   value={bulkScore}
                   onChange={e => setBulkScore(e.target.value === "" ? "" : Number(e.target.value))}
                   max={assignment.max_score}
-                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-base font-bold focus:border-indigo-400 focus:outline-none"
                 />
               </div>
               <div>
-                <label className="text-xs font-black text-slate-500">สถานะ</label>
+                <label className="text-base font-black text-slate-500">สถานะ</label>
                 <select
                   value={bulkStatus}
                   onChange={e => setBulkStatus(e.target.value as SubmissionStatus)}
-                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-base font-bold bg-white focus:border-indigo-400 focus:outline-none"
                 >
                   <option value="pending_review">รอตรวจ</option>
                   <option value="reviewed">ตรวจแล้ว</option>
@@ -1833,25 +1833,25 @@ function SubmissionsTab({
             </div>
 
             <div>
-              <label className="text-xs font-black text-slate-500">คอมเมนต์ให้นักเรียน (ใช้ข้อความเดียวกันทุกคน)</label>
+              <label className="text-base font-black text-slate-500">คอมเมนต์ให้นักเรียน (ใช้ข้อความเดียวกันทุกคน)</label>
               <textarea
                 value={bulkComment}
                 onChange={e => setBulkComment(e.target.value)}
                 rows={3}
-                className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold resize-none focus:border-indigo-400 focus:outline-none"
+                className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-base font-bold resize-none focus:border-indigo-400 focus:outline-none"
               />
             </div>
 
             <button
               onClick={saveBulkGrade}
               disabled={bulkSaving}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50"
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base shadow disabled:opacity-50"
             >
               {bulkSaving ? "กำลังบันทึก..." : `บันทึกคะแนนให้ ${checkedIds.size} คน`}
             </button>
           </div>
         ) : !selectedStudent ? (
-          <p className="text-slate-300 font-bold text-sm text-center py-10">เลือกนักเรียนทางซ้ายเพื่อตรวจงาน</p>
+          <p className="text-slate-300 font-bold text-base text-center py-10">เลือกนักเรียนทางซ้ายเพื่อตรวจงาน</p>
         ) : (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
@@ -1862,22 +1862,22 @@ function SubmissionsTab({
               )}
               <div>
                 <p className="font-black text-slate-800">{selectedStudent.first_name} {selectedStudent.last_name}</p>
-                <p className="text-slate-400 text-xs font-bold">เลขที่ {selectedStudent.seat_number}</p>
+                <p className="text-slate-400 text-base font-bold">เลขที่ {selectedStudent.seat_number}</p>
               </div>
             </div>
 
             <div className="rounded-xl bg-slate-50 border border-slate-100 p-3 min-h-[100px]">
-              <p className="text-xs font-black text-slate-400 mb-1">งานที่ส่ง</p>
+              <p className="text-base font-black text-slate-400 mb-1">งานที่ส่ง</p>
               {selectedSub?.content ? (
-                <p className="text-sm font-bold text-slate-600 whitespace-pre-wrap">{selectedSub.content}</p>
+                <p className="text-base font-bold text-slate-600 whitespace-pre-wrap">{selectedSub.content}</p>
               ) : (
-                <p className="text-sm font-bold text-slate-300">นักเรียนไม่ได้อัปโหลดไฟล์ / ยังไม่ได้ส่งงาน</p>
+                <p className="text-base font-bold text-slate-300">นักเรียนไม่ได้อัปโหลดไฟล์ / ยังไม่ได้ส่งงาน</p>
               )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-black text-slate-500">คะแนน (เต็ม {assignment.max_score})</label>
+                <label className="text-base font-black text-slate-500">คะแนน (เต็ม {assignment.max_score})</label>
                 <input
                   ref={scoreInputRef}
                   type="number"
@@ -1885,16 +1885,16 @@ function SubmissionsTab({
                   onChange={e => onScoreChange(e.target.value === "" ? "" : Number(e.target.value))}
                   onKeyDown={onScoreKeyDown}
                   max={assignment.max_score}
-                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-base font-bold focus:border-indigo-400 focus:outline-none"
                 />
-                <p className="text-[10px] text-slate-300 font-bold mt-1">กด Enter เพื่อบันทึกและไปนักเรียนคนถัดไป</p>
+                <p className="text-[14px] text-slate-300 font-bold mt-1">กด Enter เพื่อบันทึกและไปนักเรียนคนถัดไป</p>
               </div>
               <div>
-                <label className="text-xs font-black text-slate-500">สถานะ</label>
+                <label className="text-base font-black text-slate-500">สถานะ</label>
                 <select
                   value={statusDraft}
                   onChange={e => setStatusDraft(e.target.value as SubmissionStatus)}
-                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+                  className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-base font-bold bg-white focus:border-indigo-400 focus:outline-none"
                 >
                   <option value="pending_review">รอตรวจ</option>
                   <option value="reviewed">ตรวจแล้ว</option>
@@ -1909,8 +1909,8 @@ function SubmissionsTab({
                 <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-black text-slate-600">ส่งช้าหรือไม่</p>
-                      <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+                      <p className="text-base font-black text-slate-600">ส่งช้าหรือไม่</p>
+                      <p className="text-[14px] text-slate-400 font-bold mt-0.5">
                         {info.isManual
                           ? "ครูกำหนดสถานะนี้เอง"
                           : assignment.due_date
@@ -1920,23 +1920,23 @@ function SubmissionsTab({
                     </div>
                     <div className="flex gap-2 shrink-0">
                       <button type="button" disabled={savingLate} onClick={() => saveLateStatus(false)}
-                        className={`px-3 py-1.5 rounded-lg font-black text-xs disabled:opacity-50 ${lateDraft === false ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+                        className={`px-3 py-1.5 rounded-lg font-black text-base disabled:opacity-50 ${lateDraft === false ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
                         ✅ ตรงเวลา
                       </button>
                       <button type="button" disabled={savingLate} onClick={() => saveLateStatus(true)}
-                        className={`px-3 py-1.5 rounded-lg font-black text-xs disabled:opacity-50 ${lateDraft === true ? "bg-rose-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+                        className={`px-3 py-1.5 rounded-lg font-black text-base disabled:opacity-50 ${lateDraft === true ? "bg-rose-500 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
                         ⏰ ส่งช้า
                       </button>
                       {lateDraft !== null && (
                         <button type="button" disabled={savingLate} onClick={() => saveLateStatus(null)} title="กลับไปใช้การคำนวณอัตโนมัติ"
-                          className="px-2 py-1.5 rounded-lg font-black text-xs bg-white border border-slate-200 text-slate-400 hover:text-indigo-500 disabled:opacity-50">
+                          className="px-2 py-1.5 rounded-lg font-black text-base bg-white border border-slate-200 text-slate-400 hover:text-indigo-500 disabled:opacity-50">
                           {savingLate ? "..." : "↺ อัตโนมัติ"}
                         </button>
                       )}
                     </div>
                   </div>
 
-                  <p className={`mt-2 text-[11px] font-black ${info.isLate ? "text-rose-500" : "text-emerald-500"}`}>
+                  <p className={`mt-2 text-[16px] font-black ${info.isLate ? "text-rose-500" : "text-emerald-500"}`}>
                     {info.isLate
                       ? `⏰ ส่งเกินกำหนด ${info.daysLate} วัน`
                       : "✅ ส่งตรงเวลา"}
@@ -1947,12 +1947,12 @@ function SubmissionsTab({
             })()}
 
             <div>
-              <label className="text-xs font-black text-slate-500">คอมเมนต์ให้นักเรียน</label>
+              <label className="text-base font-black text-slate-500">คอมเมนต์ให้นักเรียน</label>
               <textarea
                 value={commentDraft}
                 onChange={e => setCommentDraft(e.target.value)}
                 rows={3}
-                className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold resize-none focus:border-indigo-400 focus:outline-none"
+                className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-base font-bold resize-none focus:border-indigo-400 focus:outline-none"
               />
             </div>
 
@@ -1960,7 +1960,7 @@ function SubmissionsTab({
               <button
                 onClick={() => saveGrade(true)}
                 disabled={saving}
-                className="flex-1 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50"
+                className="flex-1 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base shadow disabled:opacity-50"
               >
                 {saving ? "กำลังบันทึก..." : "บันทึกคะแนน · ไปคนถัดไป"}
               </button>
@@ -1968,7 +1968,7 @@ function SubmissionsTab({
                 onClick={deleteSubmission}
                 disabled={saving}
                 title="ลบงานนักเรียน"
-                className="px-4 py-3 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-black text-xs disabled:opacity-50 shrink-0"
+                className="px-4 py-3 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-black text-base disabled:opacity-50 shrink-0"
               >
                 🗑️ ลบงานนักเรียน
               </button>
@@ -2054,19 +2054,19 @@ function AssignTab({
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-4 space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <label className="flex items-center gap-2 text-sm font-black text-slate-700 cursor-pointer">
+        <label className="flex items-center gap-2 text-base font-black text-slate-700 cursor-pointer">
           <input type="checkbox" checked={allAssigned} onChange={toggleAll} className="w-4 h-4" />
           มอบหมายทั้งหมด ({assignedIds.size}/{students.length} คน)
         </label>
 
         <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-400">มอบหมายทีละกลุ่ม (เลขที่)</span>
+          <span className="text-base font-bold text-slate-400">มอบหมายทีละกลุ่ม (เลขที่)</span>
           <input type="number" placeholder="จาก" value={rangeFrom} onChange={e => setRangeFrom(e.target.value === "" ? "" : Number(e.target.value))}
-            className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-center" />
+            className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1 text-base font-bold text-center" />
           <span className="text-slate-300">-</span>
           <input type="number" placeholder="ถึง" value={rangeTo} onChange={e => setRangeTo(e.target.value === "" ? "" : Number(e.target.value))}
-            className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-center" />
-          <button onClick={assignRange} className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs">มอบหมาย</button>
+            className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1 text-base font-bold text-center" />
+          <button onClick={assignRange} className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-base">มอบหมาย</button>
         </div>
       </div>
 
@@ -2078,11 +2078,11 @@ function AssignTab({
               {s.avatar_url ? (
                 <img src={s.avatar_url} className="w-9 h-9 rounded-full object-cover" />
               ) : (
-                <div className="w-9 h-9 rounded-full bg-indigo-200 text-indigo-700 text-xs font-black flex items-center justify-center">{s.first_name[0]}</div>
+                <div className="w-9 h-9 rounded-full bg-indigo-200 text-indigo-700 text-base font-black flex items-center justify-center">{s.first_name[0]}</div>
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
-                <p className="text-[11px] text-slate-400 font-bold">Number {s.seat_number} {!isAssigned && "(ยังไม่ได้มอบหมาย)"}</p>
+                <p className="text-base font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
+                <p className="text-[16px] text-slate-400 font-bold">Number {s.seat_number} {!isAssigned && "(ยังไม่ได้มอบหมาย)"}</p>
               </div>
               <input type="checkbox" checked={isAssigned} onChange={() => toggleOne(s.id)} className="w-5 h-5" />
             </div>
@@ -2211,19 +2211,19 @@ function CrossSectionTab({
     setSaving(false);
   }
 
-  if (loading) return <div className="text-center py-10 text-slate-300 font-bold text-sm">กำลังโหลดรายวิชา...</div>;
+  if (loading) return <div className="text-center py-10 text-slate-300 font-bold text-base">กำลังโหลดรายวิชา...</div>;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-4 space-y-3">
-      <p className="text-xs font-bold text-slate-400">เลือกวิชา/ห้องที่คุณสอน เพื่อคัดลอกชิ้นงานนี้ไปมอบหมายด้วย</p>
+      <p className="text-base font-bold text-slate-400">เลือกวิชา/ห้องที่คุณสอน เพื่อคัดลอกชิ้นงานนี้ไปมอบหมายด้วย</p>
       {sections.length === 0 ? (
-        <p className="text-center text-slate-300 font-bold text-sm py-8">ไม่พบวิชาอื่นที่คุณสอน</p>
+        <p className="text-center text-slate-300 font-bold text-base py-8">ไม่พบวิชาอื่นที่คุณสอน</p>
       ) : (
         <div className="space-y-1">
           {sections.map(sec => (
             <label key={sec.id} className="flex items-center gap-2 rounded-xl px-3 py-2 hover:bg-slate-50 cursor-pointer">
               <input type="checkbox" checked={selected.has(sec.id)} onChange={() => toggle(sec.id)} className="w-4 h-4" />
-              <span className="text-sm font-bold text-slate-700">{sec.label}</span>
+              <span className="text-base font-bold text-slate-700">{sec.label}</span>
             </label>
           ))}
         </div>
@@ -2231,11 +2231,11 @@ function CrossSectionTab({
       <button
         onClick={confirmAssign}
         disabled={saving || selected.size === 0}
-        className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50"
+        className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base shadow disabled:opacity-50"
       >
         {saving ? "กำลังมอบหมาย..." : `มอบหมายให้ ${selected.size || ""} วิชาที่เลือก`}
       </button>
-      {done && <p className="text-center text-emerald-500 font-black text-xs">✅ มอบหมายให้วิชาอื่นเรียบร้อยแล้ว</p>}
+      {done && <p className="text-center text-emerald-500 font-black text-base">✅ มอบหมายให้วิชาอื่นเรียบร้อยแล้ว</p>}
     </div>
   );
 }
@@ -2322,25 +2322,25 @@ function RubricManagerModal({
       <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto">
         <div className="flex items-start justify-between px-6 py-5 border-b border-slate-100">
           <div>
-            <p className="font-black text-slate-800 text-lg">เกณฑ์การให้คะแนน</p>
-            <p className="text-slate-400 text-xs font-bold mt-0.5">สร้างและจัดการเกณฑ์การให้คะแนนสำหรับงานของวิชานี้</p>
+            <p className="font-black text-slate-800 ttext-xl">เกณฑ์การให้คะแนน</p>
+            <p className="text-slate-400 text-base font-bold mt-0.5">สร้างและจัดการเกณฑ์การให้คะแนนสำหรับงานของวิชานี้</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-sm">ปิด</button>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-base">ปิด</button>
         </div>
 
         <div className="p-6 space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-black text-slate-700">เกณฑ์การให้คะแนน</p>
+            <p className="text-base font-black text-slate-700">เกณฑ์การให้คะแนน</p>
             <div className="flex gap-2">
               <button
                 onClick={() => setStep("copy")}
-                className="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-xs flex items-center gap-1.5"
+                className="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-base flex items-center gap-1.5"
               >
                 📋 คัดลอกจากวิชาอื่น
               </button>
               <button
                 onClick={() => setStep("create")}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-xs flex items-center gap-1.5"
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base flex items-center gap-1.5"
               >
                 + สร้างเกณฑ์การให้คะแนนแบบรูบิก
               </button>
@@ -2348,23 +2348,23 @@ function RubricManagerModal({
           </div>
 
           {loading ? (
-            <p className="text-center text-slate-300 font-bold text-sm py-16">กำลังโหลด...</p>
+            <p className="text-center text-slate-300 font-bold text-base py-16">กำลังโหลด...</p>
           ) : rubrics.length === 0 ? (
             <div className="text-center py-16">
-              <p className="font-black text-slate-500 text-sm">ยังไม่มีเกณฑ์การให้คะแนน</p>
-              <p className="text-slate-300 text-xs font-bold mt-1">สร้างเกณฑ์การให้คะแนนเพื่อให้คะแนนงานตามเกณฑ์ต่าง ๆ</p>
+              <p className="font-black text-slate-500 text-base">ยังไม่มีเกณฑ์การให้คะแนน</p>
+              <p className="text-slate-300 text-base font-bold mt-1">สร้างเกณฑ์การให้คะแนนเพื่อให้คะแนนงานตามเกณฑ์ต่าง ๆ</p>
             </div>
           ) : (
             <div className="space-y-2">
               {rubrics.map(r => (
                 <div key={r.id} className="flex items-center justify-between rounded-xl border border-slate-100 px-4 py-3 hover:bg-slate-50">
                   <button className="text-left flex-1 min-w-0" onClick={() => setEditingRubric(r)}>
-                    <p className="font-black text-slate-700 text-sm truncate">{r.name}</p>
-                    <p className="text-slate-400 text-xs font-bold">คะแนนดิบสูงสุด {r.max_score}</p>
+                    <p className="font-black text-slate-700 text-base truncate">{r.name}</p>
+                    <p className="text-slate-400 text-base font-bold">คะแนนดิบสูงสุด {r.max_score}</p>
                   </button>
                   <button
                     onClick={() => deleteRubric(r.id)}
-                    className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-500 font-black text-xs shrink-0"
+                    className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-500 font-black text-base shrink-0"
                   >
                     ลบ
                   </button>
@@ -2544,25 +2544,25 @@ function RubricEditor({
     <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl w-full max-w-6xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-start justify-between px-6 py-5 border-b border-slate-100">
-          <p className="font-black text-slate-800 text-lg">{existing ? "แก้ไขเกณฑ์การให้คะแนน" : "สร้างเกณฑ์การให้คะแนน"}</p>
+          <p className="font-black text-slate-800 ttext-xl">{existing ? "แก้ไขเกณฑ์การให้คะแนน" : "สร้างเกณฑ์การให้คะแนน"}</p>
         </div>
 
         {loadingExisting ? (
-          <p className="text-center text-slate-300 font-bold text-sm py-16">กำลังโหลด...</p>
+          <p className="text-center text-slate-300 font-bold text-base py-16">กำลังโหลด...</p>
         ) : (
           <div className="p-6 space-y-4">
             <input
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder="ชื่อเกณฑ์การให้คะแนน"
-              className="w-full rounded-xl px-4 py-3 text-sm font-black bg-gradient-to-r from-indigo-500 to-blue-500 text-white placeholder:text-white/70 focus:outline-none"
+              className="w-full rounded-xl px-4 py-3 text-base font-black bg-gradient-to-r from-indigo-500 to-blue-500 text-white placeholder:text-white/70 focus:outline-none"
             />
             <textarea
               value={description ?? ""}
               onChange={e => setDescription(e.target.value)}
               placeholder="คำอธิบาย (ไม่บังคับ)"
               rows={2}
-              className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none resize-none"
+              className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-base font-bold focus:border-indigo-400 focus:outline-none resize-none"
             />
 
             <div className="overflow-x-auto">
@@ -2570,7 +2570,7 @@ function RubricEditor({
                 className="grid gap-2"
                 style={{ gridTemplateColumns: `200px repeat(${levels.length}, minmax(180px, 1fr)) 140px` }}
               >
-                <div className="text-left text-xs font-black text-slate-500 px-1 self-end pb-2">เกณฑ์การประเมิน</div>
+                <div className="text-left text-base font-black text-slate-500 px-1 self-end pb-2">เกณฑ์การประเมิน</div>
                 {levels.map(l => (
                   <div key={l.id} className="border-2 border-slate-100 rounded-xl p-2">
                     <div className="flex items-center gap-1">
@@ -2578,21 +2578,21 @@ function RubricEditor({
                         value={l.name}
                         onChange={e => updateLevel(l.id, { name: e.target.value })}
                         placeholder="ชื่อระดับ"
-                        className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
+                        className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-base font-bold focus:border-indigo-400 focus:outline-none"
                       />
-                      <button onClick={() => removeLevel(l.id)} className="w-5 h-5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-500 text-[10px] font-black shrink-0">✕</button>
+                      <button onClick={() => removeLevel(l.id)} className="w-5 h-5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-500 text-[14px] font-black shrink-0">✕</button>
                     </div>
                     <input
                       type="number"
                       value={l.score}
                       onChange={e => updateLevel(l.id, { score: Number(e.target.value) })}
-                      className="mt-1.5 w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-center"
+                      className="mt-1.5 w-16 border border-slate-200 rounded-lg px-2 py-1 text-base font-black text-center"
                     />
-                    <span className="text-[10px] text-slate-400 font-bold ml-1">คะแนน</span>
+                    <span className="text-[14px] text-slate-400 font-bold ml-1">คะแนน</span>
                   </div>
                 ))}
                 <div className="self-end pb-1">
-                  <button onClick={addLevel} className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 font-black text-xs whitespace-nowrap w-full">+ เพิ่มระดับ</button>
+                  <button onClick={addLevel} className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 font-black text-base whitespace-nowrap w-full">+ เพิ่มระดับ</button>
                 </div>
 
                 {criteria.map(c => (
@@ -2602,16 +2602,16 @@ function RubricEditor({
                         value={c.name}
                         onChange={e => updateCriterion(c.id, { name: e.target.value })}
                         placeholder="ชื่อเกณฑ์"
-                        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-base font-bold focus:border-indigo-400 focus:outline-none"
                       />
-                      <p className="text-[10px] text-slate-400 font-bold mt-1.5">น้ำหนัก</p>
+                      <p className="text-[14px] text-slate-400 font-bold mt-1.5">น้ำหนัก</p>
                       <input
                         type="number"
                         value={c.weight}
                         onChange={e => updateCriterion(c.id, { weight: Number(e.target.value) })}
-                        className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-center"
+                        className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-base font-black text-center"
                       />
-                      <button onClick={() => removeCriterion(c.id)} className="mt-2 text-rose-500 font-black text-[11px] block">✕ ลบเกณฑ์</button>
+                      <button onClick={() => removeCriterion(c.id)} className="mt-2 text-rose-500 font-black text-[16px] block">✕ ลบเกณฑ์</button>
                     </div>
                     {levels.map(l => (
                       <textarea
@@ -2620,7 +2620,7 @@ function RubricEditor({
                         onChange={e => updateNote(c.id, l.id, e.target.value)}
                         placeholder="คำอธิบายระดับ (ไม่บังคับ)"
                         rows={3}
-                        className="w-full border-2 border-slate-100 rounded-xl px-2 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none resize-none"
+                        className="w-full border-2 border-slate-100 rounded-xl px-2 py-2 text-base font-bold focus:border-indigo-400 focus:outline-none resize-none"
                       />
                     ))}
                     <div />
@@ -2629,20 +2629,20 @@ function RubricEditor({
               </div>
             </div>
 
-            <button onClick={addCriterion} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">+ เพิ่มเกณฑ์</button>
+            <button onClick={addCriterion} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-base">+ เพิ่มเกณฑ์</button>
 
             <div className="flex items-center justify-between pt-2">
-              <div className="text-xs font-bold">
+              <div className="text-base font-bold">
                 <span className="text-slate-500">คะแนนดิบสูงสุด: </span>
                 <span className="text-slate-800 font-black">{maxScore}</span>
                 {!name.trim() && <span className="text-rose-400 ml-3">ต้องระบุชื่อเกณฑ์การให้คะแนน</span>}
               </div>
               <div className="flex gap-2">
-                <button onClick={onCancel} className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm">ยกเลิก</button>
+                <button onClick={onCancel} className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-base">ยกเลิก</button>
                 <button
                   onClick={save}
                   disabled={saving || !name.trim()}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm disabled:opacity-50"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base disabled:opacity-50"
                 >
                   {saving ? "กำลังบันทึก..." : "บันทึก"}
                 </button>
@@ -2751,14 +2751,14 @@ function RubricCopyFromOtherSubject({
     <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
-          <p className="font-black text-slate-800 text-lg">คัดลอกเกณฑ์การให้คะแนนจากวิชาอื่น</p>
-          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 font-bold text-sm">ปิด</button>
+          <p className="font-black text-slate-800 ttext-xl">คัดลอกเกณฑ์การให้คะแนนจากวิชาอื่น</p>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 font-bold text-base">ปิด</button>
         </div>
         <div className="p-6 space-y-4">
           <select
             value={pickedSubjectId ?? ""}
             onChange={e => setPickedSubjectId(e.target.value || null)}
-            className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+            className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-base font-bold bg-white focus:border-indigo-400 focus:outline-none"
           >
             <option value="">เลือกวิชาที่คุณสอน</option>
             {otherSubjects.map(s => (
@@ -2768,19 +2768,19 @@ function RubricCopyFromOtherSubject({
 
           {pickedSubjectId && (
             rubricsOfPicked.length === 0 ? (
-              <p className="text-center text-slate-300 font-bold text-sm py-8">วิชานี้ยังไม่มีเกณฑ์การให้คะแนน</p>
+              <p className="text-center text-slate-300 font-bold text-base py-8">วิชานี้ยังไม่มีเกณฑ์การให้คะแนน</p>
             ) : (
               <div className="space-y-2">
                 {rubricsOfPicked.map(r => (
                   <div key={r.id} className="flex items-center justify-between rounded-xl border border-slate-100 px-4 py-3">
                     <div>
-                      <p className="font-black text-slate-700 text-sm">{r.name}</p>
-                      <p className="text-slate-400 text-xs font-bold">คะแนนดิบสูงสุด {r.max_score}</p>
+                      <p className="font-black text-slate-700 text-base">{r.name}</p>
+                      <p className="text-slate-400 text-base font-bold">คะแนนดิบสูงสุด {r.max_score}</p>
                     </div>
                     <button
                       onClick={() => copyRubric(r)}
                       disabled={copying}
-                      className="px-4 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-xs disabled:opacity-50"
+                      className="px-4 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-base disabled:opacity-50"
                     >
                       {copying ? "กำลังคัดลอก..." : "+ คัดลอก"}
                     </button>
@@ -3034,10 +3034,10 @@ function ImportAssignmentModal({
       <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[85vh] overflow-y-auto">
         <div className="flex items-start justify-between px-6 py-5 border-b border-slate-100">
           <div>
-            <p className="font-black text-slate-800 text-lg flex items-center gap-2">📘 นำเข้าชิ้นงาน</p>
-            <p className="text-slate-400 text-xs font-bold mt-0.5">คุณสามารถนำเข้าชิ้นงานจากรายวิชาเดียวกัน แม้อยู่คนละห้องหรือคนละครูผู้สอน</p>
+            <p className="font-black text-slate-800 ttext-xl flex items-center gap-2">📘 นำเข้าชิ้นงาน</p>
+            <p className="text-slate-400 text-base font-bold mt-0.5">คุณสามารถนำเข้าชิ้นงานจากรายวิชาเดียวกัน แม้อยู่คนละห้องหรือคนละครูผู้สอน</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-base">✕</button>
         </div>
 
         {step === "search" && (
@@ -3047,12 +3047,12 @@ function ImportAssignmentModal({
                 value={searchText}
                 onChange={e => setSearchText(e.target.value)}
                 placeholder="ค้นหารายวิชา เช่น รหัสวิชา หรือชื่อวิชา"
-                className="border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+                className="border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold focus:border-indigo-400 focus:outline-none"
               />
               <select
                 value={academicYearId}
                 onChange={e => setAcademicYearId(e.target.value)}
-                className="border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+                className="border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold bg-white focus:border-indigo-400 focus:outline-none"
               >
                 <option value="">ทุกปีการศึกษา/ภาคเรียน</option>
                 {academicYears.map(y => (
@@ -3062,7 +3062,7 @@ function ImportAssignmentModal({
               <select
                 value={teacherFilter}
                 onChange={e => setTeacherFilter(e.target.value)}
-                className="border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white focus:border-indigo-400 focus:outline-none"
+                className="border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold bg-white focus:border-indigo-400 focus:outline-none"
               >
                 <option value="">ค้นหาตามรายชื่อคุณครูในโรงเรียน</option>
                 {teachers.map(t => (
@@ -3070,12 +3070,12 @@ function ImportAssignmentModal({
                 ))}
               </select>
             </div>
-            <button onClick={runSearch} className="px-5 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-sm">ค้นหา</button>
+            <button onClick={runSearch} className="px-5 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-base">ค้นหา</button>
 
             {loadingCards ? (
-              <p className="text-center text-slate-300 font-bold text-sm py-10">กำลังค้นหา...</p>
+              <p className="text-center text-slate-300 font-bold text-base py-10">กำลังค้นหา...</p>
             ) : cards.length === 0 ? (
-              <p className="text-center text-slate-300 font-bold text-sm py-10">ไม่พบรายวิชาที่ตรงกับเงื่อนไข</p>
+              <p className="text-center text-slate-300 font-bold text-base py-10">ไม่พบรายวิชาที่ตรงกับเงื่อนไข</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {cards.map(c => (
@@ -3085,18 +3085,18 @@ function ImportAssignmentModal({
                     className="text-left rounded-2xl border border-slate-200 overflow-hidden hover:shadow-lg transition-shadow"
                   >
                     <div className="bg-gradient-to-r from-indigo-500 to-blue-500 px-4 py-2 flex items-center justify-between">
-                      <span className="text-white text-[10px] font-black bg-white/20 rounded px-2 py-0.5">SUBJECT</span>
-                      <span className="text-white font-black text-lg">+</span>
+                      <span className="text-white text-[14px] font-black bg-white/20 rounded px-2 py-0.5">SUBJECT</span>
+                      <span className="text-white font-black ttext-xl">+</span>
                     </div>
                     <div className="p-4 space-y-1">
                       <p className="font-black text-slate-800">{c.name_th || c.subject_code}</p>
-                      <p className="text-slate-400 text-xs font-bold">{c.year_label}</p>
-                      <p className="text-slate-300 text-xs font-bold">{c.subject_code}</p>
+                      <p className="text-slate-400 text-base font-bold">{c.year_label}</p>
+                      <p className="text-slate-300 text-base font-bold">{c.subject_code}</p>
                       <div className="flex items-center gap-1.5 pt-1">
-                        <div className="w-5 h-5 rounded-full bg-slate-700 text-white text-[10px] font-black flex items-center justify-center">
+                        <div className="w-5 h-5 rounded-full bg-slate-700 text-white text-[14px] font-black flex items-center justify-center">
                           {c.teacher_name?.[0] ?? "?"}
                         </div>
-                        <span className="text-[11px] text-slate-400 font-bold">{c.teacher_name} · ห้อง: {c.classroom_label}</span>
+                        <span className="text-[16px] text-slate-400 font-bold">{c.teacher_name} · ห้อง: {c.classroom_label}</span>
                       </div>
                     </div>
                   </button>
@@ -3108,11 +3108,11 @@ function ImportAssignmentModal({
 
         {step === "pick" && pickedCard && (
           <div className="p-6 space-y-4">
-            <button onClick={() => setStep("search")} className="text-indigo-500 font-black text-xs">← กลับไปค้นหา</button>
-            <p className="font-black text-slate-700 text-sm">{pickedCard.name_th} · {pickedCard.classroom_label} · {pickedCard.teacher_name}</p>
+            <button onClick={() => setStep("search")} className="text-indigo-500 font-black text-base">← กลับไปค้นหา</button>
+            <p className="font-black text-slate-700 text-base">{pickedCard.name_th} · {pickedCard.classroom_label} · {pickedCard.teacher_name}</p>
 
             {sourceAssignments.length === 0 ? (
-              <p className="text-center text-slate-300 font-bold text-sm py-10">วิชานี้ยังไม่มีชิ้นงาน</p>
+              <p className="text-center text-slate-300 font-bold text-base py-10">วิชานี้ยังไม่มีชิ้นงาน</p>
             ) : (
               <div className="grid gap-3">
                 {sourceAssignments.map(a => {
@@ -3124,10 +3124,10 @@ function ImportAssignmentModal({
                       className={`text-left bg-white rounded-2xl border-2 p-4 transition-colors ${selected ? "border-indigo-400" : "border-slate-100 hover:border-slate-200"}`}
                     >
                       <div className="flex items-start gap-3">
-                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-lg font-black text-white shrink-0 ${a.status === "draft" ? "bg-slate-300" : "bg-gradient-to-br from-indigo-500 to-blue-500"}`}>📄</div>
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center ttext-xl font-black text-white shrink-0 ${a.status === "draft" ? "bg-slate-300" : "bg-gradient-to-br from-indigo-500 to-blue-500"}`}>📄</div>
                         <div>
                           <p className="font-black text-slate-800">{a.title}</p>
-                          <p className="text-slate-400 text-xs font-bold mt-0.5"><DateTimeText iso={a.assigned_at} /> · {a.max_score} คะแนน</p>
+                          <p className="text-slate-400 text-base font-bold mt-0.5"><DateTimeText iso={a.assigned_at} /> · {a.max_score} คะแนน</p>
                         </div>
                       </div>
                     </button>
@@ -3137,11 +3137,11 @@ function ImportAssignmentModal({
             )}
 
             <div className="flex justify-end gap-3 pt-2">
-              <button onClick={onClose} className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm">Cancel</button>
+              <button onClick={onClose} className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-base">Cancel</button>
               <button
                 onClick={confirmCopy}
                 disabled={copying || selectedIds.size === 0}
-                className="px-5 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-sm disabled:opacity-50"
+                className="px-5 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-base disabled:opacity-50"
               >
                 {copying ? "กำลังนำเข้า..." : "+ Copy"}
               </button>
@@ -3253,8 +3253,8 @@ function AnnouncementModal({
     <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
-          <p className="font-black text-slate-800 text-lg">{existing ? "แก้ไขประกาศ" : "สร้างประกาศใหม่"}</p>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
+          <p className="font-black text-slate-800 ttext-xl">{existing ? "แก้ไขประกาศ" : "สร้างประกาศใหม่"}</p>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-base">✕</button>
         </div>
 
         <div className="p-6 space-y-3">
@@ -3262,7 +3262,7 @@ function AnnouncementModal({
             value={title}
             onChange={e => setTitle(e.target.value)}
             placeholder="หัวข้อ"
-            className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+            className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-base font-bold focus:border-indigo-400 focus:outline-none"
           />
 
           <div className="border-2 border-slate-200 rounded-xl overflow-hidden">
@@ -3291,10 +3291,10 @@ function AnnouncementModal({
               ref={editorRef}
               contentEditable
               onInput={updateWordCount}
-              className="min-h-[140px] px-4 py-3 text-sm font-bold focus:outline-none"
+              className="min-h-[140px] px-4 py-3 text-base font-bold focus:outline-none"
               suppressContentEditableWarning
             />
-            <div className="flex items-center justify-between px-4 py-2 border-t border-slate-100 text-[11px] text-slate-400 font-bold">
+            <div className="flex items-center justify-between px-4 py-2 border-t border-slate-100 text-[16px] text-slate-400 font-bold">
               <span>p</span>
               <span>{wordCount} words</span>
             </div>
@@ -3303,7 +3303,7 @@ function AnnouncementModal({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 text-indigo-500 font-black text-xs"
+            className="flex items-center gap-1.5 text-indigo-500 font-black text-base"
           >
             📎 แนบไฟล์
           </button>
@@ -3320,7 +3320,7 @@ function AnnouncementModal({
           {files.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {files.map((f, i) => (
-                <span key={i} className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 font-bold bg-slate-100 rounded-full pl-3 pr-1.5 py-1">
+                <span key={i} className="inline-flex items-center gap-1.5 text-[16px] text-slate-600 font-bold bg-slate-100 rounded-full pl-3 pr-1.5 py-1">
                   📄 {f.name}
                   <button onClick={() => setFiles(prev => prev.filter((_, idx) => idx !== i))} className="w-4 h-4 rounded-full bg-slate-200 hover:bg-rose-100 hover:text-rose-500 flex items-center justify-center">✕</button>
                 </span>
@@ -3331,7 +3331,7 @@ function AnnouncementModal({
           <button
             onClick={post}
             disabled={posting}
-            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm shadow disabled:opacity-50"
+            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base shadow disabled:opacity-50"
           >
             {posting ? "กำลังโพสต์..." : existing ? "บันทึกการแก้ไข" : "โพสต์ประกาศ"}
           </button>

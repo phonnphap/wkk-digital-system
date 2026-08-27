@@ -220,39 +220,40 @@ if (roomIds.length > 0) {
 
   return (
     <div className="min-h-screen bg-slate-50 font-['TH_Sarabun_New',_sans-serif]">
-            <div className="sticky top-0 z-30 bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 shadow-md px-5 py-5">
-  <div className="flex items-center gap-4">
+                  <div className="sticky top-0 z-30 bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 shadow-md px-5 py-4">
+  <div className="flex items-center gap-3">
     <button onClick={() => router.push("/dashboard")}
-      className="w-12 h-12 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl shrink-0 transition-colors">🏠</button>
-    <div className="flex-1 min-w-0">
-      <h1 className="text-2xl font-black text-white leading-tight font-['TH_Sarabun_New',_sans-serif]">📚 Smart Class</h1>
-      <p className="text-white/90 text-base font-black mt-1 font-['TH_Sarabun_New',_sans-serif]">
-        {isAdmin
-          ? `แสดงทุกชั้นเรียน (สิทธิ์แอดมิน/ผู้บริหาร) · ${filteredClassrooms.length} ห้อง`
-          : `วิชาที่คุณสอน · ${filteredSubjects.length} วิชา`}
-      </p>
-    </div>
+      className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-xl shrink-0 transition-colors">🏠</button>
+    <h1 className="text-3xl font-black text-white leading-none whitespace-nowrap font-['TH_Sarabun_New',_sans-serif]">📚 Smart Class</h1>
+    <div className="flex-1" />
     {isAdmin && (
       <button onClick={() => router.push("/smartclass/insights")}
         title="ข้อมูลเชิงลึก"
-        className="shrink-0 px-4 py-2.5 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center gap-2 text-white text-base font-black transition-colors font-['TH_Sarabun_New',_sans-serif]">
+        className="shrink-0 px-4 py-2.5 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center gap-2 text-white text-sm font-black transition-colors font-['TH_Sarabun_New',_sans-serif]">
         📊 ข้อมูลเชิงลึก
       </button>
     )}
   </div>
-  <input value={search} onChange={e => setSearch(e.target.value)}
-    placeholder={isAdmin ? "🔍 ค้นหาชื่อห้อง/สายชั้น..." : "🔍 ค้นหาชื่อ/รหัสวิชา..."}
-    className="w-full mt-4 bg-white/90 border-2 border-white/40 rounded-xl px-4 py-3 text-base font-black text-slate-700 placeholder:text-slate-400 focus:border-white focus:outline-none font-['TH_Sarabun_New',_sans-serif]" />
+
+  <p className="text-white text-lg font-black mt-1 ml-[56px] leading-snug font-['TH_Sarabun_New',_sans-serif]">
+  {isAdmin
+    ? `แสดงทุกชั้นเรียน (สิทธิ์แอดมิน/ผู้บริหาร) · ${filteredClassrooms.length} ห้อง`
+    : `วิชาที่คุณสอน · ${filteredSubjects.length} วิชา`}
+</p>
+
+<input value={search} onChange={e => setSearch(e.target.value)}
+  placeholder={isAdmin ? "🔍 ค้นหาชื่อห้อง/สายชั้น..." : "🔍 ค้นหาชื่อ/รหัสวิชา..."}
+  className="mt-2 ml-[60px] bg-white/90 border-2 border-white/40 rounded-lg px-3 py-1 text-sm font-bold text-slate-700 placeholder:text-slate-400 focus:border-white focus:outline-none w-full max-w-[1320px] font-['TH_Sarabun_New',_sans-serif]" />
 
   {isAdmin && (
-    <div className="flex items-center gap-2.5 mt-4 overflow-x-auto pb-1">
+    <div className="flex items-center gap-2 mt-3 ml-[56px] overflow-x-auto pb-1">
       <button onClick={() => setLevelFilter("all")}
-        className={`shrink-0 px-4 py-2 rounded-lg text-sm font-black transition-colors font-['TH_Sarabun_New',_sans-serif] ${
+        className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-black transition-colors font-['TH_Sarabun_New',_sans-serif] ${
           levelFilter === "all" ? "bg-white text-fuchsia-600" : "bg-white/20 text-white hover:bg-white/30"
         }`}>ทั้งหมด</button>
       {LEVELS.filter(l => l.key !== "other").map(l => (
         <button key={l.key} onClick={() => setLevelFilter(l.key)}
-          className={`shrink-0 px-4 py-2 rounded-lg text-sm font-black transition-colors font-['TH_Sarabun_New',_sans-serif] ${
+          className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-black transition-colors font-['TH_Sarabun_New',_sans-serif] ${
             levelFilter === l.key ? "bg-white text-fuchsia-600" : "bg-white/20 text-white hover:bg-white/30"
           }`}>{l.label}</button>
       ))}
@@ -330,12 +331,12 @@ if (roomIds.length > 0) {
     </span>
     <span className="text-white text-lg leading-none font-black">⠿</span>
   </div>
-  <div className="p-4">
+    <div className="p-4">
     <p className="font-black text-xl text-slate-900 leading-tight truncate">
       {g.subject.name_th}
     </p>
     <p className="text-slate-400 text-sm font-bold mt-0.5">{g.subject.subject_code}</p>
-    <div className="mt-3">
+    <div className="mt-3 flex justify-center">
       <span className="text-sm font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
         🏫 {g.roomCount} ห้อง
       </span>

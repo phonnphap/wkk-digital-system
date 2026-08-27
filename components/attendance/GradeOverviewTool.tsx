@@ -74,7 +74,7 @@ function ToastContainer({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss:
         <div
           key={t.id}
           onClick={() => onDismiss(t.id)}
-          className={`cursor-pointer max-w-xs px-4 py-3 rounded-xl shadow-lg font-black text-xs text-white flex items-start gap-2 ${
+          className={`cursor-pointer max-w-xs px-4 py-3 rounded-xl shadow-lg font-black text-sm text-white flex items-start gap-2 ${
             t.type === "error" ? "bg-red-500" : t.type === "success" ? "bg-emerald-500" : "bg-slate-700"
           }`}
           style={{ animation: "toast-in 0.2s ease-out" }}
@@ -753,14 +753,14 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 print:hidden">
       <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-        <h3 className="font-black text-slate-800 text-sm flex items-center gap-1.5">🧮 คะแนนรวมกลุ่ม</h3>
-        <span className="text-[10px] font-black text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full">
+        <h3 className="font-black text-slate-800 text-m flex items-center gap-1.5">🧮 คะแนนรวมกลุ่ม</h3>
+        <span className="text-[14px] font-black text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full">
           รหัสกลุ่ม: {groupSummary.groupCode}
         </span>
       </div>
 
       {groupSummary.isGuessed && (
-        <p className="text-[11px] text-amber-500 font-bold mb-3 bg-amber-50 rounded-lg px-3 py-1.5 inline-block">
+        <p className="text-xs text-amber-500 font-bold mb-3 bg-amber-50 rounded-lg px-3 py-1.5 inline-block">
           ⚡ ระบบเดากลุ่มนี้จากรหัสวิชาอัตโนมัติ (ยังไม่ได้ตั้งค่าถาวร) — ถ้าต้องการให้คงกลุ่มนี้ไว้แน่นอน ไปตั้งค่าที่หน้า "ตั้งค่ารายวิชา"
         </p>
       )}
@@ -768,7 +768,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       {/* ช่องรหัสวิชาในกลุ่ม เรียงติดกัน */}
       <div className="flex items-center gap-2 flex-wrap mb-4">
         {(groupSummary.subjects ?? []).map(s => (
-          <span key={s.id} className="px-3 py-1.5 rounded-xl bg-violet-50 border border-violet-100 text-violet-700 text-xs font-black">
+          <span key={s.id} className="px-3 py-1.5 rounded-xl bg-violet-50 border border-violet-100 text-violet-700 text-sm font-black">
             {s.subject_code} · {s.name_th}
           </span>
         ))}
@@ -777,23 +777,23 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       {/* ตั้งชื่อวิชารวม + % น้ำหนัก */}
        <div className="rounded-xl border-2 border-dashed border-violet-200 bg-violet-50/40 p-4 mb-5 space-y-3">
         <div>
-          <p className="text-[11px] font-black text-violet-500 mb-1.5">ชื่อวิชารวม (ไม่บังคับ)</p>
+          <p className="text-xs font-black text-violet-500 mb-1.5">ชื่อวิชารวม (ไม่บังคับ)</p>
           <input
             type="text"
             disabled={readOnly}
             value={displayName}
             onChange={e => setDisplayName(e.target.value)}
             placeholder={`เช่น สุขศึกษาและพลศึกษา (${groupSummary.groupCode})`}
-            className="w-full border-2 border-violet-200 rounded-xl px-3 py-2 text-sm font-bold bg-white disabled:bg-slate-50 disabled:text-slate-400"
+            className="w-full border-2 border-violet-200 rounded-xl px-3 py-2 text-m font-bold bg-white disabled:bg-slate-50 disabled:text-slate-400"
           />
         </div>
 
         <div>
-          <p className="text-[11px] font-black text-violet-500 mb-1.5">% น้ำหนักคะแนนของแต่ละวิชาในกลุ่ม</p>
+          <p className="text-xs font-black text-violet-500 mb-1.5">% น้ำหนักคะแนนของแต่ละวิชาในกลุ่ม</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {(groupSummary.subjects ?? []).map(s => (
               <div key={s.id} className="flex items-center gap-2 bg-white rounded-lg border border-violet-100 px-3 py-2">
-                <span className="text-xs font-bold text-slate-600 flex-1 truncate">{s.subject_code}</span>
+                <span className="text-sm font-bold text-slate-600 flex-1 truncate">{s.subject_code}</span>
                 <input
                   type="number"
                   min={0}
@@ -801,14 +801,14 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
                   disabled={readOnly}
                   value={weightDrafts[s.id] ?? ""}
                   onChange={e => setWeightDrafts(prev => ({ ...prev, [s.id]: e.target.value }))}
-                  className="w-16 text-center border-2 border-slate-200 rounded-lg py-1 text-xs font-black disabled:bg-slate-50"
+                  className="w-16 text-center border-2 border-slate-200 rounded-lg py-1 text-sm font-black disabled:bg-slate-50"
                 />
-                <span className="text-xs font-bold text-slate-400">%</span>
+                <span className="text-sm font-bold text-slate-400">%</span>
               </div>
             ))}
           </div>
           {weightWarning && (
-            <p className="text-[11px] font-black text-amber-500 mt-1.5">
+            <p className="text-xs font-black text-amber-500 mt-1.5">
               ⚠️ รวม % ตอนนี้ = {weightSum.toFixed(1)}% (ควรรวมให้ได้ 100% พอดี)
             </p>
           )}
@@ -819,18 +819,18 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
             <button
               onClick={handleSave}
               disabled={saving}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-500 to-indigo-500 hover:from-violet-600 hover:to-indigo-600 disabled:opacity-50 text-white font-black text-xs shadow"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-500 to-indigo-500 hover:from-violet-600 hover:to-indigo-600 disabled:opacity-50 text-white font-black text-sm shadow"
             >
               {saving ? "กำลังบันทึก..." : "💾 บันทึกการตั้งค่ากลุ่ม"}
             </button>
-            {saved && <span className="text-xs font-black text-emerald-500">✅ บันทึกแล้ว</span>}
+            {saved && <span className="text-sm font-black text-emerald-500">✅ บันทึกแล้ว</span>}
           </div>
         )}
       </div>
 
       {/* ตารางคะแนนรวมกลุ่ม (ถ่วงน้ำหนักแล้ว) */}
       {rows.length === 0 ? (
-        <p className="text-center text-slate-300 text-xs font-bold py-6">ไม่มีนักเรียน</p>
+        <p className="text-center text-slate-300 text-sm font-bold py-6">ไม่มีนักเรียน</p>
       ) : (
         <div className="divide-y divide-slate-50">
           {rows.map(r => {
@@ -841,17 +841,17 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
                 {s.avatar_url ? (
                   <img src={s.avatar_url} className="w-8 h-8 rounded-full object-cover" />
                 ) : (
-                  <div className="w-8 h-8 rounded-full bg-violet-100 text-violet-600 text-xs font-black flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-full bg-violet-100 text-violet-600 text-sm font-black flex items-center justify-center">
                     {s.first_name[0]}
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-black text-slate-700 truncate">
+                  <p className="text-sm font-black text-slate-700 truncate">
                     {s.prefix}{s.first_name} {s.last_name}
                   </p>
-                  <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
+                  <p className="text-[14px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                 </div>
-                <span className="px-3 py-1 rounded-full bg-gradient-to-r from-violet-500 to-indigo-400 text-white text-xs font-black shrink-0">
+                <span className="px-3 py-1 rounded-full bg-gradient-to-r from-violet-500 to-indigo-400 text-white text-sm font-black shrink-0">
                   {combinedPct.toFixed(1)}%
                 </span>
               </div>
@@ -889,9 +889,9 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 print:hidden">
       {cards.map(c => (
         <div key={c.label} className={`rounded-2xl bg-gradient-to-br ${c.grad} p-4 text-white shadow-sm`}>
-          <p className="text-lg leading-none mb-2">{c.icon}</p>
-          <p className="text-[11px] font-bold opacity-90">{c.label}</p>
-          <p className="text-lg font-black mt-0.5">{c.value}</p>
+          <p className="text-xl leading-none mb-2">{c.icon}</p>
+          <p className="text-xs font-bold opacity-90">{c.label}</p>
+          <p className="text-xl font-black mt-0.5">{c.value}</p>
         </div>
       ))}
     </div>
@@ -934,8 +934,8 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
 
       <div className="flex items-start justify-between flex-wrap gap-3 print:hidden">
         <div>
-          <h2 className="font-black text-slate-800 text-lg">คะแนนรวม</h2>
-          <p className="text-slate-400 text-xs font-bold">
+          <h2 className="font-black text-slate-800 text-xl">คะแนนรวม</h2>
+          <p className="text-slate-400 text-sm font-bold">
             {effectiveReadOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที · กด Enter หรือลูกศร ↑↓←→ เพื่อบันทึกและย้ายไปช่องข้างเคียง · ลากหัวตารางชิ้นงานเพื่อสลับลำดับได้"}
           </p>
         </div>
@@ -943,13 +943,13 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           {!currentStudentId && (
             <button
   onClick={() => setTab(tab === "table" ? "podium" : "table")}
-  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-500 hover:to-orange-500 text-white font-black text-sm flex items-center gap-1.5 shadow-sm"
+  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-500 hover:to-orange-500 text-white font-black text-base flex items-center gap-1.5 shadow-sm"
 >
   {tab === "table" ? "🏆 อันดับคะแนน" : "🔢 ตาราง"}
 </button> )}
 {!effectiveReadOnly && gradingMode === "numeric" && (
   <button onClick={() => setShowGradeSetting(true)}
-    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-400 to-pink-400 hover:from-fuchsia-500 hover:to-pink-500 text-white font-black text-sm flex items-center gap-1.5 shadow-sm"
+    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-400 to-pink-400 hover:from-fuchsia-500 hover:to-pink-500 text-white font-black text-base flex items-center gap-1.5 shadow-sm"
   >
     ⚙️ ตั้งค่าคำนวณเกรด
   </button>
@@ -957,7 +957,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           {readOnly && !hideActions && ( 
             <button
               onClick={handlePrint}
-              className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
+              className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-base flex items-center gap-1.5"
             >
               🖨️ พิมพ์
             </button>
@@ -966,7 +966,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           <button
             onClick={handleExportExcel}
             disabled={exporting || loading}
-            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm flex items-center gap-1.5 disabled:opacity-50"
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base flex items-center gap-1.5 disabled:opacity-50"
           >
             📊 {exporting ? "กำลังดาวน์โหลด..." : "Export"}
           </button>
@@ -975,9 +975,9 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       </div>
 
       {loading ? (
-        <div className="text-center py-16 text-slate-300 font-bold text-sm">กำลังโหลดข้อมูลคะแนน...</div>
+        <div className="text-center py-16 text-slate-300 font-bold text-m">กำลังโหลดข้อมูลคะแนน...</div>
       ) : error ? (
-        <p className="text-red-600 text-xs font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-3">❌ {error}</p>
+        <p className="text-red-600 text-sm font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-3">❌ {error}</p>
       ) : tab === "table" || currentStudentId ? (
   <GradeTable rows={visibleRows}
   assignments={orderedAssignments}
@@ -1125,7 +1125,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   if (rows.length === 0) {
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
-        <p className="font-bold text-sm">ไม่มีนักเรียนในวิชานี้</p>
+        <p className="font-bold text-m">ไม่มีนักเรียนในวิชานี้</p>
       </div>
     );
   }
@@ -1142,7 +1142,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
         <th
           key={g.key}
           colSpan={g.span}
-          className="px-2 py-1.5 text-center text-[10px] font-black text-indigo-700 border-b border-indigo-200"
+          className="px-2 py-1.5 text-center text-[14px] font-black text-indigo-700 border-b border-indigo-200"
         >
           {g.label}
         </th>
@@ -1153,10 +1153,10 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     </tr>
   )}
   <tr className="bg-gradient-to-r from-indigo-50 via-sky-50 to-fuchsia-50">
-    <th className="text-left text-[11px] font-black text-slate-600 px-5 py-3 sticky left-0 top-0 bg-gradient-to-r from-indigo-50 to-sky-50 z-30">
+    <th className="text-left text-xs font-black text-slate-600 px-5 py-3 sticky left-0 top-0 bg-gradient-to-r from-indigo-50 to-sky-50 z-30">
       Name
     </th>
-    <th className="px-3 py-3 text-center text-[11px] font-black text-slate-400 bg-sky-50">Report</th>
+    <th className="px-3 py-3 text-center text-xs font-black text-slate-400 bg-sky-50">Report</th>
     {assignments.map(a => (
       // ★ column header ลากสลับลำดับได้ (ไม่ readOnly เท่านั้น)
 <th
@@ -1171,32 +1171,32 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   title={!readOnly ? "ลากเพื่อย้ายลำดับคอลัมน์นี้" : undefined}
 >
   {!readOnly && (
-    <span className="absolute top-1 left-1.5 text-indigo-400 text-xs leading-none select-none">⠿</span>
+    <span className="absolute top-1 left-1.5 text-indigo-400 text-sm leading-none select-none">⠿</span>
   )}
-  <p className="text-[11px] font-black text-indigo-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
-  <p className="text-[9px] text-indigo-600 font-bold">
+  <p className="text-xs font-black text-indigo-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
+  <p className="text-[12px] text-indigo-600 font-bold">
     {isWeighted(a) ? `กรอกเต็ม ${a.max_score} → นน. ${a.weight_percent}%` : `เต็ม ${a.max_score} คะแนน`}
   </p>
 </th>
     ))}
     {presets.map(p => (
   <th key={p.id} className="px-3 py-3 text-center min-w-[100px] bg-fuchsia-50/70">
-    <p className="text-[11px] font-black text-fuchsia-600">{p.emoji} {p.label}</p>
-    <p className="text-[9px] text-fuchsia-300 font-bold">คะแนนพิเศษ</p>
+    <p className="text-xs font-black text-fuchsia-600">{p.emoji} {p.label}</p>
+    <p className="text-[12px] text-fuchsia-300 font-bold">คะแนนพิเศษ</p>
   </th>
 ))}
 
 {gradingMode === "numeric" && (
   <>
     <th className="px-3 py-3 text-center min-w-[90px] bg-indigo-50/70">
-      <p className="text-[11px] font-black text-indigo-700">คะแนนเก็บ</p>
-      <p className="text-[9px] text-indigo-300 font-bold">เต็ม {formativeMaxScore}</p>
+      <p className="text-xs font-black text-indigo-700">คะแนนเก็บ</p>
+      <p className="text-[12px] text-indigo-300 font-bold">เต็ม {formativeMaxScore}</p>
     </th>
     {useMidterm && (
   <th className="px-3 py-3 text-center min-w-[90px] bg-teal-50/70">
-    <p className="text-[11px] font-black text-teal-700">กลางภาค</p>
+    <p className="text-xs font-black text-teal-700">กลางภาค</p>
     {readOnly ? (
-      <p className="text-[9px] text-teal-300 font-bold">
+      <p className="text-[12px] text-teal-300 font-bold">
         {rawMidtermMax ? `กรอกเต็ม ${rawMidtermMax} → นน. ${midtermMaxScore}` : `เต็ม ${midtermMaxScore}`}
       </p>
     ) : (
@@ -1206,16 +1206,16 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
         placeholder={`เต็ม ${midtermMaxScore}`}
         onChange={e => onChangeRawMidtermMax(e.target.value === "" ? null : Number(e.target.value))}
         onBlur={() => onSaveExamConfig("midterm", rawMidtermMax)}
-        className="w-14 text-center text-[9px] border-b border-teal-300 bg-transparent focus:outline-none"
+        className="w-14 text-center text-[12px] border-b border-teal-300 bg-transparent focus:outline-none"
         title="ใส่คะแนนเต็มดิบของข้อสอบจริง (ถ้าเต็มไม่เท่ากับที่ตั้งไว้)"
       />
     )}
   </th>
 )}
 <th className="px-3 py-3 text-center min-w-[90px] bg-orange-50/70">
-  <p className="text-[11px] font-black text-orange-700">ปลายภาค</p>
+  <p className="text-xs font-black text-orange-700">ปลายภาค</p>
   {readOnly ? (
-    <p className="text-[9px] text-orange-300 font-bold">
+    <p className="text-[12px] text-orange-300 font-bold">
       {rawFinalMax ? `กรอกเต็ม ${rawFinalMax} → นน. ${finalMaxScore}` : `เต็ม ${finalMaxScore}`}
     </p>
   ) : (
@@ -1225,7 +1225,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
       placeholder={`เต็ม ${finalMaxScore}`}
       onChange={e => onChangeRawFinalMax(e.target.value === "" ? null : Number(e.target.value))}
       onBlur={() => onSaveExamConfig("final", rawFinalMax)}
-      className="w-14 text-center text-[9px] border-b border-orange-300 bg-transparent focus:outline-none"
+      className="w-14 text-center text-[12px] border-b border-orange-300 bg-transparent focus:outline-none"
       title="ใส่คะแนนเต็มดิบของข้อสอบจริง (ถ้าเต็มไม่เท่ากับที่ตั้งไว้)"
     />
   )}
@@ -1234,16 +1234,16 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 )}
 {/* ★ ลำดับคอลัมน์ท้ายตาราง: รวม -> ระดับผลการเรียน/สถานะ -> ส่งตรงเวลา (ย้ายระดับผลการเรียนไปไว้หลังคอลัมน์รวมตามที่ต้องการ) */}
 <th className="px-3 py-3 text-center min-w-[100px] bg-emerald-50/70">
-  <p className="text-[11px] font-black text-emerald-700">รวม</p>
-  <p className="text-[9px] text-emerald-400 font-bold">งาน+พิเศษ{gradingMode === "numeric" ? "+สอบ" : ""}</p>
+  <p className="text-xs font-black text-emerald-700">รวม</p>
+  <p className="text-[12px] text-emerald-400 font-bold">งาน+พิเศษ{gradingMode === "numeric" ? "+สอบ" : ""}</p>
 </th>
 <th className="px-3 py-3 text-center min-w-[70px] bg-fuchsia-50/70">
-  <p className="text-[11px] font-black text-fuchsia-700">
+  <p className="text-xs font-black text-fuchsia-700">
     {gradingMode === "pass_fail" ? "สถานะ" : "ระดับผลการเรียน"}
   </p>
 </th>
 <th className="px-3 py-3 text-center min-w-[90px] bg-amber-50/70">
-  <p className="text-[11px] font-black text-amber-700">ส่งตรงเวลา</p>
+  <p className="text-xs font-black text-amber-700">ส่งตรงเวลา</p>
 </th>
 
   </tr>
@@ -1258,22 +1258,22 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
                     {s.avatar_url ? (
                       <img src={s.avatar_url} className="w-8 h-8 rounded-full object-cover" />
                     ) : (
-                      <div className="w-8 h-8 rounded-full bg-sky-100 text-sky-600 text-xs font-black flex items-center justify-center">
+                      <div className="w-8 h-8 rounded-full bg-sky-100 text-sky-600 text-sm font-black flex items-center justify-center">
                         {s.first_name[0]}
                       </div>
                     )}
                     <div>
-                      <p className="text-xs font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
-                      <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
+                      <p className="text-m font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
+                      <p className="text-[14x] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                     </div>
                   </div>
                 </td>
                 <td className="px-3 py-3 text-center">
                   <button
                     onClick={() => onOpenReport(s)}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-black whitespace-nowrap"
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[14px] font-black whitespace-nowrap"
                   >
-                    📄 Report
+                    📄 รายงานรายบุคคล
                   </button>
                 </td>
                 {assignments.map(a => {
@@ -1283,9 +1283,9 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
       <td key={a.id} className="text-center px-3 py-3">
         {readOnly ? (
   !sub ? (
-    <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-red-50 text-red-600">ไม่ส่งงาน</span>
+    <span className="inline-block px-2 py-1 rounded-full text-[14px] font-black bg-red-50 text-red-600">ไม่ส่งงาน</span>
   ) : sub.score === null ? (
-    <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600">รอตรวจ</span>
+    <span className="inline-block px-2 py-1 rounded-full text-[14px] font-black bg-amber-50 text-amber-600">รอตรวจ</span>
   ) : (
   (() => {
     const isLate = lateInfo.hasData && lateInfo.isLate;
@@ -1294,14 +1294,14 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   const weighted = isWeighted(a) ? getAssignmentWeightedScore(a, sub.score) : null;
   return (
     <div className={`inline-flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl ${bgClass}`}>
-      <span className={`text-sm font-black ${textClass}`}>
+      <span className={`text-m font-black ${textClass}`}>
         {sub.score}
       </span>
       {weighted !== null && (
-        <span className="text-[9px] font-black text-violet-500">= {fmtScore(weighted)} คะแนนจริง</span>
+        <span className="text-[12px] font-black text-violet-500">= {fmtScore(weighted)} คะแนนจริง</span>
       )}
       {lateInfo.hasData && (
-        <span className={`text-[9px] font-black ${textClass}`}>
+        <span className={`text-[12px] font-black ${textClass}`}>
           {isLate ? `⏰ ส่งช้า${lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}` : "✅ ตรงเวลา"}
         </span>
         )}
@@ -1327,7 +1327,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
                 {presets.map(p => (
                   <td key={p.id} className="text-center px-3 py-3">
                     {readOnly ? (
-                      <span className={`text-sm font-black ${(r.presetTotals[p.id] ?? 0) > 0 ? "text-emerald-600" : (r.presetTotals[p.id] ?? 0) < 0 ? "text-red-500" : "text-slate-300"}`}>
+                      <span className={`text-m font-black ${(r.presetTotals[p.id] ?? 0) > 0 ? "text-emerald-600" : (r.presetTotals[p.id] ?? 0) < 0 ? "text-red-500" : "text-slate-300"}`}>
                         {r.presetTotals[p.id] ?? 0}
                       </span>
                     ) : (
@@ -1346,8 +1346,8 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 {gradingMode === "numeric" && (
   <>
     <td className="text-center px-3 py-3">
-      <span className="text-sm font-black text-indigo-600">{fmtScore(r.scaledFormative)}</span>
-      <span className="text-slate-400 font-bold text-xs">/{formativeMaxScore}</span>
+      <span className="text-m font-black text-indigo-600">{fmtScore(r.scaledFormative)}</span>
+      <span className="text-slate-400 font-bold text-sm">/{formativeMaxScore}</span>
     </td>
     {useMidterm && (
   <td className="text-center px-3 py-3">
@@ -1384,7 +1384,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 {/* ★ คอลัมน์ "รวม" — มาก่อนคอลัมน์เกรด/สถานะ ตามลำดับใหม่ (รวม -> ระดับผลการเรียน -> ส่งตรงเวลา) */}
 <td className="text-center px-3 py-3">
   <div className="inline-flex flex-col items-center gap-1 min-w-[70px]">
-    <span className="font-black text-sm text-slate-700">
+    <span className="font-black text-m text-slate-700">
       {fmtScore(r.displayTotal)}<span className="text-slate-400 font-bold">/{fmtScore(r.displayMax)}</span>
     </span>
     <div className="w-16 h-1.5 rounded-full bg-slate-100 overflow-hidden">
@@ -1393,32 +1393,32 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
         style={{ width: `${Math.min(100, Math.max(0, r.percentage))}%` }}
       />
     </div>
-    <span className="text-[9px] font-bold text-slate-400">{r.percentage.toFixed(0)}%</span>
+    <span className="text-[12px] font-bold text-slate-400">{r.percentage.toFixed(0)}%</span>
   </div>
 </td>
 {/* ★ คอลัมน์เกรด/สถานะ — ย้ายมาไว้หลังคอลัมน์ "รวม" ตามที่ต้องการ */}
                 <td className="text-center px-3 py-3">
   {gradingMode === "pass_fail" ? (
     r.passFailStatus === null ? (
-      <span className="text-[10px] text-slate-300 font-bold">ไม่มีข้อมูล</span>
+      <span className="text-[14px] text-slate-300 font-bold">ไม่มีข้อมูล</span>
     ) : (
-      <span className={`inline-flex items-center justify-center min-w-[36px] px-2.5 py-1.5 rounded-xl font-black text-xs text-white ${
+      <span className={`inline-flex items-center justify-center min-w-[36px] px-2.5 py-1.5 rounded-xl font-black text-sm text-white ${
         r.passFailStatus === "ผ่าน" ? "bg-gradient-to-r from-emerald-500 to-teal-400" : "bg-gradient-to-r from-rose-500 to-red-400"
       }`}>
         {r.passFailStatus}
       </span>
     )
   ) : (
-    <span className="inline-flex items-center justify-center min-w-[36px] px-2.5 py-1.5 rounded-xl font-black text-sm bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white">
+    <span className="inline-flex items-center justify-center min-w-[36px] px-2.5 py-1.5 rounded-xl font-black text-m bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white">
       {r.grade}
     </span>
   )}
 </td>
                 <td className="text-center px-3 py-3">
                   {r.onTimeRate === null ? (
-                    <span className="text-[10px] text-slate-300 font-bold">ไม่มีข้อมูล</span>
+                    <span className="text-[14px] text-slate-300 font-bold">ไม่มีข้อมูล</span>
                   ) : (
-                    <span className={`inline-flex items-center justify-center min-w-[50px] px-2 py-1.5 rounded-xl font-black text-xs ${
+                    <span className={`inline-flex items-center justify-center min-w-[50px] px-2 py-1.5 rounded-xl font-black text-sm ${
                       r.onTimeRate >= 80 ? "bg-emerald-50 text-emerald-600" : r.onTimeRate >= 50 ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600"
                     }`}>
                       {r.onTimeRate.toFixed(0)}%
@@ -1547,7 +1547,7 @@ function EditableScoreCell({
         onFocus={e => e.currentTarget.select()}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
-        className="w-16 mx-auto block text-center border-2 border-sky-300 rounded-lg py-1 text-sm font-black focus:outline-none"
+        className="w-16 mx-auto block text-center border-2 border-sky-300 rounded-lg py-1 text-m font-black focus:outline-none"
       />
     );
   }
@@ -1557,7 +1557,7 @@ function EditableScoreCell({
       <button
         onClick={onRequestEdit}
         title="คลิกเพื่อให้คะแนน"
-        className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+        className="inline-block px-2 py-1 rounded-full text-[14px] font-black bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
       >
         ไม่ส่งงาน
       </button>
@@ -1569,7 +1569,7 @@ function EditableScoreCell({
       <button
         onClick={onRequestEdit}
         title="คลิกเพื่อให้คะแนน"
-        className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
+        className="inline-block px-2 py-1 rounded-full text-[14px] font-black bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
       >
         รอตรวจ
       </button>
@@ -1585,14 +1585,14 @@ function EditableScoreCell({
 return (
   <button onClick={onRequestEdit} title="คลิกเพื่อแก้ไขคะแนน"
     className={`flex flex-col items-center gap-0.5 mx-auto px-2.5 py-1.5 rounded-xl transition-colors ${bgClass} ring-1 ${isLate ? "ring-orange-200" : "ring-emerald-200"}`}>
-    <span className={`text-sm font-black ${textClass}`}>
+    <span className={`text-m font-black ${textClass}`}>
       {submission.score}
     </span>
     {weighted !== null && (
-      <span className="text-[9px] font-black text-violet-500">= {fmtScore(weighted)} คะแนนจริง</span>
+      <span className="text-[12px] font-black text-violet-500">= {fmtScore(weighted)} คะแนนจริง</span>
     )}
     {lateInfo.hasData && (
-      <span className={`text-[9px] font-black ${isLate ? "text-orange-600" : "text-emerald-600"}`}>
+      <span className={`text-[12px] font-black ${isLate ? "text-orange-600" : "text-emerald-600"}`}>
         {isLate ? `⏰ ส่งช้า${lateInfo.isManual ? "" : ` ${lateInfo.daysLate} วัน`}` : "✅ ตรงเวลา"}
       </span>
     )}
@@ -1645,10 +1645,10 @@ function EditableExamCell({
 
   if (readOnly) {
     return (
-      <span className="text-sm font-black text-slate-700 flex flex-col items-center">
+      <span className="text-m font-black text-slate-700 flex flex-col items-center">
         <span>{rawValue ?? "-"}<span className="text-slate-400 font-bold">/{inputMax}</span></span>
         {isExamWeighted(rawMax, maxScore) && value !== null && (
-          <span className="text-[9px] font-black text-violet-500">= {fmtScore(value)} คะแนนจริง</span>
+          <span className="text-[12px] font-black text-violet-500">= {fmtScore(value)} คะแนนจริง</span>
         )}
       </span>
     );
@@ -1662,7 +1662,7 @@ function EditableExamCell({
         onFocus={e => e.currentTarget.select()}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
-        className="w-16 mx-auto block text-center border-2 border-sky-300 rounded-lg py-1 text-sm font-black focus:outline-none"
+        className="w-16 mx-auto block text-center border-2 border-sky-300 rounded-lg py-1 text-m font-black focus:outline-none"
       />
     );
   }
@@ -1671,14 +1671,14 @@ function EditableExamCell({
 
   return (
     <button onClick={onRequestEdit} title="คลิกเพื่อกรอกคะแนน"
-      className="flex flex-col items-center gap-0.5 mx-auto text-sm font-black px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-700">
+      className="flex flex-col items-center gap-0.5 mx-auto text-m font-black px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-700">
       {rawValue !== null ? (
         <span>{rawValue}<span className="text-slate-400 font-bold">/{inputMax}</span></span>
       ) : (
-        <span className="text-amber-500 text-[10px]">ยังไม่กรอก</span>
+        <span className="text-amber-500 text-[14px]">ยังไม่กรอก</span>
       )}
       {weighted !== null && (
-        <span className="text-[9px] font-black text-violet-500">= {fmtScore(weighted)} คะแนนจริง</span>
+        <span className="text-[12px] font-black text-violet-500">= {fmtScore(weighted)} คะแนนจริง</span>
       )}
     </button>
   );
@@ -1731,7 +1731,7 @@ function EditablePresetCell({
         onFocus={e => e.currentTarget.select()}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
-        className="w-16 text-center border-2 border-sky-300 rounded-lg py-1 text-sm font-black focus:outline-none"
+        className="w-16 text-center border-2 border-sky-300 rounded-lg py-1 text-m font-black focus:outline-none"
       />
     );
   }
@@ -1740,7 +1740,7 @@ function EditablePresetCell({
     <button
       onClick={onRequestEdit}
       title="คลิกเพื่อแก้ไขคะแนน"
-      className={`text-sm font-black px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors ${
+      className={`text-m font-black px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors ${
         value > 0 ? "text-emerald-600" : value < 0 ? "text-red-500" : "text-slate-300"
       }`}
     >
@@ -1801,7 +1801,7 @@ function PodiumView({
   if (ranked.length === 0) {
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
-        <p className="font-bold text-sm">ยังไม่มีข้อมูลคะแนน</p>
+        <p className="font-bold text-m">ยังไม่มีข้อมูลคะแนน</p>
       </div>
     );
   }
@@ -1826,7 +1826,7 @@ function PodiumView({
       {showConfetti && <ConfettiBurst />}
       <div className="bg-white rounded-2xl border border-slate-100 p-6 sm:p-10">
         <div className="flex justify-end mb-6 print:hidden">
-          <button onClick={onToggleHide} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-bold text-xs">
+          <button onClick={onToggleHide} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-bold text-m">
             {hideScores ? "👁️ แสดงคะแนน" : "🙈 ซ่อนคะแนน"}
           </button>
         </div>
@@ -1853,16 +1853,16 @@ function PodiumView({
                             {s.first_name[0]}
                           </div>
                         )}
-                        <p className="mt-2 text-sm font-black text-slate-700 text-center max-w-[100px] truncate">{s.first_name} {s.last_name}</p>
+                        <p className="mt-2 text-m font-black text-slate-700 text-center max-w-[100px] truncate">{s.nick_name} {s.first_name}</p>
                       </div>
                     );
                   })}
                 </div>
-                <p className="text-[11px] font-black text-fuchsia-500 my-2">
+                <p className="text-m font-black text-fuchsia-500 my-2">
                   {hideScores ? "•••" : `${fmtScore(group[0].grandTotal)} คะแนน`}
                 </p>
                 <div className={`w-20 sm:w-28 ${heights[rankNum]} rounded-t-xl bg-gradient-to-b from-amber-300 to-amber-400 flex items-start justify-center pt-2`}>
-                  <span className="text-white font-black text-lg">{rankNum}</span>
+                  <span className="text-white font-black text-xl">{rankNum}</span>
                 </div>
               </div>
             );
@@ -1871,23 +1871,23 @@ function PodiumView({
 
         {restRanked.length > 0 && (
           <div className={`mt-8 pt-6 border-t border-slate-100 transition-opacity duration-500 ${revealed ? "opacity-100" : "opacity-0"}`}>
-            <p className="font-black text-slate-600 text-sm mb-3">📋 อันดับที่เหลือ</p>
+            <p className="font-black text-slate-600 text-m mb-3">📋 อันดับที่เหลือ</p>
             <div className="divide-y divide-slate-50">
               {restRanked.map(r => {
                 const s = r.student;
                 return (
                   <div key={s.id} className="flex items-center gap-3 py-2">
-                    <span className="w-9 text-center text-xs font-black text-slate-400">#{r.rank}</span>
+                    <span className="w-9 text-center text-m font-black text-slate-400">#{r.rank}</span>
                     {s.avatar_url ? (
                       <img src={s.avatar_url} className="w-8 h-8 rounded-full object-cover" />
                     ) : (
-                      <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-xs font-black flex items-center justify-center">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 text-sm font-black flex items-center justify-center">
                         {s.first_name[0]}
                       </div>
                     )}
-                    <p className="flex-1 text-xs font-bold text-slate-600 truncate">{s.prefix}{s.first_name} {s.last_name}</p>
-                    <span className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</span>
-                    <span className="text-xs font-black text-fuchsia-500 shrink-0 min-w-[70px] text-right">
+                    <p className="flex-1 text-m font-bold text-slate-600 truncate">{s.prefix}{s.first_name} {s.last_name}</p>
+                    <span className="text-[16px] text-slate-400 font-bold">เลขที่ {s.seat_number}</span>
+                    <span className="text-m font-black text-fuchsia-500 shrink-0 min-w-[70px] text-right">
                       {hideScores ? "•••" : `${fmtScore(r.grandTotal)} คะแนน`}
                     </span>
                   </div>
@@ -1937,11 +1937,11 @@ function GradeSettingModal({
     <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onCancel}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-black text-slate-800 text-lg">Grade Setting</h3>
+          <h3 className="font-black text-slate-800 text-xl">Grade Setting</h3>
           <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
         </div>
 
-        <div className="grid grid-cols-[1fr_1fr_1fr_32px] gap-2 mb-2 text-[11px] font-black text-slate-400 px-1">
+        <div className="grid grid-cols-[1fr_1fr_1fr_32px] gap-2 mb-2 text-xs font-black text-slate-400 px-1">
           <span>Max</span><span>Min</span><span>Grade</span><span></span>
         </div>
 
@@ -1949,23 +1949,23 @@ function GradeSettingModal({
           {rows.map((r, i) => (
             <div key={i} className="grid grid-cols-[1fr_1fr_1fr_32px] gap-2 items-center">
               <input type="number" value={r.max_percent} onChange={e => updateRow(i, "max_percent", e.target.value)}
-                className="border-2 border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center" />
+                className="border-2 border-slate-200 rounded-lg px-2 py-1.5 text-m font-bold text-center" />
               <input type="number" value={r.min_percent} onChange={e => updateRow(i, "min_percent", e.target.value)}
-                className="border-2 border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center" />
+                className="border-2 border-slate-200 rounded-lg px-2 py-1.5 text-m font-bold text-center" />
               <input value={r.grade} onChange={e => updateRow(i, "grade", e.target.value)}
-                className="border-2 border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center" />
+                className="border-2 border-slate-200 rounded-lg px-2 py-1.5 text-m font-bold text-center" />
               <button onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 font-black">✕</button>
             </div>
           ))}
         </div>
 
-        <button onClick={addRow} className="mt-3 w-full py-2 rounded-lg border-2 border-dashed border-slate-300 text-slate-400 hover:border-fuchsia-400 hover:text-fuchsia-500 font-black text-xs">
+        <button onClick={addRow} className="mt-3 w-full py-2 rounded-lg border-2 border-dashed border-slate-300 text-slate-400 hover:border-fuchsia-400 hover:text-fuchsia-500 font-black text-sm">
           + เพิ่มแถว
         </button>
 
         <div className="flex gap-2 mt-5">
-          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">Cancel</button>
-          <button onClick={() => onSave(rows)} className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-500 text-white font-black text-sm">+ Update</button>
+          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-m">Cancel</button>
+          <button onClick={() => onSave(rows)} className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-500 text-white font-black text-m">+ Update</button>
         </div>
       </div>
     </div>
@@ -2041,9 +2041,9 @@ function StudentReportModal({
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4 print:hidden">
-          <h3 className="font-black text-slate-800 text-lg">รายงานผลรายบุคคล</h3>
+          <h3 className="font-black text-slate-800 text-xl">รายงานผลรายบุคคล</h3>
           <div className="flex items-center gap-2">
-            <button onClick={handlePrint} className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">
+            <button onClick={handlePrint} className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm">
               🖨️ พิมพ์ / บันทึก PDF
             </button>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
@@ -2058,8 +2058,8 @@ function StudentReportModal({
               {s.first_name[0]}
             </div>
           )}
-          <p className="mt-3 font-black text-slate-800 text-lg">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
-          <p className="text-slate-400 text-xs font-bold">เลขที่ {s.seat_number} · {classroomLabel ?? "-"}</p>
+          <p className="mt-3 font-black text-slate-800 text-xl">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
+          <p className="text-slate-400 text-sm font-bold">เลขที่ {s.seat_number} · {classroomLabel ?? "-"}</p>
         </div>
 
         <div className="grid grid-cols-2 gap-2 mb-5">
@@ -2071,11 +2071,11 @@ function StudentReportModal({
 
         <div className="rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white p-4 flex items-center justify-between mb-5">
   <div>
-    <p className="text-[11px] font-bold opacity-90">คะแนนรวมทั้งหมด</p>
+    <p className="text-xs font-bold opacity-90">คะแนนรวมทั้งหมด</p>
     <p className="text-2xl font-black">{row.grandTotal} คะแนน</p>
   </div>
   <div className="text-right">
-    <p className="text-[11px] font-bold opacity-90">{gradingMode === "pass_fail" ? "สถานะ" : "เกรด"}</p>   {/* ★ */}
+    <p className="text-xs font-bold opacity-90">{gradingMode === "pass_fail" ? "สถานะ" : "เกรด"}</p>   {/* ★ */}
     <p className="text-2xl font-black">
       {gradingMode === "pass_fail" ? (row.passFailStatus ?? "-") : row.grade}   {/* ★ */}
     </p>
@@ -2083,7 +2083,7 @@ function StudentReportModal({
 </div>
 
         <div className="mb-5">
-          <p className="text-xs font-black text-slate-600 mb-2">🗓️ การเข้าเรียน</p>
+          <p className="text-sm font-black text-slate-600 mb-2">🗓️ การเข้าเรียน</p>
           <InfoBox
             label="จำนวนวันที่มาเรียน"
             value={attendance.total > 0 ? `${attendance.present} / ${attendance.total} วัน` : "ยังไม่มีข้อมูลการเช็คชื่อ"}
@@ -2091,16 +2091,16 @@ function StudentReportModal({
         </div>
 
         <div className="mb-5">
-          <p className="text-xs font-black text-slate-600 mb-2">📚 รายการชิ้นงาน</p>
+          <p className="text-sm font-black text-slate-600 mb-2">📚 รายการชิ้นงาน</p>
           {assignments.length === 0 ? (
-            <p className="text-slate-300 text-xs font-bold italic">ยังไม่มีงานที่มอบหมาย</p>
+            <p className="text-slate-300 text-sm font-bold italic">ยังไม่มีงานที่มอบหมาย</p>
           ) : (
             <div className="rounded-xl border border-slate-100 overflow-hidden">
               {assignments.map((a, i) => {
   const sub = row.subMap[a.id];
   const info = getLateInfo(a, sub); // ★ เรียกตรง ๆ ได้เลย เพราะเป็น top-level function
   return (
-    <div key={a.id} className={`flex items-center justify-between px-3 py-2 text-xs ${i % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
+    <div key={a.id} className={`flex items-center justify-between px-3 py-2 text-sm ${i % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
       <span className="font-bold text-slate-600 truncate pr-2">{a.title}</span>
       <span className="font-black text-slate-700 whitespace-nowrap flex items-center gap-1.5">
         {sub?.score ?? (sub ? "รอตรวจ" : "ไม่ส่งงาน")} / {a.max_score}
@@ -2113,7 +2113,7 @@ function StudentReportModal({
 })}
             </div>
           )}
-          <div className="mt-2 flex items-center justify-between text-[11px] font-black text-slate-500">
+          <div className="mt-2 flex items-center justify-between text-xs font-black text-slate-500">
             <span>ส่งงานแล้ว {row.submittedCount} / {assignments.length} ชิ้น · รวม {row.assignmentTotal} / {assignments.reduce((a, b) => a + (b.max_score ?? 0), 0)} คะแนน</span>
             <span>
   {row.onTimeRate === null
@@ -2124,20 +2124,20 @@ function StudentReportModal({
         </div>
 
         <div className="mb-5">
-          <p className="text-xs font-black text-slate-600 mb-2">⭐ คะแนนพิเศษรวม</p>
+          <p className="text-sm font-black text-slate-600 mb-2">⭐ คะแนนพิเศษรวม</p>
           <InfoBox label="คะแนนพิเศษที่ได้ (บวก/ลบ)" value={`${row.specialTotal > 0 ? "+" : ""}${row.specialTotal} คะแนน`} />
         </div>
 
         <div>
-          <p className="text-xs font-black text-slate-600 mb-2 flex items-center justify-between print:hidden">
+          <p className="text-sm font-black text-slate-600 mb-2 flex items-center justify-between print:hidden">
             <span>💬 คอมเมนต์ครูประจำวิชา</span>
-            {commentSaved && <span className="text-emerald-500 text-[10px] font-black">✓ บันทึกแล้ว</span>}
+            {commentSaved && <span className="text-emerald-500 text-[14px] font-black">✓ บันทึกแล้ว</span>}
           </p>
-          <p className="text-xs font-black text-slate-600 mb-2 hidden print:block">💬 คอมเมนต์ครูประจำวิชา</p>
+          <p className="text-sm font-black text-slate-600 mb-2 hidden print:block">💬 คอมเมนต์ครูประจำวิชา</p>
           {loadingComment ? (
-            <p className="text-slate-300 text-xs font-bold">กำลังโหลด...</p>
+            <p className="text-slate-300 text-sm font-bold">กำลังโหลด...</p>
           ) : readOnly ? (
-            <p className="w-full border-2 border-slate-100 rounded-xl px-3 py-2 text-xs font-bold text-slate-600 bg-slate-50 min-h-[3rem] print:border-none print:p-0 print:bg-transparent">
+            <p className="w-full border-2 border-slate-100 rounded-xl px-3 py-2 text-sm font-bold text-slate-600 bg-slate-50 min-h-[3rem] print:border-none print:p-0 print:bg-transparent">
               {comment || "— ไม่มีคอมเมนต์ —"}
             </p>
           ) : (
@@ -2147,12 +2147,12 @@ function StudentReportModal({
                 onChange={e => setComment(e.target.value)}
                 placeholder="พิมพ์คอมเมนต์ถึงนักเรียน (ไม่บังคับ)..."
                 rows={3}
-                className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-xs font-bold resize-none focus:border-fuchsia-300 focus:outline-none print:border-none print:p-0"
+                className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold resize-none focus:border-fuchsia-300 focus:outline-none print:border-none print:p-0"
               />
               <button
                 onClick={saveComment}
                 disabled={savingComment}
-                className="mt-2 w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-black text-xs disabled:opacity-50 print:hidden"
+                className="mt-2 w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-black text-sm disabled:opacity-50 print:hidden"
               >
                 {savingComment ? "กำลังบันทึก..." : "💾 บันทึกคอมเมนต์"}
               </button>
@@ -2167,8 +2167,8 @@ function StudentReportModal({
 function InfoBox({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-      <p className="text-[10px] font-black text-slate-400">{label}</p>
-      <p className="text-sm font-black text-slate-700 mt-0.5 truncate">{value}</p>
+      <p className="text-[14px] font-black text-slate-400">{label}</p>
+      <p className="text-m font-black text-slate-700 mt-0.5 truncate">{value}</p>
     </div>
   );
 }

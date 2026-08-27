@@ -128,9 +128,9 @@ export default function SmartClassRoomsPage() {
   </div>
   <div className="text-center px-2">
     <h1 className="text-3xl sm:text-4xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
-    <p className="text-white text-xl font-black mt-1.5">
-      {subject.subject_code} · {sections.length} ห้อง{isAdmin ? " (มุมมองแอดมิน)" : ""}
-    </p>
+    <p className="text-white text-2xl font-black mt-1.5">
+  {subject.subject_code} · {sections.length} ห้อง{isAdmin ? " (มุมมองแอดมิน)" : ""}
+</p>
   </div>
 </div>
 
@@ -153,20 +153,20 @@ export default function SmartClassRoomsPage() {
   onClick={() => router.push(`/smartclass/${subjectId}/${sec.id}`)}
   className="text-left rounded-2xl border-2 border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
 >
-  <div className={`h-11 bg-gradient-to-r ${gradient} px-3 flex items-center justify-between`}>
-    <span className="text-sm font-black bg-white text-slate-900 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
-      CLASSROOM
+  <div className={`h-14 bg-gradient-to-r ${gradient} px-3 flex items-center justify-between`}>
+  <span className="text-sm font-black bg-white text-slate-900 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
+    CLASSROOM
+  </span>
+  <span className="text-white text-lg leading-none font-black">⠿</span>
+</div>
+<div className="p-4 text-left">
+  <p className="font-black text-xl text-slate-900 leading-tight truncate">{label}</p>
+  <div className="mt-2.5 flex justify-start">
+    <span className="text-sm font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
+      👥 {count} คน
     </span>
-    <span className="text-white text-lg leading-none font-black">⠿</span>
   </div>
-  <div className="p-3 text-center">
-    <p className="font-black text-xl text-slate-900 leading-tight truncate">{label}</p>
-    <div className="mt-2.5 flex justify-center">
-      <span className="text-sm font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
-        👥 {count} คน
-      </span>
-    </div>
-  </div>
+</div>
 </button>
               );
             })}

@@ -248,7 +248,7 @@ export default function AttendanceTool({
     return (
       <div className="p-10 text-center text-slate-400">
         <p className="text-3xl mb-2">📭</p>
-        <p className="font-bold text-sm">ยังไม่มีนักเรียนเข้าร่วมวิชานี้ ไม่สามารถเช็กชื่อได้</p>
+        <p className="font-bold text-m">ยังไม่มีนักเรียนเข้าร่วมวิชานี้ ไม่สามารถเช็กชื่อได้</p>
       </div>
     );
   }
@@ -258,22 +258,22 @@ export default function AttendanceTool({
       {/* หัวการ์ด */}
       <div className="flex items-start justify-between gap-3 px-5 pt-5 flex-wrap">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-sky-50 flex items-center justify-center text-lg shrink-0">✨</div>
+          <div className="w-10 h-10 rounded-xl bg-sky-50 flex items-center justify-center text-xl shrink-0">✨</div>
           <div>
-            <h2 className="font-black text-slate-800 text-lg leading-none">เช็คชื่อ</h2>
-            <p className="text-slate-400 text-xs italic mt-1">ตารางเช็คชื่อสำหรับคาบเรียนนี้</p>
+            <h2 className="font-black text-slate-800 text-xl leading-none">เช็คชื่อ</h2>
+            <p className="text-slate-400 text-sm italic mt-1">ตารางเช็คชื่อสำหรับคาบเรียนนี้</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => { setShowSwapDate(v => !v); setSwapError(""); }}
-            className="shrink-0 px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-xs flex items-center gap-1.5 transition-colors"
+            className="shrink-0 px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-sm flex items-center gap-1.5 transition-colors"
           >
             🔄 สลับคาบวันเรียน
           </button>
           <button
             onClick={() => setShowNoteCol(v => !v)}
-            className="shrink-0 px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-600 font-black text-xs flex items-center gap-1.5 transition-colors"
+            className="shrink-0 px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-600 font-black text-sm flex items-center gap-1.5 transition-colors"
           >
             📝 {showNoteCol ? "ซ่อนโน้ต" : "เพิ่มโน้ต"}
           </button>
@@ -283,36 +283,36 @@ export default function AttendanceTool({
       {/* แผงสลับคาบวันเรียน */}
       {showSwapDate && (
         <div className="mx-5 mt-3 rounded-xl border-2 border-indigo-200 bg-indigo-50 px-4 py-3">
-          <p className="text-xs font-black text-indigo-700 mb-2">🔄 สลับคาบวันเรียน (เรียนชดเชย / สลับคาบฉุกเฉิน)</p>
+          <p className="text-sm font-black text-indigo-700 mb-2">🔄 สลับคาบวันเรียน (เรียนชดเชย / สลับคาบฉุกเฉิน)</p>
 
           <div className="flex items-center gap-2 flex-wrap mb-3">
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-bold text-slate-500">จาก</span>
-              <span className="px-2.5 py-1 rounded-lg bg-white border-2 border-slate-200 text-xs font-black text-slate-700">
+              <span className="text-xs font-bold text-slate-500">จาก</span>
+              <span className="px-2.5 py-1 rounded-lg bg-white border-2 border-slate-200 text-sm font-black text-slate-700">
                 {formatThaiDate(date)}
               </span>
             </div>
             <span className="text-slate-400 font-black">→</span>
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-bold text-slate-500">เป็น</span>
+              <span className="text-xs font-bold text-slate-500">เป็น</span>
               <input
                 type="date"
                 value={swapToDate}
                 onChange={e => setSwapToDate(e.target.value)}
-                className="border-2 border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold focus:border-indigo-400 focus:outline-none"
+                className="border-2 border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
               />
             </div>
           </div>
 
           <div className="mb-3">
-            <p className="text-[11px] font-bold text-slate-500 mb-1.5">เหตุผล</p>
+            <p className="text-xs font-bold text-slate-500 mb-1.5">เหตุผล</p>
             <div className="flex gap-2 flex-wrap">
               {(Object.keys(REASON_CONFIG) as SwapReason[]).map(r => (
                 <button
                   key={r}
                   type="button"
                   onClick={() => setSwapReason(r)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 transition-colors ${
+                  className={`px-3 py-1.5 rounded-xl text-sm font-black border-2 transition-colors ${
                     swapReason === r
                       ? "bg-indigo-600 border-indigo-600 text-white"
                       : "bg-white border-slate-200 text-slate-500 hover:border-indigo-300"
@@ -328,76 +328,76 @@ export default function AttendanceTool({
             value={swapNote}
             onChange={e => setSwapNote(e.target.value)}
             placeholder="หมายเหตุเพิ่มเติม (ถ้ามี) เช่น เหตุผลของการสลับคาบ"
-            className="w-full border-2 border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:border-indigo-400 focus:outline-none mb-3"
+            className="w-full border-2 border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:border-indigo-400 focus:outline-none mb-3"
           />
 
           <div className="flex gap-2">
             <button
               onClick={handleSwapDate}
               disabled={swapping}
-              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs disabled:opacity-50"
+              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm disabled:opacity-50"
             >
               {swapping ? "⏳ กำลังสลับ..." : "✅ ยืนยันสลับวัน"}
             </button>
             <button
               onClick={() => { setShowSwapDate(false); setSwapToDate(""); setSwapNote(""); setSwapError(""); }}
-              className="px-3 py-1.5 rounded-xl border-2 border-slate-200 text-slate-500 font-black text-xs"
+              className="px-3 py-1.5 rounded-xl border-2 border-slate-200 text-slate-500 font-black text-sm"
             >
               ยกเลิก
             </button>
           </div>
-          {swapError && <p className="text-red-600 text-[11px] font-bold mt-2">❌ {swapError}</p>}
+          {swapError && <p className="text-red-600 text-xs font-bold mt-2">❌ {swapError}</p>}
         </div>
       )}
 
       {/* แจ้งเตือนถ้าคาบนี้ถูกย้าย */}
       {movedAway && (
-        <div className="mx-5 mt-3 rounded-xl border-2 border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs font-bold text-indigo-600 flex items-center justify-between gap-2 flex-wrap">
+        <div className="mx-5 mt-3 rounded-xl border-2 border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-600 flex items-center justify-between gap-2 flex-wrap">
           <span>
             {REASON_CONFIG[movedAway.reason].emoji} คาบนี้ถูกย้ายไปสอนวันที่ {formatThaiDate(movedAway.new_date)}
             {" "}({REASON_CONFIG[movedAway.reason].label}) — ไม่ต้องเช็คชื่อวันนี้
           </span>
           <button
             onClick={() => handleCancelReschedule(movedAway.id)}
-            className="px-2.5 py-1 rounded-lg border-2 border-indigo-200 text-indigo-500 font-black text-[11px] shrink-0"
+            className="px-2.5 py-1 rounded-lg border-2 border-indigo-200 text-indigo-500 font-black text-xs shrink-0"
           >
             ยกเลิกการสลับ
           </button>
         </div>
       )}
       {movedIn && (
-        <div className="mx-5 mt-3 rounded-xl border-2 border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs font-bold text-indigo-600">
+        <div className="mx-5 mt-3 rounded-xl border-2 border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-600">
           {REASON_CONFIG[movedIn.reason].emoji} คาบนี้ย้ายมาจากวันที่ {formatThaiDate(movedIn.original_date)}
           {" "}({REASON_CONFIG[movedIn.reason].label}) — เช็คชื่อที่นี่แทน
         </div>
       )}
 
       <div className="px-5 mt-4">
-        <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500 text-white text-xs font-black">Default</span>
+        <span className="inline-block px-4 py-1.5 rounded-full bg-blue-500 text-white text-sm font-black">Default</span>
       </div>
 
       {/* ช่วงเวลา (แสดงผลอย่างเดียว ยังไม่ส่งเข้า API) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 px-5 mt-4">
         <div>
-          <p className="text-xs font-bold text-slate-500 mb-1 flex items-center gap-1.5">📅 เลือกเวลาเริ่ม</p>
+          <p className="text-sm font-bold text-slate-500 mb-1 flex items-center gap-1.5">📅 เลือกเวลาเริ่ม</p>
           <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
-            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-sky-400 focus:outline-none" />
+            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-m font-bold focus:border-sky-400 focus:outline-none" />
         </div>
         <div>
-          <p className="text-xs font-bold text-slate-500 mb-1 flex items-center gap-1.5">🕐 เลือกเวลาจบ</p>
+          <p className="text-sm font-bold text-slate-500 mb-1 flex items-center gap-1.5">🕐 เลือกเวลาจบ</p>
           <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
-            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-sky-400 focus:outline-none" />
+            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-m font-bold focus:border-sky-400 focus:outline-none" />
         </div>
       </div>
 
       {/* ตัวนับ + สรุปยอด + ปุ่มลัด */}
       <div className="flex items-center justify-between flex-wrap gap-2 px-5 mt-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1.5 text-xs font-black text-sky-600 bg-sky-50 px-3 py-1.5 rounded-full">
+          <span className="inline-flex items-center gap-1.5 text-sm font-black text-sky-600 bg-sky-50 px-3 py-1.5 rounded-full">
             <span className="w-2 h-2 rounded-full bg-sky-500" /> {markedCount} / {students.length} marked
           </span>
           {STATUS_ORDER.map(st => (
-            <span key={st} className={`px-2.5 py-1 rounded-full text-[11px] font-black ${STATUS_CONFIG[st].chipBg} ${STATUS_CONFIG[st].chipText}`}>
+            <span key={st} className={`px-2.5 py-1 rounded-full text-xs font-black ${STATUS_CONFIG[st].chipBg} ${STATUS_CONFIG[st].chipText}`}>
               {STATUS_CONFIG[st].emoji} {STATUS_CONFIG[st].label} {summary[st] ?? 0}
             </span>
           ))}
@@ -405,12 +405,12 @@ export default function AttendanceTool({
         <div className="flex gap-2">
           {referenceMap && (
             <button onClick={pullFromReference}
-              className="px-3 py-1.5 rounded-xl border-2 border-blue-200 bg-blue-50 text-blue-700 font-black text-xs">
+              className="px-3 py-1.5 rounded-xl border-2 border-blue-200 bg-blue-50 text-blue-700 font-black text-sm">
               📥 ดึงจาก{referenceLabel}
             </button>
           )}
           {holidayInfo && (
-  <div className="mx-5 mt-3 rounded-xl border-2 border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-bold text-rose-600">
+  <div className="mx-5 mt-3 rounded-xl border-2 border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-bold text-rose-600">
     📅 วันนี้เป็นวันหยุด: {holidayInfo.name} — ถ้าไม่มีเรียนชดเชย ไม่ต้องเช็คชื่อ
   </div>
 )}
@@ -422,20 +422,20 @@ export default function AttendanceTool({
         <table className="w-full min-w-[640px] border-collapse">
           <thead>
             <tr className="bg-slate-50">
-              <th className="text-left text-[11px] font-black text-slate-500 tracking-wide px-5 py-3 sticky left-0 bg-slate-50">STUDENT</th>
+              <th className="text-left text-xs font-black text-slate-500 tracking-wide px-5 py-3 sticky left-0 bg-slate-50">STUDENT</th>
               {STATUS_ORDER.map(st => (
                 <th key={st} className="px-2 py-3">
                   <button
                     type="button"
                     onClick={() => markAll(st)}
                     title={`ตั้งค่าทุกคนเป็น "${STATUS_CONFIG[st].label}"`}
-                    className={`inline-flex items-center gap-1.5 text-[11px] font-black ${STATUS_CONFIG[st].chipText} ${STATUS_CONFIG[st].chipBg} px-2.5 py-1 rounded-full hover:brightness-95 active:scale-95 transition-all cursor-pointer`}
+                    className={`inline-flex items-center gap-1.5 text-xs font-black ${STATUS_CONFIG[st].chipText} ${STATUS_CONFIG[st].chipBg} px-2.5 py-1 rounded-full hover:brightness-95 active:scale-95 transition-all cursor-pointer`}
                   >
                     <span className={`w-2 h-2 rounded-full ${STATUS_CONFIG[st].dot}`} /> {STATUS_CONFIG[st].label}
                   </button>
                 </th>
               ))}
-              {showNoteCol && <th className="text-left text-[11px] font-black text-slate-500 tracking-wide px-5 py-3">NOTE</th>}
+              {showNoteCol && <th className="text-left text-xs font-black text-slate-500 tracking-wide px-5 py-3">NOTE</th>}
             </tr>
           </thead>
           <tbody>
@@ -449,15 +449,15 @@ export default function AttendanceTool({
                       {s.avatar_url ? (
                         <img src={s.avatar_url} className="w-9 h-9 rounded-full object-cover shrink-0" />
                       ) : (
-                        <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${gradient} text-white text-sm font-black flex items-center justify-center shrink-0`}>
+                        <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${gradient} text-white text-m font-black flex items-center justify-center shrink-0`}>
                           {s.first_name[0]}
                         </div>
                       )}
-                      <p className="text-sm font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
+                      <p className="text-m font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
                       <div className="flex items-center gap-1.5 whitespace-nowrap">
-                        <p className="text-[11px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
+                        <p className="text-xs text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                         {ref && (
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-black ${STATUS_CONFIG[ref.status].chipBg} ${STATUS_CONFIG[ref.status].chipText}`}>
+                          <span className={`text-[12px] px-1.5 py-0.5 rounded-md font-black ${STATUS_CONFIG[ref.status].chipBg} ${STATUS_CONFIG[ref.status].chipText}`}>
                             {referenceLabel}: {STATUS_CONFIG[ref.status].label}
                           </span>
                         )}
@@ -489,7 +489,7 @@ export default function AttendanceTool({
                         value={noteMap[s.id] ?? ""}
                         onChange={e => setNote(s.id, e.target.value)}
                         placeholder="เพิ่มโน้ต..."
-                        className="w-full min-w-[140px] border-2 border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold focus:border-sky-400 focus:outline-none"
+                        className="w-full min-w-[140px] border-2 border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-bold focus:border-sky-400 focus:outline-none"
                       />
                     </td>
                   )}
@@ -500,12 +500,12 @@ export default function AttendanceTool({
         </table>
       </div>
 
-      {error && <p className="text-red-600 text-xs font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-2 mx-5 mt-3">❌ {error}</p>}
+      {error && <p className="text-red-600 text-sm font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-2 mx-5 mt-3">❌ {error}</p>}
 
       {/* ปุ่มบันทึก */}
       <div className="px-5 py-4 mt-3 border-t border-slate-100">
         <button onClick={handleSave} disabled={saving}
-          className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+          className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-m disabled:opacity-50 flex items-center justify-center gap-2">
           {saving ? "⏳ กำลังบันทึก..." : saved ? "✅ บันทึกแล้ว — กดซ้ำเพื่ออัปเดต" : "✏️ บันทึก"}
         </button>
       </div>
