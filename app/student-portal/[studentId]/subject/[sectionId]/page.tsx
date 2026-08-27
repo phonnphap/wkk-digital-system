@@ -16,10 +16,8 @@ interface Submission {
   teacher_comment: string | null;
   status: string;
   is_late: boolean | null;
-  // ★ FIX 1: ไฟล์ที่นักเรียนอัปโหลดส่งงาน ต้องมี URL เพื่อให้คลิกเปิด/ดาวน์โหลดได้
   file_url?: string | null;
   file_name?: string | null;
-  // ★ FIX 3: ผลลัพธ์เมื่อ assignment เป็นโหมดผ่าน/ไม่ผ่าน
   pass_fail_result?: PassFailResult;
 }
 
@@ -31,7 +29,6 @@ interface Assignment {
   max_score: number | null;
   weight_percent?: number | null;
   submissions: Submission[];
-  // ★ FIX 3: โหมดการให้คะแนนของงานชิ้นนี้
   grading_mode?: GradingMode;
 }
 
@@ -43,13 +40,21 @@ interface GradeRow {
   weight_percent: number | null;
   percentage: number | null;
   is_late: boolean;
-  // ★ FIX 3
   grading_mode?: GradingMode;
   pass_fail_result?: PassFailResult;
 }
 
+// ★ ข้อมูลรายวิชาสำหรับแบนเนอร์ด้านบน
+// หมายเหตุ: สมมติว่ามี endpoint นี้ ถ้ายังไม่มีฝั่ง backend ต้องเพิ่มให้ตรงกัน
+interface SubjectInfo {
+  subject_name: string;
+  class_name?: string | null;
+  academic_year?: string | null;
+  class_code?: string | null;
+}
+
 const TAB_ITEMS: { key: Tab; label: string; icon: string }[] = [
-  { key: "assignments", label: "งานที่มอบหมาย/ส่งงาน", icon: "📌" },
+  { key: "assignments", label: "งานของฉัน", icon: "📌" },
   { key: "pending", label: "งานที่ยังไม่ส่ง", icon: "⏳" },
   { key: "grades", label: "คะแนนรวม", icon: "⭐" },
   { key: "attendance", label: "เช็คชื่อ", icon: "✅" },
@@ -70,10 +75,30 @@ function formatDate(iso: string | null | undefined) {
   }
 }
 
-// ★ FIX 1: helper เผื่อกรณี content เป็น URL ตรง ๆ (เก็บมาแบบเก่าก่อนมี file_url)
 function looksLikeUrl(text: string | null | undefined): boolean {
   if (!text) return false;
   return /^https?:\/\/\S+$/i.test(text.trim());
+}
+
+// ★ ฟีเจอร์เสริม (อ้างอิงจากภาพตัวอย่าง): badge นับเวลาถึงกำหนดส่ง / เลยกำหนดแล้วกี่วัน
+function getDueStatus(due_date: string | null | undefined): { label: string; className: string } | null {
+  if (!due_date) return null;
+  const due = new Date(due_date).getTime();
+  if (Number.isNaN(due)) return null;
+  const now = Date.now();
+  const diffMs = due - now;
+  const diffDays = Math.round(Math.abs(diffMs) / (1000 * 60 * 60 * 24));
+
+  if (diffMs < 0) {
+    return {
+      label: diffDays === 0 ? "เลยกำหนดวันนี้ 😟" : `เลยกำหนดแล้ว ${diffDays} วัน 😟`,
+      className: "bg-rose-50 text-rose-600",
+    };
+  }
+  if (diffDays === 0) {
+    return { label: "กำหนดส่งวันนี้ ⏰", className: "bg-amber-50 text-amber-600" };
+  }
+  return { label: `เหลืออีก ${diffDays} วัน`, className: "bg-emerald-50 text-emerald-600" };
 }
 
 export default function StudentPortalSubjectPage() {
@@ -87,6 +112,7 @@ export default function StudentPortalSubjectPage() {
     summary: { weighted_score: number; weight_graded: number; grade: string | null };
   } | null>(null);
   const [attendance, setAttendance] = useState<any>(null);
+  const [subjectInfo, setSubjectInfo] = useState<SubjectInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
 
@@ -120,6 +146,26 @@ export default function StudentPortalSubjectPage() {
     setLoading(false);
   }, [studentId]);
 
+  // ★ ดึงข้อมูลรายวิชาสำหรับแบนเนอร์ (ไม่บล็อก loading หลักของแท็บ ถ้า endpoint ไม่มีจริงจะ fail เงียบ ๆ)
+  const fetchSubjectInfo = useCallback(async () => {
+    if (!sectionId) return;
+    try {
+      const res = await fetch(
+        `/api/student-portal/subject-section?student_id=${studentId}&subject_section_id=${sectionId}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setSubjectInfo(data);
+      }
+    } catch {
+      // เงียบไว้ ไม่ให้กระทบหน้าอื่น
+    }
+  }, [studentId, sectionId]);
+
+  useEffect(() => {
+    fetchSubjectInfo();
+  }, [fetchSubjectInfo]);
+
   useEffect(() => {
     if (tab === "assignments" || tab === "pending") fetchAssignments();
     if (tab === "grades") fetchGrades();
@@ -151,33 +197,59 @@ export default function StudentPortalSubjectPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-fuchsia-50/40 font-['TH_Sarabun_New',_sans-serif] pb-16">
-      <div className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8">
-        {/* ปุ่มย้อนกลับ */}
+      {/* ★ แบนเนอร์ด้านบน + ปุ่มย้อนกลับมุมบนซ้าย */}
+      <div className="relative bg-gradient-to-br from-fuchsia-500 via-pink-500 to-rose-400 pt-14 pb-8 px-4 sm:px-6 lg:px-8 rounded-b-[2rem] shadow-md">
         <button
           onClick={() => router.push(`/student-portal/${studentId}`)}
-          className="flex items-center gap-2 text-base font-bold text-slate-500 hover:text-fuchsia-600 mb-5 transition-colors"
+          aria-label="กลับตารางเรียน"
+          className="absolute top-4 left-4 sm:left-6 lg:left-8 inline-flex items-center justify-center h-11 w-11 rounded-full bg-white/20 backdrop-blur-sm text-white hover:bg-white/30 active:scale-95 transition-all shadow-sm"
         >
-          <ArrowLeft className="h-5 w-5" /> กลับตารางเรียน
+          <ArrowLeft className="h-6 w-6" />
         </button>
 
-        {/* แท็บ */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-2 flex items-center gap-2 flex-wrap mb-6">
+        <div className="max-w-6xl mx-auto mt-2">
+          <p className="text-2xl sm:text-3xl font-black text-white truncate">
+            {subjectInfo?.subject_name ?? "รายวิชา"}
+          </p>
+          {subjectInfo?.class_name && (
+            <p className="text-base sm:text-lg font-bold text-white/85 mt-0.5 truncate">
+              {subjectInfo.class_name}
+            </p>
+          )}
+          <div className="flex items-center gap-2 flex-wrap mt-3">
+            {subjectInfo?.academic_year && (
+              <span className="px-3 py-1.5 rounded-full bg-white/20 text-white text-sm font-bold backdrop-blur-sm">
+                ปีการศึกษา: {subjectInfo.academic_year}
+              </span>
+            )}
+            {subjectInfo?.class_code && (
+              <span className="px-3 py-1.5 rounded-full bg-amber-300/90 text-amber-900 text-sm font-black">
+                รหัสเข้ารายวิชา: {subjectInfo.class_code}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8">
+        {/* ★ แท็บเมนู 4 อัน จัดกึ่งกลาง ตัวหนังสือใหญ่ขึ้น */}
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-2 flex items-center justify-center gap-2 flex-wrap mb-6 -mt-10 relative z-10">
           {TAB_ITEMS.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`flex items-center gap-2 px-5 py-3.5 rounded-xl font-black text-sm sm:text-base transition-colors ${
+              className={`flex items-center gap-2 px-5 py-3.5 rounded-xl font-black text-base sm:text-lg transition-colors ${
                 tab === t.key
                   ? "bg-gradient-to-r from-fuchsia-500 to-pink-500 text-white shadow-sm"
-                  : "text-slate-500 hover:bg-slate-50"
+                  : "text-slate-600 hover:bg-slate-50"
               }`}
             >
-              <span className="text-lg">{t.icon}</span>
+              <span className="text-xl">{t.icon}</span>
               {t.label}
               {t.key === "pending" && pendingAssignments.length > 0 && (
                 <span
-                  className={`ml-0.5 px-2 py-0.5 rounded-full text-xs font-black ${
-                    tab === t.key ? "bg-white/25 text-white" : "bg-rose-100 text-rose-500"
+                  className={`ml-0.5 px-2.5 py-0.5 rounded-full text-sm font-black ${
+                    tab === t.key ? "bg-white/25 text-white" : "bg-rose-100 text-rose-600"
                   }`}
                 >
                   {pendingAssignments.length}
@@ -188,12 +260,12 @@ export default function StudentPortalSubjectPage() {
         </div>
 
         {loading && (
-          <div className="text-center py-12 text-fuchsia-400 font-black text-base animate-pulse">
+          <div className="text-center py-12 text-fuchsia-500 font-black text-lg animate-pulse">
             กำลังโหลดข้อมูล...
           </div>
         )}
 
-        {/* งานที่มอบหมาย/ส่งงาน */}
+        {/* งานของฉัน */}
         {tab === "assignments" && !loading && (
           <div className="space-y-4">
             {assignments.length === 0 ? (
@@ -203,6 +275,7 @@ export default function StudentPortalSubjectPage() {
                 const sub = a.submissions[0];
                 const late = !!sub?.is_late;
                 const isPassFail = a.grading_mode === "pass_fail";
+                const dueStatus = !sub ? getDueStatus(a.due_date) : null;
                 return (
                   <div
                     key={a.id}
@@ -210,55 +283,63 @@ export default function StudentPortalSubjectPage() {
                   >
                     <div className="flex items-start justify-between gap-4 flex-wrap">
                       <div className="flex items-start gap-4 min-w-0">
-                        <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-black text-white shrink-0 bg-gradient-to-br from-indigo-500 to-blue-500">
+                        <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl font-black text-white shrink-0 bg-gradient-to-br from-indigo-500 to-blue-500">
                           📄
                         </div>
                         <div className="min-w-0">
-                          <p className="font-black text-slate-800 text-lg truncate">{a.title}</p>
+                          <p className="font-black text-slate-900 text-xl truncate">{a.title}</p>
                           {a.description && (
-                            <p className="text-slate-500 text-sm font-bold mt-1 line-clamp-2">
+                            <p className="text-slate-600 text-base font-bold mt-1 line-clamp-2">
                               {a.description}
                             </p>
                           )}
-                          <p className="text-slate-400 text-xs font-bold mt-1.5">
-                            {a.due_date ? <>กำหนดส่ง {formatDate(a.due_date)}</> : "ไม่มีกำหนดส่ง"}
-                          </p>
+                          <div className="flex items-center gap-2 flex-wrap mt-2">
+                            <p className="text-slate-500 text-sm font-bold">
+                              {a.due_date ? <>กำหนดส่ง {formatDate(a.due_date)}</> : "ไม่มีกำหนดส่ง"}
+                            </p>
+                            {dueStatus && (
+                              <span
+                                className={`px-2.5 py-1 rounded-full text-xs font-black ${dueStatus.className}`}
+                              >
+                                {dueStatus.label}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
-                      {/* คะแนนที่ได้ / สถานะ */}
-                      <div className="shrink-0">
+                      {/* ★ คะแนน/สถานะ ชิดขวา ตัวใหญ่ */}
+                      <div className="shrink-0 ml-auto">
                         {!sub ? (
-                          <span className="inline-block px-4 py-2 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm font-black">
+                          <span className="inline-block px-5 py-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 text-lg font-black">
                             ยังไม่ได้ส่ง
                           </span>
                         ) : isPassFail ? (
-                          // ★ FIX 3: แสดงผลผ่าน/ไม่ผ่าน/รอตรวจ แทนตัวเลขคะแนน
                           sub.pass_fail_result === "pass" ? (
-                            <div className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl bg-emerald-50 border border-emerald-100">
-                              <span className="text-base font-black text-emerald-600">✅ ผ่าน</span>
-                              {late && <span className="text-[11px] font-black text-orange-500">⏰ ส่งช้า</span>}
+                            <div className="flex flex-col items-center gap-1 px-5 py-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                              <span className="text-xl font-black text-emerald-600">✅ ผ่าน</span>
+                              {late && <span className="text-xs font-black text-orange-500">⏰ ส่งช้า</span>}
                             </div>
                           ) : sub.pass_fail_result === "fail" ? (
-                            <div className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl bg-rose-50 border border-rose-100">
-                              <span className="text-base font-black text-rose-600">❌ ไม่ผ่าน</span>
-                              {late && <span className="text-[11px] font-black text-orange-500">⏰ ส่งช้า</span>}
+                            <div className="flex flex-col items-center gap-1 px-5 py-3 rounded-xl bg-rose-50 border border-rose-200">
+                              <span className="text-xl font-black text-rose-600">❌ ไม่ผ่าน</span>
+                              {late && <span className="text-xs font-black text-orange-500">⏰ ส่งช้า</span>}
                             </div>
                           ) : (
-                            <span className="inline-block px-4 py-2 rounded-xl bg-amber-50 border border-amber-100 text-amber-600 text-sm font-black">
+                            <span className="inline-block px-5 py-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 text-lg font-black">
                               ⏳ รอตรวจ
                             </span>
                           )
                         ) : sub.score !== null && sub.score !== undefined ? (
-                          <div className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl bg-emerald-50 border border-emerald-100">
-                            <span className="text-lg font-black text-emerald-600">
+                          <div className="flex flex-col items-center gap-1 px-5 py-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                            <span className="text-3xl font-black text-emerald-600 leading-none">
                               {sub.score}
-                              <span className="text-emerald-400 font-bold text-sm">/{a.max_score ?? "-"}</span>
+                              <span className="text-emerald-500 font-bold text-lg">/{a.max_score ?? "-"}</span>
                             </span>
-                            {late && <span className="text-[11px] font-black text-orange-500">⏰ ส่งช้า</span>}
+                            {late && <span className="text-xs font-black text-orange-500 mt-1">⏰ ส่งช้า</span>}
                           </div>
                         ) : (
-                          <span className="inline-block px-4 py-2 rounded-xl bg-amber-50 border border-amber-100 text-amber-600 text-sm font-black">
+                          <span className="inline-block px-5 py-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 text-lg font-black">
                             ⏳ รอตรวจ
                           </span>
                         )}
@@ -267,15 +348,14 @@ export default function StudentPortalSubjectPage() {
 
                     {sub ? (
                       <div className="mt-4 rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
-                        {/* ★ FIX 1: ไฟล์ที่ส่ง แสดงเป็นลิงก์คลิกได้จริง */}
                         {sub.file_url ? (
                           <a
                             href={sub.file_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 text-sm font-black text-indigo-600 hover:text-indigo-700 hover:underline break-all"
+                            className="inline-flex items-center gap-2 text-base font-black text-indigo-600 hover:text-indigo-700 hover:underline break-all"
                           >
-                            <Paperclip className="h-4 w-4 shrink-0" />
+                            <Paperclip className="h-5 w-5 shrink-0" />
                             {sub.file_name || "เปิดไฟล์ที่ส่ง"}
                           </a>
                         ) : looksLikeUrl(sub.content) ? (
@@ -283,23 +363,23 @@ export default function StudentPortalSubjectPage() {
                             href={sub.content as string}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 text-sm font-black text-indigo-600 hover:text-indigo-700 hover:underline break-all"
+                            className="inline-flex items-center gap-2 text-base font-black text-indigo-600 hover:text-indigo-700 hover:underline break-all"
                           >
-                            <Paperclip className="h-4 w-4 shrink-0" />
+                            <Paperclip className="h-5 w-5 shrink-0" />
                             เปิดไฟล์ที่ส่ง
                           </a>
                         ) : (
                           sub.content && (
-                            <p className="text-sm font-bold text-slate-600 whitespace-pre-wrap break-words">
+                            <p className="text-base font-bold text-slate-700 whitespace-pre-wrap break-words">
                               {sub.content}
                             </p>
                           )
                         )}
-                        <p className="text-xs text-slate-400 font-bold mt-1">
+                        <p className="text-sm text-slate-500 font-bold mt-1.5">
                           ส่งเมื่อ {formatDate(sub.submitted_at)}
                         </p>
                         {sub.teacher_comment && (
-                          <p className="text-sm font-bold text-indigo-600 mt-2 bg-indigo-50 rounded-lg px-3 py-2">
+                          <p className="text-base font-bold text-indigo-700 mt-2 bg-indigo-50 rounded-lg px-3 py-2">
                             💬 {sub.teacher_comment}
                           </p>
                         )}
@@ -307,7 +387,7 @@ export default function StudentPortalSubjectPage() {
                     ) : (
                       <div className="mt-4 flex items-center gap-3">
                         <label
-                          className={`inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm cursor-pointer transition-colors ${
+                          className={`inline-flex items-center gap-2 px-5 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base cursor-pointer transition-colors ${
                             uploadingId === a.id ? "opacity-60 pointer-events-none" : ""
                           }`}
                         >
@@ -323,7 +403,7 @@ export default function StudentPortalSubjectPage() {
                           />
                         </label>
                         {uploadingId === a.id && (
-                          <span className="text-sm font-bold text-slate-400 animate-pulse">
+                          <span className="text-base font-bold text-slate-500 animate-pulse">
                             กำลังอัปโหลด...
                           </span>
                         )}
@@ -342,62 +422,71 @@ export default function StudentPortalSubjectPage() {
             {pendingAssignments.length === 0 ? (
               <EmptyState icon="🎉" text="ไม่มีงานค้างส่ง เยี่ยมมาก!" />
             ) : (
-              pendingAssignments.map((a) => (
-                <div
-                  key={a.id}
-                  className="bg-white rounded-2xl border border-rose-100 shadow-sm p-5 flex items-center gap-4"
-                >
-                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-black text-white shrink-0 bg-gradient-to-br from-rose-400 to-orange-400">
-                    ⏰
+              pendingAssignments.map((a) => {
+                const dueStatus = getDueStatus(a.due_date);
+                return (
+                  <div
+                    key={a.id}
+                    className="bg-white rounded-2xl border border-rose-200 shadow-sm p-5 flex items-center gap-4"
+                  >
+                    <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl font-black text-white shrink-0 bg-gradient-to-br from-rose-400 to-orange-400">
+                      ⏰
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-black text-slate-900 text-xl truncate">{a.title}</p>
+                      <div className="flex items-center gap-2 flex-wrap mt-1.5">
+                        <p className="text-rose-500 text-base font-bold">
+                          กำหนดส่ง: {formatDate(a.due_date)}
+                        </p>
+                        {dueStatus && (
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-black ${dueStatus.className}`}>
+                            {dueStatus.label}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-black text-slate-800 text-lg truncate">{a.title}</p>
-                    <p className="text-rose-400 text-sm font-bold mt-1">
-                      กำหนดส่ง: {formatDate(a.due_date)}
-                    </p>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         )}
 
-        {/* คะแนนรวม — ★ ปรับให้เป็นตารางแบบครู แต่เห็นเฉพาะข้อมูลตัวเอง */}
+        {/* คะแนนรวม */}
         {tab === "grades" && !loading && grades && (
           <div className="space-y-4">
             <div className="rounded-2xl bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white p-6 shadow-sm flex items-center justify-between flex-wrap gap-4">
               <div>
-                <p className="text-sm font-bold opacity-90">คะแนนรวม (ถ่วงน้ำหนักจากงานที่มอบหมาย)</p>
-                <p className="text-4xl font-black mt-1">{grades.summary.weighted_score}%</p>
-                <p className="text-xs font-bold opacity-80 mt-1.5">
+                <p className="text-base font-bold opacity-90">คะแนนรวม (ถ่วงน้ำหนักจากงานที่มอบหมาย)</p>
+                <p className="text-5xl font-black mt-1">{grades.summary.weighted_score}%</p>
+                <p className="text-sm font-bold opacity-90 mt-1.5">
                   ตรวจแล้ว {grades.summary.weight_graded}% ของน้ำหนักคะแนนทั้งหมด
                 </p>
-                {/* ★ FIX 2: ชี้แจงขอบเขตของตัวเลขคะแนนรวม */}
-                <p className="text-[11px] font-bold opacity-75 mt-1">
+                <p className="text-xs font-bold opacity-80 mt-1">
                   * ยังไม่รวมคะแนนสอบกลางภาค/ปลายภาค
                 </p>
               </div>
               {grades.summary.grade && (
                 <div className="text-center bg-white/15 rounded-2xl px-6 py-3">
-                  <p className="text-xs font-bold opacity-90">เกรด</p>
-                  <p className="text-3xl font-black mt-0.5">{grades.summary.grade}</p>
+                  <p className="text-sm font-bold opacity-90">เกรด</p>
+                  <p className="text-4xl font-black mt-0.5">{grades.summary.grade}</p>
                 </div>
               )}
             </div>
 
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               {grades.grades.length === 0 ? (
-                <p className="text-center text-slate-300 font-bold text-base py-10">
+                <p className="text-center text-slate-400 font-bold text-lg py-10">
                   ยังไม่มีคะแนนที่ตรวจแล้ว
                 </p>
               ) : (
                 <table className="w-full">
                   <thead>
                     <tr className="bg-gradient-to-r from-indigo-50 via-sky-50 to-fuchsia-50">
-                      <th className="text-left text-xs font-black text-slate-500 px-5 py-3">ชื่องาน</th>
-                      <th className="text-center text-xs font-black text-slate-500 px-3 py-3">คะแนน</th>
-                      <th className="text-center text-xs font-black text-slate-500 px-3 py-3">น้ำหนัก</th>
-                      <th className="text-center text-xs font-black text-slate-500 px-3 py-3">สถานะ</th>
+                      <th className="text-left text-sm font-black text-slate-600 px-5 py-3">ชื่องาน</th>
+                      <th className="text-center text-sm font-black text-slate-600 px-3 py-3">คะแนน</th>
+                      <th className="text-center text-sm font-black text-slate-600 px-3 py-3">น้ำหนัก</th>
+                      <th className="text-center text-sm font-black text-slate-600 px-3 py-3">สถานะ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
@@ -406,13 +495,12 @@ export default function StudentPortalSubjectPage() {
                       return (
                         <tr key={g.assignment_id}>
                           <td className="px-5 py-3.5">
-                            <p className="text-sm font-bold text-slate-700">{g.title}</p>
+                            <p className="text-base font-bold text-slate-800">{g.title}</p>
                           </td>
                           <td className="text-center px-3 py-3.5">
                             {isPassFail ? (
-                              // ★ FIX 3: แสดงป้ายผ่าน/ไม่ผ่านในตารางคะแนนรวมด้วย
                               <span
-                                className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-xl font-black text-sm ${
+                                className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-xl font-black text-base ${
                                   g.pass_fail_result === "pass"
                                     ? "bg-emerald-50 text-emerald-600"
                                     : g.pass_fail_result === "fail"
@@ -428,25 +516,25 @@ export default function StudentPortalSubjectPage() {
                               </span>
                             ) : (
                               <span
-                                className={`inline-flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl font-black text-sm ${
+                                className={`inline-flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl font-black text-base ${
                                   g.is_late
                                     ? "bg-orange-50 text-orange-600"
                                     : "bg-emerald-50 text-emerald-600"
                                 }`}
                               >
                                 {g.score ?? "-"}
-                                <span className="text-slate-400 font-bold text-xs">/{g.max_score ?? "-"}</span>
+                                <span className="text-slate-500 font-bold text-sm">/{g.max_score ?? "-"}</span>
                               </span>
                             )}
                           </td>
-                          <td className="text-center px-3 py-3.5 text-sm font-bold text-slate-500">
+                          <td className="text-center px-3 py-3.5 text-base font-bold text-slate-600">
                             {g.weight_percent != null ? `${g.weight_percent}%` : "-"}
                           </td>
                           <td className="text-center px-3 py-3.5">
                             {g.is_late ? (
-                              <span className="text-[11px] font-black text-orange-500">⏰ ส่งช้า</span>
+                              <span className="text-xs font-black text-orange-500">⏰ ส่งช้า</span>
                             ) : (
-                              <span className="text-[11px] font-black text-emerald-500">✅ ตรงเวลา</span>
+                              <span className="text-xs font-black text-emerald-600">✅ ตรงเวลา</span>
                             )}
                           </td>
                         </tr>
@@ -462,7 +550,7 @@ export default function StudentPortalSubjectPage() {
         {/* เช็คชื่อ */}
         {tab === "attendance" && !loading && attendance && (
           <div className="space-y-5">
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <StatCard label="มา" value={attendance.summary.present} colorClass="from-emerald-500 to-teal-400" />
               <StatCard label="ขาด" value={attendance.summary.absent} colorClass="from-rose-500 to-red-400" />
               <StatCard label="สาย" value={attendance.summary.late} colorClass="from-amber-500 to-orange-400" />
@@ -475,13 +563,13 @@ export default function StudentPortalSubjectPage() {
 
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-50">
               {attendance.records.length === 0 ? (
-                <p className="text-center text-slate-300 font-bold text-base py-10">
+                <p className="text-center text-slate-400 font-bold text-lg py-10">
                   ยังไม่มีข้อมูลการเช็คชื่อ
                 </p>
               ) : (
                 attendance.records.map((r: any) => (
-                  <div key={r.id} className="flex items-center justify-between px-5 py-3">
-                    <span className="text-base font-bold text-slate-600">
+                  <div key={r.id} className="flex items-center justify-between px-5 py-3.5">
+                    <span className="text-lg font-bold text-slate-700">
                       {r.date ?? r.attendance_date}
                     </span>
                     <StatusPill status={r.status} />
@@ -498,9 +586,9 @@ export default function StudentPortalSubjectPage() {
 
 function EmptyState({ icon, text }: { icon: string; text: string }) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center text-slate-400">
-      <p className="text-4xl mb-3">{icon}</p>
-      <p className="font-bold text-base">{text}</p>
+    <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center text-slate-500">
+      <p className="text-5xl mb-3">{icon}</p>
+      <p className="font-bold text-lg">{text}</p>
     </div>
   );
 }
@@ -508,8 +596,8 @@ function EmptyState({ icon, text }: { icon: string; text: string }) {
 function StatCard({ label, value, colorClass }: { label: string; value: number; colorClass: string }) {
   return (
     <div className={`rounded-2xl bg-gradient-to-br ${colorClass} p-4 text-white shadow-sm text-center`}>
-      <p className="text-2xl font-black">{value ?? 0}</p>
-      <p className="text-xs font-bold opacity-90 mt-1">{label}</p>
+      <p className="text-3xl font-black">{value ?? 0}</p>
+      <p className="text-sm font-bold opacity-95 mt-1">{label}</p>
     </div>
   );
 }
@@ -523,8 +611,8 @@ const STATUS_STYLE: Record<string, { label: string; className: string }> = {
 };
 
 function StatusPill({ status }: { status: string }) {
-  const s = STATUS_STYLE[status] ?? { label: status, className: "bg-slate-100 text-slate-500" };
+  const s = STATUS_STYLE[status] ?? { label: status, className: "bg-slate-100 text-slate-600" };
   return (
-    <span className={`px-3 py-1.5 rounded-full text-sm font-black ${s.className}`}>{s.label}</span>
+    <span className={`px-4 py-2 rounded-full text-base font-black ${s.className}`}>{s.label}</span>
   );
 }

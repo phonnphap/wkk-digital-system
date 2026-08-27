@@ -117,22 +117,22 @@ export default function SmartClassRoomsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-['TH_Sarabun_New',_sans-serif]">
-      <div className="bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-4 pt-4 pb-7">
-        <div className="flex items-center gap-2 mb-4">
-          <button onClick={() => router.push("/dashboard")}
-            title="กลับแดชบอร์ด"
-            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl transition-colors">🏠</button>
-          <button onClick={() => router.push("/smartclass")}
-            title="กลับหน้ารายวิชา"
-            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl font-black transition-colors">←</button>
-        </div>
-        <div className="text-center px-2">
-          <h1 className="text-3xl sm:text-4xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
-          <p className="text-white text-lg font-extrabold mt-1.5">
-            {subject.subject_code} · {sections.length} ห้อง{isAdmin ? " (มุมมองแอดมิน)" : ""}
-          </p>
-        </div>
-      </div>
+      <div className="bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-4 pt-3 pb-5">
+  <div className="flex items-center gap-2 mb-2">
+    <button onClick={() => router.push("/dashboard")}
+      title="กลับแดชบอร์ด"
+      className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl transition-colors">🏠</button>
+    <button onClick={() => router.push("/smartclass")}
+      title="กลับหน้ารายวิชา"
+      className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl font-black transition-colors">←</button>
+  </div>
+  <div className="text-center px-2">
+    <h1 className="text-3xl sm:text-4xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
+    <p className="text-white text-xl font-extrabold mt-1.5">
+      {subject.subject_code} · {sections.length} ห้อง{isAdmin ? " (มุมมองแอดมิน)" : ""}
+    </p>
+  </div>
+</div>
 
       <main className="p-4 lg:p-6 w-full max-w-[1600px]">
         {sortedSections.length === 0 ? (
@@ -141,7 +141,7 @@ export default function SmartClassRoomsPage() {
             <p className="font-extrabold text-xl">ไม่พบห้องที่สอนวิชานี้</p>
           </div>
         ) : (
-          <div className="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
             {sortedSections.map((sec) => {
               const room = classroomOf(sec.classroom_id);
               const gradient = getRoomGradient(room?.room_name);
@@ -153,19 +153,17 @@ export default function SmartClassRoomsPage() {
   onClick={() => router.push(`/smartclass/${subjectId}/${sec.id}`)}
   className="text-left rounded-2xl border-2 border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
 >
-  <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
-    <span className="text-sm font-black bg-white text-slate-900 px-3 py-1.5 rounded-full tracking-wide shadow-sm">
+  <div className={`h-11 bg-gradient-to-r ${gradient} px-3 flex items-center justify-between`}>
+    <span className="text-sm font-black bg-white text-slate-900 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
       CLASSROOM
     </span>
-    <span className="text-white text-xl leading-none font-black">⠿</span>
+    <span className="text-white text-lg leading-none font-black">⠿</span>
   </div>
-  <div className="p-5">
-    <p className="font-black text-xl text-slate-900 leading-snug break-words">
-      {label}
-    </p>
-    <p className="text-slate-400 text-sm font-bold mt-1">รายชื่อ</p>
-    <div className="mt-3">
-      <span className="text-sm font-black bg-fuchsia-50 border border-fuchsia-100 px-3 py-1.5 rounded-lg text-fuchsia-600 inline-flex items-center gap-1.5">
+  <div className="p-3 text-center">
+    <p className="font-black text-xl text-slate-900 leading-tight truncate">{label}</p>
+    <p className="text-slate-400 text-sm font-bold mt-0.5">รายชื่อ</p>
+    <div className="mt-2.5 flex justify-center">
+      <span className="text-sm font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
         👥 {count} คน
       </span>
     </div>
