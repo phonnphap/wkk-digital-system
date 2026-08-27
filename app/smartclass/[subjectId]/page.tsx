@@ -160,14 +160,14 @@ export default function SmartClassRoomsPage() {
     <span className="text-white text-lg leading-none font-black">⠿</span>
   </div>
   <div className="p-3 flex items-center justify-between gap-2">
-    <div className="min-w-0">
-      <p className="font-black text-2xl text-slate-900 leading-tight truncate">{label}</p>
-      <p className="text-slate-700 text-base font-extrabold mt-1 truncate">รายชื่อ - {label}</p>
-    </div>
-    <span className="shrink-0 text-base font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
-      👥 {count} คน
-    </span>
+  <div className="min-w-0">
+    <p className="font-black text-2xl text-slate-900 leading-tight truncate">{label}</p>
+    <p className="text-slate-700 text-base font-extrabold mt-1 truncate">รายชื่อ</p>
   </div>
+  <span className="shrink-0 text-base font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
+    👥 {count} คน
+  </span>
+</div>
 </button>
               );
             })}

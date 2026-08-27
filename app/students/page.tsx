@@ -33,8 +33,8 @@ function calculateAge(birthDateStr: string): number | null {
 function getAutoPrefix(gender: string, birthDateStr: string): string | null {
   const age = calculateAge(birthDateStr);
   if (age === null || !gender) return null;
-  if (gender === "male") return age > 15 ? "นาย" : "เด็กชาย";
-  if (gender === "female") return age > 15 ? "นางสาว" : "เด็กหญิง";
+  if (gender === "male") return age >= 15 ? "นาย" : "เด็กชาย";
+  if (gender === "female") return age >= 15 ? "นางสาว" : "เด็กหญิง";
   return null;
 }
 
@@ -96,8 +96,6 @@ export default function StudentsPage() {
   const [saveError, setSaveError] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
 const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
-const [loginUsername, setLoginUsername] = useState("");
-const [loginPassword, setLoginPassword] = useState("");
 
 // ★ เพิ่มใหม่: อัปเดตคำนำหน้าอัตโนมัติเมื่อวันเกิดหรือเพศเปลี่ยน (เฉพาะตอนที่ modal เปิดอยู่)
 useEffect(() => {
@@ -136,39 +134,33 @@ useEffect(() => {
   }, [selectedClass]);
 
   function openAddForm() {
-    setEditingId(null);
-    setForm(EMPTY_FORM);
-    setSaveError("");
-    setShowForm(true);
-    setAvatarFile(null);
+  setEditingId(null);
+  setForm(EMPTY_FORM);
+  setSaveError("");
+  setAvatarFile(null);
   setAvatarPreview(null);
-  setLoginUsername("");
-  setLoginPassword("");
   setShowForm(true);
 }
 
   function openEditForm(s: Student) {
-    setEditingId(s.id);
-    setForm({
-      seat_number: s.seat_number?.toString() ?? "",
-      student_code: s.student_code ?? "",
-      prefix: s.prefix ?? "",
-      first_name: s.first_name ?? "",
-      last_name: s.last_name ?? "",
-      nick_name: s.nick_name ?? "",
-      birth_date: s.birth_date ?? "",
-      gender: s.gender ?? "",
-      guardian_name: s.guardian_name ?? "",
-      guardian_relation: s.guardian_relation ?? "",
-      guardian_phone: s.guardian_phone ?? "",
-      address: s.address ?? "",
-    });
-    setSaveError("");
-    setShowForm(true);
-    setAvatarFile(null);
-  setAvatarPreview((s as any).avatar_url ?? null);   // ★ ใหม่ — ต้องเพิ่ม avatar_url ใน select() ด้วย ดูจุดที่ 5
-  setLoginUsername("");
-  setLoginPassword("");
+  setEditingId(s.id);
+  setForm({
+    seat_number: s.seat_number?.toString() ?? "",
+    student_code: s.student_code ?? "",
+    prefix: s.prefix ?? "",
+    first_name: s.first_name ?? "",
+    last_name: s.last_name ?? "",
+    nick_name: s.nick_name ?? "",
+    birth_date: s.birth_date ?? "",
+    gender: s.gender ?? "",
+    guardian_name: s.guardian_name ?? "",
+    guardian_relation: s.guardian_relation ?? "",
+    guardian_phone: s.guardian_phone ?? "",
+    address: s.address ?? "",
+  });
+  setSaveError("");
+  setAvatarFile(null);
+  setAvatarPreview((s as any).avatar_url ?? null);
   setShowForm(true);
 }
   
@@ -218,7 +210,7 @@ useEffect(() => {
 
     const savedId = editingId ?? savedRows[0]?.id;
 
-  // ★ อัปโหลด avatar ถ้ามีการเลือกไฟล์ใหม่
+    // ★ อัปโหลด avatar ถ้ามีการเลือกไฟล์ใหม่
   if (avatarFile && savedId) {
     const fd = new FormData();
     fd.append("file", avatarFile);
@@ -226,18 +218,6 @@ useEffect(() => {
     if (!res.ok) {
       const j = await res.json();
       alert("บันทึกข้อมูลนักเรียนสำเร็จ แต่อัปโหลดรูปไม่สำเร็จ: " + (j.error ?? ""));
-    }
-  }
-
-  // ★ ตั้ง/เปลี่ยนรหัสผ่านผู้เรียน ถ้ากรอกทั้ง username และ password มา
-  if (loginUsername.trim() && loginPassword.trim() && savedId) {
-    const res = await fetch(`/api/students/${savedId}/credentials`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: loginUsername, password: loginPassword }),
-    });
-    if (!res.ok) {
-      const j = await res.json();
-      alert("บันทึกข้อมูลนักเรียนสำเร็จ แต่ตั้งรหัสผ่านไม่สำเร็จ: " + (j.error ?? ""));
     }
   }
 
@@ -485,16 +465,6 @@ useEffect(() => {
                   <Field label="เบอร์โทรผู้ปกครอง" value={form.guardian_phone} onChange={(v) => setForm({ ...form, guardian_phone: v })} />
                   <Field label="ที่อยู่" value={form.address} onChange={(v) => setForm({ ...form, address: v })} full />
                 </div>
-                {/* ★ ตั้งบัญชีล็อกอินนักเรียน */}
-<div className="mt-5 rounded-xl border-2 border-amber-200 bg-amber-50 p-3 space-y-2">
-  <p className="text-xs font-bold text-amber-700">
-    🔑 {editingId ? "เปลี่ยนบัญชีล็อกอิน (เว้นว่างถ้าไม่ต้องการเปลี่ยน)" : "ตั้งบัญชีล็อกอินผู้เรียน (ไม่บังคับ)"}
-  </p>
-  <input value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="Username"
-    className="w-full rounded-xl border-2 border-amber-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-400" />
-  <input value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="รหัสผ่าน"
-    className="w-full rounded-xl border-2 border-amber-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-400" />
-</div>
 
                 <div className="mt-6 flex justify-end gap-2">
                   <button

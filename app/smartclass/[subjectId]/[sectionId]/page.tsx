@@ -1789,6 +1789,20 @@ function GroupingBox({ students }: { students: Student[] }) {
     </div>
   );
 }
+function getAutoPrefix(gender: "male" | "female", birthDate: string | null): string {
+  if (!birthDate) return gender === "male" ? "เด็กชาย" : "เด็กหญิง"; // ไม่มีวันเกิด ให้ default เป็นเด็ก
+
+  const dob = new Date(birthDate);
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const passedBirthdayThisYear =
+    today.getMonth() > dob.getMonth() ||
+    (today.getMonth() === dob.getMonth() && today.getDate() >= dob.getDate());
+  if (!passedBirthdayThisYear) age--;
+
+  if (gender === "male") return age >= 15 ? "นาย" : "เด็กชาย";
+  return age >= 15 ? "นางสาว" : "เด็กหญิง";
+}
 
 /* แถบเครื่องมือ: จัดเป็นแถวเดียว 3 ช่อง เลือกกดเครื่องมือไหนก็ได้
    - จับเวลา: เปิดวิดเจ็ตลอย (FloatingTimer) ที่หน้าเพจหลัก ใช้ต่อได้แม้สลับแท็บ/เมนูอื่น
@@ -1817,12 +1831,12 @@ function ToolsTab({ students, onOpenTimer }: { students: Student[]; onOpenTimer:
           <button
             key={c.key}
             onClick={() => handleCardClick(c.key)}
-            className={`rounded-2xl ${c.bg} text-white p-4 sm:p-5 flex flex-col items-center justify-center gap-1.5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all ${
+            className={`rounded-2xl ${c.bg} text-white p-6 sm:p-7 flex flex-col items-center justify-center gap-2 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all ${
               activeTool === c.key ? "ring-4 ring-white/60" : ""
             }`}
           >
-            <span className="text-2xl sm:text-3xl">{c.icon}</span>
-            <span className="font-black text-xs sm:text-sm text-center">{c.label}</span>
+            <span className="text-3xl sm:text-4xl">{c.icon}</span>
+  <span className="font-black text-sm sm:text-base text-center">{c.label}</span>
           </button>
         ))}
       </div>
@@ -2708,49 +2722,47 @@ const [{ data: subj }, { data: room }] = await Promise.all([
           <div className="flex items-center gap-2">
             <button onClick={() => router.push("/dashboard")}
               title="กลับแดชบอร์ด"
-              className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">🏠</button>
+              className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">🏠</button>
             <button onClick={() => router.push(`/smartclass/${subjectId}`)}
               title="กลับหน้ารายห้องของวิชานี้"
-              className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">←</button>
+              className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">←</button>
           </div>
           <div className="w-9 sm:hidden" />
         </div>
 
         <div className="text-center px-2">
-          <h1 className="text-xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
-          <p className="text-white/80 text-sm font-bold">
-            {subject.subject_code} · {classroom?.grade_group} {classroom?.room_name} · 👥 {students.length} คน
-          </p>
+          <h1 className="text-2xl sm:text-3xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
+<p className="text-white/80 text-base font-bold">
+  {subject.subject_code} · {classroom?.grade_group} {classroom?.room_name} · 👥 {students.length} คน
+</p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-between mt-4">
           <div className="flex items-center gap-2 flex-wrap justify-center">
             {(isAdmin ? BANNER_MENU.filter(m => ["attendanceInfo","totalScore","reports"].includes(m.key)) : BANNER_MENU).map(m => (
               <button
-                key={m.key}
-                onClick={() => handleBannerMenuClick(m.key)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs backdrop-blur-sm transition-colors ${
-                  bannerMenu === m.key
-                    ? "bg-white text-fuchsia-700 shadow-sm"
-                    : "bg-white/20 hover:bg-white/30 text-white"
-                }`}
-              >
-                <span>{m.icon}</span>{m.label}
-              </button>
+  key={m.key}
+  onClick={() => handleBannerMenuClick(m.key)}
+  className={`flex items-center gap-2 px-4 py-3 rounded-xl font-black text-sm backdrop-blur-sm transition-colors ${
+    bannerMenu === m.key ? "bg-white text-fuchsia-700 shadow-sm" : "bg-white/20 hover:bg-white/30 text-white"
+  }`}
+>
+  <span className="text-base">{m.icon}</span>{m.label}
+</button>
             ))}
           </div>
 
           <div className="flex items-center gap-2 flex-wrap justify-center">
-            <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-2 flex items-center gap-2">
-              <span className="text-white/80 text-xs font-bold">รหัสเข้าวิชา</span>
-              <span className="font-black text-white font-mono tracking-widest">{section.join_code}</span>
-            </div>
-            <button onClick={copyInvite} className="px-3 py-2 rounded-xl bg-white text-fuchsia-700 font-black text-xs hover:bg-pink-50 shadow-sm transition-colors">
-              {copied ? "✅ คัดลอกแล้ว" : "📋 คัดลอกลิงก์เชิญ"}
-            </button>
-            <button onClick={() => setShowQr(true)} className="px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-xs transition-colors">
-              📷 QR
-            </button>
+            <div className="bg-white/20 backdrop-blur-sm rounded-xl px-4 py-2.5 flex items-center gap-2">
+  <span className="text-white/80 text-sm font-bold">รหัสเข้าวิชา</span>
+  <span className="font-black text-white font-mono tracking-widest text-lg">{section.join_code}</span>
+</div>
+<button onClick={copyInvite} className="px-4 py-2.5 rounded-xl bg-white text-fuchsia-700 font-black text-sm hover:bg-pink-50 shadow-sm transition-colors">
+  {copied ? "✅ คัดลอกแล้ว" : "📋 คัดลอกลิงก์เชิญ"}
+</button>
+<button onClick={() => setShowQr(true)} className="px-4 py-2.5 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-sm transition-colors">
+  📷 QR
+</button>
           </div>
         </div>
       </div>
@@ -2974,12 +2986,12 @@ const [{ data: subj }, { data: room }] = await Promise.all([
                   setRandomMenuOpen(false);
                 }
               }}
-              className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-black ${
-                !bannerMenu && tab === t.key ? "text-fuchsia-600" : "text-slate-400"
-              }`}>
-              <span className="text-lg leading-none">{t.icon}</span>
-              {t.label}
-            </button>
+               className={`flex flex-col items-center gap-1 py-3.5 text-sm font-black ${
+    !bannerMenu && tab === t.key ? "text-fuchsia-600" : "text-slate-400"
+  }`}>
+  <span className="text-2xl leading-none">{t.icon}</span>
+  {t.label}
+</button>
           ))}
         </div>
       </div>
