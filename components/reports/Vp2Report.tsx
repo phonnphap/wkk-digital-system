@@ -553,7 +553,7 @@ function formatGradeLevel(label?: string): string {
   writeSignature(
     sigRow1, 5, 6,
     deptHeadName || ".......................................",
-    `หัวหน้ากลุ่มสาระ${deptName || "ฯ"}`
+    `หัวหน้ากลุ่มสาระการเรียนรู้${deptName || "ฯ"}`
   );
 
   // ผู้อำนวยการ (กึ่งกลางทั้งแถว ใต้ 2 ลายเซ็นแรก)
@@ -786,7 +786,7 @@ function formatGradeLevel(label?: string): string {
           <div className="flex justify-center">
             {/* "หัวหน้ากลุ่มสาระฯ" -> "หัวหน้ากลุ่มสาระ" + ชื่อกลุ่มสาระจริง (เช่น วิทยาศาสตร์และเทคโนโลยี) */}
             <SignatureField
-              role={`หัวหน้ากลุ่มสาระ${deptName || "ฯ"}`}
+              role={`หัวหน้ากลุ่มสาระการเรียนรู้${deptName || "ฯ"}`}
               name={deptHeadName || "......................................."}
             />
           </div>

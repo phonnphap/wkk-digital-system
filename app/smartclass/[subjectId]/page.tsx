@@ -141,7 +141,7 @@ export default function SmartClassRoomsPage() {
             <p className="font-extrabold text-xl">ไม่พบห้องที่สอนวิชานี้</p>
           </div>
         ) : (
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(210px,1fr))]">
+          <div className="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
             {sortedSections.map((sec) => {
               const room = classroomOf(sec.classroom_id);
               const gradient = getRoomGradient(room?.room_name);
@@ -153,21 +153,23 @@ export default function SmartClassRoomsPage() {
   onClick={() => router.push(`/smartclass/${subjectId}/${sec.id}`)}
   className="text-left rounded-2xl border-2 border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
 >
-  <div className={`h-11 bg-gradient-to-r ${gradient} px-3 flex items-center justify-between`}>
-    <span className="text-sm font-black bg-white text-slate-900 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
+  <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
+    <span className="text-sm font-black bg-white text-slate-900 px-3 py-1.5 rounded-full tracking-wide shadow-sm">
       CLASSROOM
     </span>
-    <span className="text-white text-lg leading-none font-black">⠿</span>
+    <span className="text-white text-xl leading-none font-black">⠿</span>
   </div>
-  <div className="p-3 flex items-center justify-between gap-2">
-  <div className="min-w-0">
-    <p className="font-black text-2xl text-slate-900 leading-tight truncate">{label}</p>
-    <p className="text-slate-700 text-base font-extrabold mt-1 truncate">รายชื่อ</p>
+  <div className="p-5">
+    <p className="font-black text-xl text-slate-900 leading-snug break-words">
+      {label}
+    </p>
+    <p className="text-slate-400 text-sm font-bold mt-1">รายชื่อ</p>
+    <div className="mt-3">
+      <span className="text-sm font-black bg-fuchsia-50 border border-fuchsia-100 px-3 py-1.5 rounded-lg text-fuchsia-600 inline-flex items-center gap-1.5">
+        👥 {count} คน
+      </span>
+    </div>
   </div>
-  <span className="shrink-0 text-base font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
-    👥 {count} คน
-  </span>
-</div>
 </button>
               );
             })}
