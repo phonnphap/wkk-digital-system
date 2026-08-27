@@ -77,7 +77,6 @@ export default function SmartClassRoomsPage() {
           .from("classrooms").select("id, room_name, grade_group").in("id", classroomIds);
         setClassrooms((rooms ?? []) as Classroom[]);
 
-        // แก้บั๊ก: เดิมไม่ได้ select/กรอง classroom_id ทำให้นับจำนวน นร. ต่อห้องไม่ได้ (ขึ้น 0 เสมอ)
         const { data: studentsData } = await supabase
           .from("students")
           .select("id, classroom_id")
@@ -104,14 +103,14 @@ export default function SmartClassRoomsPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center font-['TH_Sarabun_New',_sans-serif]">
-        <div className="text-fuchsia-500 font-black text-lg animate-pulse">กำลังโหลดข้อมูล...</div>
+        <div className="text-fuchsia-600 font-black text-xl animate-pulse">กำลังโหลดข้อมูล...</div>
       </div>
     );
   }
   if (!subject) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center font-['TH_Sarabun_New',_sans-serif]">
-        <p className="text-red-500 font-black">❌ ไม่พบวิชานี้</p>
+        <p className="text-red-600 font-black text-lg">❌ ไม่พบวิชานี้</p>
       </div>
     );
   }
@@ -122,14 +121,14 @@ export default function SmartClassRoomsPage() {
         <div className="flex items-center gap-2 mb-3">
           <button onClick={() => router.push("/dashboard")}
             title="กลับแดชบอร์ด"
-            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">🏠</button>
+            className="w-10 h-10 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-xl transition-colors">🏠</button>
           <button onClick={() => router.push("/smartclass")}
             title="กลับหน้ารายวิชา"
-            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">←</button>
+            className="w-10 h-10 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-xl transition-colors">←</button>
         </div>
         <div className="text-center px-2">
-          <h1 className="text-xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
-          <p className="text-white/80 text-sm font-bold">
+          <h1 className="text-2xl sm:text-3xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
+          <p className="text-white text-base font-bold mt-1">
             {subject.subject_code} · {sections.length} ห้อง{isAdmin ? " (มุมมองแอดมิน)" : ""}
           </p>
         </div>
@@ -137,42 +136,42 @@ export default function SmartClassRoomsPage() {
 
       <main className="p-4 lg:p-6 w-full max-w-[1600px]">
         {sortedSections.length === 0 ? (
-          <div className="text-center py-20 text-slate-400 bg-white rounded-2xl border border-slate-200">
-            <p className="text-4xl mb-3">🏫</p>
-            <p className="font-bold">ไม่พบห้องที่สอนวิชานี้</p>
+          <div className="text-center py-20 text-slate-500 bg-white rounded-2xl border border-slate-200">
+            <p className="text-5xl mb-3">🏫</p>
+            <p className="font-bold text-lg">ไม่พบห้องที่สอนวิชานี้</p>
           </div>
         ) : (
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
-  {sortedSections.map((sec) => {
-    const room = classroomOf(sec.classroom_id);
-    const gradient = getRoomGradient(room?.room_name);
-    const label = `${room?.grade_group ?? ""} ${room?.room_name ?? ""}`.trim();
-    const count = studentCounts[sec.classroom_id] ?? 0;
-    return (
-      <button
-        key={sec.id}
-        onClick={() => router.push(`/smartclass/${subjectId}/${sec.id}`)}
-        className="text-left rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
-      >
-        <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
-          <span className="text-[10px] font-black bg-white/95 text-slate-700 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
-            CLASSROOM
-          </span>
-          <span className="text-white/60 text-lg leading-none">⠿</span>
-        </div>
-        <div className="p-4">
-          <p className="font-black text-lg text-slate-800 leading-tight">{label}</p>
-          <p className="text-slate-400 text-xs font-bold mt-1">รายชื่อ - {label}</p>
-          <div className="mt-3">
-            <span className="text-[11px] font-black bg-fuchsia-50 px-2.5 py-1.5 rounded-lg text-fuchsia-600 inline-flex items-center gap-1">
-              👥 {count} คน
-            </span>
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
+            {sortedSections.map((sec) => {
+              const room = classroomOf(sec.classroom_id);
+              const gradient = getRoomGradient(room?.room_name);
+              const label = `${room?.grade_group ?? ""} ${room?.room_name ?? ""}`.trim();
+              const count = studentCounts[sec.classroom_id] ?? 0;
+              return (
+                <button
+                  key={sec.id}
+                  onClick={() => router.push(`/smartclass/${subjectId}/${sec.id}`)}
+                  className="text-left rounded-2xl border-2 border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
+                >
+                  <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
+                    <span className="text-xs font-black bg-white text-slate-800 px-3 py-1.5 rounded-full tracking-wide shadow-sm">
+                      CLASSROOM
+                    </span>
+                    <span className="text-white text-xl leading-none">⠿</span>
+                  </div>
+                  <div className="p-4">
+                    <p className="font-black text-xl text-slate-900 leading-tight">{label}</p>
+                    <p className="text-slate-600 text-sm font-bold mt-1.5">รายชื่อ - {label}</p>
+                    <div className="mt-3">
+                      <span className="text-sm font-black bg-fuchsia-100 border border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
+                        👥 {count} คน
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
-        </div>
-      </button>
-    );
-  })}
-</div>
         )}
       </main>
     </div>
