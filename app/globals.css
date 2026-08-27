@@ -2,15 +2,43 @@
 @tailwind components;
 @tailwind utilities;
 
+/* TH Sarabun New — แม็บแต่ละไฟล์จริงเข้ากับ weight/style ให้ตรง
+   (ของเดิมใช้ไฟล์เดียว font-weight:100 900 ซึ่งเป็น TTF ธรรมดา ไม่ใช่ variable font
+   ผลคือตัวหนาถูก browser "ปลอม" ขึ้นเอง ไม่คมเท่าไฟล์ Bold จริง) */
+
 @font-face {
-  font-family: 'TH Saraban New';
-  src: url('/fonts/THSarabunNew.ttf') format('truetype');
-  font-weight: 100 900; /* ครอบคลุมทุกความหนา ด้วยไฟล์เดียว */
+  font-family: "TH Sarabun New";
+  src: url("/fonts/THSarabunNew.ttf") format("truetype");
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
+@font-face {
+  font-family: "TH Sarabun New";
+  src: url("/fonts/THSarabun-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "TH Sarabun New";
+  src: url("/fonts/THSarabun Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "TH Sarabun New";
+  src: url("/fonts/THSarabun BoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
 body {
-  font-family: 'TH Saraban New';
-  font-size: 18px; /* ปรับขนาดฟอนต์ให้เหมาะสมกับ Saraban */
+  font-family: "TH Sarabun New", sans-serif;
+  font-size: 20px; /* Sarabun เส้นบาง ต้องตัวใหญ่กว่าฟอนต์ทั่วไปถึงจะอ่านง่าย โดยเฉพาะเด็กประถม */
 }
