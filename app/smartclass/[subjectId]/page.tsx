@@ -141,7 +141,7 @@ export default function SmartClassRoomsPage() {
             <p className="font-extrabold text-xl">ไม่พบห้องที่สอนวิชานี้</p>
           </div>
         ) : (
-          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(210px,1fr))]">
             {sortedSections.map((sec) => {
               const room = classroomOf(sec.classroom_id);
               const gradient = getRoomGradient(room?.room_name);
@@ -149,26 +149,26 @@ export default function SmartClassRoomsPage() {
               const count = studentCounts[sec.classroom_id] ?? 0;
               return (
                 <button
-                  key={sec.id}
-                  onClick={() => router.push(`/smartclass/${subjectId}/${sec.id}`)}
-                  className="text-left rounded-2xl border-2 border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
-                >
-                  <div className={`h-16 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
-                    <span className="text-sm font-black bg-white text-slate-900 px-3 py-1.5 rounded-full tracking-wide shadow-sm">
-                      CLASSROOM
-                    </span>
-                    <span className="text-white text-2xl leading-none font-black">⠿</span>
-                  </div>
-                  <div className="p-4">
-                    <p className="font-black text-2xl text-slate-900 leading-tight">{label}</p>
-                    <p className="text-slate-700 text-base font-extrabold mt-2">รายชื่อ - {label}</p>
-                    <div className="mt-3.5">
-                      <span className="text-base font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3.5 py-2 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
-                        👥 {count} คน
-                      </span>
-                    </div>
-                  </div>
-                </button>
+  key={sec.id}
+  onClick={() => router.push(`/smartclass/${subjectId}/${sec.id}`)}
+  className="text-left rounded-2xl border-2 border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
+>
+  <div className={`h-11 bg-gradient-to-r ${gradient} px-3 flex items-center justify-between`}>
+    <span className="text-sm font-black bg-white text-slate-900 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
+      CLASSROOM
+    </span>
+    <span className="text-white text-lg leading-none font-black">⠿</span>
+  </div>
+  <div className="p-3 flex items-center justify-between gap-2">
+    <div className="min-w-0">
+      <p className="font-black text-2xl text-slate-900 leading-tight truncate">{label}</p>
+      <p className="text-slate-700 text-base font-extrabold mt-1 truncate">รายชื่อ - {label}</p>
+    </div>
+    <span className="shrink-0 text-base font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
+      👥 {count} คน
+    </span>
+  </div>
+</button>
               );
             })}
           </div>

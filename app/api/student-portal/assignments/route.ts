@@ -11,14 +11,12 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const studentId = searchParams.get("student_id");
 
-  // จุดสำคัญ: ห้ามให้ student คนหนึ่งเปลี่ยน student_id ใน query แล้วดูของคนอื่นได้
   if (!studentId || studentId !== session.student_id) {
     return NextResponse.json({ error: "ไม่มีสิทธิ์เข้าถึงข้อมูลนี้" }, { status: 403 });
   }
 
   const supabase = await createClient();
 
-  // หา classroom_id ของนักเรียนคนนี้ (กันกรณี session ไม่มี section_id ผูกมา)
   const { data: student } = await supabase
     .from("students")
     .select("id, classroom_id")
@@ -30,34 +28,36 @@ export async function GET(req: NextRequest) {
   }
 
   const sectionId = searchParams.get("subject_section_id");
-if (!sectionId) {
-  return NextResponse.json({ error: "ไม่ระบุวิชา" }, { status: 400 });
-}
-// เช็คว่า section นี้อยู่ใน classroom ของ นร. คนนี้จริง (กันดูวิชาห้องอื่น)
-const { data: section } = await supabase
-  .from("subject_sections")
-  .select("id")
-  .eq("id", sectionId)
-  .eq("classroom_id", student.classroom_id)
-  .maybeSingle();
+  if (!sectionId) {
+    return NextResponse.json({ error: "ไม่ระบุวิชา" }, { status: 400 });
+  }
+
+  const { data: section } = await supabase
+    .from("subject_sections")
+    .select("id")
+    .eq("id", sectionId)
+    .eq("classroom_id", student.classroom_id)
+    .maybeSingle();
 
   if (!section) {
     return NextResponse.json({ error: "ไม่พบวิชาของนักเรียนคนนี้" }, { status: 404 });
   }
 
-  // ดึงงานที่มอบหมาย (ไม่เอา draft) พร้อม join submission ของ student คนนี้เท่านั้น
+  // ★ แก้: ดึงจากตาราง assignment_submissions (ตัวที่ครูใช้ให้คะแนนจริง) แทน submissions ที่ไม่มีใครเขียนลงเลย
   const { data: assignments, error } = await supabase
-  .from("assignments")
-  .select(
+    .from("assignments")
+    .select(
+      `
+      id, title, description, due_date, max_score, weight_percent, status, created_at,
+      submissions:assignment_submissions (
+        id, status, content, submitted_at, score, teacher_comment, is_late
+      )
     `
-    id, title, description, due_date, max_score, weight_percent, status, created_at,
-    submissions:submissions ( id, file_url, file_name, submitted_at, score, feedback, status )
-  `
-  )
-  .eq("subject_section_id", section.id)  // เปลี่ยนตรงนี้
-  .neq("status", "draft")
-  .eq("submissions.student_id", studentId)
-  .order("due_date", { ascending: true });
+    )
+    .eq("subject_section_id", section.id)
+    .neq("status", "draft")
+    .eq("submissions.student_id", studentId)
+    .order("due_date", { ascending: true });
 
   if (error) {
     return NextResponse.json({ error: "ดึงข้อมูลงานไม่สำเร็จ" }, { status: 500 });
@@ -86,7 +86,6 @@ export async function POST(req: NextRequest) {
 
   const supabase = await createClient();
 
-  // ยืนยันว่า assignment นี้เปิดรับส่งงานจริง และไม่ใช่ draft
   const { data: assignment } = await supabase
     .from("assignments")
     .select("id, status, subject_section_id")
@@ -98,7 +97,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "ไม่พบงานนี้ หรืองานยังไม่เปิดให้ส่ง" }, { status: 404 });
   }
 
-  // อัปโหลดไฟล์ขึ้น storage bucket (ตั้งชื่อ bucket ตามจริง เช่น "submissions")
   const filePath = `${assignmentId}/${studentId}-${Date.now()}-${file.name}`;
   const { error: uploadError } = await supabase.storage
     .from("submissions")
@@ -112,17 +110,20 @@ export async function POST(req: NextRequest) {
     data: { publicUrl },
   } = supabase.storage.from("submissions").getPublicUrl(filePath);
 
-  // upsert submission (ส่งซ้ำ = เขียนทับของเดิม)
+  // ★ แก้: เขียนลง assignment_submissions ให้ตรงกับที่ครูใช้อ่าน/แก้คะแนน
+  // ★ ตาราง assignment_submissions ไม่มีคอลัมน์ file_url/file_name โดยตรง — เก็บลิงก์ไฟล์ไว้ใน content แทนไปก่อน
+  //   (ถ้าต้องการเก็บชื่อไฟล์แยกต่างหาก ต้องเพิ่มคอลัมน์ในตาราง หรือคุยเรื่องออกแบบ schema เพิ่มเติม)
+  const contentText = `[ไฟล์แนบ] ${file.name}\n${publicUrl}`;
+
   const { data: submission, error: submitError } = await supabase
-    .from("submissions")
+    .from("assignment_submissions")
     .upsert(
       {
         assignment_id: assignmentId,
         student_id: studentId,
-        file_url: publicUrl,
-        file_name: file.name,
+        content: contentText,
         submitted_at: new Date().toISOString(),
-        status: "submitted",
+        status: "pending_review",
       },
       { onConflict: "assignment_id,student_id" }
     )
