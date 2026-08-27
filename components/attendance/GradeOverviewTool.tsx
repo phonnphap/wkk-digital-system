@@ -245,6 +245,7 @@ export default function GradeOverviewTool({
   students,
   currentUserId,
   readOnly = false,
+  hideActions = false,
   gradingMode = "numeric",              // ★ เพิ่ม
   passThresholdPercent = 50,   
   gradingStructure = "formative_midterm_final",       // ★ เพิ่ม: โครงสร้างคะแนนเหลือแบบเดียว (เก็บ+กลางภาค+ปลายภาค)
@@ -263,6 +264,7 @@ export default function GradeOverviewTool({
   students: Student[];
   currentUserId?: string;
   readOnly?: boolean;
+  hideActions?: boolean;
   gradingMode?: "numeric" | "pass_fail";   // ★ เพิ่ม
   passThresholdPercent?: number; 
   gradingStructure?: "formative_final" | "formative_midterm_final";
@@ -952,7 +954,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
     ⚙️ ตั้งค่าคำนวณเกรด
   </button>
 )}
-          {readOnly && (
+          {readOnly && !hideActions && ( 
             <button
               onClick={handlePrint}
               className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm flex items-center gap-1.5"
@@ -960,6 +962,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
               🖨️ พิมพ์
             </button>
           )}
+          {!hideActions && ( 
           <button
             onClick={handleExportExcel}
             disabled={exporting || loading}
@@ -967,6 +970,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           >
             📊 {exporting ? "กำลังดาวน์โหลด..." : "Export"}
           </button>
+)}
         </div>
       </div>
 

@@ -27,6 +27,7 @@ interface Assignment {
   title: string;
   description: string | null;
   due_date: string | null;
+  created_at?: string | null;
   max_score: number | null;
   weight_percent?: number | null;
   submissions: Submission[];
@@ -72,7 +73,16 @@ function formatDate(iso: string | null | undefined) {
     return "-";
   }
 }
+type GradeStudent = {
+  id: string;
+  prefix?: string;
+  first_name: string;
+  last_name: string;
+  nick_name?: string;
+  seat_number: number;
+};
 
+const [selfStudent, setSelfStudent] = useState<GradeStudent | null>(null);
 // ★ วันที่แบบสั้น สำหรับหัวคอลัมน์ตารางเช็คชื่อ เช่น "06 ส.ค. 69"
 function formatShortDate(iso: string | null | undefined) {
   if (!iso) return "-";
@@ -166,15 +176,40 @@ export default function StudentPortalSubjectPage() {
   setLoading(false);
 }, [studentId, sectionId]);
 
+// ★ ดึงข้อมูลรายวิชา/ตัวนักเรียน จาก endpoint ตารางเรียนเดียวกับหน้า dashboard
+// (แทนที่ /api/student-portal/subject-section ที่ยังไม่มีจริง -> 404)
 const fetchSubjectInfo = useCallback(async () => {
   if (!sectionId) return;
   try {
-    const res = await fetch(
-      `/api/student-portal/subject-section?student_id=${studentId}&subject_section_id=${sectionId}`
-    );
-    if (res.ok) {
-      const data = await res.json();
-      setSubjectInfo(data);
+    const res = await fetch(`/api/student-portal/timetable?student_id=${studentId}`);
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const sections: any[] = data.sections ?? [];
+    const matched = sections.find((s) => s.id === sectionId);
+
+    const classroom = data.classroom;
+    const classLabel = classroom?.grade_group
+      ? `${classroom.grade_group}${classroom.room_name ? `/${classroom.room_name}` : ""}`
+      : (classroom?.room_name ?? null);
+
+    setSubjectInfo({
+      subject_name: matched?.subject?.name_th ?? "",
+      class_code: matched?.subject?.subject_code ?? null,
+      class_name: classLabel,
+      academic_year: data.academic_year ?? null, // ★ ถ้า backend ยังไม่ส่งค่านี้มา ให้เพิ่มใน timetable endpoint ด้วย
+    });
+
+    // ★ เก็บข้อมูลตัวนักเรียนไว้ใช้ส่งต่อให้ GradeOverviewTool (ข้อ 2.2)
+    if (data.student) {
+      setSelfStudent({
+        id: data.student.id,
+        prefix: data.student.prefix,
+        first_name: data.student.first_name,
+        last_name: data.student.last_name,
+        nick_name: data.student.nick_name ?? data.student.first_name,
+        seat_number: Number(data.student.student_no) || 0,
+      });
     }
   } catch {
     // เงียบไว้ ไม่ให้กระทบหน้าอื่น
@@ -184,10 +219,6 @@ const fetchSubjectInfo = useCallback(async () => {
 useEffect(() => {
   fetchSubjectInfo();
 }, [fetchSubjectInfo]);
-
-  useEffect(() => {
-    fetchSubjectInfo();
-  }, [fetchSubjectInfo]);
 
   useEffect(() => {
   if (tab === "assignments" || tab === "pending") fetchAssignments();
@@ -232,11 +263,10 @@ useEffect(() => {
   // ★ เรียงงานในแท็บ "งานของฉัน" ตามลำดับที่มอบหมาย (เก่า -> ใหม่ ตามวันกำหนดส่ง)
 // งานที่ไม่มีกำหนดส่งจะถูกจัดไว้ท้ายสุด
 const sortedAssignments = [...assignments].sort((a, b) => {
-  const at = a.due_date ? new Date(a.due_date).getTime() : Infinity;
-  const bt = b.due_date ? new Date(b.due_date).getTime() : Infinity;
+  const at = a.created_at ? new Date(a.created_at).getTime() : Infinity;
+  const bt = b.created_at ? new Date(b.created_at).getTime() : Infinity;
   return at - bt;
 });
-
   // ★ คำนวณสรุปการเช็คชื่อ (จำนวนขาด/ลา/สาย และ % การมาเรียน) ในแท็บเช็คชื่อ
   const attSummary = attendance?.summary ?? null;
   const attExcused = attSummary ? attSummary.excused ?? attSummary.leave ?? 0 : 0;
@@ -352,9 +382,15 @@ const sortedAssignments = [...assignments].sort((a, b) => {
                             </p>
                           )}
                           <div className="flex items-center gap-2 flex-wrap mt-2">
-                            <p className="text-slate-500 text-sm font-bold">
-                              {a.due_date ? <>กำหนดส่ง {formatDate(a.due_date)}</> : "ไม่มีกำหนดส่ง"}
-                            </p>
+{/* ★ วันที่มอบหมายงาน */}
+{a.created_at && (
+  <p className="text-slate-400 text-sm font-bold">
+    มอบหมายเมื่อ {formatDate(a.created_at)}
+  </p>
+)}
+<p className="text-slate-500 text-sm font-bold">
+  {a.due_date ? <>กำหนดส่ง {formatDate(a.due_date)}</> : "ไม่มีกำหนดส่ง"}
+</p>
                             {dueStatus && (
                               <span
                                 className={`px-2.5 py-1 rounded-full text-xs font-black ${dueStatus.className}`}
@@ -476,15 +512,22 @@ const sortedAssignments = [...assignments].sort((a, b) => {
                         </div>
                         <div className="min-w-0">
                           <p className="font-black text-slate-900 text-xl truncate">{a.title}</p>
+                          
                           {a.description && (
                             <p className="text-slate-600 text-base font-bold mt-1 line-clamp-2">
                               {a.description}
                             </p>
                           )}
                           <div className="flex items-center gap-2 flex-wrap mt-2">
-                            <p className="text-rose-500 text-base font-bold">
-                              กำหนดส่ง: {formatDate(a.due_date)}
-                            </p>
+{/* ★ วันที่มอบหมายงาน */}
+{a.created_at && (
+  <p className="text-slate-400 text-sm font-bold">
+    มอบหมายเมื่อ {formatDate(a.created_at)}
+  </p>
+)}
+<p className="text-slate-500 text-sm font-bold">
+  {a.due_date ? <>กำหนดส่ง {formatDate(a.due_date)}</> : "ไม่มีกำหนดส่ง"}
+</p>
                             {dueStatus && (
                               <span className={`px-2.5 py-1 rounded-full text-xs font-black ${dueStatus.className}`}>
                                 {dueStatus.label}
@@ -525,7 +568,7 @@ const sortedAssignments = [...assignments].sort((a, b) => {
     classroomLabel={subjectInfo?.class_name ?? undefined}
     homeroomTeacherName={subjectInfo?.homeroom_teacher_name ?? undefined}
     subjectTeacherName={subjectInfo?.subject_teacher_name ?? undefined}
-    students={[]} // จะถูกใช้แค่ผ่านคำนวณ - ถ้า GradeOverviewTool ต้องการ full roster ให้ fetch มาแยกและใส่ตรงนี้
+    students={selfStudent ? [selfStudent] : []} 
     gradingMode={subjectInfo?.grading_mode ?? "numeric"}
     passThresholdPercent={subjectInfo?.pass_threshold_percent ?? 50}
     gradingStructure={subjectInfo?.grading_structure ?? "formative_midterm_final"}
@@ -533,6 +576,7 @@ const sortedAssignments = [...assignments].sort((a, b) => {
     midtermMaxScore={subjectInfo?.midterm_max_score ?? 0}
     finalMaxScore={subjectInfo?.final_max_score ?? 30}
     currentStudentId={studentId}
+    hideActions  
     readOnly
   />
 )}

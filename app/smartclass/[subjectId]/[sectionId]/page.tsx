@@ -2723,12 +2723,12 @@ const [{ data: subj }, { data: room }] = await Promise.all([
           <button onClick={() => router.push("/dashboard")}
             title="กลับแดชบอร์ด"
             className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl transition-colors">🏠</button>
-          <button onClick={() => router.push(`/smartclass/${subjectId}`)}
+          <button onClick={() => router.push("/smartclass")}
+            title="กลับหน้า Smart Class"
+            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl font-black transition-colors">📚</button>
+            <button onClick={() => router.push(`/smartclass/${subjectId}`)}
               title="กลับหน้ารายห้องของวิชานี้"
               className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">←</button>
-          <button onClick={() => router.push("/smartclass")}
-            title="กลับหน้ารายวิชา"
-            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl font-black transition-colors">←</button>
                     </div>
           <div className="w-9 sm:hidden" />
         </div>
