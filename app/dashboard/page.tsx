@@ -1029,6 +1029,7 @@ return (
               ? `/ ${attendanceStats.total} คน (เช็คแล้ว ${attendanceStats.checkedIn})`
               : "รอข้อมูล",
             subColor: "text-slate-400",
+            href: "/admin/attendance-overview",
           },
           {
             icon: "✕", bg: "bg-rose-100", color: "text-rose-600", label: "ขาดเรียนวันนี้",

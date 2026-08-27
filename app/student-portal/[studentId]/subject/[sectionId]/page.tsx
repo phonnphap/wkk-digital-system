@@ -1,15 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 type Tab = "assignments" | "pending" | "grades" | "attendance";
-
-interface StudentPortalClientProps {
-  studentId: string;
-  sectionId?: string; // ★ ถ้าไม่มีค่า = โหมดดูตารางรวม (ไม่ใช้ในหน้านี้ แต่กันไว้)
-}
 
 interface Assignment {
   id: string;
@@ -28,8 +23,13 @@ interface Assignment {
   }[];
 }
 
-export default function StudentPortalClient({ studentId, sectionId }: StudentPortalClientProps) {
+export default function StudentPortalSubjectPage() {
   const router = useRouter();
+  // ★ ดึง studentId และ sectionId จาก URL params ให้ถูกต้อง
+  // (ก่อนหน้านี้ component รับ props ตรงๆ ซึ่ง Next.js ไม่ได้ส่งมาแบบนั้น
+  //  ทำให้ studentId/sectionId เป็น undefined เสมอ)
+  const { studentId, sectionId } = useParams() as { studentId: string; sectionId: string };
+
   const [tab, setTab] = useState<Tab>("assignments");
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [grades, setGrades] = useState<any>(null);

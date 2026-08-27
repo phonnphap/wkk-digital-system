@@ -290,26 +290,16 @@ const todayHoliday = isHoliday(date, holidayMap);
 
   // ตรวจสิทธิ์ผู้ดูแลระบบก่อนแสดงหน้า
   useEffect(() => {
-    (async () => {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) {
-        router.push("/login");
-        return;
-      }
-      const { data: profile } = await supabase
-        .from("users")
-        .select("role")
-        .eq("auth_id", authUser.id)
-        .maybeSingle();
-
-      if (profile?.role && ADMIN_ROLES.has(profile.role)) {
-        setAllowed(true);
-      } else {
-        router.push(HOMEROOM_PATH);
-      }
-      setCheckingAuth(false);
-    })();
-  }, [router]);
+  (async () => {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) {
+      router.push("/login");
+      return;
+    }
+    setAllowed(true);          // ★ แค่เช็คว่าล็อกอินอยู่ก็พอ ไม่เช็ค role
+    setCheckingAuth(false);
+  })();
+}, [router]);
 
   // ★ โหลดรายชื่อห้องเรียน/นักเรียนครั้งเดียว (ใช้ร่วมกันทั้งตารางรายวันและกราฟ)
   useEffect(() => {
