@@ -211,22 +211,22 @@ if (roomIds.length > 0) {
   }, [filteredClassrooms]);
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="text-emerald-500 font-black text-lg animate-pulse">กำลังโหลด Smart Class...</div>
-      </div>
-    );
-  }
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center font-['TH_Sarabun_New',_sans-serif]">
+      <div className="text-fuchsia-600 font-black text-2xl animate-pulse">กำลังโหลดข้อมูล...</div>
+    </div>
+  );
+}
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="sticky top-0 z-30 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 shadow-md px-4 py-3">
+    <div className="min-h-screen bg-slate-50 font-['TH_Sarabun_New',_sans-serif]">
+      <div className="sticky top-0 z-30 bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 shadow-md px-4 py-3">
   <div className="flex items-center gap-3">
     <button onClick={() => router.push("/dashboard")}
-      className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white text-lg shrink-0">🏠</button>
+      className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg shrink-0 transition-colors">🏠</button>
     <div className="flex-1 min-w-0">
       <h1 className="text-base font-black text-white leading-none">📚 Smart Class</h1>
-      <p className="text-white/70 text-xs">
+      <p className="text-white/80 text-xs font-bold mt-0.5">
         {isAdmin
           ? `แสดงทุกชั้นเรียน (สิทธิ์แอดมิน/ผู้บริหาร) · ${filteredClassrooms.length} ห้อง`
           : `วิชาที่คุณสอน · ${filteredSubjects.length} วิชา`}
@@ -235,7 +235,7 @@ if (roomIds.length > 0) {
     {isAdmin && (
       <button onClick={() => router.push("/smartclass/insights")}
         title="ข้อมูลเชิงลึก"
-        className="shrink-0 px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center gap-1.5 text-white text-xs font-black">
+        className="shrink-0 px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center gap-1.5 text-white text-xs font-black transition-colors">
         📊 ข้อมูลเชิงลึก
       </button>
     )}
@@ -247,13 +247,13 @@ if (roomIds.length > 0) {
   {isAdmin && (
     <div className="flex items-center gap-2 mt-3 overflow-x-auto pb-1">
       <button onClick={() => setLevelFilter("all")}
-        className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-black ${
-          levelFilter === "all" ? "bg-white text-purple-600" : "bg-white/20 text-white"
+        className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${
+          levelFilter === "all" ? "bg-white text-fuchsia-600" : "bg-white/20 text-white hover:bg-white/30"
         }`}>ทั้งหมด</button>
       {LEVELS.filter(l => l.key !== "other").map(l => (
         <button key={l.key} onClick={() => setLevelFilter(l.key)}
-          className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-black ${
-            levelFilter === l.key ? "bg-white text-purple-600" : "bg-white/20 text-white"
+          className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${
+            levelFilter === l.key ? "bg-white text-fuchsia-600" : "bg-white/20 text-white hover:bg-white/30"
           }`}>{l.label}</button>
       ))}
     </div>
@@ -263,45 +263,45 @@ if (roomIds.length > 0) {
       <main className="p-4 w-full">
         {isAdmin ? (
           filteredClassrooms.length === 0 ? (
-            <div className="text-center py-20 text-slate-400 bg-white rounded-2xl border border-slate-200">
-              <p className="text-4xl mb-3">🏫</p>
-              <p className="font-bold">{search ? "ไม่พบห้องเรียนตามที่ค้นหา" : "ยังไม่มีข้อมูลชั้นเรียน"}</p>
-            </div>
+            <div className="text-center py-20 text-slate-400 bg-white rounded-2xl border-2 border-slate-100">
+  <p className="text-4xl mb-3">🏫</p>
+  <p className="font-black text-slate-500">{search ? "ไม่พบห้องเรียนตามที่ค้นหา" : "ยังไม่มีข้อมูลชั้นเรียน"}</p>
+</div>
           ) : (
             <div className="space-y-6">
               {classroomsByLevel.map(({ level, items }) => (
                 <div key={level.key}>
                   {levelFilter === "all" && (
-                    <h2 className="text-sm font-black text-slate-500 mb-2 flex items-center gap-2">
-                      <span className="w-1.5 h-4 rounded-full bg-emerald-400 inline-block" />
-                      {level.label}
-                      <span className="text-slate-300 font-bold">({items.length})</span>
-                    </h2>
+                    <h2 className="text-sm font-black text-slate-600 mb-2 flex items-center gap-2">
+  <span className="w-1.5 h-4 rounded-full bg-fuchsia-400 inline-block" />
+  {level.label}
+  <span className="text-slate-300 font-black">({items.length})</span>
+</h2>
                   )}
                   <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
                     {items.map(({ classroom }, i) => {
   const gradient = getRoomGradient(classroom.room_name);
-  const label = `${classroom.grade_group ?? ""} ${classroom.room_name ?? ""}`.trim();
+  const label = classroom.room_name?.trim() ?? "";
   const count = studentCounts[classroom.id] ?? 0;
   return (
     <button key={classroom.id} onClick={() => router.push(`/smartclass/room/${classroom.id}`)}
-      className="text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden">
-      <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
-        <span className="text-[10px] font-black bg-white/95 text-slate-700 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
-          CLASSROOM
-        </span>
-        <span className="text-white/60 text-lg leading-none">⠿</span>
-      </div>
-      <div className="p-4">
-        <p className="font-black text-lg text-slate-800 leading-tight">{label}</p>
-        <p className="text-slate-400 text-xs font-bold mt-1">รายชื่อ - {label}</p>
-        <div className="mt-3">
-          <span className="text-[11px] font-black bg-slate-100 px-2.5 py-1.5 rounded-lg text-slate-600 inline-flex items-center gap-1">
-            👥 {count} Students
-          </span>
-        </div>
-      </div>
-    </button>
+  className="text-left rounded-2xl border-2 border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden">
+  <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
+    <span className="text-sm font-black bg-white text-slate-900 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
+      CLASSROOM
+    </span>
+    <span className="text-white text-lg leading-none font-black">⠿</span>
+  </div>
+  <div className="p-4">
+    <p className="font-black text-xl text-slate-900 leading-tight truncate">{label}</p>
+    <p className="text-slate-400 text-sm font-bold mt-0.5">รายชื่อ</p>
+    <div className="mt-3">
+      <span className="text-sm font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
+        👥 {count} คน
+      </span>
+    </div>
+  </div>
+</button>
   );
 })}
                   </div>
@@ -310,38 +310,38 @@ if (roomIds.length > 0) {
             </div>
           )
         ) : filteredSubjects.length === 0 ? (
-          <div className="text-center py-20 text-slate-400 bg-white rounded-2xl border border-slate-200">
-            <p className="text-4xl mb-3">📚</p>
-            <p className="font-bold">{search ? "ไม่พบวิชาตามที่ค้นหา" : "คุณยังไม่มีวิชาที่สอน"}</p>
-          </div>
+          <div className="text-center py-20 text-slate-400 bg-white rounded-2xl border-2 border-slate-100">
+  <p className="text-4xl mb-3">📚</p>
+  <p className="font-black text-slate-500">{search ? "ไม่พบวิชาตามที่ค้นหา" : "คุณยังไม่มีวิชาที่สอน"}</p>
+</div>
         ) : (
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
   {filteredSubjects.map((g, i) => {
     const gradient = SUBJECT_GRADIENTS[i % SUBJECT_GRADIENTS.length];
     return (
       <button
-        key={g.subject.id}
-        onClick={() => router.push(`/smartclass/${g.subject.id}`)}
-        className="text-left rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
-      >
-        <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
-          <span className="text-[10px] font-black bg-white/95 text-slate-700 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
-            SUBJECT
-          </span>
-          <span className="text-white/60 text-lg leading-none">⠿</span>
-        </div>
-        <div className="p-4">
-          <p className="font-black text-base text-slate-800 leading-tight truncate">
-            {g.subject.name_th}
-          </p>
-          <p className="text-slate-400 text-xs font-bold mt-1">{g.subject.subject_code}</p>
-          <div className="mt-3">
-            <span className="text-[11px] font-black bg-slate-100 px-2.5 py-1.5 rounded-lg text-slate-600 inline-flex items-center gap-1">
-              🏫 {g.roomCount} ห้อง
-            </span>
-          </div>
-        </div>
-      </button>
+  key={g.subject.id}
+  onClick={() => router.push(`/smartclass/${g.subject.id}`)}
+  className="text-left rounded-2xl border-2 border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
+>
+  <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
+    <span className="text-sm font-black bg-white text-slate-900 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
+      SUBJECT
+    </span>
+    <span className="text-white text-lg leading-none font-black">⠿</span>
+  </div>
+  <div className="p-4">
+    <p className="font-black text-xl text-slate-900 leading-tight truncate">
+      {g.subject.name_th}
+    </p>
+    <p className="text-slate-400 text-sm font-bold mt-0.5">{g.subject.subject_code}</p>
+    <div className="mt-3">
+      <span className="text-sm font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
+        🏫 {g.roomCount} ห้อง
+      </span>
+    </div>
+  </div>
+</button>
     );
   })}
 </div>

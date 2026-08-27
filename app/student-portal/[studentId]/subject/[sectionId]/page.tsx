@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { ArrowLeft, Paperclip, LogOut } from "lucide-react";
+import GradeOverviewTool from "@/components/attendance/GradeOverviewTool"; 
 
 type Tab = "assignments" | "pending" | "grades" | "attendance";
 type GradingMode = "numeric" | "pass_fail";
@@ -32,18 +33,6 @@ interface Assignment {
   grading_mode?: GradingMode;
 }
 
-interface GradeRow {
-  assignment_id: string;
-  title: string;
-  score: number | null;
-  max_score: number | null;
-  weight_percent: number | null;
-  percentage: number | null;
-  is_late: boolean;
-  grading_mode?: GradingMode;
-  pass_fail_result?: PassFailResult;
-}
-
 // ★ ข้อมูลรายวิชาสำหรับแบนเนอร์ด้านบน
 // หมายเหตุ: สมมติว่ามี endpoint นี้ ถ้ายังไม่มีฝั่ง backend ต้องเพิ่มให้ตรงกัน
 interface SubjectInfo {
@@ -51,6 +40,15 @@ interface SubjectInfo {
   class_name?: string | null;
   academic_year?: string | null;
   class_code?: string | null;
+  // ★ เพิ่มสำหรับส่งต่อให้ GradeOverviewTool
+  homeroom_teacher_name?: string | null;
+  subject_teacher_name?: string | null;
+  grading_mode?: "numeric" | "pass_fail";
+  pass_threshold_percent?: number;
+  grading_structure?: "formative_final" | "formative_midterm_final";
+  formative_max_score?: number;
+  midterm_max_score?: number;
+  final_max_score?: number;
 }
 
 const TAB_ITEMS: { key: Tab; label: string; icon: string }[] = [
@@ -121,10 +119,6 @@ export default function StudentPortalSubjectPage() {
 
   const [tab, setTab] = useState<Tab>("assignments");
   const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [grades, setGrades] = useState<{
-    grades: GradeRow[];
-    summary: { weighted_score: number; weight_graded: number; grade: string | null };
-  } | null>(null);
   const [attendance, setAttendance] = useState<any>(null);
   const [subjectInfo, setSubjectInfo] = useState<SubjectInfo | null>(null);
   const [loading, setLoading] = useState(false);
@@ -141,52 +135,64 @@ export default function StudentPortalSubjectPage() {
     setLoading(false);
   }, [studentId, sectionId]);
 
-  const fetchGrades = useCallback(async () => {
-    if (!sectionId) return;
-    setLoading(true);
-    const res = await fetch(
-      `/api/student-portal/grades?student_id=${studentId}&subject_section_id=${sectionId}`
-    );
-    const data = await res.json();
-    if (res.ok) setGrades(data);
-    setLoading(false);
-  }, [studentId, sectionId]);
-
   const fetchAttendance = useCallback(async () => {
-    setLoading(true);
-    const res = await fetch(`/api/student-portal/attendance?student_id=${studentId}`);
-    const data = await res.json();
-    if (res.ok) setAttendance(data);
-    setLoading(false);
-  }, [studentId]);
+  if (!sectionId) return;
+  setLoading(true);
+  // ★ เปลี่ยนมาดึงเช็คชื่อ "รายวิชา" (ตรงกับที่ครูเห็น) แทนเช็คชื่อโฮมรูม
+  const res = await fetch(`/api/subject-attendance/summary?subject_section_id=${sectionId}`);
+  const data = await res.json();
+  if (res.ok) {
+    const allRecords: { student_id: string; attendance_date: string; status: string }[] =
+      data.records ?? [];
+    const myRecords = allRecords.filter((r) => r.student_id === studentId);
 
-  // ★ ดึงข้อมูลรายวิชาสำหรับแบนเนอร์ (ไม่บล็อก loading หลักของแท็บ ถ้า endpoint ไม่มีจริงจะ fail เงียบ ๆ)
-  // หมายเหตุ: ถ้าชื่อวิชาไม่ขึ้น ให้ตรวจสอบว่า backend มี route
-  // /api/student-portal/subject-section?student_id=...&subject_section_id=... จริง (ปัจจุบันคืน 404)
-  const fetchSubjectInfo = useCallback(async () => {
-    if (!sectionId) return;
-    try {
-      const res = await fetch(
-        `/api/student-portal/subject-section?student_id=${studentId}&subject_section_id=${sectionId}`
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setSubjectInfo(data);
-      }
-    } catch {
-      // เงียบไว้ ไม่ให้กระทบหน้าอื่น
+    const summary = { present: 0, absent: 0, late: 0, excused: 0 };
+    myRecords.forEach((r) => {
+      if (r.status === "present") summary.present++;
+      else if (r.status === "absent") summary.absent++;
+      else if (r.status === "late") summary.late++;
+      else if (r.status === "leave" || r.status === "excused") summary.excused++;
+    });
+
+    setAttendance({
+      summary,
+      records: myRecords.map((r) => ({
+        id: `${r.student_id}-${r.attendance_date}`,
+        date: r.attendance_date,
+        status: r.status,
+      })),
+    });
+  }
+  setLoading(false);
+}, [studentId, sectionId]);
+
+const fetchSubjectInfo = useCallback(async () => {
+  if (!sectionId) return;
+  try {
+    const res = await fetch(
+      `/api/student-portal/subject-section?student_id=${studentId}&subject_section_id=${sectionId}`
+    );
+    if (res.ok) {
+      const data = await res.json();
+      setSubjectInfo(data);
     }
-  }, [studentId, sectionId]);
+  } catch {
+    // เงียบไว้ ไม่ให้กระทบหน้าอื่น
+  }
+}, [studentId, sectionId]);
+
+useEffect(() => {
+  fetchSubjectInfo();
+}, [fetchSubjectInfo]);
 
   useEffect(() => {
     fetchSubjectInfo();
   }, [fetchSubjectInfo]);
 
   useEffect(() => {
-    if (tab === "assignments" || tab === "pending") fetchAssignments();
-    if (tab === "grades") fetchGrades();
-    if (tab === "attendance") fetchAttendance();
-  }, [tab, fetchAssignments, fetchGrades, fetchAttendance]);
+  if (tab === "assignments" || tab === "pending") fetchAssignments();
+  if (tab === "attendance") fetchAttendance();
+}, [tab, fetchAssignments, fetchAttendance]);
 
   const handleUpload = async (assignmentId: string, file: File) => {
     setUploadingId(assignmentId);
@@ -223,17 +229,13 @@ export default function StudentPortalSubjectPage() {
 
   const pendingAssignments = assignments.filter((a) => a.submissions.length === 0);
 
-  // ★ เรียงงานในแท็บ "งานของฉัน" ตามวันกำหนดส่ง ใหม่ -> เก่า (ใหม่สุดอยู่บนสุด)
-  const sortedAssignments = [...assignments].sort((a, b) => {
-    const at = a.due_date ? new Date(a.due_date).getTime() : -Infinity;
-    const bt = b.due_date ? new Date(b.due_date).getTime() : -Infinity;
-    return bt - at;
-  });
-
-  // ★ คำนวณ % ส่งงานตรงเวลา จากงานที่ตรวจแล้วทั้งหมด (ใช้ในตารางคะแนนรวม)
-  const gradedRows = grades?.grades.filter((g) => g.score !== null || !!g.pass_fail_result) ?? [];
-  const onTimeCount = gradedRows.filter((g) => !g.is_late).length;
-  const onTimePercent = gradedRows.length > 0 ? Math.round((onTimeCount / gradedRows.length) * 100) : null;
+  // ★ เรียงงานในแท็บ "งานของฉัน" ตามลำดับที่มอบหมาย (เก่า -> ใหม่ ตามวันกำหนดส่ง)
+// งานที่ไม่มีกำหนดส่งจะถูกจัดไว้ท้ายสุด
+const sortedAssignments = [...assignments].sort((a, b) => {
+  const at = a.due_date ? new Date(a.due_date).getTime() : Infinity;
+  const bt = b.due_date ? new Date(b.due_date).getTime() : Infinity;
+  return at - bt;
+});
 
   // ★ คำนวณสรุปการเช็คชื่อ (จำนวนขาด/ลา/สาย และ % การมาเรียน) ในแท็บเช็คชื่อ
   const attSummary = attendance?.summary ?? null;
@@ -514,126 +516,26 @@ export default function StudentPortalSubjectPage() {
         )}
 
         {/* คะแนนรวม */}
-        {tab === "grades" && !loading && grades && (
-          <div className="space-y-4">
-            <div className="rounded-2xl bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white p-6 shadow-sm flex items-center justify-between flex-wrap gap-4">
-              <div>
-                <p className="text-base font-bold opacity-90">คะแนนรวม (ถ่วงน้ำหนักจากงานที่มอบหมาย)</p>
-                <p className="text-5xl font-black mt-1">{grades.summary.weighted_score}%</p>
-                <p className="text-sm font-bold opacity-90 mt-1.5">
-                  ตรวจแล้ว {grades.summary.weight_graded}% ของน้ำหนักคะแนนทั้งหมด
-                </p>
-                <p className="text-xs font-bold opacity-80 mt-1">
-                  * ยังไม่รวมคะแนนสอบกลางภาค/ปลายภาค
-                </p>
-              </div>
-              {grades.summary.grade && (
-                <div className="text-center bg-white/15 rounded-2xl px-6 py-3">
-                  <p className="text-sm font-bold opacity-90">เกรด</p>
-                  <p className="text-4xl font-black mt-0.5">{grades.summary.grade}</p>
-                </div>
-              )}
-            </div>
-
-            {/* ★ ตารางคะแนนแบบรายวิชา: แต่ละงานเป็นคอลัมน์ พร้อมคอลัมน์สรุปท้ายตาราง */}
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
-              {grades.grades.length === 0 ? (
-                <p className="text-center text-slate-400 font-bold text-lg py-10">
-                  ยังไม่มีคะแนนที่ตรวจแล้ว
-                </p>
-              ) : (
-                <table className="w-full min-w-max border-collapse">
-                  <thead>
-                    <tr className="bg-gradient-to-r from-indigo-50 via-sky-50 to-fuchsia-50">
-                      <th className="sticky left-0 z-10 bg-indigo-50 text-left text-sm font-black text-slate-600 px-5 py-3 min-w-[140px]">
-                        รายการ
-                      </th>
-                      {grades.grades.map((g) => (
-                        <th
-                          key={g.assignment_id}
-                          className="text-center text-sm font-black text-slate-600 px-4 py-3 min-w-[120px] align-bottom"
-                          title={g.title}
-                        >
-                          <p className="truncate max-w-[120px] mx-auto">{g.title}</p>
-                          {g.weight_percent != null && (
-                            <p className="text-xs font-bold text-slate-400 mt-0.5">
-                              เต็ม {g.weight_percent}%
-                            </p>
-                          )}
-                        </th>
-                      ))}
-                      <th className="text-center text-sm font-black text-slate-600 px-4 py-3 min-w-[90px] bg-fuchsia-50">
-                        รวม
-                      </th>
-                      <th className="text-center text-sm font-black text-slate-600 px-4 py-3 min-w-[110px] bg-fuchsia-50">
-                        ระดับผลการเรียน
-                      </th>
-                      <th className="text-center text-sm font-black text-slate-600 px-4 py-3 min-w-[110px] bg-fuchsia-50">
-                        ส่งตรงเวลา
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td className="sticky left-0 z-10 bg-white text-base font-bold text-slate-800 px-5 py-3.5">
-                        คะแนนของฉัน
-                      </td>
-                      {grades.grades.map((g) => {
-                        const isPassFail = g.grading_mode === "pass_fail";
-                        return (
-                          <td key={g.assignment_id} className="text-center px-4 py-3.5">
-                            {isPassFail ? (
-                              <span
-                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-black text-sm ${
-                                  g.pass_fail_result === "pass"
-                                    ? "bg-emerald-50 text-emerald-600"
-                                    : g.pass_fail_result === "fail"
-                                    ? "bg-rose-50 text-rose-600"
-                                    : "bg-amber-50 text-amber-600"
-                                }`}
-                              >
-                                {g.pass_fail_result === "pass"
-                                  ? "✅ ผ่าน"
-                                  : g.pass_fail_result === "fail"
-                                  ? "❌ ไม่ผ่าน"
-                                  : "⏳ รอตรวจ"}
-                              </span>
-                            ) : g.score !== null && g.score !== undefined ? (
-                              <span
-                                className={`inline-flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl font-black text-base ${
-                                  g.is_late
-                                    ? "bg-orange-50 text-orange-600"
-                                    : "bg-emerald-50 text-emerald-600"
-                                }`}
-                              >
-                                {g.score}
-                                <span className="text-slate-500 font-bold text-sm">/{g.max_score ?? "-"}</span>
-                              </span>
-                            ) : (
-                              <span className="text-slate-300 font-black text-lg">-</span>
-                            )}
-                            {g.is_late && (
-                              <p className="text-[10px] font-black text-orange-500 mt-1">⏰ ส่งช้า</p>
-                            )}
-                          </td>
-                        );
-                      })}
-                      <td className="text-center px-4 py-3.5 font-black text-fuchsia-600 text-lg bg-fuchsia-50/40">
-                        {grades.summary.weighted_score}%
-                      </td>
-                      <td className="text-center px-4 py-3.5 font-black text-fuchsia-600 text-lg bg-fuchsia-50/40">
-                        {grades.summary.grade ?? "-"}
-                      </td>
-                      <td className="text-center px-4 py-3.5 font-black text-emerald-600 text-lg bg-fuchsia-50/40">
-                        {onTimePercent !== null ? `${onTimePercent}%` : "-"}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        )}
+{tab === "grades" && (
+  <GradeOverviewTool
+    sectionId={sectionId}
+    subjectTitle={subjectInfo?.subject_name ?? ""}
+    subjectCode={subjectInfo?.class_code ?? ""}
+    academicYearLabel={subjectInfo?.academic_year ?? undefined}
+    classroomLabel={subjectInfo?.class_name ?? undefined}
+    homeroomTeacherName={subjectInfo?.homeroom_teacher_name ?? undefined}
+    subjectTeacherName={subjectInfo?.subject_teacher_name ?? undefined}
+    students={[]} // จะถูกใช้แค่ผ่านคำนวณ - ถ้า GradeOverviewTool ต้องการ full roster ให้ fetch มาแยกและใส่ตรงนี้
+    gradingMode={subjectInfo?.grading_mode ?? "numeric"}
+    passThresholdPercent={subjectInfo?.pass_threshold_percent ?? 50}
+    gradingStructure={subjectInfo?.grading_structure ?? "formative_midterm_final"}
+    formativeMaxScore={subjectInfo?.formative_max_score ?? 70}
+    midtermMaxScore={subjectInfo?.midterm_max_score ?? 0}
+    finalMaxScore={subjectInfo?.final_max_score ?? 30}
+    currentStudentId={studentId}
+    readOnly
+  />
+)}
 
         {/* เช็คชื่อ */}
         {tab === "attendance" && !loading && attendance && (
