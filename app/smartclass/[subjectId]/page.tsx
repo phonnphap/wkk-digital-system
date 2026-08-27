@@ -103,32 +103,32 @@ export default function SmartClassRoomsPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center font-['TH_Sarabun_New',_sans-serif]">
-        <div className="text-fuchsia-600 font-black text-xl animate-pulse">กำลังโหลดข้อมูล...</div>
+        <div className="text-fuchsia-600 font-black text-2xl animate-pulse">กำลังโหลดข้อมูล...</div>
       </div>
     );
   }
   if (!subject) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center font-['TH_Sarabun_New',_sans-serif]">
-        <p className="text-red-600 font-black text-lg">❌ ไม่พบวิชานี้</p>
+        <p className="text-red-600 font-black text-xl">❌ ไม่พบวิชานี้</p>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-slate-50 font-['TH_Sarabun_New',_sans-serif]">
-      <div className="bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-4 pt-4 pb-6">
-        <div className="flex items-center gap-2 mb-3">
+      <div className="bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-4 pt-4 pb-7">
+        <div className="flex items-center gap-2 mb-4">
           <button onClick={() => router.push("/dashboard")}
             title="กลับแดชบอร์ด"
-            className="w-10 h-10 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-xl transition-colors">🏠</button>
+            className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl transition-colors">🏠</button>
           <button onClick={() => router.push("/smartclass")}
             title="กลับหน้ารายวิชา"
-            className="w-10 h-10 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-xl transition-colors">←</button>
+            className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl font-black transition-colors">←</button>
         </div>
         <div className="text-center px-2">
-          <h1 className="text-2xl sm:text-3xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
-          <p className="text-white text-base font-bold mt-1">
+          <h1 className="text-3xl sm:text-4xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
+          <p className="text-white text-lg font-extrabold mt-1.5">
             {subject.subject_code} · {sections.length} ห้อง{isAdmin ? " (มุมมองแอดมิน)" : ""}
           </p>
         </div>
@@ -137,11 +137,11 @@ export default function SmartClassRoomsPage() {
       <main className="p-4 lg:p-6 w-full max-w-[1600px]">
         {sortedSections.length === 0 ? (
           <div className="text-center py-20 text-slate-500 bg-white rounded-2xl border border-slate-200">
-            <p className="text-5xl mb-3">🏫</p>
-            <p className="font-bold text-lg">ไม่พบห้องที่สอนวิชานี้</p>
+            <p className="text-6xl mb-3">🏫</p>
+            <p className="font-extrabold text-xl">ไม่พบห้องที่สอนวิชานี้</p>
           </div>
         ) : (
-          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
             {sortedSections.map((sec) => {
               const room = classroomOf(sec.classroom_id);
               const gradient = getRoomGradient(room?.room_name);
@@ -153,17 +153,17 @@ export default function SmartClassRoomsPage() {
                   onClick={() => router.push(`/smartclass/${subjectId}/${sec.id}`)}
                   className="text-left rounded-2xl border-2 border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
                 >
-                  <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
-                    <span className="text-xs font-black bg-white text-slate-800 px-3 py-1.5 rounded-full tracking-wide shadow-sm">
+                  <div className={`h-16 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
+                    <span className="text-sm font-black bg-white text-slate-900 px-3 py-1.5 rounded-full tracking-wide shadow-sm">
                       CLASSROOM
                     </span>
-                    <span className="text-white text-xl leading-none">⠿</span>
+                    <span className="text-white text-2xl leading-none font-black">⠿</span>
                   </div>
                   <div className="p-4">
-                    <p className="font-black text-xl text-slate-900 leading-tight">{label}</p>
-                    <p className="text-slate-600 text-sm font-bold mt-1.5">รายชื่อ - {label}</p>
-                    <div className="mt-3">
-                      <span className="text-sm font-black bg-fuchsia-100 border border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
+                    <p className="font-black text-2xl text-slate-900 leading-tight">{label}</p>
+                    <p className="text-slate-700 text-base font-extrabold mt-2">รายชื่อ - {label}</p>
+                    <div className="mt-3.5">
+                      <span className="text-base font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3.5 py-2 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
                         👥 {count} คน
                       </span>
                     </div>
