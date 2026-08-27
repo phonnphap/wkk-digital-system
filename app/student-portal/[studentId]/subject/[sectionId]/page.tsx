@@ -6,28 +6,55 @@ import { ArrowLeft } from "lucide-react";
 
 type Tab = "assignments" | "pending" | "grades" | "attendance";
 
+interface Submission {
+  id: string;
+  file_url: string;
+  file_name: string;
+  submitted_at: string;
+  score: number | null;
+  feedback: string | null;
+  status: string;
+}
+
 interface Assignment {
   id: string;
   title: string;
   description: string | null;
   due_date: string | null;
-  points_possible: number | null;
-  submissions: {
-    id: string;
-    file_url: string;
-    file_name: string;
-    submitted_at: string;
-    score: number | null;
-    feedback: string | null;
-    status: string;
-  }[];
+  max_score: number | null;
+  weight_percent?: number | null;
+  submissions: Submission[];
+}
+
+const TAB_ITEMS: { key: Tab; label: string; icon: string }[] = [
+  { key: "assignments", label: "งานที่มอบหมาย/ส่งงาน", icon: "📌" },
+  { key: "pending", label: "งานที่ยังไม่ส่ง", icon: "⏳" },
+  { key: "grades", label: "คะแนนรวม", icon: "⭐" },
+  { key: "attendance", label: "เช็คชื่อ", icon: "✅" },
+];
+
+function formatDate(iso: string | null | undefined) {
+  if (!iso) return "-";
+  try {
+    return new Date(iso).toLocaleDateString("th-TH", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "-";
+  }
+}
+
+function isLate(dueDate: string | null, submittedAt: string | null) {
+  if (!dueDate || !submittedAt) return false;
+  return new Date(submittedAt).getTime() > new Date(dueDate).getTime();
 }
 
 export default function StudentPortalSubjectPage() {
   const router = useRouter();
-  // ★ ดึง studentId และ sectionId จาก URL params ให้ถูกต้อง
-  // (ก่อนหน้านี้ component รับ props ตรงๆ ซึ่ง Next.js ไม่ได้ส่งมาแบบนั้น
-  //  ทำให้ studentId/sectionId เป็น undefined เสมอ)
   const { studentId, sectionId } = useParams() as { studentId: string; sectionId: string };
 
   const [tab, setTab] = useState<Tab>("assignments");
@@ -97,126 +124,271 @@ export default function StudentPortalSubjectPage() {
   const pendingAssignments = assignments.filter((a) => a.submissions.length === 0);
 
   return (
-    <div className="max-w-3xl mx-auto p-4">
-      {/* ★ ปุ่มย้อนกลับไปตารางเรียนรวม */}
-      <button
-        onClick={() => router.push(`/student-portal/${studentId}`)}
-        className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3"
-      >
-        <ArrowLeft className="h-4 w-4" /> กลับตารางเรียน
-      </button>
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-fuchsia-50/40 font-['TH_Sarabun_New',_sans-serif] pb-14">
+      <div className="max-w-3xl mx-auto p-4">
+        {/* ปุ่มย้อนกลับ */}
+        <button
+          onClick={() => router.push(`/student-portal/${studentId}`)}
+          className="flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-fuchsia-600 mb-4 transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" /> กลับตารางเรียน
+        </button>
 
-      <nav className="flex gap-2 border-b mb-4">
-        {[
-          { key: "assignments", label: "งานที่มอบหมาย/ส่งงาน" },
-          { key: "pending", label: "งานที่ยังไม่ส่ง" },
-          { key: "grades", label: "คะแนนรวม" },
-          { key: "attendance", label: "เช็คชื่อ" },
-        ].map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key as Tab)}
-            className={`px-3 py-2 text-sm ${
-              tab === t.key ? "border-b-2 border-blue-600 font-medium" : "text-gray-500"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-
-      {loading && <p className="text-sm text-gray-400">กำลังโหลด...</p>}
-
-      {tab === "assignments" && !loading && (
-        <ul className="space-y-3">
-          {assignments.map((a) => {
-            const sub = a.submissions[0];
-            return (
-              <li key={a.id} className="border rounded p-3">
-                <div className="flex justify-between">
-                  <span className="font-medium">{a.title}</span>
-                  <span className="text-xs text-gray-400">{a.due_date}</span>
-                </div>
-                {a.description && <p className="text-sm text-gray-600 mt-1">{a.description}</p>}
-
-                {sub ? (
-                  <div className="mt-2 text-sm">
-                    <p>ส่งแล้ว: {sub.file_name}</p>
-                    {sub.score != null && <p>คะแนน: {sub.score}/{a.points_possible}</p>}
-                    {sub.feedback && <p className="text-gray-500">ความเห็น: {sub.feedback}</p>}
-                  </div>
-                ) : (
-                  <div className="mt-2">
-                    <input
-                      type="file"
-                      disabled={uploadingId === a.id}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleUpload(a.id, file);
-                      }}
-                    />
-                    {uploadingId === a.id && <span className="text-xs ml-2">กำลังอัปโหลด...</span>}
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {tab === "pending" && !loading && (
-        <ul className="space-y-2">
-          {pendingAssignments.length === 0 && (
-            <p className="text-sm text-gray-400">ไม่มีงานค้างส่ง 🎉</p>
-          )}
-          {pendingAssignments.map((a) => (
-            <li key={a.id} className="border rounded p-3">
-              <span className="font-medium">{a.title}</span>
-              <span className="text-xs text-gray-400 block">กำหนดส่ง: {a.due_date}</span>
-            </li>
+        {/* แท็บ */}
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-1.5 flex items-center gap-1 flex-wrap mb-5">
+          {TAB_ITEMS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl font-black text-xs sm:text-sm transition-colors ${
+                tab === t.key
+                  ? "bg-gradient-to-r from-fuchsia-500 to-pink-500 text-white shadow-sm"
+                  : "text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              <span>{t.icon}</span>
+              {t.label}
+              {t.key === "pending" && pendingAssignments.length > 0 && (
+                <span
+                  className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                    tab === t.key ? "bg-white/25 text-white" : "bg-rose-100 text-rose-500"
+                  }`}
+                >
+                  {pendingAssignments.length}
+                </span>
+              )}
+            </button>
           ))}
-        </ul>
-      )}
-
-      {tab === "grades" && !loading && grades && (
-        <div>
-          <div className="mb-4 p-3 bg-gray-50 rounded">
-            <p className="font-medium">
-              คะแนนรวม (ถ่วงน้ำหนัก): {grades.summary.weighted_score}%
-            </p>
-            <p className="text-xs text-gray-400">
-              ตรวจแล้ว {grades.summary.weight_graded}% ของคะแนนทั้งหมด
-            </p>
-          </div>
-          <ul className="space-y-2">
-            {grades.grades.map((g: any, i: number) => (
-              <li key={i} className="flex justify-between border-b py-1 text-sm">
-                <span>{g.title}</span>
-                <span>{g.score}/{g.max_score} (น้ำหนัก {g.weight_percent}%)</span>
-              </li>
-            ))}
-          </ul>
         </div>
-      )}
 
-      {tab === "attendance" && !loading && attendance && (
-        <div>
-          <div className="mb-4 grid grid-cols-4 gap-2 text-center text-sm">
-            <div className="p-2 bg-green-50 rounded">มา {attendance.summary.present}</div>
-            <div className="p-2 bg-red-50 rounded">ขาด {attendance.summary.absent}</div>
-            <div className="p-2 bg-yellow-50 rounded">สาย {attendance.summary.late}</div>
-            <div className="p-2 bg-blue-50 rounded">ลา {attendance.summary.excused ?? attendance.summary.leave}</div>
+        {loading && (
+          <div className="text-center py-10 text-fuchsia-400 font-black text-sm animate-pulse">
+            กำลังโหลดข้อมูล...
           </div>
-          <ul className="space-y-1">
-            {attendance.records.map((r: any) => (
-              <li key={r.id} className="flex justify-between text-sm border-b py-1">
-                <span>{r.date ?? r.attendance_date}</span>
-                <span>{r.status}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+        )}
+
+        {/* งานที่มอบหมาย/ส่งงาน */}
+        {tab === "assignments" && !loading && (
+          <div className="space-y-3">
+            {assignments.length === 0 ? (
+              <EmptyState icon="📋" text="ยังไม่มีงานที่มอบหมายในวิชานี้" />
+            ) : (
+              assignments.map((a) => {
+                const sub = a.submissions[0];
+                const late = sub ? isLate(a.due_date, sub.submitted_at) : false;
+                return (
+                  <div
+                    key={a.id}
+                    className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 hover:shadow-md transition-shadow"
+                  >
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="w-11 h-11 rounded-xl flex items-center justify-center text-lg font-black text-white shrink-0 bg-gradient-to-br from-indigo-500 to-blue-500">
+                          📄
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-black text-slate-800 truncate">{a.title}</p>
+                          {a.description && (
+                            <p className="text-slate-500 text-xs font-bold mt-0.5 line-clamp-2">
+                              {a.description}
+                            </p>
+                          )}
+                          <p className="text-slate-400 text-[11px] font-bold mt-1">
+                            {a.due_date ? <>กำหนดส่ง {formatDate(a.due_date)}</> : "ไม่มีกำหนดส่ง"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* ★ คะแนนที่ได้ / สถานะ — โชว์ตรงนี้เลยโดยไม่ต้องกดเข้าไปดู */}
+                      <div className="shrink-0">
+                        {!sub ? (
+                          <span className="inline-block px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-[11px] font-black">
+                            ยังไม่ได้ส่ง
+                          </span>
+                        ) : sub.score !== null && sub.score !== undefined ? (
+                          <div className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-100">
+                            <span className="text-sm font-black text-emerald-600">
+                              {sub.score}
+                              <span className="text-emerald-400 font-bold">/{a.max_score ?? "-"}</span>
+                            </span>
+                            {late && (
+                              <span className="text-[9px] font-black text-orange-500">⏰ ส่งช้า</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="inline-block px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-100 text-amber-600 text-[11px] font-black">
+                            ⏳ รอตรวจ
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {sub ? (
+                      <div className="mt-3 rounded-xl bg-slate-50 border border-slate-100 px-3.5 py-2.5">
+                        <p className="text-xs font-bold text-slate-600">
+                          ส่งแล้ว: <span className="text-slate-800">{sub.file_name}</span>
+                        </p>
+                        <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+                          ส่งเมื่อ {formatDate(sub.submitted_at)}
+                        </p>
+                        {sub.feedback && (
+                          <p className="text-xs font-bold text-indigo-600 mt-1.5 bg-indigo-50 rounded-lg px-2.5 py-1.5">
+                            💬 {sub.feedback}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="mt-3 flex items-center gap-2">
+                        <label
+                          className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-xs cursor-pointer transition-colors ${
+                            uploadingId === a.id ? "opacity-60 pointer-events-none" : ""
+                          }`}
+                        >
+                          📎 เลือกไฟล์เพื่อส่งงาน
+                          <input
+                            type="file"
+                            disabled={uploadingId === a.id}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleUpload(a.id, file);
+                            }}
+                            className="hidden"
+                          />
+                        </label>
+                        {uploadingId === a.id && (
+                          <span className="text-xs font-bold text-slate-400 animate-pulse">
+                            กำลังอัปโหลด...
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* งานที่ยังไม่ส่ง */}
+        {tab === "pending" && !loading && (
+          <div className="space-y-3">
+            {pendingAssignments.length === 0 ? (
+              <EmptyState icon="🎉" text="ไม่มีงานค้างส่ง เยี่ยมมาก!" />
+            ) : (
+              pendingAssignments.map((a) => (
+                <div
+                  key={a.id}
+                  className="bg-white rounded-2xl border border-rose-100 shadow-sm p-4 flex items-center gap-3"
+                >
+                  <div className="w-11 h-11 rounded-xl flex items-center justify-center text-lg font-black text-white shrink-0 bg-gradient-to-br from-rose-400 to-orange-400">
+                    ⏰
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-black text-slate-800 truncate">{a.title}</p>
+                    <p className="text-rose-400 text-xs font-bold mt-0.5">
+                      กำหนดส่ง: {formatDate(a.due_date)}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* คะแนนรวม */}
+        {tab === "grades" && !loading && grades && (
+          <div className="space-y-3">
+            <div className="rounded-2xl bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white p-5 shadow-sm">
+              <p className="text-xs font-bold opacity-90">คะแนนรวม (ถ่วงน้ำหนัก)</p>
+              <p className="text-3xl font-black mt-1">{grades.summary.weighted_score}%</p>
+              <p className="text-[11px] font-bold opacity-80 mt-1">
+                ตรวจแล้ว {grades.summary.weight_graded}% ของคะแนนทั้งหมด
+              </p>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-50">
+              {grades.grades.length === 0 ? (
+                <p className="text-center text-slate-300 font-bold text-sm py-8">ยังไม่มีคะแนน</p>
+              ) : (
+                grades.grades.map((g: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between px-4 py-3">
+                    <p className="text-sm font-bold text-slate-700">{g.title}</p>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-black text-fuchsia-600">
+                        {g.score}
+                        <span className="text-slate-400 font-bold">/{g.max_score}</span>
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-bold">น้ำหนัก {g.weight_percent}%</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* เช็คชื่อ */}
+        {tab === "attendance" && !loading && attendance && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-4 gap-2">
+              <StatCard label="มา" value={attendance.summary.present} colorClass="from-emerald-500 to-teal-400" />
+              <StatCard label="ขาด" value={attendance.summary.absent} colorClass="from-rose-500 to-red-400" />
+              <StatCard label="สาย" value={attendance.summary.late} colorClass="from-amber-500 to-orange-400" />
+              <StatCard
+                label="ลา"
+                value={attendance.summary.excused ?? attendance.summary.leave}
+                colorClass="from-sky-500 to-blue-400"
+              />
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-50">
+              {attendance.records.length === 0 ? (
+                <p className="text-center text-slate-300 font-bold text-sm py-8">ยังไม่มีข้อมูลการเช็คชื่อ</p>
+              ) : (
+                attendance.records.map((r: any) => (
+                  <div key={r.id} className="flex items-center justify-between px-4 py-2.5">
+                    <span className="text-sm font-bold text-slate-600">{r.date ?? r.attendance_date}</span>
+                    <StatusPill status={r.status} />
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+function EmptyState({ icon, text }: { icon: string; text: string }) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
+      <p className="text-3xl mb-2">{icon}</p>
+      <p className="font-bold text-sm">{text}</p>
+    </div>
+  );
+}
+
+function StatCard({ label, value, colorClass }: { label: string; value: number; colorClass: string }) {
+  return (
+    <div className={`rounded-2xl bg-gradient-to-br ${colorClass} p-3 text-white shadow-sm text-center`}>
+      <p className="text-lg font-black">{value ?? 0}</p>
+      <p className="text-[10px] font-bold opacity-90 mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+const STATUS_STYLE: Record<string, { label: string; className: string }> = {
+  present: { label: "มา", className: "bg-emerald-50 text-emerald-600" },
+  absent: { label: "ขาด", className: "bg-rose-50 text-rose-600" },
+  late: { label: "สาย", className: "bg-amber-50 text-amber-600" },
+  leave: { label: "ลา", className: "bg-sky-50 text-sky-600" },
+  excused: { label: "ลา", className: "bg-sky-50 text-sky-600" },
+};
+
+function StatusPill({ status }: { status: string }) {
+  const s = STATUS_STYLE[status] ?? { label: status, className: "bg-slate-100 text-slate-500" };
+  return (
+    <span className={`px-2.5 py-1 rounded-full text-[11px] font-black ${s.className}`}>{s.label}</span>
   );
 }
