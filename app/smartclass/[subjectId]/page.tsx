@@ -145,7 +145,7 @@ export default function SmartClassRoomsPage() {
             {sortedSections.map((sec) => {
               const room = classroomOf(sec.classroom_id);
               const gradient = getRoomGradient(room?.room_name);
-              const label = `${room?.grade_group ?? ""} ${room?.room_name ?? ""}`.trim();
+              const label = room?.room_name?.trim() ?? "";
               const count = studentCounts[sec.classroom_id] ?? 0;
               return (
                 <button
@@ -161,7 +161,6 @@ export default function SmartClassRoomsPage() {
   </div>
   <div className="p-3 text-center">
     <p className="font-black text-xl text-slate-900 leading-tight truncate">{label}</p>
-    <p className="text-slate-400 text-sm font-bold mt-0.5">รายชื่อ</p>
     <div className="mt-2.5 flex justify-center">
       <span className="text-sm font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
         👥 {count} คน
