@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Paperclip } from "lucide-react";
 
 type Tab = "assignments" | "pending" | "grades" | "attendance";
+type GradingMode = "numeric" | "pass_fail";
+type PassFailResult = "pass" | "fail" | null;
 
 interface Submission {
   id: string;
@@ -14,6 +16,11 @@ interface Submission {
   teacher_comment: string | null;
   status: string;
   is_late: boolean | null;
+  // ★ FIX 1: ไฟล์ที่นักเรียนอัปโหลดส่งงาน ต้องมี URL เพื่อให้คลิกเปิด/ดาวน์โหลดได้
+  file_url?: string | null;
+  file_name?: string | null;
+  // ★ FIX 3: ผลลัพธ์เมื่อ assignment เป็นโหมดผ่าน/ไม่ผ่าน
+  pass_fail_result?: PassFailResult;
 }
 
 interface Assignment {
@@ -24,16 +31,21 @@ interface Assignment {
   max_score: number | null;
   weight_percent?: number | null;
   submissions: Submission[];
+  // ★ FIX 3: โหมดการให้คะแนนของงานชิ้นนี้
+  grading_mode?: GradingMode;
 }
 
 interface GradeRow {
   assignment_id: string;
   title: string;
-  score: number;
-  max_score: number;
+  score: number | null;
+  max_score: number | null;
   weight_percent: number | null;
-  percentage: number;
+  percentage: number | null;
   is_late: boolean;
+  // ★ FIX 3
+  grading_mode?: GradingMode;
+  pass_fail_result?: PassFailResult;
 }
 
 const TAB_ITEMS: { key: Tab; label: string; icon: string }[] = [
@@ -56,6 +68,12 @@ function formatDate(iso: string | null | undefined) {
   } catch {
     return "-";
   }
+}
+
+// ★ FIX 1: helper เผื่อกรณี content เป็น URL ตรง ๆ (เก็บมาแบบเก่าก่อนมี file_url)
+function looksLikeUrl(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return /^https?:\/\/\S+$/i.test(text.trim());
 }
 
 export default function StudentPortalSubjectPage() {
@@ -184,6 +202,7 @@ export default function StudentPortalSubjectPage() {
               assignments.map((a) => {
                 const sub = a.submissions[0];
                 const late = !!sub?.is_late;
+                const isPassFail = a.grading_mode === "pass_fail";
                 return (
                   <div
                     key={a.id}
@@ -213,6 +232,23 @@ export default function StudentPortalSubjectPage() {
                           <span className="inline-block px-4 py-2 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm font-black">
                             ยังไม่ได้ส่ง
                           </span>
+                        ) : isPassFail ? (
+                          // ★ FIX 3: แสดงผลผ่าน/ไม่ผ่าน/รอตรวจ แทนตัวเลขคะแนน
+                          sub.pass_fail_result === "pass" ? (
+                            <div className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl bg-emerald-50 border border-emerald-100">
+                              <span className="text-base font-black text-emerald-600">✅ ผ่าน</span>
+                              {late && <span className="text-[11px] font-black text-orange-500">⏰ ส่งช้า</span>}
+                            </div>
+                          ) : sub.pass_fail_result === "fail" ? (
+                            <div className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl bg-rose-50 border border-rose-100">
+                              <span className="text-base font-black text-rose-600">❌ ไม่ผ่าน</span>
+                              {late && <span className="text-[11px] font-black text-orange-500">⏰ ส่งช้า</span>}
+                            </div>
+                          ) : (
+                            <span className="inline-block px-4 py-2 rounded-xl bg-amber-50 border border-amber-100 text-amber-600 text-sm font-black">
+                              ⏳ รอตรวจ
+                            </span>
+                          )
                         ) : sub.score !== null && sub.score !== undefined ? (
                           <div className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl bg-emerald-50 border border-emerald-100">
                             <span className="text-lg font-black text-emerald-600">
@@ -231,10 +267,33 @@ export default function StudentPortalSubjectPage() {
 
                     {sub ? (
                       <div className="mt-4 rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
-                        {sub.content && (
-                          <p className="text-sm font-bold text-slate-600 whitespace-pre-wrap break-words">
-                            {sub.content}
-                          </p>
+                        {/* ★ FIX 1: ไฟล์ที่ส่ง แสดงเป็นลิงก์คลิกได้จริง */}
+                        {sub.file_url ? (
+                          <a
+                            href={sub.file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 text-sm font-black text-indigo-600 hover:text-indigo-700 hover:underline break-all"
+                          >
+                            <Paperclip className="h-4 w-4 shrink-0" />
+                            {sub.file_name || "เปิดไฟล์ที่ส่ง"}
+                          </a>
+                        ) : looksLikeUrl(sub.content) ? (
+                          <a
+                            href={sub.content as string}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 text-sm font-black text-indigo-600 hover:text-indigo-700 hover:underline break-all"
+                          >
+                            <Paperclip className="h-4 w-4 shrink-0" />
+                            เปิดไฟล์ที่ส่ง
+                          </a>
+                        ) : (
+                          sub.content && (
+                            <p className="text-sm font-bold text-slate-600 whitespace-pre-wrap break-words">
+                              {sub.content}
+                            </p>
+                          )
                         )}
                         <p className="text-xs text-slate-400 font-bold mt-1">
                           ส่งเมื่อ {formatDate(sub.submitted_at)}
@@ -313,6 +372,10 @@ export default function StudentPortalSubjectPage() {
                 <p className="text-xs font-bold opacity-80 mt-1.5">
                   ตรวจแล้ว {grades.summary.weight_graded}% ของน้ำหนักคะแนนทั้งหมด
                 </p>
+                {/* ★ FIX 2: ชี้แจงขอบเขตของตัวเลขคะแนนรวม */}
+                <p className="text-[11px] font-bold opacity-75 mt-1">
+                  * ยังไม่รวมคะแนนสอบกลางภาค/ปลายภาค
+                </p>
               </div>
               {grades.summary.grade && (
                 <div className="text-center bg-white/15 rounded-2xl px-6 py-3">
@@ -338,35 +401,57 @@ export default function StudentPortalSubjectPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {grades.grades.map((g) => (
-                      <tr key={g.assignment_id}>
-                        <td className="px-5 py-3.5">
-                          <p className="text-sm font-bold text-slate-700">{g.title}</p>
-                        </td>
-                        <td className="text-center px-3 py-3.5">
-                          <span
-                            className={`inline-flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl font-black text-sm ${
-                              g.is_late
-                                ? "bg-orange-50 text-orange-600"
-                                : "bg-emerald-50 text-emerald-600"
-                            }`}
-                          >
-                            {g.score}
-                            <span className="text-slate-400 font-bold text-xs">/{g.max_score}</span>
-                          </span>
-                        </td>
-                        <td className="text-center px-3 py-3.5 text-sm font-bold text-slate-500">
-                          {g.weight_percent != null ? `${g.weight_percent}%` : "-"}
-                        </td>
-                        <td className="text-center px-3 py-3.5">
-                          {g.is_late ? (
-                            <span className="text-[11px] font-black text-orange-500">⏰ ส่งช้า</span>
-                          ) : (
-                            <span className="text-[11px] font-black text-emerald-500">✅ ตรงเวลา</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {grades.grades.map((g) => {
+                      const isPassFail = g.grading_mode === "pass_fail";
+                      return (
+                        <tr key={g.assignment_id}>
+                          <td className="px-5 py-3.5">
+                            <p className="text-sm font-bold text-slate-700">{g.title}</p>
+                          </td>
+                          <td className="text-center px-3 py-3.5">
+                            {isPassFail ? (
+                              // ★ FIX 3: แสดงป้ายผ่าน/ไม่ผ่านในตารางคะแนนรวมด้วย
+                              <span
+                                className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-xl font-black text-sm ${
+                                  g.pass_fail_result === "pass"
+                                    ? "bg-emerald-50 text-emerald-600"
+                                    : g.pass_fail_result === "fail"
+                                    ? "bg-rose-50 text-rose-600"
+                                    : "bg-amber-50 text-amber-600"
+                                }`}
+                              >
+                                {g.pass_fail_result === "pass"
+                                  ? "✅ ผ่าน"
+                                  : g.pass_fail_result === "fail"
+                                  ? "❌ ไม่ผ่าน"
+                                  : "⏳ รอตรวจ"}
+                              </span>
+                            ) : (
+                              <span
+                                className={`inline-flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl font-black text-sm ${
+                                  g.is_late
+                                    ? "bg-orange-50 text-orange-600"
+                                    : "bg-emerald-50 text-emerald-600"
+                                }`}
+                              >
+                                {g.score ?? "-"}
+                                <span className="text-slate-400 font-bold text-xs">/{g.max_score ?? "-"}</span>
+                              </span>
+                            )}
+                          </td>
+                          <td className="text-center px-3 py-3.5 text-sm font-bold text-slate-500">
+                            {g.weight_percent != null ? `${g.weight_percent}%` : "-"}
+                          </td>
+                          <td className="text-center px-3 py-3.5">
+                            {g.is_late ? (
+                              <span className="text-[11px] font-black text-orange-500">⏰ ส่งช้า</span>
+                            ) : (
+                              <span className="text-[11px] font-black text-emerald-500">✅ ตรงเวลา</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
