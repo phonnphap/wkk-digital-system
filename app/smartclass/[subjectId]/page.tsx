@@ -121,10 +121,10 @@ export default function SmartClassRoomsPage() {
         <div className="flex items-center gap-2 mb-4">
           <button onClick={() => router.push("/dashboard")}
             title="กลับแดชบอร์ด"
-            className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl transition-colors">🏠</button>
+            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl transition-colors">🏠</button>
           <button onClick={() => router.push("/smartclass")}
             title="กลับหน้ารายวิชา"
-            className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl font-black transition-colors">←</button>
+            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl font-black transition-colors">←</button>
         </div>
         <div className="text-center px-2">
           <h1 className="text-3xl sm:text-4xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>

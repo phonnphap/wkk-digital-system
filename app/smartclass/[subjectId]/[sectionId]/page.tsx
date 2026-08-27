@@ -2719,14 +2719,17 @@ const [{ data: subj }, { data: room }] = await Promise.all([
 
       <div className="bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 px-4 pt-4 pb-6 print:hidden">
         <div className="flex items-center justify-between gap-2 mb-2">
-          <div className="flex items-center gap-2">
-            <button onClick={() => router.push("/dashboard")}
-              title="กลับแดชบอร์ด"
-              className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">🏠</button>
-            <button onClick={() => router.push(`/smartclass/${subjectId}`)}
+          <div className="flex items-center gap-2 mb-4">
+          <button onClick={() => router.push("/dashboard")}
+            title="กลับแดชบอร์ด"
+            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl transition-colors">🏠</button>
+          <button onClick={() => router.push(`/smartclass/${subjectId}`)}
               title="กลับหน้ารายห้องของวิชานี้"
-              className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">←</button>
-          </div>
+              className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">←</button>
+          <button onClick={() => router.push("/smartclass")}
+            title="กลับหน้ารายวิชา"
+            className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl font-black transition-colors">←</button>
+                    </div>
           <div className="w-9 sm:hidden" />
         </div>
 
