@@ -17,16 +17,16 @@ const DAYS = [1, 2, 3, 4, 5];
 const DAY_LABELS = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์"];
 
 const SUBJECT_COLORS = [
-  { bg: "bg-red-50", border: "border-red-200", text: "text-red-700" },
-  { bg: "bg-blue-50", border: "border-blue-200", text: "text-blue-700" },
-  { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700" },
-  { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-700" },
-  { bg: "bg-purple-50", border: "border-purple-200", text: "text-purple-700" },
-  { bg: "bg-pink-50", border: "border-pink-200", text: "text-pink-700" },
-  { bg: "bg-indigo-50", border: "border-indigo-200", text: "text-indigo-700" },
-  { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700" },
-  { bg: "bg-teal-50", border: "border-teal-200", text: "text-teal-700" },
-  { bg: "bg-cyan-50", border: "border-cyan-200", text: "text-cyan-700" },
+  { bg: "bg-red-100", border: "border-red-300", text: "text-red-800" },
+  { bg: "bg-blue-100", border: "border-blue-300", text: "text-blue-800" },
+  { bg: "bg-emerald-100", border: "border-emerald-300", text: "text-emerald-800" },
+  { bg: "bg-amber-100", border: "border-amber-300", text: "text-amber-800" },
+  { bg: "bg-purple-100", border: "border-purple-300", text: "text-purple-800" },
+  { bg: "bg-pink-100", border: "border-pink-300", text: "text-pink-800" },
+  { bg: "bg-indigo-100", border: "border-indigo-300", text: "text-indigo-800" },
+  { bg: "bg-orange-100", border: "border-orange-300", text: "text-orange-800" },
+  { bg: "bg-teal-100", border: "border-teal-300", text: "text-teal-800" },
+  { bg: "bg-cyan-100", border: "border-cyan-300", text: "text-cyan-800" },
 ];
 
 function formatTime(t: string) {
@@ -40,14 +40,29 @@ function teacherDisplayName(t: TeacherInfo) {
   return `${t.title ?? ""}${namePart}`.trim();
 }
 
-// ★ แปลง grade_group ที่เก็บแบบ "มัธยมศึกษาตอนต้น/ม.3" หรือ "ม.3" ให้เป็น "มัธยมศึกษาปีที่ 3/ห้อง"
+// แปลง grade_group เช่น "อ.2/1", "ป.1/7", "ม.2/1"
+// เป็น "ชั้นอนุบาลปีที่ 2/1", "ชั้นประถมศึกษาปีที่ 1/7", "ชั้นมัธยมศึกษาปีที่ 2/1"
+// (ของเดิม hardcode คำว่า "มัธยมศึกษาปีที่" ตายตัว ไม่ตรวจว่าเป็นระดับอะไรจริง
+//  พอเจอ grade_group ของ อนุบาล/ประถม เลยได้ข้อความผิดเพี้ยนแบบในรูป)
 function formatClassLabel(classroom: ClassroomInfo | null) {
   if (!classroom) return "";
-  const raw = classroom.grade_group ?? "";
-  const match = raw.match(/ม\.?\s*(\d)/); // ดึงเลขชั้นจากรูปแบบ ม.1 - ม.6
-  const gradeNum = match ? match[1] : raw;
-  const roomPart = classroom.room_name ? `/${classroom.room_name}` : "";
-  return gradeNum ? `มัธยมศึกษาปีที่ ${gradeNum}${roomPart}` : "";
+  const raw = (classroom.grade_group ?? "").trim();
+  if (!raw) return "";
+
+  const match = raw.match(/^(อ|ป|ม)\.?\s*(\d+)\/?(\d+)?/);
+  if (!match) return raw; // เผื่อรูปแบบไม่ตรงเลย โชว์ค่าดิบไปก่อนดีกว่าไม่โชว์อะไร
+
+  const [, levelCode, year, roomFromGroup] = match;
+  const LEVEL_LABELS: Record<string, string> = {
+    "อ": "ชั้นอนุบาลปีที่",
+    "ป": "ชั้นประถมศึกษาปีที่",
+    "ม": "ชั้นมัธยมศึกษาปีที่",
+  };
+  const level = LEVEL_LABELS[levelCode];
+  if (!level) return raw;
+
+  const room = classroom.room_name ?? roomFromGroup ?? "";
+  return room ? `${level} ${year}/${room}` : `${level} ${year}`;
 }
 
 export default function StudentDashboardPage() {
@@ -89,7 +104,7 @@ export default function StudentDashboardPage() {
     try {
       await fetch("/api/student-auth/logout", { method: "POST" });
     } finally {
-      router.push("/login"); // ★ TODO: เปลี่ยนเป็น path หน้าล็อกอินจริงของระบบ (ดูหมายเหตุด้านล่าง)
+      router.push("/login"); // TODO: เปลี่ยนเป็น path หน้าล็อกอินจริงของระบบ
     }
   }
 
@@ -137,22 +152,21 @@ export default function StudentDashboardPage() {
             <img
               src="/school-logo.png"
               alt="ตราโรงเรียนวัดเขียนเขต"
-              className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white/90 object-contain p-1 shadow-md shrink-0"
+              className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/90 object-contain p-1 shadow-md shrink-0"
             />
             <div className="min-w-0">
-              <p className="text-white/70 text-[11px] font-bold">โรงเรียนวัดเขียนเขต</p>
+              <p className="text-white/80 text-sm font-bold">โรงเรียนวัดเขียนเขต</p>
               {loading ? (
-                <div className="h-6 w-40 bg-white/20 rounded-lg mt-1 animate-pulse" />
+                <div className="h-7 w-48 bg-white/20 rounded-lg mt-1 animate-pulse" />
               ) : (
                 <>
-                  {/* ★ คำนำ */}
-                  <p className="text-white/80 text-[11px] font-bold">ยินดีต้อนรับเข้าสู่ระบบนักเรียนออนไลน์</p>
-                  <h1 className="text-white font-black text-lg sm:text-xl leading-tight truncate">
+                  {/* เหลือ "ยินดีต้อนรับ" แค่จุดเดียว (เอาบรรทัดซ้ำออกแล้ว) */}
+                  <h1 className="text-white font-black text-xl sm:text-2xl leading-tight truncate drop-shadow-sm">
                     ยินดีต้อนรับ {studentFullName || "นักเรียน"} 👋
                   </h1>
                   {(classLabel || student?.student_no) && (
-                    <p className="text-white/80 text-xs font-bold mt-0.5">
-                      {classLabel && `ชั้น${classLabel}`}
+                    <p className="text-white text-sm sm:text-base font-bold mt-1">
+                      {classLabel}
                       {student?.student_no && `  เลขที่ ${student.student_no}`}
                     </p>
                   )}
@@ -163,16 +177,16 @@ export default function StudentDashboardPage() {
           <button
             onClick={handleLogout}
             disabled={loggingOut}
-            className="shrink-0 px-3.5 py-2.5 rounded-2xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-xs transition disabled:opacity-50"
+            className="shrink-0 px-4 py-2.5 rounded-2xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-sm transition disabled:opacity-50"
           >
             {loggingOut ? "กำลังออก..." : "🚪 ออกจากระบบ"}
           </button>
         </div>
 
         {!loading && homeroomTeachers.length > 0 && (
-          <div className="relative mt-3 bg-white/15 backdrop-blur-sm rounded-2xl px-4 py-2.5">
-            <p className="text-white/70 text-[10px] font-bold uppercase tracking-wide">ครูประจำชั้น</p>
-            <p className="text-white font-black text-sm mt-0.5">
+          <div className="relative mt-3 bg-white/20 backdrop-blur-sm rounded-2xl px-4 py-3">
+            <p className="text-white/80 text-xs font-bold uppercase tracking-wide">ครูประจำชั้น</p>
+            <p className="text-white font-black text-base mt-0.5">
               {homeroomTeachers.map(teacherDisplayName).filter(Boolean).join("  •  ")}
             </p>
           </div>
@@ -181,9 +195,9 @@ export default function StudentDashboardPage() {
 
       <div className="px-3 sm:px-4 pt-4 max-w-5xl mx-auto space-y-3">
         {!loading && !error && allSlots.length > 0 && (
-          <div className="bg-fuchsia-50 border-2 border-fuchsia-100 rounded-2xl px-4 py-2.5 flex items-center gap-2">
-            <span className="text-lg">👆</span>
-            <p className="text-fuchsia-600 text-xs font-bold">
+          <div className="bg-fuchsia-100 border-2 border-fuchsia-200 rounded-2xl px-4 py-3 flex items-center gap-2">
+            <span className="text-xl">👆</span>
+            <p className="text-fuchsia-700 text-sm font-bold">
               แตะที่วิชาในตารางเพื่อดูงานที่มอบหมาย คะแนน และการเช็คชื่อของวิชานั้น
             </p>
           </div>
@@ -191,43 +205,43 @@ export default function StudentDashboardPage() {
 
         {loading ? (
           <div className="bg-white rounded-3xl shadow-md border border-slate-100 p-10 text-center animate-pulse">
-            <p className="text-slate-300 font-bold text-sm">กำลังโหลดตารางเรียน...</p>
+            <p className="text-slate-400 font-bold text-base">กำลังโหลดตารางเรียน...</p>
           </div>
         ) : error ? (
           <div className="bg-white rounded-3xl shadow-md border border-rose-100 p-8 text-center">
-            <p className="text-3xl mb-2">😵</p>
-            <p className="text-rose-500 font-black text-sm">{error}</p>
+            <p className="text-4xl mb-2">😵</p>
+            <p className="text-rose-600 font-black text-base">{error}</p>
             <button
               onClick={() => location.reload()}
-              className="mt-4 px-5 py-2.5 rounded-2xl bg-rose-50 text-rose-600 font-black text-xs hover:bg-rose-100 transition"
+              className="mt-4 px-5 py-2.5 rounded-2xl bg-rose-50 text-rose-600 font-black text-sm hover:bg-rose-100 transition"
             >
               🔄 ลองใหม่อีกครั้ง
             </button>
           </div>
         ) : allSlots.length === 0 ? (
           <div className="bg-white rounded-3xl shadow-md border border-slate-100 p-10 text-center">
-            <p className="text-4xl mb-3">🗓️</p>
-            <p className="text-slate-400 font-bold text-sm">ยังไม่มีวิชาที่เปิดให้เข้าดู</p>
-            <p className="text-slate-300 font-bold text-xs mt-1">รอครูผู้สอนเปิดให้เข้าใช้งานวิชานี้</p>
+            <p className="text-5xl mb-3">🗓️</p>
+            <p className="text-slate-500 font-bold text-base">ยังไม่มีวิชาที่เปิดให้เข้าดู</p>
+            <p className="text-slate-400 font-bold text-sm mt-1">รอครูผู้สอนเปิดให้เข้าใช้งานวิชานี้</p>
           </div>
         ) : (
           <div className="bg-white rounded-3xl shadow-md border border-slate-100 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="border-collapse w-full" style={{ minWidth: "560px" }}>
+              <table className="border-collapse w-full" style={{ minWidth: "640px" }}>
                 <thead>
                   <tr>
-                    <th className="px-2 py-3 bg-slate-50 border-b-2 border-r-2 border-slate-200 text-slate-400 font-black text-[11px] uppercase text-center sticky left-0 z-10 w-16">
+                    <th className="px-2 py-3 bg-slate-100 border-b-2 border-r-2 border-slate-200 text-slate-500 font-black text-sm uppercase text-center sticky left-0 z-10 w-20">
                       คาบ
                     </th>
                     {DAYS.map(day => (
                       <th
                         key={day}
-                        className={`px-2 py-3 border-b-2 border-r border-slate-200 text-center font-black text-xs ${
-                          day === todayDow ? "bg-fuchsia-50 text-fuchsia-600" : "bg-slate-50 text-slate-600"
+                        className={`px-2 py-3 border-b-2 border-r border-slate-200 text-center font-black text-base ${
+                          day === todayDow ? "bg-fuchsia-100 text-fuchsia-700" : "bg-slate-100 text-slate-700"
                         }`}
                       >
                         {DAY_LABELS[day - 1]}
-                        {day === todayDow && <div className="text-[9px] font-black text-fuchsia-400">วันนี้</div>}
+                        {day === todayDow && <div className="text-xs font-black text-fuchsia-500">วันนี้</div>}
                       </th>
                     ))}
                   </tr>
@@ -235,15 +249,15 @@ export default function StudentDashboardPage() {
                 <tbody>
                   {allSlots.map((slot, i) => (
                     <tr key={i} className="border-b border-slate-100">
-                      <td className="px-1 py-2 border-r-2 border-slate-200 sticky left-0 z-10 bg-slate-50 text-center">
-                        <p className="text-[11px] font-black text-slate-500">{formatTime(slot.start_time)}</p>
-                        <p className="text-[9px] text-slate-400">{formatTime(slot.end_time)}</p>
+                      <td className="px-1 py-2 border-r-2 border-slate-200 sticky left-0 z-10 bg-slate-100 text-center">
+                        <p className="text-sm font-black text-slate-600">{formatTime(slot.start_time)}</p>
+                        <p className="text-xs text-slate-400">{formatTime(slot.end_time)}</p>
                       </td>
                       {DAYS.map(day => {
                         const found = findEntry(day, slot);
                         if (!found) {
                           return <td key={day} className="p-1 border-r border-slate-100">
-                            <div className="rounded-xl border-2 border-dashed border-slate-100" style={{ minHeight: "64px" }} />
+                            <div className="rounded-xl border-2 border-dashed border-slate-100" style={{ minHeight: "68px" }} />
                           </td>;
                         }
                         const colors = subjectColorMap[found.section.subject?.id ?? ""] ?? SUBJECT_COLORS[0];
@@ -252,12 +266,12 @@ export default function StudentDashboardPage() {
                             <button
                               onClick={() => router.push(`/student-portal/${studentId}/subject/${found.section.id}`)}
                               className={`w-full h-full rounded-xl border-2 px-2 py-2 text-left transition-all hover:shadow-md hover:-translate-y-0.5 ${colors.bg} ${colors.border} ${colors.text}`}
-                              style={{ minHeight: "64px" }}
+                              style={{ minHeight: "68px" }}
                             >
-                              <p className="font-black text-[11px] leading-tight line-clamp-2">
+                              <p className="font-black text-sm leading-tight line-clamp-2">
                                 {found.section.subject?.name_th ?? "-"}
                               </p>
-                              <p className="text-[9px] font-bold opacity-70 mt-0.5">
+                              <p className="text-xs font-bold opacity-80 mt-0.5">
                                 {found.section.subject?.subject_code}
                               </p>
                             </button>
