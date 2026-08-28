@@ -3,7 +3,7 @@
 
 export const dynamic = "force-dynamic"; // ★ เพิ่ม: กัน error ตอน build จากการ prerender หน้าที่ใช้ useSearchParams()
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react"; // ★ เพิ่ม Suspense
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { QRCodeSVG } from "qrcode.react"; // ★ ต้องติดตั้ง: npm install qrcode.react
@@ -48,7 +48,23 @@ function formatClassLabel(classroom: ClassroomInfo | null): string {
   return roomCode;
 }
 
+// ★ แก้ไข: ต้องห่อ component ที่ใช้ useSearchParams() ด้วย <Suspense> เสมอ
+// ไม่งั้น Next.js จะ build ไม่ผ่าน (error: "useSearchParams() should be wrapped in a suspense boundary")
 export default function PrintStudentCardsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center text-sm text-slate-400">
+          กำลังโหลด...
+        </div>
+      }
+    >
+      <PrintStudentCardsContent />
+    </Suspense>
+  );
+}
+
+function PrintStudentCardsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const classroomId = searchParams.get("classroom") ?? "";
