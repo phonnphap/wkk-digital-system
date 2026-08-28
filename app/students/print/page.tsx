@@ -1,6 +1,8 @@
 // app/students/print/page.tsx
 "use client";
 
+export const dynamic = "force-dynamic"; // ★ เพิ่ม: กัน error ตอน build จากการ prerender หน้าที่ใช้ useSearchParams()
+
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
