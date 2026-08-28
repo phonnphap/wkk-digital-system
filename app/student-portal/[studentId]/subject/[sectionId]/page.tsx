@@ -41,7 +41,7 @@ interface SubjectInfo {
   class_name?: string | null;
   academic_year?: string | null;
   class_code?: string | null;
-  // ★ เพิ่มสำหรับส่งต่อให้ GradeOverviewTool
+  class_room_label?: string | null;  
   homeroom_teacher_name?: string | null;
   subject_teacher_name?: string | null;
   grading_mode?: "numeric" | "pass_fail";
@@ -189,16 +189,17 @@ const fetchSubjectInfo = useCallback(async () => {
     const matched = sections.find((s) => s.id === sectionId);
 
     const classroom = data.classroom;
-    const classLabel = classroom?.grade_group
-      ? `${classroom.grade_group}${classroom.room_name ? `/${classroom.room_name}` : ""}`
-      : (classroom?.room_name ?? null);
+const classLabel = classroom?.grade_group
+  ? `${classroom.grade_group}${classroom.room_name ? `/${classroom.room_name}` : ""}`
+  : (classroom?.room_name ?? null);
 
-    setSubjectInfo({
-      subject_name: matched?.subject?.name_th ?? "",
-      class_code: matched?.subject?.subject_code ?? null,
-      class_name: classLabel,
-      academic_year: data.academic_year ?? null, // ★ ถ้า backend ยังไม่ส่งค่านี้มา ให้เพิ่มใน timetable endpoint ด้วย
-    });
+setSubjectInfo({
+  subject_name: matched?.subject?.name_th ?? "",
+  class_code: matched?.subject?.subject_code ?? null,
+  class_name: classLabel,
+  class_room_label: classroom?.room_name ?? null,   // ★ เพิ่ม: เก็บแค่ "ป.3/1"
+  academic_year: data.academic_year ?? null,
+});
 
     // ★ เก็บข้อมูลตัวนักเรียนไว้ใช้ส่งต่อให้ GradeOverviewTool (ข้อ 2.2)
     if (data.student) {
@@ -296,27 +297,33 @@ const sortedAssignments = [...assignments].sort((a, b) => {
         </button>
 
         <div className="max-w-6xl mx-auto mt-2">
-          <p className="text-2xl sm:text-3xl font-black text-white truncate">
-            รายวิชา{subjectInfo?.subject_name ? `: ${subjectInfo.subject_name}` : ""}
-          </p>
-          {subjectInfo?.class_name && (
-            <p className="text-base sm:text-lg font-bold text-white/85 mt-0.5 truncate">
-              {subjectInfo.class_name}
-            </p>
-          )}
-          <div className="flex items-center gap-2 flex-wrap mt-3">
-            {subjectInfo?.academic_year && (
-              <span className="px-3 py-1.5 rounded-full bg-white/20 text-white text-sm font-bold backdrop-blur-sm">
-                ปีการศึกษา: {subjectInfo.academic_year}
-              </span>
-            )}
-            {subjectInfo?.class_code && (
-              <span className="px-3 py-1.5 rounded-full bg-amber-300/90 text-amber-900 text-sm font-black">
-                รหัสเข้ารายวิชา: {subjectInfo.class_code}
-              </span>
-            )}
-          </div>
-        </div>
+  <p className="text-2xl sm:text-3xl font-black text-white truncate">
+    รายวิชา{subjectInfo?.subject_name ? `: ${subjectInfo.subject_name}` : ""}
+  </p>
+
+  {/* ★ ย้ายรหัสเข้ารายวิชาขึ้นมาไว้บนสุด (ใต้ชื่อวิชา) */}
+  <div className="flex items-center gap-2 flex-wrap mt-3">
+    {subjectInfo?.academic_year && (
+      <span className="px-3 py-1.5 rounded-full bg-white/20 text-white text-sm font-bold backdrop-blur-sm">
+        ปีการศึกษา: {subjectInfo.academic_year}
+      </span>
+    )}
+    {subjectInfo?.class_code && (
+      <span className="px-3 py-1.5 rounded-full bg-amber-300/90 text-amber-900 text-m font-black">
+        รหัสเข้ารายวิชา: {subjectInfo.class_code}
+      </span>
+    )}
+  </div>
+
+  {/* ★ คำทักทาย + ห้องเรียนแบบสั้น + เลขที่ มาแทนตำแหน่งเดิมของป้ายห้องเรียน */}
+  {selfStudent && (
+    <p className="text-base sm:text-lg font-bold text-white/85 mt-3 truncate">
+      สวัสดี {selfStudent.prefix ?? ""}{selfStudent.first_name} {selfStudent.last_name}
+      {subjectInfo?.class_room_label ? ` · ${subjectInfo.class_room_label}` : ""}
+      {" · "}เลขที่ {selfStudent.seat_number}
+    </p>
+  )}
+</div>
       </div>
 
       <div className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8">
