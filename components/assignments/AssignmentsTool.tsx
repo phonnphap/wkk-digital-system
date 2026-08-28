@@ -1729,6 +1729,17 @@ function SubmissionsTab({
     }
     setBulkSaving(false);
   }
+  async function postTeacherComment(assignmentId: string, studentId: string, content: string) {
+  const { data: userData } = await supabase.auth.getUser();
+  await supabase.from("assignment_submission_comments").insert({
+    assignment_id: assignmentId,
+    student_id: studentId,
+    author_role: "teacher",
+    author_id: userData.user?.id ?? null,
+    author_name: userData.user?.email ?? "ครูผู้สอน",
+    content: content.trim(),
+  });
+}
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-[280px_1fr] gap-4">

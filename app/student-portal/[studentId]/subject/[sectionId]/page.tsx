@@ -10,7 +10,23 @@ import { getDisplayPrefix } from "@/lib/student-prefix";
 type Tab = "assignments" | "pending" | "grades" | "attendance";
 type GradingMode = "numeric" | "pass_fail";
 type PassFailResult = "pass" | "fail" | null;
+type AttachmentKind = "file" | "link" | "text";
 
+type SubmissionAttachment = {
+  id: string;
+  kind: AttachmentKind;
+  url: string | null;
+  content: string | null;
+  file_name: string | null;
+  created_at: string;
+};
+type SubmissionComment = {
+  id: string;
+  author_role: "student" | "teacher";
+  author_name: string | null;
+  content: string;
+  created_at: string;
+};
 interface Submission {
   id: string;
   content: string | null;
@@ -19,6 +35,7 @@ interface Submission {
   teacher_comment: string | null;
   status: string;
   is_late: boolean | null;
+  is_submitted?: boolean;
   file_url?: string | null;
   file_name?: string | null;
   pass_fail_result?: PassFailResult;
@@ -506,11 +523,12 @@ const sortedAssignments = [...assignments].sort((a, b) => {
                         )}
                       </div>
                     ) : (
-                      <UploadButton
-                        assignmentId={a.id}
-                        uploadingId={uploadingId}
-                        onUpload={handleUpload}
-                      />
+                      <SubmissionPanel
+  assignment={a}
+  studentId={studentId}
+  submission={a.submissions[0] ?? null}
+  onChanged={fetchAssignments}
+/>
                     )}
                   </div>
                 );
@@ -572,12 +590,6 @@ const sortedAssignments = [...assignments].sort((a, b) => {
                       </div>
                     </div>
 
-                    {/* ★ ปุ่มส่งงานโดยตรงจากแท็บนี้ */}
-                    <UploadButton
-                      assignmentId={a.id}
-                      uploadingId={uploadingId}
-                      onUpload={handleUpload}
-                    />
                   </div>
                 );
               })
@@ -707,42 +719,6 @@ function StatCard({
   );
 }
 
-// ★ ปุ่มเลือกไฟล์/ส่งงาน ใช้ร่วมกันทั้งแท็บ "งานของฉัน" (งานที่ยังไม่ส่ง) และแท็บ "งานที่ยังไม่ส่ง"
-function UploadButton({
-  assignmentId,
-  uploadingId,
-  onUpload,
-}: {
-  assignmentId: string;
-  uploadingId: string | null;
-  onUpload: (assignmentId: string, file: File) => void;
-}) {
-  const isUploading = uploadingId === assignmentId;
-  return (
-    <div className="mt-4 flex items-center gap-3">
-      <label
-        className={`inline-flex items-center gap-2 px-5 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base cursor-pointer transition-colors ${
-          isUploading ? "opacity-60 pointer-events-none" : ""
-        }`}
-      >
-        📎 เลือกไฟล์เพื่อส่งงาน
-        <input
-          type="file"
-          disabled={isUploading}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) onUpload(assignmentId, file);
-          }}
-          className="hidden"
-        />
-      </label>
-      {isUploading && (
-        <span className="text-base font-bold text-slate-500 animate-pulse">กำลังอัปโหลด...</span>
-      )}
-    </div>
-  );
-}
-
 const STATUS_STYLE: Record<string, { label: string; className: string }> = {
   present: { label: "มา", className: "bg-emerald-50 text-emerald-600" },
   absent: { label: "ขาด", className: "bg-rose-50 text-rose-600" },
@@ -755,5 +731,290 @@ function StatusPill({ status }: { status: string }) {
   const s = STATUS_STYLE[status] ?? { label: status, className: "bg-slate-100 text-slate-600" };
   return (
     <span className={`px-4 py-2 rounded-full text-base font-black ${s.className}`}>{s.label}</span>
+  );
+}
+
+function SubmissionPanel({
+  assignment,
+  studentId,
+  submission,
+  onChanged,
+}: {
+  assignment: Assignment;
+  studentId: string;
+  submission: Submission | null;
+  onChanged: () => void;
+}) {
+  const [attachments, setAttachments] = useState<SubmissionAttachment[]>([]);
+  const [comments, setComments] = useState<SubmissionComment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [linkInput, setLinkInput] = useState("");
+  const [textInput, setTextInput] = useState("");
+  const [commentInput, setCommentInput] = useState("");
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const isSubmitted = !!submission?.is_submitted;
+  // ★ ลบได้เฉพาะตอนยังไม่ถูกตรวจ (ตรงกับเงื่อนไขฝั่ง API)
+  const isLocked = submission ? ["reviewed", "needs_revision", "failed"].includes(submission.status) : false;
+
+  async function loadExtras() {
+    setLoading(true);
+    try {
+      const [attRes, cmtRes] = await Promise.all([
+        fetch(`/api/student-portal/submission-attachments?assignment_id=${assignment.id}&student_id=${studentId}`),
+        fetch(`/api/student-portal/submission-comments?assignment_id=${assignment.id}&student_id=${studentId}`),
+      ]);
+      const attJson = await attRes.json();
+      const cmtJson = await cmtRes.json();
+      setAttachments(attJson.attachments ?? []);
+      setComments(cmtJson.comments ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadExtras();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignment.id]);
+
+  async function handleFileUpload(file: File) {
+    setUploadingFile(true);
+    try {
+      const fd = new FormData();
+      fd.append("assignment_id", assignment.id);
+      fd.append("student_id", studentId);
+      fd.append("subject_section_id", assignment.id); // TODO: ถ้ามี sectionId แยก ให้ส่ง prop เข้ามาแทน assignment.id
+      fd.append("file", file);
+      const res = await fetch("/api/student-portal/submission-attachments", { method: "POST", body: fd });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "แนบไฟล์ไม่สำเร็จ");
+      await loadExtras();
+    } catch (e: any) {
+      alert(e?.message ?? "แนบไฟล์ไม่สำเร็จ");
+    }
+    setUploadingFile(false);
+  }
+
+  async function handleAddLink() {
+    if (!linkInput.trim()) return;
+    const res = await fetch("/api/student-portal/submission-attachments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignment_id: assignment.id, student_id: studentId, kind: "link", url: linkInput.trim() }),
+    });
+    if (res.ok) {
+      setLinkInput("");
+      await loadExtras();
+    }
+  }
+
+  async function handleAddText() {
+    if (!textInput.trim()) return;
+    const res = await fetch("/api/student-portal/submission-attachments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignment_id: assignment.id, student_id: studentId, kind: "text", content: textInput.trim() }),
+    });
+    if (res.ok) {
+      setTextInput("");
+      await loadExtras();
+    }
+  }
+
+  async function handleRemoveAttachment(id: string) {
+    await fetch(`/api/student-portal/submission-attachments?id=${id}&student_id=${studentId}`, { method: "DELETE" });
+    await loadExtras();
+  }
+
+  async function handleToggleConfirm(confirm: boolean) {
+    setToggling(true);
+    try {
+      const res = await fetch("/api/student-portal/submission-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignment_id: assignment.id, student_id: studentId, confirm }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "อัปเดตสถานะไม่สำเร็จ");
+      onChanged();
+    } catch (e: any) {
+      alert(e?.message ?? "อัปเดตสถานะไม่สำเร็จ");
+    }
+    setToggling(false);
+  }
+
+  async function handleDeleteSubmission() {
+    if (!confirm("ต้องการลบงานที่ส่งไว้ทั้งหมด (ไฟล์/ลิงก์/ข้อความ) ใช่หรือไม่?")) return;
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/student-portal/submission-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignment_id: assignment.id, student_id: studentId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "ลบไม่สำเร็จ");
+      onChanged();
+    } catch (e: any) {
+      alert(e?.message ?? "ลบไม่สำเร็จ");
+    }
+    setDeleting(false);
+  }
+
+  async function handlePostComment() {
+    if (!commentInput.trim()) return;
+    setPosting(true);
+    try {
+      const res = await fetch("/api/student-portal/submission-comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignment_id: assignment.id, student_id: studentId, content: commentInput.trim() }),
+      });
+      if (res.ok) {
+        setCommentInput("");
+        await loadExtras();
+      }
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-xl bg-slate-50 border border-slate-100 px-4 py-3 space-y-4">
+      {/* ★ แนบไฟล์ / ลิงก์ / ข้อความ */}
+      {!isLocked && (
+        <div className="flex flex-wrap gap-2">
+          <label className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 text-sm font-black cursor-pointer hover:bg-slate-100">
+            📎 แนบไฟล์
+            <input
+              type="file"
+              disabled={uploadingFile}
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) handleFileUpload(f);
+              }}
+            />
+          </label>
+          {uploadingFile && <span className="text-xs font-bold text-slate-400 self-center">กำลังอัปโหลด...</span>}
+        </div>
+      )}
+
+      {!isLocked && (
+        <div className="flex gap-2 flex-wrap">
+          <div className="flex-1 min-w-[180px] flex gap-1.5">
+            <input
+              value={linkInput}
+              onChange={e => setLinkInput(e.target.value)}
+              placeholder="แนบลิงก์ (https://...)"
+              className="flex-1 border-2 border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+            />
+            <button onClick={handleAddLink} className="px-3 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-black">เพิ่ม</button>
+          </div>
+        </div>
+      )}
+
+      {!isLocked && (
+        <div className="flex gap-1.5">
+          <textarea
+            value={textInput}
+            onChange={e => setTextInput(e.target.value)}
+            rows={2}
+            placeholder="แนบข้อความ..."
+            className="flex-1 border-2 border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold resize-none focus:border-indigo-400 focus:outline-none"
+          />
+          <button onClick={handleAddText} className="px-3 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-black self-start">เพิ่ม</button>
+        </div>
+      )}
+
+      {/* ★ รายการที่แนบไว้ */}
+      {loading ? (
+        <p className="text-xs text-slate-300 font-bold">กำลังโหลด...</p>
+      ) : attachments.length === 0 ? (
+        <p className="text-xs text-slate-300 font-bold">ยังไม่มีไฟล์/ลิงก์/ข้อความที่แนบ</p>
+      ) : (
+        <div className="space-y-1.5">
+          {attachments.map(att => (
+            <div key={att.id} className="flex items-center justify-between gap-2 bg-white rounded-lg border border-slate-100 px-3 py-2">
+              {att.kind === "file" && (
+                <a href={att.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-sm font-black text-indigo-600 hover:underline truncate">
+                  📎 {att.file_name}
+                </a>
+              )}
+              {att.kind === "link" && (
+                <a href={att.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-sm font-black text-indigo-600 hover:underline truncate">
+                  🔗 {att.url}
+                </a>
+              )}
+              {att.kind === "text" && (
+                <p className="text-sm font-bold text-slate-600 whitespace-pre-wrap">{att.content}</p>
+              )}
+              {!isLocked && (
+                <button onClick={() => handleRemoveAttachment(att.id)} className="text-slate-300 hover:text-rose-500 shrink-0">✕</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ★ ปุ่มยืนยัน/ยกเลิกส่งงาน + ลบงาน */}
+      <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100">
+        {isSubmitted ? (
+          <button
+            onClick={() => handleToggleConfirm(false)}
+            disabled={toggling || isLocked}
+            title={isLocked ? "ครูตรวจงานนี้แล้ว ไม่สามารถยกเลิกได้" : undefined}
+            className="px-4 py-2 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-600 text-sm font-black disabled:opacity-50"
+          >
+            {toggling ? "..." : "↺ ยกเลิกการส่งงาน"}
+          </button>
+        ) : (
+          <button
+            onClick={() => handleToggleConfirm(true)}
+            disabled={toggling}
+            className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-black disabled:opacity-50"
+          >
+            {toggling ? "..." : "✅ ยืนยันการส่งงาน"}
+          </button>
+        )}
+        {!isLocked && submission && (
+          <button
+            onClick={handleDeleteSubmission}
+            disabled={deleting}
+            className="px-4 py-2 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-500 text-sm font-black disabled:opacity-50"
+          >
+            {deleting ? "..." : "🗑️ ลบงานที่ส่ง"}
+          </button>
+        )}
+        {isLocked && <span className="text-xs font-bold text-slate-400">🔒 ครูตรวจงานนี้แล้ว แก้ไข/ลบไม่ได้</span>}
+      </div>
+
+      {/* ★ คอมเมนต์ */}
+      <div className="pt-2 border-t border-slate-100 space-y-2">
+        <p className="text-xs font-black text-slate-400">💬 คอมเมนต์</p>
+        {comments.map(c => (
+          <div key={c.id} className={`text-sm rounded-lg px-3 py-2 ${c.author_role === "teacher" ? "bg-indigo-50 text-indigo-700" : "bg-white border border-slate-100 text-slate-600"}`}>
+            <p className="font-black text-xs">{c.author_role === "teacher" ? "👩‍🏫 ครู" : "🧑‍🎓 นักเรียน"}</p>
+            <p className="font-bold mt-0.5 whitespace-pre-wrap">{c.content}</p>
+          </div>
+        ))}
+        <div className="flex gap-1.5">
+          <input
+            value={commentInput}
+            onChange={e => setCommentInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handlePostComment()}
+            placeholder="พิมพ์คอมเมนต์..."
+            className="flex-1 border-2 border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+          />
+          <button onClick={handlePostComment} disabled={posting} className="px-3 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-black disabled:opacity-50">
+            ส่ง
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

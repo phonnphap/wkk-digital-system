@@ -1,6 +1,6 @@
 "use client";
 export const dynamic = "force-dynamic"; // ★ เพิ่ม: กัน error ตอน build เพราะเพิ่ม useSearchParams() เข้ามา
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation"; // ★ เพิ่ม useSearchParams
 import { createClient } from "@/lib/supabase/client";
 import ThaiDateSelect, { thaiDateToISO } from "@/components/shared/ThaiDateSelect";
@@ -11,6 +11,15 @@ type Entity = {
   type: "subject" | "classroom";
   classroomId: string;
   accessMode: string;
+};
+
+type Student = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  seat_number: number;
+  gender: string | null;
+  birth_date: string | null;
 };
 
 // ★ เพิ่มใหม่: คำนวณคำนำหน้าจากอายุจริง (วันเกิด+เพศ) แทนค่า prefix ที่บันทึกไว้ในตาราง
@@ -29,13 +38,17 @@ function getAutoPrefix(gender: string | null, birthDateStr: string | null): stri
   return "";
 }
 
+function studentFullLabel(s: Student) {
+  return `${s.seat_number}. ${getAutoPrefix(s.gender, s.birth_date)}${s.first_name} ${s.last_name}`;
+}
+
 export default function JoinPage() {
   const router = useRouter();
   const { joinCode } = useParams() as { joinCode: string };
   const searchParams = useSearchParams(); // ★ เพิ่มใหม่
 
   const [entity, setEntity] = useState<Entity | null>(null);
-  const [students, setStudents] = useState<{ id: string; first_name: string; last_name: string; seat_number: number; gender: string | null; birth_date: string | null }[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [studentCode, setStudentCode] = useState("");
   const [prefilledCode, setPrefilledCode] = useState(false); // ★ เพิ่มใหม่: มาจากการสแกน QR การ์ด นร. หรือไม่
@@ -43,6 +56,11 @@ export default function JoinPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  // ★ เพิ่มใหม่: ช่องค้นหาชื่อนักเรียน (แทน select เดิม)
+  const [nameQuery, setNameQuery] = useState("");
+  const [showNameDropdown, setShowNameDropdown] = useState(false);
+  const nameBoxRef = useRef<HTMLDivElement>(null);
 
   // ★ เพิ่มใหม่: ถ้ามาจากการ์ด QR จะแนบ ?code=รหัสนักเรียน มาด้วย เติมลงช่องให้อัตโนมัติ
   // เพื่อให้นักเรียนกรอกแค่วันเกิดอย่างเดียว (เฉพาะโหมด id_and_dob เท่านั้นที่ใช้ช่องนี้)
@@ -53,6 +71,17 @@ export default function JoinPage() {
       setPrefilledCode(true);
     }
   }, [searchParams]);
+
+  // ★ เพิ่มใหม่: ปิด dropdown เมื่อคลิกนอกกล่อง
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (nameBoxRef.current && !nameBoxRef.current.contains(e.target as Node)) {
+        setShowNameDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -99,6 +128,32 @@ export default function JoinPage() {
       setLoading(false);
     })();
   }, [joinCode]);
+
+  // ★ เพิ่มใหม่: กรองรายชื่อตามคำค้นหา (ค้นได้ทั้งชื่อ นามสกุล และเลขที่)
+  const filteredStudents = nameQuery.trim()
+    ? students.filter((s) => {
+        const q = nameQuery.trim().toLowerCase();
+        return (
+          s.first_name.toLowerCase().includes(q) ||
+          s.last_name.toLowerCase().includes(q) ||
+          `${s.first_name} ${s.last_name}`.toLowerCase().includes(q) ||
+          String(s.seat_number).includes(q)
+        );
+      })
+    : students;
+
+  function handleSelectStudent(s: Student) {
+    setSelectedStudentId(s.id);
+    setNameQuery(studentFullLabel(s));
+    setShowNameDropdown(false);
+  }
+
+  function handleNameQueryChange(value: string) {
+    setNameQuery(value);
+    setShowNameDropdown(true);
+    // ถ้าพิมพ์แก้ไขหลังจากเลือกไปแล้ว ให้ล้างค่าที่เลือกไว้ จนกว่าจะเลือกใหม่
+    if (selectedStudentId) setSelectedStudentId("");
+  }
 
   async function handleSubmit() {
     if (!entity) return;
@@ -149,18 +204,53 @@ export default function JoinPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-['TH_Sarabun_New',_sans-serif]">
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 w-full max-w-sm p-6 space-y-4">
-        <h1 className="text-lg font-black text-slate-800 text-center">เข้าสู่ระบบนักเรียน</h1>
+        {/* ★ เพิ่มใหม่: โลโก้โรงเรียน ด้านบนตรงกลาง */}
+        <div className="flex justify-center">
+          {/* วางไฟล์โลโก้ไว้ที่ public/logo.png (หรือแก้ path ตามจริง) */}
+          <img
+            src="/school-logo.png"
+            alt="โลโก้โรงเรียน"
+            className="h-16 w-16 object-contain"
+            onError={(e) => {
+              // ถ้าไม่มีไฟล์โลโก้ ให้ซ่อนรูปแทนที่จะโชว์ไอคอนรูปหาย
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+            }}
+          />
+        </div>
+
+        <h1 className="text-xl font-black text-slate-900 text-center">เข้าสู่ระบบนักเรียน</h1>
 
         {entity.accessMode !== "id_and_dob" && (
-          <select value={selectedStudentId} onChange={e => setSelectedStudentId(e.target.value)}
-            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold">
-            <option value="">-- เลือกชื่อของคุณ --</option>
-            {students.map(s => (
-              <option key={s.id} value={s.id}>
-                {s.seat_number}. {getAutoPrefix(s.gender, s.birth_date)}{s.first_name} {s.last_name}
-              </option>
-            ))}
-          </select>
+          // ★ แก้ไข: เปลี่ยนจาก <select> เป็นช่องพิมพ์ค้นหาชื่อ (combobox)
+          <div className="relative" ref={nameBoxRef}>
+            <input
+              value={nameQuery}
+              onChange={(e) => handleNameQueryChange(e.target.value)}
+              onFocus={() => setShowNameDropdown(true)}
+              placeholder="พิมพ์ชื่อ นามสกุล หรือเลขที่ เพื่อค้นหา"
+              className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-m font-bold"
+              autoComplete="off"
+            />
+            {showNameDropdown && (
+              <div className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border-2 border-slate-200 rounded-xl shadow-sm">
+                {filteredStudents.length === 0 && (
+                  <div className="px-3 py-2.5 text-m font-bold text-slate-400">ไม่พบชื่อที่ค้นหา</div>
+                )}
+                {filteredStudents.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handleSelectStudent(s)}
+                    className={`w-full text-left px-3 py-2.5 text-m font-bold hover:bg-fuchsia-50 ${
+                      selectedStudentId === s.id ? "bg-fuchsia-50 text-fuchsia-600" : "text-slate-900"
+                    }`}
+                  >
+                    {studentFullLabel(s)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {(entity.accessMode === "name_and_id" || entity.accessMode === "id_and_dob") && (
@@ -172,7 +262,7 @@ export default function JoinPage() {
               onChange={e => setStudentCode(e.target.value)}
               placeholder="รหัสนักเรียน"
               readOnly={prefilledCode}
-              className={`w-full border-2 rounded-xl px-3 py-2.5 text-sm font-bold ${
+              className={`w-full border-2 rounded-xl px-3 py-2.5 text-m font-bold ${
                 prefilledCode ? "border-slate-100 bg-slate-50 text-slate-500" : "border-slate-200"
               }`}
             />
@@ -193,7 +283,7 @@ export default function JoinPage() {
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="w-full py-3 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 text-white font-black text-sm disabled:opacity-50"
+          className="w-full py-3 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 text-white font-black text-m disabled:opacity-50"
         >
           {submitting ? "กำลังตรวจสอบ..." : "เข้าสู่ระบบ"}
         </button>
