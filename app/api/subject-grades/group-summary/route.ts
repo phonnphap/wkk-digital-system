@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // GET /api/subject-grades/group-summary?subject_section_id=xxx
-// 1) ถ้าวิชานี้ตั้ง score_group_code เองไว้ -> ใช้ค่านั้น
-// 2) ถ้าไม่ได้ตั้ง -> เดากลุ่มจาก 6 ตัวแรกของ subject_code แทน (เฉพาะวิชาที่ยังไม่มี score_group_code เองเหมือนกัน)
-// 3) หา section ของทุกวิชาในกลุ่ม เฉพาะห้องเดียวกับ section ปัจจุบัน แล้วคำนวณ % คะแนนถ่วงน้ำหนัก
+//
+// ★ DEBUG BUILD: เวอร์ชันนี้ใส่ console.time/timeEnd คั่นทุกขั้นตอน เพื่อหาว่า
+// ขั้นตอนไหนกินเวลาไปกี่วินาทีจริงๆ (เพราะเช็ค index แล้วครบทุกจุด ตัดเรื่อง missing index ทิ้งได้)
+// ดู log ได้ที่ Vercel → Deployments → เลือก deployment ล่าสุด → Logs (runtime logs, ไม่ใช่ build logs)
+// หรือรัน `vercel dev` / `next dev` แล้วดู terminal ตรงๆ ถ้าทดสอบ local
+//
+// เมื่อหาสาเหตุที่แท้จริงได้แล้ว ให้เอา console.time ออก แล้วใช้เวอร์ชัน production ตัวก่อนหน้าแทน
 export async function GET(req: NextRequest) {
+  const t0 = Date.now();
   try {
     const { searchParams } = new URL(req.url);
     const subject_section_id = searchParams.get("subject_section_id");
@@ -13,24 +18,25 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "ต้องระบุ subject_section_id" }, { status: 400 });
     }
 
-    const admin = createAdminClient();
+    console.log(`[group-summary] start subject_section_id=${subject_section_id}`);
 
+    const tClient0 = Date.now();
+    const admin = createAdminClient();
+    console.log(`[group-summary] createAdminClient: ${Date.now() - tClient0}ms`);
+
+    const tSection0 = Date.now();
     const { data: currentSection, error: secErr } = await admin
       .from("subject_sections")
-      .select("id, subject_id, classroom_id")
+      .select("id, subject_id, classroom_id, subject:subjects ( id, subject_code, score_group_code )")
       .eq("id", subject_section_id)
       .maybeSingle();
+    console.log(`[group-summary] query currentSection: ${Date.now() - tSection0}ms`);
     if (secErr) throw secErr;
     if (!currentSection) {
       return NextResponse.json({ error: "ไม่พบ subject_section" }, { status: 404 });
     }
 
-    const { data: currentSubject, error: subjErr } = await admin
-      .from("subjects")
-      .select("id, subject_code, score_group_code")
-      .eq("id", currentSection.subject_id)
-      .maybeSingle();
-    if (subjErr) throw subjErr;
+    const currentSubject = (currentSection as any).subject;
     if (!currentSubject) {
       return NextResponse.json({ grouped: false });
     }
@@ -42,6 +48,7 @@ export async function GET(req: NextRequest) {
     let candidateSubjects: any[] = [];
     let isGuessed = false;
 
+    const tCandidates0 = Date.now();
     if (explicitGroupCode) {
       groupCode = explicitGroupCode;
       const { data, error } = await admin
@@ -56,11 +63,11 @@ export async function GET(req: NextRequest) {
         .select("id, subject_code, name_th, score_group_code, score_group_weight_percent")
         .ilike("subject_code", `${guessedGroupCode}%`);
       if (error) throw error;
-      // เดาจากรหัสได้เฉพาะวิชาที่ "ไม่ได้ตั้ง score_group_code เอง" เท่านั้น (กันชนกับวิชาที่ตั้งกลุ่มอื่นเองไว้)
       candidateSubjects = (data ?? []).filter((s: any) => !s.score_group_code);
       groupCode = guessedGroupCode;
       isGuessed = true;
     }
+    console.log(`[group-summary] query candidateSubjects (${candidateSubjects.length} rows, explicit=${!!explicitGroupCode}): ${Date.now() - tCandidates0}ms`);
 
     if (!groupCode || candidateSubjects.length <= 1) {
       return NextResponse.json({ grouped: false });
@@ -68,11 +75,20 @@ export async function GET(req: NextRequest) {
 
     const groupSubjectIds = candidateSubjects.map((s: any) => s.id);
 
-    const { data: groupSections, error: gsecErr } = await admin
-      .from("subject_sections")
-      .select("id, subject_id")
-      .in("subject_id", groupSubjectIds)
-      .eq("classroom_id", currentSection.classroom_id);
+    const tGroupSections0 = Date.now();
+    const [{ data: groupSections, error: gsecErr }, { data: groupMeta }] = await Promise.all([
+      admin
+        .from("subject_sections")
+        .select("id, subject_id")
+        .in("subject_id", groupSubjectIds)
+        .eq("classroom_id", currentSection.classroom_id),
+      admin
+        .from("subject_score_groups")
+        .select("group_code, display_name")
+        .eq("group_code", groupCode)
+        .maybeSingle(),
+    ]);
+    console.log(`[group-summary] query groupSections+groupMeta (${groupSections?.length ?? 0} sections): ${Date.now() - tGroupSections0}ms`);
     if (gsecErr) throw gsecErr;
 
     if (!groupSections || groupSections.length <= 1) {
@@ -83,20 +99,24 @@ export async function GET(req: NextRequest) {
     groupSections.forEach((s: any) => { sectionBySubjectId[s.subject_id] = s.id; });
     const sectionIds = groupSections.map((s: any) => s.id);
 
+    const tAssignments0 = Date.now();
     const { data: allAssignments, error: aErr } = await admin
       .from("assignments")
       .select("id, subject_section_id, max_score")
       .in("subject_section_id", sectionIds);
+    console.log(`[group-summary] query allAssignments (${allAssignments?.length ?? 0} rows): ${Date.now() - tAssignments0}ms`);
     if (aErr) throw aErr;
 
     const assignmentIds = (allAssignments ?? []).map((a: any) => a.id);
 
+    const tSubEvents0 = Date.now();
     const [{ data: allSubmissions, error: sErr }, { data: allScoreEvents, error: eErr }] = await Promise.all([
       assignmentIds.length > 0
         ? admin.from("assignment_submissions").select("assignment_id, student_id, score").in("assignment_id", assignmentIds)
         : Promise.resolve({ data: [], error: null }),
       admin.from("score_events").select("subject_section_id, student_id, points").in("subject_section_id", sectionIds),
     ]);
+    console.log(`[group-summary] query submissions(${allSubmissions?.length ?? 0})+scoreEvents(${allScoreEvents?.length ?? 0}): ${Date.now() - tSubEvents0}ms`);
     if (sErr) throw sErr;
     if (eErr) throw eErr;
 
@@ -127,7 +147,6 @@ export async function GET(req: NextRequest) {
       bucket[ev.student_id] = (bucket[ev.student_id] ?? 0) + ev.points;
     });
 
-    // น้ำหนัก % ต่อวิชา -> ถ้าไม่ตั้งมา แบ่งเท่ากันจากส่วนที่เหลือ
     const withSection = candidateSubjects
       .map((s: any) => ({ ...s, section_id: sectionBySubjectId[s.id] ?? null }))
       .filter((s: any) => s.section_id);
@@ -148,12 +167,6 @@ export async function GET(req: NextRequest) {
       total_max_score: perSectionMax[s.section_id] ?? 0,
     }));
 
-    const { data: groupMeta } = await admin
-      .from("subject_score_groups")
-      .select("group_code, display_name")
-      .eq("group_code", groupCode)
-      .maybeSingle();
-
     const studentIds = new Set<string>();
     Object.values(perSectionStudentTotals).forEach(bucket => Object.keys(bucket).forEach(id => studentIds.add(id)));
 
@@ -168,6 +181,8 @@ export async function GET(req: NextRequest) {
       combinedPercentByStudent[studentId] = combined;
     });
 
+    console.log(`[group-summary] TOTAL: ${Date.now() - t0}ms`);
+
     return NextResponse.json({
       grouped: true,
       groupCode,
@@ -177,7 +192,7 @@ export async function GET(req: NextRequest) {
       combinedPercentByStudent,
     });
   } catch (err: any) {
-    console.error("[GET /api/subject-grades/group-summary] error:", err);
+    console.error(`[group-summary] error after ${Date.now() - t0}ms:`, err);
     return NextResponse.json({ error: err?.message ?? "โหลดข้อมูลคะแนนรวมกลุ่มไม่สำเร็จ" }, { status: 500 });
   }
 }
