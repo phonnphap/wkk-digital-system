@@ -173,7 +173,7 @@ export default function StudentDashboardPage() {
                   {/* ★ ปรับขนาดตัวอักษรของบรรทัดชั้นเรียน/เลขที่ ให้ใหญ่ขึ้น (text-lg sm:text-2xl font-black)
                       ให้สอดคล้องกับสไตล์ของหน้ารายวิชา และแก้ให้ "เลขที่" ขึ้นจริง โดยอ้างอิง seat_number */}
                   {(classLabel || seatNo != null) && (
-                    <p className="text-white text-lg sm:text-2xl font-black mt-1.5">
+                    <p className="text-white text-m sm:text-xl font-black mt-1.5">
                       {classLabel}
                       {seatNo != null && `  เลขที่ ${seatNo}`}
                     </p>
@@ -193,7 +193,7 @@ export default function StudentDashboardPage() {
 
         {!loading && homeroomTeachers.length > 0 && (
           <div className="relative mt-3 bg-white/20 backdrop-blur-sm rounded-2xl px-4 py-3">
-            <p className="text-black text-m font-bold uppercase tracking-wide">ครูประจำชั้น  {homeroomTeachers.map(teacherDisplayName).filter(Boolean).join("  และ  ")}
+            <p className="text-white text-m sm:text-xl font-black mt-0.5">ครูประจำชั้น  {homeroomTeachers.map(teacherDisplayName).filter(Boolean).join("  และ  ")}
             </p>
           </div>
         )}

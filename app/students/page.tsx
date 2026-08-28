@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Phone, MapPin, Plus, Pencil, Trash2, X, Home, ArrowLeft } from "lucide-react";
+import { Phone, MapPin, Plus, Pencil, Trash2, X, Home, ArrowLeft, Printer } from "lucide-react"; // ★ เพิ่ม Printer
 
 const supabase = createClient();
 
@@ -242,6 +242,12 @@ useEffect(() => {
     if (selectedClass) loadStudents(selectedClass.classroom_id);
   }
 
+  // ★ เพิ่มใหม่: ไปหน้าพิมพ์การ์งนักเรียนของห้องที่เลือกอยู่
+  function goToPrintCards() {
+    if (!selectedClass) return;
+    router.push(`/students/print?classroom=${selectedClass.classroom_id}`);
+  }
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-sky-50 via-white to-violet-50">
       {/* ★ ปรับ padding ให้เท่ากับหน้าเช็คชื่อ (w-full px-4 sm:px-6 py-6 lg:px-8, ไม่มี mx-auto/max-w ครอบ) */}
@@ -272,13 +278,23 @@ useEffect(() => {
               รายชื่อ ข้อมูลพื้นฐาน และข้อมูลผู้ปกครองของนักเรียนในความดูแล
             </p>
           </div>
-          <button
-            onClick={openAddForm}
-            disabled={!selectedClass}
-            className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:shadow-xl disabled:translate-y-0 disabled:opacity-40 disabled:shadow-none"
-          >
-            <Plus className="h-4 w-4" /> เพิ่มนักเรียน
-          </button>
+          {/* ★ เพิ่มปุ่มพิมพ์การ์ด นร. คู่กับปุ่มเพิ่มนักเรียน */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={goToPrintCards}
+              disabled={!selectedClass}
+              className="flex items-center gap-1.5 rounded-2xl border-2 border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-600 shadow-sm transition hover:-translate-y-0.5 hover:bg-indigo-50 hover:shadow-md disabled:translate-y-0 disabled:opacity-40 disabled:shadow-none"
+            >
+              <Printer className="h-4 w-4" /> พิมพ์การ์ด นร.
+            </button>
+            <button
+              onClick={openAddForm}
+              disabled={!selectedClass}
+              className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:shadow-xl disabled:translate-y-0 disabled:opacity-40 disabled:shadow-none"
+            >
+              <Plus className="h-4 w-4" /> เพิ่มนักเรียน
+            </button>
+          </div>
         </div>
 
         {classrooms.length > 1 && (

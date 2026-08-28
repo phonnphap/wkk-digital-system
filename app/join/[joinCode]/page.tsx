@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation"; // ★ เพิ่ม useSearchParams
 import { createClient } from "@/lib/supabase/client";
 import ThaiDateSelect, { thaiDateToISO } from "@/components/shared/ThaiDateSelect";
 
@@ -15,15 +15,27 @@ type Entity = {
 export default function JoinPage() {
   const router = useRouter();
   const { joinCode } = useParams() as { joinCode: string };
+  const searchParams = useSearchParams(); // ★ เพิ่มใหม่
 
   const [entity, setEntity] = useState<Entity | null>(null);
   const [students, setStudents] = useState<{ id: string; first_name: string; last_name: string; seat_number: number }[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [studentCode, setStudentCode] = useState("");
+  const [prefilledCode, setPrefilledCode] = useState(false); // ★ เพิ่มใหม่: มาจากการสแกน QR การ์ด นร. หรือไม่
   const [dob, setDob] = useState<{ day: number | null; month: number | null; yearBE: number | null }>({ day: null, month: null, yearBE: null });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  // ★ เพิ่มใหม่: ถ้ามาจากการ์ด QR จะแนบ ?code=รหัสนักเรียน มาด้วย เติมลงช่องให้อัตโนมัติ
+  // เพื่อให้นักเรียนกรอกแค่วันเกิดอย่างเดียว (เฉพาะโหมด id_and_dob เท่านั้นที่ใช้ช่องนี้)
+  useEffect(() => {
+    const codeFromQr = searchParams.get("code");
+    if (codeFromQr) {
+      setStudentCode(codeFromQr);
+      setPrefilledCode(true);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     (async () => {
@@ -133,12 +145,24 @@ export default function JoinPage() {
         )}
 
         {(entity.accessMode === "name_and_id" || entity.accessMode === "id_and_dob") && (
-          <input
-            value={studentCode}
-            onChange={e => setStudentCode(e.target.value)}
-            placeholder="รหัสนักเรียน"
-            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold"
-          />
+          // ★ ถ้ามาจาก QR การ์ด นร. (มี ?code= แนบมา) ให้ล็อกช่องนี้ไว้ ไม่ต้องพิมพ์ซ้ำ
+          //   กันพิมพ์รหัสตัวเองผิด/สลับกับเพื่อน และลดขั้นตอนเหลือแค่กรอกวันเกิดอย่างเดียว
+          <div>
+            <input
+              value={studentCode}
+              onChange={e => setStudentCode(e.target.value)}
+              placeholder="รหัสนักเรียน"
+              readOnly={prefilledCode}
+              className={`w-full border-2 rounded-xl px-3 py-2.5 text-sm font-bold ${
+                prefilledCode ? "border-slate-100 bg-slate-50 text-slate-500" : "border-slate-200"
+              }`}
+            />
+            {prefilledCode && (
+              <p className="mt-1 text-[11px] font-bold text-slate-400">
+                ระบุจากการ์ดนักเรียนแล้ว — กรอกแค่วันเกิดด้านล่าง
+              </p>
+            )}
+          </div>
         )}
 
         {entity.accessMode === "id_and_dob" && (
