@@ -183,7 +183,7 @@ export function buildIndividualReportHTML(
   <div class="section-title">ส่วนที่ 6 — ช่องเซ็นชื่ออนุมัติ</div>
   <div class="sign-section">
     <div class="sign-box"><div class="sign-name">(${user.full_name})</div><div style="font-size:13pt;color:#475569">ผู้อบรม</div></div>
-    <div class="sign-box"><div class="sign-name">(${deputyHrName || '..............................'})</div><div style="font-size:13pt;color:#475569">รองฝ่ายบุคคล</div></div>
+    <div class="sign-box"><div class="sign-name">(${deputyHrName || '..............................'})</div><div style="font-size:13pt;color:#475569">รองผู้อำนวยการฝ่ายบริหารงานบุคคล</div></div>
     <div class="sign-box"><div class="sign-name">(${directorName || '..............................'})</div><div style="font-size:13pt;color:#475569">ผู้อำนวยการโรงเรียน</div></div>
   </div>
   <script>window.onload=()=>window.print()<\/script>
