@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin"; // ★ เพิ่ม: bypass RLS เฉพาะตารางที่ต้องใช้ Supabase Auth
 import { getStudentSession } from "@/lib/studentAuth";
 
 export async function GET(req: NextRequest) {
@@ -43,8 +44,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ไม่พบวิชาของนักเรียนคนนี้" }, { status: 404 });
   }
 
+  // ★ FIX: ตาราง assignments (และ assignment_submissions ที่ join ข้างใน) มี RLS policy
+  // ที่อนุญาตเฉพาะ role "authenticated" (Supabase Auth session) เท่านั้น เหมือนกับ timetable_entries
+  // ที่เจอปัญหาไปก่อนหน้านี้ — หน้า student-portal ใช้ custom session (getStudentSession) ไม่ได้
+  // login ผ่าน Supabase Auth ทำให้ request วิ่งด้วย role "anon" เสมอ ไม่ผ่าน policy ใดๆ เลย
+  // ผลคือ query สำเร็จแต่ได้ [] เงียบๆ โดยไม่มี error ทำให้หน้าเว็บมองว่า "ไม่มีงานที่มอบหมาย"
+  // สิทธิ์ของนักเรียนถูกเช็คไปแล้วด้านบน (studentId === session.student_id + section ต้องอยู่ห้องเดียวกัน)
+  // จึงปลอดภัยที่จะ bypass RLS เฉพาะจุดนี้ด้วย service-role client
+  const supabaseAdmin = createAdminClient();
+
   // ★ แก้: ดึงจากตาราง assignment_submissions (ตัวที่ครูใช้ให้คะแนนจริง) แทน submissions ที่ไม่มีใครเขียนลงเลย
-  const { data: assignments, error } = await supabase
+  const { data: assignments, error } = await supabaseAdmin
     .from("assignments")
     .select(
       `
@@ -60,6 +70,7 @@ export async function GET(req: NextRequest) {
     .order("due_date", { ascending: true });
 
   if (error) {
+    console.error("[student-portal/assignments] query error:", error);
     return NextResponse.json({ error: "ดึงข้อมูลงานไม่สำเร็จ" }, { status: 500 });
   }
 
@@ -85,8 +96,11 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = await createClient();
+  // ★ FIX: ใช้ admin client เดียวกับด้านบน กันเคสเดียวกัน — ถ้า assignments/assignment_submissions
+  // โดน RLS บล็อกตอนอ่าน ก็มีโอกาสสูงที่จะบล็อกตอนเขียน (insert/upsert) ด้วยเช่นกัน
+  const supabaseAdmin = createAdminClient();
 
-  const { data: assignment } = await supabase
+  const { data: assignment } = await supabaseAdmin
     .from("assignments")
     .select("id, status, subject_section_id")
     .eq("id", assignmentId)
@@ -115,7 +129,7 @@ export async function POST(req: NextRequest) {
   //   (ถ้าต้องการเก็บชื่อไฟล์แยกต่างหาก ต้องเพิ่มคอลัมน์ในตาราง หรือคุยเรื่องออกแบบ schema เพิ่มเติม)
   const contentText = `[ไฟล์แนบ] ${file.name}\n${publicUrl}`;
 
-  const { data: submission, error: submitError } = await supabase
+  const { data: submission, error: submitError } = await supabaseAdmin
     .from("assignment_submissions")
     .upsert(
       {
@@ -131,6 +145,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (submitError) {
+    console.error("[student-portal/assignments] submit error:", submitError);
     return NextResponse.json({ error: "บันทึกการส่งงานไม่สำเร็จ" }, { status: 500 });
   }
 
