@@ -219,7 +219,7 @@ function EmojiPicker({ value, onChange }: { value: string; onChange: (emoji: str
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="w-12 h-11 text-center border-2 border-slate-200 rounded-lg text-lg bg-white hover:border-fuchsia-300"
+        className="w-12 h-11 text-center border-2 border-slate-200 rounded-lg text-xlbg-white hover:border-fuchsia-300"
       >
         {value}
       </button>
@@ -232,7 +232,7 @@ function EmojiPicker({ value, onChange }: { value: string; onChange: (emoji: str
                 key={e}
                 type="button"
                 onClick={() => { onChange(e); setOpen(false); }}
-                className="text-lg rounded-lg hover:bg-fuchsia-50 py-1"
+                className="text-xlrounded-lg hover:bg-fuchsia-50 py-1"
               >
                 {e}
               </button>
@@ -249,10 +249,10 @@ function QrCodeModal({ inviteUrl, onClose }: { inviteUrl: string; onClose: () =>
   return (
     <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-6 text-center" onClick={e => e.stopPropagation()}>
-        <h3 className="font-black text-slate-800 text-lg mb-3">📷 QR เข้าร่วมวิชา</h3>
+        <h3 className="font-black text-slate-800 text-xlmb-3">📷 QR เข้าร่วมวิชา</h3>
         <img src={qrSrc} alt="QR Code" className="mx-auto rounded-xl border-2 border-slate-100" width={260} height={260} />
-        <p className="text-slate-400 text-xs mt-3">สแกนเพื่อเข้าร่วมวิชานี้</p>
-        <button onClick={onClose} className="mt-4 w-full py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">ปิด</button>
+        <p className="text-slate-400 text-sm mt-3">สแกนเพื่อเข้าร่วมวิชานี้</p>
+        <button onClick={onClose} className="mt-4 w-full py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-base">ปิด</button>
       </div>
     </div>
   );
@@ -288,7 +288,7 @@ function StudentCard({
       }`}
     >
       <div
-        className={`absolute -top-3.5 left-1/2 -translate-x-1/2 min-w-[40px] h-8 px-2.5 rounded-full bg-gradient-to-r ${badgeGradient} text-white text-sm font-black flex items-center justify-center gap-1 shadow-lg ring-[3px] ring-white`}
+        className={`absolute -top-3.5 left-1/2 -translate-x-1/2 min-w-[40px] h-8 px-2.5 rounded-full bg-gradient-to-r ${badgeGradient} text-white text-base font-black flex items-center justify-center gap-1 shadow-lg ring-[3px] ring-white`}
       >
         <span className="text-[16px] leading-none">{badgeIcon}</span>
         <span>{score}</span>
@@ -296,7 +296,7 @@ function StudentCard({
 
       {selectMode && (
         <div
-          className={`absolute top-2 right-2 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-black transition-colors ${
+          className={`absolute top-2 right-2 w-6 h-6 rounded-full border-2 flex items-center justify-center text-sm font-black transition-colors ${
             selected ? "bg-fuchsia-500 border-fuchsia-500 text-white" : "border-slate-200 bg-white text-transparent"
           }`}
         >
@@ -366,7 +366,7 @@ function ScoreModal({
         <div className="sm:w-52 shrink-0 bg-slate-50 p-5 flex flex-col items-center text-center border-b sm:border-b-0 sm:border-r border-slate-100">
           {single ? (
             <>
-              <div className="w-full rounded-t-xl bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white font-black text-sm py-1.5 mb-3 shadow">
+              <div className="w-full rounded-t-xl bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white font-black text-base py-1.5 mb-3 shadow">
                 {usageCounts[single.id] ?? 0}
               </div>
               {single.avatar_url ? (
@@ -376,15 +376,15 @@ function ScoreModal({
                   {single.first_name[0]}
                 </div>
               )}
-              <p className="mt-3 text-slate-700 font-black text-sm">{single.first_name} {single.last_name}</p>
-              {single.nick_name && <p className="text-slate-400 text-[11px] font-bold mt-0.5">({single.nick_name})</p>}
-              <p className="text-fuchsia-500 text-xs font-black">เลขที่ {single.seat_number}</p>
+              <p className="mt-3 text-slate-700 font-black text-base">{single.first_name} {single.last_name}</p>
+              {single.nick_name && <p className="text-slate-400 text-[14px] font-bold mt-0.5">({single.nick_name})</p>}
+              <p className="text-fuchsia-500 text-sm font-black">เลขที่ {single.seat_number}</p>
             </>
           ) : (
             <>
               <p className="text-4xl mb-2">👥</p>
-              <p className="text-slate-700 font-black text-sm">เลือกไว้ {students.length} คน</p>
-              <p className="text-slate-400 text-xs font-bold mt-1">คะแนนจะถูกให้กับทุกคนที่เลือก</p>
+              <p className="text-slate-700 font-black text-base">เลือกไว้ {students.length} คน</p>
+              <p className="text-slate-400 text-sm font-bold mt-1">คะแนนจะถูกให้กับทุกคนที่เลือก</p>
             </>
           )}
         </div>
@@ -412,12 +412,12 @@ function ScoreModal({
                   type="button"
                   onClick={e => { e.stopPropagation(); setConfirmDeleteId(p.id); }}
                   title="ลบการ์ดนี้"
-                  className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-white border border-slate-200 text-slate-400 hover:bg-red-500 hover:border-red-500 hover:text-white flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                  className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-white border border-slate-200 text-slate-400 hover:bg-red-500 hover:border-red-500 hover:text-white flex items-center justify-center text-[12px] opacity-0 group-hover:opacity-100 transition-opacity shadow"
                 >
                   🗑
                 </button>
                 <span
-                  className={`absolute -top-2 -right-2 w-5 h-5 rounded-full text-[10px] font-black text-white flex items-center justify-center shadow ${
+                  className={`absolute -top-2 -right-2 w-5 h-5 rounded-full text-[12px] font-black text-white flex items-center justify-center shadow ${
                     p.points >= 0 ? "bg-emerald-500" : "bg-rose-500"
                   }`}
                 >
@@ -425,7 +425,7 @@ function ScoreModal({
                 </span>
                 <button onClick={() => onGiveScore(p)} className="flex flex-col items-center gap-1 w-full">
                   <span className="text-2xl leading-none">{p.emoji}</span>
-                  <span className="text-[11px] font-black text-slate-600 text-center leading-tight px-1">{p.label}</span>
+                  <span className="text-[14px] font-black text-slate-600 text-center leading-tight px-1">{p.label}</span>
                 </button>
               </div>
             ))}
@@ -433,27 +433,27 @@ function ScoreModal({
 
           {addingPreset && (
             <div className="mt-4 rounded-xl border-2 border-fuchsia-200 bg-fuchsia-50/40 p-3 space-y-2">
-              <p className="font-black text-fuchsia-700 text-xs">เพิ่มการ์ดให้คะแนนใหม่</p>
+              <p className="font-black text-fuchsia-700 text-sm">เพิ่มการ์ดให้คะแนนใหม่</p>
               <div className="flex gap-2">
                 <EmojiPicker value={newEmoji} onChange={setNewEmoji} />
                 <input
                   value={newLabel}
                   onChange={e => setNewLabel(e.target.value)}
                   placeholder="เช่น ตอบคำถาม, พูดคำหยาบ"
-                  className="flex-1 border-2 border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold bg-white"
+                  className="flex-1 border-2 border-slate-200 rounded-lg px-3 py-1.5 text-base font-bold bg-white"
                 />
                 <input
                   type="number"
                   value={newPoints}
                   onChange={e => setNewPoints(Number(e.target.value))}
-                  className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-center bg-white"
+                  className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1.5 text-base font-bold text-center bg-white"
                 />
               </div>
               <div className="flex gap-2">
-                <button onClick={submitNewPreset} className="flex-1 py-2 rounded-lg bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-black text-xs">
+                <button onClick={submitNewPreset} className="flex-1 py-2 rounded-lg bg-fuchsia-500 hover:bg-fuchsia-600 text-white font-black text-sm">
                   บันทึกการ์ด
                 </button>
-                <button onClick={() => setAddingPreset(false)} className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-500 font-black text-xs">
+                <button onClick={() => setAddingPreset(false)} className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-500 font-black text-sm">
                   ยกเลิก
                 </button>
               </div>
@@ -469,12 +469,12 @@ function ScoreModal({
                 onClick={e => e.stopPropagation()}
               >
                 <p className="text-3xl mb-2">{presetToDelete.emoji}</p>
-                <h4 className="font-black text-slate-800 text-sm mb-1">ลบการ์ด "{presetToDelete.label}"?</h4>
-                <p className="text-slate-400 text-xs font-bold mb-4">การ์ดนี้จะถูกลบออกจากรายการให้คะแนนถาวร</p>
+                <h4 className="font-black text-slate-800 text-base mb-1">ลบการ์ด "{presetToDelete.label}"?</h4>
+                <p className="text-slate-400 text-sm font-bold mb-4">การ์ดนี้จะถูกลบออกจากรายการให้คะแนนถาวร</p>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setConfirmDeleteId(null)}
-                    className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm"
+                    className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-base"
                   >
                     ยกเลิก
                   </button>
@@ -483,7 +483,7 @@ function ScoreModal({
                       onDeletePreset(presetToDelete.id);
                       setConfirmDeleteId(null);
                     }}
-                    className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-sm"
+                    className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-base"
                   >
                     ลบเลย
                   </button>
@@ -497,11 +497,11 @@ function ScoreModal({
               type="number"
               value={customPoints}
               onChange={e => setCustomPoints(Number(e.target.value))}
-              className="w-24 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-center"
+              className="w-24 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold text-center"
             />
             <button
               onClick={() => onGiveScore(null, customPoints)}
-              className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 text-white font-black text-sm shadow"
+              className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 text-white font-black text-base shadow"
             >
               Give Score ★
             </button>
@@ -647,11 +647,11 @@ function RandomPickerTab({
     <div className="space-y-3">
       {/* แถบสถานะบาง ๆ ด้านบน: แสดงโหมดปัจจุบัน (เลือกจาก dropdown ของแท็บล่างแล้ว) + จำนวนคนคงเหลือ */}
       <div className="bg-white rounded-2xl border border-slate-200 px-4 py-2.5 flex items-center justify-between flex-wrap gap-2">
-        <div className={`flex items-center gap-2 px-4 py-2 rounded-full border-2 border-current font-black text-sm ${MODE_INFO[mode].bg} ${MODE_INFO[mode].text}`}>
+        <div className={`flex items-center gap-2 px-4 py-2 rounded-full border-2 border-current font-black text-base ${MODE_INFO[mode].bg} ${MODE_INFO[mode].text}`}>
           <span className="text-lg">{MODE_INFO[mode].icon}</span>
           {MODE_INFO[mode].label}
         </div>
-        <span className="text-xs text-slate-400 font-bold">เหลือ {pool.length}/{entries.length} คน</span>
+        <span className="text-sm text-slate-400 font-bold">เหลือ {pool.length}/{entries.length} คน</span>
       </div>
 
       {/* ผังหลัก: เกมสุ่ม 75% ซ้าย + กรอบจัดการรายชื่อ 25% ขวา */}
@@ -676,31 +676,31 @@ function RandomPickerTab({
 
         {/* กรอบจัดการรายชื่อ */}
         <div className="w-full lg:w-[25%] shrink-0 bg-white rounded-2xl border border-slate-200 p-4 flex flex-col lg:sticky lg:top-4 lg:max-h-[75vh]">
-          <p className="font-black text-slate-700 text-sm mb-3">📋 จัดการรายชื่อ ({entries.length})</p>
+          <p className="font-black text-slate-700 text-base mb-3">📋 จัดการรายชื่อ ({entries.length})</p>
           <div className="grid grid-cols-2 gap-2 mb-2">
             <button
               onClick={() => setAutoSwap(v => !v)}
-              className={`py-2 rounded-lg font-black text-xs transition-colors ${
+              className={`py-2 rounded-lg font-black text-sm transition-colors ${
                 autoSwap ? "bg-fuchsia-500 hover:bg-fuchsia-600 text-white" : "bg-slate-100 hover:bg-slate-200 text-slate-600"
               }`}
             >
               🔀 {autoSwap ? "กำลังสลับ..." : "สลับ"}
             </button>
-            <button onClick={addEntry} className="py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs">
+            <button onClick={addEntry} className="py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-black text-sm">
               + เพิ่มชื่อ
             </button>
           </div>
           <div className="grid grid-cols-2 gap-2 mb-3">
-            <button onClick={resetEntries} className="py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">
+            <button onClick={resetEntries} className="py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm">
               ↺ รีเซ็ต
             </button>
-            <button onClick={clearAllEntries} className="py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-black text-xs">
+            <button onClick={clearAllEntries} className="py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-black text-sm">
               🗑 ล้างทั้งหมด
             </button>
           </div>
           <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 max-h-[50vh] lg:max-h-none">
             {entries.length === 0 && (
-              <p className="text-center text-slate-300 text-xs font-bold py-6">ไม่มีรายชื่อในรายการ</p>
+              <p className="text-center text-slate-300 text-sm font-bold py-6">ไม่มีรายชื่อในรายการ</p>
             )}
             {entries.map(e => (
               <div
@@ -712,17 +712,17 @@ function RandomPickerTab({
                 <input
                   value={e.label}
                   onChange={ev => updateLabel(e.id, ev.target.value)}
-                  className="flex-1 text-xs font-bold border-0 focus:outline-none focus:ring-1 focus:ring-fuchsia-300 rounded px-1 py-1 min-w-0"
+                  className="flex-1 text-sm font-bold border-0 focus:outline-none focus:ring-1 focus:ring-fuchsia-300 rounded px-1 py-1 min-w-0"
                 />
                 {removedIds.has(e.id) && (
                   <button
                     onClick={() => setRemovedIds(prev => { const n = new Set(prev); n.delete(e.id); return n; })}
-                    className="text-[9px] font-black text-emerald-500 whitespace-nowrap"
+                    className="text-[12px] font-black text-emerald-500 whitespace-nowrap"
                   >
                     คืน
                   </button>
                 )}
-                <button onClick={() => deleteEntry(e.id)} className="text-slate-300 hover:text-red-500 text-xs shrink-0">✕</button>
+                <button onClick={() => deleteEntry(e.id)} className="text-slate-300 hover:text-red-500 text-sm shrink-0">✕</button>
               </div>
             ))}
           </div>
@@ -743,24 +743,24 @@ function RandomPickerTab({
               </div>
             )}
             <p className="text-2xl font-black text-slate-800">{winner.label}</p>
-            <p className="text-slate-400 text-xs font-bold mt-1">คือคนที่ถูกสุ่มเลือก</p>
+            <p className="text-slate-400 text-sm font-bold mt-1">คือคนที่ถูกสุ่มเลือก</p>
             {scoredWinnerId === winner.id && (
-              <p className="mt-2 inline-block px-3 py-1 rounded-full bg-emerald-100 text-emerald-600 text-xs font-black">✅ ให้คะแนนแล้ว</p>
+              <p className="mt-2 inline-block px-3 py-1 rounded-full bg-emerald-100 text-emerald-600 text-sm font-black">✅ ให้คะแนนแล้ว</p>
             )}
 
             <div className={`grid gap-2 mt-6 ${matchedStudent && onOpenScore ? "grid-cols-3" : "grid-cols-2"}`}>
-              <button onClick={keepWinnerInPool} className="py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs">
+              <button onClick={keepWinnerInPool} className="py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm">
                 เก็บไว้
               </button>
               {matchedStudent && onOpenScore && (
                 <button
                   onClick={giveScoreToWinner}
-                  className="py-3 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 text-white font-black text-xs"
+                  className="py-3 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 text-white font-black text-sm"
                 >
                   ⭐ ให้คะแนน
                 </button>
               )}
-              <button onClick={removeWinnerFromPool} className="py-3 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black text-xs">
+              <button onClick={removeWinnerFromPool} className="py-3 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black text-sm">
                 🗑 เอาออก
               </button>
             </div>
@@ -815,7 +815,7 @@ function WheelPicker({
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-10 flex flex-col items-center gap-6 w-full max-w-3xl">
       {n === 0 ? (
-        <p className="text-slate-400 font-bold text-sm py-10">ไม่มีนักเรียนในรายการ</p>
+        <p className="text-slate-400 font-bold text-base py-10">ไม่มีนักเรียนในรายการ</p>
       ) : (
         <div className="relative" style={{ width: size, height: size, maxWidth: "100%" }}>
           <div className="absolute left-1/2 -top-1 -translate-x-1/2 z-10 text-4xl drop-shadow" style={{ transform: "translateX(-50%) rotate(180deg)" }}>
@@ -864,7 +864,7 @@ function WheelPicker({
           <button
             onClick={spin}
             disabled={spinning}
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full bg-white border-4 border-fuchsia-400 shadow-lg font-black text-fuchsia-600 text-sm disabled:opacity-60"
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full bg-white border-4 border-fuchsia-400 shadow-lg font-black text-fuchsia-600 text-base disabled:opacity-60"
           >
             {spinning ? "..." : "หมุน"}
           </button>
@@ -918,10 +918,10 @@ function SlidePicker({
     <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 w-full">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div className="flex gap-2">
-          <button onClick={() => setSpeed("slow")} className={`px-4 py-2 rounded-lg font-black text-sm ${speed === "slow" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>ช้า</button>
-          <button onClick={() => setSpeed("fast")} className={`px-4 py-2 rounded-lg font-black text-sm ${speed === "fast" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>ไว</button>
+          <button onClick={() => setSpeed("slow")} className={`px-4 py-2 rounded-lg font-black text-base ${speed === "slow" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>ช้า</button>
+          <button onClick={() => setSpeed("fast")} className={`px-4 py-2 rounded-lg font-black text-base ${speed === "fast" ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>ไว</button>
         </div>
-        <button onClick={restart} className="px-3 py-2 rounded-lg bg-slate-100 text-slate-500 font-black text-xs">↺ เริ่มใหม่</button>
+        <button onClick={restart} className="px-3 py-2 rounded-lg bg-slate-100 text-slate-500 font-black text-sm">↺ เริ่มใหม่</button>
       </div>
 
       <div className="relative h-44 overflow-hidden rounded-xl bg-slate-50" ref={containerRef}>
@@ -938,17 +938,17 @@ function SlidePicker({
               {e.avatar_url ? (
                 <img src={e.avatar_url} className="w-14 h-14 rounded-full object-cover" />
               ) : (
-                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-sky-400 to-blue-400 text-white text-lg font-black flex items-center justify-center">
+                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-sky-400 to-blue-400 text-white text-xlfont-black flex items-center justify-center">
                   {e.first_name[0]}
                 </div>
               )}
-              <p className="text-xs font-black text-slate-600 mt-2 truncate w-full">{e.label}</p>
+              <p className="text-sm font-black text-slate-600 mt-2 truncate w-full">{e.label}</p>
             </div>
           ))}
         </div>
       </div>
 
-      {pool.length === 0 && <p className="text-center text-slate-400 text-sm font-bold mt-3">ไม่มีนักเรียนในรายการ</p>}
+      {pool.length === 0 && <p className="text-center text-slate-400 text-base font-bold mt-3">ไม่มีนักเรียนในรายการ</p>}
 
       <button
         onClick={spin}
@@ -1028,11 +1028,11 @@ function CardPicker({
                   {e.avatar_url ? (
                     <img src={e.avatar_url} className="w-10 h-10 rounded-full object-cover" />
                   ) : (
-                    <div className="w-10 h-10 rounded-full bg-emerald-400 text-white text-sm font-black flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-full bg-emerald-400 text-white text-base font-black flex items-center justify-center">
                       {e.first_name[0]}
                     </div>
                   )}
-                  <p className="text-[10px] font-black text-slate-600 mt-1 truncate w-full text-center">{e.label}</p>
+                  <p className="text-[12px] font-black text-slate-600 mt-1 truncate w-full text-center">{e.label}</p>
                 </div>
               </div>
             </div>
@@ -1040,7 +1040,7 @@ function CardPicker({
         })}
       </div>
 
-      {pool.length === 0 && <p className="text-center text-slate-400 text-sm font-bold py-6">ไม่มีนักเรียนในรายการ</p>}
+      {pool.length === 0 && <p className="text-center text-slate-400 text-base font-bold py-6">ไม่มีนักเรียนในรายการ</p>}
 
       <button
         onClick={shuffle}
@@ -1141,11 +1141,11 @@ function DeckPicker({
     <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-10 flex flex-col items-center gap-6 w-full">
       <div className="flex items-center gap-8">
         <div className="text-center">
-          <p className="text-xs font-black text-emerald-600">ในกอง</p>
+          <p className="text-sm font-black text-emerald-600">ในกอง</p>
           <p className="text-2xl font-black text-slate-700">{order.length}</p>
         </div>
         <div className="text-center">
-          <p className="text-xs font-black text-rose-500">ดึงออกแล้ว</p>
+          <p className="text-sm font-black text-rose-500">ดึงออกแล้ว</p>
           <p className="text-2xl font-black text-slate-700">{removedCount}</p>
         </div>
       </div>
@@ -1154,7 +1154,7 @@ function DeckPicker({
         // สถานะเริ่มต้น: ไพ่เรียงกันเป็นกอง
         <div className="relative h-56 w-40 flex items-center justify-center">
           {order.length === 0 ? (
-            <p className="text-slate-300 font-bold text-sm text-center px-4">กองไพ่หมดแล้ว<br />กด "สับไพ่" เพื่อเริ่มใหม่</p>
+            <p className="text-slate-300 font-bold text-base text-center px-4">กองไพ่หมดแล้ว<br />กด "สับไพ่" เพื่อเริ่มใหม่</p>
           ) : (
             Array.from({ length: stackCount }).map((_, i) => (
               <div
@@ -1174,7 +1174,7 @@ function DeckPicker({
         // สถานะกางไพ่: กางเป็นรูปพัดครึ่งวงกลม กว้างเต็มกรอบพื้นที่จริง (วัดความกว้างจาก fanRef)
         <div ref={fanRef} className="relative w-full" style={{ height: fanHeight }}>
           {order.length === 0 && (
-            <p className="absolute inset-0 flex items-center justify-center text-slate-300 font-bold text-sm text-center px-4">
+            <p className="absolute inset-0 flex items-center justify-center text-slate-300 font-bold text-base text-center px-4">
               กองไพ่หมดแล้ว<br />กด "สับไพ่" เพื่อเริ่มใหม่
             </p>
           )}
@@ -1242,14 +1242,14 @@ function DeckPicker({
         <button
           onClick={shuffleDeck}
           disabled={spinning || pool.length === 0}
-          className="flex-1 py-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-600 font-black text-sm"
+          className="flex-1 py-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-600 font-black text-base"
         >
           🔀 สับไพ่
         </button>
         {fanned && (
           <button
             onClick={resetDeck}
-            className="flex-1 py-3.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-sm"
+            className="flex-1 py-3.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-black text-base"
           >
             📥 รวมกอง
           </button>
@@ -1321,10 +1321,10 @@ function StickPicker({
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-10 flex flex-col items-center gap-6 w-full max-w-2xl">
       {pool.length === 0 ? (
-        <p className="text-slate-400 font-bold text-sm py-10">ไม่มีนักเรียนในรายการ</p>
+        <p className="text-slate-400 font-bold text-base py-10">ไม่มีนักเรียนในรายการ</p>
       ) : (
         <>
-          <p className="text-slate-400 text-xs font-bold text-center -mb-2">
+          <p className="text-slate-400 text-sm font-bold text-center -mb-2">
             🎋 เขย่ากระบอกให้ไม้เซียมซีโผล่ขึ้นมา 1 อัน แล้วแตะที่ไม้นั้นเพื่อเปิดดูว่าใครถูกเลือก
           </p>
           <div
@@ -1368,7 +1368,7 @@ function StickPicker({
           </div>
 
           {poppedIdx !== null && !revealed && (
-            <p className="text-amber-600 font-black text-sm animate-pulse">👆 มีไม้เซียมซีโผล่ขึ้นมาแล้ว แตะที่ไม้เพื่อเปิดดูผล</p>
+            <p className="text-amber-600 font-black text-base animate-pulse">👆 มีไม้เซียมซีโผล่ขึ้นมาแล้ว แตะที่ไม้เพื่อเปิดดูผล</p>
           )}
 
           {revealed && drawnEntry && (
@@ -1380,14 +1380,14 @@ function StickPicker({
                   {drawnEntry.first_name[0]}
                 </div>
               )}
-              <p className="font-black text-slate-700 text-sm mt-2">{drawnEntry.label}</p>
+              <p className="font-black text-slate-700 text-base mt-2">{drawnEntry.label}</p>
             </div>
           )}
 
           <button
             onClick={shakeCup}
             disabled={spinning}
-            className="w-full max-w-xs py-4 rounded-xl bg-gradient-to-r from-red-500 to-amber-500 hover:from-red-600 hover:to-amber-600 disabled:opacity-60 text-white font-black text-lg shadow"
+            className="w-full max-w-xs py-4 rounded-xl bg-gradient-to-r from-red-500 to-amber-500 hover:from-red-600 hover:to-amber-600 disabled:opacity-60 text-white font-black text-xlshadow"
           >
             {shaking ? "กำลังเขย่า..." : "🎋 เขย่ากระบอกเซียมซี"}
           </button>
@@ -1482,8 +1482,8 @@ function FloatingTimer({ open, onClose }: { open: boolean; onClose: () => void }
         className="fixed bottom-24 right-5 z-[75] w-16 h-16 rounded-full bg-gradient-to-br from-cyan-400 to-sky-500 text-white shadow-2xl flex flex-col items-center justify-center font-black hover:scale-105 transition-transform"
         title="เปิดตัวจับเวลา"
       >
-        <span className="text-[10px] leading-none">⏱️</span>
-        <span className="tabular-nums text-xs leading-tight">{mm}:{ss}</span>
+        <span className="text-[12px] leading-none">⏱️</span>
+        <span className="tabular-nums text-sm leading-tight">{mm}:{ss}</span>
       </button>
     );
   }
@@ -1497,17 +1497,17 @@ function FloatingTimer({ open, onClose }: { open: boolean; onClose: () => void }
     <div className={wrapperClass} style={wrapperStyle}>
       <div className={`bg-gradient-to-br from-cyan-400 to-sky-500 rounded-3xl shadow-2xl p-4 ${fullscreen ? "w-full max-w-sm" : "w-72"}`}>
         <div className="flex items-center justify-between mb-3 cursor-move select-none" onMouseDown={onDragStart}>
-          <p className="text-white font-black text-sm flex items-center gap-1.5">⏱️ จับเวลา</p>
+          <p className="text-white font-black text-base flex items-center gap-1.5">⏱️ จับเวลา</p>
           <div className="flex items-center gap-1.5">
-            <button onClick={() => setFullscreen(v => !v)} title={fullscreen ? "ย่อกลับ" : "เต็มจอ"} className="w-7 h-7 rounded-lg bg-white/25 hover:bg-white/40 text-white flex items-center justify-center text-xs">
+            <button onClick={() => setFullscreen(v => !v)} title={fullscreen ? "ย่อกลับ" : "เต็มจอ"} className="w-7 h-7 rounded-lg bg-white/25 hover:bg-white/40 text-white flex items-center justify-center text-sm">
               {fullscreen ? "⤡" : "⤢"}
             </button>
             {!fullscreen && (
-              <button onClick={() => setMinimized(true)} title="ย่อ" className="w-7 h-7 rounded-lg bg-white/25 hover:bg-white/40 text-white flex items-center justify-center text-xs">
+              <button onClick={() => setMinimized(true)} title="ย่อ" className="w-7 h-7 rounded-lg bg-white/25 hover:bg-white/40 text-white flex items-center justify-center text-sm">
                 –
               </button>
             )}
-            <button onClick={onClose} title="ปิด" className="w-7 h-7 rounded-lg bg-white/25 hover:bg-white/40 text-white flex items-center justify-center text-xs">
+            <button onClick={onClose} title="ปิด" className="w-7 h-7 rounded-lg bg-white/25 hover:bg-white/40 text-white flex items-center justify-center text-sm">
               ✕
             </button>
           </div>
@@ -1531,9 +1531,9 @@ function FloatingTimer({ open, onClose }: { open: boolean; onClose: () => void }
         </div>
 
         <div className="flex items-center justify-center gap-2 mb-3">
-          <span className="text-white/90 text-[11px] font-black">SEC:</span>
+          <span className="text-white/90 text-[14px] font-black">SEC:</span>
           {[5, 10, 30].map(s => (
-            <button key={s} onClick={() => addSeconds(s)} className="px-2.5 py-1 rounded-lg bg-white/25 hover:bg-white/40 text-white text-[11px] font-black">
+            <button key={s} onClick={() => addSeconds(s)} className="px-2.5 py-1 rounded-lg bg-white/25 hover:bg-white/40 text-white text-[14px] font-black">
               +{s}s
             </button>
           ))}
@@ -1542,16 +1542,16 @@ function FloatingTimer({ open, onClose }: { open: boolean; onClose: () => void }
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-white rounded-xl px-2 py-1.5 flex items-center justify-between">
             <button onClick={() => setMinutesInput(m => Math.max(0, m - 1))} className="text-slate-400 font-black px-1">–</button>
-            <span className="text-[11px] font-black text-slate-600">Minutes: {minutesInput}</span>
+            <span className="text-[14px] font-black text-slate-600">Minutes: {minutesInput}</span>
             <button onClick={() => setMinutesInput(m => m + 1)} className="text-slate-400 font-black px-1">+</button>
           </div>
           <div className="bg-white rounded-xl px-2 py-1.5 flex items-center justify-between">
             <button onClick={() => setSecondsInput(s => Math.max(0, s - 5))} className="text-slate-400 font-black px-1">–</button>
-            <span className="text-[11px] font-black text-slate-600">Seconds: {secondsInput}</span>
+            <span className="text-[14px] font-black text-slate-600">Seconds: {secondsInput}</span>
             <button onClick={() => setSecondsInput(s => Math.min(59, s + 5))} className="text-slate-400 font-black px-1">+</button>
           </div>
         </div>
-        <button onClick={applyCustomTime} className="w-full mt-2 py-2 rounded-xl bg-white/90 hover:bg-white text-sky-600 font-black text-xs">
+        <button onClick={applyCustomTime} className="w-full mt-2 py-2 rounded-xl bg-white/90 hover:bg-white text-sky-600 font-black text-sm">
           ตั้งเวลาใหม่
         </button>
       </div>
@@ -1647,7 +1647,7 @@ function NoiseDetectorPanel({ onClose }: { onClose: () => void }) {
           <div>
             <h3 className="font-black text-slate-800 text-2xl flex items-center gap-2">🔊 Noise Detector</h3>
             {sustainSec > 0 && (
-              <p className="text-amber-500 font-bold text-xs mt-1 flex items-center gap-1">⚠️ Getting loud... {sustainSec}s</p>
+              <p className="text-amber-500 font-bold text-sm mt-1 flex items-center gap-1">⚠️ Getting loud... {sustainSec}s</p>
             )}
           </div>
           <button onClick={onClose} className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center">✕</button>
@@ -1657,11 +1657,11 @@ function NoiseDetectorPanel({ onClose }: { onClose: () => void }) {
           {/* กราฟระดับเสียง */}
           <div className="flex-1 relative rounded-2xl bg-slate-50 border border-slate-100 h-64 sm:h-80 overflow-hidden">
             <div className="absolute left-0 right-0 border-t-2 border-dashed border-red-300" style={{ top: `${100 - threshold}%` }}>
-              <span className="absolute right-2 -top-5 text-[10px] font-black text-red-400 bg-red-50 px-1.5 py-0.5 rounded">Limit: {threshold}%</span>
+              <span className="absolute right-2 -top-5 text-[12px] font-black text-red-400 bg-red-50 px-1.5 py-0.5 rounded">Limit: {threshold}%</span>
             </div>
             <div className="absolute inset-0 flex items-end gap-1 px-3 pb-3">
               {history.length === 0 && (
-                <p className="w-full text-center text-slate-300 font-bold text-sm self-center">กดเริ่มตรวจจับเพื่อดูกราฟเสียง</p>
+                <p className="w-full text-center text-slate-300 font-bold text-base self-center">กดเริ่มตรวจจับเพื่อดูกราฟเสียง</p>
               )}
               {history.map((h, i) => (
                 <div
@@ -1676,18 +1676,18 @@ function NoiseDetectorPanel({ onClose }: { onClose: () => void }) {
           {/* บันทึกเหตุการณ์เสียงดัง */}
           <div className="w-full lg:w-72 shrink-0 rounded-2xl border border-slate-100 bg-white flex flex-col">
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-              <p className="font-black text-slate-700 text-sm flex items-center gap-1.5">🕓 Noise Log</p>
-              <button onClick={() => setLog([])} className="text-red-400 hover:text-red-500 text-xs font-black flex items-center gap-1">🗑 Clear</button>
+              <p className="font-black text-slate-700 text-base flex items-center gap-1.5">🕓 Noise Log</p>
+              <button onClick={() => setLog([])} className="text-red-400 hover:text-red-500 text-sm font-black flex items-center gap-1">🗑 Clear</button>
             </div>
             <div className="flex-1 overflow-y-auto max-h-64">
-              <div className="grid grid-cols-3 gap-2 px-4 py-2 text-[10px] font-black text-slate-400">
+              <div className="grid grid-cols-3 gap-2 px-4 py-2 text-[12px] font-black text-slate-400">
                 <span>Time</span><span className="text-center">Level</span><span className="text-right">Limit</span>
               </div>
               {log.length === 0 ? (
-                <p className="text-center text-slate-300 text-xs font-bold py-8">ยังไม่มีบันทึกเสียงดัง</p>
+                <p className="text-center text-slate-300 text-sm font-bold py-8">ยังไม่มีบันทึกเสียงดัง</p>
               ) : (
                 log.map((l, i) => (
-                  <div key={i} className="grid grid-cols-3 gap-2 px-4 py-1.5 text-xs font-bold">
+                  <div key={i} className="grid grid-cols-3 gap-2 px-4 py-1.5 text-sm font-bold">
                     <span className="text-slate-500">{l.time}</span>
                     <span className="text-center text-red-500 font-black">{l.level}%</span>
                     <span className="text-right text-slate-400">{l.limit}%</span>
@@ -1702,26 +1702,26 @@ function NoiseDetectorPanel({ onClose }: { onClose: () => void }) {
         <div className="flex flex-col sm:flex-row items-center gap-4 px-6 py-5 border-t border-slate-100 bg-slate-50">
           <button
             onClick={active ? stop : start}
-            className={`px-6 py-3 rounded-2xl font-black text-sm text-white shrink-0 flex items-center gap-2 ${active ? "bg-red-500 hover:bg-red-600" : "bg-emerald-500 hover:bg-emerald-600"}`}
+            className={`px-6 py-3 rounded-2xl font-black text-base text-white shrink-0 flex items-center gap-2 ${active ? "bg-red-500 hover:bg-red-600" : "bg-emerald-500 hover:bg-emerald-600"}`}
           >
             {active ? "🔇 STOP" : "🎙️ START"}
           </button>
 
           <div className="flex-1 w-full">
-            <p className="text-[10px] font-black text-slate-400 mb-1.5 flex items-center gap-1">⚙️ Sensitivity Mode</p>
+            <p className="text-[12px] font-black text-slate-400 mb-1.5 flex items-center gap-1">⚙️ Sensitivity Mode</p>
             <div className="flex items-center gap-2 flex-wrap">
               {SENSITIVITY_MODES.map(m => (
                 <button
                   key={m.key}
                   onClick={() => setModeKey(m.key)}
-                  className={`px-4 py-2 rounded-xl font-black text-xs ${modeKey === m.key ? "bg-blue-500 text-white" : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-100"}`}
+                  className={`px-4 py-2 rounded-xl font-black text-sm ${modeKey === m.key ? "bg-blue-500 text-white" : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-100"}`}
                 >
                   {m.label}
                 </button>
               ))}
               <button
                 onClick={() => setModeKey("custom")}
-                className={`px-4 py-2 rounded-xl font-black text-xs ${modeKey === "custom" ? "bg-blue-500 text-white" : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-100"}`}
+                className={`px-4 py-2 rounded-xl font-black text-sm ${modeKey === "custom" ? "bg-blue-500 text-white" : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-100"}`}
               >
                 Custom
               </button>
@@ -1736,11 +1736,11 @@ function NoiseDetectorPanel({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="flex flex-col items-center gap-1 shrink-0">
-            <p className="text-[10px] font-black text-slate-400">Volume</p>
+            <p className="text-[12px] font-black text-slate-400">Volume</p>
             <div className="w-4 h-20 rounded-full bg-slate-200 overflow-hidden flex flex-col-reverse">
               <div className={`w-full transition-all ${level > threshold ? "bg-red-400" : "bg-emerald-400"}`} style={{ height: `${level}%` }} />
             </div>
-            <p className="text-[10px] font-black text-slate-600">{level}%</p>
+            <p className="text-[12px] font-black text-slate-600">{level}%</p>
           </div>
         </div>
       </div>
@@ -1761,14 +1761,14 @@ function GroupingBox({ students }: { students: Student[] }) {
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-4">
-      <p className="font-black text-slate-700 text-sm mb-3">👨‍👩‍👧‍👦 สร้างกลุ่ม</p>
+      <p className="font-black text-slate-700 text-base mb-3">👨‍👩‍👧‍👦 สร้างกลุ่ม</p>
       <div className="flex items-center gap-2 mb-3">
-        <span className="text-xs font-bold text-slate-500">จำนวนกลุ่ม</span>
+        <span className="text-sm font-bold text-slate-500">จำนวนกลุ่ม</span>
         <input type="number" min={2} max={Math.max(2, students.length)} value={numGroups}
           onChange={e => setNumGroups(Math.max(2, Number(e.target.value) || 2))}
-          className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1 text-sm font-bold text-center" />
+          className="w-16 border-2 border-slate-200 rounded-lg px-2 py-1 text-base font-bold text-center" />
         <button onClick={generate} disabled={students.length === 0}
-          className="ml-auto px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 text-white font-black text-xs">
+          className="ml-auto px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 text-white font-black text-sm">
           🔀 สุ่มแบ่งกลุ่ม
         </button>
       </div>
@@ -1776,10 +1776,10 @@ function GroupingBox({ students }: { students: Student[] }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {groups.map((g, i) => (
             <div key={i} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-              <p className="text-xs font-black text-emerald-600 mb-1.5">กลุ่มที่ {i + 1} ({g.length} คน)</p>
+              <p className="text-sm font-black text-emerald-600 mb-1.5">กลุ่มที่ {i + 1} ({g.length} คน)</p>
               <div className="space-y-1">
                 {g.map(s => (
-                  <p key={s.id} className="text-xs font-bold text-slate-600 truncate">• {s.first_name} {s.last_name}</p>
+                  <p key={s.id} className="text-sm font-bold text-slate-600 truncate">• {s.first_name} {s.last_name}</p>
                 ))}
               </div>
             </div>
@@ -1836,7 +1836,7 @@ function ToolsTab({ students, onOpenTimer }: { students: Student[]; onOpenTimer:
             }`}
           >
             <span className="text-3xl sm:text-4xl">{c.icon}</span>
-  <span className="font-black text-sm sm:text-base text-center">{c.label}</span>
+  <span className="font-black text-base sm:text-base text-center">{c.label}</span>
           </button>
         ))}
       </div>
@@ -1844,7 +1844,7 @@ function ToolsTab({ students, onOpenTimer }: { students: Student[]; onOpenTimer:
       {activeTool === "noise" && <NoiseDetectorPanel onClose={() => setActiveTool(null)} />}
       {activeTool === "group" && <GroupingBox students={students} />}
       {activeTool === null && (
-        <p className="text-center text-slate-300 text-xs font-bold py-6">เลือกเครื่องมือด้านบนเพื่อเริ่มใช้งาน</p>
+        <p className="text-center text-slate-300 text-sm font-bold py-6">เลือกเครื่องมือด้านบนเพื่อเริ่มใช้งาน</p>
       )}
     </div>
   );
@@ -1856,26 +1856,26 @@ function TotalScoreTab({ students, studentScores }: { students: Student[]; stude
   const sorted = [...students].sort((a, b) => (studentScores[b.id] ?? 0) - (studentScores[a.id] ?? 0));
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6">
-      <h2 className="font-black text-slate-700 text-sm flex items-center gap-1.5 mb-4">⭐ คะแนนรวมของนักเรียน</h2>
+      <h2 className="font-black text-slate-700 text-base flex items-center gap-1.5 mb-4">⭐ คะแนนรวมของนักเรียน</h2>
       {sorted.length === 0 ? (
-        <p className="text-center text-slate-400 font-bold text-sm py-8">ยังไม่มีนักเรียนในวิชานี้</p>
+        <p className="text-center text-slate-400 font-bold text-base py-8">ยังไม่มีนักเรียนในวิชานี้</p>
       ) : (
         <div className="divide-y divide-slate-50">
           {sorted.map((s, i) => (
             <div key={s.id} className="flex items-center gap-3 py-2.5">
-              <span className="w-6 text-center text-xs font-black text-slate-300">{i + 1}</span>
+              <span className="w-6 text-center text-sm font-black text-slate-300">{i + 1}</span>
               {s.avatar_url ? (
                 <img src={s.avatar_url} className="w-9 h-9 rounded-full object-cover" />
               ) : (
-                <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${avatarGradient(i)} text-white text-xs font-black flex items-center justify-center`}>
+                <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${avatarGradient(i)} text-white text-sm font-black flex items-center justify-center`}>
                   {s.first_name[0]}
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
-                <p className="text-[11px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
+                <p className="text-base font-black text-slate-700 truncate">{s.first_name} {s.last_name}</p>
+                <p className="text-[14px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
               </div>
-              <span className="px-3 py-1 rounded-full bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white text-xs font-black shrink-0">
+              <span className="px-3 py-1 rounded-full bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white text-sm font-black shrink-0">
                 {studentScores[s.id] ?? 0} คะแนน
               </span>
             </div>
@@ -2019,9 +2019,9 @@ useEffect(() => {
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="font-black text-slate-700 text-sm flex items-center gap-1.5">⚙️ ตั้งค่ารายวิชา</h2>
+        <h2 className="font-black text-slate-700 text-base flex items-center gap-1.5">⚙️ ตั้งค่ารายวิชา</h2>
         {readOnly && (
-          <span className="text-[11px] font-black text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full">
+          <span className="text-[14px] font-black text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full">
             ดูอย่างเดียว
           </span>
         )}
@@ -2030,16 +2030,16 @@ useEffect(() => {
       {/* ข้อมูลพื้นฐาน (แก้ไม่ได้ในหน้านี้) */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
         <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-          <p className="text-[10px] font-black text-slate-400">รหัสวิชา</p>
-          <p className="text-sm font-black text-slate-700 mt-0.5">{subject?.subject_code ?? "-"}</p>
+          <p className="text-[12px] font-black text-slate-400">รหัสวิชา</p>
+          <p className="text-base font-black text-slate-700 mt-0.5">{subject?.subject_code ?? "-"}</p>
         </div>
         <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-          <p className="text-[10px] font-black text-slate-400">ชื่อวิชา</p>
-          <p className="text-sm font-black text-slate-700 mt-0.5">{subject?.name_th ?? "-"}</p>
+          <p className="text-[12px] font-black text-slate-400">ชื่อวิชา</p>
+          <p className="text-base font-black text-slate-700 mt-0.5">{subject?.name_th ?? "-"}</p>
         </div>
         <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-          <p className="text-[10px] font-black text-slate-400">ห้องเรียน</p>
-          <p className="text-sm font-black text-slate-700 mt-0.5">{classroom?.grade_group} {classroom?.room_name}</p>
+          <p className="text-[12px] font-black text-slate-400">ห้องเรียน</p>
+          <p className="text-base font-black text-slate-700 mt-0.5">{classroom?.grade_group} {classroom?.room_name}</p>
         </div>
       </div>
 
@@ -2047,7 +2047,7 @@ useEffect(() => {
       <div className="space-y-5">
         {/* ประเภทวิชา */}
         <div>
-          <p className="text-xs font-black text-slate-500 mb-2">ประเภทวิชา</p>
+          <p className="text-sm font-black text-slate-500 mb-2">ประเภทวิชา</p>
           <div className="flex gap-2">
             {[
               { key: "basic", label: "รายวิชาพื้นฐาน" },
@@ -2058,7 +2058,7 @@ useEffect(() => {
                 type="button"
                 disabled={readOnly}
                 onClick={() => setSubjectType(opt.key as "basic" | "additional")}
-                className={`px-4 py-2 rounded-xl font-black text-xs border-2 transition-colors disabled:opacity-50 ${
+                className={`px-4 py-2 rounded-xl font-black text-sm border-2 transition-colors disabled:opacity-50 ${
                   subjectType === opt.key
                     ? "bg-fuchsia-500 border-fuchsia-500 text-white"
                     : "bg-white border-slate-200 text-slate-500 hover:border-fuchsia-300"
@@ -2070,7 +2070,7 @@ useEffect(() => {
           </div>
         </div>
         <div>
-  <p className="text-xs font-black text-slate-500 mb-2">รอบการบันทึกคะแนน</p>
+  <p className="text-sm font-black text-slate-500 mb-2">รอบการบันทึกคะแนน</p>
   <div className="flex gap-2">
     {[
       { key: "semester", label: "แยกเทอม 1-2 (มัธยม)" },
@@ -2078,7 +2078,7 @@ useEffect(() => {
     ].map(opt => (
       <button key={opt.key} type="button" disabled={readOnly}
         onClick={() => setScorePeriodMode(opt.key as any)}
-        className={`px-4 py-2 rounded-xl font-black text-xs border-2 disabled:opacity-50 ${
+        className={`px-4 py-2 rounded-xl font-black text-sm border-2 disabled:opacity-50 ${
           scorePeriodMode === opt.key ? "bg-fuchsia-500 border-fuchsia-500 text-white" : "bg-white border-slate-200 text-slate-500"
         }`}>
         {opt.label}
@@ -2092,7 +2092,7 @@ useEffect(() => {
       {[1, 2].map(sem => (
         <button key={sem} type="button" disabled={readOnly}
           onClick={() => setSelectedSemester(sem as 1 | 2)}
-          className={`px-4 py-2 rounded-xl font-black text-xs border-2 disabled:opacity-50 ${
+          className={`px-4 py-2 rounded-xl font-black text-sm border-2 disabled:opacity-50 ${
             selectedSemester === sem ? "bg-indigo-500 border-indigo-500 text-white" : "bg-white border-slate-200 text-slate-500"
           }`}>
           ภาคเรียนที่ {sem}
@@ -2101,14 +2101,14 @@ useEffect(() => {
     </div>
   )}
 
-  <p className="text-[11px] text-slate-400 font-bold mt-1.5">
+  <p className="text-[14px] text-slate-400 font-bold mt-1.5">
     "ตลอดปีการศึกษา" = วิชานี้จะมีห้อง/section เดียวคลุมทั้งปี ไม่ต้องสร้างซ้ำตอนขึ้นเทอม 2
   </p>
 </div>
         {/* หน่วยกิต + ชม./ปี */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <p className="text-xs font-black text-slate-500 mb-2">จำนวนหน่วยกิต</p>
+            <p className="text-sm font-black text-slate-500 mb-2">จำนวนหน่วยกิต</p>
             <input
               type="number"
               step="0.5"
@@ -2117,11 +2117,11 @@ useEffect(() => {
               value={creditHours}
               onChange={e => setCreditHours(e.target.value)}
               placeholder="เช่น 1.0"
-              className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold disabled:bg-slate-50 disabled:text-slate-400"
+              className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold disabled:bg-slate-50 disabled:text-slate-400"
             />
           </div>
           <div>
-            <p className="text-xs font-black text-slate-500 mb-2">จำนวนชั่วโมง/ปี</p>
+            <p className="text-sm font-black text-slate-500 mb-2">จำนวนชั่วโมง/ปี</p>
             <input
               type="number"
               min="0"
@@ -2129,13 +2129,13 @@ useEffect(() => {
               value={hoursPerYear}
               onChange={e => setHoursPerYear(e.target.value)}
               placeholder="เช่น 40"
-              className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold disabled:bg-slate-50 disabled:text-slate-400"
+              className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold disabled:bg-slate-50 disabled:text-slate-400"
             />
           </div>
         </div>
         {/* ★ เพิ่มใหม่: รูปแบบการตัดเกรด */}
         <div>
-          <p className="text-xs font-black text-slate-500 mb-2">รูปแบบการวัดผล</p>
+          <p className="text-sm font-black text-slate-500 mb-2">รูปแบบการวัดผล</p>
           <div className="flex gap-2 mb-2">
             {[
               { key: "numeric", label: "ตัดเกรด 0–4 (ปกติ)" },
@@ -2146,7 +2146,7 @@ useEffect(() => {
                 type="button"
                 disabled={readOnly}
                 onClick={() => setGradingMode(opt.key as "numeric" | "pass_fail")}
-                className={`px-4 py-2 rounded-xl font-black text-xs border-2 transition-colors disabled:opacity-50 ${
+                className={`px-4 py-2 rounded-xl font-black text-sm border-2 transition-colors disabled:opacity-50 ${
                   gradingMode === opt.key
                     ? "bg-fuchsia-500 border-fuchsia-500 text-white"
                     : "bg-white border-slate-200 text-slate-500 hover:border-fuchsia-300"
@@ -2158,64 +2158,64 @@ useEffect(() => {
           </div>
           {gradingMode === "pass_fail" && (
             <div className="rounded-xl border-2 border-dashed border-fuchsia-200 bg-fuchsia-50/40 p-3 flex items-center gap-2">
-              <span className="text-xs font-black text-fuchsia-600">เกณฑ์ "ผ่าน" ต้องมีอัตราเข้าเรียนอย่างน้อย</span>
+              <span className="text-sm font-black text-fuchsia-600">เกณฑ์ "ผ่าน" ต้องมีอัตราเข้าเรียนอย่างน้อย</span>
               <input
                 type="number" min={0} max={100} disabled={readOnly}
                 value={passThreshold}
                 onChange={e => setPassThreshold(e.target.value)}
-                className="w-16 text-center border-2 border-fuchsia-200 rounded-lg py-1 text-xs font-black disabled:bg-slate-50"
+                className="w-16 text-center border-2 border-fuchsia-200 rounded-lg py-1 text-sm font-black disabled:bg-slate-50"
               />
-              <span className="text-xs font-black text-fuchsia-600">%</span>
+              <span className="text-sm font-black text-fuchsia-600">%</span>
             </div>
           )}
-          <p className="text-[11px] text-slate-400 font-bold mt-1.5">
+          <p className="text-[14px] text-slate-400 font-bold mt-1.5">
             วิชาแบบ "ผ่าน/ไม่ผ่าน" จะไม่ถูกนำไปคิดรวมในเกรดเฉลี่ยของนักเรียน และหน้า "คะแนนรวม" จะตัดสินผ่าน/ไม่ผ่านจากอัตราเข้าเรียนแทนคะแนนสอบ
           </p>
         </div>
         {/* ★ เพิ่มใหม่: โครงสร้างคะแนน — แสดงเฉพาะตอนตัดเกรดแบบ numeric */}
         {gradingMode === "numeric" && (
           <div>
-  <p className="text-xs font-black text-slate-500 mb-2">โครงสร้างคะแนน (เต็ม 100) — เก็บ + กลางภาค + ปลายภาค</p>
+  <p className="text-sm font-black text-slate-500 mb-2">โครงสร้างคะแนน (เต็ม 100) — เก็บ + กลางภาค + ปลายภาค</p>
 
             <div className={`grid gap-2 ${useMidterm ? "grid-cols-3" : "grid-cols-2"}`}>
               <div className="bg-slate-50 border-2 border-slate-100 rounded-xl px-3 py-2">
-                <p className="text-[10px] font-black text-slate-400 mb-1">คะแนนเก็บ</p>
+                <p className="text-[12px] font-black text-slate-400 mb-1">คะแนนเก็บ</p>
                 <input
                   type="number" min={0} max={100} disabled={readOnly}
                   value={formativeMax} onChange={e => setFormativeMax(e.target.value)}
-                  className="w-full text-center border-2 border-slate-200 rounded-lg py-1 text-sm font-black bg-white disabled:bg-slate-50"
+                  className="w-full text-center border-2 border-slate-200 rounded-lg py-1 text-base font-black bg-white disabled:bg-slate-50"
                 />
               </div>
               {useMidterm && (
                 <div className="bg-slate-50 border-2 border-slate-100 rounded-xl px-3 py-2">
-                  <p className="text-[10px] font-black text-slate-400 mb-1">กลางภาค</p>
+                  <p className="text-[12px] font-black text-slate-400 mb-1">กลางภาค</p>
                   <input
                     type="number" min={0} max={100} disabled={readOnly}
                     value={midtermMax} onChange={e => setMidtermMax(e.target.value)}
-                    className="w-full text-center border-2 border-slate-200 rounded-lg py-1 text-sm font-black bg-white disabled:bg-slate-50"
+                    className="w-full text-center border-2 border-slate-200 rounded-lg py-1 text-base font-black bg-white disabled:bg-slate-50"
                   />
                 </div>
               )}
               <div className="bg-slate-50 border-2 border-slate-100 rounded-xl px-3 py-2">
-                <p className="text-[10px] font-black text-slate-400 mb-1">ปลายภาค</p>
+                <p className="text-[12px] font-black text-slate-400 mb-1">ปลายภาค</p>
                 <input
                   type="number" min={0} max={100} disabled={readOnly}
                   value={finalMax} onChange={e => setFinalMax(e.target.value)}
-                  className="w-full text-center border-2 border-slate-200 rounded-lg py-1 text-sm font-black bg-white disabled:bg-slate-50"
+                  className="w-full text-center border-2 border-slate-200 rounded-lg py-1 text-base font-black bg-white disabled:bg-slate-50"
                 />
               </div>
             </div>
 
-            <p className={`text-[11px] font-black mt-1.5 ${scoreSumInvalid ? "text-amber-500" : "text-emerald-500"}`}>
+            <p className={`text-[14px] font-black mt-1.5 ${scoreSumInvalid ? "text-amber-500" : "text-emerald-500"}`}>
               {scoreSumInvalid ? `⚠️ รวมตอนนี้ = ${scoreSum} (ต้องรวมให้ได้ 100 พอดี)` : "✅ รวม 100 พอดี"}
             </p>
-            <p className="text-[11px] text-slate-400 font-bold mt-1">
+            <p className="text-[14px] text-slate-400 font-bold mt-1">
               คะแนนเก็บจะถูกคำนวณจากคะแนนงานทั้งหมดที่ให้ไว้ แล้วสเกลให้พอดีกับคะแนนเต็มที่ตั้งไว้ตรงนี้อัตโนมัติ
             </p>
           </div>
         )}
         <div>
-  <p className="text-xs font-black text-slate-500 mb-2">การปัดเศษคะแนน/เกรด</p>
+  <p className="text-sm font-black text-slate-500 mb-2">การปัดเศษคะแนน/เกรด</p>
   <div className="flex gap-2">
     {[
       { key: "up", label: "ปัดขึ้นเมื่อมีเศษ" },
@@ -2223,7 +2223,7 @@ useEffect(() => {
     ].map(opt => (
       <button key={opt.key} type="button" disabled={readOnly}
         onClick={() => setGradeRounding(opt.key as any)}
-        className={`px-4 py-2 rounded-xl font-black text-xs border-2 disabled:opacity-50 ${
+        className={`px-4 py-2 rounded-xl font-black text-sm border-2 disabled:opacity-50 ${
           gradeRounding === opt.key ? "bg-fuchsia-500 border-fuchsia-500 text-white" : "bg-white border-slate-200 text-slate-500"
         }`}>
         {opt.label}
@@ -2233,7 +2233,7 @@ useEffect(() => {
 </div>
         {/* รหัสกลุ่มรวมคะแนน */}
         <div>
-          <p className="text-xs font-black text-slate-500 mb-1.5">
+          <p className="text-sm font-black text-slate-500 mb-1.5">
             รหัสกลุ่มรวมคะแนน <span className="font-bold text-slate-400">(ไม่บังคับ)</span>
           </p>
           <input
@@ -2242,28 +2242,28 @@ useEffect(() => {
             value={scoreGroupCode}
             onChange={e => setScoreGroupCode(e.target.value)}
             placeholder="เช่น ART-P1 (ตั้งรหัสเดียวกันในวิชาที่ต้องการรวมคะแนน เช่น ดนตรี+ศิลปะ+นาฏศิลป์)"
-            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold disabled:bg-slate-50 disabled:text-slate-400"
+            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold disabled:bg-slate-50 disabled:text-slate-400"
           />
-          <p className="text-[11px] text-slate-400 font-bold mt-1.5">
+          <p className="text-[14px] text-slate-400 font-bold mt-1.5">
             วิชาที่ตั้งรหัสกลุ่มเดียวกัน ระบบจะนำคะแนนมารวมกันตอนออกเกรดในหน้า "คะแนนรวม"
           </p>
         </div>
         {suggestedGroup.length > 0 && !readOnly && (
   <div className="rounded-xl border-2 border-dashed border-violet-200 bg-violet-50/40 p-3 mt-2">
-    <p className="text-[11px] font-black text-violet-600 mb-2">
+    <p className="text-[14px] font-black text-violet-600 mb-2">
       ⚡ พบวิชาอื่นที่รหัสขึ้นต้นเหมือนกัน ({subject!.subject_code.slice(0,6)}) — ต้องการรวมคะแนนด้วยกันไหม?
     </p>
     <div className="space-y-1.5">
       {suggestedGroup.map(s => (
         <div key={s.id} className="flex items-center gap-2 bg-white rounded-lg border border-violet-100 px-3 py-2">
-          <span className="text-xs font-bold text-slate-600 flex-1">{s.subject_code} · {s.name_th}</span>
+          <span className="text-sm font-bold text-slate-600 flex-1">{s.subject_code} · {s.name_th}</span>
           <input
             type="number" min={0} max={100} placeholder="น้ำหนัก %"
             value={groupWeights[s.id] ?? ""}
             onChange={e => setGroupWeights(prev => ({ ...prev, [s.id]: e.target.value }))}
-            className="w-20 text-center border-2 border-slate-200 rounded-lg py-1 text-xs font-black"
+            className="w-20 text-center border-2 border-slate-200 rounded-lg py-1 text-sm font-black"
           />
-          <span className="text-xs font-bold text-slate-400">%</span>
+          <span className="text-sm font-bold text-slate-400">%</span>
         </div>
       ))}
     </div>
@@ -2274,7 +2274,7 @@ useEffect(() => {
         setScoreGroupCode(prefix); // ใช้ 6 หลักแรกเป็นรหัสกลุ่มอัตโนมัติ
         // TODO: เรียก /api/subject-grades/group-settings เพื่อบันทึกน้ำหนักแต่ละวิชาด้วย
       }}
-      className="mt-2 w-full py-2 rounded-lg bg-violet-500 hover:bg-violet-600 text-white font-black text-xs"
+      className="mt-2 w-full py-2 rounded-lg bg-violet-500 hover:bg-violet-600 text-white font-black text-sm"
     >
       ✅ ใช้กลุ่มนี้ + บันทึกน้ำหนักคะแนน
     </button>
@@ -2285,11 +2285,11 @@ useEffect(() => {
 
         {/* การตั้งค่า section: login นักเรียน */}
         <div className="space-y-3">
-  <p className="text-xs font-black text-slate-500">การเข้าถึงของนักเรียน</p>
+  <p className="text-sm font-black text-slate-500">การเข้าถึงของนักเรียน</p>
 
   {/* ★ เพิ่ม: เลือกรูปแบบการยืนยันตัวตน นร. */}
   <div>
-  <p className="text-[11px] font-black text-slate-400 mb-1.5">รูปแบบการยืนยันตัวตนก่อนเข้าดูข้อมูล</p>
+  <p className="text-[14px] font-black text-slate-400 mb-1.5">รูปแบบการยืนยันตัวตนก่อนเข้าดูข้อมูล</p>
   <div className="space-y-2">
     {[
       {
@@ -2325,8 +2325,8 @@ useEffect(() => {
           className="mt-1 w-4 h-4 accent-fuchsia-500 shrink-0"
         />
         <div>
-          <p className="text-sm font-black text-slate-700">{opt.title}</p>
-          <p className="text-[11px] text-slate-400 font-bold mt-0.5">{opt.desc}</p>
+          <p className="text-base font-black text-slate-700">{opt.title}</p>
+          <p className="text-[14px] text-slate-400 font-bold mt-0.5">{opt.desc}</p>
         </div>
       </label>
     ))}
@@ -2335,8 +2335,8 @@ useEffect(() => {
 
           <label className="flex items-center justify-between rounded-xl border-2 border-slate-100 px-4 py-3 cursor-pointer">
   <div>
-    <p className="text-sm font-black text-slate-700">เปิดให้นักเรียนล็อกอินดูงาน</p>
-    <p className="text-[11px] text-slate-400 font-bold mt-0.5">ปิดไว้ถ้ายังไม่พร้อมให้นักเรียนเข้าดูเนื้อหาวิชานี้</p>
+    <p className="text-base font-black text-slate-700">เปิดให้นักเรียนล็อกอินดูงาน</p>
+    <p className="text-[14px] text-slate-400 font-bold mt-0.5">ปิดไว้ถ้ายังไม่พร้อมให้นักเรียนเข้าดูเนื้อหาวิชานี้</p>
   </div>
   <input
     type="checkbox"
@@ -2349,8 +2349,8 @@ useEffect(() => {
 
 <label className="flex items-center justify-between rounded-xl border-2 border-slate-100 px-4 py-3 cursor-pointer">
   <div>
-    <p className="text-sm font-black text-slate-700">เปิดให้นักเรียนล็อกอินส่งงาน</p>
-    <p className="text-[11px] text-slate-400 font-bold mt-0.5">ปิดไว้ถ้ายังไม่ต้องการให้นักเรียนส่งงานผ่านระบบ (ยังดูงานได้ตามปกติ)</p>
+    <p className="text-base font-black text-slate-700">เปิดให้นักเรียนล็อกอินส่งงาน</p>
+    <p className="text-[14px] text-slate-400 font-bold mt-0.5">ปิดไว้ถ้ายังไม่ต้องการให้นักเรียนส่งงานผ่านระบบ (ยังดูงานได้ตามปกติ)</p>
   </div>
   <input
     type="checkbox"
@@ -2363,8 +2363,8 @@ useEffect(() => {
 
 <label className="flex items-center justify-between rounded-xl border-2 border-slate-100 px-4 py-3 cursor-pointer">
   <div>
-    <p className="text-sm font-black text-slate-700">อนุญาตให้ส่งงานย้อนหลัง (ส่งช้า)</p>
-    <p className="text-[11px] text-slate-400 font-bold mt-0.5">ถ้าปิด นักเรียนจะส่งงานไม่ได้หลังพ้นกำหนดส่ง</p>
+    <p className="text-base font-black text-slate-700">อนุญาตให้ส่งงานย้อนหลัง (ส่งช้า)</p>
+    <p className="text-[14px] text-slate-400 font-bold mt-0.5">ถ้าปิด นักเรียนจะส่งงานไม่ได้หลังพ้นกำหนดส่ง</p>
   </div>
   <input
     type="checkbox"
@@ -2377,21 +2377,21 @@ useEffect(() => {
         </div>
       </div>
 
-      {error && <p className="mt-4 text-xs font-black text-red-500 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
+      {error && <p className="mt-4 text-sm font-black text-red-500 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
 
       {!readOnly && (
         <div className="flex items-center gap-3 mt-6">
           <button
             onClick={handleSave}
             disabled={saving || !dirty || scoreSumInvalid} 
-            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-sm shadow"
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-base shadow"
           >
             {saving ? "กำลังบันทึก..." : "💾 บันทึกการตั้งค่า"}
           </button>
           {!dirty && savedAt && (
-            <span className="text-xs font-black text-emerald-500">✅ บันทึกแล้ว</span>
+            <span className="text-sm font-black text-emerald-500">✅ บันทึกแล้ว</span>
           )}
-          {dirty && <span className="text-xs font-bold text-amber-500">มีการแก้ไขที่ยังไม่ได้บันทึก</span>}
+          {dirty && <span className="text-sm font-bold text-amber-500">มีการแก้ไขที่ยังไม่ได้บันทึก</span>}
         </div>
       )}
     </div>
@@ -2706,7 +2706,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center font-['TH_Sarabun_New',_sans-serif]">
-        <div className="text-fuchsia-500 font-black text-lg animate-pulse">กำลังโหลดรายชื่อ...</div>
+        <div className="text-fuchsia-500 font-black text-xlanimate-pulse">กำลังโหลดรายชื่อ...</div>
       </div>
     );
   }
@@ -2747,14 +2747,14 @@ const [{ data: subj }, { data: room }] = await Promise.all([
             className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-2xl font-black transition-colors">📚</button>
             <button onClick={() => router.push(`/smartclass/${subjectId}`)}
               title="กลับหน้ารายห้องของวิชานี้"
-              className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-lg transition-colors">←</button>
+              className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white text-xltransition-colors">←</button>
                     </div>
           <div className="w-9 sm:hidden" />
         </div>
 
         <div className="text-center px-2">
           <h1 className="text-4xl sm:text-4xl font-black text-white leading-tight drop-shadow-sm">{subject.name_th}</h1>
-<p className="text-white text-lg font-black mt-1 leading-snug">
+<p className="text-white text-xlfont-black mt-1 leading-snug">
   {subject.subject_code} · {classroom?.grade_group} {classroom?.room_name} · 👥 {students.length} คน
 </p>
         </div>
@@ -2901,7 +2901,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
             {students.length === 0 ? (
               <div className="text-center py-10 text-slate-400">
                 <p className="text-3xl mb-2">📭</p>
-                <p className="font-bold text-sm">ยังไม่มีนักเรียนในห้องนี้</p>
+                <p className="font-bold text-base">ยังไม่มีนักเรียนในห้องนี้</p>
               </div>
             ) : (
               <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
@@ -2925,10 +2925,10 @@ const [{ data: subj }, { data: room }] = await Promise.all([
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
             <div className="px-4 pt-4 flex items-center gap-2 flex-wrap">
               <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
-                className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:outline-none" />
+                className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-base font-bold focus:border-emerald-400 focus:outline-none" />
               {periods.length > 1 && (
                 <select value={timetableEntryId} onChange={e => setTimetableEntryId(e.target.value)}
-                  className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:outline-none">
+                  className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-base font-bold focus:border-emerald-400 focus:outline-none">
                   {periods.map(p => (
                     <option key={p.timetable_entry_id} value={p.timetable_entry_id}>
                       คาบ {p.slot_number} · {p.start_time?.slice(0,5)}-{p.end_time?.slice(0,5)}
@@ -2940,8 +2940,8 @@ const [{ data: subj }, { data: room }] = await Promise.all([
             {periods.length === 0 ? (
   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-center text-slate-400">
     <p className="text-3xl mb-2">🗓️</p>
-    <p className="font-bold text-sm">วันนี้ไม่มีคาบเรียนวิชานี้ตามตารางสอน</p>
-    <p className="text-xs mt-2 text-slate-400">
+    <p className="font-bold text-base">วันนี้ไม่มีคาบเรียนวิชานี้ตามตารางสอน</p>
+    <p className="text-sm mt-2 text-slate-400">
       ถ้าต้องการเรียนชดเชย/สลับคาบมาวันนี้ ให้ไปเปิดหน้าของ<b>วันที่มีคาบเดิม</b> แล้วกด "🔄 สลับคาบวันเรียน" เลือกวันที่ใหม่เป็นวันนี้
     </p>
   </div>
@@ -2978,7 +2978,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
                     setTab("random");
                     setRandomMenuOpen(false);
                   }}
-                  className={`w-full flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-black text-left transition-opacity ${MODE_INFO[k].bg} ${MODE_INFO[k].text} ${
+                  className={`w-full flex items-center gap-2 px-4 py-2.5 rounded-full text-base font-black text-left transition-opacity ${MODE_INFO[k].bg} ${MODE_INFO[k].text} ${
                     tab === "random" && randomMode === k && !bannerMenu ? "ring-2 ring-current opacity-100" : "opacity-80 hover:opacity-100"
                   }`}
                 >
