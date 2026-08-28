@@ -151,6 +151,7 @@ export default function StudentPortalSubjectPage() {
   // ★ เปลี่ยนมาดึงเช็คชื่อ "รายวิชา" (ตรงกับที่ครูเห็น) แทนเช็คชื่อโฮมรูม
   const res = await fetch(`/api/subject-attendance/summary?subject_section_id=${sectionId}`);
   const data = await res.json();
+  console.log("timetable API response:", data); 
   if (res.ok) {
     const allRecords: { student_id: string; attendance_date: string; status: string }[] =
       data.records ?? [];
@@ -209,7 +210,7 @@ setSubjectInfo({
         first_name: data.student.first_name,
         last_name: data.student.last_name,
         nick_name: data.student.nick_name ?? data.student.first_name,
-        seat_number: Number(data.student.student_no) || 0,
+        seat_number: Number(data.student.seat_number) || 0,
       });
     }
   } catch {
@@ -290,41 +291,46 @@ const sortedAssignments = [...assignments].sort((a, b) => {
 
         <button
           onClick={handleLogout}
-          className="absolute top-4 right-4 sm:right-6 lg:right-8 inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full bg-white/20 backdrop-blur-sm text-white text-sm font-black hover:bg-white/30 active:scale-95 transition-all shadow-sm"
+          className="absolute top-4 right-4 sm:right-6 lg:right-8 inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full bg-white/20 backdrop-blur-sm text-white text-m font-black hover:bg-white/30 active:scale-95 transition-all shadow-ml"
         >
           <LogOut className="h-4 w-4" />
           <span className="hidden sm:inline">ออกจากระบบ</span>
         </button>
 
-        <div className="max-w-6xl mx-auto mt-2">
-  <p className="text-2xl sm:text-3xl font-black text-white truncate">
-    รายวิชา{subjectInfo?.subject_name ? `: ${subjectInfo.subject_name}` : ""}
-  </p>
+        <div className="max-w-6xl mx-auto mt-2 flex items-start justify-between flex-wrap gap-4">
+  {/* ฝั่งซ้าย: ชื่อวิชา + รหัสเข้ารายวิชา */}
+  <div className="min-w-0">
+    <p className="text-2xl sm:text-3xl font-black text-white truncate">
+      รายวิชา{subjectInfo?.subject_name ? `: ${subjectInfo.subject_name}` : ""}
+    </p>
 
-  {/* ★ ย้ายรหัสเข้ารายวิชาขึ้นมาไว้บนสุด (ใต้ชื่อวิชา) */}
-  <div className="flex items-center gap-2 flex-wrap mt-3">
-    {subjectInfo?.academic_year && (
-      <span className="px-3 py-1.5 rounded-full bg-white/20 text-white text-sm font-bold backdrop-blur-sm">
-        ปีการศึกษา: {subjectInfo.academic_year}
-      </span>
-    )}
-    {subjectInfo?.class_code && (
-      <span className="px-3 py-1.5 rounded-full bg-amber-300/90 text-amber-900 text-m font-black">
-        รหัสเข้ารายวิชา: {subjectInfo.class_code}
-      </span>
-    )}
+    <div className="flex items-center gap-2 flex-wrap mt-3">
+      {subjectInfo?.academic_year && (
+        <span className="px-3 py-1.5 rounded-full bg-white/20 text-white text-sm font-bold backdrop-blur-sm">
+          ปีการศึกษา: {subjectInfo.academic_year}
+        </span>
+      )}
+      {subjectInfo?.class_code && (
+        <span className="px-3 py-1.5 rounded-full bg-amber-300/90 text-amber-900 text-base font-black">
+          รหัสรายวิชา: {subjectInfo.class_code}
+        </span>
+      )}
+    </div>
   </div>
 
-  {/* ★ คำทักทาย + ห้องเรียนแบบสั้น + เลขที่ มาแทนตำแหน่งเดิมของป้ายห้องเรียน */}
-  {selfStudent && (
-    <p className="text-base sm:text-lg font-bold text-white/85 mt-3 truncate">
+  {/* ฝั่งขวา: คำทักทาย ตัวใหญ่ */}
+{selfStudent && (
+  <div className="text-right mt-1 sm:mt-0 mr-0 sm:mr-14">
+    <p className="text-2xl sm:text-3xl font-black text-white truncate">
       สวัสดี {selfStudent.prefix ?? ""}{selfStudent.first_name} {selfStudent.last_name}
-      {subjectInfo?.class_room_label ? ` · ${subjectInfo.class_room_label}` : ""}
-      {" · "}เลขที่ {selfStudent.seat_number}
     </p>
-  )}
+    <p className="text-lg sm:text-2xl font-black text-white/90 mt-1.5">
+      {subjectInfo?.class_room_label ? `${subjectInfo.class_room_label} · ` : ""}เลขที่ {selfStudent.seat_number}
+    </p>
+  </div>
+)}
 </div>
-      </div>
+</div> 
 
       <div className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8">
         {/* ★ แท็บเมนู 4 อัน จัดกึ่งกลาง ตัวหนังสือใหญ่ขึ้น */}

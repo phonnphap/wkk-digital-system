@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   // 1) ข้อมูลนักเรียน + ห้องเรียน
   const { data: student, error: studentErr } = await supabase
     .from("students")
-    .select("id, prefix, first_name, last_name, classroom_id")
+    .select("id, prefix, first_name, last_name, seat_number, classroom_id")
     .eq("id", studentId)
     .maybeSingle();
 
@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
 
   const sectionList = sections ?? [];
   const commonInfo = {
-    student: { id: student.id, prefix: student.prefix, first_name: student.first_name, last_name: student.last_name },
+    student: { id: student.id, prefix: student.prefix, first_name: student.first_name, last_name: student.last_name, seat_number: student.seat_number, },
     classroom: classroom ? { room_name: classroom.room_name, grade_group: classroom.grade_group } : null,
     homeroom_teachers: homeroomTeachers.map((t) => ({
       title: t.title ?? "",

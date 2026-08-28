@@ -9,7 +9,14 @@ type Section = {
   timetable_entries: { id: string; day_of_week: number; slot_number: number; start_time: string; end_time: string }[];
 };
 
-type StudentInfo = { id: string; prefix?: string; first_name: string; last_name: string; student_no?: string };
+type StudentInfo = {
+  id: string;
+  prefix?: string;
+  first_name: string;
+  last_name: string;
+  student_no?: string;
+  seat_number?: number; // ★ เพิ่ม: API จริงส่งฟิลด์นี้มา ไม่ใช่ student_no
+};
 type ClassroomInfo = { room_name?: string; grade_group?: string };
 type TeacherInfo = { title?: string; first_name?: string; last_name?: string; full_name?: string };
 
@@ -40,29 +47,27 @@ function teacherDisplayName(t: TeacherInfo) {
   return `${t.title ?? ""}${namePart}`.trim();
 }
 
-// แปลง grade_group เช่น "อ.2/1", "ป.1/7", "ม.2/1"
-// เป็น "ชั้นอนุบาลปีที่ 2/1", "ชั้นประถมศึกษาปีที่ 1/7", "ชั้นมัธยมศึกษาปีที่ 2/1"
-// (ของเดิม hardcode คำว่า "มัธยมศึกษาปีที่" ตายตัว ไม่ตรวจว่าเป็นระดับอะไรจริง
-//  พอเจอ grade_group ของ อนุบาล/ประถม เลยได้ข้อความผิดเพี้ยนแบบในรูป)
+// ★ แก้ใหม่: ของเดิม parse จาก grade_group โดยสมมติว่าเป็นรหัสสั้น เช่น "ป.1/7"
+// แต่ข้อมูลจริงจาก API คือ
+//   grade_group = คำเต็มอยู่แล้ว เช่น "ประถมศึกษา" / "มัธยมศึกษา" / "อนุบาล"
+//   room_name   = รหัสห้อง เช่น "ป.1/1"  (มีทั้งชั้นปีและห้องอยู่ในนี้)
+// เลยต้องดึงเลข "ปี/ห้อง" จาก room_name แล้วเอา grade_group (คำเต็ม) มาต่อแทน
+// ผลลัพธ์ที่ต้องการ: "ชั้นประถมศึกษาปีที่ 1/1"
 function formatClassLabel(classroom: ClassroomInfo | null) {
   if (!classroom) return "";
-  const raw = (classroom.grade_group ?? "").trim();
-  if (!raw) return "";
+  const levelWord = (classroom.grade_group ?? "").trim(); // เช่น "ประถมศึกษา"
+  const roomCode = (classroom.room_name ?? "").trim(); // เช่น "ป.1/1"
+  if (!levelWord && !roomCode) return "";
 
-  const match = raw.match(/^(อ|ป|ม)\.?\s*(\d+)\/?(\d+)?/);
-  if (!match) return raw; // เผื่อรูปแบบไม่ตรงเลย โชว์ค่าดิบไปก่อนดีกว่าไม่โชว์อะไร
+  const match = roomCode.match(/(\d+)\s*\/\s*(\d+)/); // ดึง "ปี/ห้อง" ออกจากรหัสห้อง
+  if (levelWord && match) {
+    const [, year, room] = match;
+    return `ชั้น${levelWord}ปีที่ ${year}/${room}`;
+  }
 
-  const [, levelCode, year, roomFromGroup] = match;
-  const LEVEL_LABELS: Record<string, string> = {
-    "อ": "ชั้นอนุบาลปีที่",
-    "ป": "ชั้นประถมศึกษาปีที่",
-    "ม": "ชั้นมัธยมศึกษาปีที่",
-  };
-  const level = LEVEL_LABELS[levelCode];
-  if (!level) return raw;
-
-  const room = classroom.room_name ?? roomFromGroup ?? "";
-  return room ? `${level} ${year}/${room}` : `${level} ${year}`;
+  // เผื่อข้อมูลไม่ครบรูปแบบ ให้โชว์เท่าที่มีดีกว่าไม่โชว์อะไรเลย
+  if (levelWord) return `ชั้น${levelWord}`;
+  return roomCode;
 }
 
 export default function StudentDashboardPage() {
@@ -140,6 +145,8 @@ export default function StudentDashboardPage() {
 
   const studentFullName = student ? `${student.prefix ?? ""}${student.first_name} ${student.last_name}`.trim() : "";
   const classLabel = formatClassLabel(classroom);
+  // ★ เลขที่: API ส่งมาเป็น seat_number ไม่ใช่ student_no — เผื่อไว้ทั้งสองแบบ
+  const seatNo = student?.seat_number ?? (student?.student_no ? Number(student.student_no) : undefined);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-fuchsia-50 via-white to-sky-50 font-['TH_Sarabun_New',_sans-serif] pb-14">
@@ -155,19 +162,20 @@ export default function StudentDashboardPage() {
               className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/90 object-contain p-1 shadow-md shrink-0"
             />
             <div className="min-w-0">
-              <p className="text-white/80 text-sm font-bold">โรงเรียนวัดเขียนเขต</p>
+              <p className="text-white/80 text-ml font-bold">โรงเรียนวัดเขียนเขต</p>
               {loading ? (
                 <div className="h-7 w-48 bg-white/20 rounded-lg mt-1 animate-pulse" />
               ) : (
                 <>
-                  {/* เหลือ "ยินดีต้อนรับ" แค่จุดเดียว (เอาบรรทัดซ้ำออกแล้ว) */}
-                  <h1 className="text-white font-black text-xl sm:text-2xl leading-tight truncate drop-shadow-sm">
+                  <h1 className="text-white font-black text-2xl sm:text-2xl leading-tight truncate drop-shadow-sm">
                     ยินดีต้อนรับ {studentFullName || "นักเรียน"} 👋
                   </h1>
-                  {(classLabel || student?.student_no) && (
-                    <p className="text-white text-sm sm:text-base font-bold mt-1">
+                  {/* ★ ปรับขนาดตัวอักษรของบรรทัดชั้นเรียน/เลขที่ ให้ใหญ่ขึ้น (text-lg sm:text-2xl font-black)
+                      ให้สอดคล้องกับสไตล์ของหน้ารายวิชา และแก้ให้ "เลขที่" ขึ้นจริง โดยอ้างอิง seat_number */}
+                  {(classLabel || seatNo != null) && (
+                    <p className="text-white text-lg sm:text-2xl font-black mt-1.5">
                       {classLabel}
-                      {student?.student_no && `  เลขที่ ${student.student_no}`}
+                      {seatNo != null && `  เลขที่ ${seatNo}`}
                     </p>
                   )}
                 </>
@@ -177,7 +185,7 @@ export default function StudentDashboardPage() {
           <button
             onClick={handleLogout}
             disabled={loggingOut}
-            className="shrink-0 px-4 py-2.5 rounded-2xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-sm transition disabled:opacity-50"
+            className="shrink-0 px-4 py-2.5 rounded-2xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-black text-m transition disabled:opacity-50"
           >
             {loggingOut ? "กำลังออก..." : "🚪 ออกจากระบบ"}
           </button>
@@ -185,9 +193,7 @@ export default function StudentDashboardPage() {
 
         {!loading && homeroomTeachers.length > 0 && (
           <div className="relative mt-3 bg-white/20 backdrop-blur-sm rounded-2xl px-4 py-3">
-            <p className="text-white/80 text-xs font-bold uppercase tracking-wide">ครูประจำชั้น</p>
-            <p className="text-white font-black text-base mt-0.5">
-              {homeroomTeachers.map(teacherDisplayName).filter(Boolean).join("  •  ")}
+            <p className="text-black text-m font-bold uppercase tracking-wide">ครูประจำชั้น  {homeroomTeachers.map(teacherDisplayName).filter(Boolean).join("  และ  ")}
             </p>
           </div>
         )}
