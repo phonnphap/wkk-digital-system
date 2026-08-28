@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Phone, MapPin, Plus, Pencil, Trash2, X, Home, ArrowLeft, Printer } from "lucide-react"; // ★ เพิ่ม Printer
+// ★ ย้าย logic คำนวณคำนำหน้าไปไว้ไฟล์กลาง lib/student-prefix.ts เพื่อใช้ร่วมกันทุกหน้า
+import { getAutoPrefix, getDisplayPrefix } from "@/lib/student-prefix";
 
 const supabase = createClient();
 
@@ -13,30 +15,6 @@ const DASHBOARD_PATH = "/dashboard";
 const HOMEROOM_PATH = "/homeroom";
 
 const PREFIX_OPTIONS = ["เด็กชาย", "เด็กหญิง", "นาย", "นางสาว"];
-
-// ★ เพิ่มใหม่: คำนวณอายุจากวันเกิด
-function calculateAge(birthDateStr: string): number | null {
-  if (!birthDateStr) return null;
-  const birth = new Date(birthDateStr);
-  if (isNaN(birth.getTime())) return null;
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const monthDiff = today.getMonth() - birth.getMonth();
-  const dayDiff = today.getDate() - birth.getDate();
-  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
-    age--;
-  }
-  return age;
-}
-
-// ★ เพิ่มใหม่: คำนวณคำนำหน้าที่ควรจะเป็น จากเพศ + อายุ
-function getAutoPrefix(gender: string, birthDateStr: string): string | null {
-  const age = calculateAge(birthDateStr);
-  if (age === null || !gender) return null;
-  if (gender === "male") return age >= 15 ? "นาย" : "เด็กชาย";
-  if (gender === "female") return age >= 15 ? "นางสาว" : "เด็กหญิง";
-  return null;
-}
 
 type Classroom = {
   classroom_id: string;
@@ -97,7 +75,7 @@ export default function StudentsPage() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
 const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
 
-// ★ เพิ่มใหม่: อัปเดตคำนำหน้าอัตโนมัติเมื่อวันเกิดหรือเพศเปลี่ยน (เฉพาะตอนที่ modal เปิดอยู่)
+// ★ อัปเดตคำนำหน้าอัตโนมัติเมื่อวันเกิดหรือเพศเปลี่ยน (เฉพาะตอนที่ modal เปิดอยู่)
 useEffect(() => {
   if (!showForm) return;
   const autoPrefix = getAutoPrefix(form.gender, form.birth_date);
@@ -242,7 +220,7 @@ useEffect(() => {
     if (selectedClass) loadStudents(selectedClass.classroom_id);
   }
 
-  // ★ เพิ่มใหม่: ไปหน้าพิมพ์การ์งนักเรียนของห้องที่เลือกอยู่
+  // ★ ไปหน้าพิมพ์การ์ดนักเรียนของห้องที่เลือกอยู่
   function goToPrintCards() {
     if (!selectedClass) return;
     router.push(`/students/print?classroom=${selectedClass.classroom_id}`);
@@ -323,6 +301,9 @@ useEffect(() => {
           ) : (
             students.map((s) => {
               const active = expanded === s.id;
+              // ★ คำนวณคำนำหน้าที่จะแสดงผลจากอายุ+เพศจริง แทนที่จะใช้ s.prefix ตรงๆ
+              // (ครอบคลุมกรณีนักเรียนอายุครบ 15 ปีแล้วแต่ยังไม่มีใครไปกดแก้ไขฟอร์มเพื่ออัปเดต prefix ในฐานข้อมูล)
+              const displayPrefix = getDisplayPrefix(s.gender, s.birth_date, s.prefix);
               return (
                 <div
                   key={s.id}
@@ -340,7 +321,7 @@ useEffect(() => {
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[13px] font-semibold text-slate-800">
-                          {s.prefix ? `${s.prefix}` : ""}
+                          {displayPrefix}
                           {s.first_name} {s.last_name}
                           {s.nick_name && <span className="ml-1 font-normal text-slate-400">({s.nick_name})</span>}
                         </p>

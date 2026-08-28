@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic"; // ★ เพิ่ม: กัน error ตอน build เพราะเพิ่ม useSearchParams() เข้ามา
 import { useState, useEffect } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation"; // ★ เพิ่ม useSearchParams
 import { createClient } from "@/lib/supabase/client";
@@ -12,13 +13,29 @@ type Entity = {
   accessMode: string;
 };
 
+// ★ เพิ่มใหม่: คำนวณคำนำหน้าจากอายุจริง (วันเกิด+เพศ) แทนค่า prefix ที่บันทึกไว้ในตาราง
+// ชาย อายุ >= 15 = "นาย" / น้อยกว่า = "เด็กชาย" ・ หญิง อายุ >= 15 = "นางสาว" / น้อยกว่า = "เด็กหญิง"
+function getAutoPrefix(gender: string | null, birthDateStr: string | null): string {
+  if (!gender || !birthDateStr) return "";
+  const birth = new Date(birthDateStr);
+  if (isNaN(birth.getTime())) return "";
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  const dayDiff = today.getDate() - birth.getDate();
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) age--;
+  if (gender === "male") return age >= 15 ? "นาย" : "เด็กชาย";
+  if (gender === "female") return age >= 15 ? "นางสาว" : "เด็กหญิง";
+  return "";
+}
+
 export default function JoinPage() {
   const router = useRouter();
   const { joinCode } = useParams() as { joinCode: string };
   const searchParams = useSearchParams(); // ★ เพิ่มใหม่
 
   const [entity, setEntity] = useState<Entity | null>(null);
-  const [students, setStudents] = useState<{ id: string; first_name: string; last_name: string; seat_number: number }[]>([]);
+  const [students, setStudents] = useState<{ id: string; first_name: string; last_name: string; seat_number: number; gender: string | null; birth_date: string | null }[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [studentCode, setStudentCode] = useState("");
   const [prefilledCode, setPrefilledCode] = useState(false); // ★ เพิ่มใหม่: มาจากการสแกน QR การ์ด นร. หรือไม่
@@ -74,7 +91,7 @@ export default function JoinPage() {
       if (resolvedEntity.accessMode !== "id_and_dob") {
         const { data: list } = await supabase
           .from("students")
-          .select("id, first_name, last_name, seat_number")
+          .select("id, first_name, last_name, seat_number, gender, birth_date") // ★ เพิ่ม gender, birth_date เพื่อคำนวณคำนำหน้า
           .eq("classroom_id", resolvedEntity.classroomId)
           .order("seat_number");
         setStudents(list ?? []);
@@ -139,7 +156,9 @@ export default function JoinPage() {
             className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold">
             <option value="">-- เลือกชื่อของคุณ --</option>
             {students.map(s => (
-              <option key={s.id} value={s.id}>{s.seat_number}. {s.first_name} {s.last_name}</option>
+              <option key={s.id} value={s.id}>
+                {s.seat_number}. {getAutoPrefix(s.gender, s.birth_date)}{s.first_name} {s.last_name}
+              </option>
             ))}
           </select>
         )}

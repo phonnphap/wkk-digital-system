@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useParams } from "next/navigation";
+// ★ ใช้ util กลางเพื่อคำนวณคำนำหน้าจากอายุ+เพศ
+import { getDisplayPrefix } from "@/lib/student-prefix";
 
 type Section = {
   id: string;
@@ -15,7 +17,12 @@ type StudentInfo = {
   first_name: string;
   last_name: string;
   student_no?: string;
-  seat_number?: number; // ★ เพิ่ม: API จริงส่งฟิลด์นี้มา ไม่ใช่ student_no
+  seat_number?: number; // ★ API จริงส่งฟิลด์นี้มา ไม่ใช่ student_no
+  // ★ เพิ่ม: ต้องให้ /api/student-portal/timetable ส่งสองฟิลด์นี้มาด้วย
+  // เพื่อให้คำนวณคำนำหน้าอัตโนมัติจากอายุปัจจุบันได้ ถ้า API ยังไม่ส่งมา
+  // โค้ดจะ fallback ไปใช้ค่า prefix เดิมที่บันทึกไว้ในฐานข้อมูลแทน
+  birth_date?: string | null;
+  gender?: string | null;
 };
 type ClassroomInfo = { room_name?: string; grade_group?: string };
 type TeacherInfo = { title?: string; first_name?: string; last_name?: string; full_name?: string };
@@ -47,7 +54,7 @@ function teacherDisplayName(t: TeacherInfo) {
   return `${t.title ?? ""}${namePart}`.trim();
 }
 
-// ★ แก้ใหม่: ของเดิม parse จาก grade_group โดยสมมติว่าเป็นรหัสสั้น เช่น "ป.1/7"
+// ★ ของเดิม parse จาก grade_group โดยสมมติว่าเป็นรหัสสั้น เช่น "ป.1/7"
 // แต่ข้อมูลจริงจาก API คือ
 //   grade_group = คำเต็มอยู่แล้ว เช่น "ประถมศึกษา" / "มัธยมศึกษา" / "อนุบาล"
 //   room_name   = รหัสห้อง เช่น "ป.1/1"  (มีทั้งชั้นปีและห้องอยู่ในนี้)
@@ -143,7 +150,9 @@ export default function StudentDashboardPage() {
 
   const todayDow = new Date().getDay() === 0 ? 7 : new Date().getDay();
 
-  const studentFullName = student ? `${student.prefix ?? ""}${student.first_name} ${student.last_name}`.trim() : "";
+  // ★ ใช้คำนำหน้าที่คำนวณจากอายุ+เพศ แทนค่า prefix ดิบจากฐานข้อมูล
+  const displayPrefix = student ? getDisplayPrefix(student.gender, student.birth_date, student.prefix) : "";
+  const studentFullName = student ? `${displayPrefix}${student.first_name} ${student.last_name}`.trim() : "";
   const classLabel = formatClassLabel(classroom);
   // ★ เลขที่: API ส่งมาเป็น seat_number ไม่ใช่ student_no — เผื่อไว้ทั้งสองแบบ
   const seatNo = student?.seat_number ?? (student?.student_no ? Number(student.student_no) : undefined);

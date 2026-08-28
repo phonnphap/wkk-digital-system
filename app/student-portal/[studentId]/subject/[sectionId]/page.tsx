@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { ArrowLeft, Paperclip, LogOut } from "lucide-react";
 import GradeOverviewTool from "@/components/attendance/GradeOverviewTool"; 
+// ★ ใช้ util กลางเพื่อคำนวณคำนำหน้าจากอายุ+เพศ
+import { getDisplayPrefix } from "@/lib/student-prefix";
 
 type Tab = "assignments" | "pending" | "grades" | "attendance";
 type GradingMode = "numeric" | "pass_fail";
@@ -80,6 +82,10 @@ type GradeStudent = {
   last_name: string;
   nick_name?: string;
   seat_number: number;
+  // ★ เพิ่ม: ต้องให้ /api/student-portal/timetable ส่งสองฟิลด์นี้มาด้วย
+  // เพื่อคำนวณคำนำหน้าอัตโนมัติจากอายุปัจจุบัน ถ้าไม่มีข้อมูลจะ fallback ไปใช้ prefix เดิม
+  birth_date?: string | null;
+  gender?: string | null;
 };
 
 // ★ วันที่แบบสั้น สำหรับหัวคอลัมน์ตารางเช็คชื่อ เช่น "06 ส.ค. 69"
@@ -198,11 +204,12 @@ setSubjectInfo({
   subject_name: matched?.subject?.name_th ?? "",
   class_code: matched?.subject?.subject_code ?? null,
   class_name: classLabel,
-  class_room_label: classroom?.room_name ?? null,   // ★ เพิ่ม: เก็บแค่ "ป.3/1"
+  class_room_label: classroom?.room_name ?? null,   // ★ เก็บแค่ "ป.3/1"
   academic_year: data.academic_year ?? null,
 });
 
     // ★ เก็บข้อมูลตัวนักเรียนไว้ใช้ส่งต่อให้ GradeOverviewTool (ข้อ 2.2)
+    // ★ เพิ่ม birth_date/gender เพื่อให้คำนวณคำนำหน้าอัตโนมัติได้ทั้งหน้านี้และใน GradeOverviewTool
     if (data.student) {
       setSelfStudent({
         id: data.student.id,
@@ -211,6 +218,8 @@ setSubjectInfo({
         last_name: data.student.last_name,
         nick_name: data.student.nick_name ?? data.student.first_name,
         seat_number: Number(data.student.seat_number) || 0,
+        birth_date: data.student.birth_date ?? null,
+        gender: data.student.gender ?? null,
       });
     }
   } catch {
@@ -277,6 +286,11 @@ const sortedAssignments = [...assignments].sort((a, b) => {
     : 0;
   const attPercent = attTotal > 0 ? Math.round(((attSummary?.present ?? 0) / attTotal) * 100) : null;
 
+  // ★ คำนำหน้าที่แสดงผลจริง คำนวณจากอายุ+เพศ (fallback เป็น prefix เดิมถ้าคำนวณไม่ได้)
+  const selfDisplayPrefix = selfStudent
+    ? getDisplayPrefix(selfStudent.gender, selfStudent.birth_date, selfStudent.prefix)
+    : "";
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-fuchsia-50/40 font-['TH_Sarabun_New',_sans-serif] pb-16">
       {/* ★ แบนเนอร์ด้านบน + ปุ่มย้อนกลับมุมบนซ้าย (เล็กลง) + ปุ่มออกจากระบบมุมบนขวา */}
@@ -322,7 +336,7 @@ const sortedAssignments = [...assignments].sort((a, b) => {
 {selfStudent && (
   <div className="text-right mt-1 sm:mt-0 mr-0 sm:mr-14">
     <p className="text-2xl sm:text-3xl font-black text-white truncate">
-      สวัสดี {selfStudent.prefix ?? ""}{selfStudent.first_name} {selfStudent.last_name}
+      สวัสดี {selfDisplayPrefix}{selfStudent.first_name} {selfStudent.last_name}
     </p>
     <p className="text-lg sm:text-2xl font-black text-white/90 mt-1.5">
       {subjectInfo?.class_room_label ? `${subjectInfo.class_room_label} · ` : ""}เลขที่ {selfStudent.seat_number}
@@ -581,7 +595,9 @@ const sortedAssignments = [...assignments].sort((a, b) => {
     classroomLabel={subjectInfo?.class_name ?? undefined}
     homeroomTeacherName={subjectInfo?.homeroom_teacher_name ?? undefined}
     subjectTeacherName={subjectInfo?.subject_teacher_name ?? undefined}
-    students={selfStudent ? [selfStudent] : []} 
+    // ★ ส่ง prefix ที่คำนวณจากอายุ+เพศแล้วเข้าไปแทนค่า prefix ดิบ
+    // เผื่อ GradeOverviewTool เอาไปแสดงชื่อนักเรียนตรงๆ โดยไม่คำนวณเอง
+    students={selfStudent ? [{ ...selfStudent, prefix: selfDisplayPrefix }] : []}
     gradingMode={subjectInfo?.grading_mode ?? "numeric"}
     passThresholdPercent={subjectInfo?.pass_threshold_percent ?? 50}
     gradingStructure={subjectInfo?.grading_structure ?? "formative_midterm_final"}

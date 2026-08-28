@@ -1,7 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin"; // ★ เพิ่ม: ใช้ bypass RLS เฉพาะตารางที่ต้องใช้ Supabase Auth
 import { getStudentSession } from "@/lib/studentAuth";
+
+// ★ เพิ่มใหม่: คำนวณคำนำหน้าจากอายุจริง (วันเกิด+เพศ) แทนค่า prefix ที่บันทึกไว้ในตาราง
+// ชาย อายุ >= 15 = "นาย" / น้อยกว่า = "เด็กชาย" ・ หญิง อายุ >= 15 = "นางสาว" / น้อยกว่า = "เด็กหญิง"
+// ถ้าไม่มีวันเกิดหรือเพศในระบบ จะ fallback กลับไปใช้ค่า prefix ที่บันทึกไว้เดิม (เผื่อข้อมูลไม่ครบ)
+function getAutoPrefix(gender: string | null, birthDateStr: string | null, fallback: string | null): string {
+  if (!gender || !birthDateStr) return fallback ?? "";
+  const birth = new Date(birthDateStr);
+  if (isNaN(birth.getTime())) return fallback ?? "";
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  const dayDiff = today.getDate() - birth.getDate();
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) age--;
+  if (gender === "male") return age >= 15 ? "นาย" : "เด็กชาย";
+  if (gender === "female") return age >= 15 ? "นางสาว" : "เด็กหญิง";
+  return fallback ?? "";
+}
 
 export async function GET(req: NextRequest) {
   const session = await getStudentSession();
@@ -16,19 +32,12 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = await createClient();
-  // ★ ทำไมต้องมี client แยก:
-  // ตาราง timetable_entries มี RLS policy ที่อนุญาตเฉพาะ role "authenticated" (Supabase Auth session)
-  // เท่านั้น เช่น "auth.role() = 'authenticated'" หรือเช็ค users.auth_id = auth.uid()
-  // แต่หน้า student-portal ใช้ custom session (getStudentSession) ไม่ได้ login ผ่าน Supabase Auth
-  // ทำให้ทุก request วิ่งด้วย role "anon" เสมอ → ไม่ผ่าน policy ไหนเลย → ได้ [] เงียบๆ โดยไม่มี error
-  // เราเช็คสิทธิ์นักเรียนเองแล้วด้านบน (studentId === session.student_id) จึงปลอดภัยที่จะ
-  // bypass RLS เฉพาะ 2 ตารางนี้ (timetable_entries, time_slots) ด้วย service-role client
-  const supabaseAdmin = createAdminClient();
 
   // 1) ข้อมูลนักเรียน + ห้องเรียน
+  // ★ เพิ่ม gender, birth_date เข้ามาใน select เพื่อคำนวณคำนำหน้าอัตโนมัติ
   const { data: student, error: studentErr } = await supabase
     .from("students")
-    .select("id, prefix, first_name, last_name, seat_number, classroom_id")
+    .select("id, prefix, first_name, last_name, seat_number, classroom_id, gender, birth_date")
     .eq("id", studentId)
     .maybeSingle();
 
@@ -88,7 +97,14 @@ export async function GET(req: NextRequest) {
 
   const sectionList = sections ?? [];
   const commonInfo = {
-    student: { id: student.id, prefix: student.prefix, first_name: student.first_name, last_name: student.last_name, seat_number: student.seat_number, },
+    student: {
+      id: student.id,
+      // ★ แก้ไข: ใช้คำนำหน้าที่คำนวณจากอายุจริง (วันเกิด+เพศ) แทนค่า prefix ที่บันทึกไว้เฉยๆ
+      prefix: getAutoPrefix(student.gender, student.birth_date, student.prefix),
+      first_name: student.first_name,
+      last_name: student.last_name,
+      seat_number: student.seat_number,
+    },
     classroom: classroom ? { room_name: classroom.room_name, grade_group: classroom.grade_group } : null,
     homeroom_teachers: homeroomTeachers.map((t) => ({
       title: t.title ?? "",
@@ -103,8 +119,7 @@ export async function GET(req: NextRequest) {
   }
 
   // 4) ดึง timetable_entries ของห้องนี้ (เก็บแค่ time_slot_id ไม่มีเวลาเริ่ม/จบตรงๆ)
-  // ★ ใช้ supabaseAdmin เพราะตารางนี้มี RLS ที่ block role "anon" (ดูคอมเมนต์ด้านบน)
-  const { data: entries, error: entriesErr } = await supabaseAdmin
+  const { data: entries, error: entriesErr } = await supabase
     .from("timetable_entries")
     .select("id, classroom_id, subject_id, day_of_week, time_slot_id")
     .eq("classroom_id", student.classroom_id);
@@ -117,12 +132,11 @@ export async function GET(req: NextRequest) {
   const entryList = entries ?? [];
 
   // 5) ดึงข้อมูลเวลาจริงจาก time_slots ตาม time_slot_id ที่ใช้จริงทั้งหมด
-  // ★ ใช้ supabaseAdmin เช่นกัน เผื่อ time_slots มี RLS แบบเดียวกัน (กันเคสว่างเปล่าซ้ำ)
   const slotIds = [...new Set(entryList.map((e) => e.time_slot_id).filter(Boolean))];
   let slotMap = new Map<string, { slot_number: number; start_time: string; end_time: string }>();
 
   if (slotIds.length > 0) {
-    const { data: slots, error: slotsErr } = await supabaseAdmin
+    const { data: slots, error: slotsErr } = await supabase
       .from("time_slots")
       .select("id, slot_number, start_time, end_time")
       .in("id", slotIds);
