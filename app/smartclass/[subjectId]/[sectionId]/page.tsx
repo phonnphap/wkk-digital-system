@@ -1905,6 +1905,9 @@ function SubjectSettingsTab({
   const [gradingMode, setGradingMode] = useState<"numeric" | "pass_fail">(subject?.grading_mode ?? "numeric");
   const [passThreshold, setPassThreshold] = useState<string>(String(subject?.pass_threshold_percent ?? 50));
   const [studentPortalEnabled, setStudentPortalEnabled] = useState<boolean>(section.student_portal_enabled ?? true);
+  const [studentSubmitEnabled, setStudentSubmitEnabled] = useState<boolean>(
+  (section as any).student_submit_enabled ?? true
+);
   const [allowLateSubmission, setAllowLateSubmission] = useState<boolean>(section.allow_late_submission ?? true);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -1941,6 +1944,7 @@ const [selectedSemester, setSelectedSemester] = useState<1 | 2>(
     studentAccessMode !== (section.student_access_mode ?? "name_only") ||
     passThreshold !== String(subject?.pass_threshold_percent ?? 50) ||
     studentPortalEnabled !== (section.student_portal_enabled ?? true) ||
+    studentSubmitEnabled !== ((section as any).student_submit_enabled ?? true) ||
     allowLateSubmission !== (section.allow_late_submission ?? true) ||
     formativeMax !== String((section as any).formative_max_score ?? 70) ||
     midtermMax !== String((section as any).midterm_max_score ?? 0) ||
@@ -1985,6 +1989,7 @@ useEffect(() => {
     };
     const sectionUpdate = {
   student_portal_enabled: studentPortalEnabled,
+  student_submit_enabled: studentSubmitEnabled, 
   allow_late_submission: allowLateSubmission,
   student_access_mode: studentAccessMode, // ★ เพิ่ม
   grading_structure: "formative_midterm_final",
@@ -2329,32 +2334,46 @@ useEffect(() => {
 </div>
 
           <label className="flex items-center justify-between rounded-xl border-2 border-slate-100 px-4 py-3 cursor-pointer">
-            <div>
-              <p className="text-sm font-black text-slate-700">เปิดให้นักเรียนล็อกอินดู/ส่งงาน</p>
-              <p className="text-[11px] text-slate-400 font-bold mt-0.5">ปิดไว้ถ้ายังไม่พร้อมให้นักเรียนเข้าดูเนื้อหาวิชานี้</p>
-            </div>
-            <input
-              type="checkbox"
-              disabled={readOnly}
-              checked={studentPortalEnabled}
-              onChange={e => setStudentPortalEnabled(e.target.checked)}
-              className="w-5 h-5 accent-fuchsia-500 shrink-0"
-            />
-          </label>
+  <div>
+    <p className="text-sm font-black text-slate-700">เปิดให้นักเรียนล็อกอินดูงาน</p>
+    <p className="text-[11px] text-slate-400 font-bold mt-0.5">ปิดไว้ถ้ายังไม่พร้อมให้นักเรียนเข้าดูเนื้อหาวิชานี้</p>
+  </div>
+  <input
+    type="checkbox"
+    disabled={readOnly}
+    checked={studentPortalEnabled}
+    onChange={e => setStudentPortalEnabled(e.target.checked)}
+    className="w-5 h-5 accent-fuchsia-500 shrink-0"
+  />
+</label>
 
-          <label className="flex items-center justify-between rounded-xl border-2 border-slate-100 px-4 py-3 cursor-pointer">
-            <div>
-              <p className="text-sm font-black text-slate-700">อนุญาตให้ส่งงานย้อนหลัง (ส่งช้า)</p>
-              <p className="text-[11px] text-slate-400 font-bold mt-0.5">ถ้าปิด นักเรียนจะส่งงานไม่ได้หลังพ้นกำหนดส่ง</p>
-            </div>
-            <input
-              type="checkbox"
-              disabled={readOnly}
-              checked={allowLateSubmission}
-              onChange={e => setAllowLateSubmission(e.target.checked)}
-              className="w-5 h-5 accent-fuchsia-500 shrink-0"
-            />
-          </label>
+<label className="flex items-center justify-between rounded-xl border-2 border-slate-100 px-4 py-3 cursor-pointer">
+  <div>
+    <p className="text-sm font-black text-slate-700">เปิดให้นักเรียนล็อกอินส่งงาน</p>
+    <p className="text-[11px] text-slate-400 font-bold mt-0.5">ปิดไว้ถ้ายังไม่ต้องการให้นักเรียนส่งงานผ่านระบบ (ยังดูงานได้ตามปกติ)</p>
+  </div>
+  <input
+    type="checkbox"
+    disabled={readOnly}
+    checked={studentSubmitEnabled}
+    onChange={e => setStudentSubmitEnabled(e.target.checked)}
+    className="w-5 h-5 accent-fuchsia-500 shrink-0"
+  />
+</label>
+
+<label className="flex items-center justify-between rounded-xl border-2 border-slate-100 px-4 py-3 cursor-pointer">
+  <div>
+    <p className="text-sm font-black text-slate-700">อนุญาตให้ส่งงานย้อนหลัง (ส่งช้า)</p>
+    <p className="text-[11px] text-slate-400 font-bold mt-0.5">ถ้าปิด นักเรียนจะส่งงานไม่ได้หลังพ้นกำหนดส่ง</p>
+  </div>
+  <input
+    type="checkbox"
+    disabled={readOnly}
+    checked={allowLateSubmission}
+    onChange={e => setAllowLateSubmission(e.target.checked)}
+    className="w-5 h-5 accent-fuchsia-500 shrink-0"
+  />
+</label>
         </div>
       </div>
 
