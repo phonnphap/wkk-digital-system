@@ -48,6 +48,17 @@ function formatClassLabel(classroom: ClassroomInfo | null): string {
   return roomCode;
 }
 
+// ★ เพิ่มใหม่: คำนวณขนาดฟอนต์ชื่อนักเรียนตามความยาว เพื่อให้ชื่อยาวแค่ไหนก็ยังอยู่บรรทัดเดียวเสมอ
+// (ใช้ควบคู่กับ white-space: nowrap ใน CSS ด้านล่าง เป็นตัวกันสุดท้ายอีกชั้น)
+function nameFontSizePt(fullName: string): number {
+  const len = fullName.length;
+  if (len <= 14) return 13;
+  if (len <= 18) return 11.5;
+  if (len <= 22) return 10;
+  if (len <= 26) return 9;
+  return 8;
+}
+
 // ★ แก้ไข: ต้องห่อ component ที่ใช้ useSearchParams() ด้วย <Suspense> เสมอ
 // ไม่งั้น Next.js จะ build ไม่ผ่าน (error: "useSearchParams() should be wrapped in a suspense boundary")
 export default function PrintStudentCardsPage() {
@@ -251,7 +262,10 @@ function PrintStudentCardsContent() {
                     {origin && url && <QRCodeSVG value={url} size={92} level="M" />}
                   </div>
                   <div className="student-card-info">
-                    <p className="student-card-name">
+                    <p
+                      className="student-card-name"
+                      style={{ fontSize: `${nameFontSizePt(`${s.prefix ?? ""}${s.first_name} ${s.last_name}`)}pt` }}
+                    >
                       {s.prefix ?? ""}
                       {s.first_name} {s.last_name}
                     </p>
@@ -278,6 +292,11 @@ function PrintStudentCardsContent() {
             background: white !important;
           }
         }
+        /* ★ บังคับฟอนต์ TH Sarabun New ทุก element ในพื้นที่พิมพ์ ไม่ให้ตกหล่นชิ้นไหน */
+        .print-grid,
+        .print-grid * {
+          font-family: "TH Sarabun New", "Sarabun", sans-serif !important;
+        }
         .print-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -294,7 +313,6 @@ function PrintStudentCardsContent() {
           justify-content: space-between;
           page-break-inside: avoid;
           break-inside: avoid;
-          font-family: "TH Sarabun New", sans-serif;
         }
         .student-card-header {
           display: flex;
@@ -321,12 +339,15 @@ function PrintStudentCardsContent() {
         }
         .student-card-info {
           min-width: 0;
+          width: 100%;
         }
         .student-card-name {
-          font-size: 13pt;
+          /* font-size ถูกกำหนดแบบ dynamic ผ่าน inline style (nameFontSizePt) ตามความยาวชื่อ */
           font-weight: 800;
           color: #1e293b;
           line-height: 1.2;
+          white-space: nowrap;   /* ★ กันขึ้นบรรทัดใหม่เด็ดขาด */
+          overflow: hidden;      /* ★ กันล้นกรอบกรณีชื่อยาวสุดขีดจริง ๆ */
         }
         .student-card-meta {
           font-size: 10pt;
