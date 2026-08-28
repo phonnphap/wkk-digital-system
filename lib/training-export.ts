@@ -59,12 +59,16 @@ function thaiDateFull(iso?: string) {
   return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear() + 543}`;
 }
 
+function isImageFile(name: string) {
+  return /\.(jpe?g|png|gif|webp|bmp)$/i.test(name);
+}
+
 export function buildIndividualReportHTML(
   user: IndividualReportUser,
   records: TrainingRecordWithUser[],
   targetHoursPerYear: number,
-  approverName = '',
-  hrName = ''
+  deputyHrName = '',
+  directorName = ''
 ): string {
   const totalHours = records.reduce((s, r) => s + Number(r.hours), 0);
   const totalCourses = records.length;
@@ -84,6 +88,7 @@ export function buildIndividualReportHTML(
         <td style="padding:5px 8px;border:1px solid #cbd5e1">${r.organizer ?? '—'}</td>
         <td style="padding:5px 8px;border:1px solid #cbd5e1;text-align:center">${r.hours}</td>
         <td style="padding:5px 8px;border:1px solid #cbd5e1;text-align:center">${TRAINING_STATUS_LABELS[r.status]}</td>
+        <td style="padding:5px 8px;border:1px solid #cbd5e1;text-align:center">${(r.evidence_files ?? []).length || '—'}</td>
       </tr>`).join('');
 
   const takeawayBlocks = records
@@ -95,19 +100,38 @@ export function buildIndividualReportHTML(
         ${r.action_plan ? `<p style="font-size:12pt;margin:2px 0"><b>การนำไปประยุกต์ใช้:</b> ${r.action_plan}</p>` : ''}
       </div>`).join('');
 
+  const evidenceBlocks = records
+    .filter((r) => (r.evidence_files ?? []).length > 0)
+    .map((r) => `
+      <div style="margin-bottom:16px">
+        <p style="font-weight:700;margin-bottom:6px">${r.course_name}</p>
+        <div style="display:flex;flex-wrap:wrap;gap:10px">
+          ${r.evidence_files.map((f) => (
+            isImageFile(f.name)
+              ? `<div style="text-align:center">
+                   <img src="${f.url}" style="width:150px;height:150px;object-fit:cover;border:1px solid #cbd5e1;border-radius:6px" onerror="this.style.display='none'" />
+                   <div style="font-size:9pt;color:#64748b;max-width:150px;word-break:break-all;margin-top:2px">${f.name}</div>
+                 </div>`
+              : `<div style="border:1px solid #cbd5e1;border-radius:6px;padding:16px 14px;font-size:10pt;text-align:center;width:150px">
+                   📄<br/>${f.name}
+                 </div>`
+          )).join('')}
+        </div>
+      </div>`).join('');
+
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
   @page { size: A4; margin: 18mm 20mm; }
-  body { font-family:'Sarabun','TH SarabunNew',sans-serif; font-size:13pt; color:#111; line-height:1.6; }
-  h1 { text-align:center; font-size:18pt; margin-bottom:4px; }
-  h2 { text-align:center; font-size:13pt; margin:0 0 18px; color:#475569; }
-  .section-title { font-weight:900; font-size:14pt; color:#1e3a8a; margin:22px 0 10px; border-bottom:2px solid #1e3a8a; padding-bottom:4px; }
-  table { width:100%; border-collapse:collapse; font-size:12pt; }
+  body { font-family:'TH Sarabun New','TH SarabunPSK',sans-serif; font-size:16pt; color:#111; line-height:1.5; }
+  h1 { text-align:center; font-size:22pt; margin-bottom:4px; }
+  h2 { text-align:center; font-size:16pt; margin:0 0 18px; color:#475569; }
+  .section-title { font-weight:900; font-size:17pt; color:#1e3a8a; margin:22px 0 10px; border-bottom:2px solid #1e3a8a; padding-bottom:4px; }
+  table { width:100%; border-collapse:collapse; font-size:15pt; }
   th { background:#1e3a8a; color:#fff; padding:6px 8px; border:1px solid #1e3a8a; }
   .kpi-cards { display:flex; gap:16px; margin:10px 0; }
   .kpi-card { flex:1; border:2px solid #1e3a8a; border-radius:10px; padding:14px; text-align:center; }
-  .kpi-value { font-size:26pt; font-weight:900; color:#1e3a8a; }
-  .kpi-label { font-size:11pt; color:#475569; }
+  .kpi-value { font-size:28pt; font-weight:900; color:#1e3a8a; }
+  .kpi-label { font-size:13pt; color:#475569; }
   .progress-bar { height:14px; background:#e2e8f0; border-radius:7px; overflow:hidden; margin-top:6px; }
   .progress-fill { height:100%; background:#f97316; }
   .sign-section { display:flex; justify-content:space-between; margin-top:40px; gap:20px; }
@@ -126,7 +150,8 @@ export function buildIndividualReportHTML(
   <table style="border:none">
     <tr><td style="border:none;width:15%"><b>ชื่อ-สกุล</b></td><td style="border:none">${user.full_name}</td></tr>
     <tr><td style="border:none"><b>ตำแหน่ง</b></td><td style="border:none">${user.position ?? '—'}</td></tr>
-    <tr><td style="border:none"><b>สายชั้น/กลุ่มสาระ</b></td><td style="border:none">${[user.grade_level, user.department_name].filter(Boolean).join(' · ') || '—'}</td></tr>
+    <tr><td style="border:none"><b>สายชั้น</b></td><td style="border:none">${user.grade_level ?? '—'}</td></tr>
+    <tr><td style="border:none"><b>กลุ่มสาระ</b></td><td style="border:none">${user.department_name ?? '—'}</td></tr>
   </table>
 
   <div class="section-title">ส่วนที่ 2 — สรุปภาพรวม</div>
@@ -135,7 +160,7 @@ export function buildIndividualReportHTML(
     <div class="kpi-card"><div class="kpi-value">${totalCourses}</div><div class="kpi-label">จำนวนคอร์ส</div></div>
     <div class="kpi-card"><div class="kpi-value">${targetHoursPerYear}</div><div class="kpi-label">เป้าหมายต่อปี (ชม.)</div></div>
   </div>
-  <p style="font-size:11pt;color:#475569">ความคืบหน้าเทียบเป้าหมายประจำปี: ${pct.toFixed(0)}%</p>
+  <p style="font-size:13pt;color:#475569">ความคืบหน้าเทียบเป้าหมายประจำปี: ${pct.toFixed(0)}%</p>
   <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
 
   <table style="margin-top:14px;max-width:60%">
@@ -145,25 +170,34 @@ export function buildIndividualReportHTML(
 
   <div class="section-title">ส่วนที่ 3 — ตารางประวัติการอบรม</div>
   <table>
-    <tr><th>ที่</th><th>วันที่</th><th>ชื่อหลักสูตร</th><th>สถาบัน/วิทยากร</th><th>ชั่วโมง</th><th>สถานะ</th></tr>
+    <tr><th>ที่</th><th>วันที่</th><th>ชื่อหลักสูตร</th><th>สถาบัน/วิทยากร</th><th>ชั่วโมง</th><th>สถานะ</th><th>ไฟล์แนบ</th></tr>
     ${tableRows}
   </table>
 
   <div class="section-title">ส่วนที่ 4 — สรุปความรู้และการนำไปใช้</div>
   ${takeawayBlocks || '<p style="color:#94a3b8">ไม่มีข้อมูล</p>'}
 
-  <div class="section-title">ส่วนที่ 5 — ช่องเซ็นชื่ออนุมัติ</div>
+  <div class="section-title">ส่วนที่ 5 — เอกสาร/หลักฐานแนบ</div>
+  ${evidenceBlocks || '<p style="color:#94a3b8">ไม่มีเอกสารแนบ</p>'}
+
+  <div class="section-title">ส่วนที่ 6 — ช่องเซ็นชื่ออนุมัติ</div>
   <div class="sign-section">
-    <div class="sign-box"><div class="sign-name">(${user.full_name})</div><div style="font-size:11pt;color:#475569">ผู้รายงาน</div></div>
-    <div class="sign-box"><div class="sign-name">(${approverName || '..............................'})</div><div style="font-size:11pt;color:#475569">หัวหน้างาน</div></div>
-    <div class="sign-box"><div class="sign-name">(${hrName || '..............................'})</div><div style="font-size:11pt;color:#475569">ฝ่ายบุคคล</div></div>
+    <div class="sign-box"><div class="sign-name">(${user.full_name})</div><div style="font-size:13pt;color:#475569">ผู้อบรม</div></div>
+    <div class="sign-box"><div class="sign-name">(${deputyHrName || '..............................'})</div><div style="font-size:13pt;color:#475569">รองฝ่ายบุคคล</div></div>
+    <div class="sign-box"><div class="sign-name">(${directorName || '..............................'})</div><div style="font-size:13pt;color:#475569">ผู้อำนวยการโรงเรียน</div></div>
   </div>
   <script>window.onload=()=>window.print()<\/script>
 </body></html>`;
 }
 
-export function printIndividualReport(user: IndividualReportUser, records: TrainingRecordWithUser[], targetHoursPerYear: number) {
-  const html = buildIndividualReportHTML(user, records, targetHoursPerYear);
+export function printIndividualReport(
+  user: IndividualReportUser,
+  records: TrainingRecordWithUser[],
+  targetHoursPerYear: number,
+  deputyHrName?: string,
+  directorName?: string
+) {
+  const html = buildIndividualReportHTML(user, records, targetHoursPerYear, deputyHrName, directorName);
   const w = window.open('', '_blank', 'width=900,height=780');
   if (!w) return;
   w.document.write(html);

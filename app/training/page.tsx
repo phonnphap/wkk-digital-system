@@ -93,12 +93,17 @@ export default function TrainingPage() {
             </button>
           )}
           <button onClick={() => printIndividualReport(
-            { full_name: access.user!.full_name, position: allUsers.find(u => u.id === access.user!.id)?.position },
-            myRecords, targetHours
-          )}
-            className="px-3 py-2 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-xl border border-white/30">
-            📄 รายงานของฉัน (PDF)
-          </button>
+  {
+    full_name: access.user!.full_name,
+    position: allUsers.find(u => u.id === access.user!.id)?.position,
+    grade_level: myRecords[0]?.grade_level,
+    department_name: myRecords[0]?.department_name,
+  },
+  myRecords, targetHours
+)}
+  className="px-3 py-2 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-xl border border-white/30">
+  📄 รายงานของฉัน (PDF)
+</button>
           <button onClick={() => { setEditing(null); setShowForm(true); }}
             className="px-4 py-2 bg-white text-blue-600 text-xs font-bold rounded-xl shadow-sm hover:bg-blue-50">
             + บันทึกการอบรม

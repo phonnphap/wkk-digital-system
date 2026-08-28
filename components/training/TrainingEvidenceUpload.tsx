@@ -2,17 +2,20 @@
 
 import { useRef, useState } from 'react';
 import { buildTrainingFileName, sanitizeSegment } from '@/lib/training-file-naming';
-import type { EvidenceFile } from '@/lib/training-records';
+import type { EvidenceFile, TrainingType } from '@/lib/training-records';
+import { TRAINING_TYPE_LABELS } from '@/lib/training-records';
 
 const ONEDRIVE_ACCOUNT = 'hr@khienkhet.ac.th';
 
 export default function TrainingEvidenceUpload({
   teacherName,
+  trainingType,
   startDate,
   value,
   onChange,
 }: {
   teacherName: string;
+  trainingType: TrainingType;
   startDate: string;
   value: EvidenceFile[];
   onChange: (files: EvidenceFile[]) => void;
@@ -32,7 +35,11 @@ export default function TrainingEvidenceUpload({
     try {
       const uploaded: EvidenceFile[] = [];
       let seq = value.length;
-      const folder = sanitizeSegment(teacherName || 'ไม่ระบุชื่อ');
+      const folder = [
+        'รายงานการอบรม',
+        sanitizeSegment(teacherName || 'ไม่ระบุชื่อ'),
+        sanitizeSegment(TRAINING_TYPE_LABELS[trainingType] || 'ไม่ระบุประเภท'),
+      ].join('/');
       for (const file of Array.from(fileList)) {
         const fileName = buildTrainingFileName(startDate, file.name, seq);
         const fd = new FormData();

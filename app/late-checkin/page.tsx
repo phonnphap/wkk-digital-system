@@ -269,6 +269,7 @@ export default function LateCheckinPage() {
           classroom_id: student.classroom_id,
           attendance_date: todayISO(),
           status: "late",
+          recorded_source: "gate_scan",
           recorded_by: myProfileId || null,
           recorded_at: new Date().toISOString(),
         },

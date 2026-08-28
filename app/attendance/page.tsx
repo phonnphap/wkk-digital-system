@@ -299,7 +299,7 @@ export default function AttendancePage() {
   // ตัวกรองรายชื่อใต้ชิปสรุป (คลิกชิปเพื่อดูรายชื่อ เลขที่ + ชื่อ)
   const [summaryFilter, setSummaryFilter] = useState<SummaryFilter | null>(null);
   const [holidayMap, setHolidayMap] = useState<HolidayMap>(new Map());
-
+  const [lockedMap, setLockedMap] = useState<Record<string, boolean>>({});
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -344,7 +344,7 @@ const todayHoliday = isHoliday(date, holidayMap);
         .order("seat_number"),
       supabase
         .from("attendance_records")
-        .select("student_id, status")
+        .select("student_id, status, recorded_source") 
         .eq("classroom_id", cid)
         .eq("attendance_date", date),
     ]).then(([studentsRes, attendanceRes]) => {
@@ -352,13 +352,20 @@ const todayHoliday = isHoliday(date, holidayMap);
       setStudents(studentList);
 
       const map: Record<string, AttendanceStatus> = {};
-      // ค่าเริ่มต้น = มา สำหรับทุกคนที่ยังไม่มีบันทึก
-      studentList.forEach((s) => { map[s.id] = "present"; });
-      (attendanceRes.data ?? []).forEach((r: { student_id: string; status: AttendanceStatus }) => {
-        map[r.student_id] = r.status;
-      });
-      setStatusMap(map);
-      setLoading(false);
+      const locked: Record<string, boolean> = {}; 
+studentList.forEach((s) => { map[s.id] = "present"; });
+
+(attendanceRes.data ?? []).forEach((r: { 
+  student_id: string; 
+  status: AttendanceStatus; 
+  recorded_source?: string; // เพิ่มบรรทัดนี้ (ใส่ ? ไว้เผื่อบางรายการไม่มี value)
+}) => {
+  map[r.student_id] = r.status;
+  if (r.status === "late" && r.recorded_source === "จับสาย") locked[r.student_id] = true;
+});
+
+setStatusMap(map);
+setLockedMap(locked);
     });
   }, [selectedClass, date]);
 
@@ -423,10 +430,10 @@ const todayHoliday = isHoliday(date, holidayMap);
   }
 
   function setAllStatus(status: AttendanceStatus) {
-    const map: Record<string, AttendanceStatus> = {};
-    students.forEach((s) => { map[s.id] = status; });
-    setStatusMap(map);
-  }
+  const map: Record<string, AttendanceStatus> = { ...statusMap };
+  students.forEach((s) => { if (!lockedMap[s.id]) map[s.id] = status; });
+  setStatusMap(map);
+}
 
   async function handleSave() {
     if (!selectedClass || students.length === 0) return;
@@ -434,20 +441,17 @@ const todayHoliday = isHoliday(date, holidayMap);
     setSavedMsg("");
 
     const rows = students.map((s) => ({
-      student_id: s.id,
-      classroom_id: selectedClass.classroom_id,
-      attendance_date: date,
-      status: statusMap[s.id] ?? "present",
-    }));
+  student_id: s.id,
+  classroom_id: selectedClass.classroom_id,
+  attendance_date: date,
+  status: statusMap[s.id] ?? "present",
+  recorded_source: "homeroom", // ★
+}));
 
-    // หมายเหตุ: ถ้าขึ้น error "no unique or exclusion constraint matching the ON CONFLICT specification"
-    // แปลว่าตาราง attendance_records ยังไม่มี UNIQUE constraint บน (student_id, attendance_date)
-    // ให้รันคำสั่ง SQL นี้ในฐานข้อมูลก่อน:
-    //   ALTER TABLE attendance_records ADD CONSTRAINT attendance_records_student_date_unique UNIQUE (student_id, attendance_date);
-    const { data: savedRows, error } = await supabase
-      .from("attendance_records")
-      .upsert(rows, { onConflict: "student_id,attendance_date" })
-      .select();
+const { data: savedRows, error } = await supabase
+  .from("attendance_records")
+  .upsert(rows, { onConflict: "student_id,attendance_date" })
+  .select("student_id, status, recorded_source");
 
     setSaving(false);
 
@@ -670,16 +674,18 @@ const todayHoliday = isHoliday(date, holidayMap);
                       </div>
                       <div className="flex shrink-0 gap-1.5">
                         {STATUS_OPTIONS.map((opt) => (
-                          <button
-                            key={opt.value}
-                            onClick={() => setStatus(s.id, opt.value)}
-                            className={`rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
-                              current === opt.value ? opt.activeCls : "bg-slate-100 text-slate-400 hover:bg-slate-200"
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
+  <button
+    key={opt.value}
+    disabled={lockedMap[s.id]}
+    onClick={() => setStatus(s.id, opt.value)}
+    className={`rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
+      current === opt.value ? opt.activeCls : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+    } ${lockedMap[s.id] ? "opacity-50 cursor-not-allowed" : ""}`}
+  >
+    {opt.label}
+  </button>
+))}
+{lockedMap[s.id] && <span className="text-[10px] text-rose-500 ml-1">🔒 สแกนประตู</span>}
                       </div>
                     </div>
                   );

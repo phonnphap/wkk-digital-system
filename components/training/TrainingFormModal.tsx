@@ -153,11 +153,12 @@ export default function TrainingFormModal({
           </div>
 
           <TrainingEvidenceUpload
-            teacherName={fullName(selectedUser)}
-            startDate={startDate}
-            value={evidenceFiles}
-            onChange={setEvidenceFiles}
-          />
+  teacherName={fullName(selectedUser)}
+  trainingType={trainingType}
+  startDate={startDate}
+  value={evidenceFiles}
+  onChange={setEvidenceFiles}
+/>
         </div>
 
         <div className="px-6 py-4 border-t border-slate-100 flex gap-2 justify-end shrink-0 bg-slate-50 rounded-b-2xl">
