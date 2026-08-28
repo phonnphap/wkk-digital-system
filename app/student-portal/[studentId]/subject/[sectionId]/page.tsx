@@ -82,7 +82,6 @@ type GradeStudent = {
   seat_number: number;
 };
 
-const [selfStudent, setSelfStudent] = useState<GradeStudent | null>(null);
 // ★ วันที่แบบสั้น สำหรับหัวคอลัมน์ตารางเช็คชื่อ เช่น "06 ส.ค. 69"
 function formatShortDate(iso: string | null | undefined) {
   if (!iso) return "-";
@@ -133,6 +132,7 @@ export default function StudentPortalSubjectPage() {
   const [subjectInfo, setSubjectInfo] = useState<SubjectInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [selfStudent, setSelfStudent] = useState<GradeStudent | null>(null);
 
   const fetchAssignments = useCallback(async () => {
     if (!sectionId) return;

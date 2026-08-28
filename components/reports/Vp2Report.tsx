@@ -638,7 +638,7 @@ function formatGradeLevel(label?: string): string {
 
       <div className="vp2-report-root">
       <div className="print:hidden flex items-center justify-between flex-wrap gap-2">
-  <button onClick={onBack} className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm">
+  <button onClick={onBack} className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-base">
     ← กลับ
   </button>
   <div className="flex items-center gap-2">
@@ -646,23 +646,23 @@ function formatGradeLevel(label?: string): string {
       <button
         onClick={handleSaveRemarks}
         disabled={saving}
-        className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 disabled:opacity-50 text-white font-black text-sm shadow"
+        className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 disabled:opacity-50 text-white font-black text-base shadow"
       >
         {saving ? "กำลังบันทึก..." : "💾 บันทึกหมายเหตุ"}
       </button>
     )}
-    <button onClick={handleExportExcel} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm shadow">
+    <button onClick={handleExportExcel} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-base shadow">
       📊 ส่งออก Excel
     </button>
-    <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-black text-sm shadow">
+    <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-black text-base shadow">
       🖨️ พิมพ์ / บันทึกเป็น PDF
     </button>
   </div>
 </div>
 
-      {error && <p className="print:hidden text-xs font-black text-red-500 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
+      {error && <p className="print:hidden text-m font-black text-red-500 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
       {savedAt && !error && (
-        <p className="print:hidden text-xs font-black text-emerald-500">✅ บันทึกหมายเหตุล่าสุดแล้ว</p>
+        <p className="print:hidden text-m font-black text-emerald-500">✅ บันทึกหมายเหตุล่าสุดแล้ว</p>
       )}
 
       {/* ★ แก้ไข: เจอสาเหตุจริงที่ "หน้าเล็กลง" — เดิม max-w-[190mm] (~718px, ขนาดกระดาษ A4) ถูกบังคับใช้ตลอด
@@ -725,7 +725,7 @@ function formatGradeLevel(label?: string): string {
           </div>
         </div>
 
-        <table className="w-full table-fixed border-collapse text-sm print:text-[11px] mt-4">
+        <table className="w-full table-fixed border-collapse text-base print:text-[14px] mt-4">
           <thead>
             <tr>
               <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "5%" }}>เลขที่</th>

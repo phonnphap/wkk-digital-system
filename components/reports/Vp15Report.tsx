@@ -48,30 +48,30 @@ export default function Vp15Report({
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2 print:hidden">
         <div>
-          <button onClick={onBack} className="text-xs font-black text-slate-400 hover:text-slate-600 mb-1">← กลับ</button>
+          <button onClick={onBack} className="text-m font-black text-slate-400 hover:text-slate-600 mb-1">← กลับ</button>
           <h2 className="font-black text-slate-800 text-lg">แบบวัดผล 15 — สรุปผลสัมฤทธิ์ทางการเรียน</h2>
-          <p className="text-slate-400 text-xs font-bold">{subjectCode} · {subjectTitle} · ทุกห้องเรียนของวิชานี้</p>
+          <p className="text-slate-400 text-m font-bold">{subjectCode} · {subjectTitle} · ทุกห้องเรียนของวิชานี้</p>
         </div>
-        <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm">
+        <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-base">
           🖨️ พิมพ์
         </button>
       </div>
 
       {loading ? (
-        <div className="text-center py-16 text-slate-300 font-bold text-sm">กำลังโหลด...</div>
+        <div className="text-center py-16 text-slate-300 font-bold text-base">กำลังโหลด...</div>
       ) : error ? (
-        <p className="text-red-600 text-xs font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-3">❌ {error}</p>
+        <p className="text-red-600 text-m font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-3">❌ {error}</p>
       ) : rows.length === 0 ? (
-        <p className="text-center text-slate-400 font-bold text-sm py-10">ยังไม่มีห้องเรียนของวิชานี้</p>
+        <p className="text-center text-slate-400 font-bold text-base py-10">ยังไม่มีห้องเรียนของวิชานี้</p>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-6 print:p-0 print:border-none print:shadow-none">
           <div className="text-center mb-4">
             <p className="font-black text-slate-700">แบบรายงานผลสัมฤทธิ์นักเรียน</p>
-            <p className="text-xs font-bold text-slate-400">รายวิชา {subjectCode} {subjectTitle}</p>
+            <p className="text-m font-bold text-slate-400">รายวิชา {subjectCode} {subjectTitle}</p>
           </div>
 
           <div className="overflow-auto">
-            <table className="w-full min-w-[760px] border-collapse text-xs text-center">
+            <table className="w-full min-w-[760px] border-collapse text-m text-center">
               <thead>
                 <tr className="bg-slate-50">
                   <th rowSpan={2} className="border border-slate-200 px-2 py-2">ห้องเรียน</th>
@@ -120,14 +120,14 @@ export default function Vp15Report({
           </div>
 
           {grandTotal && (
-            <div className="mt-4 flex flex-wrap gap-6 text-xs font-bold text-slate-600">
+            <div className="mt-4 flex flex-wrap gap-6 text-m font-bold text-slate-600">
               <p>จำนวนที่ได้ระดับ 3–4: <span className="font-black text-emerald-600">{level3to4}</span> คน</p>
               <p>คิดเป็นร้อยละ: <span className="font-black text-emerald-600">{gradedTotal > 0 ? ((level3to4 / gradedTotal) * 100).toFixed(2) : "0.00"}%</span></p>
             </div>
           )}
 
           {/* ช่องลงชื่อสำหรับพิมพ์ */}
-          <div className="mt-10 space-y-8 text-xs font-bold text-slate-600 print:mt-16">
+          <div className="mt-10 space-y-8 text-m font-bold text-slate-600 print:mt-16">
             {["ครูประจำวิชา", "หัวหน้ากลุ่มสาระ", "หัวหน้ากลุ่มบริหารวิชาการ", "รองผู้อำนวยการโรงเรียน", "ผู้อำนวยการโรงเรียน"].map(role => (
               <p key={role} className="text-right pr-10">ลงชื่อ..................................................... {role}</p>
             ))}

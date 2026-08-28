@@ -684,24 +684,24 @@ export default function Vp3Report({
 
       <div className="vp3-report-root">
       <div className="print:hidden flex items-center justify-between flex-wrap gap-2">
-        <button onClick={onBack} className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-sm">
+        <button onClick={onBack} className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-base">
           ← กลับ
         </button>
         <div className="flex items-center gap-2">
           <button
             onClick={handleExportWord}
             disabled={exporting}
-            className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-sm shadow"
+            className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-base shadow"
           >
             📄 {exporting ? "กำลังสร้างไฟล์..." : "ส่งออก Word"}
           </button>
-          <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-black text-sm shadow">
+          <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-black text-base shadow">
             🖨️ พิมพ์ / บันทึกเป็น PDF
           </button>
         </div>
       </div>
 
-      {error && <p className="print:hidden text-xs font-black text-red-500 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
+      {error && <p className="print:hidden text-m font-black text-red-500 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
 
       <div className="bg-slate-100 print:bg-transparent rounded-2xl p-4 sm:p-8 print:p-0 overflow-x-auto">
         <div

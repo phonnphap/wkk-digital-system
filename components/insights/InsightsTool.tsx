@@ -188,17 +188,17 @@ export default function InsightsTool({
     <ScopeButton active={scope === "school"} onClick={() => setScope("school")}
       label="🏫 ทั้งโรงเรียน (ทุกวิชา)" />
   )}
-  <span className="text-slate-300 text-[11px] font-bold ml-auto">ขอบเขต: {scopeLabelOf(scope)}</span>
+  <span className="text-slate-300 text-[14px] font-bold ml-auto">ขอบเขต: {scopeLabelOf(scope)}</span>
 </div>
 
       {loading ? (
-        <div className="text-center py-16 text-slate-300 font-bold text-sm">กำลังโหลดข้อมูลเชิงลึก...</div>
+        <div className="text-center py-16 text-slate-300 font-bold text-base">กำลังโหลดข้อมูลเชิงลึก...</div>
       ) : error ? (
-        <p className="text-red-600 text-xs font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-3">❌ {error}</p>
+        <p className="text-red-600 text-sm font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-3">❌ {error}</p>
       ) : !data ? null : data.totals.studentCount === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
           <p className="text-3xl mb-2">📭</p>
-          <p className="font-bold text-sm">ไม่มีข้อมูลนักเรียนในขอบเขตที่เลือก ลองสลับไปดูขอบเขตอื่น</p>
+          <p className="font-bold text-base">ไม่มีข้อมูลนักเรียนในขอบเขตที่เลือก ลองสลับไปดูขอบเขตอื่น</p>
         </div>
       ) : (
         <>
@@ -211,36 +211,36 @@ export default function InsightsTool({
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 p-4 sm:p-6">
-              <h3 className="font-black text-slate-700 text-sm mb-3 flex items-center gap-1.5">⚠️ นักเรียนกลุ่มเสี่ยง</h3>
+              <h3 className="font-black text-slate-700 text-base mb-3 flex items-center gap-1.5">⚠️ นักเรียนกลุ่มเสี่ยง</h3>
               {data.atRiskStudents.length === 0 ? (
                 <div className="text-center py-10">
                   <p className="text-3xl mb-2">🎉</p>
-                  <p className="text-emerald-500 font-black text-sm">ไม่มีนักเรียนกลุ่มเสี่ยงในขอบเขตนี้</p>
+                  <p className="text-emerald-500 font-black text-base">ไม่มีนักเรียนกลุ่มเสี่ยงในขอบเขตนี้</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[520px] border-collapse">
                     <thead>
                       <tr className="bg-slate-50">
-                        <th className="text-left text-[11px] font-black text-slate-500 px-3 py-2">ชื่อ</th>
-                        <th className="text-left text-[11px] font-black text-slate-500 px-3 py-2">ห้อง</th>
-                        <th className="text-center text-[11px] font-black text-slate-500 px-3 py-2">เข้าเรียน</th>
-                        <th className="text-center text-[11px] font-black text-slate-500 px-3 py-2">คะแนนเฉลี่ย</th>
-                        <th className="text-left text-[11px] font-black text-slate-500 px-3 py-2">สาเหตุ</th>
+                        <th className="text-left text-[14px] font-black text-slate-500 px-3 py-2">ชื่อ</th>
+                        <th className="text-left text-[14px] font-black text-slate-500 px-3 py-2">ห้อง</th>
+                        <th className="text-center text-[14px] font-black text-slate-500 px-3 py-2">เข้าเรียน</th>
+                        <th className="text-center text-[14px] font-black text-slate-500 px-3 py-2">คะแนนเฉลี่ย</th>
+                        <th className="text-left text-[14px] font-black text-slate-500 px-3 py-2">สาเหตุ</th>
                       </tr>
                     </thead>
                     <tbody>
                       {data.atRiskStudents.map(s => (
                         <tr key={s.id} className="border-t border-slate-100">
-                          <td className="px-3 py-2 text-xs font-black text-slate-700 whitespace-nowrap">เลขที่ {s.seatNumber} {s.name}</td>
-                          <td className="px-3 py-2 text-xs font-bold text-slate-500 whitespace-nowrap">{s.classroomName}</td>
-                          <td className="px-3 py-2 text-center text-xs font-black">
+                          <td className="px-3 py-2 text-sm font-black text-slate-700 whitespace-nowrap">เลขที่ {s.seatNumber} {s.name}</td>
+                          <td className="px-3 py-2 text-sm font-bold text-slate-500 whitespace-nowrap">{s.classroomName}</td>
+                          <td className="px-3 py-2 text-center text-sm font-black">
                             {s.attendanceRate === null ? "-" : <span className={s.attendanceRate < 80 ? "text-red-500" : "text-slate-600"}>{s.attendanceRate}%</span>}
                           </td>
-                          <td className="px-3 py-2 text-center text-xs font-black">
+                          <td className="px-3 py-2 text-center text-sm font-black">
                             {s.avgScore === null ? "-" : <span className={s.avgScore < 50 ? "text-red-500" : "text-slate-600"}>{s.avgScore}%</span>}
                           </td>
-                          <td className="px-3 py-2 text-[11px] font-bold text-slate-400">{s.reasons.join(" · ")}</td>
+                          <td className="px-3 py-2 text-[14px] font-bold text-slate-400">{s.reasons.join(" · ")}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -251,13 +251,13 @@ export default function InsightsTool({
 
             <div className="space-y-4">
               <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-5">
-                <h3 className="font-black text-slate-700 text-sm mb-3 flex items-center gap-1.5">📈 การกระจายของคะแนน</h3>
+                <h3 className="font-black text-slate-700 text-base mb-3 flex items-center gap-1.5">📈 การกระจายของคะแนน</h3>
                 <div className="grid grid-cols-3 gap-2">
                   {data.scoreDistribution.map(b => (
                     <div key={b.band} className="text-center rounded-xl border border-slate-100 p-2">
                       <div className={`w-2 h-2 rounded-full mx-auto mb-1 ${bandColor(b.band)}`} />
                       <p className="text-base font-black text-slate-700">{b.count}</p>
-                      <p className="text-[9px] text-slate-400 font-bold">{b.band}</p>
+                      <p className="text-[12px] text-slate-400 font-bold">{b.band}</p>
                     </div>
                   ))}
                 </div>
@@ -295,7 +295,7 @@ function ScopeButton({ active, onClick, label }: { active: boolean; onClick: () 
   return (
     <button
       onClick={onClick}
-      className={`px-3 py-2 rounded-xl font-black text-xs transition-colors ${
+      className={`px-3 py-2 rounded-xl font-black text-sm transition-colors ${
         active ? "bg-blue-600 text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
       }`}
     >
@@ -319,9 +319,9 @@ function StatCard({
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-4 flex items-start justify-between">
       <div>
-        <p className="text-[11px] font-bold text-slate-400">{label}</p>
+        <p className="text-[14px] font-bold text-slate-400">{label}</p>
         <p className={`text-2xl font-black mt-1 ${valueToneMap[tone]}`}>{value}</p>
-        <p className="text-[10px] font-bold text-slate-300 mt-0.5">{sub}</p>
+        <p className="text-[12px] font-bold text-slate-300 mt-0.5">{sub}</p>
       </div>
       <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0 ${toneMap[tone]}`}>{icon}</div>
     </div>
@@ -331,20 +331,20 @@ function StatCard({
 function RankingCard({ title, rows }: { title: string; rows: { id: string; name: string; sub: string; riskPercent: number }[] }) {
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-5">
-      <h3 className="font-black text-slate-700 text-sm mb-3">{title}</h3>
+      <h3 className="font-black text-slate-700 text-base mb-3">{title}</h3>
       {rows.length === 0 ? (
-        <p className="text-center text-slate-300 font-bold text-xs py-6">ไม่มีข้อมูล</p>
+        <p className="text-center text-slate-300 font-bold text-sm py-6">ไม่มีข้อมูล</p>
       ) : (
         <div className="divide-y divide-slate-50">
           {rows.map((r, i) => (
             <div key={r.id} className="flex items-center gap-3 py-2.5">
-              <span className="w-6 text-center text-xs font-black text-slate-300">{i + 1}</span>
+              <span className="w-6 text-center text-sm font-black text-slate-300">{i + 1}</span>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-black text-slate-700 truncate">{r.name}</p>
-                <p className="text-[10px] text-slate-400 font-bold">{r.sub}</p>
+                <p className="text-sm font-black text-slate-700 truncate">{r.name}</p>
+                <p className="text-[12px] text-slate-400 font-bold">{r.sub}</p>
               </div>
               <span
-                className={`px-2.5 py-1 rounded-full text-[11px] font-black shrink-0 ${
+                className={`px-2.5 py-1 rounded-full text-[14px] font-black shrink-0 ${
                   r.riskPercent < 20 ? "bg-emerald-50 text-emerald-600" : r.riskPercent < 50 ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600"
                 }`}
               >

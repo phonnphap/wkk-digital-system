@@ -238,9 +238,9 @@ async function handleDeleteLinkedAssignment(assignmentId: string, title: string)
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2 print:hidden">
         <div>
-          <button onClick={onBack} className="text-xs font-black text-slate-400 hover:text-slate-600 mb-1">← กลับ</button>
-          <h2 className="font-black text-slate-800 text-lg">วผ.7.1 แผนการวัดและประเมินผล</h2>
-          <p className="text-slate-400 text-xs font-bold">
+          <button onClick={onBack} className="text-m font-black text-slate-400 hover:text-slate-600 mb-1">← กลับ</button>
+          <h2 className="font-black text-slate-800 text-xl">วผ.7.1 แผนการวัดและประเมินผล</h2>
+          <p className="text-slate-400 text-m font-bold">
             {subjectCode} · {subjectTitle} · ข้อมูลนี้ใช้ร่วมกันทุกห้อง/ทุกครูที่สอนวิชานี้
           </p>
         </div>
@@ -249,13 +249,13 @@ async function handleDeleteLinkedAssignment(assignmentId: string, title: string)
   <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1">
     <button
       onClick={() => setView("edit")}
-      className={`px-3 py-2 rounded-lg text-xs font-black transition-colors ${view === "edit" ? "bg-fuchsia-500 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+      className={`px-3 py-2 rounded-lg text-m font-black transition-colors ${view === "edit" ? "bg-fuchsia-500 text-white" : "text-slate-500 hover:bg-slate-50"}`}
     >
       📝 แก้ไขแผน
     </button>
     <button
       onClick={() => setView("report")}
-      className={`px-3 py-2 rounded-lg text-xs font-black transition-colors ${view === "report" ? "bg-fuchsia-500 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+      className={`px-3 py-2 rounded-lg text-m font-black transition-colors ${view === "report" ? "bg-fuchsia-500 text-white" : "text-slate-500 hover:bg-slate-50"}`}
     >
       📊 รายงานคะแนน นร.
     </button>
@@ -265,24 +265,24 @@ async function handleDeleteLinkedAssignment(assignmentId: string, title: string)
       onClick={loadUnitScores}
       disabled={loadingUnitScores}
       title="ดึงข้อมูลชิ้นงานที่ผูกล่าสุด"
-      className="px-3 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm disabled:opacity-50"
+      className="px-3 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-base disabled:opacity-50"
     >
       {loadingUnitScores ? "⏳" : "🔄"} รีเฟรช
     </button>
   )}
-  <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm">
+  <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-base">
     🖨️ พิมพ์
   </button>
           {!readOnly && view === "edit" && (
             <button onClick={handleSave} disabled={saving}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 disabled:opacity-50 text-white font-black text-sm">
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:to-pink-600 disabled:opacity-50 text-white font-black text-base">
               {saving ? "กำลังบันทึก..." : "💾 บันทึกทั้งหมด"}
             </button>
           )}
         </div>
       </div>
       {savedAt && !saving && view === "edit" && (
-        <p className="text-xs font-black text-emerald-500 print:hidden">✅ บันทึกแล้ว</p>
+        <p className="text-m font-black text-emerald-500 print:hidden">✅ บันทึกแล้ว</p>
       )}
 
       {view === "edit" ? (
@@ -354,12 +354,12 @@ function EditPlanView({
   onDeleteAssignment: (assignmentId: string, title: string) => void; 
 }) {
   if (loading) {
-    return <div className="text-center py-16 text-slate-300 font-bold text-sm">กำลังโหลด...</div>;
+    return <div className="text-center py-16 text-slate-300 font-bold text-base">กำลังโหลด...</div>;
   }
   return (
     <>
       <div className="bg-white rounded-2xl border border-slate-100 overflow-auto">
-        <table className="w-full min-w-[960px] border-collapse text-xs">
+        <table className="w-full min-w-[960px] border-collapse text-m">
           <thead className="bg-gradient-to-r from-indigo-50 to-fuchsia-50">
             <tr>
               <th className="px-2 py-3 font-black text-slate-600 w-10">หน่วยที่</th>
@@ -422,18 +422,18 @@ function EditPlanView({
                 </td>
                 <td className="px-2 py-2">
                   {loadingUnitScores ? (
-                    <span className="text-[10px] text-slate-300 font-bold">กำลังโหลด...</span>
+                    <span className="text-[12px] text-slate-300 font-bold">กำลังโหลด...</span>
                   ) : !u.score_points ? (
-                    <span className="text-[10px] text-slate-300 font-bold">— ยังไม่ตั้งคะแนนเก็บ —</span>
+                    <span className="text-[12px] text-slate-300 font-bold">— ยังไม่ตั้งคะแนนเก็บ —</span>
                   ) : linkedCount === 0 ? (
-                    <span className="inline-block px-2 py-1 rounded-full text-[10px] font-black bg-amber-50 text-amber-600">
+                    <span className="inline-block px-2 py-1 rounded-full text-[12px] font-black bg-amber-50 text-amber-600">
                       ⚠️ ยังไม่มีชิ้นงานผูก
                     </span>
                   ) : (
                     <button
                       type="button"
                       onClick={() => setExpandedUnit(isExpanded ? null : u.unit_no)}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[12px] font-black bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
                     >
                       ✅ ผูกแล้ว {linkedCount} ชิ้น (รวม {fmtScore(info!.totalMaxScore)} คะแนนดิบ) {isExpanded ? "▲" : "▼"}
                     </button>
@@ -449,7 +449,7 @@ function EditPlanView({
   <tr className="bg-emerald-50/40">
     <td></td>
     <td colSpan={7} className="px-4 py-3">
-      <p className="text-[11px] font-black text-emerald-700 mb-2">
+      <p className="text-[14px] font-black text-emerald-700 mb-2">
         ระบบคำนวณน้ำหนักคะแนนของแต่ละชิ้นงานอัตโนมัติ ให้รวมกันเท่ากับคะแนนเก็บที่ตั้งไว้ ({fmtScore(u.score_points ?? 0)} คะแนน) เสมอ
       </p>
       <div className="space-y-1">
@@ -466,7 +466,7 @@ function EditPlanView({
                     type="button"
                     onClick={() => onUnlinkAssignment(a.id)}
                     title="เอาออกจากหน่วยนี้ (ชิ้นงานยังอยู่ในห้องเรียนเดิม)"
-                    className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-600 font-black text-[10px]"
+                    className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-600 font-black text-[12px]"
                   >
                     🔗 เอาออก
                   </button>
@@ -474,7 +474,7 @@ function EditPlanView({
                     type="button"
                     onClick={() => onDeleteAssignment(a.id, a.title)}
                     title="ลบชิ้นงานนี้ถาวร"
-                    className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-black text-[10px]"
+                    className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-black text-[12px]"
                   >
                     🗑️ ลบถาวร
                   </button>
@@ -503,7 +503,7 @@ function EditPlanView({
       </div>
 
       {!readOnly && (
-        <button onClick={addUnit} className="w-full py-3 rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-fuchsia-400 hover:text-fuchsia-500 font-black text-xs print:hidden">
+        <button onClick={addUnit} className="w-full py-3 rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-fuchsia-400 hover:text-fuchsia-500 font-black text-m print:hidden">
           + เพิ่มหน่วยการเรียนรู้
         </button>
       )}
@@ -676,7 +676,7 @@ function ReportView({
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
         <p className="text-3xl mb-2">📊</p>
-        <p className="font-bold text-sm">
+        <p className="font-bold text-base">
           หน้านี้ต้องเปิดจากภายในห้องเรียนที่ต้องการดูรายงาน (ต้องส่ง <code>sectionId</code> และ <code>students</code> เข้ามาให้คอมโพเนนต์นี้)
         </p>
       </div>
@@ -684,7 +684,7 @@ function ReportView({
   }
 
   if (loading) {
-    return <div className="text-center py-16 text-slate-300 font-bold text-sm">กำลังโหลดรายงาน...</div>;
+    return <div className="text-center py-16 text-slate-300 font-bold text-base">กำลังโหลดรายงาน...</div>;
   }
 
   const sortedStudents = [...students].sort((a, b) => a.seat_number - b.seat_number);
@@ -692,7 +692,7 @@ function ReportView({
   return (
     <div>
       <div className="flex items-center gap-3 flex-wrap mb-3 print:hidden">
-        <span className="text-[11px] text-slate-400 font-bold bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5">
+        <span className="text-[14px] text-slate-400 font-bold bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5">
           น้ำหนักคะแนนเก็บ : คะแนนสอบ = {sumUnitScorePoints} : {midtermMax + finalMax} (กลางภาค {midtermMax} + ปลายภาค {finalMax}) ·
           คะแนนเต็มรวมทั้งวิชา = {totalPossible} คะแนน
           <span className="ml-1 text-slate-300">— แก้ไขคะแนนกลางภาค/ปลายภาคได้ที่หน้า "คะแนนรวม" เท่านั้น เพื่อให้ตัวเลขตรงกันเสมอ</span>
@@ -701,17 +701,17 @@ function ReportView({
 
       <div className="hidden print:block text-center mb-2 leading-tight">
         <p className="font-black text-[13px]">แบบบันทึกคะแนนการวัดและประเมินผลระหว่างเรียนและปลายภาค</p>
-        <p className="text-[11px] font-bold">
+        <p className="text-[14px] font-bold">
           รหัสวิชา {subjectCode} &nbsp; รายวิชา {subjectTitle}
         </p>
-        <p className="text-[11px] font-bold">
+        <p className="text-[14px] font-bold">
           คะแนนเก็บระหว่างเรียน {sumUnitScorePoints} คะแนน &nbsp; คะแนนสอบ (กลางภาค {midtermMax} + ปลายภาค {finalMax}) {midtermMax + finalMax} คะแนน &nbsp;
           น้ำหนักคะแนนรวม {sumUnitScorePoints} : {midtermMax + finalMax} = {totalPossible} คะแนน
         </p>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 overflow-auto vp-print-report">
-        <table className="w-full border-collapse text-[10px] vp-report-table">
+        <table className="w-full border-collapse text-[12px] vp-report-table">
           <thead className="bg-gradient-to-r from-indigo-50 to-fuchsia-50 print:bg-white">
             <tr>
               <th rowSpan={2} className="border border-slate-300 px-1 py-2 font-black w-8">ที่</th>
@@ -790,7 +790,7 @@ function ReportView({
         </table>
       </div>
 
-      <div className="mt-4 bg-white rounded-2xl border border-slate-100 p-4 space-y-3 text-xs print:mt-2 print:border-0 print:p-0 vp-print-legend">
+      <div className="mt-4 bg-white rounded-2xl border border-slate-100 p-4 space-y-3 text-m print:mt-2 print:border-0 print:p-0 vp-print-legend">
         <p className="font-black text-slate-600">คำอธิบาย{indicatorLabel}</p>
         {unitsWithScore.map(u => (
           <div key={u.unit_no}>

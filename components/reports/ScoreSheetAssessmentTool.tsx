@@ -117,36 +117,36 @@ export default function ScoreSheetAssessmentTool({
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2 print:hidden">
         <div>
-          <button onClick={onBack} className="text-xs font-black text-slate-400 hover:text-slate-600 mb-1">← กลับ</button>
+          <button onClick={onBack} className="text-m font-black text-slate-400 hover:text-slate-600 mb-1">← กลับ</button>
           <h2 className="font-black text-slate-800 text-lg">{title}</h2>
-          <p className="text-slate-400 text-xs font-bold">
+          <p className="text-slate-400 text-m font-bold">
             {subjectTitle} · {classroomLabel} · {readOnly ? "ดูอย่างเดียว" : "คลิกที่ช่องคะแนนเพื่อแก้ไข"}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm">
+          <button onClick={handlePrint} className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-base">
             🖨️ พิมพ์
           </button>
-          <button onClick={handleExportExcel} className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-sm">
+          <button onClick={handleExportExcel} className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base">
             📊 Export
           </button>
         </div>
       </div>
 
       {loading ? (
-        <div className="text-center py-16 text-slate-300 font-bold text-sm">กำลังโหลด...</div>
+        <div className="text-center py-16 text-slate-300 font-bold text-base">กำลังโหลด...</div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-100 overflow-auto max-h-[75vh]">
-          <table className="w-full min-w-[720px] border-collapse text-xs">
+          <table className="w-full min-w-[720px] border-collapse text-m">
             <thead className="sticky top-0 z-10 bg-gradient-to-r from-indigo-50 to-fuchsia-50">
               <tr>
                 <th className="px-3 py-3 text-left font-black text-slate-600 sticky left-0 bg-indigo-50">เลขที่ / ชื่อ-สกุล</th>
                 {items.map(it => (
                   <th key={it.key} className="px-3 py-3 text-center font-black text-slate-600 min-w-[80px]">
-                    {it.label}<p className="text-[9px] text-slate-400 font-bold">เต็ม {maxPerItem}</p>
+                    {it.label}<p className="text-[12px] text-slate-400 font-bold">เต็ม {maxPerItem}</p>
                   </th>
                 ))}
-                <th className="px-3 py-3 text-center font-black text-emerald-700 min-w-[70px]">คะแนน<p className="text-[9px] text-emerald-400 font-bold">เต็ม {maxTotal}</p></th>
+                <th className="px-3 py-3 text-center font-black text-emerald-700 min-w-[70px]">คะแนน<p className="text-[12px] text-emerald-400 font-bold">เต็ม {maxTotal}</p></th>
                 <th className="px-3 py-3 text-center font-black text-slate-600 min-w-[60px]">ร้อยละ</th>
                 <th className="px-3 py-3 text-center font-black text-fuchsia-700 min-w-[90px]">ผลการประเมิน</th>
               </tr>
@@ -168,7 +168,7 @@ export default function ScoreSheetAssessmentTool({
                           value={r.rowScores[it.key] ?? 0}
                           onChange={e => setScore(r.student.id, it.key, Number(e.target.value))}
                           onBlur={() => saveRow(r.student.id)}
-                          className="w-14 text-center border-2 border-slate-200 rounded-lg py-1 text-xs font-black focus:outline-none focus:border-fuchsia-300"
+                          className="w-14 text-center border-2 border-slate-200 rounded-lg py-1 text-m font-black focus:outline-none focus:border-fuchsia-300"
                         />
                       )}
                     </td>
@@ -188,7 +188,7 @@ export default function ScoreSheetAssessmentTool({
           </table>
         </div>
       )}
-      {saving && <p className="text-[11px] text-slate-400 font-bold print:hidden">กำลังบันทึก...</p>}
+      {saving && <p className="text-[14px] text-slate-400 font-bold print:hidden">กำลังบันทึก...</p>}
     </div>
   );
 }
