@@ -33,6 +33,7 @@ export default function TrainingPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<TrainingRecordWithUser | null>(null);
+  const [printingOwn, setPrintingOwn] = useState(false);
 
   const loadAll = useCallback(async () => {
     const acc = await getTrainingAccess();
@@ -51,26 +52,52 @@ export default function TrainingPage() {
 
   const myRecords = useMemo(() => records.filter((r) => r.user_id === access?.user?.id), [records, access]);
 
+  // ✅ ทุกคนเห็นรายการทั้งหมดเสมอ (canViewAll เป็น true ตายตัวแล้วจากฝั่ง permissions)
   const visibleRecords = useMemo(() => {
-    let list = access?.canViewAll ? records : myRecords;
+    let list = records;
     if (filterType !== 'All') list = list.filter((r) => r.training_type === filterType);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((r) => r.course_name.toLowerCase().includes(q) || (r.organizer ?? '').toLowerCase().includes(q));
     }
     return list;
-  }, [records, myRecords, access, filterType, search]);
+  }, [records, filterType, search]);
 
   const chartData = useMemo(() => {
     const byType: Record<string, number> = {};
-    for (const r of (access?.canViewAll ? records : myRecords)) byType[r.training_type] = (byType[r.training_type] ?? 0) + Number(r.hours);
+    for (const r of records) byType[r.training_type] = (byType[r.training_type] ?? 0) + Number(r.hours);
     return Object.entries(byType).map(([type, hours]) => ({ name: TRAINING_TYPE_LABELS[type as TrainingType] ?? type, ชั่วโมง: hours }));
-  }, [records, myRecords, access]);
+  }, [records]);
+
+  // ✅ แก้ไข/ลบได้เฉพาะเจ้าของรายการเอง หรือผู้บริหาร/ผู้ดูแลโครงการ (isManagement) เท่านั้น
+  function canEditRecord(r: TrainingRecordWithUser): boolean {
+    if (!access?.user) return false;
+    return access.isManagement || r.user_id === access.user.id;
+  }
 
   async function handleDelete(id: string) {
     if (!confirm('ยืนยันการลบรายงานนี้?')) return;
     await deleteTrainingRecord(id);
     await loadAll();
+  }
+
+  async function handlePrintOwn() {
+    if (!access?.user) return;
+    setPrintingOwn(true);
+    try {
+      await printIndividualReport(
+        {
+          full_name: access.user.full_name,
+          position: allUsers.find(u => u.id === access.user!.id)?.position,
+          grade_level: myRecords[0]?.grade_level,
+          department_name: myRecords[0]?.department_name,
+          signature_url: access.user.signature_url,
+        },
+        myRecords, targetHours
+      );
+    } finally {
+      setPrintingOwn(false);
+    }
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><p className="text-slate-400 animate-pulse">กำลังโหลด...</p></div>;
@@ -82,28 +109,20 @@ export default function TrainingPage() {
         <button onClick={()=>router.push("/dashboard")} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg">🏠</button>
         <div className="flex-1 min-w-0">
           <h1 className="text-white font-bold text-lg leading-tight">📚 รายงานการอบรมรายบุคคล</h1>
-          <p className="text-blue-100 text-sm">{access.user.full_name}{access.canViewAll ? ' · เห็นข้อมูลทั้งหมด' : ''}</p>
+          <p className="text-blue-100 text-sm">{access.user.full_name}{access.isManagement ? ' · ผู้ดูแลระบบ/โครงการ' : ''}</p>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
           <ManageTrainingSupervisorsButton isAdmin={access.isAdmin} />
-          {access.canViewAll && (
+          {access.isManagement && (
             <button onClick={() => exportTrainingToXlsx(visibleRecords)}
               className="px-3 py-2 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-xl border border-white/30">
               📊 Export Excel
             </button>
           )}
-          <button onClick={() => printIndividualReport(
-  {
-    full_name: access.user!.full_name,
-    position: allUsers.find(u => u.id === access.user!.id)?.position,
-    grade_level: myRecords[0]?.grade_level,
-    department_name: myRecords[0]?.department_name,
-  },
-  myRecords, targetHours
-)}
-  className="px-3 py-2 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-xl border border-white/30">
-  📄 รายงานของฉัน (PDF)
-</button>
+          <button onClick={handlePrintOwn} disabled={printingOwn}
+            className="px-3 py-2 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-xl border border-white/30 disabled:opacity-50">
+            {printingOwn ? '⏳ กำลังเตรียม...' : '📄 รายงานของฉัน (PDF)'}
+          </button>
           <button onClick={() => { setEditing(null); setShowForm(true); }}
             className="px-4 py-2 bg-white text-blue-600 text-xs font-bold rounded-xl shadow-sm hover:bg-blue-50">
             + บันทึกการอบรม
@@ -113,7 +132,7 @@ export default function TrainingPage() {
 
       <div className="bg-white border-b border-slate-200 flex shrink-0">
         {([
-          ...(access.canViewAll ? [['dashboard', '📊 แดชบอร์ด']] as const : []),
+          ...(access.isManagement ? [['dashboard', '📊 แดชบอร์ด']] as const : []),
           ['list', '📋 รายการทั้งหมด'],
           ['mine', '📌 ของฉัน'],
         ] as const).map(([k, l]) => (
@@ -127,7 +146,7 @@ export default function TrainingPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {tab === 'dashboard' && access.canViewAll && (
+        {tab === 'dashboard' && access.isManagement && (
           <div className="max-w-5xl mx-auto p-5 space-y-6">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
@@ -188,7 +207,7 @@ export default function TrainingPage() {
                     <div className="min-w-0 flex-1">
                       <p className="font-bold text-slate-800 text-sm">{r.course_name}</p>
                       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-400 mt-1">
-                        {access.canViewAll && <span>👤 {fullName(r)}</span>}
+                        {tab === 'list' && <span>👤 {fullName(r)}</span>}
                         <span>🏷️ {TRAINING_TYPE_LABELS[r.training_type]}</span>
                         <span>📅 {thaiDate(r.start_date)} – {thaiDate(r.end_date)}</span>
                         <span>⏱️ {r.hours} ชม.</span>
@@ -205,12 +224,17 @@ export default function TrainingPage() {
                         </div>
                       )}
                     </div>
-                    <div className="flex gap-1.5 shrink-0">
-                      <button onClick={() => { setEditing(r); setShowForm(true); }}
-                        className="text-xs font-bold text-amber-600 hover:text-amber-800 px-2 py-1 rounded-lg hover:bg-amber-50 border border-amber-200">✏️</button>
-                      <button onClick={() => handleDelete(r.id)}
-                        className="text-xs font-bold text-red-500 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 border border-red-200">🗑️</button>
-                    </div>
+                    {/* ✅ ปุ่มแก้ไข/ลบ แสดงเฉพาะเจ้าของรายการ หรือผู้บริหาร/ผู้ดูแลโครงการเท่านั้น — คนอื่นดูได้อย่างเดียว */}
+                    {canEditRecord(r) ? (
+                      <div className="flex gap-1.5 shrink-0">
+                        <button onClick={() => { setEditing(r); setShowForm(true); }}
+                          className="text-xs font-bold text-amber-600 hover:text-amber-800 px-2 py-1 rounded-lg hover:bg-amber-50 border border-amber-200">✏️</button>
+                        <button onClick={() => handleDelete(r.id)}
+                          className="text-xs font-bold text-red-500 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 border border-red-200">🗑️</button>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] font-bold text-slate-300 shrink-0 self-start px-2 py-1">🔒 ดูอย่างเดียว</span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -230,7 +254,7 @@ export default function TrainingPage() {
           existing={editing}
           currentUser={access.user}
           allUsers={allUsers}
-          canPickAnyUser={access.canViewAll}
+          canPickAnyUser={access.isManagement}
           onSave={async () => { setShowForm(false); setEditing(null); await loadAll(); }}
           onClose={() => { setShowForm(false); setEditing(null); }}
         />

@@ -127,3 +127,14 @@ export async function deleteTrainingRecord(id: string) {
   const { error } = await supabase.from('training_records').delete().eq('id', id);
   if (error) throw error;
 }
+
+export interface EvidenceFile {
+  url: string;
+  path?: string; // OneDrive relative path — ใช้ resolve ลิงก์ใหม่ตอนพิมพ์ เพราะลิงก์ตรงอาจหมดอายุ
+  name: string;
+}
+
+export interface TrainingRecordWithUser extends TrainingRecord {
+  title?: string; first_name?: string; last_name?: string; full_name?: string;
+  position?: string; grade_level?: string; department_name?: string; signature_url?: string;
+}

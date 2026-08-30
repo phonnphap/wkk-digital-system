@@ -1,48 +1,3 @@
-// app/late-checkin/page.tsx
-// ══════════════════════════════════════════════════════════
-// ระบบบันทึกนักเรียนมาสาย (Late Attendance Module)
-// ★ สร้างโดยอ้างอิงดีไซน์/แพทเทิร์นเดียวกับ app/students/page.tsx (การ์ดโค้งมน,
-//   สี indigo→blue, ปุ่ม Home/กลับ) และ app/dashboard/page.tsx (การเชื่อมกับ
-//   ตาราง attendance_records ที่มี status: "present" / "late" / "leave" / "absent"
-//   ตามที่ระบุไว้ในคอมเมนต์ของหน้าแดชบอร์ด)
-//
-// หน้านี้ออกแบบให้ "สภานักเรียน" และ "ครูเวรประจำวัน" ใช้งานหน้าประตูโรงเรียนได้เร็ว:
-//   1) สแกนบาร์โค้ด/คิวอาร์บัตรนักเรียน (เลขประจำตัว 13 หลัก) → ขึ้นชื่อ + บันทึกสาย
-//   2) พิมพ์ค้นหาชื่อ-นามสกุล
-//   3) เลือกระดับชั้น → ห้อง → คลิกเลือกจากรายชื่อ
-//   4) มีปุ่มยืนยันก่อนบันทึกเสมอ + สามารถลบ/ยกเลิกสถานะที่บันทึกผิดได้ทันที
-//
-// ตารางที่ต้องมี (โปรดสร้าง/ตรวจสอบใน Supabase ก่อนใช้งานจริง):
-//
-//   attendance_records
-//     id                uuid primary key default gen_random_uuid()
-//     student_id        uuid references students(id)
-//     classroom_id      uuid references classrooms(classroom_id)
-//     attendance_date   date not null
-//     status            text not null   -- 'present' | 'late' | 'leave' | 'absent'
-//     recorded_by       uuid references users(id)
-//     recorded_at       timestamptz default now()
-//     note              text
-//     unique (student_id, attendance_date)   -- ★ กันบันทึกซ้ำวันเดียวกัน ใช้ทำ upsert
-//
-//   classrooms ต้องมีคอลัมน์ grade_level (เช่น "ม.1") เพิ่มจากที่มีอยู่แล้ว
-//   (classroom_id, room_name, room_number) เพื่อใช้กรองตามระดับชั้นในหน้านี้
-//
-// ตัวอย่าง RLS ที่ต้องเพิ่ม (รันใน Supabase SQL editor) — อนุญาตให้ครูเวร/สภานักเรียน
-// ที่ล็อกอินแล้ว บันทึก/แก้ไข attendance_records ของ "วันนี้" ได้ทุกห้อง (ไม่ใช่แค่ห้องตัวเอง
-// เหมือนครูประจำชั้น) เพราะงานเวรหน้าประตูต้องเห็นนักเรียนทุกห้อง:
-//
-//   create policy "duty staff can upsert today's attendance"
-//     on attendance_records for all
-//     using (attendance_date = current_date)
-//     with check (attendance_date = current_date);
-//
-// ★ ส่วนการหักคะแนนความประพฤติอัตโนมัติ (ระเบียบฯ ข้อ 2.10) และแจ้งเตือนผู้ปกครองผ่าน
-//   Line/SMS ยังไม่มีตารางจริงให้อ้างอิง จึงทำเป็น "hook" แบบ non-blocking ไว้ในฟังก์ชัน
-//   markLate() ด้านล่าง — ถ้ามีตาราง behavior_score_logs / notification_queue แล้ว
-//   ให้แก้ตรงจุดที่คอมเมนต์ TODO ไว้เพิ่มเติมได้เลย โดยไม่กระทบ flow หลัก
-// ══════════════════════════════════════════════════════════
-
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -50,14 +5,18 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   ScanLine, Search, Home, ArrowLeft, Undo2, Clock, CheckCircle2,
-  Users, ClipboardList, AlertTriangle, X,
+  Users, ClipboardList, AlertTriangle, X, Camera, Loader2,
 } from "lucide-react";
 import { getDisplayPrefix } from "@/lib/student-prefix";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 
 const supabase = createClient();
 
 const DASHBOARD_PATH = "/dashboard";
-const DUTY_REPORT_PATH = "/duty-report"; // ★ ลิงก์ไปหน้ารายงานเวรประจำวันที่มีอยู่แล้ว ไม่สร้างซ้ำ
+const DUTY_REPORT_PATH = "/duty-report";
+const CAMERA_REGION_ID = "late-checkin-camera-region";
+
+type ClassroomInfo = { room_name: string; grade_level: string | null } | null;
 
 type Classroom = {
   classroom_id: string;
@@ -70,6 +29,7 @@ type Student = {
   id: string;
   seat_number: number | null;
   student_code: string | null;
+  national_id: string | null; // ★ เพิ่ม
   prefix: string | null;
   first_name: string;
   last_name: string;
@@ -77,6 +37,7 @@ type Student = {
   birth_date: string | null;
   gender: string | null;
   classroom_id: string;
+  classroom?: ClassroomInfo; // ★ เพิ่ม — join มาเพื่อโชว์ ชั้น/ห้อง โดยไม่ต้อง query เพิ่ม
 };
 
 type LateEntry = {
@@ -85,6 +46,10 @@ type LateEntry = {
   room_name: string;
   recorded_at: string;
 };
+
+// ★ ใช้ select เดียวกันทุกจุด กันลืมฟิลด์ตกหล่น
+const STUDENT_SELECT =
+  "id, seat_number, student_code, national_id, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id, classroom:classrooms(room_name, grade_level)";
 
 function todayISO() {
   return new Date().toISOString().split("T")[0];
@@ -96,6 +61,15 @@ function timeThai(iso: string) {
       hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok",
     });
   } catch { return ""; }
+}
+
+// ★ "ม.1/1" — รวม grade_level + room_name แบบกันพลาดถ้าค่าใดค่าหนึ่งว่าง
+function formatClassLabel(classroom?: ClassroomInfo) {
+  if (!classroom) return "";
+  const grade = classroom.grade_level ?? "";
+  const room = classroom.room_name ?? "";
+  if (grade && room) return `${grade}/${room}`;
+  return grade || room;
 }
 
 export default function LateCheckinPage() {
@@ -111,7 +85,7 @@ export default function LateCheckinPage() {
   const [query, setQuery] = useState("");
   const scanInputRef = useRef<HTMLInputElement>(null);
 
-  const [pendingStudent, setPendingStudent] = useState<Student | null>(null); // ★ รอยืนยันก่อนบันทึก
+  const [pendingStudent, setPendingStudent] = useState<Student | null>(null);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -119,7 +93,13 @@ export default function LateCheckinPage() {
   const [loadingLate, setLoadingLate] = useState(true);
   const [myProfileId, setMyProfileId] = useState<string>("");
 
-  // ── โหลดผู้ใช้ปัจจุบัน (ใช้บันทึก recorded_by) ─────────────────────
+  // ── กล้องสแกนบาร์โค้ด/คิวอาร์ ─────────────────────────────
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const html5QrRef = useRef<Html5Qrcode | null>(null);
+  const scanHandledRef = useRef(false); // กันสแกนซ้ำหลายเฟรมในครั้งเดียว
+
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       const user = data.user;
@@ -133,7 +113,6 @@ export default function LateCheckinPage() {
     });
   }, []);
 
-  // ── โหลดรายชื่อห้องทั้งหมด (ทุกระดับชั้น เพราะครูเวร/สภา นร. ต้องเห็นทุกห้อง) ──
   useEffect(() => {
     supabase
       .from("classrooms")
@@ -155,29 +134,27 @@ export default function LateCheckinPage() {
     [classrooms, gradeLevel]
   );
 
-  // ── โหลดนักเรียนของห้องที่เลือก ─────────────────────────────
   useEffect(() => {
     if (!roomId) { setStudents([]); return; }
     setLoadingStudents(true);
     supabase
       .from("students")
-      .select("id, seat_number, student_code, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id")
+      .select(STUDENT_SELECT)
       .eq("classroom_id", roomId)
       .order("seat_number")
       .then(({ data, error }) => {
         if (error) console.warn("[late-checkin] โหลดนักเรียนไม่สำเร็จ:", error.message);
-        setStudents(data ?? []);
+        setStudents((data as unknown as Student[]) ?? []);
         setLoadingStudents(false);
       });
   }, [roomId]);
 
-  // ── โหลดรายการที่ "มาสายวันนี้" ทั้งโรงเรียน (สำหรับพาเนลด้านขวา + สรุปยอด) ──
   async function loadLateToday() {
     setLoadingLate(true);
     const { data, error } = await supabase
       .from("attendance_records")
       .select(
-        "id, recorded_at, student:students(id, seat_number, student_code, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id, classroom:classrooms(room_name))"
+        `id, recorded_at, student:students(id, seat_number, student_code, national_id, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id, classroom:classrooms(room_name, grade_level))`
       )
       .eq("attendance_date", todayISO())
       .eq("status", "late")
@@ -194,7 +171,7 @@ export default function LateCheckinPage() {
       .map((r: any) => ({
         record_id: r.id,
         student: r.student,
-        room_name: r.student?.classroom?.room_name ?? "-",
+        room_name: formatClassLabel(r.student?.classroom) || "-",
         recorded_at: r.recorded_at,
       }));
     setLateToday(entries);
@@ -203,7 +180,6 @@ export default function LateCheckinPage() {
 
   useEffect(() => { loadLateToday(); }, []);
 
-  // ── ค้นหาด้วยการพิมพ์ชื่อ (กรองจากห้องที่เลือกอยู่ ถ้ายังไม่เลือกห้องจะค้นหาทั้งโรงเรียน) ──
   const [globalSearchResults, setGlobalSearchResults] = useState<Student[]>([]);
   useEffect(() => {
     const q = query.trim();
@@ -211,12 +187,12 @@ export default function LateCheckinPage() {
     const handle = setTimeout(async () => {
       const { data, error } = await supabase
         .from("students")
-        .select("id, seat_number, student_code, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id")
+        .select(STUDENT_SELECT)
         .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,nick_name.ilike.%${q}%,student_code.ilike.%${q}%`)
         .limit(20);
       if (error) { console.warn("[late-checkin] ค้นหานักเรียนไม่สำเร็จ:", error.message); return; }
-      setGlobalSearchResults(data ?? []);
-    }, 300); // debounce กันยิง query ถี่เกินไปตอนพิมพ์
+      setGlobalSearchResults((data as unknown as Student[]) ?? []);
+    }, 300);
     return () => clearTimeout(handle);
   }, [query, roomId]);
 
@@ -230,37 +206,98 @@ export default function LateCheckinPage() {
 
   const alreadyLateIds = useMemo(() => new Set(lateToday.map((e) => e.student.id)), [lateToday]);
 
-  // ── สแกนบาร์โค้ด/คิวอาร์: รหัส นร. 13 หลัก + Enter → ค้นหาแล้วเปิดยืนยันทันที ──
+  // ── ค้นหานักเรียนกลาง: รองรับทั้งรหัสนักเรียน (student_code) และเลขบัตร ปชช. (national_id) ──
+  async function findStudentByCode(code: string) {
+    return supabase
+      .from("students")
+      .select(STUDENT_SELECT)
+      .or(`student_code.eq.${code},national_id.eq.${code}`)
+      .maybeSingle();
+  }
+
   async function handleScanSubmit(e: React.FormEvent) {
     e.preventDefault();
     const code = scanValue.trim();
     if (!code) return;
     setErrorMsg("");
-    const { data, error } = await supabase
-      .from("students")
-      .select("id, seat_number, student_code, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id")
-      .eq("student_code", code)
-      .maybeSingle();
+    const { data, error } = await findStudentByCode(code);
     setScanValue("");
     if (error || !data) {
-      setErrorMsg(`ไม่พบนักเรียนรหัส "${code}" ในระบบ กรุณาตรวจสอบบัตรอีกครั้ง`);
+      setErrorMsg(`ไม่พบนักเรียนรหัส/เลขบัตร "${code}" ในระบบ กรุณาตรวจสอบอีกครั้ง`);
       return;
     }
-    setPendingStudent(data);
+    setPendingStudent(data as unknown as Student);
   }
 
-  // ★ auto-focus ช่องสแกนไว้เสมอ เพื่อให้เครื่องสแกนบาร์โค้ด (ทำงานเหมือนพิมพ์คีย์บอร์ด + Enter)
-  //   ยิงเข้าช่องนี้ได้ตลอดโดยไม่ต้องคลิกเลือกก่อน
   useEffect(() => {
-    if (!pendingStudent) scanInputRef.current?.focus();
-  }, [pendingStudent]);
+    if (!pendingStudent && !scannerOpen) scanInputRef.current?.focus();
+  }, [pendingStudent, scannerOpen]);
 
-  // ── บันทึกสถานะ "มาสาย" (มีปุ่มยืนยันเสมอตามข้อกำหนดป้องกันการกดผิด) ──
+  // ── เปิด/ปิดกล้องสแกน ────────────────────────────────────
+  useEffect(() => {
+    if (!scannerOpen) return;
+    scanHandledRef.current = false;
+    setCameraError("");
+    setCameraStarting(true);
+
+    const qr = new Html5Qrcode(CAMERA_REGION_ID, {
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.ITF,
+      ],
+      verbose: false,
+    });
+    html5QrRef.current = qr;
+
+    qr.start(
+      { facingMode: "environment" }, // กล้องหลังของมือถือ
+      { fps: 10, qrbox: { width: 260, height: 160 } },
+      (decodedText) => {
+        if (scanHandledRef.current) return; // กันยิงซ้ำหลายเฟรมติดกัน
+        scanHandledRef.current = true;
+        handleScannedCode(decodedText);
+      },
+      () => { /* เฟรมที่อ่านไม่ออก ไม่ต้องแจ้ง error รัว ๆ */ }
+    )
+      .then(() => setCameraStarting(false))
+      .catch((err) => {
+        setCameraStarting(false);
+        setCameraError(
+          "เปิดกล้องไม่สำเร็จ: กรุณาอนุญาตสิทธิ์กล้อง (Camera permission) และตรวจสอบว่าเข้าเว็บผ่าน HTTPS — " +
+          String(err)
+        );
+      });
+
+    return () => {
+      const current = html5QrRef.current;
+      html5QrRef.current = null;
+      if (current) {
+        current.stop().then(() => current.clear()).catch(() => { /* ปิดไปแล้วก็ไม่เป็นไร */ });
+      }
+    };
+  }, [scannerOpen]);
+
+  async function handleScannedCode(rawText: string) {
+    const digitsOnly = rawText.replace(/\D/g, "");
+    const code = digitsOnly.length >= 5 ? digitsOnly : rawText.trim(); // เผื่อบาร์โค้ดเป็นตัวอักษรผสม
+    setScannerOpen(false); // ปิดกล้องทันทีที่อ่านได้ ป้องกันสแกนซ้ำ
+    setErrorMsg("");
+
+    const { data, error } = await findStudentByCode(code);
+    if (error || !data) {
+      setErrorMsg(`ไม่พบนักเรียนจากบาร์โค้ด "${rawText}" ในระบบ กรุณาตรวจสอบบัตรอีกครั้ง`);
+      return;
+    }
+    setPendingStudent(data as unknown as Student);
+  }
+
   async function markLate(student: Student) {
     setSaving(true);
     setErrorMsg("");
 
-    // upsert กันบันทึกซ้ำวันเดียวกัน (ใช้ unique constraint (student_id, attendance_date))
     const { data: savedRows, error } = await supabase
       .from("attendance_records")
       .upsert(
@@ -288,26 +325,11 @@ export default function LateCheckinPage() {
       return;
     }
 
-    // ★ TODO hook: หักคะแนนความประพฤติอัตโนมัติตามระเบียบฯ ข้อ 2.10 เมื่อมีตาราง
-    //   behavior_score_logs แล้ว ให้ insert ตรงนี้ — ทำแบบ non-blocking (ไม่ throw)
-    //   เพื่อไม่ให้การบันทึกมาสายล้มเหลวถ้าขั้นตอนนี้มีปัญหา
-    // try {
-    //   await supabase.from("behavior_score_logs").insert({
-    //     student_id: student.id, points: -1, reason: "มาโรงเรียนสาย (ข้อ 2.10)",
-    //     related_type: "attendance_records", related_id: savedRows[0].id,
-    //   });
-    // } catch (e) { console.warn("[late-checkin] หักคะแนนความประพฤติไม่สำเร็จ:", e); }
-
-    // ★ TODO hook: ส่งแจ้งเตือนผู้ปกครองผ่าน Line/SMS เมื่อมีระบบคิวข้อความแล้ว
-    // try { await fetch("/api/notify/guardian", { method: "POST", body: JSON.stringify({ studentId: student.id, kind: "late" }) }); }
-    // catch (e) { console.warn("[late-checkin] แจ้งเตือนผู้ปกครองไม่สำเร็จ:", e); }
-
     setPendingStudent(null);
     setQuery("");
     loadLateToday();
   }
 
-  // ── ยกเลิก/ลบสถานะมาสายที่บันทึกผิดพลาด ─────────────────────
   async function undoLate(recordId: string) {
     if (!confirm("ยืนยันยกเลิกสถานะ 'มาสาย' รายการนี้?")) return;
     const { data: deletedRows, error } = await supabase
@@ -323,7 +345,6 @@ export default function LateCheckinPage() {
     loadLateToday();
   }
 
-  // ── สรุปยอดมาสายแยกตามห้อง (ใช้โชว์แถบสรุปด้านล่าง สำหรับงานเวร/ฝ่ายปกครอง) ──
   const summaryByRoom = useMemo(() => {
     const map = new Map<string, number>();
     lateToday.forEach((e) => map.set(e.room_name, (map.get(e.room_name) ?? 0) + 1));
@@ -333,7 +354,6 @@ export default function LateCheckinPage() {
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-sky-50 via-white to-violet-50">
       <div className="w-full px-4 sm:px-6 py-6 lg:px-8">
-        {/* แถบนำทางด้านบน */}
         <div className="flex items-center gap-2">
           <button
             onClick={() => router.push(DASHBOARD_PATH)}
@@ -374,27 +394,36 @@ export default function LateCheckinPage() {
         )}
 
         <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-3">
-          {/* ── ฝั่งซ้าย: สแกน/ค้นหา/เลือกห้อง (กินพื้นที่ 2 คอลัมน์) ───────── */}
           <div className="lg:col-span-2 space-y-5">
-            {/* ช่องสแกนบาร์โค้ด/คิวอาร์ */}
-            <form
-              onSubmit={handleScanSubmit}
-              className="flex items-center gap-3 rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100"
-            >
-              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-indigo-500 to-sky-400 text-white shadow-sm">
-                <ScanLine className="h-5 w-5" />
-              </span>
-              <input
-                ref={scanInputRef}
-                autoFocus
-                value={scanValue}
-                onChange={(e) => setScanValue(e.target.value)}
-                placeholder="สแกนบาร์โค้ด/คิวอาร์บัตรนักเรียน (เลขประจำตัว 13 หลัก) แล้วกด Enter"
-                className="w-full border-none bg-transparent text-sm font-medium text-slate-700 outline-none placeholder:text-slate-400"
-              />
-            </form>
+            {/* ช่องสแกน (USB scanner) + ปุ่มเปิดกล้อง */}
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <form
+                onSubmit={handleScanSubmit}
+                className="flex flex-1 items-center gap-3 rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100"
+              >
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-indigo-500 to-sky-400 text-white shadow-sm">
+                  <ScanLine className="h-5 w-5" />
+                </span>
+                <input
+                  ref={scanInputRef}
+                  autoFocus
+                  value={scanValue}
+                  onChange={(e) => setScanValue(e.target.value)}
+                  placeholder="สแกนบาร์โค้ด (เครื่องสแกน USB) หรือพิมพ์รหัส/เลขบัตร ปชช. แล้วกด Enter"
+                  className="w-full border-none bg-transparent text-sm font-medium text-slate-700 outline-none placeholder:text-slate-400"
+                />
+              </form>
 
-            {/* ค้นหาด้วยชื่อ + เลือกชั้น/ห้อง */}
+              {/* ★ ปุ่มเปิดกล้องมือถือ/เว็บแคมสแกน */}
+              <button
+                type="button"
+                onClick={() => setScannerOpen(true)}
+                className="flex shrink-0 items-center justify-center gap-2 rounded-3xl bg-gradient-to-r from-indigo-600 to-blue-500 px-5 py-4 text-sm font-semibold text-white shadow-md shadow-indigo-200 transition hover:-translate-y-0.5 hover:shadow-lg sm:w-auto"
+              >
+                <Camera className="h-5 w-5" /> เปิดกล้องสแกน
+              </button>
+            </div>
+
             <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
               <div className="flex items-center gap-2 rounded-2xl border-2 border-slate-200 px-3 py-2.5 focus-within:border-indigo-400 focus-within:ring-4 focus-within:ring-indigo-100">
                 <Search className="h-4 w-4 text-slate-400" />
@@ -445,7 +474,6 @@ export default function LateCheckinPage() {
                 </div>
               )}
 
-              {/* รายชื่อนักเรียนให้คลิกเลือก */}
               <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {loadingStudents ? (
                   <p className="col-span-full py-6 text-center text-sm text-slate-400">กำลังโหลด...</p>
@@ -454,7 +482,7 @@ export default function LateCheckinPage() {
                     <p className="col-span-full py-6 text-center text-sm text-slate-400">ไม่พบนักเรียนที่ตรงกับคำค้นหา</p>
                   ) : (
                     filteredRoomStudents.map((s) => (
-                      <StudentPickRow key={s.id} student={s} isLate={alreadyLateIds.has(s.id)} onPick={() => setPendingStudent(s)} />
+                      <StudentPickRow key={s.id} student={s} isLate={alreadyLateIds.has(s.id)} showClass={false} onPick={() => setPendingStudent(s)} />
                     ))
                   )
                 ) : query.trim().length >= 2 ? (
@@ -462,7 +490,7 @@ export default function LateCheckinPage() {
                     <p className="col-span-full py-6 text-center text-sm text-slate-400">ไม่พบนักเรียนที่ตรงกับคำค้นหา</p>
                   ) : (
                     globalSearchResults.map((s) => (
-                      <StudentPickRow key={s.id} student={s} isLate={alreadyLateIds.has(s.id)} onPick={() => setPendingStudent(s)} />
+                      <StudentPickRow key={s.id} student={s} isLate={alreadyLateIds.has(s.id)} showClass onPick={() => setPendingStudent(s)} />
                     ))
                   )
                 ) : (
@@ -474,7 +502,6 @@ export default function LateCheckinPage() {
             </div>
           </div>
 
-          {/* ── ฝั่งขวา: รายการมาสายวันนี้ + สรุปยอด ───────────────────── */}
           <div className="space-y-5">
             <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
               <div className="flex items-center justify-between">
@@ -497,7 +524,7 @@ export default function LateCheckinPage() {
                             {displayPrefix}{e.student.first_name} {e.student.last_name}
                           </p>
                           <p className="truncate text-[11px] text-slate-400">
-                            {e.room_name} · {timeThai(e.recorded_at)} น.
+                            {e.room_name} · เลขที่ {e.student.seat_number ?? "-"} · {timeThai(e.recorded_at)} น.
                           </p>
                         </div>
                         <button
@@ -532,7 +559,43 @@ export default function LateCheckinPage() {
           </div>
         </div>
 
-        {/* ── โมดัลยืนยันก่อนบันทึกเสมอ (ป้องกันการกดผิด) ───────────────── */}
+        {/* ── โมดัลกล้องสแกน ─────────────────────────────────── */}
+        {scannerOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+              <div className="flex items-center justify-between">
+                <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-800">
+                  <Camera className="h-4 w-4 text-indigo-500" /> สแกนบาร์โค้ด/คิวอาร์บัตรนักเรียน
+                </p>
+                <button
+                  onClick={() => setScannerOpen(false)}
+                  className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="relative mt-4 overflow-hidden rounded-2xl bg-slate-900">
+                <div id={CAMERA_REGION_ID} className="w-full" />
+                {cameraStarting && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-900/70 text-white">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                    <span className="ml-2 text-sm">กำลังเปิดกล้อง...</span>
+                  </div>
+                )}
+              </div>
+
+              {cameraError && (
+                <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">{cameraError}</p>
+              )}
+              <p className="mt-3 text-center text-xs text-slate-400">
+                วางบาร์โค้ด/คิวอาร์บนบัตรนักเรียนให้อยู่ในกรอบ ระบบจะบันทึกอัตโนมัติเมื่ออ่านสำเร็จ
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── โมดัลยืนยันก่อนบันทึกเสมอ ───────────────── */}
         {pendingStudent && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-sm">
             <div className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-2xl">
@@ -545,6 +608,10 @@ export default function LateCheckinPage() {
                 {pendingStudent.first_name} {pendingStudent.last_name}
               </p>
               {pendingStudent.nick_name && <p className="text-sm text-slate-400">({pendingStudent.nick_name})</p>}
+              {/* ★ แสดง ชั้น/ห้อง + เลขที่ ให้ชัดเจนก่อนยืนยัน */}
+              <p className="mt-1 text-sm font-semibold text-indigo-600">
+                {formatClassLabel(pendingStudent.classroom) || "ไม่ระบุห้อง"} · เลขที่ {pendingStudent.seat_number ?? "-"}
+              </p>
               {alreadyLateIds.has(pendingStudent.id) && (
                 <p className="mt-2 text-xs font-bold text-amber-600">⚠️ นักเรียนคนนี้ถูกบันทึกว่ามาสายไปแล้ววันนี้</p>
               )}
@@ -572,8 +639,11 @@ export default function LateCheckinPage() {
   );
 }
 
-function StudentPickRow({ student, isLate, onPick }: { student: Student; isLate: boolean; onPick: () => void }) {
+function StudentPickRow({
+  student, isLate, showClass, onPick,
+}: { student: Student; isLate: boolean; showClass: boolean; onPick: () => void }) {
   const displayPrefix = getDisplayPrefix(student.gender, student.birth_date, student.prefix);
+  const classLabel = formatClassLabel(student.classroom);
   return (
     <button
       onClick={onPick}
@@ -589,7 +659,11 @@ function StudentPickRow({ student, isLate, onPick }: { student: Student; isLate:
           {displayPrefix}{student.first_name} {student.last_name}
           {student.nick_name && <span className="ml-1 font-normal text-slate-400">({student.nick_name})</span>}
         </p>
-        <p className="truncate text-[11px] text-slate-400">{student.student_code}</p>
+        {/* ★ แสดง ชั้น/ห้อง (เมื่อเป็นผลค้นหาข้ามห้อง) + เลขที่ เป็นข้อความชัดเจน */}
+        <p className="truncate text-[11px] text-slate-400">
+          {showClass && classLabel ? `${classLabel} · ` : ""}เลขที่ {student.seat_number ?? "-"}
+          {student.student_code ? ` · ${student.student_code}` : ""}
+        </p>
       </div>
       {isLate && <span className="shrink-0 text-[10px] font-black text-rose-500">มาสายแล้ว</span>}
     </button>

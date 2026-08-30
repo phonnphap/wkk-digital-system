@@ -1,6 +1,9 @@
 import * as XLSX from 'xlsx';
-import type { TrainingRecordWithUser } from './training-records';
+import type { TrainingRecordWithUser, EvidenceFile } from './training-records';
 import { TRAINING_TYPE_LABELS, TRAINING_STATUS_LABELS } from './training-records';
+import { getTrainingApprovers } from './training-permissions';
+
+const ONEDRIVE_ACCOUNT = 'hr@khienkhet.ac.th';
 
 function fullName(r: TrainingRecordWithUser) {
   return r.full_name || `${r.title ?? ''} ${r.first_name ?? ''} ${r.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
@@ -50,6 +53,7 @@ export interface IndividualReportUser {
   position?: string;
   grade_level?: string;
   department_name?: string;
+  signature_url?: string;
 }
 
 function thaiDateFull(iso?: string) {
@@ -63,12 +67,36 @@ function isImageFile(name: string) {
   return /\.(jpe?g|png|gif|webp|bmp)$/i.test(name);
 }
 
-export function buildIndividualReportHTML(
+// ✅ resolve ลิงก์ OneDrive สดใหม่จาก path (เหมือน resolveOneDriveUrl ในระบบ PLC) เผื่อ url ที่เก็บไว้ตอนอัปโหลดหมดอายุ
+async function resolveEvidenceUrl(path?: string | null, fallbackUrl?: string | null): Promise<string | null> {
+  if (!path) return fallbackUrl ?? null;
+  try {
+    const res = await fetch('/api/resolve-onedrive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, account: ONEDRIVE_ACCOUNT }),
+    });
+    const json = await res.json();
+    if (json.ok && json.downloadUrl) return json.downloadUrl as string;
+  } catch {}
+  return fallbackUrl ?? null;
+}
+
+async function resolveEvidenceFiles(files: EvidenceFile[]): Promise<{ name: string; url: string }[]> {
+  const resolved = await Promise.all(
+    files.map(async (f) => ({ name: f.name, url: (await resolveEvidenceUrl(f.path, f.url)) ?? f.url }))
+  );
+  return resolved.filter((f) => f.url);
+}
+
+type RecordWithResolvedEvidence = TrainingRecordWithUser & { resolvedEvidence: { name: string; url: string }[] };
+
+function buildIndividualReportHTML(
   user: IndividualReportUser,
-  records: TrainingRecordWithUser[],
+  records: RecordWithResolvedEvidence[],
   targetHoursPerYear: number,
-  deputyHrName = '',
-  directorName = ''
+  deputy: { name: string; signature_url?: string } | null,
+  director: { name: string; signature_url?: string } | null
 ): string {
   const totalHours = records.reduce((s, r) => s + Number(r.hours), 0);
   const totalCourses = records.length;
@@ -88,28 +116,29 @@ export function buildIndividualReportHTML(
         <td style="padding:5px 8px;border:1px solid #cbd5e1">${r.organizer ?? '—'}</td>
         <td style="padding:5px 8px;border:1px solid #cbd5e1;text-align:center">${r.hours}</td>
         <td style="padding:5px 8px;border:1px solid #cbd5e1;text-align:center">${TRAINING_STATUS_LABELS[r.status]}</td>
-        <td style="padding:5px 8px;border:1px solid #cbd5e1;text-align:center">${(r.evidence_files ?? []).length || '—'}</td>
+        <td style="padding:5px 8px;border:1px solid #cbd5e1;text-align:center">${r.resolvedEvidence.length || '—'}</td>
       </tr>`).join('');
 
   const takeawayBlocks = records
     .filter((r) => r.key_takeaways || r.action_plan)
     .map((r) => `
-      <div style="margin-bottom:12px;border:1px solid #cbd5e1;border-radius:8px;padding:10px 14px">
+      <div style="margin-bottom:10px;border:1px solid #cbd5e1;border-radius:8px;padding:10px 14px">
         <p style="font-weight:700;margin-bottom:4px">${r.course_name}</p>
-        ${r.key_takeaways ? `<p style="font-size:12pt;margin:2px 0"><b>องค์ความรู้ที่ได้รับ:</b> ${r.key_takeaways}</p>` : ''}
-        ${r.action_plan ? `<p style="font-size:12pt;margin:2px 0"><b>การนำไปประยุกต์ใช้:</b> ${r.action_plan}</p>` : ''}
+        ${r.key_takeaways ? `<p style="margin:2px 0"><b>องค์ความรู้ที่ได้รับ:</b> ${r.key_takeaways}</p>` : ''}
+        ${r.action_plan ? `<p style="margin:2px 0"><b>การนำไปประยุกต์ใช้:</b> ${r.action_plan}</p>` : ''}
       </div>`).join('');
 
+  // ✅ แสดงรูปไฟล์แนบจริง (ไม่ใช่แค่ลิงก์) ต่อคอร์ส — ไฟล์ที่ไม่ใช่รูปภาพ (เช่น PDF) แสดงเป็นการ์ดไอคอนแทน
   const evidenceBlocks = records
-    .filter((r) => (r.evidence_files ?? []).length > 0)
+    .filter((r) => r.resolvedEvidence.length > 0)
     .map((r) => `
-      <div style="margin-bottom:16px">
+      <div style="margin-bottom:16px;page-break-inside:avoid">
         <p style="font-weight:700;margin-bottom:6px">${r.course_name}</p>
         <div style="display:flex;flex-wrap:wrap;gap:10px">
-          ${r.evidence_files.map((f) => (
+          ${r.resolvedEvidence.map((f) => (
             isImageFile(f.name)
               ? `<div style="text-align:center">
-                   <img src="${f.url}" style="width:150px;height:150px;object-fit:cover;border:1px solid #cbd5e1;border-radius:6px" onerror="this.style.display='none'" />
+                   <img src="${f.url}" style="width:150px;height:150px;object-fit:cover;border:1px solid #cbd5e1;border-radius:6px"/>
                    <div style="font-size:9pt;color:#64748b;max-width:150px;word-break:break-all;margin-top:2px">${f.name}</div>
                  </div>`
               : `<div style="border:1px solid #cbd5e1;border-radius:6px;padding:16px 14px;font-size:10pt;text-align:center;width:150px">
@@ -118,6 +147,14 @@ export function buildIndividualReportHTML(
           )).join('')}
         </div>
       </div>`).join('');
+
+  const sigBox = (name: string, role: string, signatureUrl?: string) => `
+    <div style="text-align:center;flex:1">
+      ${signatureUrl ? `<img src="${signatureUrl}" style="max-height:55px;max-width:150px;object-fit:contain;margin:0 auto;display:block"/>` : `<div style="height:55px"></div>`}
+      <div style="border-bottom:1px solid #000;width:170px;margin:0 auto"></div>
+      <div style="font-size:13pt;margin-top:4px">(${name})</div>
+      <div style="font-size:11pt;color:#475569">${role}</div>
+    </div>`;
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
@@ -135,8 +172,6 @@ export function buildIndividualReportHTML(
   .progress-bar { height:14px; background:#e2e8f0; border-radius:7px; overflow:hidden; margin-top:6px; }
   .progress-fill { height:100%; background:#f97316; }
   .sign-section { display:flex; justify-content:space-between; margin-top:40px; gap:20px; }
-  .sign-box { text-align:center; flex:1; }
-  .sign-name { margin-top:44px; border-top:1px dotted #555; padding-top:4px; }
   @media print { button{display:none} }
 </style></head>
 <body>
@@ -182,22 +217,29 @@ export function buildIndividualReportHTML(
 
   <div class="section-title">ส่วนที่ 6 — ช่องเซ็นชื่ออนุมัติ</div>
   <div class="sign-section">
-    <div class="sign-box"><div class="sign-name">(${user.full_name})</div><div style="font-size:13pt;color:#475569">ผู้อบรม</div></div>
-    <div class="sign-box"><div class="sign-name">(${deputyHrName || '..............................'})</div><div style="font-size:13pt;color:#475569">รองผู้อำนวยการฝ่ายบริหารงานบุคคล</div></div>
-    <div class="sign-box"><div class="sign-name">(${directorName || '..............................'})</div><div style="font-size:13pt;color:#475569">ผู้อำนวยการโรงเรียน</div></div>
+    ${sigBox(user.full_name, 'ผู้อบรม', user.signature_url)}
+    ${sigBox(deputy?.name || '..............................', 'รองฝ่ายบุคคล', deputy?.signature_url)}
+    ${sigBox(director?.name || '..............................', 'ผู้อำนวยการโรงเรียน', director?.signature_url)}
   </div>
   <script>window.onload=()=>window.print()<\/script>
 </body></html>`;
 }
 
-export function printIndividualReport(
+// ✅ พิมพ์รายงาน — ดึงชื่อ+ลายเซ็นรองฝ่ายบุคคล/ผอ. อัตโนมัติ และ resolve ลิงก์ไฟล์แนบให้สดก่อนพิมพ์ทุกครั้ง
+export async function printIndividualReport(
   user: IndividualReportUser,
   records: TrainingRecordWithUser[],
-  targetHoursPerYear: number,
-  deputyHrName?: string,
-  directorName?: string
+  targetHoursPerYear: number
 ) {
-  const html = buildIndividualReportHTML(user, records, targetHoursPerYear, deputyHrName, directorName);
+  const [{ deputy, director }, resolvedRecords] = await Promise.all([
+    getTrainingApprovers(),
+    Promise.all(records.map(async (r) => ({
+      ...r,
+      resolvedEvidence: await resolveEvidenceFiles(r.evidence_files ?? []),
+    }))),
+  ]);
+
+  const html = buildIndividualReportHTML(user, resolvedRecords, targetHoursPerYear, deputy, director);
   const w = window.open('', '_blank', 'width=900,height=780');
   if (!w) return;
   w.document.write(html);

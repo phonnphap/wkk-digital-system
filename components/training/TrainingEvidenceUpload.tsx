@@ -41,17 +41,18 @@ export default function TrainingEvidenceUpload({
         sanitizeSegment(TRAINING_TYPE_LABELS[trainingType] || 'ไม่ระบุประเภท'),
       ].join('/');
       for (const file of Array.from(fileList)) {
-        const fileName = buildTrainingFileName(startDate, file.name, seq);
+                const fileName = buildTrainingFileName(startDate, file.name, seq);
+        const relPath = `${folder}/${fileName}`;
         const fd = new FormData();
         fd.append('file', file);
-        fd.append('path', `${folder}/${fileName}`);
+        fd.append('path', relPath);
         fd.append('account', ONEDRIVE_ACCOUNT);
 
         const res = await fetch('/api/upload-onedrive', { method: 'POST', body: fd });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error?.message || data.error || 'อัปโหลดไม่สำเร็จ');
 
-        uploaded.push({ url: data.url, name: fileName });
+        uploaded.push({ url: data.url, path: relPath, name: fileName });
         seq++;
       }
       onChange([...value, ...uploaded]);
@@ -66,6 +67,7 @@ export default function TrainingEvidenceUpload({
   function removeAt(idx: number) {
     onChange(value.filter((_, i) => i !== idx));
   }
+
 
   return (
     <div className="flex flex-col gap-2">
