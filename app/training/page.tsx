@@ -69,11 +69,11 @@ export default function TrainingPage() {
     return Object.entries(byType).map(([type, hours]) => ({ name: TRAINING_TYPE_LABELS[type as TrainingType] ?? type, ชั่วโมง: hours }));
   }, [records]);
 
-  // ✅ แก้ไข/ลบได้เฉพาะเจ้าของรายการเอง หรือผู้บริหาร/ผู้ดูแลโครงการ (isManagement) เท่านั้น
-  function canEditRecord(r: TrainingRecordWithUser): boolean {
-    if (!access?.user) return false;
-    return access.isManagement || r.user_id === access.user.id;
-  }
+  // ✅ แก้ไข/ลบได้เฉพาะเจ้าของรายการเท่านั้น — ผู้ดูแลโครงการ/แอดมิน/ผู้บริหาร เห็นได้ทุกคนแต่แก้ไข/ลบไม่ได้
+function canEditRecord(r: TrainingRecordWithUser): boolean {
+  if (!access?.user) return false;
+  return r.user_id === access.user.id;
+}
 
   async function handleDelete(id: string) {
     if (!confirm('ยืนยันการลบรายงานนี้?')) return;

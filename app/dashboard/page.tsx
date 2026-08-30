@@ -665,7 +665,7 @@ function StatusBadge({ status }: { status: ItemStatus }) {
     {
       title: "🛠️ ระบบสนับสนุนและยานพาหนะ",
       items: [
-        { name: "รายงานเวรประจำวัน", icon: <Calendar className="w-6 h-6" />, color: "bg-orange-500", path: "/late-checkin" },
+        { name: "รายงานเวรประจำวัน", icon: <Calendar className="w-6 h-6" />, color: "bg-orange-500", path: "/duty-report" },
         { name: "จองรถ & ห้องประชุม", icon: <Car className="w-6 h-6" />, color: "bg-blue-600", path: "/booking" },
         { name: "ยืม-คืน อุปกรณ์ ICT", icon: <Monitor className="w-6 h-6" />, color: "bg-sky-600", path: "/ict-borrow", status: "wip"  as ItemStatus },
         { name: "แจ้งซ่อม (Helpdesk)", icon: <Wrench className="w-6 h-6" />, color: "bg-rose-600", path: "/repair", status: "wip"  as ItemStatus },
