@@ -154,7 +154,15 @@ async function toggleTorch() {
       advanced: [{ focusMode: "continuous" }] as any,
     },
   },
-  (text) => { if (!scanHandledRef.current) { scanHandledRef.current = true; setScannerOpen(false); submitCode(text.replace(/\D/g, "") || text); } },
+  (text) => { 
+  if (!scanHandledRef.current) { 
+    scanHandledRef.current = true; 
+    setScannerOpen(false); 
+    const cleaned = text.replace(/\D/g, "") || text;
+    console.log("[scan] raw:", text, "| cleaned:", cleaned); // ★ debug ชั่วคราว ลบทิ้งภายหลัง
+    submitCode(cleaned); 
+  } 
+},
   () => {}
 ).then(() => setCameraStarting(false))
  .catch((err) => { setCameraStarting(false); setCameraError("เปิดกล้องไม่สำเร็จ: " + String(err)); });
