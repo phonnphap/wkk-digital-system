@@ -170,6 +170,7 @@ export default function StudentPortalSubjectPage() {
   const [selfStudent, setSelfStudent] = useState<GradeStudent | null>(null);
   const [studentSubmitEnabled, setStudentSubmitEnabled] = useState(true);
   const [allowLateSubmission, setAllowLateSubmission] = useState(true);
+  const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
 
   const fetchAssignments = useCallback(async () => {
   if (!sectionId) return;
@@ -435,12 +436,16 @@ const sortedAssignments = [...assignments].sort((a, b) => {
                     className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-shadow"
                   >
                     <div className="flex items-start justify-between gap-4 flex-wrap">
-                      <div className="flex items-start gap-4 min-w-0">
-                        <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl font-black text-white shrink-0 bg-gradient-to-br from-indigo-500 to-blue-500">
-                          📄
-                        </div>
-                        <div className="min-w-0">
-                          <p className="font-black text-slate-900 text-xl truncate">{a.title}</p>
+                      <div
+  className="flex items-start gap-4 min-w-0 cursor-pointer"
+  onClick={() => setSelectedAssignment(a)}
+>
+  <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl font-black text-white shrink-0 bg-gradient-to-br from-indigo-500 to-blue-500">
+    📄
+  </div>
+  <div className="min-w-0">
+    <p className="font-black text-slate-900 text-xl truncate hover:text-indigo-600 transition-colors">{a.title}</p>
+
                           {a.description && (
                             <p className="text-slate-600 text-base font-bold mt-1 line-clamp-2">
                               {a.description}
@@ -587,15 +592,19 @@ const sortedAssignments = [...assignments].sort((a, b) => {
                 return (
                   <div
                     key={a.id}
-                    className="bg-white rounded-2xl border border-rose-200 shadow-sm p-5"
+                    className="bg-white rounded-2xl border border-rose-200 shadow-sm p-5 hover:shadow-md transition-shadow"
                   >
                     <div className="flex items-start justify-between gap-4 flex-wrap">
-                      <div className="flex items-start gap-4 min-w-0">
+                      {/* ★ แก้ไข: เพิ่ม onClick + cursor-pointer ให้กดเปิดรายละเอียดงานได้ เหมือนแท็บ "งานของฉัน" */}
+                      <div
+                        className="flex items-start gap-4 min-w-0 cursor-pointer"
+                        onClick={() => setSelectedAssignment(a)}
+                      >
                         <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl font-black text-white shrink-0 bg-gradient-to-br from-rose-400 to-orange-400">
                           ⏰
                         </div>
                         <div className="min-w-0">
-                          <p className="font-black text-slate-900 text-xl truncate">{a.title}</p>
+                          <p className="font-black text-slate-900 text-xl truncate hover:text-indigo-600 transition-colors">{a.title}</p>
                           
                           {a.description && (
                             <p className="text-slate-600 text-base font-bold mt-1 line-clamp-2">
@@ -728,6 +737,12 @@ const sortedAssignments = [...assignments].sort((a, b) => {
           </div>
         )}
       </div>
+      {selectedAssignment && (
+        <AssignmentDetailModal
+          assignment={selectedAssignment}
+          onClose={() => setSelectedAssignment(null)}
+        />
+      )}
     </div>
   );
 }
@@ -778,6 +793,132 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
+function AssignmentDetailModal({
+  assignment,
+  onClose,
+}: {
+  assignment: Assignment;
+  onClose: () => void;
+}) {
+  // ★ แก้: ใส่ "<" ที่หายไปหน้า generic type ของ useState (ของเดิม syntax error ทำให้คอมไพล์ไม่ผ่าน)
+  const [attachments, setAttachments] = useState<
+    { id: string; kind: "file" | "link" | "image"; url: string; file_name: string | null }[]
+  >([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      try {
+        // ⚠️ ปรับ path ให้ตรงกับ endpoint จริงที่ backend มี
+        const res = await fetch(`/api/student-portal/assignment-attachments?assignment_id=${assignment.id}`);
+        const json = await res.json();
+        if (!cancelled && res.ok) setAttachments(json.attachments ?? []);
+      } catch {
+        // เงียบไว้ ไม่กระทบ modal หลัก
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [assignment.id]);
+
+  const isImage = (name: string | null, url: string) =>
+    /\.(png|jpe?g|gif|webp)$/i.test(name ?? url);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-4 flex items-center justify-between">
+          <p className="font-black text-xl text-slate-900 truncate pr-4">{assignment.title}</p>
+          <button
+            onClick={onClose}
+            className="shrink-0 h-9 w-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-black"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* ★ กล่องข้อมูล 4 ช่อง เหมือนภาพตัวอย่าง */}
+          <div className="grid grid-cols-2 gap-3">
+            <InfoBox label="คะแนนเต็ม" value={assignment.max_score != null ? `${assignment.max_score}` : "-"} />
+            <InfoBox label="มอบหมายเมื่อ" value={formatDate(assignment.created_at)} />
+            <InfoBox label="กำหนดส่ง" value={assignment.due_date ? formatDate(assignment.due_date) : "ไม่มีกำหนดส่ง"} />
+            <InfoBox label="โหมดตรวจ" value={assignment.grading_mode === "pass_fail" ? "ผ่าน/ไม่ผ่าน" : "ให้คะแนน"} />
+          </div>
+
+          {assignment.description && (
+            <div>
+              <p className="text-sm font-black text-slate-400 mb-1.5">คำอธิบาย</p>
+              <p className="text-base font-bold text-slate-700 whitespace-pre-wrap bg-slate-50 rounded-xl px-4 py-3">
+                {assignment.description}
+              </p>
+            </div>
+          )}
+
+          <div>
+            <p className="text-sm font-black text-slate-400 mb-1.5">📎 ไฟล์แนบ / รูปภาพจากครู</p>
+            {loading ? (
+              <p className="text-sm font-bold text-slate-300">กำลังโหลด...</p>
+            ) : attachments.length === 0 ? (
+              <p className="text-sm font-bold text-slate-300">ไม่มีไฟล์แนบ</p>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {attachments.map((att) =>
+                  isImage(att.file_name, att.url) ? (
+                    // ★ แก้: เดิมขาด tag <a ...> เปิด ทำให้เป็น syntax error / รูปภาพไม่แสดง
+                    <a
+                      key={att.id}
+                      href={att.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block aspect-square rounded-xl overflow-hidden border border-slate-100 hover:opacity-90"
+                    >
+                      <img src={att.url} alt={att.file_name ?? "รูปภาพ"} className="w-full h-full object-cover" />
+                    </a>
+                  ) : (
+                    // ★ แก้: เดิมขาด tag <a ...> เปิด เช่นเดียวกัน
+                    <a
+                      key={att.id}
+                      href={att.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex flex-col items-center justify-center gap-1.5 aspect-square rounded-xl border border-slate-100 bg-slate-50 hover:bg-slate-100 px-2 text-center"
+                    >
+                      <Paperclip className="h-6 w-6 text-indigo-500" />
+                      <span className="text-xs font-bold text-slate-600 truncate w-full">{att.file_name ?? "ไฟล์แนบ"}</span>
+                    </a>
+                  )
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-slate-50 rounded-xl px-4 py-3">
+      <p className="text-xs font-black text-slate-400">{label}</p>
+      <p className="text-base font-black text-slate-800 mt-0.5">{value}</p>
+    </div>
+  );
+}
+
 function SubmissionPanel({
   assignment,
   studentId,
@@ -811,6 +952,9 @@ function SubmissionPanel({
   const overdueBlocked = isOverdue && !allowLateSubmission && !isSubmitted;
 
   const canEdit = submitEnabled && !isLocked && !overdueBlocked;
+  // ★ คอมเมนต์ต้องปิดด้วยเสมอเมื่อครูปิดการส่งงานของวิชานี้ (submitEnabled=false)
+  // ไม่ว่าจะเลยกำหนดหรือไม่ก็ตาม — คงไว้ตามเดิม (submitEnabled && !overdueBlocked)
+  // แต่ทำให้ชัดเจนขึ้นว่า submitEnabled คือเงื่อนไขหลักที่ปิดทุกอย่างในพาเนลนี้
   const canComment = submitEnabled && !overdueBlocked;
 
   async function loadExtras() {
@@ -1085,6 +1229,6 @@ function SubmissionPanel({
     <p className="text-xs font-bold text-slate-400 text-center py-1">🔒 ปิดคอมเมนต์แล้ว</p>
   )}
 </div>
-        </div>
+    </div>
   );
 }
