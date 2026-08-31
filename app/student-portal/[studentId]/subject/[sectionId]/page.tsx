@@ -145,12 +145,25 @@ function getDueStatus(due_date: string | null | undefined): { label: string; cla
   return { label: `เหลืออีก ${diffDays} วัน`, className: "bg-emerald-50 text-emerald-600" };
 }
 
+// ★ เพิ่มใหม่: เช็คว่างานนี้ "ปิดรับส่ง" แล้วหรือยัง (เลยกำหนดส่ง + ครูปิดอนุญาตส่งย้อนหลัง)
+// งานที่ไม่มีกำหนดส่ง (due_date เป็น null) จะไม่ถูกล็อกเลย ส่งได้ตลอด
+function isSubmissionClosed(dueDate: string | null | undefined, allowLateSubmission: boolean): boolean {
+  if (allowLateSubmission) return false;
+  if (!dueDate) return false;
+  const due = new Date(dueDate).getTime();
+  if (Number.isNaN(due)) return false;
+  return due < Date.now();
+}
+
 export default function StudentPortalSubjectPage() {
   const router = useRouter();
   const { studentId, sectionId } = useParams() as { studentId: string; sectionId: string };
 
   const [tab, setTab] = useState<Tab>("assignments");
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  // ★ เพิ่มใหม่: ค่าตั้งค่า "อนุญาตให้ส่งงานย้อนหลัง" ของวิชานี้ ดึงมาจาก API ตอนโหลดงาน
+  // default true ไว้ก่อนโหลดเสร็จ กันฟอร์มกระพริบล็อกๆ เปิดๆ ระหว่างรอข้อมูล
+  const [allowLateSubmission, setAllowLateSubmission] = useState(true);
   const [attendance, setAttendance] = useState<any>(null);
   const [subjectInfo, setSubjectInfo] = useState<SubjectInfo | null>(null);
   const [loading, setLoading] = useState(false);
@@ -164,7 +177,11 @@ export default function StudentPortalSubjectPage() {
       `/api/student-portal/assignments?student_id=${studentId}&subject_section_id=${sectionId}`
     );
     const data = await res.json();
-    if (res.ok) setAssignments(data.assignments ?? []);
+    if (res.ok) {
+      setAssignments(data.assignments ?? []);
+      // ★ เพิ่มใหม่: เก็บค่า allow_late_submission ที่ API ส่งมาด้วย
+      setAllowLateSubmission(data.allow_late_submission ?? true);
+    }
     setLoading(false);
   }, [studentId, sectionId]);
 
@@ -408,6 +425,8 @@ const sortedAssignments = [...assignments].sort((a, b) => {
                 const late = !!sub?.is_late;
                 const isPassFail = a.grading_mode === "pass_fail";
                 const dueStatus = !sub ? getDueStatus(a.due_date) : null;
+                // ★ เพิ่มใหม่: เช็คว่างานนี้ปิดรับส่งแล้วหรือยัง (เลยกำหนด + ครูปิดส่งย้อนหลัง)
+                const closed = !sub && isSubmissionClosed(a.due_date, allowLateSubmission);
                 return (
                   <div
                     key={a.id}
@@ -440,6 +459,12 @@ const sortedAssignments = [...assignments].sort((a, b) => {
                                 className={`px-2.5 py-1 rounded-full text-xs font-black ${dueStatus.className}`}
                               >
                                 {dueStatus.label}
+                              </span>
+                            )}
+                            {/* ★ เพิ่มใหม่: badge บอกว่าปิดรับส่งงานแล้ว */}
+                            {closed && (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-black bg-slate-200 text-slate-600">
+                                🔒 ปิดรับส่งงานแล้ว
                               </span>
                             )}
                           </div>
@@ -522,6 +547,14 @@ const sortedAssignments = [...assignments].sort((a, b) => {
                           </p>
                         )}
                       </div>
+                    ) : closed ? (
+                      // ★ เพิ่มใหม่: แทนที่จะโชว์ฟอร์มส่งงาน ให้โชว์ข้อความปิดรับส่งแทน
+                      // เมื่อเลยกำหนดส่งแล้วและครูปิด "อนุญาตให้ส่งงานย้อนหลัง" ไว้
+                      <div className="mt-4 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-center">
+                        <p className="text-sm font-black text-slate-500">
+                          🔒 เลยกำหนดส่งงานนี้แล้ว และครูปิดการส่งงานย้อนหลังไว้ ติดต่อครูผู้สอนหากต้องการส่งงานนี้
+                        </p>
+                      </div>
                     ) : (
                       <SubmissionPanel
   assignment={a}
@@ -545,6 +578,8 @@ const sortedAssignments = [...assignments].sort((a, b) => {
             ) : (
               pendingAssignments.map((a) => {
                 const dueStatus = getDueStatus(a.due_date);
+                // ★ เพิ่มใหม่: badge เดียวกับแท็บ "งานของฉัน"
+                const closed = isSubmissionClosed(a.due_date, allowLateSubmission);
                 return (
                   <div
                     key={a.id}
@@ -576,6 +611,11 @@ const sortedAssignments = [...assignments].sort((a, b) => {
                             {dueStatus && (
                               <span className={`px-2.5 py-1 rounded-full text-xs font-black ${dueStatus.className}`}>
                                 {dueStatus.label}
+                              </span>
+                            )}
+                            {closed && (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-black bg-slate-200 text-slate-600">
+                                🔒 ปิดรับส่งงานแล้ว
                               </span>
                             )}
                           </div>

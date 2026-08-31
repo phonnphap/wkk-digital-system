@@ -33,9 +33,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ไม่ระบุวิชา" }, { status: 400 });
   }
 
+  // ★ แก้ไข: เพิ่ม allow_late_submission เข้า select เพื่อส่งไปให้ฝั่งนักเรียนใช้เช็คว่า
+  // ยังเปิดให้ส่งงานย้อนหลังหรือไม่ (เดิม select แค่ "id" ทำให้ฝั่งหน้าเว็บไม่มีข้อมูลนี้เลย
+  // ฟอร์มส่งงานเลยเปิดให้กรอกได้ตลอดแม้ครูจะปิด "อนุญาตให้ส่งงานย้อนหลัง" ไว้แล้ว)
   const { data: section } = await supabase
     .from("subject_sections")
-    .select("id")
+    .select("id, allow_late_submission")
     .eq("id", sectionId)
     .eq("classroom_id", student.classroom_id)
     .maybeSingle();
@@ -74,7 +77,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ดึงข้อมูลงานไม่สำเร็จ" }, { status: 500 });
   }
 
-  return NextResponse.json({ assignments });
+  // ★ แก้ไข: ส่ง allow_late_submission ของวิชานี้กลับไปด้วย ให้ฝั่งหน้าเว็บใช้ปิดฟอร์มส่งงาน
+  // เมื่อเลยกำหนดส่งแล้วและครูปิดสวิตช์นี้ไว้ (default true เผื่อ field เป็น null)
+  return NextResponse.json({
+    assignments,
+    allow_late_submission: section.allow_late_submission ?? true,
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -100,15 +108,24 @@ export async function POST(req: NextRequest) {
   // โดน RLS บล็อกตอนอ่าน ก็มีโอกาสสูงที่จะบล็อกตอนเขียน (insert/upsert) ด้วยเช่นกัน
   const supabaseAdmin = createAdminClient();
 
+  // ★ แก้ไข: ดึง due_date + allow_late_submission (ผ่าน join ตาราง subject_sections) มาเช็คด้วย
+  // เพื่อกันไม่ให้แนบไฟล์เข้ามาได้ทาง API ตรงๆ (เช่น เรียก endpoint ตรงข้ามหน้าฟอร์ม)
+  // ทั้งที่ครูปิดรับส่งงานย้อนหลังไปแล้ว — เดิม backend ไม่เช็คเงื่อนไขนี้เลย พึ่งแต่ frontend ซ่อนฟอร์ม
   const { data: assignment } = await supabaseAdmin
     .from("assignments")
-    .select("id, status, subject_section_id")
+    .select("id, status, subject_section_id, due_date, subject_sections!inner(allow_late_submission)")
     .eq("id", assignmentId)
     .neq("status", "draft")
     .maybeSingle();
 
   if (!assignment) {
     return NextResponse.json({ error: "ไม่พบงานนี้ หรืองานยังไม่เปิดให้ส่ง" }, { status: 404 });
+  }
+
+  const allowLate = (assignment as any).subject_sections?.allow_late_submission ?? true;
+  const isOverdue = assignment.due_date ? new Date(assignment.due_date).getTime() < Date.now() : false;
+  if (isOverdue && !allowLate) {
+    return NextResponse.json({ error: "เลยกำหนดส่งแล้ว และครูปิดการส่งงานย้อนหลังไว้" }, { status: 403 });
   }
 
   const filePath = `${assignmentId}/${studentId}-${Date.now()}-${file.name}`;
@@ -138,6 +155,7 @@ export async function POST(req: NextRequest) {
         content: contentText,
         submitted_at: new Date().toISOString(),
         status: "pending_review",
+        is_late: isOverdue, // ★ เพิ่ม: บันทึกไว้ด้วยว่างานนี้ส่งช้าหรือไม่ ตอนที่ยังอนุญาตอยู่
       },
       { onConflict: "assignment_id,student_id" }
     )
