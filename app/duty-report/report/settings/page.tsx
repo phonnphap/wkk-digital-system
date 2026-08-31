@@ -1,17 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Home, ArrowLeft, ShieldCheck, Save } from "lucide-react";
-import { THAI_DOW, WORKING_DOW, Teacher, HeadSetting } from "@/lib/duty-helpers";
+import { Home, ArrowLeft, ShieldCheck, Save, Search, X, Check } from "lucide-react";
+import { THAI_DOW, WORKING_DOW, HeadSetting } from "@/lib/duty-helpers";
 
 const supabase = createClient();
+
+type Teacher = {
+  id: string;
+  title: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  full_name: string | null;
+};
+
+// ★ ประกอบชื่อแสดงผล: ใช้ full_name ถ้ามีข้อมูลจริง ไม่งั้น fallback ไปประกอบจาก title+first+last
+function displayName(t: Teacher) {
+  if (t.full_name && t.full_name.trim()) return t.full_name.trim();
+  const parts = [t.title ?? "", t.first_name ?? "", t.last_name ?? ""].join(" ").replace(/\s+/g, " ").trim();
+  return parts || "(ไม่มีชื่อ)";
+}
 
 export default function DutyHeadSettingsPage() {
   const router = useRouter();
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [settingsMap, setSettingsMap] = useState<Record<string, string>>({}); // key: `${dow}-${role}` -> teacher_id
+  const [settingsMap, setSettingsMap] = useState<Record<string, string>>({});
   const [sameEveryDay, setSameEveryDay] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -19,10 +34,14 @@ export default function DutyHeadSettingsPage() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from("users").select("id, full_name").order("full_name"),
+      supabase.from("users").select("id, title, first_name, last_name, full_name"),
       supabase.from("duty_head_settings").select("day_of_week, role, teacher_id"),
     ]).then(([teacherRes, settingsRes]) => {
-      setTeachers(teacherRes.data ?? []);
+      if (teacherRes.error) console.warn("[duty-head-settings] โหลดรายชื่อครูไม่สำเร็จ:", teacherRes.error.message);
+      const list = (teacherRes.data ?? []) as Teacher[];
+      list.sort((a, b) => displayName(a).localeCompare(displayName(b), "th"));
+      setTeachers(list);
+
       const map: Record<string, string> = {};
       (settingsRes.data ?? []).forEach((r: any) => { if (r.teacher_id) map[`${r.day_of_week}-${r.role}`] = r.teacher_id; });
       setSettingsMap(map);
@@ -86,25 +105,19 @@ export default function DutyHeadSettingsPage() {
                 <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="text-xs font-bold text-slate-500">หัวหน้าเวร</label>
-                    <select
+                    <TeacherSearchSelect
+                      teachers={teachers}
                       value={settingsMap[`${dow}-head`] ?? ""}
-                      onChange={(e) => setValue(dow, "head", e.target.value)}
-                      className="mt-1 w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm"
-                    >
-                      <option value="">-- เลือกครู --</option>
-                      {teachers.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
-                    </select>
+                      onChange={(id) => setValue(dow, "head", id)}
+                    />
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-500">รองหัวหน้าเวร</label>
-                    <select
+                    <TeacherSearchSelect
+                      teachers={teachers}
                       value={settingsMap[`${dow}-deputy`] ?? ""}
-                      onChange={(e) => setValue(dow, "deputy", e.target.value)}
-                      className="mt-1 w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm"
-                    >
-                      <option value="">-- เลือกครู --</option>
-                      {teachers.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
-                    </select>
+                      onChange={(id) => setValue(dow, "deputy", id)}
+                    />
                   </div>
                 </div>
               </div>
@@ -119,6 +132,79 @@ export default function DutyHeadSettingsPage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ★ ช่องค้นหาแบบ autocomplete แทน <select> เดิม — พิมพ์ค้นหาได้ทั้งคำนำหน้า ชื่อ นามสกุล
+function TeacherSearchSelect({
+  teachers, value, onChange,
+}: { teachers: Teacher[]; value: string; onChange: (id: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  const selected = teachers.find((t) => t.id === value) ?? null;
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return teachers.slice(0, 30); // ไม่พิมพ์อะไร โชว์ 30 คนแรกกันลิสต์ยาวเกิน
+    return teachers
+      .filter((t) => {
+        const name = displayName(t).toLowerCase();
+        const first = (t.first_name ?? "").toLowerCase();
+        const last = (t.last_name ?? "").toLowerCase();
+        const title = (t.title ?? "").toLowerCase();
+        return name.includes(q) || first.includes(q) || last.includes(q) || title.includes(q);
+      })
+      .slice(0, 30);
+  }, [teachers, query]);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  return (
+    <div ref={boxRef} className="relative mt-1">
+      <div className="flex items-center gap-2 rounded-xl border-2 border-slate-200 px-3 py-2 focus-within:border-indigo-400">
+        <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        <input
+          value={open ? query : selected ? displayName(selected) : ""}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => { setQuery(""); setOpen(true); }}
+          placeholder="พิมพ์ค้นหาชื่อครู..."
+          className="w-full border-none bg-transparent text-sm outline-none placeholder:text-slate-400"
+        />
+        {selected && !open && (
+          <button type="button" onClick={() => onChange("")} className="shrink-0 text-slate-300 hover:text-slate-500">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+          {filtered.length === 0 ? (
+            <p className="px-3 py-2.5 text-xs text-slate-400">ไม่พบชื่อครูที่ตรงกับคำค้นหา</p>
+          ) : (
+            filtered.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => { onChange(t.id); setQuery(""); setOpen(false); }}
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-indigo-50"
+              >
+                <span className="text-slate-700">{displayName(t)}</span>
+                {t.id === value && <Check className="h-3.5 w-3.5 text-indigo-500" />}
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
