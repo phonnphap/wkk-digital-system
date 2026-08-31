@@ -578,84 +578,6 @@ async function regenerateToken() {
   )}
 </div>
 
-            <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
-              <div className="flex items-center gap-2 rounded-2xl border-2 border-slate-200 px-3 py-2.5 focus-within:border-indigo-400 focus-within:ring-4 focus-within:ring-indigo-100">
-                <Search className="h-4 w-4 text-slate-400" />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="พิมพ์ค้นหาชื่อ นามสกุล ชื่อเล่น หรือรหัสนักเรียน..."
-                  className="w-full border-none bg-transparent text-sm outline-none placeholder:text-slate-400"
-                />
-                {query && (
-                  <button onClick={() => setQuery("")} className="text-slate-300 hover:text-slate-500">
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {gradeLevels.map((g) => (
-                  <button
-                    key={g}
-                    onClick={() => { setGradeLevel(g); setRoomId(""); setQuery(""); }}
-                    className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
-                      gradeLevel === g
-                        ? "bg-indigo-600 text-white shadow-sm"
-                        : "bg-slate-100 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600"
-                    }`}
-                  >
-                    {g}
-                  </button>
-                ))}
-              </div>
-
-              {gradeLevel && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {roomsInGrade.map((r) => (
-                    <button
-                      key={r.classroom_id}
-                      onClick={() => setRoomId(r.classroom_id)}
-                      className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
-                        roomId === r.classroom_id
-                          ? "bg-sky-500 text-white shadow-sm"
-                          : "bg-slate-50 text-slate-500 ring-1 ring-slate-200 hover:bg-sky-50 hover:text-sky-600"
-                      }`}
-                    >
-                      {r.room_name}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {loadingStudents ? (
-                  <p className="col-span-full py-6 text-center text-sm text-slate-400">กำลังโหลด...</p>
-                ) : roomId ? (
-                  filteredRoomStudents.length === 0 ? (
-                    <p className="col-span-full py-6 text-center text-sm text-slate-400">ไม่พบนักเรียนที่ตรงกับคำค้นหา</p>
-                  ) : (
-                    filteredRoomStudents.map((s) => (
-                      <StudentPickRow key={s.id} student={s} isLate={alreadyLateIds.has(s.id)} showClass={false} onPick={() => setPendingStudent(s)} />
-                    ))
-                  )
-                ) : query.trim().length >= 2 ? (
-                  globalSearchResults.length === 0 ? (
-                    <p className="col-span-full py-6 text-center text-sm text-slate-400">ไม่พบนักเรียนที่ตรงกับคำค้นหา</p>
-                  ) : (
-                    globalSearchResults.map((s) => (
-                      <StudentPickRow key={s.id} student={s} isLate={alreadyLateIds.has(s.id)} showClass onPick={() => setPendingStudent(s)} />
-                    ))
-                  )
-                ) : (
-                  <p className="col-span-full py-6 text-center text-sm text-slate-400">
-                    เลือกระดับชั้น/ห้อง หรือพิมพ์ค้นหาชื่อนักเรียน (อย่างน้อย 2 ตัวอักษร)
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
           <div className="space-y-5">
             <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
               <div className="flex items-center justify-between">
@@ -862,6 +784,7 @@ async function regenerateToken() {
           </div>
         )}
       </div>
+    </div>
   );
 }
 

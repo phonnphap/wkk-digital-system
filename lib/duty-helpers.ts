@@ -30,7 +30,11 @@ export function timeShort(t: string) {
   return t?.slice(0, 5) ?? "";
 }
 
-export type Teacher = { id: string; full_name: string };
+export type Teacher = { id: string; title: string | null; first_name: string; last_name: string };
+export function teacherName(t?: Teacher | null) {
+  if (!t) return "";
+  return `${t.title ?? ""}${t.first_name} ${t.last_name}`.trim();
+}
 export type DutyPoint = { id: string; point_number: number; title: string; location_note: string | null; sort_order: number };
 export type DutyTimeSlot = { id: string; duty_point_id: string; day_of_week: number; start_time: string; end_time: string; slot_label: string | null; sort_order: number };
 export type DutyAssignment = { id: string; time_slot_id: string; teacher_id: string; sort_order: number };

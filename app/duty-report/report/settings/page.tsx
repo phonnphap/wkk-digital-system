@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Home, ArrowLeft, ShieldCheck, Save, Search, X, Check } from "lucide-react";
-import { THAI_DOW, WORKING_DOW, HeadSetting } from "@/lib/duty-helpers";
+import { THAI_DOW, WORKING_DOW } from "@/lib/duty-helpers";
 
 const supabase = createClient();
 
@@ -34,7 +34,7 @@ export default function DutyHeadSettingsPage() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from("users").select("id, title, first_name, last_name, full_name"),
+      supabase.from("users").select("id, title, first_name, last_name").order("first_name"),
       supabase.from("duty_head_settings").select("day_of_week, role, teacher_id"),
     ]).then(([teacherRes, settingsRes]) => {
       if (teacherRes.error) console.warn("[duty-head-settings] โหลดรายชื่อครูไม่สำเร็จ:", teacherRes.error.message);

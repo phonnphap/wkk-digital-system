@@ -8,7 +8,7 @@ import {
   Settings2, CalendarRange, ShieldCheck, Users, AlertTriangle,
 } from "lucide-react";
 import {
-  THAI_DOW, jsDateToDow, todayISO, formatThaiDateFull, timeShort,
+  THAI_DOW, jsDateToDow, todayISO, formatThaiDateFull, timeShort, teacherName,
   Teacher, DutyPoint, DutyTimeSlot, DutyAssignment, DutyLog, HeadSetting,
 } from "@/lib/duty-helpers";
 
@@ -60,7 +60,7 @@ const canManageDuty = useMemo(() => {
   }
 
   useEffect(() => {
-    supabase.from("users").select("id, full_name").order("full_name").then(({ data, error }) => {
+    supabase.from("users").select("id, title, first_name, last_name").order("first_name").then(({ data, error }) => {
       if (error) { console.warn("[duty-report] โหลดรายชื่อครูไม่สำเร็จ:", error.message); return; }
       setTeachers(data ?? []);
     });
@@ -71,9 +71,9 @@ const canManageDuty = useMemo(() => {
   setErrorMsg("");
 
   const { data: headData, error: headErr } = await supabase
-    .from("duty_head_settings")
-    .select("role, teacher:users(id, full_name)")
-    .eq("day_of_week", dow);
+  .from("duty_head_settings")
+  .select("role, teacher:users(id, title, first_name, last_name)")
+  .eq("day_of_week", dow);
   if (headErr) console.warn("[duty-report] โหลดหัวหน้าเวรไม่สำเร็จ:", headErr.message);
   const headMap: { head?: Teacher; deputy?: Teacher } = {};
   (headData ?? []).forEach((r: any) => {
@@ -86,8 +86,8 @@ const canManageDuty = useMemo(() => {
   const { data: pointRows, error: pointErr } = await supabase
     .from("duty_points")
     .select(
-      "id, point_number, title, location_note, sort_order, slots:duty_time_slots(id, duty_point_id, day_of_week, start_time, end_time, slot_label, sort_order)"
-    )
+  "id, point_number, title, location_note, sort_order, slots:duty_time_slots(id, duty_point_id, day_of_week, start_time, end_time, slot_label, sort_order, assignments:duty_assignments(id, time_slot_id, teacher_id, sort_order, teacher:users(id, title, first_name, last_name)))"
+)
     .order("sort_order");
 
   if (pointErr) {
@@ -150,7 +150,7 @@ const canManageDuty = useMemo(() => {
   if (slotIds.length > 0) {
     const { data: logData, error: logErr } = await supabase
       .from("duty_daily_logs")
-      .select("id, log_date, time_slot_id, status, signed_by, signed_at, photo_url, note, signer:users!duty_daily_logs_signed_by_fkey(id, full_name)")
+      .select("id, log_date, time_slot_id, status, signed_by, signed_at, photo_url, note, signer:users!duty_daily_logs_signed_by_fkey(id, title, first_name, last_name)")
       .eq("log_date", date)
       .in("time_slot_id", slotIds);
     if (logErr) console.warn("[duty-report] โหลดบันทึกการเซ็นไม่สำเร็จ:", logErr.message);
@@ -248,8 +248,8 @@ const canManageDuty = useMemo(() => {
         <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
             <p className="flex items-center gap-1.5 text-xs font-bold text-slate-500"><ShieldCheck className="h-3.5 w-3.5 text-indigo-500" /> หัวหน้าเวร/รองหัวหน้าเวร วัน{THAI_DOW[dow]}</p>
-            <p className="mt-1.5 text-sm font-semibold text-slate-800">หัวหน้าเวร: {headToday.head?.full_name ?? "ยังไม่ได้ตั้งค่า"}</p>
-            <p className="text-sm font-semibold text-slate-600">รองหัวหน้าเวร: {headToday.deputy?.full_name ?? "ยังไม่ได้ตั้งค่า"}</p>
+            <p className="mt-1.5 text-sm font-semibold text-slate-800">หัวหน้าเวร: {headToday.head ? teacherName(headToday.head) : "ยังไม่ได้ตั้งค่า"}</p>
+<p className="text-sm font-semibold text-slate-600">รองหัวหน้าเวร: {headToday.deputy ? teacherName(headToday.deputy) : "ยังไม่ได้ตั้งค่า"}</p>
           </div>
           <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
             <p className="flex items-center gap-1.5 text-xs font-bold text-slate-500"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> ความคืบหน้าวันนี้</p>
@@ -282,7 +282,7 @@ const canManageDuty = useMemo(() => {
                   <div className="mt-3 space-y-2">
                     {p.slots.map((s) => {
                       const done = s.log?.status === "done";
-                      const names = s.assignments.map((a) => a.teacher?.full_name).filter(Boolean).join(", ");
+                      const names = s.assignments.map((a) => teacherName(a.teacher)).filter(Boolean).join(", ");
                       return (
                         <div key={s.id} className={`flex flex-col gap-2 rounded-2xl px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${done ? "bg-emerald-50" : "bg-slate-50"}`}>
                           <div className="min-w-0 flex-1">
@@ -290,7 +290,7 @@ const canManageDuty = useMemo(() => {
                             <p className="truncate text-sm text-slate-700">{names || "ยังไม่มีผู้รับผิดชอบ"}</p>
                             {done && (
                               <p className="mt-0.5 text-xs font-semibold text-emerald-600">
-                                ✓ {s.log?.signer?.full_name} เซ็นแล้ว เวลา {s.log?.signed_at ? new Date(s.log.signed_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" }) : ""} น.
+                                ✓ {s.log?.signer ? teacherName(s.log.signer) : ""} เซ็นแล้ว เวลา {s.log?.signed_at ? new Date(s.log.signed_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" }) : ""} น.
                               </p>
                             )}
                           </div>
@@ -390,14 +390,14 @@ function SignModal({
             {slot.assignments.length > 0 && (
               <optgroup label="ผู้ถูกมอบหมายจุดนี้">
                 {slot.assignments.map((a) => (
-                  <option key={a.teacher_id} value={a.teacher_id}>{a.teacher?.full_name}</option>
-                ))}
+  <option key={a.teacher_id} value={a.teacher_id}>{teacherName(a.teacher)}</option>
+))}
               </optgroup>
             )}
             <optgroup label="ครูท่านอื่น (กรณีสับเปลี่ยน)">
               {teachers.filter((t) => !assignedIds.has(t.id)).map((t) => (
-                <option key={t.id} value={t.id}>{t.full_name}</option>
-              ))}
+  <option key={t.id} value={t.id}>{teacherName(t)}</option>
+))}
             </optgroup>
           </select>
         </div>
