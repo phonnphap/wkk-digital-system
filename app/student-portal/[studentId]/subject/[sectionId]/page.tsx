@@ -1028,23 +1028,24 @@ function SubmissionPanel({
       {/* ★ ปุ่มยืนยัน/ยกเลิกส่งงาน + ลบงาน */}
       <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100">
         {isSubmitted ? (
-          <button
-            onClick={() => handleToggleConfirm(false)}
-            disabled={toggling || isLocked}
-            title={isLocked ? "ครูตรวจงานนี้แล้ว ไม่สามารถยกเลิกได้" : undefined}
-            className="px-4 py-2 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-600 text-sm font-black disabled:opacity-50"
-          >
-            {toggling ? "..." : "↺ ยกเลิกการส่งงาน"}
-          </button>
-        ) : (
-          <button
-            onClick={() => handleToggleConfirm(true)}
-            disabled={toggling}
-            className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-black disabled:opacity-50"
-          >
-            {toggling ? "..." : "✅ ยืนยันการส่งงาน"}
-          </button>
-        )}
+  <button
+    onClick={() => handleToggleConfirm(false)}
+    disabled={toggling || isLocked}
+    title={isLocked ? "ครูตรวจงานนี้แล้ว ไม่สามารถยกเลิกได้" : undefined}
+    className="px-4 py-2 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-600 text-sm font-black disabled:opacity-50"
+  >
+    {toggling ? "..." : "↺ ยกเลิกการส่งงาน"}
+  </button>
+) : (
+  <button
+    onClick={() => handleToggleConfirm(true)}
+    disabled={toggling || !canEdit}  
+    title={!canEdit ? "ไม่สามารถส่งงานนี้ได้ในขณะนี้" : undefined}
+    className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-black disabled:opacity-50"
+  >
+    {toggling ? "..." : "✅ ยืนยันการส่งงาน"}
+  </button>
+)}
         {canEdit && submission && (
           <button
             onClick={handleDeleteSubmission}

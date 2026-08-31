@@ -17,6 +17,43 @@ export async function POST(req: Request) {
 
   const supabase = createAdminClient();
 
+  if (confirm) {
+    // ★ ดึง due_date ของงาน + subject_section_id เพื่อไปเช็คการตั้งค่าปิดรับส่ง
+    const { data: assignmentRow, error: aErr } = await supabase
+      .from("assignments")
+      .select("due_date, subject_section_id")
+      .eq("id", assignment_id)
+      .maybeSingle();
+    if (aErr) return NextResponse.json({ error: aErr.message }, { status: 500 });
+
+    // ★ ดึงค่า student_submit_enabled / allow_late_submission จากตาราง section (ปรับชื่อ table/column ให้ตรงจริง)
+    const { data: sectionRow, error: sErr } = await supabase
+      .from("subject_sections")
+      .select("student_submit_enabled, allow_late_submission")
+      .eq("id", assignmentRow?.subject_section_id)
+      .maybeSingle();
+    if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
+
+    const submitEnabled = sectionRow?.student_submit_enabled ?? true;
+    const allowLate = sectionRow?.allow_late_submission ?? true;
+    const isOverdue = assignmentRow?.due_date
+      ? new Date(assignmentRow.due_date).getTime() < Date.now()
+      : false;
+
+    if (!submitEnabled) {
+      return NextResponse.json(
+        { error: "ครูปิดการส่งงานผ่านระบบไว้สำหรับวิชานี้" },
+        { status: 403 }
+      );
+    }
+    if (isOverdue && !allowLate) {
+      return NextResponse.json(
+        { error: "เลยกำหนดส่งงานแล้ว และครูปิดการส่งงานย้อนหลังไว้" },
+        { status: 403 }
+      );
+    }
+  }
+
   const { data: existing } = await supabase
     .from("assignment_submissions")
     .select("id, status, submitted_at")
@@ -24,7 +61,6 @@ export async function POST(req: Request) {
     .eq("student_id", student_id)
     .maybeSingle();
 
-  // ★ กำหนด type ของแถวที่จะ upsert ให้ตายตัว shape เดียว
   type SubmissionUpsertRow = {
     id?: string;
     assignment_id: string;
@@ -39,7 +75,6 @@ export async function POST(req: Request) {
     assignment_id,
     student_id,
     status: existing?.status ?? "pending_review",
-    // ★ ยืนยันครั้งแรก (ยังไม่เคยมี submitted_at) ให้ประทับเวลาไว้
     submitted_at:
       confirm && !existing?.submitted_at
         ? new Date().toISOString()
@@ -56,3 +91,5 @@ export async function POST(req: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ submission: data });
 }
+
+  
