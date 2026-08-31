@@ -358,10 +358,10 @@ studentList.forEach((s) => { map[s.id] = "present"; });
 (attendanceRes.data ?? []).forEach((r: { 
   student_id: string; 
   status: AttendanceStatus; 
-  recorded_source?: string; // เพิ่มบรรทัดนี้ (ใส่ ? ไว้เผื่อบางรายการไม่มี value)
+  recorded_source?: string;
 }) => {
   map[r.student_id] = r.status;
-  if (r.status === "late" && r.recorded_source === "จับสาย") locked[r.student_id] = true;
+  if (r.status === "late" && r.recorded_source === "gate_scan") locked[r.student_id] = true; // ★ แก้จาก "จับสาย"
 });
 
 setStatusMap(map);
@@ -436,41 +436,50 @@ setLockedMap(locked);
 }
 
   async function handleSave() {
-    if (!selectedClass || students.length === 0) return;
-    setSaving(true);
-    setSavedMsg("");
+  if (!selectedClass || students.length === 0) return;
+  setSaving(true);
+  setSavedMsg("");
 
-    const rows = students.map((s) => ({
-  student_id: s.id,
-  classroom_id: selectedClass.classroom_id,
-  attendance_date: date,
-  status: statusMap[s.id] ?? "present",
-  recorded_source: "homeroom", // ★
-}));
+  const rows = students
+    .filter((s) => !lockedMap[s.id]) // ★ ไม่แตะนักเรียนที่ถูกล็อกจากการจับสาย
+    .map((s) => ({
+      student_id: s.id,
+      classroom_id: selectedClass.classroom_id,
+      attendance_date: date,
+      status: statusMap[s.id] ?? "present",
+      recorded_source: "homeroom",
+    }));
 
-const { data: savedRows, error } = await supabase
-  .from("attendance_records")
-  .upsert(rows, { onConflict: "student_id,attendance_date" })
-  .select("student_id, status, recorded_source");
-
+  if (rows.length === 0) {
     setSaving(false);
-
-    if (error) {
-      console.error("attendance save error:", error);
-      alert("บันทึกไม่สำเร็จ: " + error.message);
-      return;
-    }
-
-    if (!savedRows || savedRows.length < rows.length) {
-      alert(
-        `บันทึกได้เพียง ${savedRows?.length ?? 0}/${rows.length} คน — กรุณาตรวจสอบสิทธิ์ (RLS policy) ของตาราง attendance_records ว่าอนุญาตให้ครูประจำชั้นเขียนข้อมูลของนักเรียนทุกคนในห้องหรือไม่`
-      );
-      return;
-    }
-
     setSavedMsg("บันทึกเรียบร้อยแล้ว");
     setTimeout(() => setSavedMsg(""), 2500);
+    return;
   }
+
+  const { data: savedRows, error } = await supabase
+    .from("attendance_records")
+    .upsert(rows, { onConflict: "student_id,attendance_date" })
+    .select("student_id, status, recorded_source");
+
+  setSaving(false);
+
+  if (error) {
+    console.error("attendance save error:", error);
+    alert("บันทึกไม่สำเร็จ: " + error.message);
+    return;
+  }
+
+  if (!savedRows || savedRows.length < rows.length) {
+    alert(
+      `บันทึกได้เพียง ${savedRows?.length ?? 0}/${rows.length} คน — กรุณาตรวจสอบสิทธิ์ (RLS policy) ของตาราง attendance_records`
+    );
+    return;
+  }
+
+  setSavedMsg("บันทึกเรียบร้อยแล้ว");
+  setTimeout(() => setSavedMsg(""), 2500);
+}
 
   const summary = students.reduce(
     (acc, s) => {
