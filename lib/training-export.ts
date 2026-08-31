@@ -1,9 +1,9 @@
 import * as XLSX from 'xlsx';
-import type { TrainingRecordWithUser, EvidenceFile } from './training-records';
+import type { TrainingRecordWithUser} from './training-records';
 import { TRAINING_TYPE_LABELS, TRAINING_STATUS_LABELS } from './training-records';
 import { getTrainingApprovers } from './training-permissions';
+import { resolveEvidenceFiles, type ResolvedEvidence } from './training-evidence';
 
-const ONEDRIVE_ACCOUNT = 'hr@khienkhet.ac.th';
 
 function fullName(r: TrainingRecordWithUser) {
   return r.full_name || `${r.title ?? ''} ${r.first_name ?? ''} ${r.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
@@ -61,96 +61,6 @@ function thaiDateFull(iso?: string) {
   const months = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
   const d = new Date(iso);
   return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear() + 543}`;
-}
-
-function isImageFile(name: string) {
-  return /\.(jpe?g|png|gif|webp|bmp)$/i.test(name);
-}
-function isPdfFile(name: string) {
-  return /\.pdf$/i.test(name);
-}
-
-// ✅ resolve ลิงก์ OneDrive สดใหม่จาก path (เผื่อ url ที่เก็บไว้ตอนอัปโหลดหมดอายุ)
-async function resolveEvidenceUrl(path?: string | null, fallbackUrl?: string | null): Promise<string | null> {
-  if (!path) return fallbackUrl ?? null;
-  try {
-    const res = await fetch('/api/resolve-onedrive', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, account: ONEDRIVE_ACCOUNT }),
-    });
-    const json = await res.json();
-    if (json.ok && json.downloadUrl) return json.downloadUrl as string;
-    console.warn('[training-export] resolve-onedrive ไม่สำเร็จ:', path, json);
-  } catch (err) {
-    console.warn('[training-export] resolve-onedrive error:', path, err);
-  }
-  return fallbackUrl ?? null;
-}
-// ── PDF.js loader — โหลดจากไฟล์ local ใน /public/pdfjs/ (same-origin) แทน CDN ──
-// เดิมโหลดจาก cdnjs.cloudflare.com แล้วเจอปัญหา CSP ของหน้าต่างพิมพ์ (about:blank) บล็อกสคริปต์ข้ามโดเมน
-// การโฮสต์เองที่ same-origin แก้ปัญหานี้ได้เด็ดขาด ไม่ขึ้นกับการตั้งค่า CSP ของเซิร์ฟเวอร์เลย
-let pdfjsLoadPromise: Promise<any> | null = null;
-function loadPdfJs(): Promise<any> {
-  if (typeof window === 'undefined') return Promise.reject(new Error('no window'));
-  const w = window as any;
-  if (w.pdfjsLib) return Promise.resolve(w.pdfjsLib);
-  if (pdfjsLoadPromise) return pdfjsLoadPromise;
-  pdfjsLoadPromise = new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = '/pdfjs/pdf.min.js'; // ✅ same-origin แทน CDN
-    script.onload = () => {
-      const lib = (window as any).pdfjsLib;
-      lib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.js'; // ✅ same-origin
-      resolve(lib);
-    };
-    script.onerror = () => reject(new Error('โหลด pdf.js (local) ไม่สำเร็จ'));
-    document.head.appendChild(script);
-  });
-  return pdfjsLoadPromise;
-}
-
-// ✅ render หน้าแรกของ PDF เป็นรูปภาพจริง (data URL) เพื่อใช้แสดง/พิมพ์เหมือนรูปถ่ายทั่วไป
-async function renderPdfFirstPageToDataUrl(pdfUrl: string): Promise<string | null> {
-  try {
-    const pdfjsLib = await loadPdfJs();
-    const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
-    const page = await pdf.getPage(1);
-    const viewport = page.getViewport({ scale: 1.3 });
-    const canvas = document.createElement('canvas');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    return canvas.toDataURL('image/jpeg', 0.85);
-  } catch (err) {
-    console.warn('[training-export] แปลง PDF เป็นรูปไม่สำเร็จ:', pdfUrl, err);
-    return null;
-  }
-}
-
-interface ResolvedEvidence {
-  name: string;
-  thumbnailUrl?: string; // มีค่า = แสดงเป็นรูป, ไม่มีค่า = แสดงเป็นการ์ดไอคอนไฟล์
-  isPdf: boolean;
-}
-
-async function resolveEvidenceFiles(files: EvidenceFile[]): Promise<ResolvedEvidence[]> {
-  const out: ResolvedEvidence[] = [];
-  for (const f of files) {
-    const url = await resolveEvidenceUrl(f.path, f.url);
-    if (!url) { out.push({ name: f.name, isPdf: isPdfFile(f.name) }); continue; } // resolve ไม่สำเร็จเลย -> แสดงการ์ดไอคอนพร้อมชื่อไฟล์
-    if (isPdfFile(f.name)) {
-      const thumb = await renderPdfFirstPageToDataUrl(url);
-      out.push({ name: f.name, thumbnailUrl: thumb ?? undefined, isPdf: true });
-    } else if (isImageFile(f.name)) {
-      out.push({ name: f.name, thumbnailUrl: url, isPdf: false });
-    } else {
-      out.push({ name: f.name, isPdf: false }); // ไฟล์ประเภทอื่น (docx ฯลฯ) ยังคงเป็นการ์ดไอคอน
-    }
-  }
-  return out;
 }
 
 type RecordWithResolvedEvidence = TrainingRecordWithUser & { resolvedEvidence: ResolvedEvidence[] };

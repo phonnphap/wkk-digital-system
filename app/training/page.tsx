@@ -11,6 +11,7 @@ import type { TrainingRecordWithUser, TrainingType } from '@/lib/training-record
 import { exportTrainingToXlsx, printIndividualReport } from '@/lib/training-export';
 import TrainingFormModal from '@/components/training/TrainingFormModal';
 import ManageTrainingSupervisorsButton from '@/components/training/ManageTrainingSupervisorsButton';
+import TrainingRecordDetailModal from '@/components/training/TrainingRecordDetailModal';
 
 function fullName(r: any) {
   return r.full_name || `${r.title ?? ''} ${r.first_name ?? ''} ${r.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
@@ -31,8 +32,9 @@ export default function TrainingPage() {
   const [filterType, setFilterType] = useState<TrainingType | 'All'>('All');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
+    const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<TrainingRecordWithUser | null>(null);
+  const [viewingRecord, setViewingRecord] = useState<TrainingRecordWithUser | null>(null); // ✅ เพิ่ม
   const [printingOwn, setPrintingOwn] = useState(false);
 
   const loadAll = useCallback(async () => {
@@ -225,16 +227,19 @@ function canEditRecord(r: TrainingRecordWithUser): boolean {
                       )}
                     </div>
                     {/* ✅ ปุ่มแก้ไข/ลบ แสดงเฉพาะเจ้าของรายการ หรือผู้บริหาร/ผู้ดูแลโครงการเท่านั้น — คนอื่นดูได้อย่างเดียว */}
-                    {canEditRecord(r) ? (
-                      <div className="flex gap-1.5 shrink-0">
-                        <button onClick={() => { setEditing(r); setShowForm(true); }}
-                          className="text-xs font-bold text-amber-600 hover:text-amber-800 px-2 py-1 rounded-lg hover:bg-amber-50 border border-amber-200">✏️</button>
-                        <button onClick={() => handleDelete(r.id)}
-                          className="text-xs font-bold text-red-500 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 border border-red-200">🗑️</button>
-                      </div>
-                    ) : (
-                      <span className="text-[10px] font-bold text-slate-300 shrink-0 self-start px-2 py-1">🔒 ดูอย่างเดียว</span>
-                    )}
+                    {/* ✅ ปุ่มดูรายละเอียด — ทุกคนเห็นและกดได้เสมอ ไม่ว่าจะเป็นเจ้าของหรือไม่ */}
+<div className="flex gap-1.5 shrink-0">
+  <button onClick={() => setViewingRecord(r)}
+    className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg hover:bg-blue-50 border border-blue-200">👁️ ดูรายละเอียด</button>
+  {canEditRecord(r) && (
+    <>
+      <button onClick={() => { setEditing(r); setShowForm(true); }}
+        className="text-xs font-bold text-amber-600 hover:text-amber-800 px-2 py-1 rounded-lg hover:bg-amber-50 border border-amber-200">✏️</button>
+      <button onClick={() => handleDelete(r.id)}
+        className="text-xs font-bold text-red-500 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 border border-red-200">🗑️</button>
+    </>
+  )}
+</div>
                   </div>
                 </div>
               ))}
@@ -259,6 +264,13 @@ function canEditRecord(r: TrainingRecordWithUser): boolean {
           onClose={() => { setShowForm(false); setEditing(null); }}
         />
       )}
+
+      {viewingRecord && (
+  <TrainingRecordDetailModal
+    record={viewingRecord}
+    onClose={() => setViewingRecord(null)}
+  />
+)}
     </div>
   );
 }
