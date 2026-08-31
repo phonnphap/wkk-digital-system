@@ -11,6 +11,7 @@ import {
   THAI_DOW, jsDateToDow, todayISO, formatThaiDateFull, timeShort, teacherName,
   Teacher, DutyPoint, DutyTimeSlot, DutyAssignment, DutyLog, HeadSetting,
 } from "@/lib/duty-helpers";
+import { isExcludedTeacher } from "@/lib/duty-helpers";
 
 const supabase = createClient();
 const DASHBOARD_PATH = "/duty-report";
@@ -30,7 +31,7 @@ export default function DutyDailyReportPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
-  const [signModalSlot, setSignModalSlot] = useState<SlotView | null>(null);
+  const [signModalTarget, setSignModalTarget] = useState<{ point: PointView; slot: SlotView } | null>(null);
 
   const [myRole, setMyRole] = useState<string>("");
 const [myEmail, setMyEmail] = useState<string>("");
@@ -61,9 +62,9 @@ const canManageDuty = useMemo(() => {
 
   useEffect(() => {
     supabase.from("users").select("id, title, first_name, last_name, role").order("first_name").then(({ data, error }) => {
-      if (error) { console.warn("[duty-report] โหลดรายชื่อครูไม่สำเร็จ:", error.message); return; }
-      setTeachers(data ?? []);
-    });
+  if (error) { console.warn("[duty-report] โหลดรายชื่อครูไม่สำเร็จ:", error.message); return; }
+  setTeachers((data ?? []).filter((t) => !isExcludedTeacher(t)));
+});
   }, []);
 
   async function loadAll() {
@@ -168,30 +169,26 @@ const canManageDuty = useMemo(() => {
   const totalSlots = points.reduce((sum, p) => sum + p.slots.length, 0);
   const doneSlots = points.reduce((sum, p) => sum + p.slots.filter((s) => s.log?.status === "done").length, 0);
 
-  async function handleSaveSign(slot: SlotView, signerId: string, photoFile: File | null, note: string, existingPhotoUrl: string | null) {
-    let photo_url = existingPhotoUrl;
-    if (photoFile) {
-      const path = `${date}/${slot.id}-${Date.now()}.jpg`;
-      const { error: uploadErr } = await supabase.storage.from("duty-photos").upload(path, photoFile);
-      if (uploadErr) throw new Error("อัปโหลดรูปไม่สำเร็จ: " + uploadErr.message);
-      const { data: pub } = supabase.storage.from("duty-photos").getPublicUrl(path);
-      photo_url = pub.publicUrl;
-    }
-
-    const { error } = await supabase.from("duty_daily_logs").upsert(
-      {
-        log_date: date,
-        time_slot_id: slot.id,
-        status: "done",
-        signed_by: signerId,
-        signed_at: new Date().toISOString(),
-        photo_url,
-        note: note || null,
-      },
-      { onConflict: "log_date,time_slot_id" }
-    );
-    if (error) throw new Error("บันทึกไม่สำเร็จ: " + error.message);
+  async function handleSaveSign(point: PointView, slot: SlotView, signerId: string, photoFile: File | null, note: string, existingPhotoUrl: string | null) {
+  let photo_url = existingPhotoUrl;
+  if (photoFile) {
+    const fd = new FormData();
+    fd.append("file", photoFile);
+    fd.append("dayThai", THAI_DOW[dow]);
+    fd.append("date", date);
+    fd.append("pointLabel", `${point.point_number}-${point.title}`);
+    const res = await fetch("/api/duty-photo-upload", { method: "POST", body: fd });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? "อัปโหลดรูปไม่สำเร็จ");
+    photo_url = json.webUrl;
   }
+
+  const { error } = await supabase.from("duty_daily_logs").upsert(
+    { log_date: date, time_slot_id: slot.id, status: "done", signed_by: signerId, signed_at: new Date().toISOString(), photo_url, note: note || null },
+    { onConflict: "log_date,time_slot_id" }
+  );
+  if (error) throw new Error("บันทึกไม่สำเร็จ: " + error.message);
+}
 
   async function handleUndo(slot: SlotView) {
     if (!slot.log) return;
@@ -295,12 +292,19 @@ const canManageDuty = useMemo(() => {
                             )}
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
-                            {done && s.log?.photo_url && (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={s.log.photo_url} alt="รูปเซ็นเวร" className="h-10 w-10 rounded-xl object-cover ring-1 ring-slate-200" />
-                            )}
+                            {done && s.log?.photo_url && ( <a
+  
+    href={s.log.photo_url}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-500 ring-1 ring-indigo-200 hover:bg-indigo-100"
+    title="ดูรูปที่บันทึกไว้บน OneDrive"
+  >
+    <Camera className="h-4.5 w-4.5" />
+  </a>
+)}
                             <button
-                              onClick={() => setSignModalSlot(s)}
+                              onClick={() => setSignModalTarget({ point: p, slot: s })}
                               className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
                                 done ? "border-2 border-emerald-300 text-emerald-600 hover:bg-emerald-100" : "bg-gradient-to-r from-indigo-600 to-blue-500 text-white shadow-sm hover:-translate-y-0.5"
                               }`}
@@ -319,27 +323,28 @@ const canManageDuty = useMemo(() => {
           )}
         </div>
 
-        {signModalSlot && (
-          <SignModal
-            slot={signModalSlot}
-            teachers={teachers}
-            onClose={() => setSignModalSlot(null)}
-            onSave={handleSaveSign}
-            onUndo={handleUndo}
-            onDone={loadAll}
-          />
-        )}
+        {signModalTarget && (
+  <SignModal
+    point={signModalTarget.point}
+    slot={signModalTarget.slot}
+    teachers={teachers}
+    onClose={() => setSignModalTarget(null)}
+    onSave={handleSaveSign}
+    onUndo={handleUndo}
+    onDone={loadAll}
+  />
+)}
       </div>
     </div>
   );
 }
 
 function SignModal({
-  slot, teachers, onClose, onSave, onUndo, onDone,
+  point, slot, teachers, onClose, onSave, onUndo, onDone,
 }: {
-  slot: SlotView; teachers: Teacher[];
+  point: PointView; slot: SlotView; teachers: Teacher[];
   onClose: () => void;
-  onSave: (slot: SlotView, signerId: string, photoFile: File | null, note: string, existingPhotoUrl: string | null) => Promise<void>;
+  onSave: (point: PointView, slot: SlotView, signerId: string, photoFile: File | null, note: string, existingPhotoUrl: string | null) => Promise<void>;
   onUndo: (slot: SlotView) => Promise<void>;
   onDone: () => void;
 }) {
@@ -363,7 +368,7 @@ function SignModal({
     if (!photoFile && !slot.log?.photo_url) { setError("กรุณาแนบรูปถ่ายหน้างาน"); return; }
     setSaving(true); setError("");
     try {
-      await onSave(slot, signerId, photoFile, note, slot.log?.photo_url ?? null);
+      await onSave(point, slot, signerId, photoFile, note, slot.log?.photo_url ?? null);
       onDone(); onClose();
     } catch (e: any) {
       setError(e.message ?? "บันทึกไม่สำเร็จ");

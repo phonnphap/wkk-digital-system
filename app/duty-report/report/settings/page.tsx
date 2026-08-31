@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Home, ArrowLeft, ShieldCheck, Save, Search, X, Check } from "lucide-react";
-import { THAI_DOW, WORKING_DOW } from "@/lib/duty-helpers";
+import { THAI_DOW, WORKING_DOW, isExcludedTeacher } from "@/lib/duty-helpers";
 
 const supabase = createClient();
 
@@ -13,7 +13,8 @@ type Teacher = {
   title: string | null;
   first_name: string | null;
   last_name: string | null;
-  full_name: string | null;
+  full_name?: string | null;
+  role?: string | null;
 };
 
 // ★ ประกอบชื่อแสดงผล: ใช้ full_name ถ้ามีข้อมูลจริง ไม่งั้น fallback ไปประกอบจาก title+first+last
@@ -34,13 +35,13 @@ export default function DutyHeadSettingsPage() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from("users").select("id, title, first_name, last_name").order("first_name"),
+      supabase.from("users").select("id, title, first_name, last_name, role").order("first_name"),
       supabase.from("duty_head_settings").select("day_of_week, role, teacher_id"),
     ]).then(([teacherRes, settingsRes]) => {
       if (teacherRes.error) console.warn("[duty-head-settings] โหลดรายชื่อครูไม่สำเร็จ:", teacherRes.error.message);
-      const list = (teacherRes.data ?? []) as Teacher[];
-      list.sort((a, b) => displayName(a).localeCompare(displayName(b), "th"));
-      setTeachers(list);
+      const list = ((teacherRes.data ?? []) as Teacher[]).filter((t) => !isExcludedTeacher(t));
+list.sort((a, b) => displayName(a).localeCompare(displayName(b), "th"));
+setTeachers(list);
 
       const map: Record<string, string> = {};
       (settingsRes.data ?? []).forEach((r: any) => { if (r.teacher_id) map[`${r.day_of_week}-${r.role}`] = r.teacher_id; });

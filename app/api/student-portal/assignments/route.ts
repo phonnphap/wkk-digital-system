@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
 
     // ★ แก้ไข: เพิ่ม student_submit_enabled เข้า select ด้วย (เดิม select แค่ allow_late_submission)
   // เพื่อให้ฝั่งนักเรียนรู้ว่าครูปิดการส่งงานทั้งวิชาไว้หรือไม่ (คนละสวิตช์กับ "ส่งย้อนหลัง")
-  const { data: section } = await supabase
+      const { data: section } = await supabase
     .from("subject_sections")
     .select("id, allow_late_submission, student_submit_enabled")
     .eq("id", sectionId)
@@ -76,11 +76,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ดึงข้อมูลงานไม่สำเร็จ" }, { status: 500 });
   }
 
-  // ★ แก้ไข: ส่ง allow_late_submission ของวิชานี้กลับไปด้วย ให้ฝั่งหน้าเว็บใช้ปิดฟอร์มส่งงาน
-  // เมื่อเลยกำหนดส่งแล้วและครูปิดสวิตช์นี้ไว้ (default true เผื่อ field เป็น null)
+  // ★ แก้ไข: ส่ง allow_late_submission และ student_submit_enabled ของวิชานี้กลับไปด้วย
+  // ให้ฝั่งหน้าเว็บใช้ปิดฟอร์มส่งงาน (default true เผื่อ field เป็น null)
   return NextResponse.json({
     assignments,
     allow_late_submission: section.allow_late_submission ?? true,
+    student_submit_enabled: section.student_submit_enabled ?? true,
   });
 }
 

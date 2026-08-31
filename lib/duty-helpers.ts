@@ -30,6 +30,15 @@ export function timeShort(t: string) {
   return t?.slice(0, 5) ?? "";
 }
 
+export function isExcludedTeacher(t: { role?: string | null; title?: string | null; first_name?: string | null; last_name?: string | null }) {
+  const role = (t.role ?? "").toLowerCase();
+  const fullName = `${t.title ?? ""}${t.first_name ?? ""} ${t.last_name ?? ""}`;
+  if (role.includes("admin")) return true;
+  if (fullName.includes("ผู้บริหาร")) return true;
+  if (fullName.includes("แอดมิน")) return true;
+  return false;
+}
+
 export type Teacher = { id: string; title: string | null; first_name: string; last_name: string; role?: string | null };
 export function teacherName(t?: Teacher | null) {
   if (!t) return "";

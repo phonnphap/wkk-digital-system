@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Home, ArrowLeft, CalendarRange, Plus, Trash2, Copy, Save, Search, X } from "lucide-react";
 import { THAI_DOW, WORKING_DOW, teacherName, Teacher, DutyPoint, DutyTimeSlot, DutyAssignment } from "@/lib/duty-helpers";
+import { isExcludedTeacher } from "@/lib/duty-helpers";
 
 const supabase = createClient();
 
@@ -98,12 +99,8 @@ export default function DutyRosterPage() {
 
   useEffect(() => {
   supabase.from("users").select("id, title, first_name, last_name, role").order("first_name").then(({ data }) => {
-    const filtered = (data ?? []).filter((t: any) => {
-      const role = (t.role ?? "").toLowerCase();
-      return !role.includes("admin") && !role.includes("ผู้บริหาร") && !role.includes("บริหาร");
-    });
-    setTeachers(filtered);
-  });
+  setTeachers((data ?? []).filter((t) => !isExcludedTeacher(t)));
+});
 }, []);
 
   async function loadForDow(targetDow: number) {
