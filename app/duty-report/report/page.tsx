@@ -32,6 +32,26 @@ export default function DutyDailyReportPage() {
 
   const [signModalSlot, setSignModalSlot] = useState<SlotView | null>(null);
 
+  const [myRole, setMyRole] = useState<string>("");
+const [myEmail, setMyEmail] = useState<string>("");
+
+useEffect(() => {
+  supabase.auth.getUser().then(async ({ data }) => {
+    const user = data.user;
+    if (!user) return;
+    const { data: profile } = await supabase
+      .from("users").select("role, email").eq("auth_id", user.id).maybeSingle();
+    if (profile) { setMyRole(profile.role ?? ""); setMyEmail(profile.email ?? ""); }
+  });
+}, []);
+
+const canManageDuty = useMemo(() => {
+  return (
+    ["admin", "director", "deputy_director", "admin_general"].includes(myRole) ||
+    myEmail === "chanidapa@khienkhet.ac.th"
+  );
+}, [myRole, myEmail]);
+
   function openDatePicker() {
     const el = dateInputRef.current;
     if (!el) return;
@@ -47,62 +67,101 @@ export default function DutyDailyReportPage() {
   }, []);
 
   async function loadAll() {
-    setLoading(true);
-    setErrorMsg("");
+  setLoading(true);
+  setErrorMsg("");
 
-    // หัวหน้าเวร/รองหัวหน้าเวร ของวันนี้
-    const { data: headData, error: headErr } = await supabase
-      .from("duty_head_settings")
-      .select("role, teacher:users(id, full_name)")
-      .eq("day_of_week", dow);
-    if (headErr) console.warn("[duty-report] โหลดหัวหน้าเวรไม่สำเร็จ:", headErr.message);
-    const headMap: { head?: Teacher; deputy?: Teacher } = {};
-    (headData ?? []).forEach((r: any) => {
-      if (r.role === "head") headMap.head = r.teacher;
-      if (r.role === "deputy") headMap.deputy = r.teacher;
-    });
-    setHeadToday(headMap);
+  const { data: headData, error: headErr } = await supabase
+    .from("duty_head_settings")
+    .select("role, teacher:users(id, full_name)")
+    .eq("day_of_week", dow);
+  if (headErr) console.warn("[duty-report] โหลดหัวหน้าเวรไม่สำเร็จ:", headErr.message);
+  const headMap: { head?: Teacher; deputy?: Teacher } = {};
+  (headData ?? []).forEach((r: any) => {
+    if (r.role === "head") headMap.head = r.teacher;
+    if (r.role === "deputy") headMap.deputy = r.teacher;
+  });
+  setHeadToday(headMap);
 
-    // จุดเวร + ช่วงเวลาของวันนี้ + ผู้ถูกมอบหมาย
-    const { data: pointRows, error: pointErr } = await supabase
-      .from("duty_points")
-      .select(
-        "id, point_number, title, location_note, sort_order, slots:duty_time_slots(id, duty_point_id, day_of_week, start_time, end_time, slot_label, sort_order, assignments:duty_assignments(id, time_slot_id, teacher_id, sort_order, teacher:users(id, full_name)))"
-      )
-      .order("sort_order");
+  // จุดเวร + ช่วงเวลาของวันนี้ (ไม่ embed assignments แล้ว)
+  const { data: pointRows, error: pointErr } = await supabase
+    .from("duty_points")
+    .select(
+      "id, point_number, title, location_note, sort_order, slots:duty_time_slots(id, duty_point_id, day_of_week, start_time, end_time, slot_label, sort_order)"
+    )
+    .order("sort_order");
 
-    if (pointErr) {
-      setErrorMsg("โหลดข้อมูลจุดเวรไม่สำเร็จ: " + pointErr.message);
-      setLoading(false);
-      return;
-    }
-
-    const slotIds: string[] = [];
-    const built: PointView[] = (pointRows ?? []).map((p: any) => {
-      const slots: SlotView[] = (p.slots ?? [])
-        .filter((s: any) => s.day_of_week === dow)
-        .sort((a: any, b: any) => a.sort_order - b.sort_order)
-        .map((s: any) => { slotIds.push(s.id); return { ...s, assignments: s.assignments ?? [] }; });
-      return { id: p.id, point_number: p.point_number, title: p.title, location_note: p.location_note, sort_order: p.sort_order, slots };
-    });
-
-    // บันทึกการเซ็น/ถ่ายรูปของวันที่เลือก
-    let logs: any[] = [];
-    if (slotIds.length > 0) {
-      const { data: logData, error: logErr } = await supabase
-        .from("duty_daily_logs")
-        .select("id, log_date, time_slot_id, status, signed_by, signed_at, photo_url, note, signer:users!duty_daily_logs_signed_by_fkey(id, full_name)")
-        .eq("log_date", date)
-        .in("time_slot_id", slotIds);
-      if (logErr) console.warn("[duty-report] โหลดบันทึกการเซ็นไม่สำเร็จ:", logErr.message);
-      logs = logData ?? [];
-    }
-    const logBySlot = new Map(logs.map((l: any) => [l.time_slot_id, l]));
-
-    built.forEach((p) => p.slots.forEach((s) => { s.log = logBySlot.get(s.id); }));
-    setPoints(built);
+  if (pointErr) {
+    setErrorMsg("โหลดข้อมูลจุดเวรไม่สำเร็จ: " + pointErr.message);
     setLoading(false);
+    return;
   }
+
+  // แยกดึงครูเวรของวันที่เลือก (เช้า/บ่าย ต่อจุดเวร) — คนละ query เพราะไม่มี FK เชื่อมกับ time_slots
+  const pointIds = (pointRows ?? []).map((p: any) => p.id);
+  let assignmentByPoint = new Map<string, { morning: string[]; afternoon: string[] }>();
+  if (pointIds.length > 0) {
+    const { data: assignRows, error: assignErr } = await supabase
+      .from("duty_assignments")
+      .select("duty_point_id, morning_teachers, afternoon_teachers")
+      .eq("duty_date", date)
+      .in("duty_point_id", pointIds);
+    if (assignErr) console.warn("[duty-report] โหลดผู้รับผิดชอบไม่สำเร็จ:", assignErr.message);
+    (assignRows ?? []).forEach((r: any) => {
+      assignmentByPoint.set(r.duty_point_id, {
+        morning: r.morning_teachers ?? [],
+        afternoon: r.afternoon_teachers ?? [],
+      });
+    });
+  }
+
+  // ดึงชื่อครูทั้งหมดที่ถูกอ้างถึง มาแปะให้ id -> full_name
+  const allTeacherIds = new Set<string>();
+  assignmentByPoint.forEach((v) => { v.morning.forEach((id) => allTeacherIds.add(id)); v.afternoon.forEach((id) => allTeacherIds.add(id)); });
+  let teacherNameMap = new Map<string, string>();
+  if (allTeacherIds.size > 0) {
+    const { data: teacherRows } = await supabase
+      .from("users").select("id, full_name").in("id", Array.from(allTeacherIds));
+    (teacherRows ?? []).forEach((t: any) => teacherNameMap.set(t.id, t.full_name));
+  }
+
+  const AFTERNOON_CUTOFF = "13:00:00"; // ★ เส้นแบ่งเช้า/บ่าย
+
+  const slotIds: string[] = [];
+  const built: PointView[] = (pointRows ?? []).map((p: any) => {
+    const assign = assignmentByPoint.get(p.id) ?? { morning: [], afternoon: [] };
+    const slots: SlotView[] = (p.slots ?? [])
+      .filter((s: any) => s.day_of_week === dow)
+      .sort((a: any, b: any) => a.sort_order - b.sort_order)
+      .map((s: any) => {
+        slotIds.push(s.id);
+        const isAfternoon = s.start_time >= AFTERNOON_CUTOFF;
+        const teacherIds = isAfternoon ? assign.afternoon : assign.morning;
+        const assignments = teacherIds.map((tid: string) => ({
+          id: tid, time_slot_id: s.id, teacher_id: tid,
+          teacher: { id: tid, full_name: teacherNameMap.get(tid) ?? "ไม่ทราบชื่อ" },
+        }));
+        return { ...s, assignments };
+      });
+    return { id: p.id, point_number: p.point_number, title: p.title, location_note: p.location_note, sort_order: p.sort_order, slots };
+  });
+
+  // บันทึกการเซ็น/ถ่ายรูป (เหมือนเดิม ไม่เปลี่ยน)
+  let logs: any[] = [];
+  if (slotIds.length > 0) {
+    const { data: logData, error: logErr } = await supabase
+      .from("duty_daily_logs")
+      .select("id, log_date, time_slot_id, status, signed_by, signed_at, photo_url, note, signer:users!duty_daily_logs_signed_by_fkey(id, full_name)")
+      .eq("log_date", date)
+      .in("time_slot_id", slotIds);
+    if (logErr) console.warn("[duty-report] โหลดบันทึกการเซ็นไม่สำเร็จ:", logErr.message);
+    logs = logData ?? [];
+  }
+  const logBySlot = new Map(logs.map((l: any) => [l.time_slot_id, l]));
+
+  built.forEach((p) => p.slots.forEach((s) => { s.log = logBySlot.get(s.id); }));
+  setPoints(built);
+  setLoading(false);
+}
 
   useEffect(() => { loadAll(); }, [date, dow]);
 
@@ -155,13 +214,15 @@ export default function DutyDailyReportPage() {
             </button>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => router.push("/duty-report/report/settings")} className="flex items-center gap-1.5 rounded-2xl border-2 border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-50">
-              <Settings2 className="h-3.5 w-3.5" /> ตั้งค่าหัวหน้าเวร
-            </button>
-            <button onClick={() => router.push("/duty-report/report/roster")} className="flex items-center gap-1.5 rounded-2xl border-2 border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-600 shadow-sm hover:bg-indigo-50">
-              <CalendarRange className="h-3.5 w-3.5" /> จัดตารางเวร 7 วัน
-            </button>
-          </div>
+  {canManageDuty && (
+    <button onClick={() => router.push("/duty-report/report/settings")} className="flex items-center gap-1.5 rounded-2xl border-2 border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-50">
+      <Settings2 className="h-3.5 w-3.5" /> ตั้งค่าหัวหน้าเวร
+    </button>
+  )}
+  <button onClick={() => router.push("/duty-report/report/roster")} className="flex items-center gap-1.5 rounded-2xl border-2 border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-600 shadow-sm hover:bg-indigo-50">
+    <CalendarRange className="h-3.5 w-3.5" /> จัดตารางเวร 7 วัน
+  </button>
+</div>
         </div>
 
         <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
