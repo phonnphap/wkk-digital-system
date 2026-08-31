@@ -163,27 +163,29 @@ export default function StudentPortalSubjectPage() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   // ★ เพิ่มใหม่: ค่าตั้งค่า "อนุญาตให้ส่งงานย้อนหลัง" ของวิชานี้ ดึงมาจาก API ตอนโหลดงาน
   // default true ไว้ก่อนโหลดเสร็จ กันฟอร์มกระพริบล็อกๆ เปิดๆ ระหว่างรอข้อมูล
-  const [allowLateSubmission, setAllowLateSubmission] = useState(true);
   const [attendance, setAttendance] = useState<any>(null);
   const [subjectInfo, setSubjectInfo] = useState<SubjectInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [selfStudent, setSelfStudent] = useState<GradeStudent | null>(null);
+  const [studentSubmitEnabled, setStudentSubmitEnabled] = useState(true);
+  const [allowLateSubmission, setAllowLateSubmission] = useState(true);
 
   const fetchAssignments = useCallback(async () => {
-    if (!sectionId) return;
-    setLoading(true);
-    const res = await fetch(
-      `/api/student-portal/assignments?student_id=${studentId}&subject_section_id=${sectionId}`
-    );
-    const data = await res.json();
-    if (res.ok) {
-      setAssignments(data.assignments ?? []);
-      // ★ เพิ่มใหม่: เก็บค่า allow_late_submission ที่ API ส่งมาด้วย
-      setAllowLateSubmission(data.allow_late_submission ?? true);
-    }
-    setLoading(false);
-  }, [studentId, sectionId]);
+  if (!sectionId) return;
+  setLoading(true);
+  const res = await fetch(
+    `/api/student-portal/assignments?student_id=${studentId}&subject_section_id=${sectionId}`
+  );
+  const data = await res.json();
+  if (res.ok) {
+    setAssignments(data.assignments ?? []);
+    // ★ เก็บสถานะเปิด/ปิดการส่งงานของวิชานี้ไว้ ส่งต่อให้ SubmissionPanel เช็คก่อนแสดงปุ่ม/ฟอร์ม
+    setStudentSubmitEnabled(data.student_submit_enabled ?? true);
+    setAllowLateSubmission(data.allow_late_submission ?? true);
+  }
+  setLoading(false);
+}, [studentId, sectionId]);
 
   const fetchAttendance = useCallback(async () => {
   if (!sectionId) return;
@@ -560,6 +562,8 @@ const sortedAssignments = [...assignments].sort((a, b) => {
   assignment={a}
   studentId={studentId}
   submission={a.submissions[0] ?? null}
+  submitEnabled={studentSubmitEnabled}      // ★ เพิ่ม
+  allowLateSubmission={allowLateSubmission} // ★ เพิ่ม
   onChanged={fetchAssignments}
 />
                     )}
@@ -778,11 +782,15 @@ function SubmissionPanel({
   assignment,
   studentId,
   submission,
+  submitEnabled,       // ★ เพิ่ม
+  allowLateSubmission, // ★ เพิ่ม
   onChanged,
 }: {
   assignment: Assignment;
   studentId: string;
   submission: Submission | null;
+  submitEnabled: boolean;       // ★ เพิ่ม
+  allowLateSubmission: boolean; // ★ เพิ่ม
   onChanged: () => void;
 }) {
   const [attachments, setAttachments] = useState<SubmissionAttachment[]>([]);
@@ -796,9 +804,13 @@ function SubmissionPanel({
   const [toggling, setToggling] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const isSubmitted = !!submission?.is_submitted;
-  // ★ ลบได้เฉพาะตอนยังไม่ถูกตรวจ (ตรงกับเงื่อนไขฝั่ง API)
+   const isSubmitted = !!submission?.is_submitted;
   const isLocked = submission ? ["reviewed", "needs_revision", "failed"].includes(submission.status) : false;
+
+  const isOverdue = assignment.due_date ? new Date(assignment.due_date).getTime() < Date.now() : false;
+  const overdueBlocked = isOverdue && !allowLateSubmission && !isSubmitted;
+
+  const canEdit = submitEnabled && !isLocked && !overdueBlocked;
 
   async function loadExtras() {
     setLoading(true);
@@ -925,8 +937,20 @@ function SubmissionPanel({
 
   return (
     <div className="mt-4 rounded-xl bg-slate-50 border border-slate-100 px-4 py-3 space-y-4">
+    {/* ★ ครูปิดการส่งงานทั้งวิชาไว้ */}
+    {!submitEnabled && (
+      <div className="rounded-lg bg-slate-200 text-slate-600 text-sm font-black px-3 py-2 text-center">
+        🔒 ครูปิดการส่งงานผ่านระบบไว้สำหรับวิชานี้ ติดต่อครูผู้สอนหากต้องการส่งงาน
+      </div>
+    )}
+    {/* ★ เลยกำหนดส่งและครูปิดส่งย้อนหลัง (แสดงเฉพาะตอนที่ submit ยังเปิดอยู่ ไม่งั้นซ้ำซ้อนกับ banner ด้านบน) */}
+    {submitEnabled && overdueBlocked && (
+      <div className="rounded-lg bg-rose-50 text-rose-600 text-sm font-black px-3 py-2 text-center">
+        ⏰ เลยกำหนดส่งแล้ว และครูปิดการส่งงานย้อนหลังไว้
+      </div>
+    )}
       {/* ★ แนบไฟล์ / ลิงก์ / ข้อความ */}
-      {!isLocked && (
+      {canEdit && (
         <div className="flex flex-wrap gap-2">
           <label className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 text-sm font-black cursor-pointer hover:bg-slate-100">
             📎 แนบไฟล์
@@ -944,7 +968,7 @@ function SubmissionPanel({
         </div>
       )}
 
-      {!isLocked && (
+      {canEdit && (
         <div className="flex gap-2 flex-wrap">
           <div className="flex-1 min-w-[180px] flex gap-1.5">
             <input
@@ -958,7 +982,7 @@ function SubmissionPanel({
         </div>
       )}
 
-      {!isLocked && (
+      {canEdit && (
         <div className="flex gap-1.5">
           <textarea
             value={textInput}
@@ -993,7 +1017,7 @@ function SubmissionPanel({
               {att.kind === "text" && (
                 <p className="text-sm font-bold text-slate-600 whitespace-pre-wrap">{att.content}</p>
               )}
-              {!isLocked && (
+              {canEdit && (
                 <button onClick={() => handleRemoveAttachment(att.id)} className="text-slate-300 hover:text-rose-500 shrink-0">✕</button>
               )}
             </div>
@@ -1021,7 +1045,7 @@ function SubmissionPanel({
             {toggling ? "..." : "✅ ยืนยันการส่งงาน"}
           </button>
         )}
-        {!isLocked && submission && (
+        {canEdit && submission && (
           <button
             onClick={handleDeleteSubmission}
             disabled={deleting}

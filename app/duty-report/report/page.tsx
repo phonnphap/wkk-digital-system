@@ -86,7 +86,7 @@ const canManageDuty = useMemo(() => {
   const { data: pointRows, error: pointErr } = await supabase
     .from("duty_points")
     .select(
-  "id, point_number, title, location_note, sort_order, slots:duty_time_slots(id, duty_point_id, day_of_week, start_time, end_time, slot_label, sort_order, assignments:duty_assignments(id, time_slot_id, teacher_id, sort_order, teacher:users(id, title, first_name, last_name)))"
+  "id, point_number, title, location_note, sort_order, slots:duty_time_slots(id, duty_point_id, day_of_week, start_time, end_time, slot_label, sort_order, assignments:duty_slot_assignments(id, time_slot_id, teacher_id, sort_order, teacher:users(id, title, first_name, last_name)))"
 )
     .order("sort_order");
 

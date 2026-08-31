@@ -34,8 +34,8 @@ export default function DutyRosterPage() {
     const { data, error } = await supabase
       .from("duty_points")
       .select(
-        "id, point_number, title, location_note, sort_order, slots:duty_time_slots(id, day_of_week, start_time, end_time, sort_order, assignments:duty_assignments(teacher_id))"
-      )
+  "id, point_number, title, location_note, sort_order, slots:duty_time_slots(id, day_of_week, start_time, end_time, sort_order, assignments:duty_slot_assignments(teacher_id))"
+)
       .order("sort_order");
 
     if (error) { console.warn("[roster] โหลดไม่สำเร็จ:", error.message); setLoading(false); return; }
@@ -102,12 +102,12 @@ export default function DutyRosterPage() {
             if (error) throw new Error(error.message);
           }
           // sync ผู้รับผิดชอบ: ลบของเดิมทั้งหมดแล้วใส่ใหม่ตาม draft (ง่ายและชัวร์)
-          await supabase.from("duty_assignments").delete().eq("time_slot_id", slotId);
-          if (s.teacher_ids.length) {
-            await supabase.from("duty_assignments").insert(
-              s.teacher_ids.map((tid, idx) => ({ time_slot_id: slotId, teacher_id: tid, sort_order: idx }))
-            );
-          }
+          await supabase.from("duty_slot_assignments").delete().eq("time_slot_id", slotId);
+if (s.teacher_ids.length) {
+  await supabase.from("duty_slot_assignments").insert(
+    s.teacher_ids.map((tid, idx) => ({ time_slot_id: slotId, teacher_id: tid, sort_order: idx }))
+  );
+}
         }
       }
       setSavedMsg(`บันทึกตารางวัน${THAI_DOW[dow]}เรียบร้อยแล้ว`);
@@ -127,7 +127,7 @@ export default function DutyRosterPage() {
     setLoading(true);
     const { data } = await supabase
       .from("duty_time_slots")
-      .select("duty_point_id, start_time, end_time, sort_order, assignments:duty_assignments(teacher_id)")
+      .select("duty_point_id, start_time, end_time, sort_order, assignments:duty_slot_assignments(teacher_id)")
       .eq("day_of_week", sourceDow);
 
     const draft: Record<string, SlotDraft[]> = {};

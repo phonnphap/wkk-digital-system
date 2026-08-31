@@ -33,12 +33,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ไม่ระบุวิชา" }, { status: 400 });
   }
 
-  // ★ แก้ไข: เพิ่ม allow_late_submission เข้า select เพื่อส่งไปให้ฝั่งนักเรียนใช้เช็คว่า
-  // ยังเปิดให้ส่งงานย้อนหลังหรือไม่ (เดิม select แค่ "id" ทำให้ฝั่งหน้าเว็บไม่มีข้อมูลนี้เลย
-  // ฟอร์มส่งงานเลยเปิดให้กรอกได้ตลอดแม้ครูจะปิด "อนุญาตให้ส่งงานย้อนหลัง" ไว้แล้ว)
+    // ★ แก้ไข: เพิ่ม student_submit_enabled เข้า select ด้วย (เดิม select แค่ allow_late_submission)
+  // เพื่อให้ฝั่งนักเรียนรู้ว่าครูปิดการส่งงานทั้งวิชาไว้หรือไม่ (คนละสวิตช์กับ "ส่งย้อนหลัง")
   const { data: section } = await supabase
     .from("subject_sections")
-    .select("id, allow_late_submission")
+    .select("id, allow_late_submission, student_submit_enabled")
     .eq("id", sectionId)
     .eq("classroom_id", student.classroom_id)
     .maybeSingle();
