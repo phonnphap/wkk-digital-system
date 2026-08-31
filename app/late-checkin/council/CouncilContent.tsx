@@ -114,8 +114,12 @@ export default function CouncilLateCheckinPage() {
     });
     html5QrRef.current = qr;
     qr.start(
-      { facingMode: "environment" },
-      { fps: 10, qrbox: { width: 260, height: 160 } },
+  { facingMode: "environment" },
+  { 
+    fps: 15, 
+    qrbox: { width: 280, height: 120 },
+    aspectRatio: 1.7777778
+  },
       (text) => { if (!scanHandledRef.current) { scanHandledRef.current = true; setScannerOpen(false); submitCode(text.replace(/\D/g, "") || text); } },
       () => {}
     ).then(() => setCameraStarting(false))
