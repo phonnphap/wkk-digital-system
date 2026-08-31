@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Home, ArrowLeft, CalendarRange, Plus, Trash2, Copy, Save } from "lucide-react";
+import { Home, ArrowLeft, CalendarRange, Plus, Trash2, Copy, Save, Search, X } from "lucide-react";
 import { THAI_DOW, WORKING_DOW, teacherName, Teacher, DutyPoint, DutyTimeSlot, DutyAssignment } from "@/lib/duty-helpers";
 
 const supabase = createClient();
@@ -16,6 +16,77 @@ type SlotDraft = {
 };
 type PointDraft = DutyPoint & { slots: SlotDraft[] };
 
+function TeacherPicker({
+  teachers, selectedIds, onToggle,
+}: { teachers: Teacher[]; selectedIds: string[]; onToggle: (teacherId: string) => void }) {
+  const [query, setQuery] = useState("");
+
+  const selectedTeachers = teachers.filter((t) => selectedIds.includes(t.id));
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return teachers
+      .filter((t) => {
+        const name = `${t.title ?? ""}${t.first_name} ${t.last_name}`.toLowerCase();
+        return name.includes(q);
+      })
+      .slice(0, 15);
+  }, [teachers, query]);
+
+  return (
+    <div className="mt-2">
+      {/* ชื่อที่เลือกแล้ว */}
+      {selectedTeachers.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {selectedTeachers.map((t) => (
+            <span key={t.id} className="flex items-center gap-1 rounded-full bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white">
+              {t.title ?? ""}{t.first_name} {t.last_name}
+              <button onClick={() => onToggle(t.id)} className="ml-0.5 hover:opacity-70">
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* ช่องพิมพ์ค้นหา */}
+      <div className="flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-3 py-1.5">
+        <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="พิมพ์ค้นหาชื่อครู..."
+          className="w-full border-none bg-transparent text-xs outline-none placeholder:text-slate-400"
+        />
+      </div>
+
+      {/* ผลค้นหา */}
+      {query.trim() && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {filtered.length === 0 ? (
+            <p className="text-[11px] text-slate-400">ไม่พบชื่อครูที่ตรงกับคำค้นหา</p>
+          ) : (
+            filtered.map((t) => {
+              const active = selectedIds.includes(t.id);
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => { onToggle(t.id); setQuery(""); }}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+                    active ? "bg-indigo-100 text-indigo-600 ring-1 ring-indigo-300" : "bg-slate-50 text-slate-600 ring-1 ring-slate-200 hover:bg-indigo-50"
+                  }`}
+                >
+                  {t.title ?? ""}{t.first_name} {t.last_name}{active ? " ✓" : ""}
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DutyRosterPage() {
   const router = useRouter();
   const [dow, setDow] = useState(1);
@@ -26,8 +97,14 @@ export default function DutyRosterPage() {
   const [savedMsg, setSavedMsg] = useState("");
 
   useEffect(() => {
-    supabase.from("users").select("id, title, first_name, last_name").order("first_name").then(({ data }) => setTeachers(data ?? []));
-  }, []);
+  supabase.from("users").select("id, title, first_name, last_name, role").order("first_name").then(({ data }) => {
+    const filtered = (data ?? []).filter((t: any) => {
+      const role = (t.role ?? "").toLowerCase();
+      return !role.includes("admin") && !role.includes("ผู้บริหาร") && !role.includes("บริหาร");
+    });
+    setTeachers(filtered);
+  });
+}, []);
 
   async function loadForDow(targetDow: number) {
     setLoading(true);
@@ -213,20 +290,11 @@ if (s.teacher_ids.length) {
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {teachers.map((t) => {
-  const active = s.teacher_ids.includes(t.id);
-  return (
-    <button
-      key={t.id}
-      onClick={() => toggleTeacher(p.id, s.id, t.id)}
-      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${active ? "bg-indigo-600 text-white" : "bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-indigo-50"}`}
-    >
-      {teacherName(t)}
-    </button>
-  );
-})}
-                      </div>
+                      <TeacherPicker
+  teachers={teachers}
+  selectedIds={s.teacher_ids}
+  onToggle={(teacherId) => toggleTeacher(p.id, s.id, teacherId)}
+/>
                     </div>
                   ))}
                 </div>

@@ -30,7 +30,7 @@ export function timeShort(t: string) {
   return t?.slice(0, 5) ?? "";
 }
 
-export type Teacher = { id: string; title: string | null; first_name: string; last_name: string };
+export type Teacher = { id: string; title: string | null; first_name: string; last_name: string; role: string | null };
 export function teacherName(t?: Teacher | null) {
   if (!t) return "";
   return `${t.title ?? ""}${t.first_name} ${t.last_name}`.trim();
