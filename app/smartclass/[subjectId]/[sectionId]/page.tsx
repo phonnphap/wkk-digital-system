@@ -31,8 +31,9 @@ type SectionRow = {
   join_code: string;
   classroom_id: string;
   student_portal_enabled: boolean;
+  student_submit_enabled: boolean; // ★ เพิ่ม
   allow_late_submission: boolean;
-  student_access_mode?: "name_only" | "name_and_id" | "id_and_dob"; // ★ แก้ค่าให้ตรง DB
+  student_access_mode?: "name_only" | "name_and_id" | "id_and_dob";
 };
 type Student = { id: string; prefix?: string; first_name: string; last_name: string; nick_name?: string; seat_number: number; avatar_url?: string };
 type ScorePreset = { id: string; label: string; points: number; emoji: string; sort_order: number };
@@ -2482,9 +2483,12 @@ export default function SmartClassRosterPage() {
     (async () => {
       if (!sectionId) return;
 
-      const { data: sec } = await supabase
+      // ★ แก้: เพิ่ม student_submit_enabled เข้า select ด้วย (เดิมไม่มี ทำให้หลัง refresh
+// ค่านี้เป็น undefined เสมอ แล้ว SubjectSettingsTab fallback เป็น true ทุกครั้ง
+// ทั้งที่ใน DB บันทึกเป็น false ไปแล้วจริง ๆ ตอนกดบันทึกก่อนหน้านี้)
+const { data: sec } = await supabase
   .from("subject_sections")
-  .select("id, join_code, classroom_id, student_portal_enabled, allow_late_submission, student_access_mode, grading_structure, formative_max_score, midterm_max_score, final_max_score")
+  .select("id, join_code, classroom_id, student_portal_enabled, student_submit_enabled, allow_late_submission, student_access_mode, grading_structure, formative_max_score, midterm_max_score, final_max_score")
   .eq("id", sectionId).maybeSingle();
 setSection(sec as SectionRow);
 
