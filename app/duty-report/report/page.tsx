@@ -60,7 +60,7 @@ const canManageDuty = useMemo(() => {
   }
 
   useEffect(() => {
-    supabase.from("users").select("id, title, first_name, last_name").order("first_name").then(({ data, error }) => {
+    supabase.from("users").select("id, title, first_name, last_name, role").order("first_name").then(({ data, error }) => {
       if (error) { console.warn("[duty-report] โหลดรายชื่อครูไม่สำเร็จ:", error.message); return; }
       setTeachers(data ?? []);
     });
