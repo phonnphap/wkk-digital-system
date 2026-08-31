@@ -105,6 +105,15 @@ export default function LateCheckinPage() {
 const [settings, setSettings] = useState<{ council_enabled: boolean; open_time: string; close_time: string; share_token: string } | null>(null);
 const [shareModalOpen, setShareModalOpen] = useState(false);
 const [savingSettings, setSavingSettings] = useState(false);
+const [openTimeDraft, setOpenTimeDraft] = useState("");
+const [closeTimeDraft, setCloseTimeDraft] = useState("");
+
+useEffect(() => {
+  if (settings) {
+    setOpenTimeDraft(settings.open_time?.slice(0, 5) ?? "");
+    setCloseTimeDraft(settings.close_time?.slice(0, 5) ?? "");
+  }
+}, [settings]);
 
 useEffect(() => {
   supabase.auth.getUser().then(async ({ data }) => {
@@ -716,20 +725,22 @@ async function regenerateToken() {
           <div>
             <label className="text-[11px] text-slate-400">เปิดเวลา</label>
             <input
-              type="time"
-              value={settings.open_time?.slice(0, 5)}
-              onChange={(e) => saveSettings({ open_time: e.target.value + ":00" })}
-              className="w-full rounded-xl border-2 border-slate-200 px-2 py-1.5 text-sm"
-            />
+  type="time"
+  value={openTimeDraft}
+  onChange={(e) => setOpenTimeDraft(e.target.value)}
+  onBlur={() => { if (/^\d{2}:\d{2}$/.test(openTimeDraft)) saveSettings({ open_time: openTimeDraft + ":00" }); }}
+  className="w-full rounded-xl border-2 border-slate-200 px-2 py-1.5 text-sm"
+/>
           </div>
           <div>
             <label className="text-[11px] text-slate-400">ปิดเวลา</label>
             <input
-              type="time"
-              value={settings.close_time?.slice(0, 5)}
-              onChange={(e) => saveSettings({ close_time: e.target.value + ":00" })}
-              className="w-full rounded-xl border-2 border-slate-200 px-2 py-1.5 text-sm"
-            />
+  type="time"
+  value={closeTimeDraft}
+  onChange={(e) => setCloseTimeDraft(e.target.value)}
+  onBlur={() => { if (/^\d{2}:\d{2}$/.test(closeTimeDraft)) saveSettings({ close_time: closeTimeDraft + ":00" }); }}
+  className="w-full rounded-xl border-2 border-slate-200 px-2 py-1.5 text-sm"
+/>
           </div>
         </div>
 

@@ -1145,28 +1145,48 @@ function SubmissionPanel({
         <p className="text-xs text-slate-300 font-bold">กำลังโหลด...</p>
       ) : attachments.length === 0 ? (
         <p className="text-xs text-slate-300 font-bold">ยังไม่มีไฟล์/ลิงก์/ข้อความที่แนบ</p>
-      ) : (
+            ) : (
         <div className="space-y-1.5">
-          {attachments.map(att => (
-            <div key={att.id} className="flex items-center justify-between gap-2 bg-white rounded-lg border border-slate-100 px-3 py-2">
-              {att.kind === "file" && (
-                <a href={att.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-sm font-black text-indigo-600 hover:underline truncate">
-                  📎 {att.file_name}
-                </a>
-              )}
-              {att.kind === "link" && (
-                <a href={att.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-sm font-black text-indigo-600 hover:underline truncate">
-                  🔗 {att.url}
-                </a>
-              )}
-              {att.kind === "text" && (
-                <p className="text-sm font-bold text-slate-600 whitespace-pre-wrap">{att.content}</p>
-              )}
-              {canEdit && (
-                <button onClick={() => handleRemoveAttachment(att.id)} className="text-slate-300 hover:text-rose-500 shrink-0">✕</button>
-              )}
-            </div>
-          ))}
+          {attachments.map(att => {
+            const isImg = att.kind === "file" && /\.(png|jpe?g|gif|webp)$/i.test(att.file_name ?? att.url ?? "");
+            return (
+              <div key={att.id} className="flex items-center justify-between gap-2 bg-white rounded-lg border border-slate-100 px-3 py-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  {att.kind === "file" && isImg && (
+                    <a href={att.url ?? "#"} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                      <img
+                        src={att.url ?? ""}
+                        alt={att.file_name ?? "รูปภาพ"}
+                        className="h-10 w-10 rounded-md object-cover border border-slate-200"
+                      />
+                    </a>
+                  )}
+                  {att.kind === "file" && ( <a
+                    
+                      href={att.url ?? "#"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      download={att.file_name ?? undefined}
+                      className="text-sm font-black text-indigo-600 hover:underline truncate"
+                    >
+                      📎 {att.file_name}
+                    </a>
+                  )}
+                  {att.kind === "link" && (
+                    <a href={att.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-sm font-black text-indigo-600 hover:underline truncate">
+                      🔗 {att.url}
+                    </a>
+                  )}
+                  {att.kind === "text" && (
+                    <p className="text-sm font-bold text-slate-600 whitespace-pre-wrap">{att.content}</p>
+                  )}
+                </div>
+                {canEdit && (
+                  <button onClick={() => handleRemoveAttachment(att.id)} className="text-slate-300 hover:text-rose-500 shrink-0">✕</button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
