@@ -811,6 +811,7 @@ function SubmissionPanel({
   const overdueBlocked = isOverdue && !allowLateSubmission && !isSubmitted;
 
   const canEdit = submitEnabled && !isLocked && !overdueBlocked;
+  const canComment = submitEnabled && !overdueBlocked;
 
   async function loadExtras() {
     setLoading(true);
@@ -1059,27 +1060,31 @@ function SubmissionPanel({
       </div>
 
       {/* ★ คอมเมนต์ */}
-      <div className="pt-2 border-t border-slate-100 space-y-2">
-        <p className="text-xs font-black text-slate-400">💬 คอมเมนต์</p>
-        {comments.map(c => (
-          <div key={c.id} className={`text-sm rounded-lg px-3 py-2 ${c.author_role === "teacher" ? "bg-indigo-50 text-indigo-700" : "bg-white border border-slate-100 text-slate-600"}`}>
-            <p className="font-black text-xs">{c.author_role === "teacher" ? "👩‍🏫 ครู" : "🧑‍🎓 นักเรียน"}</p>
-            <p className="font-bold mt-0.5 whitespace-pre-wrap">{c.content}</p>
-          </div>
-        ))}
-        <div className="flex gap-1.5">
-          <input
-            value={commentInput}
-            onChange={e => setCommentInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handlePostComment()}
-            placeholder="พิมพ์คอมเมนต์..."
-            className="flex-1 border-2 border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
-          />
-          <button onClick={handlePostComment} disabled={posting} className="px-3 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-black disabled:opacity-50">
-            ส่ง
-          </button>
-        </div>
-      </div>
+<div className="pt-2 border-t border-slate-100 space-y-2">
+  <p className="text-xs font-black text-slate-400">💬 คอมเมนต์</p>
+  {comments.map(c => (
+    <div key={c.id} className={`text-sm rounded-lg px-3 py-2 ${c.author_role === "teacher" ? "bg-indigo-50 text-indigo-700" : "bg-white border border-slate-100 text-slate-600"}`}>
+      <p className="font-black text-xs">{c.author_role === "teacher" ? "👩‍🏫 ครู" : "🧑‍🎓 นักเรียน"}</p>
+      <p className="font-bold mt-0.5 whitespace-pre-wrap">{c.content}</p>
     </div>
+  ))}
+  {canComment ? (
+    <div className="flex gap-1.5">
+      <input
+        value={commentInput}
+        onChange={e => setCommentInput(e.target.value)}
+        onKeyDown={e => e.key === "Enter" && handlePostComment()}
+        placeholder="พิมพ์คอมเมนต์..."
+        className="flex-1 border-2 border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold focus:border-indigo-400 focus:outline-none"
+      />
+      <button onClick={handlePostComment} disabled={posting} className="px-3 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-black disabled:opacity-50">
+        ส่ง
+      </button>
+    </div>
+  ) : (
+    <p className="text-xs font-bold text-slate-400 text-center py-1">🔒 ปิดคอมเมนต์แล้ว</p>
+  )}
+</div>
+        </div>
   );
 }
