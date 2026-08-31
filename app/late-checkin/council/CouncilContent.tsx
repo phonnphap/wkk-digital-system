@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { ScanLine, Camera, Search, CheckCircle2, AlertTriangle, X, Loader2, Lock } from "lucide-react";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { Zap } from "lucide-react";
 
 const supabase = createClient();
 const CAMERA_REGION_ID = "council-camera-region";
@@ -54,7 +55,23 @@ export default function CouncilLateCheckinPage() {
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const html5QrRef = useRef<Html5Qrcode | null>(null);
-  const scanHandledRef = useRef(false);
+const scanHandledRef = useRef(false);
+const [torchOn, setTorchOn] = useState(false);
+const [torchSupported, setTorchSupported] = useState(false);
+
+async function toggleTorch() {
+  try {
+    const qr = html5QrRef.current;
+    if (!qr) return;
+    const next = !torchOn;
+    await qr.applyVideoConstraints({
+      advanced: [{ torch: next } as any],
+    });
+    setTorchOn(next);
+  } catch (err) {
+    console.warn("เปิดไฟฉายไม่สำเร็จ:", err);
+  }
+}
 
   function translateRpcError(msg: string) {
     return ERROR_MESSAGES[msg] ?? msg;
@@ -109,21 +126,38 @@ export default function CouncilLateCheckinPage() {
     setCameraError("");
     setCameraStarting(true);
     const qr = new Html5Qrcode(CAMERA_REGION_ID, {
-      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39, Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.ITF],
-      verbose: false,
-    });
+  formatsToSupport: [
+    Html5QrcodeSupportedFormats.QR_CODE,
+    Html5QrcodeSupportedFormats.CODE_128,
+    Html5QrcodeSupportedFormats.CODE_39,
+    Html5QrcodeSupportedFormats.EAN_13,
+    Html5QrcodeSupportedFormats.ITF,
+  ],
+  verbose: false,
+  experimentalFeatures: {
+    useBarCodeDetectorIfSupported: true, // ใช้ native API ของเบราว์เซอร์ถ้ารองรับ เร็ว/แม่นกว่า wasm มาก
+  },
+});
     html5QrRef.current = qr;
     qr.start(
-  { facingMode: "environment" },
-  { 
-    fps: 15, 
-    qrbox: { width: 280, height: 120 },
-    aspectRatio: 1.7777778
+  {
+    facingMode: "environment",
   },
-      (text) => { if (!scanHandledRef.current) { scanHandledRef.current = true; setScannerOpen(false); submitCode(text.replace(/\D/g, "") || text); } },
-      () => {}
-    ).then(() => setCameraStarting(false))
-     .catch((err) => { setCameraStarting(false); setCameraError("เปิดกล้องไม่สำเร็จ: " + String(err)); });
+  {
+    fps: 10,
+    qrbox: { width: 280, height: 120 },
+    aspectRatio: 1.7777778,
+    videoConstraints: {
+      facingMode: "environment",
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+      advanced: [{ focusMode: "continuous" }] as any,
+    },
+  },
+  (text) => { if (!scanHandledRef.current) { scanHandledRef.current = true; setScannerOpen(false); submitCode(text.replace(/\D/g, "") || text); } },
+  () => {}
+).then(() => setCameraStarting(false))
+ .catch((err) => { setCameraStarting(false); setCameraError("เปิดกล้องไม่สำเร็จ: " + String(err)); });
 
     return () => {
       const cur = html5QrRef.current; html5QrRef.current = null;
@@ -287,9 +321,20 @@ export default function CouncilLateCheckinPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4">
             <div className="w-full max-w-md rounded-3xl bg-white p-5">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-extrabold text-slate-800">สแกนบัตรนักเรียน</p>
-                <button onClick={() => setScannerOpen(false)}><X className="h-4 w-4" /></button>
-              </div>
+  <p className="text-sm font-extrabold text-slate-800">สแกนบัตรนักเรียน</p>
+  <div className="flex items-center gap-2">
+    {torchSupported && (
+      <button
+        onClick={toggleTorch}
+        className={`rounded-xl p-1.5 ${torchOn ? "bg-amber-100 text-amber-600" : "text-slate-400 hover:bg-slate-100"}`}
+        title="เปิด/ปิดไฟฉาย"
+      >
+        <Zap className="h-4 w-4" />
+      </button>
+    )}
+    <button onClick={() => setScannerOpen(false)}><X className="h-4 w-4" /></button>
+  </div>
+</div>
               <div className="relative mt-4 overflow-hidden rounded-2xl bg-slate-900">
                 <div id={CAMERA_REGION_ID} className="w-full" />
                 {cameraStarting && (

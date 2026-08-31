@@ -11,6 +11,7 @@ import { getDisplayPrefix } from "@/lib/student-prefix";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { Share2, Copy, Settings2, Lock } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import { Zap } from "lucide-react";
 
 const supabase = createClient();
 
@@ -99,8 +100,24 @@ export default function LateCheckinPage() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraError, setCameraError] = useState("");
-  const html5QrRef = useRef<Html5Qrcode | null>(null);
-  const scanHandledRef = useRef(false); // กันสแกนซ้ำหลายเฟรมในครั้งเดียว
+const html5QrRef = useRef<Html5Qrcode | null>(null);
+const scanHandledRef = useRef(false);
+const [torchOn, setTorchOn] = useState(false);
+const [torchSupported, setTorchSupported] = useState(false);
+
+async function toggleTorch() {
+  try {
+    const qr = html5QrRef.current;
+    if (!qr) return;
+    const next = !torchOn;
+    await qr.applyVideoConstraints({
+      advanced: [{ torch: next } as any],
+    });
+    setTorchOn(next);
+  } catch (err) {
+    console.warn("เปิดไฟฉายไม่สำเร็จ:", err);
+  }
+}
   const [myRole, setMyRole] = useState<string>("");
 const [settings, setSettings] = useState<{ council_enabled: boolean; open_time: string; close_time: string; share_token: string } | null>(null);
 const [shareModalOpen, setShareModalOpen] = useState(false);
@@ -305,15 +322,18 @@ async function regenerateToken() {
     setCameraStarting(true);
 
     const qr = new Html5Qrcode(CAMERA_REGION_ID, {
-      formatsToSupport: [
-        Html5QrcodeSupportedFormats.QR_CODE,
-        Html5QrcodeSupportedFormats.CODE_128,
-        Html5QrcodeSupportedFormats.CODE_39,
-        Html5QrcodeSupportedFormats.EAN_13,
-        Html5QrcodeSupportedFormats.ITF,
-      ],
-      verbose: false,
-    });
+  formatsToSupport: [
+    Html5QrcodeSupportedFormats.QR_CODE,
+    Html5QrcodeSupportedFormats.CODE_128,
+    Html5QrcodeSupportedFormats.CODE_39,
+    Html5QrcodeSupportedFormats.EAN_13,
+    Html5QrcodeSupportedFormats.ITF,
+  ],
+  verbose: false,
+  experimentalFeatures: {
+    useBarCodeDetectorIfSupported: true, // ใช้ native API ของเบราว์เซอร์ถ้ารองรับ เร็ว/แม่นกว่า wasm มาก
+  },
+});
     html5QrRef.current = qr;
 
     qr.start(
@@ -327,6 +347,13 @@ async function regenerateToken() {
       () => { /* เฟรมที่อ่านไม่ออก ไม่ต้องแจ้ง error รัว ๆ */ }
     )
       .then(() => setCameraStarting(false))
+      .then(() => {
+  setCameraStarting(false);
+  try {
+    const capabilities = qr.getRunningTrackCameraCapabilities();
+    setTorchSupported(!!(capabilities as any)?.torchFeature?.()?.isSupported?.());
+  } catch { setTorchSupported(false); }
+})
       .catch((err) => {
         setCameraStarting(false);
         setCameraError(
@@ -590,10 +617,20 @@ async function regenerateToken() {
           <div className="space-y-5">
             <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
               <div className="flex items-center justify-between">
-                <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-800">
-                  <Clock className="h-4 w-4 text-rose-500" /> มาสายวันนี้ ({lateToday.length} คน)
-                </p>
-              </div>
+  <p className="text-sm font-extrabold text-slate-800">สแกนบัตรนักเรียน</p>
+  <div className="flex items-center gap-2">
+    {torchSupported && (
+      <button
+        onClick={toggleTorch}
+        className={`rounded-xl p-1.5 ${torchOn ? "bg-amber-100 text-amber-600" : "text-slate-400 hover:bg-slate-100"}`}
+        title="เปิด/ปิดไฟฉาย"
+      >
+        <Zap className="h-4 w-4" />
+      </button>
+    )}
+    <button onClick={() => setScannerOpen(false)}><X className="h-4 w-4" /></button>
+  </div>
+</div>
               <div className="mt-3 max-h-[26rem] space-y-1.5 overflow-y-auto">
                 {loadingLate ? (
                   <p className="py-6 text-center text-sm text-slate-400">กำลังโหลด...</p>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getStudentSession } from "@/lib/studentAuth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // ★ เพิ่มใหม่: คำนวณคำนำหน้าจากอายุจริง (วันเกิด+เพศ) แทนค่า prefix ที่บันทึกไว้ในตาราง
 // ชาย อายุ >= 15 = "นาย" / น้อยกว่า = "เด็กชาย" ・ หญิง อายุ >= 15 = "นางสาว" / น้อยกว่า = "เด็กหญิง"
@@ -32,9 +33,13 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = await createClient();
+  // ★ FIX: subject_sections / timetable_entries / time_slots มี RLS ที่รับเฉพาะ role
+  // "authenticated" (Supabase Auth) แต่หน้า student-portal ใช้ custom session ทำให้วิ่งด้วย
+  // role "anon" เสมอ ไม่ผ่าน policy → ได้ [] เงียบๆ โดยไม่มี error (ปัญหาเดียวกับที่เจอใน
+  // /api/student-portal/assignments) สิทธิ์นักเรียนเช็คไปแล้วด้านบน จึง bypass RLS ได้ปลอดภัย
+  const supabaseAdmin = createAdminClient();
 
   // 1) ข้อมูลนักเรียน + ห้องเรียน
-  // ★ เพิ่ม gender, birth_date เข้ามาใน select เพื่อคำนวณคำนำหน้าอัตโนมัติ
   const { data: student, error: studentErr } = await supabase
     .from("students")
     .select("id, prefix, first_name, last_name, seat_number, classroom_id, gender, birth_date")
@@ -49,7 +54,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ไม่พบข้อมูลนักเรียน" }, { status: 404 });
   }
 
-  const { data: classroom, error: classroomErr } = await supabase
+  const { data: classroom, error: classroomErr } = await supabaseAdmin
     .from("classrooms")
     .select("id, room_name, grade_group, homeroom_teacher_id, homeroom_teacher_2_id")
     .eq("id", student.classroom_id)
@@ -60,28 +65,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ดึงข้อมูลห้องเรียนไม่สำเร็จ" }, { status: 500 });
   }
 
-  // 2) ครูประจำชั้น (สูงสุด 2 คน)
   const teacherIds = [classroom?.homeroom_teacher_id, classroom?.homeroom_teacher_2_id].filter(Boolean) as string[];
   let homeroomTeachers: { id: string; title?: string; first_name?: string; last_name?: string; full_name?: string }[] = [];
   if (teacherIds.length > 0) {
-    const { data: teachers, error: teacherErr } = await supabase
+    const { data: teachers, error: teacherErr } = await supabaseAdmin
       .from("users")
       .select("id, title, first_name, last_name, full_name")
       .in("id", teacherIds);
     if (teacherErr) {
       console.error("[timetable] homeroom teachers query error:", teacherErr);
     } else {
-      // เรียงลำดับให้ตรงกับ homeroom_teacher_id ก่อน แล้วค่อย homeroom_teacher_2_id
       homeroomTeachers = teacherIds
         .map((id) => (teachers ?? []).find((t) => t.id === id))
         .filter(Boolean) as any[];
     }
   }
 
-  // 3) ทุกวิชา (section) ของห้องนี้ ที่เปิดให้นักเรียนเข้าดูได้
-  //    หมายเหตุสำคัญ: subject_sections ไม่มีความสัมพันธ์ (FK) ตรงกับ timetable_entries ในฐานข้อมูลจริง
-  //    timetable_entries ผูกกับห้อง/วิชาผ่าน classroom_id + subject_id เท่านั้น
-  const { data: sections, error: sectionsErr } = await supabase
+  const { data: sections, error: sectionsErr } = await supabaseAdmin
     .from("subject_sections")
     .select(`
       id, subject_id, classroom_id, student_portal_enabled,
@@ -99,7 +99,6 @@ export async function GET(req: NextRequest) {
   const commonInfo = {
     student: {
       id: student.id,
-      // ★ แก้ไข: ใช้คำนำหน้าที่คำนวณจากอายุจริง (วันเกิด+เพศ) แทนค่า prefix ที่บันทึกไว้เฉยๆ
       prefix: getAutoPrefix(student.gender, student.birth_date, student.prefix),
       first_name: student.first_name,
       last_name: student.last_name,
@@ -118,8 +117,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ sections: [], ...commonInfo });
   }
 
-  // 4) ดึง timetable_entries ของห้องนี้ (เก็บแค่ time_slot_id ไม่มีเวลาเริ่ม/จบตรงๆ)
-  const { data: entries, error: entriesErr } = await supabase
+  const { data: entries, error: entriesErr } = await supabaseAdmin
     .from("timetable_entries")
     .select("id, classroom_id, subject_id, day_of_week, time_slot_id")
     .eq("classroom_id", student.classroom_id);
@@ -131,12 +129,11 @@ export async function GET(req: NextRequest) {
 
   const entryList = entries ?? [];
 
-  // 5) ดึงข้อมูลเวลาจริงจาก time_slots ตาม time_slot_id ที่ใช้จริงทั้งหมด
   const slotIds = [...new Set(entryList.map((e) => e.time_slot_id).filter(Boolean))];
   let slotMap = new Map<string, { slot_number: number; start_time: string; end_time: string }>();
 
   if (slotIds.length > 0) {
-    const { data: slots, error: slotsErr } = await supabase
+    const { data: slots, error: slotsErr } = await supabaseAdmin
       .from("time_slots")
       .select("id, slot_number, start_time, end_time")
       .in("id", slotIds);
@@ -148,7 +145,6 @@ export async function GET(req: NextRequest) {
     slotMap = new Map((slots ?? []).map((s) => [s.id, s]));
   }
 
-  // 6) ประกอบผลลัพธ์: แต่ละ section แนบ timetable_entries ที่มี subject_id ตรงกัน พร้อมเวลาเริ่ม/จบ
   const result = sectionList.map((sec: any) => ({
     id: sec.id,
     subject: sec.subject ?? null,
