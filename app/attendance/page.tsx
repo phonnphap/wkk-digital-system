@@ -333,7 +333,7 @@ const todayHoliday = isHoliday(date, holidayMap);
   useEffect(() => {
     if (!selectedClass) return;
     setLoading(true);
-    setSummaryFilter(null); // เปลี่ยนวัน/ห้อง แล้วรีเซ็ตตัวกรองรายชื่อที่เปิดค้างไว้
+    setSummaryFilter(null);
     const cid = selectedClass.classroom_id;
 
     Promise.all([
@@ -344,30 +344,35 @@ const todayHoliday = isHoliday(date, holidayMap);
         .order("seat_number"),
       supabase
         .from("attendance_records")
-        .select("student_id, status, recorded_source") 
+        .select("student_id, status, recorded_source")
         .eq("classroom_id", cid)
         .eq("attendance_date", date),
-    ]).then(([studentsRes, attendanceRes]) => {
-      const studentList: Student[] = studentsRes.data ?? [];
-      setStudents(studentList);
+    ])
+      .then(([studentsRes, attendanceRes]) => {
+        const studentList: Student[] = studentsRes.data ?? [];
+        setStudents(studentList);
 
-      const map: Record<string, AttendanceStatus> = {};
-      const locked: Record<string, boolean> = {}; 
-studentList.forEach((s) => { map[s.id] = "present"; });
+        const map: Record<string, AttendanceStatus> = {};
+        const locked: Record<string, boolean> = {};
+        studentList.forEach((s) => { map[s.id] = "present"; });
 
-(attendanceRes.data ?? []).forEach((r: { 
-  student_id: string; 
-  status: AttendanceStatus; 
-  recorded_source?: string;
-}) => {
-  map[r.student_id] = r.status;
-  if (r.status === "late" && r.recorded_source === "gate_scan") locked[r.student_id] = true; // ★ แก้จาก "จับสาย"
-});
+        (attendanceRes.data ?? []).forEach((r: {
+          student_id: string;
+          status: AttendanceStatus;
+          recorded_source?: string;
+        }) => {
+          map[r.student_id] = r.status;
+          if (r.status === "late" && r.recorded_source === "gate_scan") locked[r.student_id] = true;
+        });
 
-setStatusMap(map);
-setLockedMap(locked);
-    });
-  }, [selectedClass, date]);
+        setStatusMap(map);
+        setLockedMap(locked);
+      })
+      .catch((err) => {
+        console.error("โหลดข้อมูลนักเรียน/การเช็คชื่อไม่สำเร็จ:", err);
+      })
+      .finally(() => setLoading(false)); // ★ เพิ่มบรรทัดนี้ — สำคัญที่สุด
+}, [selectedClass, date]);
 
   // โหลดสถิติการมาเรียนรายวันทั้งเดือนของห้องนี้ (แยกชาย/หญิง)
   // หมายเหตุ: ต้องมี foreign key จาก attendance_records.student_id -> students.id

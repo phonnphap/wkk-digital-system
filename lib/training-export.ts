@@ -87,8 +87,9 @@ async function resolveEvidenceUrl(path?: string | null, fallbackUrl?: string | n
   }
   return fallbackUrl ?? null;
 }
-
-// ── PDF.js loader (โหลดจาก CDN ฝั่ง browser เท่านั้น ไม่ต้องแก้ backend) ──
+// ── PDF.js loader — โหลดจากไฟล์ local ใน /public/pdfjs/ (same-origin) แทน CDN ──
+// เดิมโหลดจาก cdnjs.cloudflare.com แล้วเจอปัญหา CSP ของหน้าต่างพิมพ์ (about:blank) บล็อกสคริปต์ข้ามโดเมน
+// การโฮสต์เองที่ same-origin แก้ปัญหานี้ได้เด็ดขาด ไม่ขึ้นกับการตั้งค่า CSP ของเซิร์ฟเวอร์เลย
 let pdfjsLoadPromise: Promise<any> | null = null;
 function loadPdfJs(): Promise<any> {
   if (typeof window === 'undefined') return Promise.reject(new Error('no window'));
@@ -97,13 +98,13 @@ function loadPdfJs(): Promise<any> {
   if (pdfjsLoadPromise) return pdfjsLoadPromise;
   pdfjsLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js';
+    script.src = '/pdfjs/pdf.min.js'; // ✅ same-origin แทน CDN
     script.onload = () => {
       const lib = (window as any).pdfjsLib;
-      lib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+      lib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.js'; // ✅ same-origin
       resolve(lib);
     };
-    script.onerror = () => reject(new Error('โหลด pdf.js ไม่สำเร็จ'));
+    script.onerror = () => reject(new Error('โหลด pdf.js (local) ไม่สำเร็จ'));
     document.head.appendChild(script);
   });
   return pdfjsLoadPromise;
