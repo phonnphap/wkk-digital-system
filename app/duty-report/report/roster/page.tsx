@@ -127,10 +127,45 @@ export default function DutyRosterPage() {
 
   useEffect(() => { loadForDow(dow); }, [dow]);
 
+  // หาเวลาเริ่มต้นที่ยังไม่ถูกใช้ในจุดนี้ เพื่อไม่ให้ชนกับช่วงเวลาที่มีอยู่แล้ว
+  function nextAvailableStartTime(existing: SlotDraft[]): { start: string; end: string } {
+    const used = new Set(existing.map((s) => s.start_time));
+    // ถ้ามีช่วงเวลาอยู่แล้ว ลองต่อจากช่วงสุดท้าย (เรียงตามเวลาสิ้นสุดล่าสุด)
+    let candidateStartMinutes = 7 * 60; // ค่าเริ่มต้น 07:00
+    if (existing.length > 0) {
+      const lastEnd = existing
+        .map((s) => s.end_time)
+        .filter(Boolean)
+        .sort()
+        .pop();
+      if (lastEnd) {
+        const [h, m] = lastEnd.split(":").map(Number);
+        candidateStartMinutes = h * 60 + m;
+      }
+    }
+
+    const toHHMM = (mins: number) => {
+      const h = Math.floor(mins / 60) % 24;
+      const m = mins % 60;
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    };
+
+    let start = toHHMM(candidateStartMinutes);
+    // ถ้าเวลาที่ได้ยังชนกับที่มีอยู่ ให้ขยับทีละ 15 นาทีจนกว่าจะว่าง
+    while (used.has(start)) {
+      candidateStartMinutes += 15;
+      start = toHHMM(candidateStartMinutes);
+    }
+    const end = toHHMM(candidateStartMinutes + 60);
+    return { start, end };
+  }
+
   function addSlot(pointId: string) {
-    setPoints((prev) => prev.map((p) => p.id === pointId
-      ? { ...p, slots: [...p.slots, { id: `new-${Date.now()}`, start_time: "07:00", end_time: "08:00", teacher_ids: [] }] }
-      : p));
+    setPoints((prev) => prev.map((p) => {
+      if (p.id !== pointId) return p;
+      const { start, end } = nextAvailableStartTime(p.slots);
+      return { ...p, slots: [...p.slots, { id: `new-${Date.now()}`, start_time: start, end_time: end, teacher_ids: [] }] };
+    }));
   }
   function removeSlot(pointId: string, slotId: string) {
     setPoints((prev) => prev.map((p) => p.id === pointId ? { ...p, slots: p.slots.filter((s) => s.id !== slotId) } : p));
@@ -148,14 +183,34 @@ export default function DutyRosterPage() {
       : p));
   }
 
+  // ตรวจสอบว่ามีช่วงเวลาที่ "เวลาเริ่ม" ซ้ำกันในจุดเดียวกันหรือไม่ ก่อนบันทึก
+  function findDuplicateStartTimes(): string[] {
+    const problems: string[] = [];
+    for (const p of points) {
+      const seen = new Map<string, number>();
+      for (const s of p.slots) {
+        seen.set(s.start_time, (seen.get(s.start_time) ?? 0) + 1);
+      }
+      for (const [time, count] of seen) {
+        if (count > 1) problems.push(`"${p.title}" มีช่วงเวลาที่เริ่ม ${time} ซ้ำกัน ${count} ช่วง`);
+      }
+    }
+    return problems;
+  }
+
   async function handleSaveDay() {
+    // ★ กันไม่ให้ยิง query ไปชน unique constraint (duty_point_id, day_of_week, start_time)
+    const problems = findDuplicateStartTimes();
+    if (problems.length) {
+      alert("บันทึกไม่ได้ เนื่องจากมีเวลาเริ่มซ้ำกันในจุดเดียวกัน:\n\n" + problems.join("\n") + "\n\nกรุณาแก้เวลาเริ่มให้ไม่ซ้ำกันก่อนบันทึก");
+      return;
+    }
+
     setSaving(true); setSavedMsg("");
     try {
       for (const p of points) {
         // ลบ slot เดิมของวันนี้ที่ไม่อยู่ใน draft แล้ว (ผู้ใช้กดลบ)
         const keepIds = p.slots.filter((s) => !s.id.startsWith("new-")).map((s) => s.id);
-        await supabase.from("duty_time_slots").delete().eq("duty_point_id", p.id).eq("day_of_week", dow)
-          .then(async (existing) => existing); // no-op guard
         const { data: existingSlots } = await supabase.from("duty_time_slots").select("id").eq("duty_point_id", p.id).eq("day_of_week", dow);
         const toDelete = (existingSlots ?? []).map((s: any) => s.id).filter((id: string) => !keepIds.includes(id));
         if (toDelete.length) await supabase.from("duty_time_slots").delete().in("id", toDelete);
