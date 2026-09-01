@@ -28,7 +28,7 @@ type Student = {
   birth_date: string | null;
   gender: string | null;
   classroom_id: string;
-  behavior_points: number;
+  behavior_score: number;
 };
 
 type BehaviorAction = "deduct" | "add";
@@ -48,13 +48,13 @@ type BehaviorRecord = {
   criteria_name: string;
   action: BehaviorAction;
   points: number;
-  note: string | null;
-  recorded_at: string;
+  description: string | null;
+  created_at: string;
   student?: { first_name: string; last_name: string; nick_name: string | null; seat_number: number | null };
 };
 
 const STUDENT_SELECT =
-  "id, seat_number, student_code, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id, behavior_points";
+  "id, seat_number, student_code, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id, behavior_score";
 
 function todayISO() {
   return new Date().toISOString().split("T")[0];
@@ -146,11 +146,11 @@ export default function BehaviorPage() {
   async function loadTodayRecords(classroomId: string) {
     setLoadingRecords(true);
     const { data, error } = await supabase
-      .from("behavior_records")
-      .select("id, student_id, criteria_name, action, points, note, recorded_at, student:students(first_name, last_name, nick_name, seat_number)")
-      .eq("classroom_id", classroomId)
-      .gte("recorded_at", `${todayISO()}T00:00:00`)
-      .order("recorded_at", { ascending: false });
+  .from("behavior_records")
+  .select("id, student_id, criteria_name, action, points, description, created_at, student:students(first_name, last_name, nick_name, seat_number)")
+  .eq("classroom_id", classroomId)
+  .gte("created_at", `${todayISO()}T00:00:00`)
+  .order("created_at", { ascending: false });
     if (error) { console.warn("[behavior] โหลดประวัติวันนี้ไม่สำเร็จ:", error.message); setLoadingRecords(false); return; }
     setTodayRecords((data as unknown as BehaviorRecord[]) ?? []);
     setLoadingRecords(false);
@@ -225,17 +225,17 @@ export default function BehaviorPage() {
     const criteriaId = customMode ? null : selectedCriteria!.id;
 
     const rows = Array.from(selectedStudentIds).map((studentId) => ({
-      student_id: studentId,
-      classroom_id: roomId,
-      criteria_id: criteriaId,
-      criteria_name: name,
-      action,
-      points,
-      category,
-      note: note.trim() || null,
-      recorded_by: myProfileId || null,
-      recorded_at: new Date().toISOString(),
-    }));
+  student_id: studentId,
+  classroom_id: roomId,
+  criteria_id: criteriaId,
+  criteria_name: name,
+  action,
+  points,
+  category,
+  description: note.trim() || null,
+  recorded_by: myProfileId || null,
+  incident_date: todayISO(),
+}));
 
     const { error } = await supabase.from("behavior_records").insert(rows);
     setSaving(false);
@@ -376,7 +376,7 @@ export default function BehaviorPage() {
                             <p className="truncate text-[13px] font-semibold text-slate-800">
                               {displayPrefix}{s.first_name} {s.last_name}
                             </p>
-                            <p className="truncate text-[11px] text-slate-400">คะแนนคงเหลือ {s.behavior_points}</p>
+                            <p className="truncate text-[11px] text-slate-400">คะแนนคงเหลือ {s.behavior_score}</p>
                           </div>
                           {checked && <CheckCircle2 className="h-4 w-4 shrink-0 text-rose-500" />}
                         </button>
@@ -534,7 +534,7 @@ export default function BehaviorPage() {
                             {r.student ? `${r.student.first_name} ${r.student.last_name}` : "-"}
                           </p>
                           <p className="truncate text-[11px] text-slate-500">{r.criteria_name}</p>
-                          <p className="text-[11px] text-slate-400">{timeThai(r.recorded_at)} น.</p>
+                          <p className="text-[11px] text-slate-400">{timeThai(r.created_at)} น.</p>
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-1">
                           <span className={`text-xs font-black ${r.action === "deduct" ? "text-rose-500" : "text-emerald-500"}`}>
