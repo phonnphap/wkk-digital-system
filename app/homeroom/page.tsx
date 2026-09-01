@@ -41,7 +41,7 @@ const SUBMENUS: SubMenuItem[] = [
   { key: "meals", name: "บันทึกอาหารและนม", desc: "การรับอาหารกลางวัน/ดื่มนมรายวัน", icon: UtensilsCrossed, color: "bg-orange-500", path: "/meals", status: "in_progress" },
   { key: "nutrition", name: "ประเมินโภชนาการ", desc: "ส่วนสูง น้ำหนัก สรุปภาวะโภชนาการ", icon: UserCheck, color: "bg-emerald-600", path: "/nutrition", status: "live" },
   { key: "reading_writing", name: "ประเมินการอ่าน-เขียน", desc: "บันทึกความสามารถอ่าน-เขียนรายบุคคล", icon: FileEdit, color: "bg-sky-500", path: "/reading_writing", status: "live" },
-  { key: "behavior", name: "บันทึกพฤติกรรม", desc: "บันทึกความดี / บันทึกความประพฤติ", icon: HeartHandshake, color: "bg-rose-500", path: "/behavior", status: "in_progress" },
+  { key: "behavior", name: "บันทึกพฤติกรรม", desc: "บันทึกความดี / บันทึกความประพฤติ", icon: HeartHandshake, color: "bg-rose-500", path: "/behavior", status: "live" },
   { key: "home_visit", name: "เยี่ยมบ้าน", desc: "บันทึกข้อมูลการเยี่ยมบ้านนักเรียน", icon: Home, color: "bg-teal-600", path: "/home_visit", status: "in_progress" },
   { key: "por5", name: "ปพ.5", desc: "รายวิชา · สรุปผลคะแนน/การมาเรียน/เชิงลึกของทุกวิชา", icon: FileText, color: "bg-cyan-600", path: "/homeroom/por5", status: "live" },
 ];
