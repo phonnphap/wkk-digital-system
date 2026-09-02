@@ -1022,37 +1022,44 @@ return (
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          {
-            icon: "✓", bg: "bg-emerald-100", color: "text-emerald-600", label: "นักเรียนมาวันนี้",
-            value: attendanceStats ? String(attendanceStats.present) : "-",
-            sub: attendanceStats
-              ? `/ ${attendanceStats.total} คน (เช็คแล้ว ${attendanceStats.checkedIn})`
-              : "รอข้อมูล",
-            subColor: "text-slate-400",
-            href: "/admin/attendance-overview",
-          },
-          {
-            icon: "✕", bg: "bg-rose-100", color: "text-rose-600", label: "ขาดเรียนวันนี้",
-            value: attendanceStats ? String(attendanceStats.absent) : "-",
-            sub: attendanceStats && attendanceStats.total > 0
-              ? `(${((attendanceStats.absent / attendanceStats.total) * 100).toFixed(1)}%)`
-              : "รอข้อมูล",
-            subColor: "text-rose-400",
-          },
-          {
-            icon: "📅", bg: "bg-blue-100", color: "text-blue-600",
-            label: leaveTodayStats ? `ครูลางาน (${leaveTodayStats.scopeLabel})` : "ครูลางาน",
-            value: leaveTodayStats ? String(leaveTodayStats.onLeave) : "-",
-            sub: !leaveTodayStats
-              ? "รอข้อมูล"
-              : leaveTodayStats.isAdminExec
-                ? "" // ★ แอดมิน/ผู้บริหาร ไม่ต้องขึ้นจำนวนคาบสอนแทน
-                : `คุณสอนแทน ${leaveTodayStats.mySubPeriods} คาบ`,
-            subColor: "text-slate-400",
-          },
-          { icon:"📌", bg:"bg-purple-100", color:"text-purple-600", label:"รอดำเนินการ",      value:String(urgentCount),  sub:"รายการ",  subColor:"text-slate-400" },
-        ].map((s, i) => (
-          <div key={i} className="bg-white border border-slate-200 rounded-2xl p-5 flex items-center gap-4 shadow-sm">
+  {
+    icon: "✓", bg: "bg-emerald-100", color: "text-emerald-600", label: "นักเรียนมาวันนี้",
+    value: attendanceStats ? String(attendanceStats.present) : "-",
+    sub: attendanceStats
+      ? `/ ${attendanceStats.total} คน (เช็คแล้ว ${attendanceStats.checkedIn})`
+      : "รอข้อมูล",
+    subColor: "text-slate-400",
+    href: "/admin/attendance-overview",
+  },
+  {
+    icon: "✕", bg: "bg-rose-100", color: "text-rose-600", label: "ขาดเรียนวันนี้",
+    value: attendanceStats ? String(attendanceStats.absent) : "-",
+    sub: attendanceStats && attendanceStats.total > 0
+      ? `(${((attendanceStats.absent / attendanceStats.total) * 100).toFixed(1)}%)`
+      : "รอข้อมูล",
+    subColor: "text-rose-400",
+    href: "/admin/attendance-overview", // ★ เพิ่มให้กดดูสถิติรวมได้เหมือนกัน
+  },
+  {
+    icon: "📅", bg: "bg-blue-100", color: "text-blue-600",
+    label: leaveTodayStats ? `ครูลางาน (${leaveTodayStats.scopeLabel})` : "ครูลางาน",
+    value: leaveTodayStats ? String(leaveTodayStats.onLeave) : "-",
+    sub: !leaveTodayStats
+      ? "รอข้อมูล"
+      : leaveTodayStats.isAdminExec
+        ? ""
+        : `คุณสอนแทน ${leaveTodayStats.mySubPeriods} คาบ`,
+    subColor: "text-slate-400",
+  },
+  { icon:"📌", bg:"bg-purple-100", color:"text-purple-600", label:"รอดำเนินการ", value:String(urgentCount), sub:"รายการ", subColor:"text-slate-400" },
+].map((s, i) => (
+  <div
+    key={i}
+    onClick={() => { if ((s as any).href) router.push((s as any).href); }}
+    className={`bg-white border border-slate-200 rounded-2xl p-5 flex items-center gap-4 shadow-sm transition-all ${
+      (s as any).href ? "cursor-pointer hover:-translate-y-0.5 hover:shadow-md hover:border-blue-300" : ""
+    }`}
+  >
             <div className={`w-12 h-12 rounded-xl ${s.bg} ${s.color} flex items-center justify-center text-xl font-bold`}>{s.icon}</div>
             <div>
               <span className="text-xs font-bold text-slate-400 block">{s.label}</span>
