@@ -391,14 +391,13 @@ async function regenerateToken() {
 
     const { data: savedRows, error } = await supabase
       .from("attendance_records")
-      .upsert(
+            .upsert(
         {
           student_id: student.id,
           classroom_id: student.classroom_id,
           attendance_date: todayISO(),
           status: "late",
           recorded_source: "gate_scan",
-          recorded_by: myProfileId || null,
           recorded_at: new Date().toISOString(),
         },
         { onConflict: "student_id,attendance_date" }
