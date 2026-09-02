@@ -4,7 +4,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Home, ArrowLeft, UserCheck, Camera, LogOut, Phone, Clock } from "lucide-react";
+import { Home, ArrowLeft, UserCheck, Camera, LogOut, Phone, Clock, QrCode } from "lucide-react";
+import Link from "next/link";
 
 const supabase = createClient();
 const DASHBOARD_PATH = "/dashboard";
@@ -133,10 +134,18 @@ export default function VisitorsPage() {
           </button>
         </div>
 
-        <div className="mt-6">
-          <p className="text-xs font-bold uppercase tracking-wider text-teal-500">งานรักษาความปลอดภัย</p>
-          <h1 className="mt-1 text-2xl font-extrabold text-slate-800 sm:text-3xl">บุคคลภายนอกเข้า-ออก</h1>
-          <p className="mt-1 text-sm text-slate-500">ผู้มาติดต่อสแกน QR กรอกเอง — รปภ. แค่ถ่ายรูปบัตรแล้วกดยืนยัน</p>
+        <div className="mt-6 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-teal-500">งานรักษาความปลอดภัย</p>
+            <h1 className="mt-1 text-2xl font-extrabold text-slate-800 sm:text-3xl">บุคคลภายนอกเข้า-ออก</h1>
+            <p className="mt-1 text-sm text-slate-500">ผู้มาติดต่อสแกน QR กรอกเอง — รปภ. แค่ถ่ายรูปบัตรแล้วกดยืนยัน</p>
+          </div>
+          <Link
+            href="/visitors/qr"
+            className="flex items-center gap-2 rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-teal-600 shadow-sm ring-1 ring-teal-200 hover:bg-teal-50"
+          >
+            <QrCode className="h-4.5 w-4.5" /> ดู/พิมพ์ QR
+          </Link>
         </div>
 
         {errorMsg && (
