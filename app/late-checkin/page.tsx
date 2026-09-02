@@ -47,12 +47,41 @@ type LateEntry = {
   record_id: string;
   student: Student;
   room_name: string;
+  grade_level: string | null; // ★ เพิ่ม — เก็บสายชั้นดิบไว้ใช้จัดเรียง/สรุป
   recorded_at: string;
 };
 
 // ★ ใช้ select เดียวกันทุกจุด กันลืมฟิลด์ตกหล่น
 const STUDENT_SELECT =
   "id, seat_number, student_code, national_id, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id, classroom:classrooms(room_name, grade_level:grade_group)";
+
+// ★ ลำดับสายชั้นที่ถูกต้อง: อนุบาล → ประถม → ม.ต้น → ม.ปลาย
+const STAGE_ORDER = ["อนุบาล", "ประถมศึกษา", "มัธยมศึกษาตอนต้น", "มัธยมศึกษาตอนปลาย"];
+
+function stageRank(stage: string | null | undefined) {
+  const idx = STAGE_ORDER.indexOf(stage ?? "");
+  return idx === -1 ? STAGE_ORDER.length : idx; // สายชั้นที่ไม่รู้จัก ให้ไปอยู่ท้ายสุด
+}
+
+// ★ แยก "เลขชั้น" และ "เลขห้อง" จากชื่อห้อง เช่น "ม.2/1" -> {level:2, room:1}, "ป.1/2" -> {level:1, room:2}
+function parseRoomName(roomName: string | null | undefined) {
+  if (!roomName) return { level: 999, room: 999 };
+  const slashMatch = roomName.match(/(\d+)\s*\/\s*(\d+)/);
+  if (slashMatch) return { level: Number(slashMatch[1]), room: Number(slashMatch[2]) };
+  const nums = roomName.match(/\d+/g);
+  if (nums && nums.length >= 2) return { level: Number(nums[0]), room: Number(nums[1]) };
+  if (nums && nums.length === 1) return { level: Number(nums[0]), room: 0 };
+  return { level: 999, room: 999 };
+}
+
+// ★ ป้ายชื่อ "สายชั้น" รวมทุกห้อง เช่น "อนุบาล 1", "ป.1", "ม.1", "ม.4"
+function gradeLineLabel(stage: string, level: number) {
+  if (stage === "อนุบาล") return `อนุบาล ${level}`;
+  if (stage === "ประถมศึกษา") return `ป.${level}`;
+  if (stage === "มัธยมศึกษาตอนต้น") return `ม.${level}`;
+  if (stage === "มัธยมศึกษาตอนปลาย") return `ม.${level}`;
+  return `${stage} ${level}`;
+}
 
   function todayISO() {
   return new Date().toISOString().split("T")[0];
@@ -96,6 +125,9 @@ export default function LateCheckinPage() {
   const [loadingLate, setLoadingLate] = useState(true);
   const [myProfileId, setMyProfileId] = useState<string>("");
 
+  // ★ โหมดการเรียง "สรุปตามห้อง": grade = เรียงตามสายชั้น/ห้อง, count = เรียงตามจำนวนขาดมากสุด
+  const [summarySortMode, setSummarySortMode] = useState<"grade" | "count">("grade");
+
   // ── กล้องสแกนบาร์โค้ด/คิวอาร์ ─────────────────────────────
   const [scannerOpen, setScannerOpen] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(false);
@@ -104,6 +136,7 @@ const html5QrRef = useRef<Html5Qrcode | null>(null);
 const scanHandledRef = useRef(false);
 const [torchOn, setTorchOn] = useState(false);
 const [torchSupported, setTorchSupported] = useState(false);
+
 
 async function toggleTorch() {
   try {
@@ -206,14 +239,28 @@ async function regenerateToken() {
     });
 }, []);
 
-  const gradeLevels = useMemo(
-    () => Array.from(new Set(classrooms.map((c) => c.grade_level).filter(Boolean))) as string[],
-    [classrooms]
-  );
-  const roomsInGrade = useMemo(
-    () => classrooms.filter((c) => c.grade_level === gradeLevel),
-    [classrooms, gradeLevel]
-  );
+  // ★ เรียงปุ่มระดับชั้นตามลำดับจริง: อนุบาล → ประถม → ม.ต้น → ม.ปลาย (แทนการเรียงตามลำดับที่เจอในข้อมูล)
+  const gradeLevels = useMemo(() => {
+    const unique = Array.from(new Set(classrooms.map((c) => c.grade_level).filter(Boolean))) as string[];
+    return unique.sort((a, b) => {
+      const rankDiff = stageRank(a) - stageRank(b);
+      if (rankDiff !== 0) return rankDiff;
+      return a.localeCompare(b, "th");
+    });
+  }, [classrooms]);
+
+  // ★ เรียงปุ่มห้องภายในสายชั้นตามเลขชั้น แล้วตามเลขห้อง เช่น ป.1/1, ป.1/2, ป.2/1 ... (เหมือนตัวกรองของสภา)
+  const roomsInGrade = useMemo(() => {
+    return classrooms
+      .filter((c) => c.grade_level === gradeLevel)
+      .sort((a, b) => {
+        const pa = parseRoomName(a.room_name);
+        const pb = parseRoomName(b.room_name);
+        if (pa.level !== pb.level) return pa.level - pb.level;
+        if (pa.room !== pb.room) return pa.room - pb.room;
+        return (a.room_number ?? 0) - (b.room_number ?? 0);
+      });
+  }, [classrooms, gradeLevel]);
 
   useEffect(() => {
     if (!roomId) { setStudents([]); return; }
@@ -253,6 +300,7 @@ async function regenerateToken() {
         record_id: r.id,
         student: r.student,
         room_name: formatClassLabel(r.student?.classroom) || "-",
+        grade_level: r.student?.classroom?.grade_level ?? null, // ★ เก็บสายชั้นดิบไว้จัดเรียง/สรุป
         recorded_at: r.recorded_at,
       }));
     setLateToday(entries);
@@ -435,10 +483,73 @@ async function regenerateToken() {
     loadLateToday();
   }
 
+  // ★ สรุปตามห้อง — เรียงได้ 2 แบบ: ตามสายชั้น/ห้อง (ค่าเริ่มต้น) หรือ ตามจำนวนขาดมากสุด
   const summaryByRoom = useMemo(() => {
-    const map = new Map<string, number>();
-    lateToday.forEach((e) => map.set(e.room_name, (map.get(e.room_name) ?? 0) + 1));
-    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+    const map = new Map<string, { count: number; grade_level: string | null }>();
+    lateToday.forEach((e) => {
+      const existing = map.get(e.room_name);
+      if (existing) existing.count += 1;
+      else map.set(e.room_name, { count: 1, grade_level: e.grade_level });
+    });
+
+    const rows = Array.from(map.entries()).map(([room, v]) => ({
+      room,
+      count: v.count,
+      grade_level: v.grade_level,
+    }));
+
+    if (summarySortMode === "count") {
+      return rows.sort((a, b) => b.count - a.count);
+    }
+
+    return rows.sort((a, b) => {
+      const rankDiff = stageRank(a.grade_level) - stageRank(b.grade_level);
+      if (rankDiff !== 0) return rankDiff;
+      const pa = parseRoomName(a.room);
+      const pb = parseRoomName(b.room);
+      if (pa.level !== pb.level) return pa.level - pb.level;
+      if (pa.room !== pb.room) return pa.room - pb.room;
+      return a.room.localeCompare(b.room, "th");
+    });
+  }, [lateToday, summarySortMode]);
+
+  // ★ สรุปตามสายชั้น (รวมทุกห้องในชั้นเดียวกัน) เรียงจากอนุบาล → ประถม → ม.ต้น → ม.ปลาย
+  // พร้อมยอดรวมทั้งสายชั้น (อนุบาลทั้งหมด, ประถมศึกษาทั้งหมด, ...) และยอดรวม ประถม+ม.ต้น+ม.ปลาย
+  const summaryByGradeLine = useMemo(() => {
+    const lineMap = new Map<string, { stage: string; level: number; count: number }>();
+    lateToday.forEach((e) => {
+      const stage = e.grade_level ?? "ไม่ระบุสายชั้น";
+      const { level } = parseRoomName(e.room_name);
+      const key = `${stage}-${level}`;
+      const existing = lineMap.get(key);
+      if (existing) existing.count += 1;
+      else lineMap.set(key, { stage, level, count: 1 });
+    });
+
+    const lines = Array.from(lineMap.values())
+      .sort((a, b) => {
+        const rankDiff = stageRank(a.stage) - stageRank(b.stage);
+        if (rankDiff !== 0) return rankDiff;
+        return a.level - b.level;
+      })
+      .map((l) => ({ label: gradeLineLabel(l.stage, l.level), count: l.count, stage: l.stage }));
+
+    const stageTotal = (stage: string) =>
+      lines.filter((l) => l.stage === stage).reduce((sum, l) => sum + l.count, 0);
+
+    const totalKindergarten = stageTotal("อนุบาล");
+    const totalPrimary = stageTotal("ประถมศึกษา");
+    const totalMiddle = stageTotal("มัธยมศึกษาตอนต้น");
+    const totalHigh = stageTotal("มัธยมศึกษาตอนปลาย");
+
+    return {
+      lines,
+      totalKindergarten,
+      totalPrimary,
+      totalMiddle,
+      totalHigh,
+      totalCombined: totalPrimary + totalMiddle + totalHigh, // ★ รวม ประถม+ม.ต้น+ม.ปลาย
+    };
   }, [lateToday]);
 
   return (
@@ -664,16 +775,62 @@ async function regenerateToken() {
 
             {summaryByRoom.length > 0 && (
               <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
-                <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-800">
-                  <Users className="h-4 w-4 text-indigo-500" /> สรุปตามห้อง
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-800">
+                    <Users className="h-4 w-4 text-indigo-500" /> สรุปตามห้อง
+                  </p>
+                  <button
+                    onClick={() => setSummarySortMode((m) => (m === "grade" ? "count" : "grade"))}
+                    className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold text-indigo-500 transition hover:bg-indigo-50"
+                  >
+                    {summarySortMode === "grade" ? "เรียงจากขาดมากสุด" : "เรียงตามชั้น/ห้อง"}
+                  </button>
+                </div>
                 <div className="mt-3 space-y-1.5">
-                  {summaryByRoom.map(([room, count]) => (
-                    <div key={room} className="flex items-center justify-between text-sm">
-                      <span className="text-slate-500">{room}</span>
-                      <span className="font-bold text-slate-700">{count} คน</span>
+                  {summaryByRoom.map((row) => (
+                    <div key={row.room} className="flex items-center justify-between text-sm">
+                      <span className="text-slate-500">{row.room}</span>
+                      <span className="font-bold text-slate-700">{row.count} คน</span>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {summaryByGradeLine.lines.length > 0 && (
+              <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+                <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-800">
+                  <ClipboardList className="h-4 w-4 text-violet-500" /> สรุปตามสายชั้น
+                </p>
+                <div className="mt-3 space-y-3 text-sm">
+                  {STAGE_ORDER.map((stage) => {
+                    const stageLines = summaryByGradeLine.lines.filter((l) => l.stage === stage);
+                    if (stageLines.length === 0) return null;
+                    const stageTotal = stageLines.reduce((sum, l) => sum + l.count, 0);
+                    return (
+                      <div key={stage}>
+                        <div className="space-y-1">
+                          {stageLines.map((l) => (
+                            <div key={l.label} className="flex items-center justify-between">
+                              <span className="text-slate-500">{l.label}</span>
+                              <span className="font-bold text-slate-700">{l.count} คน</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-1 flex items-center justify-between border-t border-dashed border-slate-200 pt-1">
+                          <span className="text-xs font-bold text-indigo-500">{stage}ทั้งหมด</span>
+                          <span className="text-xs font-black text-indigo-600">{stageTotal} คน</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {summaryByGradeLine.totalCombined > 0 && (
+                    <div className="flex items-center justify-between rounded-xl bg-violet-50 px-3 py-2">
+                      <span className="text-xs font-bold text-violet-600">รวม ประถม+ม.ต้น+ม.ปลาย</span>
+                      <span className="text-xs font-black text-violet-700">{summaryByGradeLine.totalCombined} คน</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
