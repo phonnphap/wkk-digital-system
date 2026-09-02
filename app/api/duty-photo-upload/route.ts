@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const TENANT_ID = process.env.MS_TENANT_ID!;
-const CLIENT_ID = process.env.MS_CLIENT_ID!;
-const CLIENT_SECRET = process.env.MS_CLIENT_SECRET!;
+const TENANT_ID = process.env.MICROSOFT_TENANT_ID!;
+const CLIENT_ID = process.env.MICROSOFT_CLIENT_ID!;
+const CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET!;
 const ONEDRIVE_UPN = process.env.ONEDRIVE_USER_UPN || "general@khienkhet.ac.th";
 
 async function getAccessToken() {
