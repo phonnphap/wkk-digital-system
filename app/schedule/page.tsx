@@ -469,6 +469,100 @@ const filteredByGrade = roomGradeLabel
   );
 }
 
+function TeacherCellModal({ teacher, day, slot, entry, classrooms, subjects, teachers, academicYearId, onSave, onDelete, onClose }: {
+  teacher: Teacher; day: number; slot: TimeSlot; entry?: TimetableEntry;
+  classrooms: Classroom[]; subjects: Subject[]; teachers: Teacher[]; academicYearId: string;
+  onSave: (d: any) => Promise<void>;
+  onDelete?: (id: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [classroomId, setClassroomId] = useState(entry?.classroom_id ?? "");
+  const [subjectId,   setSubjectId]   = useState(entry?.subject_id ?? "");
+  const [teacherId2,  setTeacherId2]  = useState(entry?.teacher_id_2 ?? "");
+  const [loading,     setLoading]     = useState(false);
+  const dc = DAY_COLORS[day - 1];
+
+  const selectedClassroom = classrooms.find(c => c.id === classroomId);
+  function roomGradeLabel(c?: Classroom) {
+    const m = (c?.room_name ?? "").match(/([ปมอ])\.?(\d+)/);
+    return m ? `${m[1]}.${m[2]}` : "";
+  }
+  const gLabel = roomGradeLabel(selectedClassroom);
+  const filteredSubjects = gLabel
+    ? subjects.filter(s => parseGradeFromSubjectCode(s.subject_code) === gLabel)
+    : subjects;
+  const baseSubjects = filteredSubjects.length > 0 ? filteredSubjects : subjects;
+  const selectableTeacher2 = teachers.filter(t => t.id !== teacher.id);
+
+  async function handleSubmit() {
+    if (!classroomId || !subjectId) { alert("กรุณาเลือกห้องเรียนและวิชา"); return; }
+    setLoading(true);
+    await onSave({
+      id: entry?.id,
+      classroom_id: classroomId,
+      subject_id: subjectId,
+      teacher_id: teacher.id,          // ★ ล็อกครูคนที่ 1 เป็นครูที่เลือกไว้เสมอ
+      teacher_id_2: teacherId2 || null,
+      day_of_week: day, time_slot_id: slot.id, time_slot: slot,
+      academic_year_id: academicYearId,
+    });
+    setLoading(false);
+  }
+
+  const inp = "w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm font-bold focus:border-indigo-400 focus:outline-none";
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className={`${dc.header} px-6 py-4`}>
+          <p className="text-sm text-white/80">{DAYS[day - 1]} · {slot.slot_label} · {formatTime(slot.start_time)}–{formatTime(slot.end_time)}</p>
+          <h3 className="text-lg font-black text-white mt-0.5">{entry ? "✏️ แก้ไขคาบเรียน" : "➕ เพิ่มคาบเรียน"}</h3>
+          <p className="text-sm text-white/70">ครู: {displayName(teacher)}</p>
+        </div>
+
+        <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">ห้องเรียน *</label>
+            <select value={classroomId} onChange={e => { setClassroomId(e.target.value); setSubjectId(""); }} className={inp}>
+              <option value="">— เลือกห้องเรียน —</option>
+              {classrooms.map(c => <option key={c.id} value={c.id}>{c.grade_group} {c.room_name}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">รายวิชา *</label>
+            <select value={subjectId} onChange={e => setSubjectId(e.target.value)} className={inp} disabled={!classroomId}>
+              <option value="">— เลือกรายวิชา —</option>
+              {baseSubjects.map(s => <option key={s.id} value={s.id}>{s.subject_code} {s.name_th}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+              ครูผู้สอน คนที่ 2 <span className="text-slate-400 font-normal normal-case">(ถ้ามี)</span>
+            </label>
+            <select value={teacherId2} onChange={e => setTeacherId2(e.target.value)} className={inp}>
+              <option value="">— ไม่มีครูคนที่ 2 —</option>
+              {selectableTeacher2.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="px-5 pb-5 flex gap-2 border-t border-slate-100 pt-4">
+          {entry && onDelete && (
+            <button onClick={async () => { if (confirm("ลบคาบนี้?")) { setLoading(true); await onDelete(entry.id); setLoading(false); } }}
+              className="px-4 py-2.5 rounded-xl border-2 border-red-200 bg-red-50 text-red-600 font-black text-sm">🗑️ ลบ</button>
+          )}
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm">ยกเลิก</button>
+          <button onClick={handleSubmit} disabled={loading}
+            className="flex-[2] py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm disabled:opacity-50">
+            {loading ? "⏳..." : "💾 บันทึก"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Change Requests Panel ─────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
@@ -763,6 +857,133 @@ function SubjectRequestsPanel({ requests, canApprove, onApprove, onReject }: {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function GradeScheduleManager({ currentUser, isAdmin, teachers, classrooms, subjects, timeSlots, entries, academicYearId, onSaveEntry, onDeleteEntry }: {
+  currentUser: UserProfile; isAdmin: boolean; teachers: Teacher[]; classrooms: Classroom[];
+  subjects: Subject[]; timeSlots: TimeSlot[]; entries: TimetableEntry[]; academicYearId: string;
+  onSaveEntry: (d: any) => Promise<void>; onDeleteEntry: (id: string) => Promise<void>;
+}) {
+  const allGradeLevels = [...new Set(teachers.map(t => t.grade_level).filter(Boolean))] as string[];
+  const [gradeFilter, setGradeFilter] = useState(isAdmin ? (allGradeLevels[0] ?? "") : (currentUser.grade_level ?? ""));
+  const [selectedTeacherId, setSelectedTeacherId] = useState("");
+  const [cellModal, setCellModal] = useState<{ day: number; slot: TimeSlot; entry?: TimetableEntry } | null>(null);
+
+  const gradeTeachers = teachers.filter(t => t.grade_level === gradeFilter);
+  const teacher = teachers.find(t => t.id === selectedTeacherId);
+  const myEntries = entries.filter(e => e.teacher_id === selectedTeacherId || e.teacher_id_2 === selectedTeacherId);
+
+  const subjectColorMap: Record<string, typeof SUBJECT_COLORS[0]> = {};
+  subjects.forEach((s, i) => { subjectColorMap[s.id] = SUBJECT_COLORS[i % SUBJECT_COLORS.length]; });
+
+  return (
+    <div>
+      <div className="mb-4 flex gap-2 flex-wrap items-center">
+        {isAdmin && (
+          <select value={gradeFilter} onChange={e => { setGradeFilter(e.target.value); setSelectedTeacherId(""); }}
+            className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold">
+            {allGradeLevels.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+        )}
+        <select value={selectedTeacherId} onChange={e => setSelectedTeacherId(e.target.value)}
+          className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold flex-1 min-w-[200px]">
+          <option value="">— เลือกครูในสาย {gradeFilter} —</option>
+          {gradeTeachers.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
+        </select>
+      </div>
+
+      {!teacher ? (
+        <div className="text-center py-16 text-slate-400 bg-white rounded-2xl border border-slate-200">
+          กรุณาเลือกครูเพื่อจัดตารางสอน
+        </div>
+      ) : (
+        <>
+          <h3 className="font-black text-slate-700 mb-3">📅 ตารางสอน: {displayName(teacher)} ({myEntries.length} คาบ)</h3>
+          {(["kindergarten", "primary", "junior", "senior"] as const).map(type => {
+            const slots = buildRoomSlots(type, timeSlots);
+            const roomsOfType = classrooms.filter(c => (c.schedule_type ?? "primary") === type);
+            const entriesOfType = myEntries.filter(e => roomsOfType.some(r => r.id === e.classroom_id));
+            const label = SCHEDULE_TEMPLATES.find(t => t.key === type)?.label ?? type;
+
+            return (
+              <div key={type} className="mb-6">
+                <p className="text-xs font-black text-slate-400 uppercase mb-2">{label}</p>
+                <div className="w-full rounded-2xl border border-slate-200 shadow-sm bg-white overflow-x-auto">
+                  <table className="border-collapse w-full" style={{ minWidth: "600px" }}>
+                    <thead>
+                      <tr>
+                        <th className="px-2 py-3 bg-slate-50 border-b-2 border-r-2 border-slate-200 text-slate-400 font-black text-xs uppercase text-center sticky left-0 z-10">วัน / คาบ</th>
+                        {slots.map(slot => (
+                          <th key={slot.id} className={`px-1 py-2 border-b-2 border-r border-slate-200 text-center font-black ${slot.is_break ? "bg-slate-100 text-slate-400" : "bg-slate-50 text-slate-600"}`}>
+                            <div className="text-xs">{slot.slot_label}</div>
+                            <div className="text-[10px] font-normal text-slate-400">{formatTime(slot.start_time)}–{formatTime(slot.end_time)}</div>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[1, 2, 3, 4, 5].map(day => {
+                        const dc = DAY_COLORS[day - 1];
+                        return (
+                          <tr key={day} className="border-b border-slate-100">
+                            <td className={`px-2 py-3 border-r-2 border-slate-200 sticky left-0 z-10 ${dc.bg}`}>
+                              <div className={`font-black text-sm ${dc.text}`}>{DAYS[day - 1]}</div>
+                            </td>
+                            {slots.map(slot => {
+                              if (slot.is_break) return (
+                                <td key={slot.id} className="bg-slate-50 border-r border-slate-100 text-center p-0">
+                                  <div className="text-[9px] text-slate-300 font-bold">พัก</div>
+                                </td>
+                              );
+                              const entry = entriesOfType.find(e => e.day_of_week === day && e.time_slot_id === slot.id)
+                                ?? entriesOfType.find(e => e.day_of_week === day && (timeSlots.find(s => s.id === e.time_slot_id)?.start_time.slice(0,5) === slot.start_time));
+                              const colors = entry ? (subjectColorMap[entry.subject_id] ?? SUBJECT_COLORS[0]) : null;
+                              const subject = entry ? (subjects.find(s => s.id === entry.subject_id) ?? (entry as any).subject) : null;
+                              const room = entry ? classrooms.find(c => c.id === entry.classroom_id) : null;
+                              return (
+                                <td key={slot.id} className="p-1 align-top border-r border-slate-100">
+                                  {entry && colors ? (
+                                    <div
+                                      className={`rounded-xl border-2 px-2 py-2 cursor-pointer hover:shadow-md ${colors.bg} ${colors.border} ${colors.text}`}
+                                      style={{ minHeight: "80px" }}
+                                      onClick={() => setCellModal({ day, slot, entry })}>
+                                      <p className="font-black text-xs leading-tight line-clamp-2 mb-1">{(subject as any)?.name_th ?? "—"}</p>
+                                      {room && <p className="text-[10px] font-bold opacity-70">{room.grade_group} {room.room_name}</p>}
+                                    </div>
+                                  ) : (
+                                    <div
+                                      className="rounded-xl border-2 border-dashed border-slate-200 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50 flex items-center justify-center"
+                                      style={{ minHeight: "80px" }}
+                                      onClick={() => setCellModal({ day, slot })}>
+                                      <span className="text-slate-300 text-2xl">+</span>
+                                    </div>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {cellModal && teacher && (
+        <TeacherCellModal
+          teacher={teacher} day={cellModal.day} slot={cellModal.slot} entry={cellModal.entry}
+          classrooms={classrooms} subjects={subjects} teachers={teachers} academicYearId={academicYearId}
+          onSave={async (d) => { await onSaveEntry(d); setCellModal(null); }}
+          onDelete={async (id) => { await onDeleteEntry(id); setCellModal(null); }}
+          onClose={() => setCellModal(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1369,7 +1590,7 @@ export default function SchedulePage() {
   const [academicYears,    setAcademicYears]    = useState<{ id: string; year_name: string }[]>([]);
   const [selectedYear,     setSelectedYear]     = useState("");
   const [selectedRoom,     setSelectedRoom]     = useState("");
-  const [viewMode,         setViewMode]         = useState<"room" | "teacher" | "requests" | "duplicates" | "dashboard">("room");
+  const [viewMode, setViewMode] = useState<"room"|"teacher"|"requests"|"duplicates"|"dashboard"|"gradeSchedule">("room");
   const [selectedDayDetail, setSelectedDayDetail] = useState<number | null>(null);
   const [showSettings,     setShowSettings]     = useState(false);
   const [allEntriesForCheck, setAllEntriesForCheck] = useState<TimetableEntry[]>([]);
@@ -1992,6 +2213,7 @@ if (otherClash.length > 0) {
   if (!user)   return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><p className="text-red-500 font-black">❌ กรุณาเข้าสู่ระบบก่อน</p></div>;
 
   const isAdmin           = isAdminRole(user.role);
+  const canManageGradeSchedule = isAdmin || (user.extra_roles ?? []).includes("grade_head");
   const isApprover        = APPROVER_ROLES.includes(user.role) || isAdminRole(user.role);
   const canEditDirect     = isAdmin;
   const selectedClassroom = classrooms.find(c => c.id === selectedRoom);
@@ -2186,6 +2408,13 @@ const totalScheduledPeriods = entries.length;
     )}
   </button>
 )}
+{canManageGradeSchedule && (
+  <button onClick={() => setViewMode("gradeSchedule")}
+    className={`px-3 py-2 rounded-xl border-2 font-black text-sm
+      ${viewMode === "gradeSchedule" ? "bg-indigo-600 border-indigo-600 text-white" : "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"}`}>
+    🧑‍🏫 จัดตารางสอนสายชั้น
+  </button>
+)}
 {isAdmin && (
   <button onClick={() => setShowClubAdmin(true)}
     className="px-3 py-2 rounded-xl border-2 border-purple-200 bg-purple-50 text-purple-700 font-black text-sm hover:bg-purple-100">
@@ -2320,6 +2549,22 @@ const totalScheduledPeriods = entries.length;
     />
     </div>  
   )} 
+
+  {/* ── จัดตารางสอนสายชั้น ── */}
+{viewMode === "gradeSchedule" && canManageGradeSchedule && (
+  <GradeScheduleManager
+    currentUser={user}
+    isAdmin={isAdmin}
+    teachers={teachers}
+    classrooms={classrooms}
+    subjects={subjects}
+    timeSlots={timeSlots}
+    entries={entries}
+    academicYearId={selectedYear}
+    onSaveEntry={handleSaveDirect}
+    onDeleteEntry={async (id) => { await supabase.from("timetable_entries").delete().eq("id", id); await loadEntries(); }}
+  />
+)}
 
           {/* ── ของฉัน ── */}
           {viewMode === "teacher" && (
