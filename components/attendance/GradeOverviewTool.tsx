@@ -295,6 +295,9 @@ export default function GradeOverviewTool({
 const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
   // ★ ลำดับคอลัมน์ชิ้นงานที่ครูลากสลับเอง (จำไว้ต่อห้องเรียนใน localStorage)
   const [assignmentOrder, setAssignmentOrder] = useState<string[]>([]);
+  // ★ สถานะว่าลำดับที่บันทึกไว้ใน localStorage ถูกโหลดเข้ามาแล้วหรือยัง
+  // (ใช้กันไม่ให้ effect รวมชิ้นงานทับค่าที่โหลดมา ก่อนที่ assignments ตัวจริงจะมาถึง)
+  const savedOrderLoadedRef = useRef(false);
 
   // ★ Toast state
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -363,17 +366,26 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
 
   // ★ โหลดลำดับคอลัมน์ที่บันทึกไว้ของห้องนี้
   useEffect(() => {
+    savedOrderLoadedRef.current = false;
     try {
       const saved = localStorage.getItem(`grade-assignment-order-${sectionId}`);
       if (saved) setAssignmentOrder(JSON.parse(saved));
       else setAssignmentOrder([]);
     } catch {
       setAssignmentOrder([]);
+    } finally {
+      // ทำเครื่องหมายว่าอ่านค่าที่บันทึกไว้ (ถ้ามี) เข้ามาเรียบร้อยแล้ว
+      savedOrderLoadedRef.current = true;
     }
   }, [sectionId]);
 
   // ★ เมื่อชิ้นงานเปลี่ยน (โหลดใหม่/เพิ่มชิ้นใหม่) ให้รวมเข้ากับลำดับที่จำไว้ ชิ้นใหม่ที่ยังไม่เคยเรียงจะถูกต่อท้าย
+  // ★ แก้บั๊ก: ถ้ายังไม่มีชิ้นงานเลย (assignments ยังโหลดไม่เสร็จ) ห้ามล้างลำดับที่เพิ่งอ่านจาก
+  // localStorage ทิ้ง ไม่งั้นพอรีเฟรชแล้วชิ้นงานยังไม่มา ลำดับที่เคยลากสลับไว้จะถูกรีเซ็ตกลับ
+  // เป็นลำดับเดิมทุกครั้ง
   useEffect(() => {
+    if (assignments.length === 0) return; // รอให้ข้อมูลชิ้นงานจริงมาก่อน ค่อยรวมลำดับ
+    if (!savedOrderLoadedRef.current) return; // รอให้อ่านค่าที่บันทึกไว้เสร็จก่อน
     setAssignmentOrder(prev => {
       const known = new Set(assignments.map(a => a.id));
       const filtered = prev.filter(id => known.has(id));
@@ -936,7 +948,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
         <div>
           <h2 className="font-black text-slate-800 text-xl">คะแนนรวม</h2>
           <p className="text-slate-400 text-sm font-bold">
-            {effectiveReadOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที · กด Enter หรือลูกศร ↑↓←→ เพื่อบันทึกและย้ายไปช่องข้างเคียง · ลากหัวตารางชิ้นงานเพื่อสลับลำดับได้"}
+            {effectiveReadOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที · กด Enter หรือลูกศร ↑↓←→ เพื่อบันทึกและย้ายไปช่องข้างเคียง · วางคะแนนจาก Excel ได้ทีละหลายช่อง · ลากหัวตารางชิ้นงานเพื่อสลับลำดับได้"}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -1000,6 +1012,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   onChangeRawMidtermMax={setRawMidtermMax}   // ★ เพิ่ม
   onChangeRawFinalMax={setRawFinalMax}       // ★ เพิ่ม
   onSaveExamConfig={saveExamConfig}   
+  onToast={showToast}                        // ★ เพิ่ม: ใช้แจ้งผลตอนวางคะแนนหลายช่อง
 />
       ) : (
         <PodiumView rows={rows} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
@@ -1027,6 +1040,7 @@ function GradeTable({
   useMidterm = false, formativeMaxScore = 0, midtermMaxScore = 0, finalMaxScore = 0,
   onReorderAssignments,
   rawMidtermMax, rawFinalMax, onChangeRawMidtermMax, onChangeRawFinalMax, onSaveExamConfig,  // ★ เพิ่ม
+  onToast,  // ★ เพิ่ม: ใช้แจ้งผลลัพธ์ตอนวางคะแนนหลายช่องพร้อมกัน
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
@@ -1049,6 +1063,7 @@ function GradeTable({
   onChangeRawMidtermMax: (v: number | null) => void;              // ★ เพิ่ม
   onChangeRawFinalMax: (v: number | null) => void;                // ★ เพิ่ม
   onSaveExamConfig: (examType: "midterm" | "final", rawMax: number | null) => void; // ★ เพิ่ม
+  onToast?: (message: string, type?: "success" | "error" | "info") => void; // ★ เพิ่ม
 }) {
   // ★ ช่องที่กำลังกรอกคะแนนอยู่ตอนนี้ (คุมจากที่นี่ เพื่อให้กด Enter/ลูกศร แล้วสั่งเปิดช่องถัดไปได้)
   const [activeCell, setActiveCell] = useState<ActiveCell>(null);
@@ -1075,7 +1090,7 @@ const unitHeaderGroups = useMemo(() => {
 }, [assignments]);
 
 const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
-  // ★ รายการ "คอลัมน์กรอกคะแนนได้" ทั้งหมดตามลำดับที่แสดงจริงในตาราง ใช้คำนวณตำแหน่งตอนกดลูกศร
+  // ★ รายการ "คอลัมน์กรอกคะแนนได้" ทั้งหมดตามลำดับที่แสดงจริงในตาราง ใช้คำนวณตำแหน่งตอนกดลูกศร/วางคะแนน
   const navColumns = useMemo(() => {
     const cols: string[] = assignments.map(a => a.id);
     presets.forEach(p => cols.push(`preset:${p.id}`));
@@ -1097,6 +1112,64 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     if (dir === "right") newColIdx = Math.min(navColumns.length - 1, colIdx + 1);
     if (dir === "left") newColIdx = Math.max(0, colIdx - 1);
     setActiveCell({ col: navColumns[newColIdx], studentId: rows[newRowIdx].student.id });
+  }
+
+  // ★ วางคะแนนหลายช่องพร้อมกัน (คัดลอกมาจาก Excel/Google Sheets แล้ววางใส่ตาราง)
+  // เริ่มวางจากช่อง (fromCol, fromStudentId) ที่กำลังกรอกอยู่ แล้วกระจายไปตาม
+  // แถว/คอลัมน์ถัดไปตามลำดับที่ตารางแสดงจริง (navColumns + rows)
+  // รองรับทุกประเภทคอลัมน์: คะแนนงาน, คะแนนพิเศษ, กลางภาค, ปลายภาค
+  function handlePasteGrid(fromCol: string, fromStudentId: string, text: string) {
+    if (readOnly) return;
+    const startRowIdx = rows.findIndex(r => r.student.id === fromStudentId);
+    const startColIdx = navColumns.indexOf(fromCol);
+    if (startRowIdx === -1 || startColIdx === -1) return;
+
+    // แยกข้อความที่คัดลอกมาเป็นแถว (newline) แล้วแต่ละแถวแยกเป็นคอลัมน์ (tab)
+    // ตัดบรรทัดว่างท้ายสุดทิ้ง (เกิดจากการคัดลอกทั้งแถวใน Excel ที่มักมี \n ต่อท้าย)
+    const rawLines = text.replace(/\r/g, "").split("\n");
+    if (rawLines.length > 1 && rawLines[rawLines.length - 1] === "") rawLines.pop();
+
+    let pastedCount = 0;
+    let skippedCount = 0;
+
+    rawLines.forEach((line, i) => {
+      const rowIdx = startRowIdx + i;
+      if (rowIdx >= rows.length) return; // เกินจำนวนนักเรียนในตาราง ข้ามแถวที่เหลือ
+      const r = rows[rowIdx];
+      const cells = line.split("\t");
+      cells.forEach((raw, j) => {
+        const colIdx = startColIdx + j;
+        if (colIdx >= navColumns.length) return; // เกินคอลัมน์สุดท้าย ข้ามช่องที่เหลือของแถวนี้
+        const cleaned = raw.trim();
+        if (cleaned === "") return; // ช่องว่าง -> ไม่วางทับของเดิม
+        const parsed = Number(cleaned.replace(",", "."));
+        if (Number.isNaN(parsed)) { skippedCount++; return; }
+
+        const col = navColumns[colIdx];
+        if (col.startsWith("preset:")) {
+          const presetId = col.slice("preset:".length);
+          onAdjustPreset(r.student.id, presetId, r.presetTotals[presetId] ?? 0, parsed);
+        } else if (col === "midterm") {
+          onUpdateExamScore(r.student.id, "midterm", parsed, rawMidtermMax);
+        } else if (col === "final") {
+          onUpdateExamScore(r.student.id, "final", parsed, rawFinalMax);
+        } else {
+          onUpdateScore(r.student.id, col, parsed);
+        }
+        pastedCount++;
+      });
+    });
+
+    if (onToast) {
+      if (pastedCount > 0) {
+        onToast(
+          `วางคะแนนสำเร็จ ${pastedCount} ช่อง${skippedCount > 0 ? ` (ข้าม ${skippedCount} ช่องที่ไม่ใช่ตัวเลข)` : ""}`,
+          "success"
+        );
+      } else {
+        onToast("ไม่พบข้อมูลตัวเลขที่วางได้ในคลิปบอร์ด", "error");
+      }
+    }
   }
 
   // ★ ลากหัวตารางชิ้นงานเพื่อสลับลำดับก่อน-หลัง
@@ -1319,6 +1392,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   onCommit={newScore => onUpdateScore(s.id, a.id, newScore)}
   onNavigate={dir => handleNavigate(a.id, s.id, dir)}
   onCancelEdit={() => setActiveCell(null)}
+  onPasteGrid={text => handlePasteGrid(a.id, s.id, text)}
 />
 )}
       </td>
@@ -1338,6 +1412,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
                         onCommit={newValue => onAdjustPreset(s.id, p.id, r.presetTotals[p.id] ?? 0, newValue)}
                         onNavigate={dir => handleNavigate(`preset:${p.id}`, s.id, dir)}
                         onCancelEdit={() => setActiveCell(null)}
+                        onPasteGrid={text => handlePasteGrid(`preset:${p.id}`, s.id, text)}
                       />
                     )}
                   </td>
@@ -1362,6 +1437,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
       onCommit={v => onUpdateExamScore(s.id, "midterm", v, rawMidtermMax)}
       onNavigate={dir => handleNavigate("midterm", s.id, dir)}
       onCancelEdit={() => setActiveCell(null)}
+      onPasteGrid={text => handlePasteGrid("midterm", s.id, text)}
     />
   </td>
 )}
@@ -1377,6 +1453,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     onCommit={v => onUpdateExamScore(s.id, "final", v, rawFinalMax)}
     onNavigate={dir => handleNavigate("final", s.id, dir)}
     onCancelEdit={() => setActiveCell(null)}
+    onPasteGrid={text => handlePasteGrid("final", s.id, text)}
   />
 </td>
   </>
@@ -1439,9 +1516,12 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
    - ส่งงานแล้วแต่ยังไม่ตรวจ ("รอตรวจ") -> คลิกเพื่อกรอกคะแนน
    - มีคะแนนแล้ว -> คลิกที่ตัวเลขเพื่อแก้ไข
    ★ "isEditing" ถูกควบคุมจาก GradeTable เพื่อให้กด Enter/ลูกศร แล้วสั่งเปิดโหมดแก้ไขของ
-   "ช่องข้างเคียง" (บน/ล่าง/ซ้าย/ขวา) ต่อได้ทันที เหมือนกรอกคะแนนใน Excel */
+   "ช่องข้างเคียง" (บน/ล่าง/ซ้าย/ขวา) ต่อได้ทันที เหมือนกรอกคะแนนใน Excel
+   ★ "onPasteGrid" รองรับการวางคะแนนจากไฟล์อื่น (Excel/Sheets) ทีเดียวหลายช่อง
+   ถ้าคลิปบอร์ดมี tab หรือ newline (คัดลอกมาหลายเซลล์) จะดักไว้แล้วกระจายคะแนนต่อเอง
+   แทนที่จะปล่อยให้ browser วางข้อความทั้งก้อนลงช่องเดียว */
 function EditableScoreCell({
-  submission, assignment, lateInfo, isEditing, onRequestEdit, onCommit, onNavigate, onCancelEdit,
+  submission, assignment, lateInfo, isEditing, onRequestEdit, onCommit, onNavigate, onCancelEdit, onPasteGrid,
 }: {
   submission?: Submission;
   assignment: Assignment;
@@ -1451,6 +1531,7 @@ function EditableScoreCell({
   onCommit: (newScore: number) => void;
   onNavigate: (dir: NavDir) => void;
   onCancelEdit: () => void;
+  onPasteGrid?: (text: string) => void;
 }) {
   const maxScore = assignment.max_score;
   const currentValueText = submission?.score !== null && submission?.score !== undefined ? String(submission.score) : "";
@@ -1482,6 +1563,17 @@ function EditableScoreCell({
     setDraft(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => tryCommit(value), 500);
+  }
+
+  // ★ วางคะแนนจากคลิปบอร์ด: ถ้าเป็นก้อนหลายเซลล์ (มี tab/newline) ให้ดักไว้แล้วส่งต่อให้ GradeTable
+  // กระจายคะแนนลงหลายช่องแทน ถ้าเป็นแค่ตัวเลขเดี่ยว ปล่อยให้วางแบบปกติ (จะ auto-save ผ่าน onChange เอง)
+  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData("text");
+    if (onPasteGrid && (text.includes("\t") || text.includes("\n"))) {
+      e.preventDefault();
+      justActedRef.current = true;
+      onPasteGrid(text);
+    }
   }
 
   // ★ Enter/ลูกศร = commit ค่าปัจจุบันก่อน แล้วสั่งย้ายไปช่องข้างเคียงตามทิศทาง
@@ -1547,6 +1639,7 @@ function EditableScoreCell({
         onFocus={e => e.currentTarget.select()}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
         className="w-16 mx-auto block text-center border-2 border-sky-300 rounded-lg py-1 text-m font-black focus:outline-none"
       />
     );
@@ -1601,8 +1694,9 @@ return (
 }
 
 // ★ คะแนนกลางภาค/ปลายภาค — เปลี่ยนเป็น controlled (isEditing มาจาก GradeTable) เพื่อรองรับกดลูกศรย้ายช่อง
+// ★ รองรับ onPasteGrid เช่นเดียวกับ EditableScoreCell สำหรับวางคะแนนหลายช่อง
 function EditableExamCell({
-  value, rawValue, rawMax, maxScore, readOnly, isEditing, onRequestEdit, onCommit, onNavigate, onCancelEdit,
+  value, rawValue, rawMax, maxScore, readOnly, isEditing, onRequestEdit, onCommit, onNavigate, onCancelEdit, onPasteGrid,
 }: {
   value: number | null;        // ค่าที่ scale แล้ว ใช้แค่โชว์ "= X คะแนนจริง"
   rawValue: number | null;     // ค่าดิบที่กรอก/แก้ไข
@@ -1614,6 +1708,7 @@ function EditableExamCell({
   onCommit: (rawScore: number) => void;
   onNavigate: (dir: NavDir) => void;
   onCancelEdit: () => void;
+  onPasteGrid?: (text: string) => void;
 }) {
   const inputMax = rawMax && rawMax > 0 ? rawMax : maxScore;
   const currentText = rawValue !== null ? String(rawValue) : "";   // ★ แก้ จาก value -> rawValue
@@ -1626,6 +1721,15 @@ function EditableExamCell({
     const parsed = Number(draft);
     if (draft.trim() === "" || Number.isNaN(parsed)) return;
     if (parsed !== rawValue) onCommit(parsed);   // ★ เทียบกับ rawValue
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData("text");
+    if (onPasteGrid && (text.includes("\t") || text.includes("\n"))) {
+      e.preventDefault();
+      justActedRef.current = true;
+      onPasteGrid(text);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -1662,6 +1766,7 @@ function EditableExamCell({
         onFocus={e => e.currentTarget.select()}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
         className="w-16 mx-auto block text-center border-2 border-sky-300 rounded-lg py-1 text-m font-black focus:outline-none"
       />
     );
@@ -1685,8 +1790,9 @@ function EditableExamCell({
 }
 
 // ★ คะแนนพิเศษ — เปลี่ยนเป็น controlled เช่นกัน เพื่อรองรับกดลูกศรย้ายช่อง
+// ★ รองรับ onPasteGrid เช่นเดียวกับช่องอื่นๆ สำหรับวางคะแนนหลายช่อง
 function EditablePresetCell({
-  value, isEditing, onRequestEdit, onCommit, onNavigate, onCancelEdit,
+  value, isEditing, onRequestEdit, onCommit, onNavigate, onCancelEdit, onPasteGrid,
 }: {
   value: number;
   isEditing: boolean;
@@ -1694,6 +1800,7 @@ function EditablePresetCell({
   onCommit: (newValue: number) => void;
   onNavigate: (dir: NavDir) => void;
   onCancelEdit: () => void;
+  onPasteGrid?: (text: string) => void;
 }) {
   const [draft, setDraft] = useState(String(value));
   const justActedRef = useRef(false);
@@ -1704,6 +1811,15 @@ function EditablePresetCell({
     const parsed = Number(draft);
     if (Number.isNaN(parsed)) { setDraft(String(value)); return; }
     if (parsed !== value) onCommit(parsed);
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData("text");
+    if (onPasteGrid && (text.includes("\t") || text.includes("\n"))) {
+      e.preventDefault();
+      justActedRef.current = true;
+      onPasteGrid(text);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -1731,6 +1847,7 @@ function EditablePresetCell({
         onFocus={e => e.currentTarget.select()}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
         className="w-16 text-center border-2 border-sky-300 rounded-lg py-1 text-m font-black focus:outline-none"
       />
     );
