@@ -195,7 +195,10 @@ function formatTime(t: string) { return t?.slice(0, 5) ?? ""; }
 //   กลุ่ม 1 = ประถม   → เลข 1-6 = ป.1–ป.6
 //   กลุ่ม 2 = ม.ต้น   → เลข 1-3 = ม.1–ม.3
 //   กลุ่ม 3 = ม.ปลาย  → เลข 1-3 = ม.4–ม.6 (ออฟเซ็ต +3)
-function parseGradeFromSubjectCode(code?: string): string | undefined {
+// ★ แปลงรหัสวิชา (เช่น ว11282, ว31101, ว30274) เป็นระดับชั้นที่วิชานี้ใช้ได้
+// คืนค่าเป็น array เพราะวิชารหัส 30xxx (เลข digit ที่ 2 = 0) คือวิชาเลือกเสรี ม.ปลาย
+// ที่ใช้ร่วมกันได้ทั้ง ม.4, ม.5, ม.6 ไม่ใช่แค่ชั้นใดชั้นหนึ่ง
+function parseGradeFromSubjectCode(code?: string): string[] | undefined {
   if (!code) return undefined;
   const match = code.match(/[0-9]+/);
   if (!match || match[0].length < 2) return undefined;
@@ -203,10 +206,13 @@ function parseGradeFromSubjectCode(code?: string): string | undefined {
   const group = digits[0];
   const level = parseInt(digits[1], 10);
   switch (group) {
-    case "0": return (level === 2 || level === 3) ? `อ.${level}` : undefined;
-    case "1": return (level >= 1 && level <= 6) ? `ป.${level}` : undefined;
-    case "2": return (level >= 1 && level <= 3) ? `ม.${level}` : undefined;
-    case "3": return (level >= 1 && level <= 3) ? `ม.${level + 3}` : undefined;
+    case "0": return (level === 2 || level === 3) ? [`อ.${level}`] : undefined;
+    case "1": return (level >= 1 && level <= 6) ? [`ป.${level}`] : undefined;
+    case "2": return (level >= 1 && level <= 3) ? [`ม.${level}`] : undefined;
+    case "3":
+      // ★ เลข 0 = รหัสวิชาเลือกเสรี/เพิ่มเติม ม.ปลาย ใช้ร่วมกันได้ทั้ง ม.4–ม.6 (เช่น ว30274)
+      if (level === 0) return ["ม.4", "ม.5", "ม.6"];
+      return (level >= 1 && level <= 3) ? [`ม.${level + 3}`] : undefined;
     default:  return undefined;
   }
 }
@@ -335,7 +341,7 @@ const subjectGroups  = [...new Set(subjects.map(s => s.subject_group).filter(Boo
 
 // ★ กรองด้วยการ parse รหัสวิชาแทนการเทียบตัวเลขดิบแบบเดิม (แก้บั๊กกลุ่ม ม.ปลายไม่ match)
 const filteredByGrade = roomGradeLabel
-  ? subjects.filter(s => parseGradeFromSubjectCode(s.subject_code) === roomGradeLabel)
+  ? subjects.filter(s => parseGradeFromSubjectCode(s.subject_code)?.includes(roomGradeLabel))
   : subjects;
   const useGradeFilter  = filteredByGrade.length > 0;
   const baseSubjects    = useGradeFilter ? filteredByGrade : subjects;
@@ -489,8 +495,8 @@ function TeacherCellModal({ teacher, day, slot, entry, classrooms, subjects, tea
   }
   const gLabel = roomGradeLabel(selectedClassroom);
   const filteredSubjects = gLabel
-    ? subjects.filter(s => parseGradeFromSubjectCode(s.subject_code) === gLabel)
-    : subjects;
+  ? subjects.filter(s => parseGradeFromSubjectCode(s.subject_code)?.includes(gLabel))
+  : subjects;
   const baseSubjects = filteredSubjects.length > 0 ? filteredSubjects : subjects;
   const selectableTeacher2 = teachers.filter(t => t.id !== teacher.id);
 
