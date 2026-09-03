@@ -1280,10 +1280,10 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     </tr>
   )}
   <tr className="bg-gradient-to-r from-indigo-50 via-sky-50 to-fuchsia-50">
-    <th className="text-left text-m font-black text-slate-600 px-5 py-3 sticky left-0 top-0 bg-gradient-to-r from-indigo-50 to-sky-50 z-30">
-      Name
+    <th className="text-left text-sm font-black text-slate-600 px-5 py-3 sticky left-0 top-0 bg-gradient-to-r from-indigo-50 to-sky-50 z-30">
+      ชื่อ-สกุล
     </th>
-    <th className="px-3 py-3 text-center text-m font-black text-slate-400 bg-sky-50">Report</th>
+    <th className="px-3 py-3 text-center text-sm font-black text-slate-400 bg-sky-50">Report</th>
     {assignments.map(a => (
       // ★ column header ลากสลับลำดับได้ (ไม่ readOnly เท่านั้น)
 <th
@@ -1305,7 +1305,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   {!readOnly && (
     <span className="absolute top-1 left-1.5 text-indigo-400 text-sm leading-none select-none">⠿</span>
   )}
-  <p className="text-m font-black text-indigo-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
+  <p className="text-sm font-black text-indigo-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
   <p className="text-[12px] text-indigo-600 font-bold">
     {isWeighted(a) ? `กรอกเต็ม ${a.max_score} → นน. ${a.weight_percent}%` : `เต็ม ${a.max_score} คะแนน`}
   </p>
@@ -1313,7 +1313,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     ))}
     {presets.map(p => (
   <th key={p.id} className="px-3 py-3 text-center min-w-[100px] bg-fuchsia-50/70">
-    <p className="text-m font-black text-fuchsia-600">{p.emoji} {p.label}</p>
+    <p className="text-sm font-black text-fuchsia-600">{p.emoji} {p.label}</p>
     <p className="text-[12px] text-fuchsia-300 font-bold">คะแนนพิเศษ</p>
   </th>
 ))}
@@ -1321,12 +1321,12 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 {gradingMode === "numeric" && (
   <>
     <th className="px-3 py-3 text-center min-w-[90px] bg-indigo-50/70">
-      <p className="text-m font-black text-indigo-700">คะแนนเก็บ</p>
+      <p className="text-sm font-black text-indigo-700">คะแนนเก็บ</p>
       <p className="text-[12px] text-indigo-300 font-bold">เต็ม {formativeMaxScore}</p>
     </th>
     {useMidterm && (
   <th className="px-3 py-3 text-center min-w-[90px] bg-teal-50/70">
-    <p className="text-m font-black text-teal-700">กลางภาค</p>
+    <p className="text-sm font-black text-teal-700">กลางภาค</p>
     {readOnly ? (
       <p className="text-[12px] text-teal-300 font-bold">
         {rawMidtermMax ? `กรอกเต็ม ${rawMidtermMax} → นน. ${midtermMaxScore}` : `เต็ม ${midtermMaxScore}`}
@@ -1345,7 +1345,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   </th>
 )}
 <th className="px-3 py-3 text-center min-w-[90px] bg-orange-50/70">
-  <p className="text-m font-black text-orange-700">ปลายภาค</p>
+  <p className="text-sm font-black text-orange-700">ปลายภาค</p>
   {readOnly ? (
     <p className="text-[12px] text-orange-300 font-bold">
       {rawFinalMax ? `กรอกเต็ม ${rawFinalMax} → นน. ${finalMaxScore}` : `เต็ม ${finalMaxScore}`}
@@ -1366,16 +1366,16 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 )}
 {/* ★ ลำดับคอลัมน์ท้ายตาราง: รวม -> ระดับผลการเรียน/สถานะ -> ส่งตรงเวลา (ย้ายระดับผลการเรียนไปไว้หลังคอลัมน์รวมตามที่ต้องการ) */}
 <th className="px-3 py-3 text-center min-w-[100px] bg-emerald-50/70">
-  <p className="text-m font-black text-emerald-700">รวม</p>
+  <p className="text-sm font-black text-emerald-700">รวม</p>
   <p className="text-[12px] text-emerald-400 font-bold">งาน+พิเศษ{gradingMode === "numeric" ? "+สอบ" : ""}</p>
 </th>
 <th className="px-3 py-3 text-center min-w-[70px] bg-fuchsia-50/70">
-  <p className="text-m font-black text-fuchsia-700">
+  <p className="text-sm font-black text-fuchsia-700">
     {gradingMode === "pass_fail" ? "สถานะ" : "ระดับผลการเรียน"}
   </p>
 </th>
 <th className="px-3 py-3 text-center min-w-[90px] bg-amber-50/70">
-  <p className="text-m font-black text-amber-700">ส่งตรงเวลา</p>
+  <p className="text-sm font-black text-amber-700">ส่งตรงเวลา</p>
 </th>
 
   </tr>
@@ -1395,7 +1395,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
                       </div>
                     )}
                     <div>
-                      <p className="text-m font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
+                      <p className="text-sm font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
                       <p className="text-[14x] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                     </div>
                   </div>
@@ -2154,9 +2154,9 @@ function PodiumView({
                         {s.first_name[0]}
                       </div>
                     )}
-                    <p className="flex-1 text-m font-bold text-slate-600 truncate">{s.prefix}{s.first_name} {s.last_name}</p>
-                    <span className="text-[16px] text-slate-400 font-bold">เลขที่ {s.seat_number}</span>
-                    <span className="text-m font-black text-fuchsia-500 shrink-0 min-w-[70px] text-right">
+                    <p className="flex-1 text-sm font-bold text-slate-600 truncate">{s.prefix}{s.first_name} {s.last_name}</p>
+                    <span className="text-sm text-slate-400 font-bold">เลขที่ {s.seat_number}</span>
+                    <span className="text-sm font-black text-fuchsia-500 shrink-0 min-w-[70px] text-right">
                       {hideScores ? "•••" : `${fmtScore(r.grandTotal)} คะแนน`}
                     </span>
                   </div>
@@ -2340,11 +2340,11 @@ function StudentReportModal({
 
         <div className="rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white p-4 flex items-center justify-between mb-5">
   <div>
-    <p className="text-xs font-bold opacity-90">คะแนนรวมทั้งหมด</p>
+    <p className="text-sm font-bold opacity-90">คะแนนรวมทั้งหมด</p>
     <p className="text-2xl font-black">{row.grandTotal} คะแนน</p>
   </div>
   <div className="text-right">
-    <p className="text-xs font-bold opacity-90">{gradingMode === "pass_fail" ? "สถานะ" : "เกรด"}</p>   {/* ★ */}
+    <p className="text-sm font-bold opacity-90">{gradingMode === "pass_fail" ? "สถานะ" : "เกรด"}</p>   {/* ★ */}
     <p className="text-2xl font-black">
       {gradingMode === "pass_fail" ? (row.passFailStatus ?? "-") : row.grade}   {/* ★ */}
     </p>
