@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Phone, MapPin, Plus, Pencil, Trash2, X, Home, ArrowLeft, Printer } from "lucide-react"; // ★ เพิ่ม Printer
+import { Phone, MapPin, Plus, Pencil, LogOut, X, Home, ArrowLeft, Printer } from "lucide-react";
 // ★ ย้าย logic คำนวณคำนำหน้าไปไว้ไฟล์กลาง lib/student-prefix.ts เพื่อใช้ร่วมกันทุกหน้า
 import { getAutoPrefix, getDisplayPrefix } from "@/lib/student-prefix";
 
@@ -15,6 +15,16 @@ const DASHBOARD_PATH = "/dashboard";
 const HOMEROOM_PATH = "/homeroom";
 
 const PREFIX_OPTIONS = ["เด็กชาย", "เด็กหญิง", "นาย", "นางสาว"];
+
+// ⚠️ สมมติฐานสคีมาใหม่ (ต้อง ALTER TABLE ก่อนใช้งานฟีเจอร์นี้):
+//   alter table students
+//     add column moved_out_at date,
+//     add column moved_out_by uuid references auth.users(id),
+//     add column moved_out_by_name text;
+//   - moved_out_at    : วันที่นักเรียนย้ายออก (ครูประจำชั้นเป็นคนกรอก) — null แปลว่ายังเรียนอยู่
+//   - moved_out_by    : auth_id ของครูที่กดย้ายออก (เผื่อ join เพิ่มเติมภายหลัง)
+//   - moved_out_by_name : ชื่อครูที่กดย้ายออก ณ ตอนนั้น (เก็บ snapshot ไว้ กันชื่อเพี้ยนถ้าโปรไฟล์ครูถูกแก้ทีหลัง)
+//   ถ้าชื่อคอลัมน์จริงต่างจากนี้ ให้แก้ selectStr / payload ในฟังก์ชันที่เกี่ยวข้องด้านล่าง
 
 type Classroom = {
   classroom_id: string;
@@ -60,6 +70,14 @@ const EMPTY_FORM: FormState = {
   guardian_name: "", guardian_relation: "", guardian_phone: "", address: "",
 };
 
+// ★ วันที่วันนี้ในรูปแบบ yyyy-mm-dd สำหรับ default ของ input[type=date]
+function todayStr(): string {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 export default function StudentsPage() {
   const router = useRouter();
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
@@ -73,22 +91,56 @@ export default function StudentsPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
-const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
 
-// ★ อัปเดตคำนำหน้าอัตโนมัติเมื่อวันเกิดหรือเพศเปลี่ยน (เฉพาะตอนที่ modal เปิดอยู่)
-useEffect(() => {
-  if (!showForm) return;
-  const autoPrefix = getAutoPrefix(form.gender, form.birth_date);
-  if (autoPrefix && autoPrefix !== form.prefix) {
-    setForm((f) => ({ ...f, prefix: autoPrefix }));
-  }
-}, [form.gender, form.birth_date, showForm]);
+  // ★ ชื่อครูประจำชั้นที่ล็อกอินอยู่ตอนนี้ ใช้บันทึกว่า "ใครเป็นคนกดย้ายออก"
+  const [currentAuthId, setCurrentAuthId] = useState<string | null>(null);
+  const [teacherDisplayName, setTeacherDisplayName] = useState<string>("");
+
+  // ★ modal ย้ายนักเรียนออก (แทนการลบจริง)
+  const [movingOutStudent, setMovingOutStudent] = useState<Student | null>(null);
+  const [moveOutDate, setMoveOutDate] = useState<string>(todayStr());
+  const [movingOutSaving, setMovingOutSaving] = useState(false);
+  const [movingOutError, setMovingOutError] = useState("");
+
+  // ★ อัปเดตคำนำหน้าอัตโนมัติเมื่อวันเกิดหรือเพศเปลี่ยน (เฉพาะตอนที่ modal เปิดอยู่)
+  useEffect(() => {
+    if (!showForm) return;
+    const autoPrefix = getAutoPrefix(form.gender, form.birth_date);
+    if (autoPrefix && autoPrefix !== form.prefix) {
+      setForm((f) => ({ ...f, prefix: autoPrefix }));
+    }
+  }, [form.gender, form.birth_date, showForm]);
 
   useEffect(() => {
     supabase.rpc("get_my_classrooms").then(({ data }: { data: Classroom[] | null }) => {
       setClassrooms(data ?? []);
       if (data?.length) setSelectedClass(data[0]);
     });
+  }, []);
+
+  // ★ ดึงชื่อครูประจำชั้นคนปัจจุบัน สำหรับบันทึกลง moved_out_by_name
+  // (ไม่รู้ชื่อคอลัมน์ full name ที่แน่ชัดในตาราง users จึงลองไล่หลายคอลัมน์ที่เป็นไปได้ ก่อน fallback เป็น email)
+  useEffect(() => {
+    (async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return;
+      setCurrentAuthId(authUser.id);
+      const { data: profile } = await supabase
+        .from("users")
+        .select("*")
+        .eq("auth_id", authUser.id)
+        .maybeSingle();
+      const p = (profile ?? {}) as Record<string, unknown>;
+      const name =
+        (p.full_name as string) ||
+        (p.display_name as string) ||
+        ([p.first_name, p.last_name].filter(Boolean).join(" ") || null) ||
+        (p.name as string) ||
+        authUser.email ||
+        "ครูประจำชั้น";
+      setTeacherDisplayName(name);
+    })();
   }, []);
 
   function loadStudents(cid: string) {
@@ -99,6 +151,8 @@ useEffect(() => {
         "id, seat_number, student_code, prefix, first_name, last_name, nick_name, birth_date, gender, guardian_name, guardian_relation, guardian_phone, address, avatar_url"
       )
       .eq("classroom_id", cid)
+      // ★ ซ่อนนักเรียนที่ย้ายออกไปแล้วจากหน้าครูประจำชั้น (soft-deleted)
+      .is("moved_out_at", null)
       .order("seat_number")
       .then(({ data }: { data: Student[] | null }) => {
         setStudents(data ?? []);
@@ -112,36 +166,35 @@ useEffect(() => {
   }, [selectedClass]);
 
   function openAddForm() {
-  setEditingId(null);
-  setForm(EMPTY_FORM);
-  setSaveError("");
-  setAvatarFile(null);
-  setAvatarPreview(null);
-  setShowForm(true);
-}
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+    setSaveError("");
+    setAvatarFile(null);
+    setAvatarPreview(null);
+    setShowForm(true);
+  }
 
   function openEditForm(s: Student) {
-  setEditingId(s.id);
-  setForm({
-    seat_number: s.seat_number?.toString() ?? "",
-    student_code: s.student_code ?? "",
-    prefix: s.prefix ?? "",
-    first_name: s.first_name ?? "",
-    last_name: s.last_name ?? "",
-    nick_name: s.nick_name ?? "",
-    birth_date: s.birth_date ?? "",
-    gender: s.gender ?? "",
-    guardian_name: s.guardian_name ?? "",
-    guardian_relation: s.guardian_relation ?? "",
-    guardian_phone: s.guardian_phone ?? "",
-    address: s.address ?? "",
-  });
-  setSaveError("");
-  setAvatarFile(null);
-  setAvatarPreview((s as any).avatar_url ?? null);
-  setShowForm(true);
-}
-  
+    setEditingId(s.id);
+    setForm({
+      seat_number: s.seat_number?.toString() ?? "",
+      student_code: s.student_code ?? "",
+      prefix: s.prefix ?? "",
+      first_name: s.first_name ?? "",
+      last_name: s.last_name ?? "",
+      nick_name: s.nick_name ?? "",
+      birth_date: s.birth_date ?? "",
+      gender: s.gender ?? "",
+      guardian_name: s.guardian_name ?? "",
+      guardian_relation: s.guardian_relation ?? "",
+      guardian_phone: s.guardian_phone ?? "",
+      address: s.address ?? "",
+    });
+    setSaveError("");
+    setAvatarFile(null);
+    setAvatarPreview((s as any).avatar_url ?? null);
+    setShowForm(true);
+  }
 
   async function handleSave() {
     if (!selectedClass) return;
@@ -189,34 +242,62 @@ useEffect(() => {
     const savedId = editingId ?? savedRows[0]?.id;
 
     // ★ อัปโหลด avatar ถ้ามีการเลือกไฟล์ใหม่
-  if (avatarFile && savedId) {
-    const fd = new FormData();
-    fd.append("file", avatarFile);
-    const res = await fetch(`/api/students/${savedId}/avatar`, { method: "POST", body: fd });
-    if (!res.ok) {
-      const j = await res.json();
-      alert("บันทึกข้อมูลนักเรียนสำเร็จ แต่อัปโหลดรูปไม่สำเร็จ: " + (j.error ?? ""));
+    if (avatarFile && savedId) {
+      const fd = new FormData();
+      fd.append("file", avatarFile);
+      const res = await fetch(`/api/students/${savedId}/avatar`, { method: "POST", body: fd });
+      if (!res.ok) {
+        const j = await res.json();
+        alert("บันทึกข้อมูลนักเรียนสำเร็จ แต่อัปโหลดรูปไม่สำเร็จ: " + (j.error ?? ""));
+      }
     }
+
+    setShowForm(false);
+    loadStudents(cid);
   }
 
-  setShowForm(false);
-  loadStudents(cid);
-}
+  // ★ เปิด modal กรอกวันที่ย้ายออก (แทนการลบจริงแบบเดิม)
+  function openMoveOutModal(s: Student) {
+    setMovingOutStudent(s);
+    setMoveOutDate(todayStr());
+    setMovingOutError("");
+  }
 
-  async function handleDelete(id: string) {
-    if (!confirm("ยืนยันการลบนักเรียนคนนี้?")) return;
-    // ✅ เพิ่ม .select() เพื่อตรวจสอบว่ามีแถวถูกลบจริงกี่แถว
-    // (เดิม: ถ้า RLS ของตาราง students ไม่อนุญาตให้ลบแถวนี้ Supabase จะไม่โยน error
-    //  แต่จะ "ลบสำเร็จ 0 แถว" แบบเงียบๆ ทำให้ดูเหมือนลบได้ทั้งที่ข้อมูลยังอยู่)
-    const { data: deletedRows, error } = await supabase.from("students").delete().eq("id", id).select();
+  // ★ ยืนยันย้ายนักเรียนออก — เป็นการ "soft delete": update วันที่/ผู้บันทึก แล้วซ่อนออกจากลิสต์
+  //   (ไม่ใช้ .delete() อีกต่อไป เพื่อให้แอดมินยังเห็นประวัตินักเรียนคนนี้ได้)
+  async function confirmMoveOut() {
+    if (!movingOutStudent) return;
+    if (!moveOutDate) {
+      setMovingOutError("กรุณาเลือกวันที่ย้ายออก");
+      return;
+    }
+    setMovingOutSaving(true);
+    setMovingOutError("");
+
+    const { data: updatedRows, error } = await supabase
+      .from("students")
+      .update({
+        moved_out_at: moveOutDate,
+        moved_out_by: currentAuthId,
+        moved_out_by_name: teacherDisplayName || null,
+      })
+      .eq("id", movingOutStudent.id)
+      .select();
+
+    setMovingOutSaving(false);
+
     if (error) {
-      alert("ลบไม่สำเร็จ: " + error.message);
+      setMovingOutError("บันทึกไม่สำเร็จ: " + error.message);
       return;
     }
-    if (!deletedRows || deletedRows.length === 0) {
-      alert("ไม่สามารถลบข้อมูลได้ — ระบบไม่พบสิทธิ์ในการลบแถวข้อมูลนี้ กรุณาตรวจสอบ RLS policy (DELETE) ของตาราง students หรือแจ้งผู้ดูแลระบบ");
+    if (!updatedRows || updatedRows.length === 0) {
+      setMovingOutError(
+        "ไม่สามารถบันทึกการย้ายออกได้ — ระบบไม่พบสิทธิ์ในการแก้ไขแถวข้อมูลนี้ กรุณาตรวจสอบ RLS policy (UPDATE) ของตาราง students หรือแจ้งผู้ดูแลระบบ"
+      );
       return;
     }
+
+    setMovingOutStudent(null);
     if (selectedClass) loadStudents(selectedClass.classroom_id);
   }
 
@@ -228,7 +309,6 @@ useEffect(() => {
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-sky-50 via-white to-violet-50">
-      {/* ★ ปรับ padding ให้เท่ากับหน้าเช็คชื่อ (w-full px-4 sm:px-6 py-6 lg:px-8, ไม่มี mx-auto/max-w ครอบ) */}
       <div className="w-full px-4 sm:px-6 py-6 lg:px-8">
         {/* แถบนำทางด้านบน: กลับแดชบอร์ด + ย้อนกลับไปครูประจำชั้น */}
         <div className="flex items-center gap-2">
@@ -256,7 +336,6 @@ useEffect(() => {
               รายชื่อ ข้อมูลพื้นฐาน และข้อมูลผู้ปกครองของนักเรียนในความดูแล
             </p>
           </div>
-          {/* ★ เพิ่มปุ่มพิมพ์การ์ด นร. คู่กับปุ่มเพิ่มนักเรียน */}
           <div className="flex items-center gap-2">
             <button
               onClick={goToPrintCards}
@@ -301,8 +380,6 @@ useEffect(() => {
           ) : (
             students.map((s) => {
               const active = expanded === s.id;
-              // ★ คำนวณคำนำหน้าที่จะแสดงผลจากอายุ+เพศจริง แทนที่จะใช้ s.prefix ตรงๆ
-              // (ครอบคลุมกรณีนักเรียนอายุครบ 15 ปีแล้วแต่ยังไม่มีใครไปกดแก้ไขฟอร์มเพื่ออัปเดต prefix ในฐานข้อมูล)
               const displayPrefix = getDisplayPrefix(s.gender, s.birth_date, s.prefix);
               return (
                 <div
@@ -335,11 +412,13 @@ useEffect(() => {
                       >
                         <Pencil className="h-4 w-4" />
                       </button>
+                      {/* ★ เปลี่ยนจาก "ลบ" ทันที เป็นเปิด modal ให้กรอกวันที่ย้ายออกก่อน (soft delete) */}
                       <button
-                        onClick={() => handleDelete(s.id)}
+                        onClick={() => openMoveOutModal(s)}
+                        title="ย้ายออก"
                         className="rounded-xl p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <LogOut className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
@@ -369,6 +448,76 @@ useEffect(() => {
           )}
         </div>
 
+        {/* ★ Modal ย้ายนักเรียนออก — กรอกวันที่แล้วยืนยัน */}
+        {movingOutStudent && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-sm"
+            onClick={() => !movingOutSaving && setMovingOutStudent(null)}
+          >
+            <div
+              className="w-full max-w-sm overflow-hidden rounded-3xl bg-white shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between bg-gradient-to-r from-rose-500 to-orange-400 px-6 py-4">
+                <h2 className="text-base font-bold text-white">ย้ายนักเรียนออก</h2>
+                <button
+                  onClick={() => !movingOutSaving && setMovingOutStudent(null)}
+                  className="rounded-lg p-1 text-white/80 transition hover:bg-white/10 hover:text-white"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="p-6">
+                <p className="text-sm text-slate-600">
+                  ย้าย{" "}
+                  <span className="font-bold text-slate-800">
+                    {movingOutStudent.prefix ?? ""}
+                    {movingOutStudent.first_name} {movingOutStudent.last_name}
+                  </span>{" "}
+                  ออกจากห้องเรียน
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  ข้อมูลนักเรียนจะไม่แสดงในรายชื่อห้องนี้อีก แต่แอดมินยังดูประวัติย้อนหลังได้
+                </p>
+
+                <div className="mt-4">
+                  <label className="mb-1 block text-xs font-medium text-slate-500">วันที่ย้ายออก</label>
+                  <input
+                    type="date"
+                    value={moveOutDate}
+                    onChange={(e) => setMoveOutDate(e.target.value)}
+                    className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 outline-none transition focus:border-rose-400 focus:ring-4 focus:ring-rose-100"
+                  />
+                </div>
+
+                {movingOutError && (
+                  <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-600">
+                    ⚠️ {movingOutError}
+                  </div>
+                )}
+
+                <div className="mt-6 flex justify-end gap-2">
+                  <button
+                    onClick={() => setMovingOutStudent(null)}
+                    disabled={movingOutSaving}
+                    className="rounded-xl border-2 border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    onClick={confirmMoveOut}
+                    disabled={movingOutSaving}
+                    className="rounded-xl bg-gradient-to-r from-rose-500 to-orange-400 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-rose-200 transition hover:-translate-y-0.5 hover:shadow-lg disabled:translate-y-0 disabled:opacity-50 disabled:shadow-none"
+                  >
+                    {movingOutSaving ? "กำลังบันทึก..." : "ยืนยันย้ายออก"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showForm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-sm">
             <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl bg-white shadow-2xl">
@@ -391,25 +540,25 @@ useEffect(() => {
                   </div>
                 )}
                 {/* ★ Avatar picker */}
-<div className="mb-4 flex justify-center">
-  <label className="relative cursor-pointer group">
-    {avatarPreview ? (
-      <img src={avatarPreview} className="w-20 h-20 rounded-full object-cover border-4 border-slate-100" />
-    ) : (
-      <div className="w-20 h-20 rounded-full bg-slate-100 border-4 border-slate-100 flex items-center justify-center text-2xl text-slate-300">👤</div>
-    )}
-    <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] font-black">
-      เปลี่ยนรูป
-    </div>
-    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
-      onChange={(e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        setAvatarFile(file);
-        setAvatarPreview(URL.createObjectURL(file));
-      }} />
-  </label>
-</div>
+                <div className="mb-4 flex justify-center">
+                  <label className="relative cursor-pointer group">
+                    {avatarPreview ? (
+                      <img src={avatarPreview} className="w-20 h-20 rounded-full object-cover border-4 border-slate-100" />
+                    ) : (
+                      <div className="w-20 h-20 rounded-full bg-slate-100 border-4 border-slate-100 flex items-center justify-center text-2xl text-slate-300">👤</div>
+                    )}
+                    <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] font-black">
+                      เปลี่ยนรูป
+                    </div>
+                    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        setAvatarFile(file);
+                        setAvatarPreview(URL.createObjectURL(file));
+                      }} />
+                  </label>
+                </div>
 
                 <p className="mb-2 text-xs font-bold uppercase tracking-wide text-indigo-500">ข้อมูลนักเรียน</p>
                 <div className="grid grid-cols-2 gap-3 text-sm">
@@ -417,24 +566,24 @@ useEffect(() => {
                   <Field label="รหัสนักเรียน" value={form.student_code} onChange={(v) => setForm({ ...form, student_code: v })} />
 
                   <div>
-  <label className="mb-1 block text-xs font-medium text-slate-500">
-    คำนำหน้า
-    {getAutoPrefix(form.gender, form.birth_date) && (
-      <span className="ml-1 text-[10px] font-normal text-indigo-400">(คำนวณอัตโนมัติจากอายุ)</span>
-    )}
-  </label>
-  <select
-    className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-400"
-    value={form.prefix}
-    onChange={(e) => setForm({ ...form, prefix: e.target.value })}
-    disabled={!!getAutoPrefix(form.gender, form.birth_date)}
-  >
-    <option value="">เลือก</option>
-    {PREFIX_OPTIONS.map((p) => (
-      <option key={p} value={p}>{p}</option>
-    ))}
-  </select>
-</div>
+                    <label className="mb-1 block text-xs font-medium text-slate-500">
+                      คำนำหน้า
+                      {getAutoPrefix(form.gender, form.birth_date) && (
+                        <span className="ml-1 text-[10px] font-normal text-indigo-400">(คำนวณอัตโนมัติจากอายุ)</span>
+                      )}
+                    </label>
+                    <select
+                      className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-400"
+                      value={form.prefix}
+                      onChange={(e) => setForm({ ...form, prefix: e.target.value })}
+                      disabled={!!getAutoPrefix(form.gender, form.birth_date)}
+                    >
+                      <option value="">เลือก</option>
+                      {PREFIX_OPTIONS.map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </div>
                   <div />
 
                   <Field label="ชื่อ" value={form.first_name} onChange={(v) => setForm({ ...form, first_name: v })} required />

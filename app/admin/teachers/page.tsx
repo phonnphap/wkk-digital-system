@@ -35,6 +35,7 @@ type TeacherBase = {
   grade_level_id: string | null;
   grade_level_name: string | null;
   avatar_url: string | null;
+  role: string | null; // ← ใช้เช็คสิทธิ์กดดูรายละเอียด (admin / ผอ / รองผอ)
 };
 
 type DailyRow = TeacherBase & {
@@ -56,7 +57,7 @@ type SummaryRow = TeacherBase & {
 // ── เวลาตัดสาย/กลับก่อน: ตาราง teacher_attendance_records ไม่มีคอลัมน์ is_late/is_early_leave
 // ให้ระบบคำนวณเองจากเวลาเข้า-ออกเทียบกับเวลามาตรฐานนี้ ปรับให้ตรงกับกฎของโรงเรียนได้ ──
 const LATE_CUTOFF_TIME = "07:45:00"; // มาหลังเวลานี้ถือว่า "สาย"
-const EARLY_LEAVE_CUTOFF_TIME = "16:00:00"; // กลับก่อนเวลานี้ถือว่า "กลับก่อน"
+const EARLY_LEAVE_CUTOFF_TIME = "16:30:00"; // กลับก่อนเวลานี้ถือว่า "กลับก่อน"
 
 function isLate(checkInTime: string | null) {
   return !!checkInTime && checkInTime > LATE_CUTOFF_TIME;
@@ -77,6 +78,21 @@ function gradeLevelRank(name: string | null): number {
   if (n.startsWith("ป.") || n.includes("ประถม")) return 200 + num;
   if (n.startsWith("ม.") || n.includes("มัธยม")) return 300 + num;
   return 900;
+}
+
+// ── สิทธิ์กดดูรายละเอียด: ผอ / รองผอ / โรลที่มีคำว่า "admin" เท่านั้น ครูทั่วไปกดไม่ได้ ──
+function canViewDetail(t: TeacherBase): boolean {
+  const role = String(t.role || "").toLowerCase();
+  if (role.includes("admin")) return true;
+
+  const text = `${t.position || ""} ${t.grade_level_name || ""}`;
+  return (
+    text.includes("รองผู้อำนวยการ") ||
+    text.includes("รองผอ") ||
+    text.includes("ผู้อำนวยการ") ||
+    text.includes("ผอ") ||
+    text.includes("ผู้บริหาร")
+  );
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -270,20 +286,20 @@ export default function AdminAttendanceOverviewPage() {
       // ตาราง grade_levels ยังไม่มี — จะแสดง id เดิมไปก่อนจนกว่าจะเชื่อมตารางจริง
     }
 
-    const mapped: TeacherBase[] = (teacherRows || [])
-      // ตัดทุก role ที่มีคำว่า "admin" อยู่ในชื่อออก ไม่ใช่แค่ role ที่ตรงกับ "admin" เป๊ะ ๆ
-      .filter((t: any) => !String(t.role || "").toLowerCase().includes("admin"))
-      .map((t: any) => ({
-        id: t.id,
-        prefix: t.title ?? null,
-        first_name: t.first_name,
-        last_name: t.last_name,
-        position: t.position ?? null,
-        subject_group: t.subject_group,
-        grade_level_id: t.grade_level,
-        grade_level_name: t.grade_level ? gradeLevelMap.get(t.grade_level) || t.grade_level : null,
-        avatar_url: t.avatar_url,
-      }));
+    // ── ไม่กรอง role admin ออกจากรายชื่ออีกต่อไป — ให้แสดงในตารางด้วย
+    // แต่สิทธิ์กดดูรายละเอียดจะถูกควบคุมแยกด้วย canViewDetail() ตอน render แทน
+    const mapped: TeacherBase[] = (teacherRows || []).map((t: any) => ({
+      id: t.id,
+      prefix: t.title ?? null,
+      first_name: t.first_name,
+      last_name: t.last_name,
+      position: t.position ?? null,
+      subject_group: t.subject_group,
+      grade_level_id: t.grade_level,
+      grade_level_name: t.grade_level ? gradeLevelMap.get(t.grade_level) || t.grade_level : null,
+      avatar_url: t.avatar_url,
+      role: t.role ?? null,
+    }));
 
     setTeachers(mapped);
   }
@@ -643,12 +659,103 @@ export default function AdminAttendanceOverviewPage() {
               <div className="py-16 text-center text-slate-400 text-sm">ไม่พบข้อมูลครูตามเงื่อนไขที่เลือก</div>
             ) : (
               <div className="divide-y divide-slate-50">
-                {filteredDaily.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => router.push(`/admin/teachers/${t.id}`)}
-                    className="w-full flex items-center justify-between gap-4 px-5 py-4 hover:bg-slate-50 transition-colors text-left"
-                  >
+                {filteredDaily.map((t) => {
+                  const clickable = canViewDetail(t);
+                  const rowClass = `w-full flex items-center justify-between gap-4 px-5 py-4 transition-colors text-left ${
+                    clickable ? "hover:bg-slate-50 cursor-pointer" : "cursor-default"
+                  }`;
+                  const content = (
+                    <>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center overflow-hidden shrink-0">
+                          {t.avatar_url ? (
+                            <img src={t.avatar_url} className="w-full h-full object-cover" />
+                          ) : (
+                            <User className="w-5 h-5" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-slate-800 truncate">
+                            {t.prefix ? `${t.prefix}` : ""}{t.first_name} {t.last_name}
+                          </p>
+                          <p className="text-xs text-slate-400 truncate">
+                            {[t.position, t.grade_level_name].filter(Boolean).join(" - ") || "—"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <div className="flex gap-2 items-center">
+                          {t.on_leave ? (
+                            <span className="flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                              <CalendarDays className="w-3 h-3" /> ลาวันนี้
+                            </span>
+                          ) : !t.check_in_time ? (
+                            <span className="text-[10px] font-black px-2 py-1 rounded-full bg-rose-100 text-rose-700 border border-rose-200">
+                              ยังไม่ลงเวลา
+                            </span>
+                          ) : (
+                            <>
+                              <span
+                                className={`flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full border ${
+                                  t.is_late
+                                    ? "bg-orange-100 text-orange-700 border-orange-200"
+                                    : "bg-emerald-100 text-emerald-700 border-emerald-200"
+                                }`}
+                              >
+                                <LogIn className="w-3 h-3" />
+                                {t.is_late ? "สาย" : "มา"} {formatTime(t.check_in_time)}
+                              </span>
+                              {t.check_out_time ? (
+                                <span
+                                  className={`flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full border ${
+                                    t.is_early_leave
+                                      ? "bg-rose-100 text-rose-700 border-rose-200"
+                                      : "bg-blue-100 text-blue-700 border-blue-200"
+                                  }`}
+                                >
+                                  <LogOut className="w-3 h-3" />
+                                  {t.is_early_leave ? "กลับก่อน" : "กลับตรงเวลา"} {formatTime(t.check_out_time)}
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full border bg-slate-100 text-slate-500 border-slate-200">
+                                  <LogOut className="w-3 h-3" />
+                                  ยังไม่กลับ
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-400 max-w-[200px] truncate">
+                          หมายเหตุ: {t.note || "—"}
+                        </p>
+                      </div>
+                    </>
+                  );
+
+                  return clickable ? (
+                    <button key={t.id} onClick={() => router.push(`/admin/teachers/${t.id}`)} className={rowClass}>
+                      {content}
+                    </button>
+                  ) : (
+                    <div key={t.id} className={rowClass}>
+                      {content}
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          ) : filteredSummary.length === 0 ? (
+            <div className="py-16 text-center text-slate-400 text-sm">ไม่พบข้อมูลครูตามเงื่อนไขที่เลือก</div>
+          ) : (
+            <div className="divide-y divide-slate-50">
+              {filteredSummary.map((t) => {
+                const clickable = canViewDetail(t);
+                const rowClass = `w-full flex items-center justify-between gap-4 px-5 py-4 transition-colors text-left ${
+                  clickable ? "hover:bg-slate-50 cursor-pointer" : "cursor-default"
+                }`;
+                const content = (
+                  <>
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center overflow-hidden shrink-0">
                         {t.avatar_url ? (
@@ -667,92 +774,25 @@ export default function AdminAttendanceOverviewPage() {
                       </div>
                     </div>
 
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      <div className="flex gap-2 items-center">
-                        {t.on_leave ? (
-                          <span className="flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
-                            <CalendarDays className="w-3 h-3" /> ลาวันนี้
-                          </span>
-                        ) : !t.check_in_time ? (
-                          <span className="text-[10px] font-black px-2 py-1 rounded-full bg-rose-100 text-rose-700 border border-rose-200">
-                            ยังไม่ลงเวลา
-                          </span>
-                        ) : (
-                          <>
-                            <span
-                              className={`flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full border ${
-                                t.is_late
-                                  ? "bg-orange-100 text-orange-700 border-orange-200"
-                                  : "bg-emerald-100 text-emerald-700 border-emerald-200"
-                              }`}
-                            >
-                              <LogIn className="w-3 h-3" />
-                              {t.is_late ? "สาย" : "มา"} {formatTime(t.check_in_time)}
-                            </span>
-                            {t.check_out_time ? (
-                              <span
-                                className={`flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full border ${
-                                  t.is_early_leave
-                                    ? "bg-rose-100 text-rose-700 border-rose-200"
-                                    : "bg-blue-100 text-blue-700 border-blue-200"
-                                }`}
-                              >
-                                <LogOut className="w-3 h-3" />
-                                {t.is_early_leave ? "กลับก่อน" : "กลับตรงเวลา"} {formatTime(t.check_out_time)}
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-full border bg-slate-100 text-slate-500 border-slate-200">
-                                <LogOut className="w-3 h-3" />
-                                ยังไม่กลับ
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </div>
-                      <p className="text-[10px] text-slate-400 max-w-[200px] truncate">
-                        หมายเหตุ: {t.note || "—"}
-                      </p>
+                    <div className="flex gap-4 shrink-0 text-center">
+                      <SummaryPill label="มา" value={t.present_count} color="text-emerald-600" />
+                      <SummaryPill label="สาย" value={t.late_count} color="text-orange-600" />
+                      <SummaryPill label="กลับก่อน" value={t.early_leave_count} color="text-rose-600" />
+                      <SummaryPill label="ลา" value={t.leave_count} color="text-amber-600" />
                     </div>
-                  </button>
-                ))}
-              </div>
-            )
-          ) : filteredSummary.length === 0 ? (
-            <div className="py-16 text-center text-slate-400 text-sm">ไม่พบข้อมูลครูตามเงื่อนไขที่เลือก</div>
-          ) : (
-            <div className="divide-y divide-slate-50">
-              {filteredSummary.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => router.push(`/admin/teachers/${t.id}`)}
-                  className="w-full flex items-center justify-between gap-4 px-5 py-4 hover:bg-slate-50 transition-colors text-left"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center overflow-hidden shrink-0">
-                      {t.avatar_url ? (
-                        <img src={t.avatar_url} className="w-full h-full object-cover" />
-                      ) : (
-                        <User className="w-5 h-5" />
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-slate-800 truncate">
-                        {t.prefix ? `${t.prefix}` : ""}{t.first_name} {t.last_name}
-                      </p>
-                      <p className="text-xs text-slate-400 truncate">
-                        {[t.position, t.grade_level_name].filter(Boolean).join(" - ") || "—"}
-                      </p>
-                    </div>
-                  </div>
+                  </>
+                );
 
-                  <div className="flex gap-4 shrink-0 text-center">
-                    <SummaryPill label="มา" value={t.present_count} color="text-emerald-600" />
-                    <SummaryPill label="สาย" value={t.late_count} color="text-orange-600" />
-                    <SummaryPill label="กลับก่อน" value={t.early_leave_count} color="text-rose-600" />
-                    <SummaryPill label="ลา" value={t.leave_count} color="text-amber-600" />
+                return clickable ? (
+                  <button key={t.id} onClick={() => router.push(`/admin/teachers/${t.id}`)} className={rowClass}>
+                    {content}
+                  </button>
+                ) : (
+                  <div key={t.id} className={rowClass}>
+                    {content}
                   </div>
-                </button>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

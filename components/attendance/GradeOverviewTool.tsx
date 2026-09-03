@@ -16,7 +16,7 @@ type Assignment = {
   id: string;
   title: string;
   max_score: number;
-  weight_percent?: number;
+  weight_percent?: number | null;
   allow_weight?: boolean;
   status?: string;
   due_date?: string | null;
@@ -646,6 +646,56 @@ async function handleUpdateScore(studentId: string, assignmentId: string, newSco
     showToast("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error"); // ★ toast แทน alert
   }
 }
+// ★ รีเซทคะแนนกลับเป็น "ยังไม่ได้กรอก"
+async function handleResetScore(studentId: string, assignmentId: string) {
+  if (readOnly) return;
+  try {
+    const res = await fetch("/api/assignment-submissions/grade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject_section_id: sectionId,
+        assignment_id: assignmentId,
+        student_id: studentId,
+        score: null,
+        graded_by: currentUserId || null,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? "รีเซทคะแนนไม่สำเร็จ");
+
+    if (json.deleted) {
+      setSubmissions(prev => prev.filter(s => !(s.assignment_id === assignmentId && s.student_id === studentId)));
+    } else if (json.submission) {
+      setSubmissions(prev =>
+        prev.map(s => (s.assignment_id === assignmentId && s.student_id === studentId ? { ...s, ...json.submission } : s))
+      );
+    }
+    showToast("รีเซทคะแนนสำเร็จ", "success");
+  } catch (e: any) {
+    showToast("รีเซทคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error");
+  }
+}
+
+// ★ บันทึก % น้ำหนักคะแนนของชิ้นงาน
+async function handleUpdateAssignmentWeight(assignmentId: string, weightPercent: number | null, allowWeight: boolean) {
+  if (readOnly) return;
+  try {
+    const res = await fetch("/api/assignments/update-weight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignment_id: assignmentId, allow_weight: allowWeight, weight_percent: weightPercent }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? "บันทึกน้ำหนักคะแนนไม่สำเร็จ");
+    setAssignments(prev =>
+      prev.map(a => (a.id === assignmentId ? { ...a, allow_weight: allowWeight, weight_percent: weightPercent } : a))
+    );
+    showToast("บันทึกน้ำหนักคะแนนสำเร็จ", "success");
+  } catch (e: any) {
+    showToast("บันทึกน้ำหนักคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error");
+  }
+}
 
   async function saveCriteria(newRows: Criterion[]) {
     if (readOnly) return;
@@ -998,21 +1048,23 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   onOpenReport={s => setReportStudent(s)}
   onAdjustPreset={handleAdjustPreset}
   onUpdateScore={handleUpdateScore}
-  onUpdateExamScore={handleUpdateExamScore}     // ★ add
+  onUpdateExamScore={handleUpdateExamScore}    
   getLateInfo={getLateInfo}
+  onResetScore={handleResetScore}
+  onUpdateAssignmentWeight={handleUpdateAssignmentWeight}
   readOnly={effectiveReadOnly}
   gradingMode={gradingMode}
-  useMidterm={useMidterm}                       // ★ add
-  formativeMaxScore={formativeMaxScore}          // ★ add
-  midtermMaxScore={midtermMaxScore}              // ★ add
-  finalMaxScore={finalMaxScore}                  // ★ add
-  onReorderAssignments={setAssignmentOrder}      // ★ ลากสลับลำดับหัวตาราง
-  rawMidtermMax={rawMidtermMax}              // ★ เพิ่ม
-  rawFinalMax={rawFinalMax}                  // ★ เพิ่ม
-  onChangeRawMidtermMax={setRawMidtermMax}   // ★ เพิ่ม
-  onChangeRawFinalMax={setRawFinalMax}       // ★ เพิ่ม
+  useMidterm={useMidterm}                       
+  formativeMaxScore={formativeMaxScore}          
+  midtermMaxScore={midtermMaxScore}              
+  finalMaxScore={finalMaxScore}                 
+  onReorderAssignments={setAssignmentOrder}      
+  rawMidtermMax={rawMidtermMax}              
+  rawFinalMax={rawFinalMax}                  
+  onChangeRawMidtermMax={setRawMidtermMax}   
+  onChangeRawFinalMax={setRawFinalMax}       
   onSaveExamConfig={saveExamConfig}   
-  onToast={showToast}                        // ★ เพิ่ม: ใช้แจ้งผลตอนวางคะแนนหลายช่อง
+  onToast={showToast}                        
 />
       ) : (
         <PodiumView rows={rows} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
@@ -1028,7 +1080,10 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
 </div>
 );
 }
-
+type ContextMenuState =
+  | { type: "score"; x: number; y: number; studentId: string; assignmentId: string }
+  | { type: "header"; x: number; y: number; assignmentId: string }
+  | null;
 // ★ ตอนนี้ activeCell อ้างอิงด้วย "col" (assignment id / preset:id / midterm / final) + studentId
 // เพื่อให้ย้ายด้วยลูกศรข้ามระหว่างคอลัมน์ประเภทต่างกันได้ในระบบเดียวกัน
 type ActiveCell = { col: string; studentId: string } | null;
@@ -1038,9 +1093,8 @@ function GradeTable({
   rows, assignments, presets, totalMaxScore, onOpenReport, onAdjustPreset, onUpdateScore,
   onUpdateExamScore, getLateInfo, readOnly, gradingMode = "numeric",
   useMidterm = false, formativeMaxScore = 0, midtermMaxScore = 0, finalMaxScore = 0,
-  onReorderAssignments,
-  rawMidtermMax, rawFinalMax, onChangeRawMidtermMax, onChangeRawFinalMax, onSaveExamConfig,  // ★ เพิ่ม
-  onToast,  // ★ เพิ่ม: ใช้แจ้งผลลัพธ์ตอนวางคะแนนหลายช่องพร้อมกัน
+  onReorderAssignments, rawMidtermMax, rawFinalMax, onChangeRawMidtermMax, onChangeRawFinalMax, onSaveExamConfig,  
+  onToast, onResetScore, onUpdateAssignmentWeight,  
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
@@ -1058,17 +1112,18 @@ function GradeTable({
   midtermMaxScore?: number;
   finalMaxScore?: number;
   onReorderAssignments: (newOrderIds: string[]) => void;
-  rawMidtermMax: number | null;                                   // ★ เพิ่ม
-  rawFinalMax: number | null;                                     // ★ เพิ่ม
-  onChangeRawMidtermMax: (v: number | null) => void;              // ★ เพิ่ม
-  onChangeRawFinalMax: (v: number | null) => void;                // ★ เพิ่ม
-  onSaveExamConfig: (examType: "midterm" | "final", rawMax: number | null) => void; // ★ เพิ่ม
-  onToast?: (message: string, type?: "success" | "error" | "info") => void; // ★ เพิ่ม
+  rawMidtermMax: number | null;                                   
+  rawFinalMax: number | null;                                     
+  onChangeRawMidtermMax: (v: number | null) => void;             
+  onChangeRawFinalMax: (v: number | null) => void;                
+  onSaveExamConfig: (examType: "midterm" | "final", rawMax: number | null) => void; 
+  onToast?: (message: string, type?: "success" | "error" | "info") => void; 
+  onResetScore: (studentId: string, assignmentId: string) => void;                                  
+  onUpdateAssignmentWeight: (assignmentId: string, weightPercent: number | null, allowWeight: boolean) => void; 
 }) {
-  // ★ ช่องที่กำลังกรอกคะแนนอยู่ตอนนี้ (คุมจากที่นี่ เพื่อให้กด Enter/ลูกศร แล้วสั่งเปิดช่องถัดไปได้)
   const [activeCell, setActiveCell] = useState<ActiveCell>(null);
-  // ★ id ชิ้นงานที่กำลังลากอยู่ (สำหรับลากสลับหัวตาราง)
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null); 
 const unitHeaderGroups = useMemo(() => {
   const groups: { key: string; label: string; span: number }[] = [];
   assignments.forEach(a => {
@@ -1090,7 +1145,6 @@ const unitHeaderGroups = useMemo(() => {
 }, [assignments]);
 
 const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
-  // ★ รายการ "คอลัมน์กรอกคะแนนได้" ทั้งหมดตามลำดับที่แสดงจริงในตาราง ใช้คำนวณตำแหน่งตอนกดลูกศร/วางคะแนน
   const navColumns = useMemo(() => {
     const cols: string[] = assignments.map(a => a.id);
     presets.forEach(p => cols.push(`preset:${p.id}`));
@@ -1226,10 +1280,10 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     </tr>
   )}
   <tr className="bg-gradient-to-r from-indigo-50 via-sky-50 to-fuchsia-50">
-    <th className="text-left text-xs font-black text-slate-600 px-5 py-3 sticky left-0 top-0 bg-gradient-to-r from-indigo-50 to-sky-50 z-30">
+    <th className="text-left text-m font-black text-slate-600 px-5 py-3 sticky left-0 top-0 bg-gradient-to-r from-indigo-50 to-sky-50 z-30">
       Name
     </th>
-    <th className="px-3 py-3 text-center text-xs font-black text-slate-400 bg-sky-50">Report</th>
+    <th className="px-3 py-3 text-center text-m font-black text-slate-400 bg-sky-50">Report</th>
     {assignments.map(a => (
       // ★ column header ลากสลับลำดับได้ (ไม่ readOnly เท่านั้น)
 <th
@@ -1238,6 +1292,11 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   onDragStart={() => handleDragStart(a.id)}
   onDragOver={handleDragOverTh}
   onDrop={() => handleDropTh(a.id)}
+  onContextMenu={e => {  
+    if (readOnly) return;
+    e.preventDefault();
+    setContextMenu({ type: "header", x: e.clientX, y: e.clientY, assignmentId: a.id });
+  }}
   className={`relative px-3 py-3 text-center min-w-[110px] bg-sky-50/70 transition-opacity ${
     !readOnly ? "cursor-move" : ""
   } ${draggedId === a.id ? "opacity-40" : ""}`}
@@ -1246,7 +1305,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   {!readOnly && (
     <span className="absolute top-1 left-1.5 text-indigo-400 text-sm leading-none select-none">⠿</span>
   )}
-  <p className="text-xs font-black text-indigo-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
+  <p className="text-m font-black text-indigo-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
   <p className="text-[12px] text-indigo-600 font-bold">
     {isWeighted(a) ? `กรอกเต็ม ${a.max_score} → นน. ${a.weight_percent}%` : `เต็ม ${a.max_score} คะแนน`}
   </p>
@@ -1254,7 +1313,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     ))}
     {presets.map(p => (
   <th key={p.id} className="px-3 py-3 text-center min-w-[100px] bg-fuchsia-50/70">
-    <p className="text-xs font-black text-fuchsia-600">{p.emoji} {p.label}</p>
+    <p className="text-m font-black text-fuchsia-600">{p.emoji} {p.label}</p>
     <p className="text-[12px] text-fuchsia-300 font-bold">คะแนนพิเศษ</p>
   </th>
 ))}
@@ -1262,12 +1321,12 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 {gradingMode === "numeric" && (
   <>
     <th className="px-3 py-3 text-center min-w-[90px] bg-indigo-50/70">
-      <p className="text-xs font-black text-indigo-700">คะแนนเก็บ</p>
+      <p className="text-m font-black text-indigo-700">คะแนนเก็บ</p>
       <p className="text-[12px] text-indigo-300 font-bold">เต็ม {formativeMaxScore}</p>
     </th>
     {useMidterm && (
   <th className="px-3 py-3 text-center min-w-[90px] bg-teal-50/70">
-    <p className="text-xs font-black text-teal-700">กลางภาค</p>
+    <p className="text-m font-black text-teal-700">กลางภาค</p>
     {readOnly ? (
       <p className="text-[12px] text-teal-300 font-bold">
         {rawMidtermMax ? `กรอกเต็ม ${rawMidtermMax} → นน. ${midtermMaxScore}` : `เต็ม ${midtermMaxScore}`}
@@ -1286,7 +1345,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   </th>
 )}
 <th className="px-3 py-3 text-center min-w-[90px] bg-orange-50/70">
-  <p className="text-xs font-black text-orange-700">ปลายภาค</p>
+  <p className="text-m font-black text-orange-700">ปลายภาค</p>
   {readOnly ? (
     <p className="text-[12px] text-orange-300 font-bold">
       {rawFinalMax ? `กรอกเต็ม ${rawFinalMax} → นน. ${finalMaxScore}` : `เต็ม ${finalMaxScore}`}
@@ -1307,16 +1366,16 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 )}
 {/* ★ ลำดับคอลัมน์ท้ายตาราง: รวม -> ระดับผลการเรียน/สถานะ -> ส่งตรงเวลา (ย้ายระดับผลการเรียนไปไว้หลังคอลัมน์รวมตามที่ต้องการ) */}
 <th className="px-3 py-3 text-center min-w-[100px] bg-emerald-50/70">
-  <p className="text-xs font-black text-emerald-700">รวม</p>
+  <p className="text-m font-black text-emerald-700">รวม</p>
   <p className="text-[12px] text-emerald-400 font-bold">งาน+พิเศษ{gradingMode === "numeric" ? "+สอบ" : ""}</p>
 </th>
 <th className="px-3 py-3 text-center min-w-[70px] bg-fuchsia-50/70">
-  <p className="text-xs font-black text-fuchsia-700">
+  <p className="text-m font-black text-fuchsia-700">
     {gradingMode === "pass_fail" ? "สถานะ" : "ระดับผลการเรียน"}
   </p>
 </th>
 <th className="px-3 py-3 text-center min-w-[90px] bg-amber-50/70">
-  <p className="text-xs font-black text-amber-700">ส่งตรงเวลา</p>
+  <p className="text-m font-black text-amber-700">ส่งตรงเวลา</p>
 </th>
 
   </tr>
@@ -1350,10 +1409,19 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
                   </button>
                 </td>
                 {assignments.map(a => {
-    const sub = r.subMap[a.id];
-    const lateInfo = getLateInfo(a, sub); // ★ เปลี่ยนจาก isOnTime(a, sub)
-    return (
-      <td key={a.id} className="text-center px-3 py-3">
+  const sub = r.subMap[a.id];
+  const lateInfo = getLateInfo(a, sub);
+  return (
+                <td
+  key={a.id}
+  className="text-center px-3 py-3"
+  onContextMenu={e => {                         // ★ เพิ่ม
+    if (readOnly) return;
+    if (!sub || sub.score === null) return;     // ไม่มีคะแนนให้รีเซท
+    e.preventDefault();
+    setContextMenu({ type: "score", x: e.clientX, y: e.clientY, studentId: s.id, assignmentId: a.id });
+  }}
+>
         {readOnly ? (
   !sub ? (
     <span className="inline-block px-2 py-1 rounded-full text-[14px] font-black bg-red-50 text-red-600">ไม่ส่งงาน</span>
@@ -1507,8 +1575,44 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
           })}
         </tbody>
       </table>
-    </div>
-  );
+      {/* ★ เมนูคลิกขวา — วางไว้จุดเดียว ระดับ component ไม่ซ้อนในแถว/เซลล์ */}
+    {contextMenu && (
+      <>
+        <div
+          className="fixed inset-0 z-40"
+          onClick={() => setContextMenu(null)}
+          onContextMenu={e => { e.preventDefault(); setContextMenu(null); }}
+        />
+        <div
+          className="fixed z-50 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onClick={e => e.stopPropagation()}
+        >
+          {contextMenu.type === "score" ? (
+            <button
+              onClick={() => {
+                onResetScore(contextMenu.studentId, contextMenu.assignmentId);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-4 py-2 text-sm font-bold text-red-500 hover:bg-red-50 flex items-center gap-2 whitespace-nowrap"
+            >
+              ♻️ รีเซทคะแนน (กลับเป็นยังไม่ได้กรอก)
+            </button>
+          ) : (
+            <AssignmentWeightPopover
+              assignment={assignments.find(a => a.id === contextMenu.assignmentId)!}
+              onSave={(weightPercent, allowWeight) => {
+                onUpdateAssignmentWeight(contextMenu.assignmentId, weightPercent, allowWeight);
+                setContextMenu(null);
+              }}
+              onClose={() => setContextMenu(null)}
+            />
+          )}
+        </div>
+      </>
+    )}
+  </div>
+);
 }
 
 /* ป้าย/ช่องกรอกคะแนนงานที่มอบหมาย แบบคลิกแก้ไขได้ทันที (สำหรับครูประจำวิชาเท่านั้น)
@@ -1865,7 +1969,55 @@ function EditablePresetCell({
     </button>
   );
 }
+function AssignmentWeightPopover({
+  assignment, onSave, onClose,
+}: {
+  assignment: Assignment;
+  onSave: (weightPercent: number | null, allowWeight: boolean) => void;
+  onClose: () => void;
+}) {
+  const [allow, setAllow] = useState(!!assignment.allow_weight);
+  const [weight, setWeight] = useState(
+    assignment.weight_percent !== null && assignment.weight_percent !== undefined
+      ? String(assignment.weight_percent)
+      : ""
+  );
 
+  return (
+    <div className="px-4 py-3 w-64" onKeyDown={e => { if (e.key === "Escape") onClose(); }}>
+      <p className="text-xs font-black text-slate-500 mb-2 truncate" title={assignment.title}>
+        ⚖️ ตั้งน้ำหนักคะแนน: {assignment.title}
+      </p>
+      <label className="flex items-center gap-2 text-sm font-bold text-slate-600 mb-2">
+        <input type="checkbox" checked={allow} onChange={e => setAllow(e.target.checked)} />
+        เปิดใช้น้ำหนักคะแนน (%)
+      </label>
+      {allow && (
+        <div className="flex items-center gap-2 mb-2">
+          <input
+            type="number" min={0} max={100} autoFocus
+            value={weight}
+            onChange={e => setWeight(e.target.value)}
+            placeholder="เช่น 20"
+            className="w-20 border-2 border-slate-200 rounded-lg px-2 py-1 text-center text-sm font-black"
+          />
+          <span className="text-sm font-bold text-slate-400">% (กรอกเต็มดิบ {assignment.max_score})</span>
+        </div>
+      )}
+      <div className="flex gap-2 mt-2">
+        <button onClick={onClose} className="flex-1 py-1.5 rounded-lg border-2 border-slate-200 text-slate-500 font-black text-xs">
+          ยกเลิก
+        </button>
+        <button
+          onClick={() => onSave(allow ? (weight === "" ? null : Number(weight)) : null, allow)}
+          className="flex-1 py-1.5 rounded-lg bg-gradient-to-r from-violet-500 to-indigo-500 text-white font-black text-xs"
+        >
+          บันทึก
+        </button>
+      </div>
+    </div>
+  );
+}
 function buildRowsType() {
   return [] as {
     student: Student;

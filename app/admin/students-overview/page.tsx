@@ -6,6 +6,13 @@
 //     (ถ้าชื่อคอลัมน์จริงต่างจากนี้ ให้แก้ selectStr ในฟังก์ชัน fetchAllRows ด้านล่าง และ type StudentRow)
 //   - role admin/director/deputy_director มีสิทธิ์ SELECT ทุกแถวผ่าน RLS policy (เหมือนหน้าสถิติการมาเรียน)
 //
+//   ★ ตาราง students เพิ่มคอลัมน์สำหรับ "ย้ายออก" (soft delete) ที่หน้าครูประจำชั้น (/students) เป็นคนเขียน:
+//       moved_out_at      : date  — วันที่นักเรียนย้ายออก, null = ยังเรียนอยู่
+//       moved_out_by      : uuid  — auth_id ของครูที่กดย้ายออก
+//       moved_out_by_name : text  — ชื่อครูที่กดย้ายออก (snapshot ตอนกด)
+//     หน้านี้ (แอดมิน) จะไม่กรองนักเรียนที่ย้ายออกทิ้ง — ยังคงแสดงในตาราง พร้อม badge บอกวันที่/ผู้ย้ายออก
+//     ถ้าชื่อคอลัมน์จริงต่างจากนี้ ให้แก้ selectStr ของ fetchAllRows และ type StudentRow ด้านล่าง
+//
 //   ★ StudentDetailModal ดึงข้อมูล "ทุกคอลัมน์" ของนักเรียนคนนั้นด้วย select("*") แล้ว map เป็นภาษาไทย
 //     ผ่านตัวแปร FIELD_LABELS ด้านล่าง — ถ้าตาราง students มีคอลัมน์อื่นที่อยากให้แสดงชื่อไทยสวย ๆ
 //     (เช่น ข้อมูลผู้ปกครอง / ที่อยู่ / วันเกิด) ให้เพิ่ม key เข้าไปใน FIELD_LABELS ให้ตรงกับชื่อคอลัมน์จริง
@@ -16,7 +23,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Home, ArrowLeft, Users, Search, Loader2, X, User } from "lucide-react";
+import { Home, ArrowLeft, Users, Search, Loader2, X, User, LogOut } from "lucide-react";
 
 const supabase = createClient();
 
@@ -44,6 +51,16 @@ function gradeSort(a: string, b: string) {
   if (pa.prefixRank !== pb.prefixRank) return pa.prefixRank - pb.prefixRank;
   if (pa.num !== pb.num) return pa.num - pb.num;
   return a.localeCompare(b, "th", { numeric: true });
+}
+
+// ★ ฟอร์แมตวันที่ (yyyy-mm-dd จาก DB) เป็น d/m/พ.ศ. อ่านง่ายสำหรับผู้ใช้ไทย
+function formatThaiDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  const day = d.getDate();
+  const month = d.getMonth() + 1;
+  const buddhistYear = d.getFullYear() + 543;
+  return `${day}/${month}/${buddhistYear}`;
 }
 
 // ★ Supabase/PostgREST จำกัดผลลัพธ์ query ละ 1,000 แถวโดยดีฟอลต์ — วนดึงทีละหน้าจนครบ
@@ -78,12 +95,15 @@ type StudentRow = {
   first_name: string | null;
   last_name: string | null;
   gender: string | null;
+  // ★ ฟิลด์ "ย้ายออก" — null = ยังเรียนอยู่, มีค่า = ย้ายออกแล้ว (แต่ยังคงแสดงในหน้านี้)
+  moved_out_at: string | null;
+  moved_out_by_name: string | null;
 };
 
 const GENDER_LABEL: Record<string, string> = { male: "ชาย", female: "หญิง" };
 
 // ★ คอลัมน์ที่ไม่ต้องแสดงในหน้ารายละเอียด (เป็น field เชิงเทคนิค ไม่ใช่ข้อมูลที่ครูอยากดู)
-const HIDE_IN_DETAIL = new Set(["id", "classroom_id", "created_at", "updated_at", "auth_id"]);
+const HIDE_IN_DETAIL = new Set(["id", "classroom_id", "created_at", "updated_at", "auth_id", "moved_out_by"]);
 
 // ★ map ชื่อคอลัมน์ -> label ภาษาไทย ปรับ/เพิ่มให้ตรงกับสคีมาจริงได้ตามต้องการ
 const FIELD_LABELS: Record<string, string> = {
@@ -111,11 +131,15 @@ const FIELD_LABELS: Record<string, string> = {
   photo_url: "รูปประจำตัว",
   weight: "น้ำหนัก (กก.)",
   height: "ส่วนสูง (ซม.)",
+  // ★ ฟิลด์ย้ายออก
+  moved_out_at: "วันที่ย้ายออก",
+  moved_out_by_name: "ครูที่บันทึกการย้ายออก",
 };
 
 function formatFieldValue(key: string, value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   if (key === "gender" && typeof value === "string") return GENDER_LABEL[value] ?? value;
+  if (key === "moved_out_at" && typeof value === "string") return formatThaiDate(value);
   if (typeof value === "boolean") return value ? "ใช่" : "ไม่ใช่";
   return String(value);
 }
@@ -178,6 +202,8 @@ function StudentDetailModal({
     ? `${(row.prefix as string) ?? ""}${(row.first_name as string) ?? ""} ${(row.last_name as string) ?? ""}`.trim()
     : "";
 
+  const movedOutAt = row?.moved_out_at as string | null | undefined;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
@@ -204,6 +230,15 @@ function StudentDetailModal({
         <div className="mx-6 mt-4 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs font-bold text-amber-700 shrink-0">
           🔒 โหมดดูข้อมูลเท่านั้น — แก้ไขข้อมูลนักเรียนได้ที่หน้าครูประจำชั้นของห้องนั้น
         </div>
+
+        {/* ★ แถบแจ้งเตือนถ้านักเรียนย้ายออกไปแล้ว */}
+        {!loading && movedOutAt && (
+          <div className="mx-6 mt-2 rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs font-bold text-rose-600 shrink-0 flex items-center gap-1.5">
+            <LogOut className="h-3.5 w-3.5" />
+            ย้ายออกเมื่อ {formatThaiDate(movedOutAt)}
+            {row?.moved_out_by_name ? ` โดยครู${row.moved_out_by_name as string}` : ""}
+          </div>
+        )}
 
         {/* Body */}
         <div className="overflow-y-auto px-6 py-4 space-y-4">
@@ -288,10 +323,15 @@ export default function StudentsOverviewPage() {
     (async () => {
       const [classroomsRes, studentsRes] = await Promise.all([
         supabase.from("classrooms").select("id, room_name").order("room_name"),
+        // ★ ไม่กรอง moved_out_at ออก — แอดมินต้องเห็นนักเรียนที่ย้ายออกไปแล้วด้วย
         fetchAllRows<{
           id: string; classroom_id: string; student_code: string | null;
           prefix: string | null; first_name: string | null; last_name: string | null; gender: string | null;
-        }>("students", "id, classroom_id, student_code, prefix, first_name, last_name, gender"),
+          moved_out_at: string | null; moved_out_by_name: string | null;
+        }>(
+          "students",
+          "id, classroom_id, student_code, prefix, first_name, last_name, gender, moved_out_at, moved_out_by_name"
+        ),
       ]);
 
       if (classroomsRes.error || studentsRes.error) {
@@ -355,6 +395,10 @@ export default function StudentsOverviewPage() {
         return fullName.includes(q) || code.includes(q);
       })
       .sort((a, b) => {
+        // ★ นักเรียนที่ยังเรียนอยู่ขึ้นก่อนนักเรียนที่ย้ายออกแล้วเสมอ (ภายในผลลัพธ์เดียวกัน)
+        const movedA = a.moved_out_at ? 1 : 0;
+        const movedB = b.moved_out_at ? 1 : 0;
+        if (movedA !== movedB) return movedA - movedB;
         const roomA = classroomName.get(a.classroom_id) ?? "";
         const roomB = classroomName.get(b.classroom_id) ?? "";
         if (roomA !== roomB) return roomA.localeCompare(roomB, "th", { numeric: true });
@@ -371,6 +415,12 @@ export default function StudentsOverviewPage() {
     });
     return c;
   }, [filteredStudents]);
+
+  // ★ จำนวนที่ย้ายออกแล้ว ในผลลัพธ์ที่กรองอยู่ตอนนี้
+  const movedOutCount = useMemo(
+    () => filteredStudents.filter((s) => s.moved_out_at).length,
+    [filteredStudents]
+  );
 
   if (checkingAuth) {
     return (
@@ -404,7 +454,7 @@ export default function StudentsOverviewPage() {
             ทะเบียนนักเรียนทั้งโรงเรียน
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            ดูรายชื่อนักเรียนทุกห้อง หรือกรองดูทีละระดับชั้น/ห้องเรียน — คลิกชื่อเพื่อดูรายละเอียด (ดูได้อย่างเดียว)
+            ดูรายชื่อนักเรียนทุกห้อง หรือกรองดูทีละระดับชั้น/ห้องเรียน — คลิกชื่อเพื่อดูรายละเอียด (ดูได้อย่างเดียว) — รวมนักเรียนที่ย้ายออกแล้ว
           </p>
         </div>
 
@@ -465,6 +515,11 @@ export default function StudentsOverviewPage() {
               <span className="rounded-full bg-rose-50 px-4 py-1.5 text-xs font-bold text-rose-700">
                 👧 หญิง {genderCounts.female} คน
               </span>
+              {movedOutCount > 0 && (
+                <span className="rounded-full bg-amber-50 px-4 py-1.5 text-xs font-bold text-amber-700 flex items-center gap-1">
+                  <LogOut className="h-3 w-3" /> ย้ายออกแล้ว {movedOutCount} คน
+                </span>
+              )}
             </div>
 
             {/* ตารางรายชื่อ */}
@@ -483,26 +538,46 @@ export default function StudentsOverviewPage() {
                         <th className="px-4 py-3 text-left font-semibold">ชื่อ-สกุล</th>
                         <th className="px-4 py-3 text-left font-semibold">เพศ</th>
                         <th className="px-4 py-3 text-left font-semibold">ห้อง</th>
+                        <th className="px-4 py-3 text-left font-semibold">สถานะ</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredStudents.map((s) => (
-                        <tr key={s.id} className="border-t border-slate-50 hover:bg-slate-50/60">
-                          <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{s.student_code ?? "-"}</td>
-                          <td className="px-4 py-2.5 text-slate-500">{s.prefix ?? "-"}</td>
-                          <td className="px-4 py-2.5">
-                            {/* ★ กดชื่อเพื่อเปิด modal ดูรายละเอียดแบบ read-only */}
-                            <button
-                              onClick={() => setViewingStudent(s)}
-                              className="font-semibold text-slate-700 hover:text-blue-600 hover:underline text-left"
-                            >
-                              {(s.first_name ?? "-")} {s.last_name ?? ""}
-                            </button>
-                          </td>
-                          <td className="px-4 py-2.5 text-slate-500">{s.gender ? GENDER_LABEL[s.gender] ?? s.gender : "-"}</td>
-                          <td className="px-4 py-2.5 font-semibold text-blue-700">ห้อง {classroomName.get(s.classroom_id) ?? "-"}</td>
-                        </tr>
-                      ))}
+                      {filteredStudents.map((s) => {
+                        const movedOut = !!s.moved_out_at;
+                        return (
+                          <tr key={s.id} className={`border-t border-slate-50 hover:bg-slate-50/60 ${movedOut ? "bg-amber-50/40" : ""}`}>
+                            <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{s.student_code ?? "-"}</td>
+                            <td className="px-4 py-2.5 text-slate-500">{s.prefix ?? "-"}</td>
+                            <td className="px-4 py-2.5">
+                              {/* ★ กดชื่อเพื่อเปิด modal ดูรายละเอียดแบบ read-only (ย้ายออกแล้วก็ยังกดดูได้) */}
+                              <button
+                                onClick={() => setViewingStudent(s)}
+                                className={`font-semibold hover:underline text-left ${movedOut ? "text-slate-400 hover:text-amber-600" : "text-slate-700 hover:text-blue-600"}`}
+                              >
+                                {(s.first_name ?? "-")} {s.last_name ?? ""}
+                              </button>
+                            </td>
+                            <td className="px-4 py-2.5 text-slate-500">{s.gender ? GENDER_LABEL[s.gender] ?? s.gender : "-"}</td>
+                            <td className="px-4 py-2.5 font-semibold text-blue-700">ห้อง {classroomName.get(s.classroom_id) ?? "-"}</td>
+                            <td className="px-4 py-2.5">
+                              {movedOut ? (
+                                <div className="inline-flex flex-col">
+                                  <span className="inline-flex w-fit items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-700">
+                                    <LogOut className="h-3 w-3" /> ย้ายออก {formatThaiDate(s.moved_out_at as string)}
+                                  </span>
+                                  {s.moved_out_by_name && (
+                                    <span className="mt-0.5 text-[10px] text-slate-400">โดยครู{s.moved_out_by_name}</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="inline-flex w-fit items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
+                                  กำลังศึกษา
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

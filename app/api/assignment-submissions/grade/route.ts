@@ -2,24 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-// POST /api/assignment-submissions/grade
-// ให้/แก้ไขคะแนนงานที่มอบหมายแบบรายชิ้นโดยตรง (ใช้จากตาราง "คะแนนรวม" ของครูประจำวิชา)
-// body: { subject_section_id, assignment_id, student_id, score, graded_by }
-//
-// พฤติกรรม:
-// - ถ้านักเรียนคนนี้ยังไม่มีแถว assignment_submissions สำหรับงานชิ้นนี้ -> สร้างใหม่
-//   status = "reviewed", score = ตามที่ส่งมา, graded_at = now(), submitted_at = null
-//   (submitted_at ปล่อยว่างเพราะเป็นการให้คะแนนโดยครู ไม่ใช่นักเรียนส่งเอง
-//    ถ้าใส่เวลาไปมั่ว ๆ จะกระทบการคำนวณ "ส่งตรงเวลา/ส่งช้า" ที่ฝั่ง client ให้ผิดพลาด)
-// - ถ้ามีแถวอยู่แล้ว -> อัปเดตแค่ score/status/graded_at เท่านั้น ไม่แตะ submitted_at เดิม
-//   (กรณีนักเรียนส่งงานเข้ามาเองแล้วครูตรวจให้คะแนน ต้องคงเวลาที่นักเรียนส่งจริงไว้)
-//
-// NOTE (แก้บั๊ก): ตาราง assignment_submissions มี CHECK constraint
-// "assignment_submissions_status_check" ที่อนุญาตเฉพาะค่า
-// not_submitted | pending_review | reviewed | needs_revision | failed
-// เดิมโค้ดนี้ใช้ status = "graded" ซึ่งไม่อยู่ในรายการที่อนุญาต ทำให้ insert/update
-// ชนกับ constraint และคะแนนไม่ถูกบันทึก (error 500 กลับไปที่หน้าเว็บ) — เปลี่ยนมาใช้
-// "reviewed" ซึ่งตรงกับความหมาย "ตรวจแล้ว" ของสถานะนี้แทน
+// app/api/assignment-submissions/grade/route.ts
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -28,31 +11,30 @@ export async function POST(req: NextRequest) {
     if (!subject_section_id || !assignment_id || !student_id) {
       return NextResponse.json({ error: "ต้องระบุ subject_section_id, assignment_id และ student_id" }, { status: 400 });
     }
-    if (score === undefined || score === null || Number.isNaN(Number(score))) {
+
+    // ★ score === null คือ "รีเซทคะแนน" อย่างตั้งใจ แยกจากกรอกผิดพลาด (undefined/NaN)
+    const isReset = score === null;
+    if (!isReset && (score === undefined || Number.isNaN(Number(score)))) {
       return NextResponse.json({ error: "คะแนนไม่ถูกต้อง" }, { status: 400 });
     }
-    const numericScore = Number(score);
+    const numericScore = isReset ? null : Number(score);
 
     const admin = createAdminClient();
 
-    // ตรวจว่า assignment นี้อยู่ใน subject_section ที่อ้างถึงจริง + เอา max_score มาเช็กขอบเขตคะแนนอีกชั้นฝั่ง server
     const { data: assignment, error: aErr } = await admin
       .from("assignments")
       .select("id, subject_section_id, max_score")
       .eq("id", assignment_id)
       .maybeSingle();
     if (aErr) throw aErr;
-    if (!assignment) {
-      return NextResponse.json({ error: "ไม่พบงานที่มอบหมายนี้" }, { status: 404 });
-    }
+    if (!assignment) return NextResponse.json({ error: "ไม่พบงานที่มอบหมายนี้" }, { status: 404 });
     if (assignment.subject_section_id !== subject_section_id) {
       return NextResponse.json({ error: "งานนี้ไม่ได้อยู่ในวิชา/ห้องที่ระบุ" }, { status: 400 });
     }
-    if (numericScore < 0 || numericScore > (assignment.max_score ?? 0)) {
+    if (!isReset && (numericScore! < 0 || numericScore! > (assignment.max_score ?? 0))) {
       return NextResponse.json({ error: `คะแนนต้องอยู่ระหว่าง 0 - ${assignment.max_score} คะแนน` }, { status: 400 });
     }
 
-    // หาแถวเดิม (ถ้ามี) ด้วยคู่ assignment_id + student_id
     const { data: existing, error: findErr } = await admin
       .from("assignment_submissions")
       .select("id, submitted_at")
@@ -60,6 +42,13 @@ export async function POST(req: NextRequest) {
       .eq("student_id", student_id)
       .maybeSingle();
     if (findErr) throw findErr;
+
+    // ★ รีเซท + ไม่เคยมีการส่งงานจริง -> ลบแถวทิ้งเลย กลับเป็น "ไม่ส่งงาน" เป๊ะๆ
+    if (isReset && existing && !existing.submitted_at) {
+      const { error: delErr } = await admin.from("assignment_submissions").delete().eq("id", existing.id);
+      if (delErr) throw delErr;
+      return NextResponse.json({ submission: null, deleted: true });
+    }
 
     const nowIso = new Date().toISOString();
     let submission;
@@ -69,9 +58,9 @@ export async function POST(req: NextRequest) {
         .from("assignment_submissions")
         .update({
           score: numericScore,
-          status: "reviewed",
-          graded_at: nowIso,
-          graded_by: graded_by || null,
+          status: isReset ? "pending_review" : "reviewed", // ★ รีเซทแล้วกลายเป็น "รอตรวจ"
+          graded_at: isReset ? null : nowIso,
+          graded_by: isReset ? null : (graded_by || null),
         })
         .eq("id", existing.id)
         .select("id, assignment_id, student_id, status, score, submitted_at, graded_at, teacher_comment")
@@ -79,16 +68,12 @@ export async function POST(req: NextRequest) {
       if (updErr) throw updErr;
       submission = updated;
     } else {
+      if (isReset) return NextResponse.json({ submission: null }); // ไม่มีอะไรให้รีเซท
       const { data: inserted, error: insErr } = await admin
         .from("assignment_submissions")
         .insert({
-          assignment_id,
-          student_id,
-          status: "reviewed",
-          score: numericScore,
-          graded_at: nowIso,
-          graded_by: graded_by || null,
-          submitted_at: null,
+          assignment_id, student_id, status: "reviewed", score: numericScore,
+          graded_at: nowIso, graded_by: graded_by || null, submitted_at: null,
         })
         .select("id, assignment_id, student_id, status, score, submitted_at, graded_at, teacher_comment")
         .maybeSingle();
