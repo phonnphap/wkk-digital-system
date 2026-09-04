@@ -22,6 +22,12 @@ type AttendanceRow = {
 
 type DbUser = { id: string; first_name: string; last_name: string }
 
+// select เฉพาะฟิลด์ที่ใช้ตอน check-in (ยังไม่มีค่า check_out_*)
+type CheckInResult = Pick<AttendanceRow, 'id' | 'user_id' | 'attendance_date' | 'check_in_time' | 'check_in_lat' | 'check_in_lng' | 'check_in_face_score' | 'is_late' | 'late_minutes'>
+
+// select เฉพาะฟิลด์ที่ใช้ตอน check-out
+type CheckOutResult = Pick<AttendanceRow, 'id' | 'user_id' | 'attendance_date' | 'check_in_time' | 'check_out_time' | 'check_out_lat' | 'check_out_lng' | 'check_out_face_score' | 'is_late' | 'late_minutes'>
+
 // ─── GET /api/attendance?userId=xxx ─────────────────────────────────────────
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabaseClient()
@@ -38,7 +44,7 @@ export async function GET(req: NextRequest) {
     .from('users')
     .select('id')
     .eq('auth_id', userId)
-    .single<{ id: string }>()   // ← เพิ่ม generic type
+    .single<{ id: string }>()
 
   if (!dbUser) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 })
@@ -46,10 +52,24 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabase
     .from('teacher_attendance')
-    .select('*')
+    .select(`
+      id,
+      user_id,
+      attendance_date,
+      check_in_time,
+      check_in_lat,
+      check_in_lng,
+      check_in_face_score,
+      check_out_time,
+      check_out_lat,
+      check_out_lng,
+      check_out_face_score,
+      is_late,
+      late_minutes
+    `)
     .eq('user_id', dbUser.id)
     .eq('attendance_date', date)
-    .maybeSingle<AttendanceRow>()  // ← เพิ่ม generic type
+    .maybeSingle<AttendanceRow>()
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
@@ -86,7 +106,7 @@ export async function POST(req: NextRequest) {
     .from('users')
     .select('id, first_name, last_name')
     .eq('auth_id', user.id)
-    .single<DbUser>()   // ← มีอยู่แล้ว ถูกต้อง
+    .single<DbUser>()
 
   if (!dbUser) {
     return NextResponse.json({ error: 'User profile not found' }, { status: 404 })
@@ -103,7 +123,7 @@ export async function POST(req: NextRequest) {
       .select('id, check_in_time')
       .eq('user_id', dbUser.id)
       .eq('attendance_date', today)
-      .maybeSingle<Pick<AttendanceRow, 'id' | 'check_in_time'>>()  // ← เพิ่ม generic type
+      .maybeSingle<Pick<AttendanceRow, 'id' | 'check_in_time'>>()
 
     if (existing?.check_in_time) {
       return NextResponse.json({
@@ -127,8 +147,18 @@ export async function POST(req: NextRequest) {
         is_late: isLate,
         late_minutes: lateMinutes,
       }, { onConflict: 'user_id,attendance_date' })
-      .select()
-      .single()
+      .select(`
+        id,
+        user_id,
+        attendance_date,
+        check_in_time,
+        check_in_lat,
+        check_in_lng,
+        check_in_face_score,
+        is_late,
+        late_minutes
+      `)
+      .single() as { data: CheckInResult | null; error: { message: string } | null }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
@@ -160,7 +190,7 @@ export async function POST(req: NextRequest) {
       .select('id, check_in_time, check_out_time')
       .eq('user_id', dbUser.id)
       .eq('attendance_date', today)
-      .maybeSingle<Pick<AttendanceRow, 'id' | 'check_in_time' | 'check_out_time'>>()  // ← เพิ่ม generic type
+      .maybeSingle<Pick<AttendanceRow, 'id' | 'check_in_time' | 'check_out_time'>>()
 
     if (!existing?.check_in_time) {
       return NextResponse.json({ error: 'No check-in record found for today' }, { status: 404 })
@@ -182,8 +212,19 @@ export async function POST(req: NextRequest) {
         check_out_face_score: faceScore,
       })
       .eq('id', existing.id)
-      .select()
-      .single()
+      .select(`
+        id,
+        user_id,
+        attendance_date,
+        check_in_time,
+        check_out_time,
+        check_out_lat,
+        check_out_lng,
+        check_out_face_score,
+        is_late,
+        late_minutes
+      `)
+      .single() as { data: CheckOutResult | null; error: { message: string } | null }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })

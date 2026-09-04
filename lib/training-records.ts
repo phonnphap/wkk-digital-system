@@ -20,6 +20,7 @@ export const TRAINING_STATUS_LABELS: Record<TrainingStatus, string> = {
 
 export interface EvidenceFile {
   url: string;
+  path?: string; // OneDrive relative path — ใช้ resolve ลิงก์ใหม่ตอนพิมพ์ เพราะลิงก์ตรงอาจหมดอายุ
   name: string;
 }
 
@@ -42,8 +43,14 @@ export interface TrainingRecord {
 }
 
 export interface TrainingRecordWithUser extends TrainingRecord {
-  title?: string; first_name?: string; last_name?: string; full_name?: string;
-  position?: string; grade_level?: string; department_name?: string;
+  title?: string;
+  first_name?: string;
+  last_name?: string;
+  full_name?: string;
+  position?: string;
+  grade_level?: string;
+  department_name?: string;
+  signature_url?: string;
 }
 
 export interface TrainingFilters {
@@ -69,10 +76,37 @@ export interface TrainingFormInput {
   evidence_files: EvidenceFile[];
 }
 
+// คอลัมน์ตรงกับ TrainingRecordWithUser ทั้งหมด — ใช้แทน select('*') บน view training_records_with_user
+const TRAINING_RECORD_WITH_USER_COLUMNS = `
+  id,
+  user_id,
+  course_name,
+  training_type,
+  organizer,
+  start_date,
+  end_date,
+  hours,
+  status,
+  key_takeaways,
+  action_plan,
+  evidence_files,
+  created_by,
+  created_at,
+  updated_at,
+  title,
+  first_name,
+  last_name,
+  full_name,
+  position,
+  grade_level,
+  department_name,
+  signature_url
+`;
+
 export async function fetchTrainingRecords(filters: TrainingFilters = {}): Promise<TrainingRecordWithUser[]> {
   let query = supabase
     .from('training_records_with_user')
-    .select('*')
+    .select(TRAINING_RECORD_WITH_USER_COLUMNS)
     .order('start_date', { ascending: false })
     .limit(300);
 
@@ -126,15 +160,4 @@ export async function saveTrainingRecord(input: TrainingFormInput): Promise<stri
 export async function deleteTrainingRecord(id: string) {
   const { error } = await supabase.from('training_records').delete().eq('id', id);
   if (error) throw error;
-}
-
-export interface EvidenceFile {
-  url: string;
-  path?: string; // OneDrive relative path — ใช้ resolve ลิงก์ใหม่ตอนพิมพ์ เพราะลิงก์ตรงอาจหมดอายุ
-  name: string;
-}
-
-export interface TrainingRecordWithUser extends TrainingRecord {
-  title?: string; first_name?: string; last_name?: string; full_name?: string;
-  position?: string; grade_level?: string; department_name?: string; signature_url?: string;
 }

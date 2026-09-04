@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     // ดึงข้อมูลจากตาราง subjects
     const { data, error } = await supabase
       .from('subjects')
-      .select('*')
+      .select('id, subject_code, name_th, subject_group')
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 })

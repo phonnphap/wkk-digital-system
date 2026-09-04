@@ -225,12 +225,12 @@ function toThaiDateTime(isoString: string): string {
 
   // ── 4. ดึงสถิติและประวัติ ─────────────────────────────────────────────────────
   const refreshStats = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('teacher_attendance')
-        .select('*')
-        .eq('user_id', userId)
-        .order('check_time', { ascending: false });
+  try {
+    const { data, error } = await supabase
+      .from('teacher_attendance')
+      .select('id, check_time, type, status, is_onsite')
+      .eq('user_id', userId)
+      .order('check_time', { ascending: false });
 
       if (error) throw error;
       if (!data || data.length === 0) {

@@ -3,13 +3,38 @@ import { createClient } from "@/lib/supabase/client";
 const supabase = createClient();
 import type { AwardFilters, AwardFormInput, AwardWithRecipients } from '@/types/honor';
 
+// คอลัมน์ที่ตรงกับ type AwardWithRecipients (Award + recipients + departments)
+// ใช้ร่วมกันทั้ง fetchAwards และ fetchAwardById เพื่อไม่ให้ query สองจุดเพี้ยนกัน
+const AWARD_WITH_RECIPIENTS_COLUMNS = `
+  id,
+  category,
+  title,
+  date_received,
+  academic_year,
+  organizer,
+  award_level,
+  award_type,
+  image_cover,
+  certificate_file,
+  award_images,
+  pr_link,
+  tags,
+  kpi_standard,
+  created_at,
+  updated_at,
+  created_by,
+  created_by_name,
+  recipients,
+  departments
+`;
+
 /**
  * ดึงรายการรางวัลทั้งหมดตามเงื่อนไข filter (ใช้ view awards_with_recipients)
  */
 export async function fetchAwards(filters: AwardFilters = {}): Promise<AwardWithRecipients[]> {
   let query = supabase
     .from('awards_with_recipients')
-    .select('*')
+    .select(AWARD_WITH_RECIPIENTS_COLUMNS)
     .order('date_received', { ascending: false });
 
   if (filters.category && filters.category !== 'All') {
@@ -63,7 +88,7 @@ async function withCreatorName(row: any): Promise<AwardWithRecipients> {
 export async function fetchAwardById(id: string): Promise<AwardWithRecipients | null> {
   const { data, error } = await supabase
     .from('awards_with_recipients')
-    .select('*')
+    .select(AWARD_WITH_RECIPIENTS_COLUMNS)
     .eq('id', id)
     .maybeSingle();
   if (error) throw error;

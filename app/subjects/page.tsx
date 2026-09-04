@@ -152,7 +152,11 @@ export default function SubjectsCenterPage() {
     if (!yearId) return;
     const selRow = academicYearsRaw.find(y => y.id === yearId);
     const yearIds = selRow ? academicYearsRaw.filter(y => y.year_name === selRow.year_name).map(y => y.id) : [yearId];
-    const { data } = await supabase.from("subject_sections").select("*").in("academic_year_id", yearIds).order("created_at", { ascending: false });
+    const { data } = await supabase
+  .from("subject_sections")
+  .select("id, subject_id, classroom_id, academic_year_id, teacher_id, co_teacher_id, join_code, is_active, created_at")
+  .in("academic_year_id", yearIds)
+  .order("created_at", { ascending: false });
     setSections((data ?? []) as SubjectSection[]);
   }, [academicYearsRaw]);
 
