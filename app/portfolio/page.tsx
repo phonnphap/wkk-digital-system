@@ -2,7 +2,6 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -11,6 +10,7 @@ import {
   ClipboardList, ArrowRight, Clock,
 } from "lucide-react";
 import { fetchHolidayMap, isHoliday, HolidayMap } from "@/lib/holidays";
+import { useEffect, useState, useMemo, useRef } from "react";
 
 function currentFiscalYear() {
   const now = new Date();
@@ -27,6 +27,7 @@ type Profile = {
   phone: string | null;
   line_id: string | null;
   avatar_url: string | null;
+  signature_url: string | null; 
   education_level: string | null;
   education_major: string | null;
   education_school: string | null;
@@ -479,6 +480,9 @@ export default function TeacherPortfolioPage() {
   const [supportSent, setSupportSent] = useState(false);
   const [holidayMap, setHolidayMap] = useState<HolidayMap>(new Map());
   const todayStr = useMemo(() => toDateInputValue(new Date()), []);
+  const [showSigPad, setShowSigPad] = useState(false);
+const [sigUrl, setSigUrl] = useState("");
+const [savingSig, setSavingSig] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -624,19 +628,20 @@ export default function TeacherPortfolioPage() {
     }
 
     const { data: me } = await supabase
-      .from("users")
-      .select(`
-        id, title, first_name, last_name, role, phone, line_id, avatar_url,
-        education_level, education_major, education_school, subject_group, position, department_id,
-        department:departments(name),
-        homeroom:classrooms!classrooms_homeroom_teacher_id_fkey(room_name), homeroom_teacher_2:classrooms!classrooms_homeroom_teacher_2_id_fkey(room_name)
-      `)
-      .eq("auth_id", user.id)
-      .maybeSingle();
+  .from("users")
+  .select(`
+    id, title, first_name, last_name, role, phone, line_id, avatar_url, signature_url,
+    education_level, education_major, education_school, subject_group, position, department_id,
+    department:departments(name),
+    homeroom:classrooms!classrooms_homeroom_teacher_id_fkey(room_name), homeroom_teacher_2:classrooms!classrooms_homeroom_teacher_2_id_fkey(room_name)
+  `)
+  .eq("auth_id", user.id)
+  .maybeSingle();
 
     if (me) {
       setProfile(me as unknown as Profile);
       setForm(me as unknown as Profile);
+      setSigUrl((me as any).signature_url ?? "");
 
       supabase
         .channel(`profile-${me.id}`)
@@ -645,6 +650,7 @@ export default function TeacherPortfolioPage() {
           { event: "UPDATE", schema: "public", table: "users", filter: `id=eq.${me.id}` },
           (payload) => {
             setProfile(payload.new as Profile);
+            setSigUrl((payload.new as any).signature_url ?? "");
           }
         )
         .subscribe();
@@ -731,6 +737,16 @@ export default function TeacherPortfolioPage() {
     if (error) alert("บันทึกตำแหน่งไม่สำเร็จ: " + error.message);
   }
 
+  async function saveSignature(dataUrl: string) {
+  if (!profile) return;
+  setSavingSig(true);
+  const { error } = await supabase.from("users").update({ signature_url: dataUrl }).eq("id", profile.id);
+  setSavingSig(false);
+  if (error) { alert("บันทึกลายเซ็นไม่สำเร็จ: " + error.message); return; }
+  setSigUrl(dataUrl);
+  setShowSigPad(false);
+}
+
   async function sendSupportRequest() {
     if (!profile || !supportForm.subject.trim() || !supportForm.message.trim()) return;
     setSupportSending(true);
@@ -766,8 +782,15 @@ export default function TeacherPortfolioPage() {
   const checkOutInfo = dayCheckOutInfo(selectedDayRow, selectedOnLeave);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800 font-sans antialiased">
-      <main className="w-full px-4 py-6 md:px-8 md:py-8 lg:px-12 lg:py-10 space-y-6 max-w-[1600px] mx-auto">
+  <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800 font-sans antialiased">
+    {showSigPad && (
+      <SignaturePad
+        initialUrl={sigUrl}
+        onSave={saveSignature}
+        onClose={() => setShowSigPad(false)}
+      />
+    )}
+    <main className="w-full px-4 py-6 md:px-8 md:py-8 lg:px-12 lg:py-10 space-y-6 max-w-[1600px] mx-auto">
         {/* Header */}
         <div className="flex items-center gap-2">
           <button
@@ -778,7 +801,7 @@ export default function TeacherPortfolioPage() {
             🏠
           </button>
           <span className="text-slate-300">/</span>
-          <span className="text-sm text-slate-800 font-extrabold">ประวัติส่วนตัวและผลการปฏิบัติงาน</span>
+          <span className="text-sm text-slate-800 font-extrabold">ประวัติส่วนตัวและสถิติการปฏิบัติงาน</span>
         </div>
 
         {/* Pending tasks */}
@@ -949,6 +972,25 @@ export default function TeacherPortfolioPage() {
             <ArrowRight className="w-4 h-4 text-slate-300 shrink-0" />
           </button>
         </div>
+        {/* Signature settings — สไตล์เดียวกับกล่องลายเซ็นในหน้าใบลา */}
+<div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+  <div className="flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <p className="font-bold text-slate-700">✍️ ลายเซ็น</p>
+      <p className="text-xs text-slate-400">{sigUrl ? "พร้อมแล้ว — ใช้กับใบลาและเอกสารอื่นๆ" : "ยังไม่มีลายเซ็น — ตั้งค่าไว้ที่นี่ ใช้ได้ทันทีตอนยื่นใบลา"}</p>
+    </div>
+    <div className="flex items-center gap-3">
+      {sigUrl && <img src={sigUrl} alt="sig" className="h-10 max-w-[100px] object-contain border border-slate-200 rounded" />}
+      <button
+        onClick={() => setShowSigPad(true)}
+        disabled={savingSig}
+        className="px-4 py-2.5 rounded-xl border-2 border-blue-200 bg-blue-50 text-blue-600 text-sm font-black hover:bg-blue-100 disabled:opacity-50"
+      >
+        {sigUrl ? "✏️ เซ็นใหม่" : "✍️ เพิ่มลายเซ็น"}
+      </button>
+    </div>
+  </div>
+</div>
 
         {/* Performance period + leave + attendance summary */}
         <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
@@ -1310,6 +1352,71 @@ export default function TeacherPortfolioPage() {
           )}
         </div>
       </main>
+    </div>
+  );
+}
+
+function SignaturePad({ initialUrl, onSave, onClose, title = "✍️ ลายเซ็น" }: { initialUrl: string; onSave: (d: string) => void; onClose: () => void; title?: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [drawing, setDrawing] = useState(false);
+  const [isEmpty, setIsEmpty] = useState(!initialUrl);
+  const [mode, setMode] = useState<"draw" | "upload">("draw");
+  const [preview, setPreview] = useState(initialUrl || "");
+
+  useEffect(() => {
+    if (mode !== "draw") return;
+    const c = canvasRef.current; if (!c) return;
+    const ctx = c.getContext("2d")!;
+    c.width = c.offsetWidth * devicePixelRatio; c.height = c.offsetHeight * devicePixelRatio;
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, 9999, 9999);
+    ctx.strokeStyle = "#1e3a8a"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  }, [mode]);
+
+  function getXY(e: React.MouseEvent | React.TouchEvent, c: HTMLCanvasElement) {
+    const r = c.getBoundingClientRect();
+    if ("touches" in e) return { x: e.touches[0].clientX - r.left, y: e.touches[0].clientY - r.top };
+    return { x: (e as React.MouseEvent).clientX - r.left, y: (e as React.MouseEvent).clientY - r.top };
+  }
+  function onStart(e: React.MouseEvent | React.TouchEvent) { e.preventDefault(); const c = canvasRef.current!; const ctx = c.getContext("2d")!; const p = getXY(e, c); ctx.beginPath(); ctx.moveTo(p.x, p.y); setDrawing(true); setIsEmpty(false); }
+  function onMove(e: React.MouseEvent | React.TouchEvent) { e.preventDefault(); if (!drawing) return; const c = canvasRef.current!; const ctx = c.getContext("2d")!; const p = getXY(e, c); ctx.lineTo(p.x, p.y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function onEnd(e: React.MouseEvent | React.TouchEvent) { e.preventDefault(); setDrawing(false); }
+  function clear() { const c = canvasRef.current!; const ctx = c.getContext("2d")!; ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.offsetWidth, c.offsetHeight); setIsEmpty(true); setPreview(""); }
+  function save() { if (mode === "upload") { if (!preview) { alert("กรุณาเลือกรูป"); return; } onSave(preview); return; } if (isEmpty) { alert("กรุณาวาดลายเซ็น"); return; } onSave(canvasRef.current!.toDataURL("image/png")); }
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div><h3 className="font-black text-slate-800">{title}</h3><p className="text-xs text-slate-400">วาดเอง หรือแนบไฟล์ PNG พื้นหลังโปร่งใส</p></div>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 text-lg font-bold">✕</button>
+        </div>
+        <div className="flex border-b border-slate-100">
+          {[["draw", "✏️ วาดเอง"], ["upload", "📁 แนบไฟล์ PNG"]].map(([m, l]) => (
+            <button key={m} onClick={() => setMode(m as any)} className={`flex-1 py-3 text-sm font-black border-b-2 ${mode === m ? "border-blue-500 text-blue-600" : "border-transparent text-slate-400"}`}>{l}</button>
+          ))}
+        </div>
+        <div className="p-4">
+          {mode === "draw" ? (
+            <div className="border-2 border-dashed border-slate-300 rounded-xl overflow-hidden bg-white" style={{ touchAction: "none" }}>
+              <canvas ref={canvasRef} style={{ width: "100%", height: 200, display: "block", cursor: "crosshair" }}
+                onMouseDown={onStart} onMouseMove={onMove} onMouseUp={onEnd} onMouseLeave={onEnd}
+                onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} />
+            </div>
+          ) : (
+            <div onClick={() => fileRef.current?.click()} className="border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-xl p-6 text-center cursor-pointer hover:bg-blue-50">
+              {preview ? <img src={preview} alt="sig" className="max-h-28 mx-auto object-contain" /> : <><div className="text-4xl mb-2">📁</div><p className="text-sm font-bold text-slate-500">คลิกเพื่อเลือก PNG</p><p className="text-xs text-slate-400">พื้นหลังโปร่งใสเท่านั้น</p></>}
+              <input ref={fileRef} type="file" accept="image/png" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { setPreview(ev.target?.result as string); setIsEmpty(false); }; r.readAsDataURL(f); }} />
+            </div>
+          )}
+        </div>
+        <div className="px-4 pb-4 flex gap-3">
+          {mode === "draw" && <button onClick={clear} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-bold text-sm">🗑️ ล้าง</button>}
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-bold text-sm">ยกเลิก</button>
+          <button onClick={save} className="flex-[2] py-2.5 rounded-xl bg-blue-600 text-white font-black text-sm">💾 บันทึก</button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { getDisplayPrefix } from "@/lib/student-prefix";
 import {
   Home, ArrowLeft, Search, HeartHandshake, ThumbsDown, ThumbsUp,
-  CheckCircle2, Undo2, Loader2, X, ChevronDown, PenLine,
+  CheckCircle2, Undo2, Loader2, X, ChevronDown, PenLine, AlertTriangle,
 } from "lucide-react";
-import { getDisplayPrefix } from "@/lib/student-prefix";
 
 const supabase = createClient();
 const DASHBOARD_PATH = "/dashboard";
@@ -59,6 +59,28 @@ const STUDENT_SELECT =
 function todayISO() {
   return new Date().toISOString().split("T")[0];
 }
+type BehaviorStatus = {
+  label: string;
+  detail: string | null; // ใครต้องพิจารณา (null = ปกติ ไม่ต้องแจ้งใคร)
+  tone: "emerald" | "amber" | "orange" | "rose" | "red";
+};
+
+function getBehaviorStatus(score: number): BehaviorStatus {
+  if (score >= 81) return { label: "ปกติ", detail: null, tone: "emerald" };
+  if (score >= 61) return { label: "เฝ้าระวัง", detail: "ครูประจำชั้นแจ้งผู้ปกครอง", tone: "amber" };
+  if (score >= 41) return { label: "ตักเตือนอย่างเป็นทางการ", detail: "หัวหน้าสายชั้นร่วมพิจารณา", tone: "orange" };
+  if (score >= 21) return { label: "ทำทัณฑ์บน", detail: "หัวหน้างานปกครองพิจารณา", tone: "rose" };
+  if (score >= 1) return { label: "เสี่ยงสูง", detail: "รองผู้อำนวยการพิจารณา", tone: "red" };
+  return { label: "ขั้นวิกฤต", detail: "ผู้อำนวยการพิจารณา", tone: "red" };
+}
+
+const STATUS_STYLES: Record<BehaviorStatus["tone"], string> = {
+  emerald: "bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200",
+  amber: "bg-amber-50 text-amber-600 ring-1 ring-amber-200",
+  orange: "bg-orange-50 text-orange-600 ring-1 ring-orange-200",
+  rose: "bg-rose-50 text-rose-600 ring-1 ring-rose-200",
+  red: "bg-red-100 text-red-700 ring-1 ring-red-300",
+};
 
 function timeThai(iso: string) {
   try {
@@ -97,6 +119,14 @@ export default function BehaviorPage() {
 
   const [todayRecords, setTodayRecords] = useState<BehaviorRecord[]>([]);
   const [loadingRecords, setLoadingRecords] = useState(true);
+  const [viewMode, setViewMode] = useState<"today" | "student" | "overview">("today");
+const [historyStudentId, setHistoryStudentId] = useState<string>("");
+const [studentHistory, setStudentHistory] = useState<BehaviorRecord[]>([]);
+const [loadingHistory, setLoadingHistory] = useState(false);
+
+const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+const [editAction, setEditAction] = useState<BehaviorAction>("deduct");
+const [editPoints, setEditPoints] = useState<number>(0);
 
   // ── โปรไฟล์ผู้ใช้ + ห้องของครูประจำชั้น ─────────────────────
   useEffect(() => {
@@ -127,21 +157,41 @@ export default function BehaviorPage() {
 
   // ── นักเรียนในห้องที่เลือก ──────────────────────────────────
   useEffect(() => {
-    if (!roomId) { setStudents([]); return; }
-    setLoadingStudents(true);
-    setSelectedStudentIds(new Set());
-    supabase
-      .from("students")
-      .select(STUDENT_SELECT)
-      .eq("classroom_id", roomId)
-      .order("seat_number")
-      .then(({ data, error }) => {
-        if (error) console.warn("[behavior] โหลดนักเรียนไม่สำเร็จ:", error.message);
-        setStudents((data as unknown as Student[]) ?? []);
-        setLoadingStudents(false);
-      });
-    loadTodayRecords(roomId);
-  }, [roomId]);
+  if (!roomId) { setStudents([]); return; }
+  setLoadingStudents(true);
+  setSelectedStudentIds(new Set());
+  setHistoryStudentId("");   // ★ ใหม่
+  setStudentHistory([]);     // ★ ใหม่
+  setEditingRecordId(null);  // ★ ใหม่
+  supabase
+    .from("students")
+    .select(STUDENT_SELECT)
+    .eq("classroom_id", roomId)
+    .order("seat_number")
+    .then(({ data, error }) => {
+      if (error) console.warn("[behavior] โหลดนักเรียนไม่สำเร็จ:", error.message);
+      setStudents((data as unknown as Student[]) ?? []);
+      setLoadingStudents(false);
+    });
+  loadTodayRecords(roomId);
+}, [roomId]);
+
+useEffect(() => {
+  if (viewMode !== "student" || !historyStudentId) { setStudentHistory([]); return; }
+  loadStudentHistory(historyStudentId);
+}, [viewMode, historyStudentId]);
+
+async function loadStudentHistory(studentId: string) {
+  setLoadingHistory(true);
+  const { data, error } = await supabase
+    .from("behavior_records")
+    .select("id, student_id, criteria_name, action, points, description, created_at, student:students(first_name, last_name, nick_name, seat_number)")
+    .eq("student_id", studentId)
+    .order("created_at", { ascending: false });
+  if (error) { console.warn("[behavior] โหลดประวัตินักเรียนไม่สำเร็จ:", error.message); setLoadingHistory(false); return; }
+  setStudentHistory((data as unknown as BehaviorRecord[]) ?? []);
+  setLoadingHistory(false);
+}
 
   async function loadTodayRecords(classroomId: string) {
     setLoadingRecords(true);
@@ -224,7 +274,9 @@ export default function BehaviorPage() {
     const category = customMode ? (customCategory.trim() || null) : selectedCriteria!.category;
     const criteriaId = customMode ? null : selectedCriteria!.id;
 
-    const rows = Array.from(selectedStudentIds).map((studentId) => ({
+    const affectedIds = Array.from(selectedStudentIds); // ★ เก็บก่อนเคลียร์ฟอร์ม
+
+const rows = affectedIds.map((studentId) => ({
   student_id: studentId,
   classroom_id: roomId,
   criteria_id: criteriaId,
@@ -237,42 +289,167 @@ export default function BehaviorPage() {
   incident_date: todayISO(),
 }));
 
-    const { error } = await supabase.from("behavior_records").insert(rows);
-    setSaving(false);
+const { error } = await supabase.from("behavior_records").insert(rows);
+setSaving(false);
 
-    if (error) {
-      setErrorMsg("บันทึกไม่สำเร็จ: " + error.message);
-      return;
-    }
+if (error) {
+  setErrorMsg("บันทึกไม่สำเร็จ: " + error.message);
+  return;
+}
 
-    // รีเซ็ตฟอร์ม + โหลดข้อมูลใหม่ (คะแนนคงเหลือจาก trigger จะอัปเดตแล้ว)
-    setSelectedStudentIds(new Set());
-    setSelectedCriteria(null);
-    setCustomMode(false);
-    setNote("");
-    setPoints(0);
+setSelectedStudentIds(new Set());
+setSelectedCriteria(null);
+setCustomMode(false);
+setNote("");
+setPoints(0);
 
-    const { data: freshStudents } = await supabase
-      .from("students")
-      .select(STUDENT_SELECT)
-      .eq("classroom_id", roomId)
-      .order("seat_number");
-    setStudents((freshStudents as unknown as Student[]) ?? []);
-    loadTodayRecords(roomId);
+const fresh = await refreshAfterChange();
+notifyStatusChanges(fresh, affectedIds); // ★ แจ้งเตือนถ้าเข้าเกณฑ์
   }
 
-  async function undoRecord(recordId: string) {
+  const classroomOverview = useMemo(() => {
+  return [...students]
+    .map((s) => ({ student: s, status: getBehaviorStatus(s.behavior_score) }))
+    .sort((a, b) => a.student.behavior_score - b.student.behavior_score);
+}, [students]);
+
+const studentsNeedingAttention = useMemo(
+  () => classroomOverview.filter((row) => row.status.detail !== null),
+  [classroomOverview]
+);
+async function refreshAfterChange(): Promise<Student[]> {
+  const { data: freshStudents } = await supabase
+    .from("students")
+    .select(STUDENT_SELECT)
+    .eq("classroom_id", roomId)
+    .order("seat_number");
+  const list = (freshStudents as unknown as Student[]) ?? [];
+  setStudents(list);
+  loadTodayRecords(roomId);
+  if (historyStudentId) loadStudentHistory(historyStudentId);
+  return list;
+}
+
+function startEditRecord(r: BehaviorRecord) {
+  setEditingRecordId(r.id);
+  setEditAction(r.action);
+  setEditPoints(r.points);
+}
+
+async function saveEditRecord(recordId: string, studentId: string) {
+  if (editPoints < 0) { alert("คะแนนต้องไม่ติดลบ"); return; }
+  const { error } = await supabase
+    .from("behavior_records")
+    .update({ action: editAction, points: editPoints })
+    .eq("id", recordId);
+  if (error) { alert("แก้ไขไม่สำเร็จ: " + error.message); return; }
+  setEditingRecordId(null);
+  const fresh = await refreshAfterChange();
+  notifyStatusChanges(fresh, [studentId]);
+}
+
+function BehaviorRecordRow({
+  record, editing, editAction, editPoints,
+  onStartEdit, onCancelEdit, onChangeAction, onChangePoints, onSaveEdit, onUndo,
+  showName = true, showDate = false,
+}: {
+  record: BehaviorRecord;
+  editing: boolean;
+  editAction: BehaviorAction;
+  editPoints: number;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onChangeAction: (a: BehaviorAction) => void;
+  onChangePoints: (p: number) => void;
+  onSaveEdit: () => void;
+  onUndo: () => void;
+  showName?: boolean;
+  showDate?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl bg-slate-50 px-3 py-2.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          {showName && (
+            <p className="truncate text-[13px] font-semibold text-slate-700">
+              {record.student ? `${record.student.first_name} ${record.student.last_name}` : "-"}
+            </p>
+          )}
+          <p className="truncate text-[11px] text-slate-500">{record.criteria_name}</p>
+          {record.description && (
+            <p className="truncate text-[11px] text-slate-400">{record.description}</p>
+          )}
+          <p className="text-[11px] text-slate-400">
+            {showDate
+              ? new Date(record.created_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Bangkok" })
+              : `${timeThai(record.created_at)} น.`}
+          </p>
+        </div>
+        {!editing && (
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <span className={`text-xs font-black ${record.action === "deduct" ? "text-rose-500" : "text-emerald-500"}`}>
+              {record.action === "deduct" ? "-" : "+"}{record.points}
+            </span>
+            <div className="flex gap-1">
+              <button onClick={onStartEdit} className="rounded-lg p-1 text-slate-300 hover:bg-slate-200 hover:text-slate-600">
+                <PenLine className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={onUndo} className="rounded-lg p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-500">
+                <Undo2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {editing && (
+        <div className="mt-2 flex items-center gap-2 rounded-xl bg-white p-2 ring-1 ring-slate-200">
+          <select
+            value={editAction}
+            onChange={(e) => onChangeAction(e.target.value as BehaviorAction)}
+            className="rounded-lg border border-slate-200 px-2 py-1 text-xs"
+          >
+            <option value="deduct">หักคะแนน</option>
+            <option value="add">เพิ่มคะแนน</option>
+          </select>
+          <input
+            type="number"
+            min={0}
+            value={editPoints}
+            onChange={(e) => onChangePoints(Number(e.target.value))}
+            className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-xs font-bold"
+          />
+          <button onClick={onSaveEdit} className="ml-auto rounded-lg bg-rose-500 px-2.5 py-1 text-xs font-bold text-white hover:bg-rose-600">
+            บันทึก
+          </button>
+          <button onClick={onCancelEdit} className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-400 hover:text-slate-600">
+            ยกเลิก
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function notifyStatusChanges(studentList: Student[], ids: string[]) {
+  const idSet = new Set(ids);
+  const flagged = studentList
+    .filter((s) => idSet.has(s.id))
+    .map((s) => ({ student: s, status: getBehaviorStatus(s.behavior_score) }))
+    .filter((x) => x.status.detail);
+  if (flagged.length === 0) return;
+  const msg = flagged
+    .map((x) => `${x.student.first_name} ${x.student.last_name} — คะแนนคงเหลือ ${x.student.behavior_score} (${x.status.label}) → ${x.status.detail}`)
+    .join("\n");
+  alert("⚠️ นักเรียนต่อไปนี้เข้าเกณฑ์ต้องดำเนินการ:\n\n" + msg);
+}
+
+  async function undoRecord(recordId: string, studentId: string) {
     if (!confirm("ยืนยันยกเลิกรายการนี้? คะแนนคงเหลือของนักเรียนจะถูกคำนวณใหม่")) return;
     const { error } = await supabase.from("behavior_records").delete().eq("id", recordId);
     if (error) { alert("ยกเลิกไม่สำเร็จ: " + error.message); return; }
-
-    const { data: freshStudents } = await supabase
-      .from("students")
-      .select(STUDENT_SELECT)
-      .eq("classroom_id", roomId)
-      .order("seat_number");
-    setStudents((freshStudents as unknown as Student[]) ?? []);
-    loadTodayRecords(roomId);
+    const fresh = await refreshAfterChange();
+    notifyStatusChanges(fresh, [studentId]);
   }
 
   return (
@@ -515,41 +692,158 @@ export default function BehaviorPage() {
               )}
             </div>
 
-            {/* ── คอลัมน์ขวา: ประวัติวันนี้ ─────────────────────── */}
-            <div className="space-y-5">
-              <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
-                <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-800">
-                  <HeartHandshake className="h-4 w-4 text-rose-500" /> บันทึกวันนี้
-                </p>
-                <div className="mt-3 max-h-[32rem] space-y-1.5 overflow-y-auto">
-                  {loadingRecords ? (
-                    <p className="py-6 text-center text-sm text-slate-400">กำลังโหลด...</p>
-                  ) : todayRecords.length === 0 ? (
-                    <p className="py-6 text-center text-sm text-slate-400">ยังไม่มีบันทึกวันนี้</p>
-                  ) : (
-                    todayRecords.map((r) => (
-                      <div key={r.id} className="flex items-start justify-between gap-2 rounded-2xl bg-slate-50 px-3 py-2.5">
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-semibold text-slate-700">
-                            {r.student ? `${r.student.first_name} ${r.student.last_name}` : "-"}
-                          </p>
-                          <p className="truncate text-[11px] text-slate-500">{r.criteria_name}</p>
-                          <p className="text-[11px] text-slate-400">{timeThai(r.created_at)} น.</p>
-                        </div>
-                        <div className="flex shrink-0 flex-col items-end gap-1">
-                          <span className={`text-xs font-black ${r.action === "deduct" ? "text-rose-500" : "text-emerald-500"}`}>
-                            {r.action === "deduct" ? "-" : "+"}{r.points}
-                          </span>
-                          <button onClick={() => undoRecord(r.id)} className="rounded-lg p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-500">
-                            <Undo2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
+            {/* ── คอลัมน์ขวา: ประวัติ + สถานะนักเรียน ─────────────────────── */}
+<div className="space-y-5">
+  {studentsNeedingAttention.length > 0 && (
+    <div className="rounded-3xl border-2 border-amber-200 bg-amber-50 p-4">
+      <p className="flex items-center gap-1.5 text-sm font-extrabold text-amber-700">
+        <AlertTriangle className="h-4 w-4" /> นักเรียนที่ต้องติดตาม ({studentsNeedingAttention.length})
+      </p>
+      <div className="mt-2 space-y-1.5">
+        {studentsNeedingAttention.map(({ student: s, status }) => (
+          <button
+            key={s.id}
+            onClick={() => { setViewMode("student"); setHistoryStudentId(s.id); }}
+            className="flex w-full items-center justify-between rounded-xl bg-white px-3 py-2 text-left text-xs shadow-sm hover:bg-amber-50"
+          >
+            <span className="font-semibold text-slate-700">
+              {s.first_name} {s.last_name} · {s.behavior_score} คะแนน
+            </span>
+            <span className={`rounded-full px-2 py-0.5 font-bold ${STATUS_STYLES[status.tone]}`}>
+              {status.label}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )}
+
+  <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+    <div className="flex items-center gap-1.5 rounded-2xl bg-slate-100 p-1">
+      {([
+        { key: "today", label: "วันนี้" },
+        { key: "student", label: "รายคน" },
+        { key: "overview", label: "ภาพรวมห้อง" },
+      ] as const).map((tab) => (
+        <button
+          key={tab.key}
+          onClick={() => setViewMode(tab.key)}
+          className={`flex-1 rounded-xl px-3 py-1.5 text-xs font-bold transition ${
+            viewMode === tab.key ? "bg-white text-rose-600 shadow-sm" : "text-slate-500 hover:text-rose-500"
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+
+    {viewMode === "today" && (
+      <div className="mt-3 max-h-[28rem] space-y-1.5 overflow-y-auto">
+        {loadingRecords ? (
+          <p className="py-6 text-center text-sm text-slate-400">กำลังโหลด...</p>
+        ) : todayRecords.length === 0 ? (
+          <p className="py-6 text-center text-sm text-slate-400">ยังไม่มีบันทึกวันนี้</p>
+        ) : (
+          todayRecords.map((r) => (
+            <BehaviorRecordRow
+              key={r.id}
+              record={r}
+              editing={editingRecordId === r.id}
+              editAction={editAction}
+              editPoints={editPoints}
+              onStartEdit={() => startEditRecord(r)}
+              onCancelEdit={() => setEditingRecordId(null)}
+              onChangeAction={setEditAction}
+              onChangePoints={setEditPoints}
+              onSaveEdit={() => saveEditRecord(r.id, r.student_id)}
+              onUndo={() => undoRecord(r.id, r.student_id)}
+              showName
+            />
+          ))
+        )}
+      </div>
+    )}
+
+    {viewMode === "student" && (
+      <div className="mt-3">
+        <select
+          value={historyStudentId}
+          onChange={(e) => setHistoryStudentId(e.target.value)}
+          className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm outline-none focus:border-rose-400"
+        >
+          <option value="">เลือกนักเรียน...</option>
+          {students.map((s) => (
+            <option key={s.id} value={s.id}>
+              เลขที่ {s.seat_number ?? "-"} · {s.first_name} {s.last_name}
+            </option>
+          ))}
+        </select>
+
+        {historyStudentId && (() => {
+          const s = students.find((x) => x.id === historyStudentId);
+          if (!s) return null;
+          const status = getBehaviorStatus(s.behavior_score);
+          return (
+            <div className={`mt-3 rounded-2xl p-3.5 ${STATUS_STYLES[status.tone]}`}>
+              <p className="text-sm font-black">คะแนนคงเหลือ {s.behavior_score} · {status.label}</p>
+              {status.detail && <p className="mt-0.5 text-xs font-semibold">{status.detail}</p>}
             </div>
+          );
+        })()}
+
+        <div className="mt-3 max-h-[24rem] space-y-1.5 overflow-y-auto">
+          {!historyStudentId ? (
+            <p className="py-6 text-center text-sm text-slate-400">เลือกนักเรียนเพื่อดูประวัติทั้งหมด</p>
+          ) : loadingHistory ? (
+            <p className="py-6 text-center text-sm text-slate-400">กำลังโหลด...</p>
+          ) : studentHistory.length === 0 ? (
+            <p className="py-6 text-center text-sm text-slate-400">ยังไม่มีประวัติ</p>
+          ) : (
+            studentHistory.map((r) => (
+              <BehaviorRecordRow
+                key={r.id}
+                record={r}
+                editing={editingRecordId === r.id}
+                editAction={editAction}
+                editPoints={editPoints}
+                onStartEdit={() => startEditRecord(r)}
+                onCancelEdit={() => setEditingRecordId(null)}
+                onChangeAction={setEditAction}
+                onChangePoints={setEditPoints}
+                onSaveEdit={() => saveEditRecord(r.id, r.student_id)}
+                onUndo={() => undoRecord(r.id, r.student_id)}
+                showName={false}
+                showDate
+              />
+            ))
+          )}
+        </div>
+      </div>
+    )}
+
+    {viewMode === "overview" && (
+      <div className="mt-3 max-h-[28rem] space-y-1.5 overflow-y-auto">
+        {classroomOverview.map(({ student: s, status }) => (
+          <button
+            key={s.id}
+            onClick={() => { setViewMode("student"); setHistoryStudentId(s.id); }}
+            className="flex w-full items-center justify-between gap-2 rounded-2xl bg-slate-50 px-3 py-2.5 text-left hover:bg-rose-50/60"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13px] font-semibold text-slate-800">
+                เลขที่ {s.seat_number ?? "-"} · {s.first_name} {s.last_name}
+              </p>
+              <p className="text-[11px] text-slate-400">คะแนนคงเหลือ {s.behavior_score}</p>
+            </div>
+            <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${STATUS_STYLES[status.tone]}`}>
+              {status.label}
+            </span>
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+</div>
           </div>
         )}
       </div>
