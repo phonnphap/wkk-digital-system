@@ -468,20 +468,26 @@ async function regenerateToken() {
     loadLateToday();
   }
 
-  async function undoLate(recordId: string) {
-    if (!confirm("ยืนยันยกเลิกสถานะ 'มาสาย' รายการนี้?")) return;
-    const { data: deletedRows, error } = await supabase
-      .from("attendance_records")
-      .delete()
-      .eq("id", recordId)
-      .select();
-    if (error) { alert("ยกเลิกไม่สำเร็จ: " + error.message); return; }
-    if (!deletedRows || deletedRows.length === 0) {
-      alert("ไม่สามารถยกเลิกได้ — ระบบไม่พบสิทธิ์ในการแก้ไขรายการนี้");
-      return;
-    }
-    loadLateToday();
+  async function undoLate(recordId: string, recordedAt: string) {
+  const isToday = recordedAt.slice(0, 10) === todayISO();
+  if (!isToday && myRole !== "admin") {
+    alert("ไม่สามารถยกเลิกรายการของวันอื่นได้ — ยกเลิกได้เฉพาะแอดมินเท่านั้น");
+    return;
   }
+
+  if (!confirm("ยืนยันยกเลิกสถานะ 'มาสาย' รายการนี้?")) return;
+  const { data: deletedRows, error } = await supabase
+    .from("attendance_records")
+    .delete()
+    .eq("id", recordId)
+    .select();
+  if (error) { alert("ยกเลิกไม่สำเร็จ: " + error.message); return; }
+  if (!deletedRows || deletedRows.length === 0) {
+    alert("ไม่สามารถยกเลิกได้ — ระบบไม่พบสิทธิ์ในการแก้ไขรายการนี้");
+    return;
+  }
+  loadLateToday();
+}
 
   // ★ สรุปตามห้อง — เรียงได้ 2 แบบ: ตามสายชั้น/ห้อง (ค่าเริ่มต้น) หรือ ตามจำนวนขาดมากสุด
   const summaryByRoom = useMemo(() => {
@@ -760,12 +766,12 @@ async function regenerateToken() {
                           </p>
                         </div>
                         <button
-                          onClick={() => undoLate(e.record_id)}
-                          title="ยกเลิกรายการนี้"
-                          className="shrink-0 rounded-xl p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"
-                        >
-                          <Undo2 className="h-4 w-4" />
-                        </button>
+  onClick={() => undoLate(e.record_id, e.recorded_at)}
+  title="ยกเลิกรายการนี้"
+  className="shrink-0 rounded-xl p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"
+>
+  <Undo2 className="h-4 w-4" />
+</button>
                       </div>
                     );
                   })
