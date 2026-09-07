@@ -59,20 +59,13 @@ const CATEGORIES: Record<string, { label: string; color: string; light: string; 
   budget:    { label: "งบประมาณ",        color: "#0F6E56", light: "#D9F4EC", text: "#085041" },
   general:   { label: "ทั่วไป",          color: "#6B7280", light: "#F3F4F6", text: "#374151" },
   personnel: { label: "บุคคล",           color: "#854F0B", light: "#FAF0DC", text: "#5A3408" },
-  parent:    { label: "ผู้ปกครอง",       color: "#534AB7", light: "#EEECFB", text: "#3C3489" },
-  student:   { label: "กิจการนักเรียน",  color: "#3B6D11", light: "#EBF4D6", text: "#264708" },
-  holiday:   { label: "วันหยุด",         color: "#A32D2D", light: "#FAEAEA", text: "#791F1F" },
-  meeting:   { label: "ประชุม",          color: "#1e40af", light: "#dbeafe", text: "#1e3a8a" },
-  training:  { label: "อบรม",            color: "#7c3aed", light: "#ede9fe", text: "#5b21b6" },
-  important: { label: "วันสำคัญ",        color: "#b45309", light: "#fef3c7", text: "#92400e" },
 };
 
 const AUDIENCES = [
   { value: "all",      label: "👥 ทุกคน" },
-  { value: "teacher",  label: "👩‍🏫 ครู" },
+  { value: "teacher",  label: "👩‍🏫 ครูและบุคลากร" },
   { value: "student",  label: "🎒 นักเรียน" },
   { value: "parent",   label: "👨‍👩‍👧 ผู้ปกครอง" },
-  { value: "staff",    label: "🏢 บุคลากร" },
   { value: "admin",    label: "🔐 ผู้บริหาร" },
 ];
 

@@ -121,6 +121,13 @@ function isSecondaryLevelName(name: string): boolean {
   if (trimmed.includes("ประถม")) return false; // กันชนกับคำว่า ป.3 ที่มีตัว ม ปนอยู่ในคำว่า "ประถม"
   return trimmed.includes("มัธยม") || /^ม\.?\s*\d/.test(trimmed);
 }
+// ★ ใช้แทน isSecondaryLevelName เดิม — รองรับทุกระดับชั้น ไม่ใช่แค่มัธยม
+function getGradeLevelWord(classroomLabel?: string): string {
+  if (!classroomLabel) return "มัธยมศึกษา";
+  if (classroomLabel.includes("อนุบาล")) return "อนุบาล";
+  if (classroomLabel.includes("ประถม")) return "ประถมศึกษา";
+  return "มัธยมศึกษา";
+}
 
 function SignatureField({
   role,
@@ -195,6 +202,7 @@ export default function Vp3Report({
   const currentDay = now.getDate();
   const currentMonthTh = THAI_MONTHS[now.getMonth()];
   const currentYearBE = now.getFullYear() + 543;
+  const currentLevelWord = useMemo(() => getGradeLevelWord(classroomLabel), [classroomLabel]);
 
   // ★ เลขชั้นปีล้วนๆ (ไม่มีเลขห้อง) ใช้แสดงในตำแหน่งหัวหน้าสายชั้น เช่น "3" ไม่ใช่ "3/6"
   const gradeNumberOnly = useMemo(() => extractGradeNumber(classroomLabel), [classroomLabel]);
@@ -251,24 +259,24 @@ export default function Vp3Report({
             console.error("[Vp3Report] โหลดรายชื่อหัวหน้าสายชั้นไม่สำเร็จ:", gradeHeadErr);
           } else {
             const head = (gradeHeadUsers ?? []).find((u: any) => {
-              const roles: unknown = u.extra_roles;
-              const isGradeHead =
-                Array.isArray(roles) &&
-                roles.some((r: any) => typeof r === "string" && r.includes("grade_head"));
-              if (!isGradeHead) return false;
+  const roles: unknown = u.extra_roles;
+  const isGradeHead =
+    Array.isArray(roles) &&
+    roles.some((r: any) => typeof r === "string" && r.includes("grade_head"));
+  if (!isGradeHead) return false;
 
-              const gradeLevelRel: any = u.grade_level;
-              const gradeName: string | undefined = Array.isArray(gradeLevelRel)
-                ? gradeLevelRel[0]?.name
-                : gradeLevelRel?.name;
-              if (!gradeName) return false;
+  const gradeLevelRel: any = u.grade_level;
+  const gradeName: string | undefined = Array.isArray(gradeLevelRel)
+    ? gradeLevelRel[0]?.name
+    : gradeLevelRel?.name;
+  if (!gradeName) return false;
 
-              // ★ ต้องเป็นระดับมัธยมเท่านั้น (กันชนกับ ป.3)
-              if (!isSecondaryLevelName(gradeName)) return false;
+  // ★ เทียบ "คำระดับชั้น" ให้ตรงกับห้องเรียนปัจจุบัน (ประถม/มัธยม/อนุบาล) แทนที่จะบังคับเฉพาะมัธยม
+  if (getGradeLevelWord(gradeName) !== currentLevelWord) return false;
 
-              const gradeNameNumbers = gradeName.match(/\d+/g);
-              return gradeNameNumbers?.includes(gradeNumberOnly) ?? false;
-            });
+  const gradeNameNumbers = gradeName.match(/\d+/g);
+  return gradeNameNumbers?.includes(gradeNumberOnly) ?? false;
+});
 
             if (head) {
               setGradeHeadName(buildNameWithTitle(head as any));
@@ -452,7 +460,7 @@ export default function Vp3Report({
         ],
       });
 
-      const bodyText = `ด้วยครูประจำวิชา ${teacherSignatureName || subjectTeacherNameFallback || "......."} รหัสวิชา ${subjectCode} ระดับชั้นมัธยมศึกษาปีที่ ${gradeNumberOnly || "...."} กลุ่มสาระการเรียนรู้${deptGroupName || "...."} ได้สำรวจเวลาเรียนของนักเรียนในภาคเรียนที่ ${semester || "...."} ปีการศึกษา ${yearLabel || "...."} พบว่ามีนักเรียนที่มีเวลาเรียนไม่ถึง ${presentThresholds.join("% และ ")}% ของเวลาเรียนทั้งหมด จำนวน ${belowThresholdStudents.length} คน ดังรายชื่อต่อไปนี้`;
+      const bodyText = `ด้วยครูประจำวิชา ${teacherSignatureName || subjectTeacherNameFallback || "......."} รหัสวิชา ${subjectCode} ระดับชั้น${currentLevelWord}ปีที่ ${gradeNumberOnly || "...."} กลุ่มสาระการเรียนรู้${deptGroupName || "...."} ได้สำรวจเวลาเรียนของนักเรียนในภาคเรียนที่ ${semester || "...."} ปีการศึกษา ${yearLabel || "...."} พบว่ามีนักเรียนที่มีเวลาเรียนไม่ถึง ${presentThresholds.join("% และ ")}% ของเวลาเรียนทั้งหมด จำนวน ${belowThresholdStudents.length} คน ดังรายชื่อต่อไปนี้`;
       const bodyPara = new Paragraph({
         spacing: { after: 250 },
         indent: { firstLine: 400 },
@@ -568,7 +576,7 @@ export default function Vp3Report({
       const teacherName = teacherSignatureName || subjectTeacherNameFallback || ".......................................";
       const headName = gradeHeadName || ".......................................";
       // ★ ตำแหน่งไม่มีเลขห้อง ใช้เฉพาะเลขชั้นปี เช่น "หัวหน้าสายชั้นมัธยมศึกษาปีที่ 3"
-      const headRoleText = `หัวหน้าสายชั้นมัธยมศึกษาปีที่ ${gradeNumberOnly || "...."}`;
+      const headRoleText = `หัวหน้าสายชั้น${currentLevelWord}ปีที่ ${gradeNumberOnly || "...."}`;
 
       const signatureTable = new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
@@ -740,8 +748,8 @@ export default function Vp3Report({
             <div className="border-t border-slate-400 my-2" />
             <p><span className="font-bold">เรียน</span>&nbsp;&nbsp;ผู้อำนวยการโรงเรียนวัดเขียนเขต</p>
             <p className="indent-8 leading-relaxed">
-              ด้วยครูประจำวิชา {teacherSignatureName || subjectTeacherNameFallback || "......................"} รหัสวิชา {subjectCode} ระดับชั้นมัธยมศึกษาปีที่ {gradeNumberOnly || "......"} กลุ่มสาระการเรียนรู้{deptGroupName || "......................"} ได้สำรวจเวลาเรียนของนักเรียนในภาคเรียนที่ {semester || "..."} ปีการศึกษา {yearLabel || "........"} พบว่ามีนักเรียนที่มีเวลาเรียนไม่ถึง {presentThresholds.join("% และ ")}% ของเวลาเรียนทั้งหมด จำนวน {belowThresholdStudents.length} คน ดังรายชื่อต่อไปนี้
-            </p>
+  ด้วยครูประจำวิชา {teacherSignatureName || subjectTeacherNameFallback || "......................"} รหัสวิชา {subjectCode} ระดับชั้น{currentLevelWord}ปีที่ {gradeNumberOnly || "......"} กลุ่มสาระการเรียนรู้{deptGroupName || "......................"} ได้สำรวจเวลาเรียนของนักเรียนในภาคเรียนที่ {semester || "..."} ปีการศึกษา {yearLabel || "........"} พบว่ามีนักเรียนที่มีเวลาเรียนไม่ถึง {presentThresholds.join("% และ ")}% ของเวลาเรียนทั้งหมด จำนวน {belowThresholdStudents.length} คน ดังรายชื่อต่อไปนี้
+</p>
           </div>
 
           <table className="w-full border-collapse mt-4">
@@ -800,9 +808,9 @@ export default function Vp3Report({
             </div>
             <div className="flex justify-center">
               <SignatureField
-                role={`หัวหน้าสายชั้นมัธยมศึกษาปีที่ ${gradeNumberOnly || "...."}`}
-                name={gradeHeadName || "......................................."}
-              />
+  role={`หัวหน้าสายชั้น${currentLevelWord}ปีที่ ${gradeNumberOnly || "...."}`}
+  name={gradeHeadName || "......................................."}
+/>
             </div>
           </div>
         </div>

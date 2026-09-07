@@ -129,8 +129,8 @@ if (active === "vp3") {
 }
   return (
     <div className="space-y-4">
-      <h2 className="font-black text-slate-800 text-lg flex items-center gap-2">📁 เอกสาร/รายงาน</h2>
-      <p className="text-slate-400 text-xs font-bold -mt-2">เลือกเอกสารที่ต้องการกรอก/พิมพ์/ส่งออก</p>
+      <h2 className="font-black text-slate-800 text-2xl flex items-center gap-2">📁 เอกสาร/รายงาน</h2>
+      <p className="text-slate-400 text-m font-bold -mt-2">เลือกเอกสารที่ต้องการกรอก/พิมพ์/ส่งออก</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {REPORT_CARDS.map(c => (
           <button
@@ -140,9 +140,9 @@ if (active === "vp3") {
           >
             <div className="flex items-center gap-2 mb-2">
               <span className="text-2xl">{c.icon}</span>
-              <span className="font-black text-slate-700 text-sm">{c.label}</span>
+              <span className="font-black text-slate-700 text-m">{c.label}</span>
             </div>
-            <p className="text-slate-400 text-xs font-bold leading-relaxed">{c.desc}</p>
+            <p className="text-slate-400 text-m font-bold leading-relaxed">{c.desc}</p>
           </button>
         ))}
       </div>

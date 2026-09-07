@@ -357,13 +357,15 @@ const todayHoliday = isHoliday(date, holidayMap);
         studentList.forEach((s) => { map[s.id] = "present"; });
 
         (attendanceRes.data ?? []).forEach((r: {
-          student_id: string;
-          status: AttendanceStatus;
-          recorded_source?: string;
-        }) => {
-          map[r.student_id] = r.status;
-          if (r.status === "late" && r.recorded_source === "gate_scan") locked[r.student_id] = true;
-        });
+  student_id: string;
+  status: AttendanceStatus;
+  recorded_source?: string;
+}) => {
+  map[r.student_id] = r.status;
+  // ★ ล็อกสถานะ "สาย" ที่ไม่ได้บันทึกโดยครูประจำชั้นเอง (homeroom) — ครอบคลุม
+  //   gate_scan, council_link และแหล่งอื่นใดในอนาคต ให้ admin เท่านั้นแก้ไขได้
+  if (r.status === "late" && r.recorded_source !== "homeroom") locked[r.student_id] = true;
+});
 
         setStatusMap(map);
         setLockedMap(locked);

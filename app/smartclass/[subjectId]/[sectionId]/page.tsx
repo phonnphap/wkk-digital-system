@@ -2494,7 +2494,7 @@ setSection(sec as SectionRow);
 
 const [{ data: subj }, { data: room }] = await Promise.all([
   supabase.from("subjects")
-    .select("id, subject_code, name_th, subject_type, credit_hours, hours_per_year, score_group_code, grading_mode, pass_threshold_percent") // ★ เพิ่ม 2 ฟิลด์
+    .select("id, subject_code, name_th, subject_type, credit_hours, hours_per_year, score_group_code, grading_mode, pass_threshold_percent, score_period_mode, default_semester, grade_rounding_mode")
     .eq("id", subjectId).maybeSingle(),
         sec?.classroom_id
           ? supabase.from("classrooms").select("id, room_name, grade_group").eq("id", sec.classroom_id).maybeSingle()

@@ -365,6 +365,13 @@ map[s.id] = { unit: scaledUnit, midterm, total };
   return map;
 }, [students, submissions, assignments, examScores, scoreEvents, gradeRoundingMode]);
 
+// ★ ตรวจระดับชั้นจากป้ายห้องเรียนจริง (classroomLabel เช่น "ประถมศึกษา ป.1/1" หรือ "มัธยมศึกษา ม.3/1")
+function getGradeLevelWord(classroomLabel?: string): string {
+  if (!classroomLabel) return "มัธยมศึกษา";
+  if (classroomLabel.includes("อนุบาล")) return "อนุบาล";
+  if (classroomLabel.includes("ประถม")) return "ประถมศึกษา";
+  return "มัธยมศึกษา";
+}
 function formatGradeLevel(label?: string): string {
   if (!label) return "";
   const nums = label.match(/\d+/g);
@@ -450,7 +457,7 @@ function formatGradeLevel(label?: string): string {
 
   // ---------- หัวกระดาษ 3 บรรทัด (merge เต็มความกว้าง, เริ่มแถว 6) ----------
   const headerLine1 = "แบบประกาศผลคะแนนระหว่างเรียนรายวิชาของนักเรียนโรงเรียนวัดเขียนเขต";
-  const headerLine2 = `ชั้นมัธยมศึกษาปีที่ ${gradeLevel || "-"} ภาคเรียนที่ ${semester || "-"} ปีการศึกษา ${yearLabel || "-"}`;
+  const headerLine2 = `ชั้น${getGradeLevelWord(classroomLabel)}ปีที่ ${gradeLevel || "-"} ภาคเรียนที่ ${semester || "-"} ปีการศึกษา ${yearLabel || "-"}`;
   const headerLine3 = `รหัสวิชา ${subjectCode} รายวิชา ${subjectTitle} ประเภท ${subjectType || "-"} จำนวน ${creditHours || "-"} หน่วยกิต`;
 
   const headerStartRow = 6;
@@ -685,12 +692,12 @@ function formatGradeLevel(label?: string): string {
                     <div className="flex-1 text-center min-w-0" style={{ fontSize: "18px" }}>
             <p className="font-bold leading-snug">แบบประกาศผลคะแนนระหว่างเรียนรายวิชาของนักเรียนโรงเรียนวัดเขียนเขต</p>
             <p className="font-bold mt-1 whitespace-nowrap">
-              ชั้นมัธยมศึกษาปีที่{" "}
-              {readOnly ? (
-                <span className="font-bold">{gradeLevel || "…………"}</span>
-              ) : (
-                <input value={gradeLevel} onChange={e => setGradeLevel(e.target.value)} placeholder="เช่น 3/1" className="border-b border-slate-400 text-center w-16 focus:outline-none print:border-none" />
-              )}{" "}
+  ชั้น{getGradeLevelWord(classroomLabel)}ปีที่{" "}
+  {readOnly ? (
+    <span className="font-bold">{gradeLevel || "…………"}</span>
+  ) : (
+    <input value={gradeLevel} onChange={e => setGradeLevel(e.target.value)} placeholder="เช่น 3/1" className="border-b border-slate-400 text-center w-16 focus:outline-none print:border-none" />
+  )}{" "}
               ภาคเรียนที่{" "}
               {readOnly ? (
                 <span className="font-bold">{semester || "…"}</span>

@@ -421,10 +421,24 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
     const subMap: Record<string, Submission> = {};
     submissions.filter(sub => sub.student_id === s.id).forEach(sub => { subMap[sub.assignment_id] = sub; });
 
-    const assignmentTotal = assignments.reduce(
-  (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
-  0
-);
+        // ★ แก้บั๊ก: แยกชิ้นงาน "มีน้ำหนัก" (นับแต้มคงที่ตรงๆ ไม่ยืด/หด) ออกจาก
+    // ชิ้นงาน "ไม่มีน้ำหนัก" (สเกลตามสัดส่วนให้เติมเต็มพื้นที่ที่เหลือของคะแนนเก็บ)
+    const weightedList = assignments.filter(isWeighted);
+    const unweightedList = assignments.filter(a => !isWeighted(a));
+
+    const weightedMaxTotal = weightedList.reduce((sum, a) => sum + (a.weight_percent ?? 0), 0);
+    const weightedEarnedTotal = weightedList.reduce(
+      (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
+      0
+    );
+
+    const unweightedMaxTotal = unweightedList.reduce((sum, a) => sum + (a.max_score ?? 0), 0);
+    const unweightedEarnedTotal = unweightedList.reduce(
+      (sum, a) => sum + (subMap[a.id]?.score ?? 0),
+      0
+    );
+
+    const assignmentTotal = weightedEarnedTotal + unweightedEarnedTotal;
 
     const submittedCount = assignments.filter(a => subMap[a.id]?.score !== null && subMap[a.id]?.score !== undefined).length;
     const midtermRow = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm");
@@ -461,8 +475,13 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
         ? (attendanceRate === null ? null : attendanceRate >= passThresholdPercent ? "ผ่าน" : "ไม่ผ่าน")
         : null;
 
-    // ★ เพิ่ม: สเกลคะแนนเก็บให้พอดีกับคะแนนเต็มที่ตั้งไว้
-    const scaledFormative = totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * formativeMaxScore : 0;
+        // ★ แก้บั๊ก: ชิ้นงานมีน้ำหนัก = นับแต้มคงที่ตรงๆ (ไม่ยืด/หด)
+    // ชิ้นงานไม่มีน้ำหนัก = สเกลตามสัดส่วนให้เติมเต็ม "พื้นที่ที่เหลือ" ของคะแนนเก็บ
+    // (เต็มเก็บ - ผลรวมน้ำหนักที่ตั้งไว้ทั้งหมด)
+    const remainingCapacity = Math.max(0, formativeMaxScore - weightedMaxTotal);
+    const scaledUnweighted =
+      unweightedMaxTotal > 0 ? (unweightedEarnedTotal / unweightedMaxTotal) * remainingCapacity : 0;
+    const scaledFormative = weightedEarnedTotal + scaledUnweighted;
 
     // ★ เพิ่ม: รวมคะแนนสุดท้าย (แทนที่ grandTotal เดิมที่ใช้ assignmentTotal+specialTotal ตรงๆ)
     const usesComponentGrading = gradingMode === "numeric"; // โครงสร้างเก็บ/กลาง/ปลาย ใช้เฉพาะโหมด numeric

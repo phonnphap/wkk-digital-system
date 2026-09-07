@@ -28,12 +28,13 @@ type Assignment = {
   weight_percent: number | null;
   grading_criteria_note: string | null;
   rubric_id?: string | null;
-  teaching_unit_no?: number | null;              // ★ แทน learning_unit_id
+  teaching_unit_no?: number | null;              
   selected_indicator_lines?: string[] | null;
   status: AssignmentStatus;
   published_at: string | null;
   created_by: string | null;
   created_at: string;
+  display_order?: number | null;
 };
 
 type AssignmentAttachment = { id: string; assignment_id: string; kind: "file" | "link"; url: string; file_name?: string | null };
@@ -216,8 +217,9 @@ export default function AssignmentsTool({
     try {
       const { data: aRows } = await supabase
         .from("assignments")
-        .select("*")
+        .select("id, subject_section_id, title, description, type, assigned_at, due_date, max_score, allow_weight, weight_percent, grading_criteria_note, rubric_id, teaching_unit_no, selected_indicator_lines, status, published_at, created_by, created_at, display_order")
         .eq("subject_section_id", sectionId)
+        .order("display_order", { ascending: true, nullsFirst: false })
         .order("assigned_at", { ascending: false });
       setAssignments((aRows ?? []) as Assignment[]);
 
@@ -316,6 +318,7 @@ export default function AssignmentsTool({
         onManageRubrics={() => setModal("rubric")}
         onImport={() => setModal("import")}
         onAnnouncement={() => setModal("announcement")}
+        onRefresh={loadAll}
       />
     );
   }
@@ -527,6 +530,7 @@ function AssignmentList({
   assignments, students, studentLinks, submissions,
   announcements, onAnnouncementsChanged, currentUserId,
   onCreate, onOpen, onManageRubrics, onImport, onAnnouncement,
+  onRefresh, // ★ ใหม่
 }: {
   assignments: Assignment[];
   students: Student[];
@@ -540,7 +544,103 @@ function AssignmentList({
   announcements: Announcement[];
   onAnnouncementsChanged: () => void;
   currentUserId: string;
+  onRefresh: () => Promise<void> | void; // ★ ใหม่
 }) {
+  /* ---------- ★ ใหม่: เลือกหลายชิ้นงาน + ลากจัดเรียงลำดับ ---------- */
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkSaving, setBulkSaving] = useState<"draft" | "published" | null>(null);
+
+  const [order, setOrder] = useState<Assignment[]>(assignments);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+
+  // sync ลำดับจาก props ทุกครั้งที่ assignments เปลี่ยน (เช่นหลัง refresh)
+  useEffect(() => {
+    setOrder(assignments);
+  }, [assignments]);
+
+  function toggleSelectMode() {
+    setSelectMode(v => !v);
+    setSelectedIds(new Set());
+  }
+  function toggleSelected(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAll() {
+    if (selectedIds.size === order.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(order.map(a => a.id)));
+  }
+
+  async function bulkSetStatus(status: AssignmentStatus) {
+    if (selectedIds.size === 0) return;
+    setBulkSaving(status === "draft" ? "draft" : "published");
+    try {
+      const ids = Array.from(selectedIds);
+      const payload: any = {
+        status,
+        published_at: status === "published" ? new Date().toISOString() : null,
+      };
+      const { error } = await supabase.from("assignments").update(payload).in("id", ids);
+      if (error) throw error;
+
+      // ถ้าเผยแพร่ ให้มอบหมายนักเรียนทุกคนให้ชิ้นงานที่เพิ่งเปลี่ยนจากแบบร่าง (เหมือนพฤติกรรมเดิมตอนสร้าง/แก้ไขทีละชิ้น)
+      if (status === "published" && students.length > 0) {
+        const targets = order.filter(a => ids.includes(a.id) && a.status === "draft");
+        if (targets.length > 0) {
+          const rows = targets.flatMap(a =>
+            students.map(s => ({ assignment_id: a.id, student_id: s.id, assigned_by: currentUserId || null }))
+          );
+          try {
+            await supabase.from("assignment_students").upsert(rows, { onConflict: "assignment_id,student_id" });
+          } catch {}
+        }
+      }
+
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      await onRefresh();
+    } catch (e: any) {
+      alert("อัปเดตสถานะที่เลือกไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+    setBulkSaving(null);
+  }
+
+  function handleDragStart(e: React.DragEvent, index: number) {
+    setDragIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+  }
+  function handleDragOver(e: React.DragEvent, index: number) {
+    e.preventDefault();
+    if (dragIndex === null || dragIndex === index) return;
+    setOrder(prev => {
+      const next = [...prev];
+      const [moved] = next.splice(dragIndex, 1);
+      next.splice(index, 0, moved);
+      return next;
+    });
+    setDragIndex(index);
+  }
+  async function handleDragEnd() {
+    if (dragIndex === null) return;
+    setDragIndex(null);
+    setSavingOrder(true);
+    try {
+      await Promise.all(
+        order.map((a, i) => supabase.from("assignments").update({ display_order: i }).eq("id", a.id))
+      );
+      await onRefresh();
+    } catch (e: any) {
+      alert("บันทึกลำดับไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    }
+    setSavingOrder(false);
+  }
+  /* ---------- จบส่วนใหม่ ---------- */
+
   return (
     <div className="space-y-4">
       <div>
@@ -573,36 +673,113 @@ function AssignmentList({
         >
           <span>+</span> สร้างชิ้นงาน
         </button>
+
+        {/* ★ ใหม่: ปุ่มเลือกชิ้นงาน มุมขวา */}
+        <button
+          onClick={toggleSelectMode}
+          className={`ml-auto px-4 py-2.5 rounded-xl font-black text-base flex items-center gap-1.5 border ${
+            selectMode
+              ? "bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100"
+              : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <span>{selectMode ? "✕" : "☑️"}</span> {selectMode ? "ยกเลิกการเลือก" : "เลือกชิ้นงาน"}
+        </button>
       </div>
+
       <AnnouncementsFeed
         announcements={announcements}
         currentUserId={currentUserId}
         onChanged={onAnnouncementsChanged}
       />
 
-      {assignments.length === 0 ? (
+      {/* ★ ใหม่: แถบดำเนินการเมื่ออยู่ในโหมดเลือกหลายชิ้นงาน */}
+      {selectMode && order.length > 0 && (
+        <div className="sticky top-0 z-10 bg-indigo-50 border-2 border-indigo-200 rounded-2xl p-3 flex items-center justify-between flex-wrap gap-3">
+          <label className="flex items-center gap-2 font-black text-indigo-700 text-base cursor-pointer">
+            <input
+              type="checkbox"
+              checked={order.length > 0 && selectedIds.size === order.length}
+              onChange={toggleSelectAll}
+              className="w-4 h-4"
+            />
+            เลือกแล้ว {selectedIds.size} / {order.length} ชิ้นงาน
+          </label>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => bulkSetStatus("draft")}
+              disabled={selectedIds.size === 0 || bulkSaving !== null}
+              className="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-base disabled:opacity-50"
+            >
+              {bulkSaving === "draft" ? "กำลังบันทึก..." : "บันทึกแบบร่างที่เลือก"}
+            </button>
+            <button
+              onClick={() => bulkSetStatus("published")}
+              disabled={selectedIds.size === 0 || bulkSaving !== null}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base shadow disabled:opacity-50"
+            >
+              {bulkSaving === "published" ? "กำลังเผยแพร่..." : "เผยแพร่ที่เลือก"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!selectMode && savingOrder && (
+        <p className="text-[16px] text-indigo-400 font-black">กำลังบันทึกลำดับ...</p>
+      )}
+
+      {order.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
           <p className="text-3xl mb-2">📋</p>
           <p className="font-bold text-base">ยังไม่มีชิ้นงานในวิชานี้ กด "สร้างชิ้นงาน" เพื่อเริ่มมอบหมายงาน</p>
         </div>
       ) : (
         <div className="grid gap-3">
-          {assignments.map(a => {
+          {order.map((a, idx) => {
             const assignedIds = studentLinks.filter(l => l.assignment_id === a.id).map(l => l.student_id);
             const subsForA = submissions.filter(s => s.assignment_id === a.id);
             const submittedIds = new Set(subsForA.filter(s => s.status !== "not_submitted").map(s => s.student_id));
             const notSubmitted = assignedIds.filter(id => !submittedIds.has(id)).length;
             const pending = subsForA.filter(s => s.status === "pending_review").length;
             const done = subsForA.filter(s => s.status === "reviewed").length;
+            const isSelected = selectedIds.has(a.id);
+            const isDragging = dragIndex === idx;
 
             return (
-              <button
+              <div
                 key={a.id}
-                onClick={() => onOpen(a.id)}
-                className="text-left bg-white rounded-2xl border border-slate-100 shadow-sm p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all"
+                draggable={!selectMode}
+                onDragStart={e => handleDragStart(e, idx)}
+                onDragOver={e => handleDragOver(e, idx)}
+                onDrop={e => e.preventDefault()}
+                onDragEnd={handleDragEnd}
+                onClick={() => {
+                  if (selectMode) toggleSelected(a.id);
+                  else onOpen(a.id);
+                }}
+                className={`text-left bg-white rounded-2xl border-2 shadow-sm p-4 transition-all cursor-pointer ${
+                  isSelected ? "border-indigo-400 ring-2 ring-indigo-100" : "border-slate-100"
+                } ${isDragging ? "opacity-50" : ""} ${!selectMode ? "hover:shadow-lg hover:-translate-y-0.5" : ""}`}
               >
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="flex items-start gap-3">
+                    {selectMode && (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelected(a.id)}
+                        onClick={e => e.stopPropagation()}
+                        className="w-5 h-5 mt-2 shrink-0"
+                      />
+                    )}
+                    {!selectMode && (
+                      <span
+                        className="mt-2.5 text-slate-300 select-none shrink-0 cursor-grab active:cursor-grabbing text-lg"
+                        title="ลากเพื่อจัดเรียงลำดับ"
+                      >
+                        ⠿
+                      </span>
+                    )}
                     <div className={`w-11 h-11 rounded-xl flex items-center justify-center ttext-xl font-black text-white shrink-0 ${
                       a.status === "draft" ? "bg-slate-300" : "bg-gradient-to-br from-indigo-500 to-blue-500"
                     }`}>
@@ -642,7 +819,7 @@ function AssignmentList({
                     </div>
                   </div>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -772,7 +949,7 @@ function AssignmentForm({
     if (!existing) return;
     supabase
       .from("assignment_attachments")
-      .select("*")
+      .select("id, assignment_id, kind, url, file_name")
       .eq("assignment_id", existing.id)
       .then(({ data }) => {
         const rows = (data ?? []) as AssignmentAttachment[];
@@ -1428,7 +1605,7 @@ function AssignmentAttachmentsPanel({ assignmentId }: { assignmentId: string }) 
     setLoadingAtt(true);
     supabase
       .from("assignment_attachments")
-      .select("*")
+      .select("id, assignment_id, kind, url, file_name")
       .eq("assignment_id", assignmentId)
       .then(({ data }) => {
         if (!active) return;
@@ -2423,15 +2600,15 @@ function RubricEditor({
     if (!existing) return;
     (async () => {
       const [{ data: lvlRows }, { data: critRows }] = await Promise.all([
-        supabase.from("rubric_levels").select("*").eq("rubric_id", existing.id).order("order_index"),
-        supabase.from("rubric_criteria").select("*").eq("rubric_id", existing.id).order("order_index"),
+        supabase.from("rubric_levels").select("id, name, score, order_index").eq("rubric_id", existing.id).order("order_index"),
+        supabase.from("rubric_criteria").select("id, name, weight, order_index").eq("rubric_id", existing.id).order("order_index"),
       ]);
       const lvls = ((lvlRows ?? []) as RubricLevel[]).map(l => ({ id: l.id, name: l.name ?? "", score: l.score }));
       if (lvls.length > 0) setLevels(lvls);
 
       const critIds = (critRows ?? []).map((c: any) => c.id);
       const { data: noteRows } = critIds.length
-        ? await supabase.from("rubric_criteria_level_notes").select("*").in("criterion_id", critIds)
+        ? await supabase.from("rubric_criteria_level_notes").select("criterion_id, level_id, description").in("criterion_id", critIds)
         : { data: [] as any[] };
 
       const critList: EditorCriterion[] = ((critRows ?? []) as RubricCriterion[]).map(c => {
@@ -2714,8 +2891,8 @@ function RubricCopyFromOtherSubject({
       const uid = userData.user.id;
 
       const [{ data: levelRows }, { data: critRows }] = await Promise.all([
-        supabase.from("rubric_levels").select("*").eq("rubric_id", r.id).order("order_index"),
-        supabase.from("rubric_criteria").select("*").eq("rubric_id", r.id).order("order_index"),
+        supabase.from("rubric_levels").select("id, name, score, order_index").eq("rubric_id", r.id).order("order_index"),
+        supabase.from("rubric_criteria").select("id, name, weight, order_index").eq("rubric_id", r.id).order("order_index"),
       ]);
 
       const { data: newRubric, error } = await supabase
@@ -2742,7 +2919,7 @@ function RubricCopyFromOtherSubject({
           .select()
           .maybeSingle();
 
-        const { data: noteRows } = await supabase.from("rubric_criteria_level_notes").select("*").eq("criterion_id", c.id);
+        const { data: noteRows } = await supabase.from("rubric_criteria_level_notes").select("level_id, description").eq("criterion_id", c.id);
         const newNotes = ((noteRows ?? []) as RubricCellNote[]).map(n => ({
           criterion_id: newCrit.id,
           level_id: levelIdMap[n.level_id] ?? n.level_id,
@@ -2974,7 +3151,7 @@ function ImportAssignmentModal({
     setSelectedIds(new Set());
     const { data } = await supabase
       .from("assignments")
-      .select("*")
+      .select("id, title, description, type, assigned_at, due_date, max_score, allow_weight, weight_percent, grading_criteria_note, rubric_id, status")
       .eq("subject_section_id", card.subject_section_id)
       .order("assigned_at", { ascending: false });
     setSourceAssignments((data ?? []) as Assignment[]);
@@ -3019,7 +3196,7 @@ function ImportAssignmentModal({
           .maybeSingle();
         if (error) throw error;
 
-        const { data: atts } = await supabase.from("assignment_attachments").select("*").eq("assignment_id", a.id);
+        const { data: atts } = await supabase.from("assignment_attachments").select("kind, url, file_name").eq("assignment_id", a.id);
         if (atts && atts.length > 0) {
           await supabase.from("assignment_attachments").insert(
             atts.map((att: any) => ({ assignment_id: cloned.id, kind: att.kind, url: att.url, file_name: att.file_name }))
