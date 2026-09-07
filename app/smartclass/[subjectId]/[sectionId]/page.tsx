@@ -313,10 +313,10 @@ function StudentCard({
     </div>
       )}
 
-      {student.prefix && <p className="text-slate-500 text-[14px] font-bold mt-1">{student.prefix}</p>}
-  <p className="text-slate-700 font-black text-m mt-0.5 truncate">{student.first_name} {student.last_name}</p>
+      {student.prefix && <p className="text-slate-500 text-m font-bold mt-1">{student.prefix}</p>}
+  <p className="text-slate-700 font-black text-2xl mt-0.5 truncate">{student.first_name} {student.last_name}</p>
   {student.nick_name && <p className="text-slate-500 text-[16px] font-bold mt-0.5">({student.nick_name})</p>}
-  <p className="text-fuchsia-500 text-[14px] font-black">เลขที่ {student.seat_number}</p>
+  <p className="text-fuchsia-500 text-2xl font-black">เลขที่ {student.seat_number}</p>
 </button>
   );
 }

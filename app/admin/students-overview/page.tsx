@@ -136,6 +136,14 @@ const FIELD_LABELS: Record<string, string> = {
   moved_out_by_name: "ครูที่บันทึกการย้ายออก",
 };
 
+// ★ สร้างรายชื่อคอลัมน์ที่จะ SELECT จาก FIELD_LABELS โดยอัตโนมัติ
+// เวลาจะเพิ่มคอลัมน์ใหม่ให้โมดัลนี้แสดง แค่เพิ่ม key ลงใน FIELD_LABELS ด้านบน
+// ระบบจะดึงคอลัมน์นั้นมาด้วยเอง ไม่ต้องแก้ตรงนี้
+const DETAIL_SELECT_COLUMNS = ["id", "prefix", ...Object.keys(FIELD_LABELS)]
+  // กันคอลัมน์ซ้ำ (prefix อยู่ใน FIELD_LABELS อยู่แล้ว)
+  .filter((v, i, arr) => arr.indexOf(v) === i)
+  .join(", ");
+
 function formatFieldValue(key: string, value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   if (key === "gender" && typeof value === "string") return GENDER_LABEL[value] ?? value;
