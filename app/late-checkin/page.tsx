@@ -40,6 +40,7 @@ type Student = {
   birth_date: string | null;
   gender: string | null;
   classroom_id: string;
+  behavior_score: number | null;
   classroom?: ClassroomInfo; // ★ เพิ่ม — join มาเพื่อโชว์ ชั้น/ห้อง โดยไม่ต้อง query เพิ่ม
 };
 
@@ -53,7 +54,7 @@ type LateEntry = {
 
 // ★ ใช้ select เดียวกันทุกจุด กันลืมฟิลด์ตกหล่น
 const STUDENT_SELECT =
-  "id, seat_number, student_code, national_id, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id, classroom:classrooms(room_name, grade_level:grade_group)";
+  "id, seat_number, student_code, national_id, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id, behavior_score, classroom:classrooms(room_name, grade_level:grade_group)";
 
 // ★ ลำดับสายชั้นที่ถูกต้อง: อนุบาล → ประถม → ม.ต้น → ม.ปลาย
 const STAGE_ORDER = ["อนุบาล", "ประถมศึกษา", "มัธยมศึกษาตอนต้น", "มัธยมศึกษาตอนปลาย"];
@@ -1020,9 +1021,10 @@ function StudentPickRow({
         </p>
         {/* ★ แสดง ชั้น/ห้อง (เมื่อเป็นผลค้นหาข้ามห้อง) + เลขที่ เป็นข้อความชัดเจน */}
         <p className="truncate text-[11px] text-slate-400">
-          {showClass && classLabel ? `${classLabel} · ` : ""}เลขที่ {student.seat_number ?? "-"}
-          {student.student_code ? ` · ${student.student_code}` : ""}
-        </p>
+  {showClass && classLabel ? `${classLabel} · ` : ""}เลขที่ {student.seat_number ?? "-"}
+  {student.student_code ? ` · ${student.student_code}` : ""}
+  {typeof student.behavior_score === "number" ? ` · คงเหลือ ${student.behavior_score} คะแนน` : ""}
+</p>
       </div>
       {isLate && <span className="shrink-0 text-[10px] font-black text-rose-500">มาสายแล้ว</span>}
     </button>

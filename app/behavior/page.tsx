@@ -727,7 +727,13 @@ function notifyStatusChanges(studentList: Student[], ids: string[]) {
       ] as const).map((tab) => (
         <button
           key={tab.key}
-          onClick={() => setViewMode(tab.key)}
+  onClick={() => {
+    setViewMode(tab.key);
+    // ★ กดแท็บ "รายคน" ครั้งแรก ถ้ามีนักเรียนถูกติ๊กเลือกไว้ในข้อ 1 อยู่แล้ว ให้ดึงประวัติของคนนั้นมาโชว์เลย
+    if (tab.key === "student" && !historyStudentId && selectedStudentIds.size >= 1) {
+      setHistoryStudentId(Array.from(selectedStudentIds)[0]);
+    }
+  }}
           className={`flex-1 rounded-xl px-3 py-1.5 text-xs font-bold transition ${
             viewMode === tab.key ? "bg-white text-rose-600 shadow-sm" : "text-slate-500 hover:text-rose-500"
           }`}

@@ -175,7 +175,7 @@ function StudentDetailModal({
     setErrorMsg("");
     supabase
       .from("students")
-      .select("*")
+      .select(DETAIL_SELECT_COLUMNS)
       .eq("id", studentId)
       .maybeSingle()
       .then(({ data, error }) => {
@@ -183,7 +183,7 @@ function StudentDetailModal({
         if (error || !data) {
           setErrorMsg("โหลดข้อมูลนักเรียนไม่สำเร็จ");
         } else {
-          setRow(data as Record<string, unknown>);
+          setRow(data as unknown as Record<string, unknown>);
         }
         setLoading(false);
       });
