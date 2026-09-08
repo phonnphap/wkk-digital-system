@@ -955,8 +955,13 @@ function GradeScheduleManager({ currentUser, isAdmin, teachers, classrooms, subj
                                       className={`rounded-xl border-2 px-2 py-2 cursor-pointer hover:shadow-md ${colors.bg} ${colors.border} ${colors.text}`}
                                       style={{ minHeight: "80px" }}
                                       onClick={() => setCellModal({ day, slot, entry })}>
-                                      <p className="font-black text-xs leading-tight line-clamp-2 mb-1">{(subject as any)?.name_th ?? "—"}</p>
-                                      {room && <p className="text-[10px] font-bold opacity-70">{room.grade_group} {room.room_name}</p>}
+                                      <p className="font-black text-xs leading-tight line-clamp-2 mb-1">
+  {(subject as any)?.name_th ?? "—"}
+  {(subject as any)?.subject_code && (
+    <span className="block text-[9px] font-bold opacity-60">{(subject as any).subject_code}</span>
+  )}
+</p>
+{room && <p className="text-[10px] font-bold opacity-70">{room.grade_group} {room.room_name}</p>}
                                     </div>
                                   ) : (
                                     <div
@@ -1161,8 +1166,13 @@ function TimetableGrid({ classroom, entries, timeSlots, allTimeSlots, subjects, 
                               ${isMyClass ? "ring-2 ring-offset-1 ring-blue-400" : ""}`}
                             style={{ minHeight: "92px" }}
                             onClick={() => clickable && setModal({ slot, day, entry, permission: perm === "direct" ? "direct" : "request" })}>
-                            <p className="font-black text-xs leading-tight line-clamp-2 mb-1">{(subject as any)?.name_th ?? "—"}</p>
-                            <p className="text-[11px] font-bold opacity-80 leading-tight">{displayName(teacher1)}</p>
+                            <p className="font-black text-xs leading-tight line-clamp-2 mb-1">
+  {(subject as any)?.name_th ?? "—"}
+  {(subject as any)?.subject_code && (
+    <span className="block text-[9px] font-bold opacity-60">{(subject as any).subject_code}</span>
+  )}
+</p>
+<p className="text-[11px] font-bold opacity-80 leading-tight">{displayName(teacher1)}</p>
                             {teacher2 && <p className="text-[11px] font-bold opacity-80 leading-tight mt-0.5">{displayName(teacher2)}</p>}
                             {isMyClass && <span className="text-[9px] font-black bg-blue-500 text-white px-1.5 py-0.5 rounded mt-1 inline-block">ฉัน</span>}
                           </div>
@@ -1440,8 +1450,13 @@ const otherTeacher = otherTeacherId ? teachers.find(t => t.id === otherTeacherId
 return (
   <td key={slot.id} className="p-1 align-top border-r border-slate-100">
     <div className={`rounded-xl border-2 px-2 py-2 ${colors.bg} ${colors.border} ${colors.text} ring-2 ring-offset-1 ring-blue-400`} style={{ minHeight: "92px" }}>
-      <p className="font-black text-xs leading-tight line-clamp-2 mb-1">{(subject as any)?.name_th ?? "—"}</p>
-      {room && <p className="text-[10px] font-bold opacity-70">{room.grade_group} {room.room_name}</p>}
+      <p className="font-black text-xs leading-tight line-clamp-2 mb-1">
+  {(subject as any)?.name_th ?? "—"}
+  {(subject as any)?.subject_code && (
+    <span className="block text-[9px] font-bold opacity-60">{(subject as any).subject_code}</span>
+  )}
+</p>
+{room && <p className="text-[10px] font-bold opacity-70">{room.grade_group} {room.room_name}</p>}
       {otherTeacher && <p className="text-[10px] font-bold opacity-70">ร่วมกับ {displayName(otherTeacher)}</p>}
       <span className="text-[9px] font-black bg-blue-500 text-white px-1.5 py-0.5 rounded mt-1 inline-block">
         {entry.teacher_id_2 === userId ? "ครู 2" : "ครู 1"}
@@ -1491,8 +1506,12 @@ function DayDetailModal({ day, entries, timeSlots, subjects, teachers, classroom
                   <p className="text-[10px] text-slate-400">{formatTime(e.slot?.start_time ?? "")}</p>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-black text-slate-800 text-sm truncate">{(subject as any)?.name_th ?? "—"}</p>
-                  <p className="text-slate-500 text-xs">{room?.grade_group} {room?.room_name}</p>
+                  <p className="font-black text-slate-800 text-sm truncate">
+  {(subject as any)?.name_th ?? "—"}
+  {(subject as any)?.subject_code && (
+    <span className="ml-1 text-[10px] font-bold text-slate-400">{(subject as any).subject_code}</span>
+  )}
+</p>
                 </div>
                 {otherTeacher && <span className="text-[10px] font-bold text-slate-400 shrink-0">+ {displayName(otherTeacher)}</span>}
                 {isMe2 && <span className="text-[9px] font-black bg-purple-500 text-white px-1.5 py-0.5 rounded shrink-0">ครู 2</span>}
