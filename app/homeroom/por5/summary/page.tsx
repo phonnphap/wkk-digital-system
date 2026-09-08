@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import InsightsTool from "@/components/insights/InsightsTool";
+import Vp4Report from "@/components/insights/Vp4Report";
 
 const supabase = createClient();
 
@@ -16,7 +17,7 @@ type SectionInfo = { id: string; subject_id: string; subject_code: string; subje
 type GradeCell = { grandTotal: number; percentage: number; grade: string };
 type AttendCell = { present: number; total: number };
 
-type ViewTab = "grades" | "attendance" | "insights";
+type ViewTab = "grades" | "attendance" | "insights" | "vp4";
 
 export default function Por5SummaryPage() {
   const router = useRouter();
@@ -124,6 +125,10 @@ export default function Por5SummaryPage() {
       setLoadingData(false);
     })();
   }, [selectedClassroom]);
+  function detectLevel(roomName: string): "primary" | "secondary" {
+  return roomName.startsWith("ม") || /^[4-6]\//.test(roomName) ? "secondary" : "primary";
+  // TODO: แทนที่ด้วยการอ่านจาก classrooms.level ถ้ามีคอลัมน์นี้จริง แม่นยำกว่าการเดาจากชื่อ
+}
 
   async function handleExportExcel() {
     setExporting(true);
@@ -203,6 +208,10 @@ export default function Por5SummaryPage() {
                 className={`px-4 py-2 rounded-xl font-black text-sm ${tab === "insights" ? "bg-blue-600 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
                 📊 ข้อมูลเชิงลึก
               </button>
+              <button onClick={() => setTab("vp4")}
+  className={`px-4 py-2 rounded-xl font-black text-sm ${tab === "vp4" ? "bg-blue-600 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+  📄 วผ.4
+</button>
             </div>
             {tab !== "insights" && (
               <div className="flex items-center gap-2">
@@ -216,8 +225,24 @@ export default function Por5SummaryPage() {
               </div>
             )}
           </div>
-
-          {tab === "insights" ? (
+          {tab === "vp4" ? (
+  <Vp4Report
+    classroomLevel={detectLevel(selectedClassroom.room_name)}
+    classroomLabel={selectedClassroom.room_name}
+    academicYear="2568"           // TODO: ดึงจาก academic_years table จริง
+    semester="1"                  // TODO: ดึงภาคเรียนปัจจุบันจริง
+    schoolName="โรงเรียนวัดเขียนเขต"   // TODO: ดึงจาก schools table
+    districtName="ธัญบุรี"
+    provinceName="ปทุมธานี"
+    directorName="นายธนณัฐ ศิระวงษ์"  // TODO
+    advisorNames={["", ""]}          // TODO: ดึงครูที่ปรึกษาของห้องนี้
+    students={students}
+    sections={sections}
+    gradeMatrix={gradeMatrix}
+    attendMatrix={attendMatrix}
+    onBack={() => setTab("grades")}
+  />
+) : tab === "insights" ? (
             <InsightsTool currentUserId={currentUserId} classroomId={selectedClassroom.classroom_id} />
           ) : loadingData ? (
             <p className="text-slate-400 text-sm">กำลังโหลดข้อมูลทุกวิชา...</p>
