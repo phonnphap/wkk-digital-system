@@ -18,7 +18,7 @@ type SectionInfo = {
   hours_per_year: number | null;
 };
 
-type GradeCell = { grandTotal: number; percentage: number; grade: string };
+type GradeCell = { grandTotal: number; percentage: number; grade: string; totalMax: number };
 type AttendCell = { present: number; total: number };
 
 type ViewTab = "grades" | "attendance" | "insights" | "vp4";
@@ -100,24 +100,24 @@ setSections(secs);
           const scoreEvents = json.scoreEvents ?? [];
           const criteria = json.criteria ?? [];
           const totalMax = assignments.reduce((s: number, a: any) => s + (a.max_score ?? 0), 0);
-          const sortedCriteria = [...criteria].sort((a: any, b: any) => b.min_percent - a.min_percent);
+const sortedCriteria = [...criteria].sort((a: any, b: any) => b.min_percent - a.min_percent);
 
-          studentRows.forEach(s => {
-            const assignmentTotal = assignments.reduce((sum: number, a: any) => {
-              const sub = submissions.find((x: any) => x.assignment_id === a.id && x.student_id === s.id);
-              return sum + (sub?.score ?? 0);
-            }, 0);
-            const specialTotal = scoreEvents
-              .filter((ev: any) => ev.student_id === s.id)
-              .reduce((sum: number, ev: any) => sum + ev.points, 0);
-            const grandTotal = assignmentTotal + specialTotal;
-            const percentage = totalMax > 0 ? (assignmentTotal / totalMax) * 100 : 0;
-            let grade = "-";
-            for (const c of sortedCriteria) {
-              if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
-            }
-            gMatrix[s.id][sec.id] = { grandTotal, percentage, grade };
-          });
+studentRows.forEach(s => {
+  const assignmentTotal = assignments.reduce((sum: number, a: any) => {
+    const sub = submissions.find((x: any) => x.assignment_id === a.id && x.student_id === s.id);
+    return sum + (sub?.score ?? 0);
+  }, 0);
+  const specialTotal = scoreEvents
+    .filter((ev: any) => ev.student_id === s.id)
+    .reduce((sum: number, ev: any) => sum + ev.points, 0);
+  const grandTotal = assignmentTotal + specialTotal;
+  const percentage = totalMax > 0 ? (assignmentTotal / totalMax) * 100 : 0;
+  let grade = "-";
+  for (const c of sortedCriteria) {
+    if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
+  }
+  gMatrix[s.id][sec.id] = { grandTotal, percentage, grade, totalMax }; // ← เพิ่ม totalMax ตรงนี้
+});
         } catch { /* ข้ามวิชานี้ถ้าดึงข้อมูลไม่สำเร็จ */ }
 
         try {

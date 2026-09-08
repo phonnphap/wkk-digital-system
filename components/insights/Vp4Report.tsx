@@ -10,12 +10,14 @@ type Student = {
   seat_number: number; student_code?: string; // TODO: เลขประจำตัว - เช็คชื่อ column จริงใน students
 };
 type SectionInfo = {
-  id: string; subject_id: string; subject_code: string; subject_name: string;
-  subject_type?: string;   // "พื้นฐาน" | "เพิ่มเติม"  -- TODO: มาจาก subjects.subject_type ?
-  credit_hours?: number;   // หน่วยกิต (ม.)  -- TODO: subjects.credit_hours
+  id: string;
+  subject_id: string;
+  subject_code: string;
+  subject_name: string;
+  subject_type: "basic" | "additional";   // ← เอา ? ออก, บังคับเป็น literal
   hours_per_year: number | null;
 };
-type GradeCell = { grandTotal: number; percentage: number; grade: string };
+type GradeCell = { grandTotal: number; percentage: number; grade: string; totalMax: number };
 type AttendCell = { present: number; total: number };
 
 export default function Vp4Report({
@@ -63,7 +65,11 @@ export default function Vp4Report({
   const m = roomName.match(/^(\d+)/); // "1/7" -> "1"
   return m ? m[1] : roomName;
 }
-
+function subjectTypeLabel(type: string | null | undefined): string {
+  if (type === "basic") return "พื้นฐาน";
+  if (type === "additional") return "เพิ่มเติม";
+  return "-";
+}
   function calcGpaAndAvgPercent(studentId: string) {
     let totalGrandScore = 0, totalMaxPercent = 0, gradeSum = 0, gradeCount = 0;
     sections.forEach(sec => {
@@ -146,7 +152,7 @@ export default function Vp4Report({
                 </tr>
                 <tr className="border text-[10px] text-slate-400">
                   <th className="border p-1" colSpan={4}></th>
-                  <th className="border p-1">คะแนนเต็ม</th>
+                  <th className="border p-1">คะแนนที่ได้</th>
                   <th className="border p-1">{classroomLevel === "primary" ? "ผลการเรียน" : "คะแนนที่ได้"}</th>
                   <th className="border p-1" colSpan={classroomLevel === "primary" ? 2 : 1}></th>
                 </tr>
@@ -158,11 +164,11 @@ export default function Vp4Report({
                     <tr key={sec.id} className="border">
                       <td className="border p-1">{sec.subject_code}</td>
                       <td className="border p-1">{sec.subject_name}</td>
-                      <td className="border p-1 text-center">{sec.subject_type ?? "-"}</td>
+                      <td className="border p-1 text-center">{subjectTypeLabel(sec.subject_type)}</td>
                       <td className="border p-1 text-center">
-                        {classroomLevel === "primary" ? (sec.hours_per_year ?? "-") : (sec.credit_hours ?? "-")}
+                        {sec.hours_per_year ?? "-"}
                       </td>
-                      <td className="border p-1 text-center">100</td>
+                      <td className="border p-1 text-center">{cell?.totalMax ?? "-"}</td>
                       <td className="border p-1 text-center">
                         {classroomLevel === "primary" ? (cell?.grade ?? "-") : (cell?.grandTotal ?? "-")}
                       </td>
