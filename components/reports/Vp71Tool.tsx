@@ -358,6 +358,7 @@ function EditPlanView({
   }
   return (
     <>
+    <div className="vp-print-area">
       <div className="bg-white rounded-2xl border border-slate-100 overflow-auto">
         <table className="w-full min-w-[960px] border-collapse text-m">
           <thead className="bg-gradient-to-r from-indigo-50 to-fuchsia-50">
@@ -500,6 +501,7 @@ function EditPlanView({
             </tr>
           </tfoot>
         </table>
+      </div>
       </div>
 
       {!readOnly && (
@@ -715,7 +717,7 @@ function ReportView({
           <thead className="bg-gradient-to-r from-indigo-50 to-fuchsia-50 print:bg-white">
             <tr>
               <th rowSpan={2} className="border border-slate-300 px-1 py-2 font-black w-8">ที่</th>
-              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black min-w-[140px] text-left">ชื่อ-นามสกุล</th>
+              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black text-left whitespace-nowrap">ชื่อ-นามสกุล</th>
               {unitsWithScore.map(u => (
                 <th key={u.unit_no} colSpan={indicatorLinesOf(u).length + 1} className="border border-slate-300 px-1 py-1 font-black">
                   หน่วยที่ {u.unit_no}{u.unit_name ? ` · ${u.unit_name}` : ""}
@@ -790,7 +792,7 @@ function ReportView({
         </table>
       </div>
 
-      <div className="mt-4 bg-white rounded-2xl border border-slate-100 p-4 space-y-3 text-m print:mt-2 print:border-0 print:p-0 vp-print-legend">
+      <div className="mt-4 bg-white rounded-2xl border border-slate-100 p-4 space-y-3 text-m print:mt-2 print:border-0 print:p-0">
         <p className="font-black text-slate-600">คำอธิบาย{indicatorLabel}</p>
         {unitsWithScore.map(u => (
           <div key={u.unit_no}>

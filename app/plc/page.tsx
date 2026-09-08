@@ -94,6 +94,9 @@ type DeptGroup = {
   totalHours: number;
 };
 
+// ✅ ผู้ตรวจงานประจำกลุ่ม: แอดมินกำหนดครู 1 คนต่อกลุ่ม (กลุ่มสาระ หรือ สายชั้น) ให้เห็นรายงานทุกรายการของกลุ่มนั้น แต่แก้ไขไม่ได้
+type GroupReviewer = { id: string; scope: MeetingScope; group_key: string; reviewer_id: string };
+
 const PLC_ONEDRIVE_FOLDER = "Plc";
 
 function attendsMeeting(teacherId: string, m: PLCMeeting): boolean {
@@ -111,7 +114,8 @@ const GROUP_META: Record<string, { icon: string; color: string; textColor: strin
   "ไทย มัธยม":            { icon:"📖", color:"bg-rose-500",    textColor:"text-rose-700",    borderColor:"border-rose-300",    bgLight:"bg-rose-50"    },
   "คณิตฯ ประถมต้น":         { icon:"🔢", color:"bg-blue-500",    textColor:"text-blue-700",    borderColor:"border-blue-300",    bgLight:"bg-blue-50"    },
   "คณิตฯ ประถมปลาย":         { icon:"🔢", color:"bg-blue-500",    textColor:"text-blue-700",    borderColor:"border-blue-300",    bgLight:"bg-blue-50"    },
-  "คณิตฯ มัธยม":         { icon:"🔢", color:"bg-blue-500",    textColor:"text-blue-700",    borderColor:"border-blue-300",    bgLight:"bg-blue-50"    },
+  "คณิตฯ ม.ต้น":         { icon:"🔢", color:"bg-blue-500",    textColor:"text-blue-700",    borderColor:"border-blue-300",    bgLight:"bg-blue-50"    },
+  "คณิตฯ ม.ปลาย":         { icon:"🔢", color:"bg-blue-500",    textColor:"text-blue-700",    borderColor:"border-blue-300",    bgLight:"bg-blue-50"    },
   "วิทย์ ประถม":        { icon:"🔬", color:"bg-emerald-500", textColor:"text-emerald-700", borderColor:"border-emerald-300", bgLight:"bg-emerald-50" },
   "วิทย์ ม.ต้น":        { icon:"🔬", color:"bg-emerald-500", textColor:"text-emerald-700", borderColor:"border-emerald-300", bgLight:"bg-emerald-50" },
   "วิทย์ ม.ปลาย":        { icon:"🔬", color:"bg-emerald-500", textColor:"text-emerald-700", borderColor:"border-emerald-300", bgLight:"bg-emerald-50" },
@@ -1150,6 +1154,76 @@ function PendingSuggestionsCard({ meetings, onOpen, onView }: {
   );
 }
 
+// ✅ โมดัลสำหรับแอดมิน: ตั้งค่าคนตรวจงานประจำกลุ่ม (กลุ่มสาระ / สายชั้น) — ผู้ที่ถูกเลือกจะเห็นรายงานทุกรายการของกลุ่มนั้น แต่แก้ไขไม่ได้
+function ReviewerAssignmentModal({ subjectGroups, gradeGroups, allTeachers, groupReviewers, onSave, onClose }: {
+  subjectGroups: { key: string; label: string }[];
+  gradeGroups: { key: string; label: string }[];
+  allTeachers: Teacher[];
+  groupReviewers: GroupReviewer[];
+  onSave: (scope: MeetingScope, groupKey: string, reviewerId: string | null) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<MeetingScope>("subject");
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  function currentReviewerId(scope: MeetingScope, key: string): string {
+    return groupReviewers.find(r => r.scope === scope && r.group_key === key)?.reviewer_id ?? "";
+  }
+
+  async function handleChange(scope: MeetingScope, key: string, value: string) {
+    setSavingKey(`${scope}:${key}`);
+    try { await onSave(scope, key, value || null); } finally { setSavingKey(null); }
+  }
+
+  const groups = tab === "subject" ? subjectGroups : gradeGroups;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-5 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
+          <div>
+            <h3 className="font-black text-slate-800 text-lg">🔍 ตั้งค่าคนตรวจงานประจำกลุ่ม</h3>
+            <p className="text-slate-400 text-xs mt-1">เลือกครู 1 คนต่อกลุ่ม ให้เห็นรายงานทุกรายการของกลุ่มนั้น (ดูได้เท่านั้น แก้ไขไม่ได้)</p>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-lg shrink-0">✕</button>
+        </div>
+        <div className="flex border-b border-slate-100 shrink-0 px-6">
+          <button onClick={() => setTab("subject")}
+            className={`px-4 py-3 text-sm font-black border-b-2 transition-all ${tab === "subject" ? "border-indigo-500 text-indigo-600" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
+            📚 กลุ่มสาระ
+          </button>
+          <button onClick={() => setTab("grade")}
+            className={`px-4 py-3 text-sm font-black border-b-2 transition-all ${tab === "grade" ? "border-cyan-500 text-cyan-600" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
+            {GRADE_META.icon} สายชั้น
+          </button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-2.5">
+          {groups.length === 0 ? (
+            <div className="text-center py-10 text-slate-400 text-sm">ไม่พบข้อมูลกลุ่ม</div>
+          ) : groups.map(g => {
+            const val = currentReviewerId(tab, g.key);
+            const busy = savingKey === `${tab}:${g.key}`;
+            return (
+              <div key={g.key} className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-slate-700 text-sm truncate">{g.label}</p>
+                  {val && <p className="text-emerald-600 text-[11px] font-bold mt-0.5">✅ มีคนตรวจแล้ว</p>}
+                </div>
+                <select value={val} disabled={busy} onChange={e => handleChange(tab, g.key, e.target.value)}
+                  className="bg-white border-2 border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-400 max-w-[170px] shrink-0">
+                  <option value="">— ไม่มีคนตรวจ —</option>
+                  {allTeachers.map(t => <option key={t.id} value={t.id}>{fullName(t)}</option>)}
+                </select>
+                {busy && <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin shrink-0" />}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DeptGroupPanel({ group, allTeachers, onEdit, onDelete, gradeLevelMap, subjectMap, deputySignatureUrl, directorSignatureUrl }: {
   group: DeptGroup;
   allTeachers: Teacher[];
@@ -1288,7 +1362,7 @@ function AllReportsModal({ meetings, allTeachers, academicYears, selectedYearId,
   const draft      = meetings.filter(m => m.status === "draft").length;
   const totalHours = meetings.reduce((s,m) => s + Number(m.duration_hours), 0);
 
-  // ✅ สิทธิ์แก้ไขต่อรายการ: ผู้ดูแลระบบจริงแก้ได้ทุกรายการ ส่วนคนอื่น (เช่นผู้ดูแลโครงการที่ดูอย่างเดียว) แก้ได้เฉพาะรายการที่ตนเป็นผู้บันทึก
+  // ✅ สิทธิ์แก้ไขต่อรายการ: ผู้ดูแลระบบจริงแก้ได้ทุกรายการ ส่วนคนอื่น (เช่นผู้ดูแลโครงการ/คนตรวจกลุ่มที่ดูอย่างเดียว) แก้ได้เฉพาะรายการที่ตนเป็นผู้บันทึก
   function rowCanEdit(m: PLCMeeting): boolean {
     if (isRealAdmin) return true;
     return canEdit && m.facilitator_id === currentUserId;
@@ -1544,6 +1618,9 @@ export default function PLCHoursPage() {
   const [suggestMeeting, setSuggestMeeting] = useState<PLCMeeting | null>(null);
   const [deputySignature, setDeputySignature] = useState<string>("");
   const [directorSignature, setDirectorSignature] = useState<string>("");
+  // ✅ ผู้ตรวจงานประจำกลุ่ม
+  const [groupReviewers, setGroupReviewers] = useState<GroupReviewer[]>([]);
+  const [showReviewerAssign, setShowReviewerAssign] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -1618,9 +1695,25 @@ setGradeLevelMap(glMap);
     })();
   }, []);
 
+  // ✅ โหลดรายการผู้ตรวจงานประจำกลุ่มทั้งหมด (แยกจาก effect หลักเพื่อให้เรียกซ้ำได้หลังบันทึก)
+  const loadGroupReviewers = useCallback(async () => {
+    const { data } = await supabase.from("plc_group_reviewers").select("id, scope, group_key, reviewer_id");
+    setGroupReviewers((data as GroupReviewer[]) || []);
+  }, []);
+  useEffect(() => { loadGroupReviewers(); }, [loadGroupReviewers]);
+
   const isRealAdmin  = !!(user?.role && ADMIN_ROLES_SET.has(user.role));
   const isCoordinator = !isRealAdmin && !!user?.is_plc_coordinator;
-  const isAdmin   = isRealAdmin || isCoordinator;
+
+  // ✅ กลุ่มที่ผู้ใช้ปัจจุบันถูกตั้งเป็นคนตรวจงาน + สถานะ "เป็นคนตรวจงานล้วนๆ" (ไม่ใช่แอดมิน/ผู้ดูแลโครงการ)
+  const myReviewerAssignments = useMemo(
+    () => (user ? groupReviewers.filter(r => r.reviewer_id === user.id) : []),
+    [groupReviewers, user]
+  );
+  const isGroupReviewer = myReviewerAssignments.length > 0;
+  const isGroupReviewerOnly = isGroupReviewer && !isRealAdmin && !isCoordinator;
+
+  const isAdmin   = isRealAdmin || isCoordinator || isGroupReviewer;
   const isTeacher = !isRealAdmin;
 
   const loadMeetings = useCallback(async () => {
@@ -1637,6 +1730,25 @@ setGradeLevelMap(glMap);
     () => meetings.filter(m => (m.meeting_scope ?? "subject") === viewScope),
     [meetings, viewScope]
   );
+
+  // ✅ รายชื่อกลุ่มสาระ/สายชั้นทั้งหมด (key+label เท่านั้น ไม่ขึ้นกับ viewScope) ใช้สำหรับหน้าตั้งค่าคนตรวจงาน
+  const subjectGroupsList = useMemo(() => {
+    const map = new Map<string, string>();
+    allTeachers.forEach(t => {
+      const lv = (t.academic_level ?? "").trim();
+      if (lv && !map.has(lv)) map.set(lv, subjectLabel(lv, subjectMap));
+    });
+    return Array.from(map.entries()).map(([key, label]) => ({ key, label })).sort((a,b) => a.label.localeCompare(b.label, "th"));
+  }, [allTeachers, subjectMap]);
+
+  const gradeGroupsList = useMemo(() => {
+    const map = new Map<string, string>();
+    allTeachers.forEach(t => {
+      const lv = (t.grade_level ?? "").trim();
+      if (lv && !map.has(lv)) map.set(lv, gradeLabel(lv, gradeLevelMap));
+    });
+    return Array.from(map.entries()).map(([key, label]) => ({ key, label })).sort((a,b) => gradeSortIndex(a.label) - gradeSortIndex(b.label));
+  }, [allTeachers, gradeLevelMap]);
 
   const deptGroups = useMemo((): DeptGroup[] => {
     if (viewScope === "grade") {
@@ -1674,18 +1786,66 @@ setGradeLevelMap(glMap);
     }).sort((a, b) => a.label.localeCompare(b.label, "th"));
   }, [allTeachers, meetingsInScope, viewScope, gradeLevelMap, subjectMap]);
 
-  const uniqueGroupKeys = useMemo(() => deptGroups.map(g => g.key), [deptGroups]);
+  // ✅ ถ้าผู้ใช้เป็น "คนตรวจงานประจำกลุ่ม" ล้วนๆ (ไม่ใช่แอดมิน/ผู้ดูแลโครงการ) ให้เห็นเฉพาะกลุ่มที่ตนถูกตั้งเป็นคนตรวจใน scope ปัจจุบันเท่านั้น
+  const allowedReviewerKeysForScope = useMemo(
+    () => new Set(myReviewerAssignments.filter(r => r.scope === viewScope).map(r => r.group_key)),
+    [myReviewerAssignments, viewScope]
+  );
+  const scopedDeptGroups = useMemo(() => {
+    if (!isGroupReviewerOnly) return deptGroups;
+    return deptGroups.filter(g => allowedReviewerKeysForScope.has(g.key));
+  }, [deptGroups, isGroupReviewerOnly, allowedReviewerKeysForScope]);
+
+  const uniqueGroupKeys = useMemo(() => scopedDeptGroups.map(g => g.key), [scopedDeptGroups]);
 
   const filteredGroups = useMemo(() => {
-    if (activeGroupKey === "all") return deptGroups;
-    return deptGroups.filter(g => g.key === activeGroupKey);
-  }, [deptGroups, activeGroupKey]);
+    if (activeGroupKey === "all") return scopedDeptGroups;
+    return scopedDeptGroups.filter(g => g.key === activeGroupKey);
+  }, [scopedDeptGroups, activeGroupKey]);
 
   useEffect(() => { setActiveGroupKey("all"); }, [viewScope]);
 
   const totalHoursAll = meetings.reduce((s, m) => s + Number(m.duration_hours), 0);
   const totalMeetings = meetings.length;
   const totalTeachers = allTeachers.length;
+
+  // ✅ สรุปตัวเลขการ์ดด้านบน: ถ้าเป็นคนตรวจงานล้วนๆ ให้นับเฉพาะกลุ่มที่ตนตรวจ ไม่ใช่ทั้งโรงเรียน
+  const scopedStats = useMemo(() => {
+    if (!isGroupReviewerOnly) return { meetingsCount: totalMeetings, teachersCount: totalTeachers, hours: totalHoursAll };
+    const teacherSet = new Set<string>();
+    const meetingSet = new Set<string>();
+    let hours = 0;
+    scopedDeptGroups.forEach(g => {
+      g.teachers.forEach(t => teacherSet.add(t.id));
+      g.meetings.forEach(m => { if (!meetingSet.has(m.id)) { meetingSet.add(m.id); hours += Number(m.duration_hours); } });
+    });
+    return { meetingsCount: meetingSet.size, teachersCount: teacherSet.size, hours };
+  }, [isGroupReviewerOnly, scopedDeptGroups, totalMeetings, totalTeachers, totalHoursAll]);
+
+  // ✅ รายการที่มองเห็นได้ในโมดัล "รายงานทั้งหมด" — คนตรวจงานล้วนๆ เห็นเฉพาะของกลุ่ม (ทั้งสอง scope) ที่ตนถูกตั้งเป็นคนตรวจ
+  const reviewerVisibleMeetings = useMemo(() => {
+    if (!isGroupReviewerOnly) return meetings;
+    const subjectKeys = new Set(myReviewerAssignments.filter(r => r.scope === "subject").map(r => r.group_key));
+    const gradeKeys = new Set(myReviewerAssignments.filter(r => r.scope === "grade").map(r => r.group_key));
+    const subjectTeacherIds = new Set(allTeachers.filter(t => subjectKeys.has((t.academic_level ?? "").trim())).map(t => t.id));
+    const gradeTeacherIds = new Set(allTeachers.filter(t => gradeKeys.has((t.grade_level ?? "").trim())).map(t => t.id));
+    return meetings.filter(m => {
+      const scope = m.meeting_scope ?? "subject";
+      if (scope === "grade") {
+        return gradeKeys.has((m.grade_level ?? "").trim()) || gradeTeacherIds.has(m.facilitator_id) || m.participants?.some(pid => gradeTeacherIds.has(pid));
+      }
+      return subjectTeacherIds.has(m.facilitator_id) || m.participants?.some(pid => subjectTeacherIds.has(pid));
+    });
+  }, [isGroupReviewerOnly, meetings, myReviewerAssignments, allTeachers]);
+
+  // ✅ กลุ่มครูที่ใช้แสดงในตาราง "สรุปชั่วโมงรายบุคคล" — คนตรวจงานล้วนๆ เห็นเฉพาะครูในกลุ่มที่ตนตรวจ
+  const summaryTeacherPool = useMemo(() => {
+    if (!isGroupReviewerOnly) return allTeachers;
+    const set = new Set<string>();
+    const arr: Teacher[] = [];
+    scopedDeptGroups.forEach(g => g.teachers.forEach(t => { if (!set.has(t.id)) { set.add(t.id); arr.push(t); } }));
+    return arr;
+  }, [isGroupReviewerOnly, scopedDeptGroups, allTeachers]);
 
   // ✅ รายการประชุมที่ผู้ใช้ปัจจุบันเข้าร่วม (วิทยากรหรือผู้เข้าร่วม) แต่ยังไม่ได้กรอกข้อเสนอแนะรายบุคคลของตนเอง
   const pendingSuggestions = useMemo(() => {
@@ -1730,6 +1890,21 @@ setGradeLevelMap(glMap);
     await loadMeetings();
   }
 
+  // ✅ ตั้ง/ยกเลิกคนตรวจงานของกลุ่ม — เขียนลงตาราง plc_group_reviewers (คีย์เฉพาะคือ scope+group_key)
+  async function handleSaveGroupReviewer(scope: MeetingScope, groupKey: string, reviewerId: string | null) {
+    if (!reviewerId) {
+      const { error } = await supabase.from("plc_group_reviewers").delete().eq("scope", scope).eq("group_key", groupKey);
+      if (error) { alert("❌ " + error.message); return; }
+    } else {
+      const { error } = await (supabase.from("plc_group_reviewers") as any).upsert(
+        { scope, group_key: groupKey, reviewer_id: reviewerId },
+        { onConflict: "scope,group_key" }
+      );
+      if (error) { alert("❌ " + error.message); return; }
+    }
+    await loadGroupReviewers();
+  }
+
   function openAdd() {
     setEditMeeting({ academic_year_id: selectedYearId, meeting_scope: viewScope === "grade" ? "grade" : "subject" });
     setModalOpen(true);
@@ -1756,7 +1931,7 @@ setGradeLevelMap(glMap);
           <div className="flex-1 min-w-0">
             <h1 className="text-base font-black text-slate-800 leading-none">บันทึกชั่วโมง PLC</h1>
             <p className="text-blue-600 text-xs font-bold truncate">
-  {isRealAdmin ? "ผู้บริหาร · " : isCoordinator ? `${fullName(user)} · 🎓 ผู้ดูแลโครงการ · ` : fullName(user) + " · "}{currentYearLabel}
+  {isRealAdmin ? "ผู้บริหาร · " : isCoordinator ? `${fullName(user)} · 🎓 ผู้ดูแลโครงการ · ` : isGroupReviewer ? `${fullName(user)} · 🔍 คนตรวจกลุ่ม (${myReviewerAssignments.map(r => r.scope === "grade" ? gradeLabel(r.group_key, gradeLevelMap) : subjectLabel(r.group_key, subjectMap)).join(", ")}) · ` : fullName(user) + " · "}{currentYearLabel}
 </p>
           </div>
           {academicYears.length > 1 && (
@@ -1812,11 +1987,20 @@ setGradeLevelMap(glMap);
 
         {isAdmin && (
           <>
+            {isGroupReviewerOnly && (
+              <div className="bg-cyan-50 border-2 border-cyan-200 rounded-2xl px-5 py-4 flex items-center gap-3">
+                <span className="text-2xl">🔍</span>
+                <div>
+                  <p className="font-black text-cyan-700 text-sm">โหมดคนตรวจงานประจำกลุ่ม</p>
+                  <p className="text-cyan-600 text-xs">คุณเห็นรายงานของกลุ่มที่ได้รับมอบหมายเท่านั้น และดูได้อย่างเดียว (แก้ไขได้เฉพาะรายการที่คุณบันทึกเอง)</p>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-3">
               {[
-                { label:"จำนวนครั้ง", value:totalMeetings, unit:"ครั้ง", color:"text-emerald-600", bg:"bg-emerald-50", border:"border-emerald-200", icon:"📅" },
-                { label:"ครูทั้งหมด", value:totalTeachers, unit:"คน",   color:"text-amber-600",   bg:"bg-amber-50",   border:"border-amber-200",   icon:"👩‍🏫" },
-                { label:"ชั่วโมงรวม", value:totalHoursAll, unit:"ชม.",  color:"text-blue-600",    bg:"bg-blue-50",    border:"border-blue-200",    icon:"⏱️"  },
+                { label:"จำนวนครั้ง", value:scopedStats.meetingsCount, unit:"ครั้ง", color:"text-emerald-600", bg:"bg-emerald-50", border:"border-emerald-200", icon:"📅" },
+                { label:"ครูทั้งหมด", value:scopedStats.teachersCount, unit:"คน",   color:"text-amber-600",   bg:"bg-amber-50",   border:"border-amber-200",   icon:"👩‍🏫" },
+                { label:"ชั่วโมงรวม", value:scopedStats.hours, unit:"ชม.",  color:"text-blue-600",    bg:"bg-blue-50",    border:"border-blue-200",    icon:"⏱️"  },
               ].map(card => (
                 <div key={card.label} className={`${card.bg} border-2 ${card.border} rounded-2xl p-4 text-center`}>
                   <div className="text-2xl mb-1">{card.icon}</div>
@@ -1833,25 +2017,38 @@ setGradeLevelMap(glMap);
                 <span className="text-3xl">📊</span>
                 <div className="text-left">
                   <p className="font-black text-base">รายงานทั้งหมด</p>
-                  <p className="text-indigo-200 text-xs">{totalMeetings} รายการ · {totalHoursAll} ชั่วโมง</p>
+                  <p className="text-indigo-200 text-xs">{scopedStats.meetingsCount} รายการ · {scopedStats.hours} ชั่วโมง</p>
                 </div>
               </div>
               <span className="text-white/60 group-hover:text-white text-xl">→</span>
             </button>
 
             {isRealAdmin && (
-  <button onClick={() => router.push("/plc/manage-users")}
-    className="w-full bg-white border-2 border-slate-200 hover:border-slate-300 text-slate-700 rounded-2xl px-6 py-4 flex items-center justify-between transition-all shadow-sm group">
-    <div className="flex items-center gap-3">
-      <span className="text-3xl">🛡️</span>
-      <div className="text-left">
-        <p className="font-black text-base">จัดการสิทธิ์ผู้ดูแลโครงการ</p>
-        <p className="text-slate-400 text-xs">มอบสิทธิ์ให้ครูดูข้อมูลแบบผู้บริหาร (ดูอย่างเดียว)</p>
-      </div>
-    </div>
-    <span className="text-slate-300 group-hover:text-slate-500 text-xl">→</span>
-  </button>
-)}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button onClick={() => router.push("/plc/manage-users")}
+                  className="w-full bg-white border-2 border-slate-200 hover:border-slate-300 text-slate-700 rounded-2xl px-6 py-4 flex items-center justify-between transition-all shadow-sm group">
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl">🛡️</span>
+                    <div className="text-left">
+                      <p className="font-black text-base">จัดการสิทธิ์ผู้ดูแลโครงการ</p>
+                      <p className="text-slate-400 text-xs">มอบสิทธิ์ให้ครูดูข้อมูลแบบผู้บริหาร (ดูอย่างเดียว)</p>
+                    </div>
+                  </div>
+                  <span className="text-slate-300 group-hover:text-slate-500 text-xl">→</span>
+                </button>
+                <button onClick={() => setShowReviewerAssign(true)}
+                  className="w-full bg-white border-2 border-slate-200 hover:border-slate-300 text-slate-700 rounded-2xl px-6 py-4 flex items-center justify-between transition-all shadow-sm group">
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl">🔍</span>
+                    <div className="text-left">
+                      <p className="font-black text-base">ตั้งค่าคนตรวจงานประจำกลุ่ม</p>
+                      <p className="text-slate-400 text-xs">เลือกครูให้เห็นรายงานทุกรายการของแต่ละกลุ่ม (ดูอย่างเดียว)</p>
+                    </div>
+                  </div>
+                  <span className="text-slate-300 group-hover:text-slate-500 text-xl">→</span>
+                </button>
+              </div>
+            )}
 
             <div className="flex gap-2 bg-white border-2 border-slate-200 rounded-2xl p-1.5 w-fit">
               <button onClick={() => setViewScope("subject")}
@@ -1870,7 +2067,7 @@ setGradeLevelMap(glMap);
                 {viewScope === "grade" ? "🏫 ทุกสายชั้น" : "🏫 ทุกกลุ่มสาระ"}
               </button>
               {uniqueGroupKeys.map(key => {
-                const grp = deptGroups.find(g => g.key === key);
+                const grp = scopedDeptGroups.find(g => g.key === key);
                 const meta = viewScope === "grade" ? GRADE_META : getGroupMeta(grp?.label ?? key);
                 return (
                   <button key={key} onClick={() => setActiveGroupKey(key)}
@@ -1890,7 +2087,11 @@ setGradeLevelMap(glMap);
               {filteredGroups.length === 0 ? (
                 <div className="text-center py-12 text-slate-400 bg-white rounded-2xl border border-slate-200">
                   <div className="text-4xl mb-2">📭</div>
-                  <p className="text-sm font-bold">{viewScope === "grade" ? "ไม่พบข้อมูลสายชั้น" : "ไม่พบข้อมูลกลุ่มสาระ"}</p>
+                  <p className="text-sm font-bold">
+                    {isGroupReviewerOnly
+                      ? (viewScope === "grade" ? "คุณยังไม่ได้รับมอบหมายให้ตรวจสายชั้นใด" : "คุณยังไม่ได้รับมอบหมายให้ตรวจกลุ่มสาระใด")
+                      : (viewScope === "grade" ? "ไม่พบข้อมูลสายชั้น" : "ไม่พบข้อมูลกลุ่มสาระ")}
+                  </p>
                 </div>
               ) : filteredGroups.map(group => (
                 <DeptGroupPanel
@@ -1924,8 +2125,8 @@ setGradeLevelMap(glMap);
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {(viewScope === "grade"
-                      ? (activeGroupKey === "all" ? allTeachers : allTeachers.filter(t => (t.grade_level ?? "").trim() === activeGroupKey))
-                      : (activeGroupKey === "all" ? allTeachers : allTeachers.filter(t => (t.academic_level ?? "").trim() === activeGroupKey))
+                      ? (activeGroupKey === "all" ? summaryTeacherPool : summaryTeacherPool.filter(t => (t.grade_level ?? "").trim() === activeGroupKey))
+                      : (activeGroupKey === "all" ? summaryTeacherPool : summaryTeacherPool.filter(t => (t.academic_level ?? "").trim() === activeGroupKey))
                     )
                       .map(t => ({
                         ...t,
@@ -1955,7 +2156,7 @@ setGradeLevelMap(glMap);
                     }
                   </tbody>
                 </table>
-                {allTeachers.length === 0 && (
+                {summaryTeacherPool.length === 0 && (
                   <div className="text-center py-10 text-slate-400 text-sm">ไม่พบข้อมูลครู</div>
                 )}
               </div>
@@ -1979,7 +2180,7 @@ setGradeLevelMap(glMap);
       )}
       {showReports && user && (
         <AllReportsModal
-  meetings={meetings} allTeachers={allTeachers} academicYears={academicYears}
+  meetings={reviewerVisibleMeetings} allTeachers={allTeachers} academicYears={academicYears}
   selectedYearId={selectedYearId} onClose={() => setShowReports(false)}
   onEdit={m => { setShowReports(false); setEditMeeting(m); setModalOpen(true); }}
   onDelete={handleDelete} canEdit={isAdmin} currentUserId={user.id} isRealAdmin={isRealAdmin}
@@ -2009,6 +2210,16 @@ setGradeLevelMap(glMap);
           currentUserId={user.id}
           onSave={handleSaveSuggestion}
           onClose={() => setSuggestMeeting(null)}
+        />
+      )}
+      {showReviewerAssign && isRealAdmin && (
+        <ReviewerAssignmentModal
+          subjectGroups={subjectGroupsList}
+          gradeGroups={gradeGroupsList}
+          allTeachers={allTeachers}
+          groupReviewers={groupReviewers}
+          onSave={handleSaveGroupReviewer}
+          onClose={() => setShowReviewerAssign(false)}
         />
       )}
     </div>

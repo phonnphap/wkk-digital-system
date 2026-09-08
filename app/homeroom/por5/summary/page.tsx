@@ -24,6 +24,30 @@ type AttendCell = { present: number; total: number };
 
 type ViewTab = "grades" | "attendance" | "insights" | "vp4";
 
+// วิชากลุ่ม "กิจกรรมพัฒนาผู้เรียน" (แนะแนว / ชุมนุม / ลูกเสือ-ยุวกาชาด ฯลฯ)
+// สังเกตจาก subject_code ที่ขึ้นต้นด้วย "ก" (เช่น ก11901, ก11902, ก11903)
+// ถ้ามีคอลัมน์ subject_type เป็น "activity" จริงในฐานข้อมูล แนะนำให้เปลี่ยนมาเช็คจาก field นั้นแทน
+function isActivitySubject(subjectCode: string): boolean {
+  return /^ก/.test(subjectCode ?? "");
+}
+
+// ลำดับหมวดวิชา: พื้นฐาน(0) < เพิ่มเติม(1) < กิจกรรมพัฒนาผู้เรียน(2, อยู่ท้ายสุดเสมอ)
+function subjectRank(s: SectionInfo): number {
+  if (isActivitySubject(s.subject_code)) return 2;
+  return s.subject_type === "basic" ? 0 : 1;
+}
+
+// จานสี สลับ ชมพูเข้ม / ชมพูอ่อน ต่อ "บล็อกวิชา" หนึ่งบล็อก (วิชาเดี่ยว หรือกลุ่มวิชาที่รวมกัน)
+const COLUMN_COLORS = [
+  { header: "bg-pink-300/80 text-pink-900", code: "text-pink-900/50", cell: "bg-pink-50/70" },
+  { header: "bg-pink-100/80 text-pink-800", code: "text-pink-800/50", cell: "bg-pink-50/20" },
+];
+
+type FlatColumn =
+  | { key: string; kind: "single"; label: string; code: string; section: SectionInfo; colorIndex: number }
+  | { key: string; kind: "groupMember"; label: string; code: string; section: SectionInfo; colorIndex: number; groupCode: string }
+  | { key: string; kind: "groupCombined"; label: string; colorIndex: number; groupCode: string; members: SectionInfo[] };
+
 export default function Por5SummaryPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -39,37 +63,81 @@ export default function Por5SummaryPage() {
   const [exporting, setExporting] = useState(false);
   const [groupNames, setGroupNames] = useState<Record<string, string>>({});
 
-  type DisplayColumn =
-  | { key: string; kind: "single"; section: SectionInfo }
-  | { key: string; kind: "group"; groupCode: string; groupLabel: string; members: SectionInfo[] };
+  // คอลัมน์สำหรับแท็บ "คะแนนรวมทุกวิชา": วิชาที่ไม่รวมกลุ่ม = 1 คอลัมน์, วิชาที่รวมกลุ่ม = สมาชิกทุกวิชา + 1 คอลัมน์รวม
+  const gradeColumns = useMemo<FlatColumn[]>(() => {
+    const seenGroups = new Set<string>();
+    const cols: FlatColumn[] = [];
+    let colorIndex = 0;
 
-const displayColumns = useMemo<DisplayColumn[]>(() => {
-  const seen = new Set<string>();
-  const cols: DisplayColumn[] = [];
-  sections.forEach(sec => {
-    if (sec.score_group_code) {
-      if (seen.has(sec.score_group_code)) return;
-      seen.add(sec.score_group_code);
-      const members = sections.filter(s => s.score_group_code === sec.score_group_code);
-      const label = `${members.map(m => m.subject_name).join("/")}${groupNames[sec.score_group_code] ? "/" + groupNames[sec.score_group_code] : ""}`;
-      cols.push({ key: `group-${sec.score_group_code}`, kind: "group", groupCode: sec.score_group_code, groupLabel: label, members });
-    } else {
-      cols.push({ key: sec.id, kind: "single", section: sec });
-    }
-  });
-  return cols;
-}, [sections, groupNames]);
+    sections.forEach(sec => {
+      if (sec.score_group_code) {
+        if (seenGroups.has(sec.score_group_code)) return;
+        seenGroups.add(sec.score_group_code);
 
-function groupCombinedCell(studentId: string, members: SectionInfo[]) {
-  const cells = members.map(m => gradeMatrix[studentId]?.[m.id]);
-  if (cells.some(c => !c)) return null;
-  const totalWeight = members.reduce((s, m) => s + (m.score_group_weight_percent ?? 0), 0) || 100;
-  const combined = members.reduce((sum, m, i) => {
-    const w = (m.score_group_weight_percent ?? 0) / totalWeight;
-    return sum + w * (cells[i]!.percentage);
-  }, 0);
-  return { parts: cells.map(c => c!.grandTotal), combined: Math.round(combined) };
-}
+        const members = sections.filter(s => s.score_group_code === sec.score_group_code);
+        const idx = colorIndex++;
+
+        members.forEach(m => {
+          cols.push({
+            key: `${m.id}-member`,
+            kind: "groupMember",
+            label: m.subject_name,
+            code: m.subject_code,
+            section: m,
+            colorIndex: idx,
+            groupCode: sec.score_group_code!,
+          });
+        });
+
+        const groupLabel = groupNames[sec.score_group_code] || members.map(m => m.subject_name).join("/");
+        cols.push({
+          key: `group-${sec.score_group_code}-combined`,
+          kind: "groupCombined",
+          label: groupLabel,
+          colorIndex: idx,
+          groupCode: sec.score_group_code!,
+          members,
+        });
+      } else {
+        const idx = colorIndex++;
+        cols.push({
+          key: sec.id,
+          kind: "single",
+          label: sec.subject_name,
+          code: sec.subject_code,
+          section: sec,
+          colorIndex: idx,
+        });
+      }
+    });
+
+    return cols;
+  }, [sections, groupNames]);
+
+  // คอลัมน์สำหรับแท็บ "การมาเรียนทุกวิชา": แสดงทุกวิชาแยกคอลัมน์เดี่ยว ไม่รวมกลุ่ม (แต่เรียงลำดับเดียวกัน กิจกรรมฯ อยู่ท้ายสุด)
+  const attendanceColumns = useMemo<FlatColumn[]>(() => {
+    return sections.map((sec, i) => ({
+      key: sec.id,
+      kind: "single" as const,
+      label: sec.subject_name,
+      code: sec.subject_code,
+      section: sec,
+      colorIndex: i,
+    }));
+  }, [sections]);
+
+  const activeColumns = tab === "attendance" ? attendanceColumns : gradeColumns;
+
+  function groupCombinedCell(studentId: string, members: SectionInfo[]) {
+    const cells = members.map(m => gradeMatrix[studentId]?.[m.id]);
+    if (cells.some(c => !c)) return null;
+    const totalWeight = members.reduce((s, m) => s + (m.score_group_weight_percent ?? 0), 0) || 100;
+    const combined = members.reduce((sum, m, i) => {
+      const w = (m.score_group_weight_percent ?? 0) / totalWeight;
+      return sum + w * (cells[i]!.percentage);
+    }, 0);
+    return { parts: cells.map(c => c!.grandTotal), combined: Math.round(combined) };
+  }
 
   useEffect(() => {
     (async () => {
@@ -92,48 +160,53 @@ function groupCombinedCell(studentId: string, members: SectionInfo[]) {
       setLoadingData(true);
 
       const { data: studentsData } = await supabase
-  .from("students")
-  .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url, student_code")
-  .eq("classroom_id", selectedClassroom.classroom_id)
-  .order("seat_number");
+        .from("students")
+        .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url, student_code")
+        .eq("classroom_id", selectedClassroom.classroom_id)
+        .order("seat_number");
       const studentRows = (studentsData ?? []) as Student[];
       setStudents(studentRows);
 
       // Por5SummaryPage.tsx
-const { data: sectionRows } = await supabase
-  .from("subject_sections")
-  .select("id, subject_id, is_active, subjects(subject_code, name_th, subject_type, hours_per_year, score_group_code, score_group_weight_percent)")
-  .eq("classroom_id", selectedClassroom.classroom_id)
-  .eq("is_active", true);
+      const { data: sectionRows } = await supabase
+        .from("subject_sections")
+        .select("id, subject_id, is_active, subjects(subject_code, name_th, subject_type, hours_per_year, score_group_code, score_group_weight_percent)")
+        .eq("classroom_id", selectedClassroom.classroom_id)
+        .eq("is_active", true);
 
-const secs: SectionInfo[] = (sectionRows ?? []).map((r: any) => ({
-  id: r.id,
-  subject_id: r.subject_id,
-  subject_code: r.subjects?.subject_code ?? "",
-  subject_name: r.subjects?.name_th ?? "ไม่ทราบชื่อวิชา",
-  subject_type: r.subjects?.subject_type ?? "basic",     // "basic" | "additional"
-  hours_per_year: r.subjects?.hours_per_year ?? null,
-  score_group_code: r.subjects?.score_group_code ?? null,
-score_group_weight_percent: r.subjects?.score_group_weight_percent ?? 100,
-})).sort((a: SectionInfo, b: SectionInfo) => {
-  if (a.subject_type !== b.subject_type) {
-    return a.subject_type === "basic" ? -1 : 1;   // basic ก่อน additional
-  }
-  return a.subject_name.localeCompare(b.subject_name, "th");
-});
-setSections(secs);
+      const secs: SectionInfo[] = (sectionRows ?? []).map((r: any) => {
+        const subjectCode = r.subjects?.subject_code ?? "";
+        const isActivity = isActivitySubject(subjectCode);
+        return {
+          id: r.id,
+          subject_id: r.subject_id,
+          subject_code: subjectCode,
+          subject_name: r.subjects?.name_th ?? "ไม่ทราบชื่อวิชา",
+          subject_type: r.subjects?.subject_type ?? "basic", // "basic" | "additional"
+          hours_per_year: r.subjects?.hours_per_year ?? null,
+          // กิจกรรมพัฒนาผู้เรียนไม่เข้ากลุ่มรวมคะแนนกับวิชาอื่น
+          score_group_code: isActivity ? null : (r.subjects?.score_group_code ?? null),
+          score_group_weight_percent: r.subjects?.score_group_weight_percent ?? 100,
+        };
+      }).sort((a: SectionInfo, b: SectionInfo) => {
+        const ra = subjectRank(a);
+        const rb = subjectRank(b);
+        if (ra !== rb) return ra - rb; // พื้นฐาน -> เพิ่มเติม -> กิจกรรมพัฒนาผู้เรียน(ท้ายสุด)
+        return a.subject_name.localeCompare(b.subject_name, "th");
+      });
+      setSections(secs);
 
-// ใส่ต่อจาก setSections(secs);
-const groupCodes = Array.from(new Set(secs.map(s => s.score_group_code).filter(Boolean))) as string[];
-if (groupCodes.length > 0) {
-  const { data: groupRows } = await supabase
-    .from("subject_score_groups")
-    .select("group_code, group_name")
-    .in("group_code", groupCodes);
-  const map: Record<string, string> = {};
-  (groupRows ?? []).forEach((g: any) => { map[g.group_code] = g.group_name; });
-  setGroupNames(map);
-}
+      // ใส่ต่อจาก setSections(secs);
+      const groupCodes = Array.from(new Set(secs.map(s => s.score_group_code).filter(Boolean))) as string[];
+      if (groupCodes.length > 0) {
+        const { data: groupRows } = await supabase
+          .from("subject_score_groups")
+          .select("group_code, group_name")
+          .in("group_code", groupCodes);
+        const map: Record<string, string> = {};
+        (groupRows ?? []).forEach((g: any) => { map[g.group_code] = g.group_name; });
+        setGroupNames(map);
+      }
 
       const gMatrix: Record<string, Record<string, GradeCell>> = {};
       const aMatrix: Record<string, Record<string, AttendCell>> = {};
@@ -148,24 +221,24 @@ if (groupCodes.length > 0) {
           const scoreEvents = json.scoreEvents ?? [];
           const criteria = json.criteria ?? [];
           const totalMax = assignments.reduce((s: number, a: any) => s + (a.max_score ?? 0), 0);
-const sortedCriteria = [...criteria].sort((a: any, b: any) => b.min_percent - a.min_percent);
+          const sortedCriteria = [...criteria].sort((a: any, b: any) => b.min_percent - a.min_percent);
 
-studentRows.forEach(s => {
-  const assignmentTotal = assignments.reduce((sum: number, a: any) => {
-    const sub = submissions.find((x: any) => x.assignment_id === a.id && x.student_id === s.id);
-    return sum + (sub?.score ?? 0);
-  }, 0);
-  const specialTotal = scoreEvents
-    .filter((ev: any) => ev.student_id === s.id)
-    .reduce((sum: number, ev: any) => sum + ev.points, 0);
-  const grandTotal = assignmentTotal + specialTotal;
-  const percentage = totalMax > 0 ? (assignmentTotal / totalMax) * 100 : 0;
-  let grade = "-";
-  for (const c of sortedCriteria) {
-    if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
-  }
-  gMatrix[s.id][sec.id] = { grandTotal, percentage, grade, totalMax }; // ← เพิ่ม totalMax ตรงนี้
-});
+          studentRows.forEach(s => {
+            const assignmentTotal = assignments.reduce((sum: number, a: any) => {
+              const sub = submissions.find((x: any) => x.assignment_id === a.id && x.student_id === s.id);
+              return sum + (sub?.score ?? 0);
+            }, 0);
+            const specialTotal = scoreEvents
+              .filter((ev: any) => ev.student_id === s.id)
+              .reduce((sum: number, ev: any) => sum + ev.points, 0);
+            const grandTotal = assignmentTotal + specialTotal;
+            const percentage = totalMax > 0 ? (assignmentTotal / totalMax) * 100 : 0;
+            let grade = "-";
+            for (const c of sortedCriteria) {
+              if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
+            }
+            gMatrix[s.id][sec.id] = { grandTotal, percentage, grade, totalMax };
+          });
         } catch { /* ข้ามวิชานี้ถ้าดึงข้อมูลไม่สำเร็จ */ }
 
         try {
@@ -185,10 +258,11 @@ studentRows.forEach(s => {
       setLoadingData(false);
     })();
   }, [selectedClassroom]);
+
   function detectLevel(roomName: string): "primary" | "secondary" {
-  return roomName.startsWith("ม") || /^[4-6]\//.test(roomName) ? "secondary" : "primary";
-  // TODO: แทนที่ด้วยการอ่านจาก classrooms.level ถ้ามีคอลัมน์นี้จริง แม่นยำกว่าการเดาจากชื่อ
-}
+    return roomName.startsWith("ม") || /^[4-6]\//.test(roomName) ? "secondary" : "primary";
+    // TODO: แทนที่ด้วยการอ่านจาก classrooms.level ถ้ามีคอลัมน์นี้จริง แม่นยำกว่าการเดาจากชื่อ
+  }
 
   async function handleExportExcel() {
     setExporting(true);
@@ -201,9 +275,17 @@ studentRows.forEach(s => {
           "เลขที่": s.seat_number,
           "ชื่อ-นามสกุล": `${s.prefix ?? ""}${s.first_name} ${s.last_name}`.trim(),
         };
-        sections.forEach(sec => {
-          const cell = gradeMatrix[s.id]?.[sec.id];
-          row[sec.subject_name] = cell ? `${cell.grandTotal} (${cell.grade})` : "-";
+        gradeColumns.forEach(col => {
+          if (col.kind === "single") {
+            const cell = gradeMatrix[s.id]?.[col.section.id];
+            row[col.label] = cell ? `${cell.grandTotal} (${cell.grade})` : "-";
+          } else if (col.kind === "groupMember") {
+            const cell = gradeMatrix[s.id]?.[col.section.id];
+            row[col.label] = cell ? `${cell.grandTotal}` : "-";
+          } else if (col.kind === "groupCombined") {
+            const g = groupCombinedCell(s.id, col.members);
+            row[`${col.label} (รวม)`] = g ? `${g.combined}` : "-";
+          }
         });
         return row;
       });
@@ -264,11 +346,11 @@ studentRows.forEach(s => {
                 📊 ข้อมูลเชิงลึก
               </button>
               <button onClick={() => setTab("vp4")}
-  className={`px-4 py-2 rounded-xl font-black text-sm ${tab === "vp4" ? "bg-blue-600 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
-  📄 วผ.4
-</button>
+                className={`px-4 py-2 rounded-xl font-black text-sm ${tab === "vp4" ? "bg-blue-600 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+                📄 วผ.4
+              </button>
             </div>
-            {tab !== "insights" && (
+            {tab !== "insights" && tab !== "vp4" && (
               <div className="flex items-center gap-2">
                 <button onClick={handleExportExcel} disabled={exporting || loadingData}
                   className="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm disabled:opacity-50">
@@ -280,24 +362,25 @@ studentRows.forEach(s => {
               </div>
             )}
           </div>
+
           {tab === "vp4" ? (
-  <Vp4Report
-    classroomLevel={detectLevel(selectedClassroom.room_name)}
-    classroomLabel={selectedClassroom.room_name}
-    academicYear="2568"           // TODO: ดึงจาก academic_years table จริง
-    semester="1"                  // TODO: ดึงภาคเรียนปัจจุบันจริง
-    schoolName="โรงเรียนวัดเขียนเขต"   // TODO: ดึงจาก schools table
-    districtName="ธัญบุรี"
-    provinceName="ปทุมธานี"
-    directorName="นายธนณัฐ ศิระวงษ์"  // TODO
-    advisorNames={["", ""]}          // TODO: ดึงครูที่ปรึกษาของห้องนี้
-    students={students}
-    sections={sections}
-    gradeMatrix={gradeMatrix}
-    attendMatrix={attendMatrix}
-    onBack={() => setTab("grades")}
-  />
-) : tab === "insights" ? (
+            <Vp4Report
+              classroomLevel={detectLevel(selectedClassroom.room_name)}
+              classroomLabel={selectedClassroom.room_name}
+              academicYear="2568"           // TODO: ดึงจาก academic_years table จริง
+              semester="1"                  // TODO: ดึงภาคเรียนปัจจุบันจริง
+              schoolName="โรงเรียนวัดเขียนเขต"   // TODO: ดึงจาก schools table
+              districtName="ธัญบุรี"
+              provinceName="ปทุมธานี"
+              directorName="นายธนณัฐ ศิระวงษ์"  // TODO
+              advisorNames={["", ""]}          // TODO: ดึงครูที่ปรึกษาของห้องนี้
+              students={students}
+              sections={sections}
+              gradeMatrix={gradeMatrix}
+              attendMatrix={attendMatrix}
+              onBack={() => setTab("grades")}
+            />
+          ) : tab === "insights" ? (
             <InsightsTool currentUserId={currentUserId} classroomId={selectedClassroom.classroom_id} />
           ) : loadingData ? (
             <p className="text-slate-400 text-sm">กำลังโหลดข้อมูลทุกวิชา...</p>
@@ -309,69 +392,75 @@ studentRows.forEach(s => {
                 <thead>
                   <tr className="bg-slate-50">
                     <th className="text-left text-[11px] font-black text-slate-500 px-5 py-3 sticky left-0 bg-slate-50 z-10">รายชื่อ</th>
-                    {sections.map(sec => (
-                      <th key={sec.id} className="px-3 py-3 text-center min-w-[110px]">
-                        <p className="text-[11px] font-black text-slate-700 truncate max-w-[110px] mx-auto" title={sec.subject_name}>{sec.subject_name}</p>
-                        <p className="text-[9px] text-slate-300 font-bold">{sec.subject_code}</p>
-                      </th>
-                    ))}
+                    {activeColumns.map(col => {
+                      const colors = COLUMN_COLORS[col.colorIndex % COLUMN_COLORS.length];
+                      return (
+                        <th key={col.key} className={`px-3 py-3 text-center min-w-[110px] ${colors.header}`}>
+                          <p className="text-[11px] font-black truncate max-w-[140px] mx-auto" title={col.label}>
+                            {col.label}
+                          </p>
+                          <p className={`text-[9px] font-bold ${colors.code}`}>
+                            {col.kind === "groupCombined" ? "รวม" : col.code}
+                          </p>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
-                  <tr className="bg-slate-50">
-  <th className="text-left text-[11px] font-black text-slate-500 px-5 py-3 sticky left-0 bg-slate-50 z-10">รายชื่อ</th>
-  {(tab === "grades" ? displayColumns : sections.map(s => ({ key: s.id, kind: "single" as const, section: s }))).map(col => (
-    <th key={col.key} className="px-3 py-3 text-center min-w-[110px]">
-      <p className="text-[11px] font-black text-slate-700 truncate max-w-[140px] mx-auto"
-         title={col.kind === "group" ? col.groupLabel : col.section.subject_name}>
-        {col.kind === "group" ? col.groupLabel : col.section.subject_name}
-      </p>
-      {col.kind === "single" && <p className="text-[9px] text-slate-300 font-bold">{col.section.subject_code}</p>}
-    </th>
-  ))}
-</tr>
                   {students.map(s => (
                     <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60">
                       <td className="px-5 py-3 sticky left-0 bg-white z-10">
                         <p className="text-xs font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name}</p>
                         <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                       </td>
-                      {(tab === "grades" ? displayColumns : sections.map(sec => ({ key: sec.id, kind: "single" as const, section: sec }))).map(col => {
-  if (tab === "grades") {
-    if (col.kind === "group") {
-      const g = groupCombinedCell(s.id, col.members);
-      return (
-        <td key={col.key} className="text-center px-3 py-3">
-          {g ? <span className="text-sm font-black text-slate-700">{g.parts.join("/")}/{g.combined}</span>
-             : <span className="text-slate-200 text-xs">-</span>}
-        </td>
-      );
-    }
-    const cell = gradeMatrix[s.id]?.[col.section.id];
-    return (
-      <td key={col.key} className="text-center px-3 py-3">
-        {cell ? (
-          <div className="flex flex-col items-center">
-            <span className="text-sm font-black text-slate-700">{cell.grandTotal}</span>
-            <span className="text-[10px] font-black text-fuchsia-500">{cell.grade}</span>
-          </div>
-        ) : <span className="text-slate-200 text-xs">-</span>}
-      </td>
-    );
-  }
-  const cell = col.kind === "single" ? attendMatrix[s.id]?.[col.section.id] : undefined;
-return (
-  <td key={col.key} className="text-center px-3 py-3">
-    {cell && cell.total > 0 ? (
-      <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-black ${
-        cell.present / cell.total >= 0.8 ? "bg-emerald-50 text-emerald-600" : cell.present / cell.total >= 0.5 ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600"
-      }`}>
-        {cell.present}/{cell.total}
-      </span>
-    ) : <span className="text-slate-200 text-xs">-</span>}
-  </td>
-);
-})}
+                      {activeColumns.map(col => {
+                        const colors = COLUMN_COLORS[col.colorIndex % COLUMN_COLORS.length];
+
+                        if (tab === "attendance") {
+                          const cell = col.kind === "single" ? attendMatrix[s.id]?.[col.section.id] : undefined;
+                          return (
+                            <td key={col.key} className={`text-center px-3 py-3 ${colors.cell}`}>
+                              {cell && cell.total > 0 ? (
+                                <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-black ${
+                                  cell.present / cell.total >= 0.8 ? "bg-emerald-50 text-emerald-600" : cell.present / cell.total >= 0.5 ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600"
+                                }`}>
+                                  {cell.present}/{cell.total}
+                                </span>
+                              ) : <span className="text-slate-200 text-xs">-</span>}
+                            </td>
+                          );
+                        }
+
+                        // tab === "grades"
+                        if (col.kind === "groupCombined") {
+                          const g = groupCombinedCell(s.id, col.members);
+                          return (
+                            <td key={col.key} className={`text-center px-3 py-3 ${colors.cell}`}>
+                              {g ? (
+                                <span className="inline-flex px-2 py-1 rounded-full text-sm font-black bg-fuchsia-50 text-fuchsia-600">
+                                  {g.combined}
+                                </span>
+                              ) : <span className="text-slate-200 text-xs">-</span>}
+                            </td>
+                          );
+                        }
+
+                        // "single" or "groupMember"
+                        const cell = gradeMatrix[s.id]?.[col.section.id];
+                        return (
+                          <td key={col.key} className={`text-center px-3 py-3 ${colors.cell}`}>
+                            {cell ? (
+                              <div className="flex flex-col items-center">
+                                <span className="text-sm font-black text-slate-700">{cell.grandTotal}</span>
+                                {col.kind === "single" && (
+                                  <span className="text-[10px] font-black text-fuchsia-500">{cell.grade}</span>
+                                )}
+                              </div>
+                            ) : <span className="text-slate-200 text-xs">-</span>}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
