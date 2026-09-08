@@ -1955,11 +1955,43 @@ const [selectedSemester, setSelectedSemester] = useState<1 | 2>(
     midtermMax !== String((section as any).midterm_max_score ?? 0) ||
     finalMax !== String((section as any).final_max_score ?? 30) ||
     showSpecialScores !== (section.show_special_scores ?? true);
-    const [suggestedGroup, setSuggestedGroup] = useState<{id:string; subject_code:string; name_th:string}[]>([]);
-const [groupWeights, setGroupWeights] = useState<Record<string, string>>({});
+    const [groupName, setGroupName] = useState("");
+const [mainSubjectCode, setMainSubjectCode] = useState("");
+const [groupMembers, setGroupMembers] = useState <
+  { id: string; subject_code: string; name_th: string; score_group_weight_percent: number }[]
+>([]);
+const [suggestedGroup, setSuggestedGroup] = useState<{ id: string; subject_code: string; name_th: string }[]>([]);
+const [memberWeightEdits, setMemberWeightEdits] = useState<Record<string, string>>({});
+const [savingGroup, setSavingGroup] = useState(false);
+const [groupError, setGroupError] = useState<string | null>(null);
+
+useEffect(() => {
+  if (!scoreGroupCode) {
+    setGroupMembers([]);
+    setGroupName("");
+    setMainSubjectCode("");
+    return;
+  }
+  (async () => {
+    const { data: groupRow } = await supabase
+      .from("subject_score_groups")
+      .select("group_code, group_name, main_subject_code")
+      .eq("group_code", scoreGroupCode)
+      .maybeSingle();
+    setGroupName(groupRow?.group_name ?? "");
+    setMainSubjectCode(groupRow?.main_subject_code ?? "");
+
+    const { data: memberRows } = await supabase
+      .from("subjects")
+      .select("id, subject_code, name_th, score_group_weight_percent")
+      .eq("score_group_code", scoreGroupCode);
+    setGroupMembers((memberRows ?? []) as any);
+  })();
+}, [scoreGroupCode]);
 
 useEffect(() => {
   if (!subject?.subject_code || subject.subject_code.length < 6) return;
+  if (scoreGroupCode) { setSuggestedGroup([]); return; }
   const prefix = subject.subject_code.slice(0, 6);
   supabase
     .from("subjects")
@@ -1967,7 +1999,78 @@ useEffect(() => {
     .like("subject_code", `${prefix}%`)
     .neq("id", subject.id)
     .then(({ data }) => setSuggestedGroup(data ?? []));
-}, [subject?.subject_code, subject?.id]);
+}, [subject?.subject_code, subject?.id, scoreGroupCode]);
+
+const allGroupSubjects = useMemo(() => {
+  if (!subject) return [];
+  const others = groupMembers.filter(m => m.id !== subject.id);
+  return [
+    { id: subject.id, subject_code: subject.subject_code, name_th: subject.name_th,
+      score_group_weight_percent: (subject as any).score_group_weight_percent ?? 100 },
+    ...others,
+  ];
+}, [groupMembers, subject]);
+
+useEffect(() => {
+  const edits: Record<string, string> = {};
+  allGroupSubjects.forEach(s => { edits[s.id] = String(s.score_group_weight_percent ?? 100); });
+  setMemberWeightEdits(prev => ({ ...edits, ...prev })); // เก็บค่าที่ผู้ใช้เพิ่งพิมพ์ไว้ไม่ให้หาย
+}, [allGroupSubjects.map(s => s.id).join(",")]);
+
+const weightSum = allGroupSubjects.reduce((sum, s) => sum + (Number(memberWeightEdits[s.id]) || 0), 0);
+const weightSumInvalid = allGroupSubjects.length > 1 && Math.abs(weightSum - 100) > 0.01;
+
+async function saveScoreGroup(withSubjectIds?: string[]) {
+  if (!subject) return;
+  const code = scoreGroupCode.trim() || subject.subject_code.slice(0, 6);
+  const targets = withSubjectIds
+    ? allGroupSubjects.concat(
+        suggestedGroup.filter(s => withSubjectIds.includes(s.id))
+          .map(s => ({ id: s.id, subject_code: s.subject_code, name_th: s.name_th,
+                       score_group_weight_percent: Number(memberWeightEdits[s.id]) || 0 }))
+      )
+    : allGroupSubjects;
+
+  const sum = targets.reduce((s, t) => s + (Number(memberWeightEdits[t.id]) || 0), 0);
+  if (targets.length > 1 && Math.abs(sum - 100) > 0.01) {
+    setGroupError("% คะแนนรวมของทุกวิชาในกลุ่มต้องรวมกันได้ 100 พอดี");
+    return;
+  }
+
+  setSavingGroup(true);
+  setGroupError(null);
+  try {
+    await supabase.from("subject_score_groups").upsert({
+      group_code: code,
+      group_name: groupName.trim() || targets.map(s => s.name_th).join(" / "),
+      main_subject_code: mainSubjectCode.trim() || targets[0]?.subject_code || code,
+    });
+    await Promise.all(
+      targets.map(t =>
+        supabase.from("subjects")
+          .update({ score_group_code: code, score_group_weight_percent: Number(memberWeightEdits[t.id]) || 0 })
+          .eq("id", t.id)
+      )
+    );
+    setScoreGroupCode(code);
+    onSubjectSaved({ score_group_code: code, score_group_weight_percent: Number(memberWeightEdits[subject.id]) || 100 } as any);
+  } catch (e: any) {
+    setGroupError(e?.message ?? "บันทึกกลุ่มคะแนนไม่สำเร็จ");
+  } finally {
+    setSavingGroup(false);
+  }
+}
+
+async function removeFromGroup() {
+  if (!subject) return;
+  if (!window.confirm("นำวิชานี้ออกจากกลุ่มรวมคะแนนหรือไม่?")) return;
+  await supabase.from("subjects")
+    .update({ score_group_code: null, score_group_weight_percent: 100 })
+    .eq("id", subject.id);
+  setScoreGroupCode("");
+  setGroupMembers([]);
+  onSubjectSaved({ score_group_code: null } as any);
+}
 
     function applyRounding(percent: number, mode: "up" | "truncate"): number {
   return mode === "up" ? Math.ceil(percent) : Math.floor(percent);
@@ -2240,53 +2343,126 @@ useEffect(() => {
 </div>
         {/* รหัสกลุ่มรวมคะแนน */}
         <div>
-          <p className="text-m font-black text-slate-500 mb-1.5">
-            รหัสกลุ่มรวมคะแนน <span className="font-bold text-slate-600">(ไม่บังคับ)</span>
-          </p>
+  <p className="text-m font-black text-slate-500 mb-1.5">
+    รหัสกลุ่มรวมคะแนน <span className="font-bold text-slate-600">(ไม่บังคับ)</span>
+  </p>
+
+  {!scoreGroupCode ? (
+    suggestedGroup.length === 0 ? (
+      <p className="text-[18px] text-slate-600 font-bold">
+        ไม่พบวิชาอื่นที่รหัสขึ้นต้นตรงกัน ({subject?.subject_code?.slice(0, 6)}) — ถ้าต้องการรวมคะแนนกับวิชาอื่น ให้ไปตั้งค่าที่วิชานั้นแทน หรือกรอกรหัสกลุ่มด้วยตัวเองด้านล่าง
+      </p>
+    ) : (
+      <div className="rounded-xl border-2 border-dashed border-violet-200 bg-violet-50/40 p-3">
+        <p className="text-[18px] font-black text-violet-600 mb-2">
+          ⚡ พบวิชาอื่นที่รหัสขึ้นต้นเหมือนกัน ({subject?.subject_code?.slice(0, 6)}) — ต้องการรวมคะแนนด้วยกันไหม?
+        </p>
+        <div className="space-y-2 mb-2">
           <input
-            type="text"
-            disabled={readOnly}
-            value={scoreGroupCode}
-            onChange={e => setScoreGroupCode(e.target.value)}
-            placeholder="เช่น ART-P1 (ตั้งรหัสเดียวกันในวิชาที่ต้องการรวมคะแนน เช่น ดนตรี+ศิลปะ+นาฏศิลป์)"
-            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold disabled:bg-slate-50 disabled:text-slate-600"
+            value={groupName}
+            onChange={e => setGroupName(e.target.value)}
+            placeholder="ชื่อกลุ่มคะแนนรวม เช่น สุขศึกษาและพลศึกษา"
+            className="w-full border-2 border-slate-200 rounded-lg px-3 py-1.5 text-m font-bold bg-white"
           />
-          <p className="text-[18px] text-slate-600 font-bold mt-1.5">
-            วิชาที่ตั้งรหัสกลุ่มเดียวกัน ระบบจะนำคะแนนมารวมกันตอนออกเกรดในหน้า "คะแนนรวม"
-          </p>
-        </div>
-        {suggestedGroup.length > 0 && !readOnly && (
-  <div className="rounded-xl border-2 border-dashed border-violet-200 bg-violet-50/40 p-3 mt-2">
-    <p className="text-[18px] font-black text-violet-600 mb-2">
-      ⚡ พบวิชาอื่นที่รหัสขึ้นต้นเหมือนกัน ({subject!.subject_code.slice(0,6)}) — ต้องการรวมคะแนนด้วยกันไหม?
-    </p>
-    <div className="space-y-1.5">
-      {suggestedGroup.map(s => (
-        <div key={s.id} className="flex items-center gap-2 bg-white rounded-lg border border-violet-100 px-3 py-2">
-          <span className="text-m font-bold text-slate-600 flex-1">{s.subject_code} · {s.name_th}</span>
           <input
-            type="number" min={0} max={100} placeholder="น้ำหนัก %"
-            value={groupWeights[s.id] ?? ""}
-            onChange={e => setGroupWeights(prev => ({ ...prev, [s.id]: e.target.value }))}
-            className="w-20 text-center border-2 border-slate-200 rounded-lg py-1 text-m font-black"
+            value={mainSubjectCode}
+            onChange={e => setMainSubjectCode(e.target.value)}
+            placeholder="รหัสวิชาหลัก เช่น พ11101"
+            className="w-full border-2 border-slate-200 rounded-lg px-3 py-1.5 text-m font-bold bg-white"
           />
-          <span className="text-m font-bold text-slate-600">%</span>
         </div>
-      ))}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 bg-white rounded-lg border border-violet-100 px-3 py-2">
+            <span className="text-m font-bold text-slate-600 flex-1">
+              {subject?.subject_code} · {subject?.name_th} (วิชานี้)
+            </span>
+            <input
+              type="number" min={0} max={100} placeholder="%"
+              value={memberWeightEdits[subject?.id ?? ""] ?? ""}
+              onChange={e => setMemberWeightEdits(prev => ({ ...prev, [subject!.id]: e.target.value }))}
+              className="w-20 text-center border-2 border-slate-200 rounded-lg py-1 text-m font-black"
+            />
+            <span className="text-m font-bold text-slate-600">%</span>
+          </div>
+          {suggestedGroup.map(s => (
+            <div key={s.id} className="flex items-center gap-2 bg-white rounded-lg border border-violet-100 px-3 py-2">
+              <span className="text-m font-bold text-slate-600 flex-1">{s.subject_code} · {s.name_th}</span>
+              <input
+                type="number" min={0} max={100} placeholder="%"
+                value={memberWeightEdits[s.id] ?? ""}
+                onChange={e => setMemberWeightEdits(prev => ({ ...prev, [s.id]: e.target.value }))}
+                className="w-20 text-center border-2 border-slate-200 rounded-lg py-1 text-m font-black"
+              />
+              <span className="text-m font-bold text-slate-600">%</span>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => saveScoreGroup(suggestedGroup.map(s => s.id))}
+          disabled={savingGroup}
+          className="mt-2 w-full py-2 rounded-lg bg-violet-500 hover:bg-violet-600 disabled:opacity-50 text-white font-black text-m"
+        >
+          {savingGroup ? "กำลังบันทึก..." : "✅ ใช้กลุ่มนี้ + บันทึกน้ำหนักคะแนน"}
+        </button>
+      </div>
+    )
+  ) : (
+    <div className="rounded-xl border-2 border-fuchsia-200 bg-fuchsia-50/40 p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-m font-black text-fuchsia-600">รหัสกลุ่ม: {scoreGroupCode}</span>
+        <button type="button" onClick={removeFromGroup} className="text-m font-black text-red-500">🗑 นำออกจากกลุ่ม</button>
+      </div>
+      <div className="space-y-2 mb-2">
+        <input
+          value={groupName}
+          onChange={e => setGroupName(e.target.value)}
+          placeholder="ชื่อกลุ่มคะแนนรวม เช่น สุขศึกษาและพลศึกษา"
+          className="w-full border-2 border-fuchsia-200 rounded-lg px-3 py-1.5 text-m font-bold bg-white"
+        />
+        <input
+          value={mainSubjectCode}
+          onChange={e => setMainSubjectCode(e.target.value)}
+          placeholder="รหัสวิชาหลัก เช่น พ11101"
+          className="w-full border-2 border-fuchsia-200 rounded-lg px-3 py-1.5 text-m font-bold bg-white"
+        />
+      </div>
+      <div className="space-y-1.5">
+        {allGroupSubjects.map(s => (
+          <div key={s.id} className="flex items-center gap-2 bg-white rounded-lg border border-fuchsia-100 px-3 py-2">
+            <span className="text-m font-bold text-slate-600 flex-1">
+              {s.subject_code} · {s.name_th}{s.id === subject?.id ? " (วิชานี้)" : ""}
+            </span>
+            <input
+              type="number" min={0} max={100} placeholder="%"
+              value={memberWeightEdits[s.id] ?? ""}
+              onChange={e => setMemberWeightEdits(prev => ({ ...prev, [s.id]: e.target.value }))}
+              className="w-20 text-center border-2 border-fuchsia-200 rounded-lg py-1 text-m font-black"
+            />
+            <span className="text-m font-bold text-slate-600">%</span>
+          </div>
+        ))}
+      </div>
+      <p className={`text-[18px] font-black mt-1.5 ${weightSumInvalid ? "text-amber-500" : "text-emerald-500"}`}>
+        {weightSumInvalid ? `⚠️ รวมตอนนี้ = ${weightSum} (ต้องรวมให้ได้ 100 พอดี)` : "✅ รวม 100 พอดี"}
+      </p>
+      <button
+        type="button"
+        onClick={() => saveScoreGroup()}
+        disabled={savingGroup || weightSumInvalid}
+        className="mt-2 w-full py-2 rounded-lg bg-fuchsia-500 hover:bg-fuchsia-600 disabled:opacity-50 text-white font-black text-m"
+      >
+        {savingGroup ? "กำลังบันทึก..." : "💾 บันทึกกลุ่มคะแนนรวม"}
+      </button>
     </div>
-    <button
-      type="button"
-      onClick={() => {
-        const prefix = subject!.subject_code.slice(0, 6);
-        setScoreGroupCode(prefix); // ใช้ 6 หลักแรกเป็นรหัสกลุ่มอัตโนมัติ
-        // TODO: เรียก /api/subject-grades/group-settings เพื่อบันทึกน้ำหนักแต่ละวิชาด้วย
-      }}
-      className="mt-2 w-full py-2 rounded-lg bg-violet-500 hover:bg-violet-600 text-white font-black text-m"
-    >
-      ✅ ใช้กลุ่มนี้ + บันทึกน้ำหนักคะแนน
-    </button>
-  </div>
-)}
+  )}
+
+  {groupError && <p className="text-[18px] font-black text-red-500 mt-1.5">⚠️ {groupError}</p>}
+
+  <p className="text-[18px] text-slate-600 font-bold mt-1.5">
+    วิชาที่ตั้งรหัสกลุ่มเดียวกัน ระบบจะรวมคะแนนกันในหน้า ปพ.5 ให้ทุกห้อง/ทุกครูที่สอนวิชานี้อัตโนมัติ
+  </p>
+</div>
 
         <div className="h-px bg-slate-100" />
 

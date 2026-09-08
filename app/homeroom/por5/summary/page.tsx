@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import InsightsTool from "@/components/insights/InsightsTool";
@@ -15,7 +15,8 @@ type Student = { id: string; prefix?: string; first_name: string; last_name: str
 type SectionInfo = {
   id: string; subject_id: string; subject_code: string; subject_name: string;
   subject_type: "basic" | "additional";
-  hours_per_year: number | null;
+  hours_per_year: number | null; score_group_code?: string | null;
+  score_group_weight_percent?: number;
 };
 
 type GradeCell = { grandTotal: number; percentage: number; grade: string; totalMax: number };
@@ -36,6 +37,39 @@ export default function Por5SummaryPage() {
   const [gradeMatrix, setGradeMatrix] = useState<Record<string, Record<string, GradeCell>>>({});
   const [attendMatrix, setAttendMatrix] = useState<Record<string, Record<string, AttendCell>>>({});
   const [exporting, setExporting] = useState(false);
+  const [groupNames, setGroupNames] = useState<Record<string, string>>({});
+
+  type DisplayColumn =
+  | { key: string; kind: "single"; section: SectionInfo }
+  | { key: string; kind: "group"; groupCode: string; groupLabel: string; members: SectionInfo[] };
+
+const displayColumns = useMemo<DisplayColumn[]>(() => {
+  const seen = new Set<string>();
+  const cols: DisplayColumn[] = [];
+  sections.forEach(sec => {
+    if (sec.score_group_code) {
+      if (seen.has(sec.score_group_code)) return;
+      seen.add(sec.score_group_code);
+      const members = sections.filter(s => s.score_group_code === sec.score_group_code);
+      const label = `${members.map(m => m.subject_name).join("/")}${groupNames[sec.score_group_code] ? "/" + groupNames[sec.score_group_code] : ""}`;
+      cols.push({ key: `group-${sec.score_group_code}`, kind: "group", groupCode: sec.score_group_code, groupLabel: label, members });
+    } else {
+      cols.push({ key: sec.id, kind: "single", section: sec });
+    }
+  });
+  return cols;
+}, [sections, groupNames]);
+
+function groupCombinedCell(studentId: string, members: SectionInfo[]) {
+  const cells = members.map(m => gradeMatrix[studentId]?.[m.id]);
+  if (cells.some(c => !c)) return null;
+  const totalWeight = members.reduce((s, m) => s + (m.score_group_weight_percent ?? 0), 0) || 100;
+  const combined = members.reduce((sum, m, i) => {
+    const w = (m.score_group_weight_percent ?? 0) / totalWeight;
+    return sum + w * (cells[i]!.percentage);
+  }, 0);
+  return { parts: cells.map(c => c!.grandTotal), combined: Math.round(combined) };
+}
 
   useEffect(() => {
     (async () => {
@@ -68,7 +102,7 @@ export default function Por5SummaryPage() {
       // Por5SummaryPage.tsx
 const { data: sectionRows } = await supabase
   .from("subject_sections")
-  .select("id, subject_id, is_active, subjects(subject_code, name_th, subject_type, hours_per_year)")
+  .select("id, subject_id, is_active, subjects(subject_code, name_th, subject_type, hours_per_year, score_group_code, score_group_weight_percent)")
   .eq("classroom_id", selectedClassroom.classroom_id)
   .eq("is_active", true);
 
@@ -79,6 +113,8 @@ const secs: SectionInfo[] = (sectionRows ?? []).map((r: any) => ({
   subject_name: r.subjects?.name_th ?? "ไม่ทราบชื่อวิชา",
   subject_type: r.subjects?.subject_type ?? "basic",     // "basic" | "additional"
   hours_per_year: r.subjects?.hours_per_year ?? null,
+  score_group_code: r.subjects?.score_group_code ?? null,
+score_group_weight_percent: r.subjects?.score_group_weight_percent ?? 100,
 })).sort((a: SectionInfo, b: SectionInfo) => {
   if (a.subject_type !== b.subject_type) {
     return a.subject_type === "basic" ? -1 : 1;   // basic ก่อน additional
@@ -86,6 +122,18 @@ const secs: SectionInfo[] = (sectionRows ?? []).map((r: any) => ({
   return a.subject_name.localeCompare(b.subject_name, "th");
 });
 setSections(secs);
+
+// ใส่ต่อจาก setSections(secs);
+const groupCodes = Array.from(new Set(secs.map(s => s.score_group_code).filter(Boolean))) as string[];
+if (groupCodes.length > 0) {
+  const { data: groupRows } = await supabase
+    .from("subject_score_groups")
+    .select("group_code, group_name")
+    .in("group_code", groupCodes);
+  const map: Record<string, string> = {};
+  (groupRows ?? []).forEach((g: any) => { map[g.group_code] = g.group_name; });
+  setGroupNames(map);
+}
 
       const gMatrix: Record<string, Record<string, GradeCell>> = {};
       const aMatrix: Record<string, Record<string, AttendCell>> = {};
@@ -270,39 +318,60 @@ studentRows.forEach(s => {
                   </tr>
                 </thead>
                 <tbody>
+                  <tr className="bg-slate-50">
+  <th className="text-left text-[11px] font-black text-slate-500 px-5 py-3 sticky left-0 bg-slate-50 z-10">รายชื่อ</th>
+  {(tab === "grades" ? displayColumns : sections.map(s => ({ key: s.id, kind: "single" as const, section: s }))).map(col => (
+    <th key={col.key} className="px-3 py-3 text-center min-w-[110px]">
+      <p className="text-[11px] font-black text-slate-700 truncate max-w-[140px] mx-auto"
+         title={col.kind === "group" ? col.groupLabel : col.section.subject_name}>
+        {col.kind === "group" ? col.groupLabel : col.section.subject_name}
+      </p>
+      {col.kind === "single" && <p className="text-[9px] text-slate-300 font-bold">{col.section.subject_code}</p>}
+    </th>
+  ))}
+</tr>
                   {students.map(s => (
                     <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60">
                       <td className="px-5 py-3 sticky left-0 bg-white z-10">
                         <p className="text-xs font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name}</p>
                         <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                       </td>
-                      {sections.map(sec => {
-                        if (tab === "grades") {
-                          const cell = gradeMatrix[s.id]?.[sec.id];
-                          return (
-                            <td key={sec.id} className="text-center px-3 py-3">
-                              {cell ? (
-                                <div className="flex flex-col items-center">
-                                  <span className="text-sm font-black text-slate-700">{cell.grandTotal}</span>
-                                  <span className="text-[10px] font-black text-fuchsia-500">{cell.grade}</span>
-                                </div>
-                              ) : <span className="text-slate-200 text-xs">-</span>}
-                            </td>
-                          );
-                        }
-                        const cell = attendMatrix[s.id]?.[sec.id];
-                        return (
-                          <td key={sec.id} className="text-center px-3 py-3">
-                            {cell && cell.total > 0 ? (
-                              <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-black ${
-                                cell.present / cell.total >= 0.8 ? "bg-emerald-50 text-emerald-600" : cell.present / cell.total >= 0.5 ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600"
-                              }`}>
-                                {cell.present}/{cell.total}
-                              </span>
-                            ) : <span className="text-slate-200 text-xs">-</span>}
-                          </td>
-                        );
-                      })}
+                      {(tab === "grades" ? displayColumns : sections.map(sec => ({ key: sec.id, kind: "single" as const, section: sec }))).map(col => {
+  if (tab === "grades") {
+    if (col.kind === "group") {
+      const g = groupCombinedCell(s.id, col.members);
+      return (
+        <td key={col.key} className="text-center px-3 py-3">
+          {g ? <span className="text-sm font-black text-slate-700">{g.parts.join("/")}/{g.combined}</span>
+             : <span className="text-slate-200 text-xs">-</span>}
+        </td>
+      );
+    }
+    const cell = gradeMatrix[s.id]?.[col.section.id];
+    return (
+      <td key={col.key} className="text-center px-3 py-3">
+        {cell ? (
+          <div className="flex flex-col items-center">
+            <span className="text-sm font-black text-slate-700">{cell.grandTotal}</span>
+            <span className="text-[10px] font-black text-fuchsia-500">{cell.grade}</span>
+          </div>
+        ) : <span className="text-slate-200 text-xs">-</span>}
+      </td>
+    );
+  }
+  const cell = col.kind === "single" ? attendMatrix[s.id]?.[col.section.id] : undefined;
+return (
+  <td key={col.key} className="text-center px-3 py-3">
+    {cell && cell.total > 0 ? (
+      <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-black ${
+        cell.present / cell.total >= 0.8 ? "bg-emerald-50 text-emerald-600" : cell.present / cell.total >= 0.5 ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600"
+      }`}>
+        {cell.present}/{cell.total}
+      </span>
+    ) : <span className="text-slate-200 text-xs">-</span>}
+  </td>
+);
+})}
                     </tr>
                   ))}
                 </tbody>

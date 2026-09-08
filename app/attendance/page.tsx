@@ -701,7 +701,7 @@ const todayHoliday = isHoliday(date, holidayMap);
     {opt.label}
   </button>
 ))}
-{lockedMap[s.id] && <span className="text-[10px] text-rose-500 ml-1">🔒 สแกนประตู</span>}
+{lockedMap[s.id] && <span className="text-[10px] text-rose-500 ml-1">🔒 จับสาย</span>}
                       </div>
                     </div>
                   );
