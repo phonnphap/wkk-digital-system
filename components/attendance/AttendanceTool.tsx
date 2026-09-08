@@ -86,6 +86,7 @@ export default function AttendanceTool({
   const [swapping, setSwapping] = useState(false);
   const [swapError, setSwapError] = useState("");
   const [reschedules, setReschedules] = useState<ClassReschedule[]>([]);
+  const [showNoReferenceWarning, setShowNoReferenceWarning] = useState(false);
 
   useEffect(() => {
   if (!date) return;
@@ -151,11 +152,22 @@ export default function AttendanceTool({
 
   function pullFromReference() {
     if (!referenceMap) return;
+
+    // เช็กว่ามีข้อมูลอ้างอิงของนักเรียนในคาบนี้จริงหรือไม่
+    const hasAnyReference = students.some(s => referenceMap[s.id]);
+    if (!hasAnyReference) {
+      setShowNoReferenceWarning(true);
+      return;
+    }
+
     setStatusMap(prev => {
       const next = { ...prev };
       students.forEach(s => {
         const ref = referenceMap[s.id];
-        if (ref && !next[s.id]) next[s.id] = ref.status; // ไม่ทับคนที่เช็กไปแล้ว
+        if (ref && !next[s.id]) {
+          // ถ้าโฮมรูมมาสาย ให้ถือว่ามา (present) ในการเช็กชื่อคาบนี้
+          next[s.id] = ref.status === "late" ? "present" : ref.status;
+        }
       });
       return next;
     });
@@ -509,6 +521,23 @@ export default function AttendanceTool({
           {saving ? "⏳ กำลังบันทึก..." : saved ? "✅ บันทึกแล้ว — กดซ้ำเพื่ออัปเดต" : "✏️ บันทึก"}
         </button>
       </div>
+      {showNoReferenceWarning && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+    <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 text-center">
+      <p className="text-3xl mb-2">⚠️</p>
+      <p className="font-black text-slate-800 text-lg mb-1">ยังไม่มีข้อมูลจากโฮมรูม</p>
+      <p className="text-slate-500 text-m font-bold mb-5">
+        ครูประจำชั้นยังไม่ได้เช็กชื่อคาบโฮมรูมของวันนี้ กรุณาเช็กชื่อคาบนี้ด้วยตนเอง หรือรอครูประจำชั้นเช็กชื่อก่อน
+      </p>
+      <button
+        onClick={() => setShowNoReferenceWarning(false)}
+        className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-m"
+      >
+        รับทราบ
+      </button>
+    </div>
+  </div>
+)}
     </div>
   );
 }

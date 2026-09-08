@@ -253,6 +253,7 @@ export default function GradeOverviewTool({
   midtermMaxScore = 0,                         // ★ เพิ่ม
   finalMaxScore = 30, 
   currentStudentId, 
+  showSpecialScores = true
 }: {
   sectionId: string;
   subjectTitle: string;
@@ -272,6 +273,7 @@ export default function GradeOverviewTool({
   midtermMaxScore?: number;
   finalMaxScore?: number;
   currentStudentId?: string;
+  showSpecialScores?: boolean;
 }) {
   const [tab, setTab] = useState<ViewTab>("table");
   const [loading, setLoading] = useState(true);
@@ -279,6 +281,7 @@ export default function GradeOverviewTool({
   const [exporting, setExporting] = useState(false);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
+  const effectivePresets = showSpecialScores ? presets : [];
   const [criteria, setCriteria] = useState<Criterion[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [scoreEvents, setScoreEvents] = useState<ScoreEvent[]>([]);
@@ -462,7 +465,7 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
     const onTimeRate = knownOnTimeCount > 0 ? (onTimeCount / knownOnTimeCount) * 100 : null;
 
     const presetTotals: Record<string, number> = {};
-    presets.forEach(p => { presetTotals[p.id] = 0; });
+    effectivePresets.forEach(p => { presetTotals[p.id] = 0; });
     scoreEvents
       .filter(ev => ev.student_id === s.id && presetTotals[ev.preset_id] !== undefined)
       .forEach(ev => { presetTotals[ev.preset_id] += ev.points; });
@@ -530,7 +533,7 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
       displayTotal, displayMax, // ★ เพิ่ม
     };
   });
-}, [students, submissions, assignments, presets, scoreEvents, criteria, totalMaxScore,
+}, [students, submissions, assignments, effectivePresets, scoreEvents, criteria, totalMaxScore,
     attendanceMap, gradingMode, passThresholdPercent, examScores, formativeMaxScore, midtermMaxScore, finalMaxScore, useMidterm]); // ★ เพิ่ม dependency
   // ★ ถ้าเป็นมุมมองนักเรียน กรองให้เหลือแถวตัวเองเท่านั้น
 const visibleRows = useMemo(() => {
@@ -996,11 +999,11 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           subjectTeacherName={subjectTeacherName}
           readOnly={effectiveReadOnly}
           gradingMode={gradingMode}
+          showSpecialScores={showSpecialScores}
           onClose={() => setReportStudent(null)}
           onToast={showToast}
         />
       )}
-
       {showGradeSetting && !readOnly && (
         <GradeSettingModal
           initialCriteria={criteria}
@@ -1015,7 +1018,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       <div className="flex items-start justify-between flex-wrap gap-3 print:hidden">
         <div>
           <h2 className="font-black text-slate-800 text-xl">คะแนนรวม</h2>
-          <p className="text-slate-400 text-sm font-bold">
+          <p className="text-slate-400 text-m font-bold">
             {effectiveReadOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที · กด Enter หรือลูกศร ↑↓←→ เพื่อบันทึกและย้ายไปช่องข้างเคียง · วางคะแนนจาก Excel ได้ทีละหลายช่อง · ลากหัวตารางชิ้นงานเพื่อสลับลำดับได้"}
           </p>
         </div>
@@ -1061,7 +1064,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
       ) : tab === "table" || currentStudentId ? (
   <GradeTable rows={visibleRows}
   assignments={orderedAssignments}
-  presets={presets}
+  presets={effectivePresets}
   totalMaxScore={totalMaxScore}
   onOpenReport={s => setReportStudent(s)}
   onAdjustPreset={handleAdjustPreset}
@@ -1298,10 +1301,10 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     </tr>
   )}
   <tr className="bg-gradient-to-r from-indigo-50 via-sky-50 to-fuchsia-50">
-    <th className="text-left text-sm font-black text-slate-600 px-5 py-3 sticky left-0 top-0 bg-gradient-to-r from-indigo-50 to-sky-50 z-30">
+    <th className="text-left text-m font-black text-slate-600 px-5 py-3 sticky left-0 top-0 bg-gradient-to-r from-indigo-50 to-sky-50 z-30">
       ชื่อ-สกุล
     </th>
-    <th className="px-3 py-3 text-center text-sm font-black text-slate-400 bg-sky-50">Report</th>
+    <th className="px-3 py-3 text-center text-m font-black text-slate-400 bg-sky-50">Report</th>
     {assignments.map(a => (
       // ★ column header ลากสลับลำดับได้ (ไม่ readOnly เท่านั้น)
 <th
@@ -1324,7 +1327,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     <span className="absolute top-1 left-1.5 text-indigo-400 text-sm leading-none select-none">⠿</span>
   )}
   <p className="text-sm font-black text-indigo-700 truncate max-w-[110px] mx-auto" title={a.title}>{a.title}</p>
-  <p className="text-[12px] text-indigo-600 font-bold">
+  <p className="text-[18px] text-indigo-600 font-bold">
     {isWeighted(a) ? `กรอกเต็ม ${a.max_score} → นน. ${a.weight_percent}%` : `เต็ม ${a.max_score} คะแนน`}
   </p>
 </th>
@@ -1332,21 +1335,21 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     {presets.map(p => (
   <th key={p.id} className="px-3 py-3 text-center min-w-[100px] bg-fuchsia-50/70">
     <p className="text-sm font-black text-fuchsia-600">{p.emoji} {p.label}</p>
-    <p className="text-[12px] text-fuchsia-300 font-bold">คะแนนพิเศษ</p>
+    <p className="text-[18px] text-fuchsia-300 font-bold">คะแนนพิเศษ</p>
   </th>
 ))}
 
 {gradingMode === "numeric" && (
   <>
     <th className="px-3 py-3 text-center min-w-[90px] bg-indigo-50/70">
-      <p className="text-sm font-black text-indigo-700">คะแนนเก็บ</p>
-      <p className="text-[12px] text-indigo-300 font-bold">เต็ม {formativeMaxScore}</p>
+      <p className="text-m font-black text-indigo-700">คะแนนเก็บ</p>
+      <p className="text-[18px] text-indigo-300 font-bold">เต็ม {formativeMaxScore}</p>
     </th>
     {useMidterm && (
   <th className="px-3 py-3 text-center min-w-[90px] bg-teal-50/70">
-    <p className="text-sm font-black text-teal-700">กลางภาค</p>
+    <p className="text-m font-black text-teal-700">กลางภาค</p>
     {readOnly ? (
-      <p className="text-[12px] text-teal-300 font-bold">
+      <p className="text-[18px] text-teal-300 font-bold">
         {rawMidtermMax ? `กรอกเต็ม ${rawMidtermMax} → นน. ${midtermMaxScore}` : `เต็ม ${midtermMaxScore}`}
       </p>
     ) : (
@@ -1356,16 +1359,16 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
         placeholder={`เต็ม ${midtermMaxScore}`}
         onChange={e => onChangeRawMidtermMax(e.target.value === "" ? null : Number(e.target.value))}
         onBlur={() => onSaveExamConfig("midterm", rawMidtermMax)}
-        className="w-14 text-center text-[12px] border-b border-teal-300 bg-transparent focus:outline-none"
+        className="w-14 text-center text-[18px] border-b border-teal-300 bg-transparent focus:outline-none"
         title="ใส่คะแนนเต็มดิบของข้อสอบจริง (ถ้าเต็มไม่เท่ากับที่ตั้งไว้)"
       />
     )}
   </th>
 )}
 <th className="px-3 py-3 text-center min-w-[90px] bg-orange-50/70">
-  <p className="text-sm font-black text-orange-700">ปลายภาค</p>
+  <p className="text-m font-black text-orange-700">ปลายภาค</p>
   {readOnly ? (
-    <p className="text-[12px] text-orange-300 font-bold">
+    <p className="text-[18px] text-orange-300 font-bold">
       {rawFinalMax ? `กรอกเต็ม ${rawFinalMax} → นน. ${finalMaxScore}` : `เต็ม ${finalMaxScore}`}
     </p>
   ) : (
@@ -1375,7 +1378,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
       placeholder={`เต็ม ${finalMaxScore}`}
       onChange={e => onChangeRawFinalMax(e.target.value === "" ? null : Number(e.target.value))}
       onBlur={() => onSaveExamConfig("final", rawFinalMax)}
-      className="w-14 text-center text-[12px] border-b border-orange-300 bg-transparent focus:outline-none"
+      className="w-14 text-center text-[18px] border-b border-orange-300 bg-transparent focus:outline-none"
       title="ใส่คะแนนเต็มดิบของข้อสอบจริง (ถ้าเต็มไม่เท่ากับที่ตั้งไว้)"
     />
   )}
@@ -1385,7 +1388,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 {/* ★ ลำดับคอลัมน์ท้ายตาราง: รวม -> ระดับผลการเรียน/สถานะ -> ส่งตรงเวลา (ย้ายระดับผลการเรียนไปไว้หลังคอลัมน์รวมตามที่ต้องการ) */}
 <th className="px-3 py-3 text-center min-w-[100px] bg-emerald-50/70">
   <p className="text-sm font-black text-emerald-700">รวม</p>
-  <p className="text-[12px] text-emerald-400 font-bold">งาน+พิเศษ{gradingMode === "numeric" ? "+สอบ" : ""}</p>
+  <p className="text-[18px] text-emerald-400 font-bold">งาน+พิเศษ{gradingMode === "numeric" ? "+สอบ" : ""}</p>
 </th>
 <th className="px-3 py-3 text-center min-w-[70px] bg-fuchsia-50/70">
   <p className="text-sm font-black text-fuchsia-700">
@@ -1413,8 +1416,8 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
                       </div>
                     )}
                     <div>
-                      <p className="text-sm font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
-                      <p className="text-sm text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
+                      <p className="text-m font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
+                      <p className="text-m text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                     </div>
                   </div>
                 </td>
@@ -2261,7 +2264,7 @@ function GradeSettingModal({
 
 function StudentReportModal({
   row, assignments, sectionId, currentUserId, attendance, subjectTitle, subjectCode,
-  academicYearLabel, classroomLabel, homeroomTeacherName, subjectTeacherName, readOnly, onClose, gradingMode = "numeric", onToast,
+  academicYearLabel, classroomLabel, homeroomTeacherName, subjectTeacherName, readOnly, onClose, gradingMode = "numeric", onToast,showSpecialScores = true,
 }: {
   row: ReturnType<typeof buildRowsType>[number];
   assignments: Assignment[];
@@ -2274,6 +2277,7 @@ function StudentReportModal({
   classroomLabel?: string;
   homeroomTeacherName?: string;
   subjectTeacherName?: string;
+  showSpecialScores?: boolean;
   readOnly?: boolean;
   onClose: () => void;
   gradingMode?: "numeric" | "pass_fail";
@@ -2410,10 +2414,12 @@ function StudentReportModal({
           </div>
         </div>
 
-        <div className="mb-5">
-          <p className="text-sm font-black text-slate-600 mb-2">⭐ คะแนนพิเศษรวม</p>
-          <InfoBox label="คะแนนพิเศษที่ได้ (บวก/ลบ)" value={`${row.specialTotal > 0 ? "+" : ""}${row.specialTotal} คะแนน`} />
-        </div>
+                {showSpecialScores && (
+          <div className="mb-5">
+            <p className="text-sm font-black text-slate-600 mb-2">⭐ คะแนนพิเศษรวม</p>
+            <InfoBox label="คะแนนพิเศษที่ได้ (บวก/ลบ)" value={`${row.specialTotal > 0 ? "+" : ""}${row.specialTotal} คะแนน`} />
+          </div>
+        )}
 
         <div>
           <p className="text-sm font-black text-slate-600 mb-2 flex items-center justify-between print:hidden">
