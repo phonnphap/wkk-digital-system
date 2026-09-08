@@ -13,7 +13,7 @@ type SectionInfo = {
   id: string; subject_id: string; subject_code: string; subject_name: string;
   subject_type?: string;   // "พื้นฐาน" | "เพิ่มเติม"  -- TODO: มาจาก subjects.subject_type ?
   credit_hours?: number;   // หน่วยกิต (ม.)  -- TODO: subjects.credit_hours
-  period_hours?: number;   // ชั่วโมง/สัปดาห์ (ป.) -- TODO: subjects.period_hours
+  hours_per_year: number | null;
 };
 type GradeCell = { grandTotal: number; percentage: number; grade: string };
 type AttendCell = { present: number; total: number };
@@ -59,6 +59,10 @@ export default function Vp4Report({
       setOverallScores(results);
     })();
   }, [classroomLevel, students]);
+  function extractGradeLevel(roomName: string): string {
+  const m = roomName.match(/^(\d+)/); // "1/7" -> "1"
+  return m ? m[1] : roomName;
+}
 
   function calcGpaAndAvgPercent(studentId: string) {
     let totalGrandScore = 0, totalMaxPercent = 0, gradeSum = 0, gradeCount = 0;
@@ -101,18 +105,18 @@ export default function Vp4Report({
         return (
           <div key={s.id} className="vp4-page bg-white p-8 mb-6 print:mb-0 print:break-after-page border border-slate-100 print:border-0">
             <div className="text-center mb-2">
-              {/* TODO: ใส่โลโก้โรงเรียนจริง */}
-              <p className="font-bold">แบบรายงานคะแนน{classroomLevel === "primary" ? "ประจำตัวนักเรียน" : "ระหว่างเรียนและเวลาเรียนประจำตัวนักเรียน"}</p>
-              <p className="text-sm">{schoolName} อำเภอ{districtName} จังหวัด{provinceName}</p>
-            </div>
+  <img src="/school-logo.png" alt="ตราโรงเรียน" className="h-16 w-16 mx-auto mb-1 object-contain" />
+  <p className="font-bold">แบบรายงานคะแนนประจำตัวนักเรียน</p>
+  <p className="text-sm">{schoolName} อำเภอ{districtName} จังหวัด{provinceName}</p>
+</div>
 
-            <div className="flex justify-between text-sm mb-3">
-              {classroomLevel === "primary" ? (
-                <span>ชั้นประถมศึกษาปีที่ {classroomLabel} ปีการศึกษา {academicYear}</span>
-              ) : (
-                <span>ชั้น ม.{classroomLabel} ภาคเรียนที่ {semester} ปีการศึกษา {academicYear}</span>
-              )}
-            </div>
+<div className="text-center text-sm mb-3">
+  {classroomLevel === "primary" ? (
+    <span>ชั้นประถมศึกษาปีที่ {extractGradeLevel(classroomLabel)} ปีการศึกษา {academicYear}</span>
+  ) : (
+    <span>ชั้น ม.{extractGradeLevel(classroomLabel)} ภาคเรียนที่ {semester} ปีการศึกษา {academicYear}</span>
+  )}
+</div>
 
             <div className="flex flex-wrap gap-4 text-sm mb-3">
               <span>ชื่อ {s.prefix}{s.first_name} {s.last_name}</span>
@@ -156,7 +160,7 @@ export default function Vp4Report({
                       <td className="border p-1">{sec.subject_name}</td>
                       <td className="border p-1 text-center">{sec.subject_type ?? "-"}</td>
                       <td className="border p-1 text-center">
-                        {classroomLevel === "primary" ? (sec.period_hours ?? "-") : (sec.credit_hours ?? "-")}
+                        {classroomLevel === "primary" ? (sec.hours_per_year ?? "-") : (sec.credit_hours ?? "-")}
                       </td>
                       <td className="border p-1 text-center">100</td>
                       <td className="border p-1 text-center">

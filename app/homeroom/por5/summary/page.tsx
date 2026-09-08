@@ -12,7 +12,11 @@ const supabase = createClient();
 
 type Classroom = { classroom_id: string; room_name: string };
 type Student = { id: string; prefix?: string; first_name: string; last_name: string; nick_name?: string; seat_number: number; avatar_url?: string };
-type SectionInfo = { id: string; subject_id: string; subject_code: string; subject_name: string };
+type SectionInfo = {
+  id: string; subject_id: string; subject_code: string; subject_name: string;
+  subject_type: "basic" | "additional";
+  hours_per_year: number | null;
+};
 
 type GradeCell = { grandTotal: number; percentage: number; grade: string };
 type AttendCell = { present: number; total: number };
@@ -54,26 +58,34 @@ export default function Por5SummaryPage() {
       setLoadingData(true);
 
       const { data: studentsData } = await supabase
-        .from("students")
-        .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url")
-        .eq("classroom_id", selectedClassroom.classroom_id)
-        .order("seat_number");
+  .from("students")
+  .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url, student_code")
+  .eq("classroom_id", selectedClassroom.classroom_id)
+  .order("seat_number");
       const studentRows = (studentsData ?? []) as Student[];
       setStudents(studentRows);
 
-      const { data: sectionRows } = await supabase
-        .from("subject_sections")
-        .select("id, subject_id, is_active, subjects(subject_code, name_th)")
-        .eq("classroom_id", selectedClassroom.classroom_id)
-        .eq("is_active", true);
+      // Por5SummaryPage.tsx
+const { data: sectionRows } = await supabase
+  .from("subject_sections")
+  .select("id, subject_id, is_active, subjects(subject_code, name_th, subject_type, hours_per_year)")
+  .eq("classroom_id", selectedClassroom.classroom_id)
+  .eq("is_active", true);
 
-      const secs: SectionInfo[] = (sectionRows ?? []).map((r: any) => ({
-        id: r.id,
-        subject_id: r.subject_id,
-        subject_code: r.subjects?.subject_code ?? "",
-        subject_name: r.subjects?.name_th ?? "ไม่ทราบชื่อวิชา",
-      })).sort((a: SectionInfo, b: SectionInfo) => a.subject_name.localeCompare(b.subject_name, "th"));
-      setSections(secs);
+const secs: SectionInfo[] = (sectionRows ?? []).map((r: any) => ({
+  id: r.id,
+  subject_id: r.subject_id,
+  subject_code: r.subjects?.subject_code ?? "",
+  subject_name: r.subjects?.name_th ?? "ไม่ทราบชื่อวิชา",
+  subject_type: r.subjects?.subject_type ?? "basic",     // "basic" | "additional"
+  hours_per_year: r.subjects?.hours_per_year ?? null,
+})).sort((a: SectionInfo, b: SectionInfo) => {
+  if (a.subject_type !== b.subject_type) {
+    return a.subject_type === "basic" ? -1 : 1;   // basic ก่อน additional
+  }
+  return a.subject_name.localeCompare(b.subject_name, "th");
+});
+setSections(secs);
 
       const gMatrix: Record<string, Record<string, GradeCell>> = {};
       const aMatrix: Record<string, Record<string, AttendCell>> = {};
@@ -174,11 +186,6 @@ export default function Por5SummaryPage() {
 
   return (
     <div className="w-full px-4 sm:px-6 py-6 lg:px-8">
-      <div className="flex items-center gap-3 mb-2">
-        <button onClick={() => router.push("/homeroom/por5")} className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600">←</button>
-        <h1 className="text-lg font-bold text-slate-800">ปพ.5 — สรุปผล</h1>
-      </div>
-
       {!selectedClassroom ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
           {classrooms.map(c => (
