@@ -511,16 +511,15 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
       ? (useMidterm && midtermRaw !== null ? midtermMaxScore : 0) + (finalRaw !== null ? finalMaxScore : 0)
       : 0;
 
+        // ★ แก้บั๊ก: ต้องใช้ "scaledFormative" (ตัวที่สเกลแล้ว เต็ม 70) แทน grandTotal ดิบ
+    // และใช้ "formativeMaxScore" (70) แทน totalMaxScore ดิบ (39) เพื่อให้ตรงกับคอลัมน์คะแนนเก็บ
     const displayTotal = usesComponentGrading
-      ? grandTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0) // งาน+พิเศษ (grandTotal) + สอบจริงที่ได้ (เป็น 0 ถ้ายังไม่กรอกอยู่แล้ว)
-      : grandTotal; // งาน+พิเศษ
+      ? scaledFormative + specialTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0)
+      : grandTotal;
 
-    // ★ แก้: ตัวเต็ม (displayMax) ไม่นับรวมคะแนนพิเศษ (specialTotal) เข้าไปด้วย
-    // เดิมบวก specialTotal เข้าไปในตัวส่วน ทำให้เต็มขยับตามคะแนนพิเศษที่ได้ (เช่น 48 -> 50)
-    // ตอนนี้ตัวเต็มจะคงที่ตามคะแนนเต็มจริงของงาน/สอบเท่านั้น ส่วนคะแนนพิเศษยังถูกบวกอยู่ในตัวเศษ (displayTotal) ตามปกติ
     const displayMax = usesComponentGrading
-      ? totalMaxScore + examMaxTotal   // เต็มงาน + เต็มสอบเฉพาะที่มีคะแนนแล้ว (ไม่รวมคะแนนพิเศษ)
-      : totalMaxScore;                  // เต็มงาน (ไม่รวมคะแนนพิเศษ)     
+      ? formativeMaxScore + examMaxTotal   // เต็มคะแนนเก็บ (70) + เต็มสอบเฉพาะที่มีคะแนนแล้ว
+      : totalMaxScore;
 
     return {
       student: s, subMap, presetTotals, assignmentTotal, submittedCount,
@@ -930,7 +929,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
                   <p className="text-sm font-black text-slate-700 truncate">
                     {s.prefix}{s.first_name} {s.last_name}
                   </p>
-                  <p className="text-[14px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
+                  <p className="text-sm text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                 </div>
                 <span className="px-3 py-1 rounded-full bg-gradient-to-r from-violet-500 to-indigo-400 text-white text-sm font-black shrink-0">
                   {combinedPct.toFixed(1)}%
@@ -1415,7 +1414,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
                     )}
                     <div>
                       <p className="text-sm font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name} ({s.nick_name})</p>
-                      <p className="text-[14x] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
+                      <p className="text-sm text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
                     </div>
                   </div>
                 </td>
