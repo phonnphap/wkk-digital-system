@@ -17,6 +17,10 @@ type SectionInfo = {
   subject_type: "basic" | "additional";
   hours_per_year: number | null; score_group_code?: string | null;
   score_group_weight_percent?: number;
+ gradingMode?: "numeric" | "pass_fail";
+ formativeMaxScore?: number;
+ midtermMaxScore?: number;
+ finalMaxScore?: number;
 };
 
 type GradeCell = { grandTotal: number; percentage: number; grade: string; totalMax: number };
@@ -129,15 +133,15 @@ export default function Por5SummaryPage() {
   const activeColumns = tab === "attendance" ? attendanceColumns : gradeColumns;
 
   function groupCombinedCell(studentId: string, members: SectionInfo[]) {
-    const cells = members.map(m => gradeMatrix[studentId]?.[m.id]);
-    if (cells.some(c => !c)) return null;
-    const totalWeight = members.reduce((s, m) => s + (m.score_group_weight_percent ?? 0), 0) || 100;
-    const combined = members.reduce((sum, m, i) => {
-      const w = (m.score_group_weight_percent ?? 0) / totalWeight;
-      return sum + w * (cells[i]!.percentage);
-    }, 0);
-    return { parts: cells.map(c => c!.grandTotal), combined: Math.round(combined) };
-  }
+  const cells = members.map(m => gradeMatrix[studentId]?.[m.id]);
+  if (cells.some(c => !c)) return null;
+  const totalWeight = members.reduce((s, m) => s + (m.score_group_weight_percent ?? 0), 0) || 100;
+  const combined = members.reduce((sum, m, i) => {
+    const w = (m.score_group_weight_percent ?? 0) / totalWeight;
+   return sum + w * (cells[i]!.grandTotal);   // ★ ใช้คะแนนดิบ (รวม งาน+พิเศษ+สอบ) แทน %
+  }, 0);
+ return { parts: cells.map(c => c!.grandTotal), combined: Number(combined.toFixed(2)) };  // ★ เก็บทศนิยม เช่น 7.5
+}
 
   useEffect(() => {
     (async () => {
@@ -169,11 +173,10 @@ export default function Por5SummaryPage() {
 
       // Por5SummaryPage.tsx
       const { data: sectionRows } = await supabase
-        .from("subject_sections")
-        .select("id, subject_id, is_active, subjects(subject_code, name_th, subject_type, hours_per_year, score_group_code, score_group_weight_percent)")
- .select("id, subject_id, is_active, formative_max_score, midterm_max_score, final_max_score, subjects(subject_code, name_th, subject_type, hours_per_year, score_group_code, score_group_weight_percent, grading_mode)")
-        .eq("classroom_id", selectedClassroom.classroom_id)
-        .eq("is_active", true);
+  .from("subject_sections")
+  .select("id, subject_id, is_active, formative_max_score, midterm_max_score, final_max_score, subjects(subject_code, name_th, subject_type, hours_per_year, score_group_code, score_group_weight_percent, grading_mode)")
+  .eq("classroom_id", selectedClassroom.classroom_id)
+  .eq("is_active", true);
 
       const secs: SectionInfo[] = (sectionRows ?? []).map((r: any) => {
         const subjectCode = r.subjects?.subject_code ?? "";
@@ -185,9 +188,12 @@ export default function Por5SummaryPage() {
           subject_name: r.subjects?.name_th ?? "ไม่ทราบชื่อวิชา",
           subject_type: r.subjects?.subject_type ?? "basic", // "basic" | "additional"
           hours_per_year: r.subjects?.hours_per_year ?? null,
-          // กิจกรรมพัฒนาผู้เรียนไม่เข้ากลุ่มรวมคะแนนกับวิชาอื่น
           score_group_code: isActivity ? null : (r.subjects?.score_group_code ?? null),
           score_group_weight_percent: r.subjects?.score_group_weight_percent ?? 100,
+             gradingMode: r.subjects?.grading_mode ?? "numeric",
+   formativeMaxScore: r.formative_max_score ?? 70,
+   midtermMaxScore: r.midterm_max_score ?? 0,
+   finalMaxScore: r.final_max_score ?? 30,
         };
       }).sort((a: SectionInfo, b: SectionInfo) => {
         const ra = subjectRank(a);
@@ -214,36 +220,88 @@ export default function Por5SummaryPage() {
       studentRows.forEach(s => { gMatrix[s.id] = {}; aMatrix[s.id] = {}; });
 
       await Promise.all(secs.map(async (sec) => {
-        try {
-          const res = await fetch(`/api/subject-grades/summary?subject_section_id=${sec.id}`);
-          const json = await res.json();
-          const assignments = json.assignments ?? [];
-          const submissions = json.submissions ?? [];
-          const scoreEvents = json.scoreEvents ?? [];
-          const criteria = json.criteria ?? [];
-           const examScores = json.examScores ?? [];
- const rawMidtermMax = json.rawMidtermMaxScore ?? null;
- const rawFinalMax = json.rawFinalMaxScore ?? null;
-          const totalMax = assignments.reduce((s: number, a: any) => s + (a.max_score ?? 0), 0);
-          const sortedCriteria = [...criteria].sort((a: any, b: any) => b.min_percent - a.min_percent);
+  try {
+    const res = await fetch(`/api/subject-grades/summary?subject_section_id=${sec.id}`);
+    const json = await res.json();
+    const assignments = json.assignments ?? [];
+    const submissions = json.submissions ?? [];
+    const scoreEvents = json.scoreEvents ?? [];
+    const criteria = json.criteria ?? [];
+    const examScores = json.examScores ?? [];              // ★ เพิ่ม
+    const rawMidtermMax = json.rawMidtermMaxScore ?? null;  // ★ เพิ่ม
+    const rawFinalMax = json.rawFinalMaxScore ?? null;      // ★ เพิ่ม
 
-          studentRows.forEach(s => {
-            const assignmentTotal = assignments.reduce((sum: number, a: any) => {
-              const sub = submissions.find((x: any) => x.assignment_id === a.id && x.student_id === s.id);
-              return sum + (sub?.score ?? 0);
-            }, 0);
-            const specialTotal = scoreEvents
-              .filter((ev: any) => ev.student_id === s.id)
-              .reduce((sum: number, ev: any) => sum + ev.points, 0);
-            const grandTotal = assignmentTotal + specialTotal;
-            const percentage = totalMax > 0 ? (assignmentTotal / totalMax) * 100 : 0;
-            let grade = "-";
-            for (const c of sortedCriteria) {
-              if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
-            }
-            gMatrix[s.id][sec.id] = { grandTotal, percentage, grade, totalMax };
-          });
-        } catch { /* ข้ามวิชานี้ถ้าดึงข้อมูลไม่สำเร็จ */ }
+    const usesComponentGrading = sec.gradingMode !== "pass_fail";
+    const formativeMaxScore = sec.formativeMaxScore ?? 70;
+    const midtermMaxScore = sec.midtermMaxScore ?? 0;
+    const finalMaxScore = sec.finalMaxScore ?? 30;
+    const useMidterm = midtermMaxScore > 0;
+
+    // ★ ก็อปฟังก์ชันเดียวกับ GradeOverviewTool.tsx มาเป๊ะๆ (ในอนาคตควรย้ายไป lib กลาง)
+    const isWeighted = (a: any) =>
+      !!(a.allow_weight && a.weight_percent != null && (a.max_score ?? 0) > 0);
+    const getAssignmentMaxContribution = (a: any) =>
+      isWeighted(a) ? a.weight_percent : (a.max_score ?? 0);
+    const getAssignmentWeightedScore = (a: any, raw: number | null | undefined) => {
+      if (raw == null) return 0;
+      return isWeighted(a) ? (raw / (a.max_score || 1)) * a.weight_percent : raw;
+    };
+    const getExamWeightedScore = (raw: number | null | undefined, rawMax: number | null | undefined, max: number) => {
+      if (raw == null) return 0;
+      return rawMax && rawMax > 0 ? (raw / rawMax) * max : raw;
+    };
+
+    const totalMaxScore = assignments.reduce((sum: number, a: any) => sum + getAssignmentMaxContribution(a), 0);
+    const sortedCriteria = [...criteria].sort((a: any, b: any) => b.min_percent - a.min_percent);
+
+    studentRows.forEach(s => {
+      const subMap: Record<string, any> = {};
+      submissions.filter((x: any) => x.student_id === s.id).forEach((x: any) => { subMap[x.assignment_id] = x; });
+
+      const weightedList = assignments.filter(isWeighted);
+      const unweightedList = assignments.filter((a: any) => !isWeighted(a));
+      const weightedMaxTotal = weightedList.reduce((s2: number, a: any) => s2 + (a.weight_percent ?? 0), 0);
+      const weightedEarnedTotal = weightedList.reduce((s2: number, a: any) => s2 + getAssignmentWeightedScore(a, subMap[a.id]?.score), 0);
+      const unweightedMaxTotal = unweightedList.reduce((s2: number, a: any) => s2 + (a.max_score ?? 0), 0);
+      const unweightedEarnedTotal = unweightedList.reduce((s2: number, a: any) => s2 + (subMap[a.id]?.score ?? 0), 0);
+      const assignmentTotal = weightedEarnedTotal + unweightedEarnedTotal;
+
+      const midtermRow = examScores.find((e: any) => e.student_id === s.id && e.exam_type === "midterm");
+      const finalRow = examScores.find((e: any) => e.student_id === s.id && e.exam_type === "final");
+      const midtermRaw = midtermRow?.raw_score ?? midtermRow?.score ?? null;
+      const finalRaw = finalRow?.raw_score ?? finalRow?.score ?? null;
+      const midtermScore = getExamWeightedScore(midtermRaw, midtermRow?.raw_max_score ?? rawMidtermMax, midtermMaxScore);
+      const finalScore = getExamWeightedScore(finalRaw, finalRow?.raw_max_score ?? rawFinalMax, finalMaxScore);
+
+      const specialTotal = scoreEvents.filter((ev: any) => ev.student_id === s.id).reduce((s2: number, ev: any) => s2 + ev.points, 0);
+
+      const remainingCapacity = Math.max(0, formativeMaxScore - weightedMaxTotal);
+      const scaledUnweighted = unweightedMaxTotal > 0 ? (unweightedEarnedTotal / unweightedMaxTotal) * remainingCapacity : 0;
+      const scaledFormative = weightedEarnedTotal + scaledUnweighted;
+
+      // % ใช้ตัดสินเกรดของ "วิชานี้เดี่ยวๆ" เท่านั้น (ยังต้องคงไว้)
+      const componentTotal = usesComponentGrading
+        ? scaledFormative + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0)
+        : null;
+      const percentage = usesComponentGrading
+        ? (componentTotal ?? 0)
+        : (totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * 100 : 0);
+
+      let grade = "-";
+      for (const c of sortedCriteria) {
+        if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
+      }
+
+      // ★ ค่านี้ต้องตรงกับคอลัมน์ "รวม" ที่แก้ไปในหน้าคะแนนรวม (displayTotal/displayMax)
+      const examMaxTotal = usesComponentGrading
+        ? (useMidterm && midtermRaw !== null ? midtermMaxScore : 0) + (finalRaw !== null ? finalMaxScore : 0)
+        : 0;
+      const displayTotal = assignmentTotal + specialTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0);
+      const displayMax = usesComponentGrading ? totalMaxScore + examMaxTotal : totalMaxScore;
+
+      gMatrix[s.id][sec.id] = { grandTotal: displayTotal, percentage, grade, totalMax: displayMax };
+    });
+  } catch { /* ข้ามวิชานี้ถ้าดึงข้อมูลไม่สำเร็จ */ }
 
         try {
           const res = await fetch(`/api/subject-attendance/summary?subject_section_id=${sec.id}`);
@@ -452,18 +510,20 @@ export default function Por5SummaryPage() {
 
                         // "single" or "groupMember"
                         const cell = gradeMatrix[s.id]?.[col.section.id];
-                        return (
-                          <td key={col.key} className={`text-center px-3 py-3 ${colors.cell}`}>
-                            {cell ? (
-                              <div className="flex flex-col items-center">
-                                <span className="text-sm font-black text-slate-700">{cell.grandTotal}</span>
-                                {col.kind === "single" && (
-                                  <span className="text-[10px] font-black text-fuchsia-500">{cell.grade}</span>
-                                )}
-                              </div>
-                            ) : <span className="text-slate-200 text-xs">-</span>}
-                          </td>
-                        );
+return (
+  <td key={col.key} className={`text-center px-3 py-3 ${colors.cell}`}>
+    {cell ? (
+      <div className="flex flex-col items-center">
+       <span className="text-sm font-black text-slate-700">
+         {cell.grandTotal}<span className="text-slate-400 font-bold text-[10px]">/{cell.totalMax}</span>
+       </span>
+        {col.kind === "single" && (
+          <span className="text-[10px] font-black text-fuchsia-500">{cell.grade}</span>
+        )}
+      </div>
+    ) : <span className="text-slate-200 text-xs">-</span>}
+  </td>
+);
                       })}
                     </tr>
                   ))}
