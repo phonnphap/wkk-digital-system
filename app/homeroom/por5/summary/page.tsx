@@ -20,7 +20,7 @@ type SectionInfo = {
  gradingMode?: "numeric" | "pass_fail";
  formativeMaxScore?: number;
  midtermMaxScore?: number;
- finalMaxScore?: number;
+ finalMaxScore?: number; gradeRoundingMode?: "up" | "truncate";
 };
 
 type GradeCell = { grandTotal: number; percentage: number; grade: string; totalMax: number };
@@ -34,7 +34,9 @@ type ViewTab = "grades" | "attendance" | "insights" | "vp4";
 function isActivitySubject(subjectCode: string): boolean {
   return /^ก/.test(subjectCode ?? "");
 }
-
+function applyRounding(value: number, mode: "up" | "truncate" = "truncate"): number {
+  return mode === "up" ? Math.ceil(value) : Math.floor(value);
+}
 // ลำดับหมวดวิชา: พื้นฐาน(0) < เพิ่มเติม(1) < กิจกรรมพัฒนาผู้เรียน(2, อยู่ท้ายสุดเสมอ)
 function subjectRank(s: SectionInfo): number {
   if (isActivitySubject(s.subject_code)) return 2;
@@ -140,7 +142,8 @@ export default function Por5SummaryPage() {
     const w = (m.score_group_weight_percent ?? 0) / totalWeight;
    return sum + w * (cells[i]!.grandTotal);   // ★ ใช้คะแนนดิบ (รวม งาน+พิเศษ+สอบ) แทน %
   }, 0);
- return { parts: cells.map(c => c!.grandTotal), combined: Number(combined.toFixed(2)) };  // ★ เก็บทศนิยม เช่น 7.5
+  const roundingMode = members[0]?.gradeRoundingMode ?? "truncate";
+ return { parts: cells.map(c => c!.grandTotal), combined: applyRounding(combined, roundingMode), };  // ★ เก็บทศนิยม เช่น 7.5
 }
 
   useEffect(() => {
@@ -172,11 +175,13 @@ export default function Por5SummaryPage() {
       setStudents(studentRows);
 
       // Por5SummaryPage.tsx
-      const { data: sectionRows } = await supabase
-  .from("subject_sections")
-  .select("id, subject_id, is_active, formative_max_score, midterm_max_score, final_max_score, subjects(subject_code, name_th, subject_type, hours_per_year, score_group_code, score_group_weight_percent, grading_mode)")
-  .eq("classroom_id", selectedClassroom.classroom_id)
-  .eq("is_active", true);
+       const { data: sectionRows } = await supabase
+   .from("subject_sections")
+   .select(
+     "id, subject_id, is_active, formative_max_score, midterm_max_score, final_max_score, subjects(subject_code, name_th, subject_type, hours_per_year, score_group_code, score_group_weight_percent, grading_mode, grade_rounding_mode)"
+   )
+   .eq("classroom_id", selectedClassroom.classroom_id)
+   .eq("is_active", true);
 
       const secs: SectionInfo[] = (sectionRows ?? []).map((r: any) => {
         const subjectCode = r.subjects?.subject_code ?? "";
@@ -193,7 +198,7 @@ export default function Por5SummaryPage() {
              gradingMode: r.subjects?.grading_mode ?? "numeric",
    formativeMaxScore: r.formative_max_score ?? 70,
    midtermMaxScore: r.midterm_max_score ?? 0,
-   finalMaxScore: r.final_max_score ?? 30,
+   finalMaxScore: r.final_max_score ?? 30, gradeRoundingMode: r.subjects?.grade_rounding_mode ?? "truncate",
         };
       }).sort((a: SectionInfo, b: SectionInfo) => {
         const ra = subjectRank(a);
@@ -283,10 +288,10 @@ export default function Por5SummaryPage() {
       const componentTotal = usesComponentGrading
         ? scaledFormative + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0)
         : null;
-      const percentage = usesComponentGrading
+      const rawPercentage = usesComponentGrading
         ? (componentTotal ?? 0)
         : (totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * 100 : 0);
-
+      const percentage = applyRounding(rawPercentage, sec.gradeRoundingMode);
       let grade = "-";
       for (const c of sortedCriteria) {
         if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
@@ -299,7 +304,8 @@ export default function Por5SummaryPage() {
       const displayTotal = assignmentTotal + specialTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0);
       const displayMax = usesComponentGrading ? totalMaxScore + examMaxTotal : totalMaxScore;
 
-      gMatrix[s.id][sec.id] = { grandTotal: displayTotal, percentage, grade, totalMax: displayMax };
+      gMatrix[s.id][sec.id] = { grandTotal: applyRounding(displayTotal, sec.gradeRoundingMode),   // ★ ปัดเศษคะแนนที่โชว์ในตารางด้วย
+ percentage, grade, totalMax: displayMax };
     });
   } catch { /* ข้ามวิชานี้ถ้าดึงข้อมูลไม่สำเร็จ */ }
 
