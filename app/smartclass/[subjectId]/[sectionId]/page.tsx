@@ -22,6 +22,7 @@ type Subject = {
   credit_hours: number | null;
   hours_per_year: number | null;
   score_group_code: string | null;
+  score_group_weight_percent?: number | null;
   grading_mode: "numeric" | "pass_fail";          // ★ เพิ่ม
   pass_threshold_percent: number;  
 };
@@ -2004,9 +2005,10 @@ useEffect(() => {
 const allGroupSubjects = useMemo(() => {
   if (!subject) return [];
   const others = groupMembers.filter(m => m.id !== subject.id);
+  const selfInGroup = groupMembers.find(m => m.id === subject.id);
   return [
     { id: subject.id, subject_code: subject.subject_code, name_th: subject.name_th,
-      score_group_weight_percent: (subject as any).score_group_weight_percent ?? 100 },
+      score_group_weight_percent: selfInGroup?.score_group_weight_percent ?? (subject as any).score_group_weight_percent  ?? 100 },
     ...others,
   ];
 }, [groupMembers, subject]);
@@ -2691,8 +2693,8 @@ setSection(sec as SectionRow);
 
 const [{ data: subj }, { data: room }] = await Promise.all([
   supabase.from("subjects")
-    .select("id, subject_code, name_th, subject_type, credit_hours, hours_per_year, score_group_code, grading_mode, pass_threshold_percent, score_period_mode, default_semester, grade_rounding_mode")
-    .eq("id", subjectId).maybeSingle(),
+  .select("id, subject_code, name_th, subject_type, credit_hours, hours_per_year, score_group_code, score_group_weight_percent, grading_mode, pass_threshold_percent, score_period_mode, default_semester, grade_rounding_mode")
+  .eq("id", subjectId).maybeSingle(),
         sec?.classroom_id
           ? supabase.from("classrooms").select("id, room_name, grade_group").eq("id", sec.classroom_id).maybeSingle()
           : Promise.resolve({ data: null }),
