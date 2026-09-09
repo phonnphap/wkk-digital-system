@@ -272,73 +272,73 @@ export default function Vp4Report({
               <span>เลขที่ {s.seat_number}</span>
             </div>
 
-            <table className="w-full border-collapse text-xs">
-              <thead>
-                <tr className="border">
-                  <th className="border p-1" rowSpan={2}>รหัสวิชา</th>
-                  <th className="border p-1" rowSpan={2}>รายวิชา</th>
-                  <th className="border p-1" rowSpan={2}>ประเภท</th>
-                  <th className="border p-1" rowSpan={2}>{classroomLevel === "primary" ? "ชั่วโมง" : "หน่วยกิต"}</th>
-                  <th className="border p-1" colSpan={2}>การประเมินผลสัมฤทธิ์</th>
-                  <th className="border p-1" rowSpan={2}>คุณลักษณะ</th>
-                  <th className="border p-1" rowSpan={2}>อ่านคิด<br/>วิเคราะห์เขียน</th>
-                  <th className="border p-1" rowSpan={2}>หมายเหตุ</th>
-                </tr>
-                <tr className="border text-[10px] text-slate-400">
-                  <th className="border p-1">คะแนน</th>
-                  <th className="border p-1">ผลการเรียน</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reportRows.map(row => {
-                  // ★ แถววิชารวมกลุ่มคะแนน (เช่น สุขศึกษา+พลศึกษา -> 1 แถว)
-                  if (row.kind === "group") {
-                    const combined = groupCombinedScore(gradeMatrix, s.id, row.members);
-                    const unitSum = row.members.reduce((sum, m) => {
-                      const v = classroomLevel === "primary" ? m.hours_per_year : m.credit_hours;
-                      return sum + (v ?? 0);
-                    }, 0);
-                    const typeLabels = Array.from(new Set(row.members.map(subjectTypeLabel))).join("/");
-                    return (
-                      <tr key={row.groupCode} className="border">
-                        <td className="border p-1">{row.code}</td>
-                        <td className="border p-1">{row.name}</td>
-                        <td className="border p-1 text-center">{typeLabels}</td>
-                        <td className="border p-1 text-center">{unitSum || "-"}</td>
-                        <td className="border p-1 text-center">{combined ?? "-"}</td>
-                        <td className="border p-1 text-center">-</td>
-                        <td className="border p-1 text-center">{overall?.characteristic ?? "-"}</td>
-                        <td className="border p-1 text-center">{overall?.readThinkWrite ?? "-"}</td>
-                        <td className="border p-1"></td>
-                      </tr>
-                    );
-                  }
+            <table className="w-full border-collapse text-base">
+  <thead>
+    <tr className="border">
+      <th className="border p-2" rowSpan={2}>รหัสวิชา</th>
+      <th className="border p-2" rowSpan={2}>รายวิชา</th>
+      <th className="border p-2" rowSpan={2}>ประเภท</th>
+      <th className="border p-2" rowSpan={2}>{classroomLevel === "primary" ? "ชั่วโมง" : "หน่วยกิต"}</th>
+      <th className="border p-2" colSpan={2}>การประเมินผลสัมฤทธิ์</th>
+      <th className="border p-2" rowSpan={2}>คุณลักษณะ</th>
+      <th className="border p-2" rowSpan={2}>อ่านคิด<br/>วิเคราะห์เขียน</th>
+      <th className="border p-2" rowSpan={2}>หมายเหตุ</th>
+    </tr>
+    <tr className="border text-base text-slate-400">
+      <th className="border p-2">คะแนน</th>
+      <th className="border p-2">ผลการเรียน</th>
+    </tr>
+  </thead>
+  <tbody>
+    {reportRows.map(row => {
+      // ★ แถววิชารวมกลุ่มคะแนน (เช่น สุขศึกษา+พลศึกษา -> 1 แถว)
+      if (row.kind === "group") {
+        const combined = groupCombinedScore(gradeMatrix, s.id, row.members);
+        const unitSum = row.members.reduce((sum, m) => {
+          const v = classroomLevel === "primary" ? m.hours_per_year : m.credit_hours;
+          return sum + (v ?? 0);
+        }, 0);
+        // ★ วิชารวมกลุ่มให้ขึ้นประเภทเป็น "พื้นฐาน" เสมอ ไม่ขึ้นสลับตามสมาชิก
+        return (
+          <tr key={row.groupCode} className="border">
+            <td className="border p-2">{row.code}</td>
+            <td className="border p-2">{row.name}</td>
+            <td className="border p-2 text-center">พื้นฐาน</td>
+            <td className="border p-2 text-center">{unitSum || "-"}</td>
+            <td className="border p-2 text-center">{combined ?? "-"}</td>
+            <td className="border p-2 text-center">-</td>
+            <td className="border p-2 text-center">{overall?.characteristic ?? "-"}</td>
+            <td className="border p-2 text-center">{overall?.readThinkWrite ?? "-"}</td>
+            <td className="border p-2"></td>
+          </tr>
+        );
+      }
 
-                  // ★ แถววิชาเดี่ยว (เหมือนเดิม)
-                  const sec = row.section;
-                  const cell = gradeMatrix[s.id]?.[sec.id];
-                  const isActivity = isActivitySubject(sec.subject_code);
-                  const unitValue = classroomLevel === "primary" ? sec.hours_per_year : sec.credit_hours;
-                  return (
-                    <tr key={sec.id} className="border">
-                      <td className="border p-1">{sec.subject_code}</td>
-                      <td className="border p-1">{sec.subject_name}</td>
-                      <td className="border p-1 text-center">{subjectTypeLabel(sec)}</td>
-                      <td className="border p-1 text-center">{isActivity ? "-" : (unitValue ?? "-")}</td>
-                      <td className="border p-1 text-center">
-                        {isActivity ? "-" : (cell?.percentage != null ? Math.round(cell.percentage) : "-")}
-                      </td>
-                      <td className="border p-1 text-center">
-                        {isActivity ? activityResult(attendMatrix[s.id]?.[sec.id]) : (cell?.grade ?? "-")}
-                      </td>
-                      <td className="border p-1 text-center">{overall?.characteristic ?? "-"}</td>
-                      <td className="border p-1 text-center">{overall?.readThinkWrite ?? "-"}</td>
-                      <td className="border p-1"></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      // ★ แถววิชาเดี่ยว (เหมือนเดิม)
+      const sec = row.section;
+      const cell = gradeMatrix[s.id]?.[sec.id];
+      const isActivity = isActivitySubject(sec.subject_code);
+      const unitValue = classroomLevel === "primary" ? sec.hours_per_year : sec.credit_hours;
+      return (
+        <tr key={sec.id} className="border">
+          <td className="border p-2">{sec.subject_code}</td>
+          <td className="border p-2">{sec.subject_name}</td>
+          <td className="border p-2 text-center">{subjectTypeLabel(sec)}</td>
+          <td className="border p-2 text-center">{isActivity ? "-" : (unitValue ?? "-")}</td>
+          <td className="border p-2 text-center">
+            {isActivity ? "-" : (cell?.percentage != null ? Math.round(cell.percentage) : "-")}
+          </td>
+          <td className="border p-2 text-center">
+            {isActivity ? activityResult(attendMatrix[s.id]?.[sec.id]) : (cell?.grade ?? "-")}
+          </td>
+          <td className="border p-2 text-center">{overall?.characteristic ?? "-"}</td>
+          <td className="border p-2 text-center">{overall?.readThinkWrite ?? "-"}</td>
+          <td className="border p-2"></td>
+        </tr>
+      );
+    })}
+  </tbody>
+</table>
 
             {classroomLevel === "primary" ? (
               <div className="flex gap-8 text-sm mt-3">
@@ -347,7 +347,7 @@ export default function Vp4Report({
               </div>
             ) : (
               <div className="mt-4 flex flex-col sm:flex-row gap-6 text-sm">
-                <table className="border-collapse text-sm flex-1">
+                <table className="border-collapse text-base flex-1">
                   <thead>
                     <tr>
                       <th className="border p-1 text-left" colSpan={1}>สรุปผลการประเมิน</th>

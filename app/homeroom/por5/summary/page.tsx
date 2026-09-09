@@ -179,20 +179,24 @@ const [groupNames, setGroupNames] = useState<Record<string, string>>({});
       const studentRows = (studentsData ?? []) as Student[];
       setStudents(studentRows);
       // ★ ดึงครูที่ปรึกษา/ครูประจำชั้น 2 คน จากตาราง classrooms
-const { data: classroomRow } = await supabase
+const { data: classroomRow, error: classroomErr } = await supabase
   .from("classrooms")
   .select("homeroom_teacher_id, homeroom_teacher_2_id")
   .eq("id", selectedClassroom.classroom_id)
   .maybeSingle();
+if (classroomErr) console.error("[advisor] classroomRow error:", classroomErr);
+console.log("[advisor] classroomRow:", classroomRow);
 
 const teacherIds = [classroomRow?.homeroom_teacher_id, classroomRow?.homeroom_teacher_2_id]
   .filter((v): v is string => !!v);
 
 if (teacherIds.length > 0) {
-  const { data: teacherRows } = await supabase
+   const { data: teacherRows, error: teacherErr } = await supabase
     .from("users")
     .select("id, prefix, first_name, last_name")
     .in("id", teacherIds);
+  if (teacherErr) console.error("[advisor] teacherRows error:", teacherErr);
+  console.log("[advisor] teacherRows:", teacherRows);
 
   const teacherMap: Record<string, AdvisorInfo> = {};
   (teacherRows ?? []).forEach((t: any) => {
