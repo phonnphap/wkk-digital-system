@@ -54,6 +54,7 @@ type FlatColumn =
   | { key: string; kind: "groupMember"; label: string; code: string; section: SectionInfo; colorIndex: number; groupCode: string }
   | { key: string; kind: "groupCombined"; label: string; colorIndex: number; groupCode: string; members: SectionInfo[] };
 
+type AdvisorInfo = { prefix?: string; first_name: string; last_name: string };
 export default function Por5SummaryPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -67,7 +68,11 @@ export default function Por5SummaryPage() {
   const [gradeMatrix, setGradeMatrix] = useState<Record<string, Record<string, GradeCell>>>({});
   const [attendMatrix, setAttendMatrix] = useState<Record<string, Record<string, AttendCell>>>({});
   const [exporting, setExporting] = useState(false);
-  const [groupNames, setGroupNames] = useState<Record<string, string>>({});
+  const [advisors, setAdvisors] = useState<AdvisorInfo[]>([
+  { first_name: "", last_name: "" },
+  { first_name: "", last_name: "" },
+]);
+const [groupNames, setGroupNames] = useState<Record<string, string>>({});
 
   // คอลัมน์สำหรับแท็บ "คะแนนรวมทุกวิชา": วิชาที่ไม่รวมกลุ่ม = 1 คอลัมน์, วิชาที่รวมกลุ่ม = สมาชิกทุกวิชา + 1 คอลัมน์รวม
   const gradeColumns = useMemo<FlatColumn[]>(() => {
@@ -173,6 +178,34 @@ export default function Por5SummaryPage() {
         .order("seat_number");
       const studentRows = (studentsData ?? []) as Student[];
       setStudents(studentRows);
+      // ★ ดึงครูที่ปรึกษา/ครูประจำชั้น 2 คน จากตาราง classrooms
+const { data: classroomRow } = await supabase
+  .from("classrooms")
+  .select("homeroom_teacher_id, homeroom_teacher_2_id")
+  .eq("id", selectedClassroom.classroom_id)
+  .maybeSingle();
+
+const teacherIds = [classroomRow?.homeroom_teacher_id, classroomRow?.homeroom_teacher_2_id]
+  .filter((v): v is string => !!v);
+
+if (teacherIds.length > 0) {
+  const { data: teacherRows } = await supabase
+    .from("users")
+    .select("id, prefix, first_name, last_name")
+    .in("id", teacherIds);
+
+  const teacherMap: Record<string, AdvisorInfo> = {};
+  (teacherRows ?? []).forEach((t: any) => {
+    teacherMap[t.id] = { prefix: t.prefix, first_name: t.first_name ?? "", last_name: t.last_name ?? "" };
+  });
+
+  setAdvisors([
+    (classroomRow?.homeroom_teacher_id && teacherMap[classroomRow.homeroom_teacher_id]) || { first_name: "", last_name: "" },
+    (classroomRow?.homeroom_teacher_2_id && teacherMap[classroomRow.homeroom_teacher_2_id]) || { first_name: "", last_name: "" },
+  ]);
+} else {
+  setAdvisors([{ first_name: "", last_name: "" }, { first_name: "", last_name: "" }]);
+}
 
       // Por5SummaryPage.tsx
        const { data: sectionRows } = await supabase
@@ -435,17 +468,15 @@ export default function Por5SummaryPage() {
           {tab === "vp4" ? (
             <Vp4Report
               classroomLevel={detectLevel(selectedClassroom.room_name)}
-              classroomLabel={selectedClassroom.room_name}
+  classroomLabel={selectedClassroom.room_name}
+  groupNames={groupNames}
               academicYear="2568"           // TODO: ดึงจาก academic_years table จริง
               semester="1"                  // TODO: ดึงภาคเรียนปัจจุบันจริง
               schoolName="โรงเรียนวัดเขียนเขต"   // TODO: ดึงจาก schools table
               districtName="ธัญบุรี"
               provinceName="ปทุมธานี"
               directorName="นายธนณัฐ ศิระวงษ์"  // TODO
-              advisorNames={[
-  { first_name: "", last_name: "" },
-  { first_name: "", last_name: "" },
-]}
+              advisorNames={advisors}
               students={students}
               sections={sections}
               gradeMatrix={gradeMatrix}

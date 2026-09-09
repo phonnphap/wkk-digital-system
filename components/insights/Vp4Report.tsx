@@ -15,6 +15,18 @@ function isActivitySubject(subjectCode: string): boolean {
   return /^ก/.test(subjectCode ?? "");
 }
 
+// ★ ปัดเศษคะแนนรวมกลุ่ม ให้ตรงกับที่ใช้ในหน้าคะแนนรวมทุกวิชา (Por5SummaryPage)
+function applyRounding(value: number, mode: "up" | "truncate" = "truncate"): number {
+  return mode === "up" ? Math.ceil(value) : Math.floor(value);
+}
+
+// ★ ดึง "เลขชั้น" และ "เลขห้อง" จากชื่อห้องที่อาจมีคำนำหน้า เช่น "ป.1/6", "ม.1/6", "1/6"
+function parseRoomName(roomName: string): { grade: string; room: string } {
+  const m = roomName.match(/(\d+)\s*\/\s*(\d+)/);
+  if (m) return { grade: m[1], room: m[2] };
+  return { grade: roomName, room: roomName };
+}
+
 type SectionInfo = {
   id: string;
   subject_id: string;
@@ -23,12 +35,59 @@ type SectionInfo = {
   subject_type: "basic" | "additional";
   hours_per_year: number | null;
   credit_hours: number | null;   // ★ เพิ่ม: ใช้แสดงคอลัมน์ "หน่วยกิต" ของมัธยม
+  score_group_code?: string | null;          // ★ เพิ่ม: สำหรับรวมกลุ่มคะแนน
+  score_group_weight_percent?: number;       // ★ เพิ่ม: น้ำหนักถ่วงคะแนนในกลุ่ม
+  gradeRoundingMode?: "up" | "truncate";      // ★ เพิ่ม: โหมดปัดเศษของวิชานั้นๆ
 };
 type GradeCell = { grandTotal: number; percentage: number; grade: string; totalMax: number };
 type AttendCell = { present: number; total: number };
 
 // ★ เปลี่ยนจาก string[] เป็น object[] เพื่อให้ต่อคำนำหน้าชื่อ-นามสกุลได้ถูกต้อง
 type AdvisorInfo = { prefix?: string; first_name: string; last_name: string };
+
+// ★ แถวของตารางรายงาน: วิชาเดี่ยว หรือวิชาที่รวมกลุ่มคะแนนแล้ว (1 แถวต่อกลุ่ม)
+type ReportRow =
+  | { kind: "single"; section: SectionInfo }
+  | { kind: "group"; groupCode: string; code: string; name: string; members: SectionInfo[] };
+
+function buildReportRows(sections: SectionInfo[], groupNames: Record<string, string>): ReportRow[] {
+  const seen = new Set<string>();
+  const rows: ReportRow[] = [];
+  sections.forEach(sec => {
+    if (sec.score_group_code) {
+      if (seen.has(sec.score_group_code)) return;
+      seen.add(sec.score_group_code);
+      const members = sections.filter(s => s.score_group_code === sec.score_group_code);
+      rows.push({
+        kind: "group",
+        groupCode: sec.score_group_code,
+        code: sec.score_group_code,   // ★ รหัสวิชาที่ตั้งใหม่จากการรวมกลุ่ม (score_group_code)
+        name: groupNames[sec.score_group_code] || members.map(m => m.subject_name).join("/"),
+        members,
+      });
+    } else {
+      rows.push({ kind: "single", section: sec });
+    }
+  });
+  return rows;
+}
+
+// ★ คำนวณคะแนนรวมกลุ่ม ให้ตรงกับ groupCombinedCell ในหน้าคะแนนรวมทุกวิชา (Por5SummaryPage)
+function groupCombinedScore(
+  gradeMatrix: Record<string, Record<string, GradeCell>>,
+  studentId: string,
+  members: SectionInfo[]
+): number | null {
+  const cells = members.map(m => gradeMatrix[studentId]?.[m.id]);
+  if (cells.some(c => !c)) return null;
+  const totalWeight = members.reduce((s, m) => s + (m.score_group_weight_percent ?? 0), 0) || 100;
+  const combined = members.reduce((sum, m, i) => {
+    const w = (m.score_group_weight_percent ?? 0) / totalWeight;
+    return sum + w * cells[i]!.grandTotal;
+  }, 0);
+  const roundingMode = members[0]?.gradeRoundingMode ?? "truncate";
+  return applyRounding(combined, roundingMode);
+}
 
 function formatFullName(a?: AdvisorInfo): string {
   if (!a || (!a.first_name && !a.last_name)) return "…";
@@ -59,6 +118,7 @@ export default function Vp4Report({
   sections,
   gradeMatrix,
   attendMatrix,
+  groupNames = {},
   onBack,
 }: {
   classroomLevel: "primary" | "secondary";
@@ -72,6 +132,7 @@ export default function Vp4Report({
   sections: SectionInfo[];
   gradeMatrix: Record<string, Record<string, GradeCell>>;
   attendMatrix: Record<string, Record<string, AttendCell>>;
+  groupNames?: Record<string, string>;   // ★ เพิ่ม: ชื่อกลุ่มวิชาที่รวมคะแนน
   onBack: () => void;
 }) {
   const [overallScores, setOverallScores] = useState<Record<string, { characteristic: string; readThinkWrite: string }>>({});
@@ -86,17 +147,15 @@ export default function Vp4Report({
     })();
   }, [classroomLevel, students]);
 
-  function extractGradeLevel(roomName: string): string {
-    const m = roomName.match(/^(\d+)/);
-    return m ? m[1] : roomName;
-  }
-
   function subjectTypeLabel(sec: SectionInfo): string {
     if (isActivitySubject(sec.subject_code)) return "กิจกรรม";   // ★ เพิ่ม
     if (sec.subject_type === "basic") return "พื้นฐาน";
     if (sec.subject_type === "additional") return "เพิ่มเติม";
     return "-";
   }
+
+  // ★ แถวของตารางรายวิชา (รวมกลุ่มคะแนนแล้ว) — คำนวณครั้งเดียว ไม่ผูกกับนักเรียนคนใดคนหนึ่ง
+  const reportRows = buildReportRows(sections, groupNames);
 
   // ★ แยกวิชาเป็นกลุ่มเพื่อสรุปยอดหน่วยกิต: พื้นฐาน / เพิ่มเติม / กิจกรรม
   function creditSummary(studentId: string) {
@@ -186,6 +245,7 @@ export default function Vp4Report({
         const overall = overallScores[s.id];
         const credits = creditSummary(s.id);
         const roomRank = classroomRanking[s.id] ?? "-";
+        const roomParts = parseRoomName(classroomLabel);   // ★ { grade, room }
 
         return (
           <div key={s.id} className="vp4-page bg-white p-8 mb-6 print:mb-0 print:break-after-page border border-slate-100 print:border-0">
@@ -197,16 +257,18 @@ export default function Vp4Report({
 
             <div className="text-center text-sm mb-3">
               {classroomLevel === "primary" ? (
-                <span>ชั้นประถมศึกษาปีที่ {extractGradeLevel(classroomLabel)} ปีการศึกษา {academicYear}</span>
+                // ★ ขึ้นแค่เลขชั้น เช่น "1" (ไม่เอา "1/6")
+                <span>ชั้นประถมศึกษาปีที่ {roomParts.grade} ปีการศึกษา {academicYear}</span>
               ) : (
-                <span>ชั้นมัธยมศึกษาปีที่ {extractGradeLevel(classroomLabel)} ปีการศึกษา {academicYear}</span>
+                <span>ชั้นมัธยมศึกษาปีที่ {roomParts.grade} ปีการศึกษา {academicYear}</span>
               )}
             </div>
 
             <div className="flex flex-wrap gap-4 text-sm mb-3">
               <span>ชื่อ {s.prefix}{s.first_name} {s.last_name}</span>
               <span>เลขประจำตัว {s.student_code ?? "-"}</span>
-              <span>ห้อง {classroomLabel}</span>
+              {/* ★ ประถม: ขึ้นแค่เลขห้อง เช่น "6" (ไม่เอา "1/6") */}
+              <span>ห้อง {classroomLevel === "primary" ? roomParts.room : classroomLabel}</span>
               <span>เลขที่ {s.seat_number}</span>
             </div>
 
@@ -228,7 +290,32 @@ export default function Vp4Report({
                 </tr>
               </thead>
               <tbody>
-                {sections.map(sec => {
+                {reportRows.map(row => {
+                  // ★ แถววิชารวมกลุ่มคะแนน (เช่น สุขศึกษา+พลศึกษา -> 1 แถว)
+                  if (row.kind === "group") {
+                    const combined = groupCombinedScore(gradeMatrix, s.id, row.members);
+                    const unitSum = row.members.reduce((sum, m) => {
+                      const v = classroomLevel === "primary" ? m.hours_per_year : m.credit_hours;
+                      return sum + (v ?? 0);
+                    }, 0);
+                    const typeLabels = Array.from(new Set(row.members.map(subjectTypeLabel))).join("/");
+                    return (
+                      <tr key={row.groupCode} className="border">
+                        <td className="border p-1">{row.code}</td>
+                        <td className="border p-1">{row.name}</td>
+                        <td className="border p-1 text-center">{typeLabels}</td>
+                        <td className="border p-1 text-center">{unitSum || "-"}</td>
+                        <td className="border p-1 text-center">{combined ?? "-"}</td>
+                        <td className="border p-1 text-center">-</td>
+                        <td className="border p-1 text-center">{overall?.characteristic ?? "-"}</td>
+                        <td className="border p-1 text-center">{overall?.readThinkWrite ?? "-"}</td>
+                        <td className="border p-1"></td>
+                      </tr>
+                    );
+                  }
+
+                  // ★ แถววิชาเดี่ยว (เหมือนเดิม)
+                  const sec = row.section;
                   const cell = gradeMatrix[s.id]?.[sec.id];
                   const isActivity = isActivitySubject(sec.subject_code);
                   const unitValue = classroomLevel === "primary" ? sec.hours_per_year : sec.credit_hours;
