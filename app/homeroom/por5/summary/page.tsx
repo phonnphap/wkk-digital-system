@@ -15,8 +15,8 @@ type Student = { id: string; prefix?: string; first_name: string; last_name: str
 type SectionInfo = {
   id: string; subject_id: string; subject_code: string; subject_name: string;
   subject_type: "basic" | "additional";
-  hours_per_year: number | null; score_group_code?: string | null;
-  score_group_weight_percent?: number;
+  hours_per_year: number | null; credit_hours: number | null; 
+  score_group_code?: string | null; score_group_weight_percent?: number;
  gradingMode?: "numeric" | "pass_fail";
  formativeMaxScore?: number;
  midtermMaxScore?: number;
@@ -178,8 +178,8 @@ export default function Por5SummaryPage() {
        const { data: sectionRows } = await supabase
    .from("subject_sections")
    .select(
-     "id, subject_id, is_active, formative_max_score, midterm_max_score, final_max_score, subjects(subject_code, name_th, subject_type, hours_per_year, score_group_code, score_group_weight_percent, grading_mode, grade_rounding_mode)"
-   )
+     "id, subject_id, is_active, formative_max_score, midterm_max_score, final_max_score, subjects(subject_code, name_th, subject_type, hours_per_year, credit_hours, score_group_code, score_group_weight_percent, grading_mode, grade_rounding_mode)"
+)
    .eq("classroom_id", selectedClassroom.classroom_id)
    .eq("is_active", true);
 
@@ -193,6 +193,7 @@ export default function Por5SummaryPage() {
           subject_name: r.subjects?.name_th ?? "ไม่ทราบชื่อวิชา",
           subject_type: r.subjects?.subject_type ?? "basic", // "basic" | "additional"
           hours_per_year: r.subjects?.hours_per_year ?? null,
+          credit_hours: r.subjects?.credit_hours ?? null,
           score_group_code: isActivity ? null : (r.subjects?.score_group_code ?? null),
           score_group_weight_percent: r.subjects?.score_group_weight_percent ?? 100,
              gradingMode: r.subjects?.grading_mode ?? "numeric",
@@ -415,7 +416,7 @@ export default function Por5SummaryPage() {
               </button>
               <button onClick={() => setTab("vp4")}
                 className={`px-4 py-2 rounded-xl font-black text-sm ${tab === "vp4" ? "bg-blue-600 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
-                📄 วผ.4
+                📄 ใบเกรด
               </button>
             </div>
             {tab !== "insights" && tab !== "vp4" && (
@@ -441,7 +442,10 @@ export default function Por5SummaryPage() {
               districtName="ธัญบุรี"
               provinceName="ปทุมธานี"
               directorName="นายธนณัฐ ศิระวงษ์"  // TODO
-              advisorNames={["", ""]}          // TODO: ดึงครูที่ปรึกษาของห้องนี้
+              advisorNames={[
+  { first_name: "", last_name: "" },
+  { first_name: "", last_name: "" },
+]}
               students={students}
               sections={sections}
               gradeMatrix={gradeMatrix}
