@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
     .from("students")
     .select("id, classroom_id")
     .eq("id", studentId)
+    .is("moved_out_at", null)
     .maybeSingle();
 
   if (!student) {

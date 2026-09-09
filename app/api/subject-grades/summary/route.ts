@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
           .from("students")
           .select("id, classroom_id")
           .eq("id", studentSession.student_id)
+          .is("moved_out_at", null)
           .maybeSingle();
 
         const { data: section } = student

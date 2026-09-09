@@ -79,7 +79,7 @@ export default function SmartClassRoomPage() {
       setClassroom(room as Classroom);
 
       const { count } = await supabase
-        .from("students").select("id", { count: "exact", head: true }).eq("classroom_id", roomId);
+        .from("students").select("id", { count: "exact", head: true }).eq("classroom_id", roomId).is("moved_out_at", null);
       setStudentCount(count ?? 0);
 
       const { data: secRows } = await supabase

@@ -105,7 +105,7 @@ function PrintStudentCardsContent() {
       supabase
         .from("students")
         .select("id, seat_number, student_code, prefix, first_name, last_name")
-        .eq("classroom_id", classroomId)
+        .eq("classroom_id", classroomId).is("moved_out_at", null)
         .order("seat_number"),
     ]).then(([classroomRes, studentsRes]) => {
       setClassroom((classroomRes.data as ClassroomInfo) ?? null);

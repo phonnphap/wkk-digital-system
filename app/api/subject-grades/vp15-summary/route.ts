@@ -46,7 +46,7 @@ export async function GET(req: Request) {
     const [{ data: classroom }, { data: students }, { data: assignments }, { data: submissions }, { data: examScores }, { data: criteria }] =
       await Promise.all([
         supabase.from("classrooms").select("id, room_name, grade_group").eq("id", sec.classroom_id).maybeSingle(),
-        supabase.from("students").select("id").eq("classroom_id", sec.classroom_id),
+        supabase.from("students").select("id").eq("classroom_id", sec.classroom_id).is("moved_out_at", null),
         supabase.from("assignments").select("id, max_score, weight_percent, allow_weight, status").eq("subject_section_id", sec.id).neq("status", "draft"),
         supabase.from("assignment_submissions").select("assignment_id, student_id, score").eq("subject_section_id", sec.id),
         supabase.from("subject_exam_scores").select("student_id, exam_type, score").eq("subject_section_id", sec.id),

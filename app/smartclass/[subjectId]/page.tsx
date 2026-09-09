@@ -79,7 +79,7 @@ export default function SmartClassRoomsPage() {
 
         const { data: studentsData } = await supabase
           .from("students")
-          .select("id, classroom_id")
+          .select("id, classroom_id").is("moved_out_at", null)
           .in("classroom_id", classroomIds);
         const counts: Record<string, number> = {};
         (studentsData ?? []).forEach((s: any) => { counts[s.classroom_id] = (counts[s.classroom_id] ?? 0) + 1; });

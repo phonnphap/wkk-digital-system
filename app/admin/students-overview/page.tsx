@@ -177,6 +177,7 @@ function StudentDetailModal({
       .from("students")
       .select(DETAIL_SELECT_COLUMNS)
       .eq("id", studentId)
+      .is("moved_out_at", null)
       .maybeSingle()
       .then(({ data, error }) => {
         if (cancelled) return;

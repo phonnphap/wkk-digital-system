@@ -98,6 +98,7 @@ export default function ClassroomCenterPage() {
         const { data: countsData } = await supabase
           .from("students")
           .select("classroom_id")
+          .is("moved_out_at", null)
           .in("classroom_id", rooms.map(r => r.id));
         const counts: Record<string, number> = {};
         (countsData ?? []).forEach((s: any) => { counts[s.classroom_id] = (counts[s.classroom_id] ?? 0) + 1; });

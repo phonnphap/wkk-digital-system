@@ -269,7 +269,7 @@ async function regenerateToken() {
     supabase
       .from("students")
       .select(STUDENT_SELECT)
-      .eq("classroom_id", roomId)
+      .eq("classroom_id", roomId).is("moved_out_at", null)
       .order("seat_number")
       .then(({ data, error }) => {
         if (error) console.warn("[late-checkin] โหลดนักเรียนไม่สำเร็จ:", error.message);
@@ -317,7 +317,7 @@ async function regenerateToken() {
     const handle = setTimeout(async () => {
       const { data, error } = await supabase
         .from("students")
-        .select(STUDENT_SELECT)
+        .select(STUDENT_SELECT).is("moved_out_at", null)
         .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,nick_name.ilike.%${q}%,student_code.ilike.%${q}%`)
         .limit(20);
       if (error) { console.warn("[late-checkin] ค้นหานักเรียนไม่สำเร็จ:", error.message); return; }
@@ -340,7 +340,7 @@ async function regenerateToken() {
   async function findStudentByCode(code: string) {
     return supabase
       .from("students")
-      .select(STUDENT_SELECT)
+      .select(STUDENT_SELECT).is("moved_out_at", null)
       .or(`student_code.eq.${code},national_id.eq.${code}`)
       .maybeSingle();
   }

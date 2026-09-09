@@ -101,7 +101,7 @@ setClassroom(room as Classroom);
       const [{ data: subs }, { data: techs }, { data: enrollments }] = await Promise.all([
         subjectIds.length ? supabase.from("subjects").select("id, subject_code, name_th").in("id", subjectIds) : Promise.resolve({ data: [] }),
         teacherIds.length ? supabase.from("users").select("id, first_name, last_name, full_name").in("id", teacherIds) : Promise.resolve({ data: [] }),
-        supabase.from("students").select("id", { count: "exact", head: true }).eq("classroom_id", classroomId),
+        supabase.from("students").select("id", { count: "exact", head: true }).eq("classroom_id", classroomId).is("moved_out_at", null),
       ]);
 
       setSubjects((subs ?? []) as Subject[]);

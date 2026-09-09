@@ -954,7 +954,7 @@ useEffect(() => {
     if (studentIds.length > 0) {
       const { data: studentData } = await supabase
         .from("students")
-        .select("id, seat_number")
+        .select("id, seat_number").is("moved_out_at", null)
         .in("id", studentIds);
       (studentData || []).forEach(s => { seatMap[s.id] = s.seat_number; });
     }

@@ -83,6 +83,7 @@ export async function POST(req: NextRequest) {
         .select("id")
         .eq("id", student_id)
         .eq("classroom_id", entity.classroomId)
+        .is("moved_out_at", null)
         .maybeSingle();
       if (error) console.error("[verify] name_only error:", error);
       matchedId = s?.id ?? null;

@@ -167,6 +167,7 @@ const [editPoints, setEditPoints] = useState<number>(0);
     .from("students")
     .select(STUDENT_SELECT)
     .eq("classroom_id", roomId)
+    .is("moved_out_at", null)
     .order("seat_number")
     .then(({ data, error }) => {
       if (error) console.warn("[behavior] โหลดนักเรียนไม่สำเร็จ:", error.message);
@@ -322,6 +323,7 @@ async function refreshAfterChange(): Promise<Student[]> {
     .from("students")
     .select(STUDENT_SELECT)
     .eq("classroom_id", roomId)
+    .is("moved_out_at", null)
     .order("seat_number");
   const list = (freshStudents as unknown as Student[]) ?? [];
   setStudents(list);

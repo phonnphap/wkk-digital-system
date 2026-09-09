@@ -230,7 +230,7 @@ useEffect(() => {
     const studentIds = (enrollments ?? []).map((e: any) => e.student_id);
     if (studentIds.length > 0) {
       const { data: studentsData } = await supabase
-        .from("students").select("id,prefix,first_name,last_name,seat_number,avatar_url")
+        .from("students").select("id,prefix,first_name,last_name,seat_number,avatar_url").is("moved_out_at", null)
 .in("id", studentIds).order("seat_number");
       setStudents((studentsData ?? []) as EnrolledStudent[]);
     } else {

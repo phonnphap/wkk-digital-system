@@ -126,7 +126,7 @@ if (roomIds.length > 0) {
   const pageSize = 1000;
   while (true) {
     const { data: page, error } = await supabase
-      .from("students").select("classroom_id")
+      .from("students").select("classroom_id").is("moved_out_at", null)
       .in("classroom_id", roomIds)
       .range(from, from + pageSize - 1);
     if (error || !page || page.length === 0) break;

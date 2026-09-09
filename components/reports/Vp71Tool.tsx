@@ -358,7 +358,6 @@ function EditPlanView({
   }
   return (
     <>
-    <div className="vp-print-area">
       <div className="bg-white rounded-2xl border border-slate-100 overflow-auto">
         <table className="w-full min-w-[960px] border-collapse text-m">
           <thead className="bg-gradient-to-r from-indigo-50 to-fuchsia-50">
@@ -450,7 +449,7 @@ function EditPlanView({
   <tr className="bg-emerald-50/40">
     <td></td>
     <td colSpan={7} className="px-4 py-3">
-      <p className="text-[14px] font-black text-emerald-700 mb-2">
+      <p className="text-[18px] font-black text-emerald-700 mb-2">
         ระบบคำนวณน้ำหนักคะแนนของแต่ละชิ้นงานอัตโนมัติ ให้รวมกันเท่ากับคะแนนเก็บที่ตั้งไว้ ({fmtScore(u.score_points ?? 0)} คะแนน) เสมอ
       </p>
       <div className="space-y-1">
@@ -501,7 +500,6 @@ function EditPlanView({
             </tr>
           </tfoot>
         </table>
-      </div>
       </div>
 
       {!readOnly && (
@@ -694,7 +692,7 @@ function ReportView({
   return (
     <div>
       <div className="flex items-center gap-3 flex-wrap mb-3 print:hidden">
-        <span className="text-[14px] text-slate-400 font-bold bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5">
+        <span className="text-[17px] text-slate-400 font-bold bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5">
           น้ำหนักคะแนนเก็บ : คะแนนสอบ = {sumUnitScorePoints} : {midtermMax + finalMax} (กลางภาค {midtermMax} + ปลายภาค {finalMax}) ·
           คะแนนเต็มรวมทั้งวิชา = {totalPossible} คะแนน
           <span className="ml-1 text-slate-300">— แก้ไขคะแนนกลางภาค/ปลายภาคได้ที่หน้า "คะแนนรวม" เท่านั้น เพื่อให้ตัวเลขตรงกันเสมอ</span>
@@ -711,13 +709,13 @@ function ReportView({
           น้ำหนักคะแนนรวม {sumUnitScorePoints} : {midtermMax + finalMax} = {totalPossible} คะแนน
         </p>
       </div>
-
-      <div className="bg-white rounded-2xl border border-slate-100 overflow-auto vp-print-report">
-        <table className="w-full border-collapse text-[12px] vp-report-table">
+      <div className="vp-print-area">
+      <div className="bg-white rounded-2xl border border-slate-100 overflow-auto ">
+        <table className="w-full border-collapse text-[18px] vp-report-table">
           <thead className="bg-gradient-to-r from-indigo-50 to-fuchsia-50 print:bg-white">
             <tr>
-              <th rowSpan={2} className="border border-slate-300 px-1 py-2 font-black w-8">ที่</th>
-              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black text-left whitespace-nowrap">ชื่อ-นามสกุล</th>
+              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black whitespace-nowrap">ที่</th>
+<th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black text-left whitespace-nowrap">ชื่อ-นามสกุล</th>
               {unitsWithScore.map(u => (
                 <th key={u.unit_no} colSpan={indicatorLinesOf(u).length + 1} className="border border-slate-300 px-1 py-1 font-black">
                   หน่วยที่ {u.unit_no}{u.unit_name ? ` · ${u.unit_name}` : ""}
@@ -725,22 +723,20 @@ function ReportView({
                   <span className="font-bold text-slate-500">({fmtScore(u.score_points ?? 0)} คะแนน)</span>
                 </th>
               ))}
-              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black w-16">รวมคะแนนเก็บ<br />({sumUnitScorePoints})</th>
-              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black w-14">กลางภาค<br />({midtermMax})</th>
-              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black w-14">ปลายภาค<br />({finalMax})</th>
-              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black w-16">รวม<br />({totalPossible})</th>
-              <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black w-14">ระดับ<br />ผลการเรียน</th>
-            </tr>
+              <th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">รวมคะแนนเก็บ<br />({sumUnitScorePoints})</th>
+<th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">กลางภาค<br />({midtermMax})</th>
+<th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">ปลายภาค<br />({finalMax})</th>
+<th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">รวม<br />({totalPossible})</th>
+<th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">ระดับ<br />ผลการเรียน</th>          </tr>
             <tr>
               {unitsWithScore.map(u => (
                 <Fragment key={u.unit_no}>
                   {indicatorLinesOf(u).map((line, idx) => (
-  <th key={`${u.unit_no}-i${idx}`} className="border border-slate-300 px-1 py-1 font-bold w-7" title={line}>
-    {indicatorNumberOf(line)}
-  </th>
+  <th key={`${u.unit_no}-i${idx}`} className="border border-slate-300 px-2 py-1 font-bold whitespace-nowrap" title={line}>
+  {indicatorNumberOf(line)}
+</th>
 ))}
-                  <th className="border border-slate-300 px-1 py-1 font-black w-12 bg-fuchsia-50 print:bg-slate-100">สรุป</th>
-                </Fragment>
+                  <th className="border border-slate-300 px-2 py-1 font-black whitespace-nowrap bg-fuchsia-50 print:bg-slate-100">สรุป</th>                </Fragment>
               ))}
             </tr>
           </thead>
@@ -753,10 +749,10 @@ function ReportView({
               const percent = totalPossible > 0 ? (total / totalPossible) * 100 : 0;
               return (
                 <tr key={s.id} className="hover:bg-slate-50">
-                  <td className="border border-slate-300 text-center px-1 py-1 font-bold">{s.seat_number}</td>
-                  <td className="border border-slate-300 px-2 py-1 font-bold whitespace-nowrap">
-                    {s.prefix ?? ""}{s.first_name} {s.last_name}
-                  </td>
+                  <td className="border border-slate-300 text-center px-2 py-1.5 font-bold whitespace-nowrap">{s.seat_number}</td>
+<td className="border border-slate-300 px-3 py-1.5 font-bold whitespace-nowrap">
+  {s.prefix ?? ""}{s.first_name} {s.last_name}
+</td>
                   {unitsWithScore.map((u, ui) => (
                     <Fragment key={u.unit_no}>
                       {indicatorLinesOf(u).map((line, idx) => {
@@ -807,25 +803,24 @@ function ReportView({
           </div>
         ))}
       </div>
+      </div>
 
-      <style jsx global>{`
+
+            <style jsx global>{`
         @media print {
           @page { size: A4 landscape; margin: 8mm; }
           body * { visibility: hidden; }
-          .vp-print-report, .vp-print-report *,
-          .vp-print-legend, .vp-print-legend * { visibility: visible; }
-          .vp-print-report {
+          .vp-print-area, .vp-print-area * { visibility: visible; }
+          .vp-print-area {
             position: absolute; left: 0; top: 0; width: 100%;
-            border: none; border-radius: 0; overflow: visible;
           }
-          .vp-print-legend { position: relative; }
-          .vp-report-table { font-size: 9px; }
-          .vp-report-table th, .vp-report-table td {
-            border: 1px solid #000 !important;
-            color: #000 !important;
-            background: #fff !important;
-            padding: 2px 3px !important;
-          }
+          .vp-report-table { font-size: 11px; }
+.vp-report-table th, .vp-report-table td {
+  border: 1px solid #000 !important;
+  color: #000 !important;
+  background: #fff !important;
+  padding: 3px 5px !important;
+}
           .vp-report-table thead { display: table-header-group; }
           .vp-report-table tr { break-inside: avoid; }
         }

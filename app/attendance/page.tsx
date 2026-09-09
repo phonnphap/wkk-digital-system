@@ -341,6 +341,7 @@ const todayHoliday = isHoliday(date, holidayMap);
         .from("students")
         .select("id, seat_number, prefix, first_name, last_name, nick_name, gender")
         .eq("classroom_id", cid)
+        .is("moved_out_at", null) 
         .order("seat_number"),
       supabase
         .from("attendance_records")

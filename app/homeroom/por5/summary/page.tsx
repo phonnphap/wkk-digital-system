@@ -435,7 +435,11 @@ if (teacherIds.length > 0) {
         <>
           <div className="flex items-center justify-between flex-wrap gap-2 mt-4 mb-4 print:hidden">
             <div className="flex items-center gap-2 flex-wrap">
-              {classrooms.length > 1 && (
+  <button onClick={() => router.push("/dashboard")}
+    className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg">
+    🏠
+  </button>
+  {classrooms.length > 1 && (
                 <button onClick={() => setSelectedClassroom(null)} className="text-xs font-bold text-blue-600 underline">← เปลี่ยนห้อง</button>
               )}
               <span className="text-sm font-black text-slate-600">ห้อง {selectedClassroom.room_name}</span>
@@ -494,87 +498,89 @@ if (teacherIds.length > 0) {
           ) : sections.length === 0 ? (
             <p className="text-slate-400 text-sm">ยังไม่พบวิชาที่เปิดสอนให้ห้องนี้</p>
           ) : (
-            <div className="bg-white rounded-2xl border border-slate-100 overflow-x-auto">
-              <table className="w-full min-w-[720px] border-collapse">
-                <thead>
-                  <tr className="bg-slate-50">
-                    <th className="text-left text-[11px] font-black text-slate-500 px-5 py-3 sticky left-0 bg-slate-50 z-10">รายชื่อ</th>
-                    {activeColumns.map(col => {
-                      const colors = COLUMN_COLORS[col.colorIndex % COLUMN_COLORS.length];
-                      return (
-                        <th key={col.key} className={`px-3 py-3 text-center min-w-[110px] ${colors.header}`}>
-                          <p className="text-[11px] font-black truncate max-w-[140px] mx-auto" title={col.label}>
-                            {col.label}
-                          </p>
-                          <p className={`text-[9px] font-bold ${colors.code}`}>
-                            {col.kind === "groupCombined" ? "รวม" : col.code}
-                          </p>
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {students.map(s => (
-                    <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                      <td className="px-5 py-3 sticky left-0 bg-white z-10">
-                        <p className="text-xs font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name}</p>
-                        <p className="text-[10px] text-slate-400 font-bold">เลขที่ {s.seat_number}</p>
-                      </td>
-                      {activeColumns.map(col => {
-                        const colors = COLUMN_COLORS[col.colorIndex % COLUMN_COLORS.length];
+            <div className="bg-white rounded-2xl border border-slate-100 overflow-auto max-h-[75vh] print:max-h-none print:overflow-visible">
+  <table className="w-full min-w-[720px] border-collapse text-base">
+    <thead>
+      <tr className="bg-slate-50">
+        <th className="text-left text-sm font-black text-slate-500 px-5 py-3 sticky left-0 top-0 z-30 bg-sky-100">
+          รายชื่อ
+        </th>
+        {activeColumns.map(col => {
+          const colors = COLUMN_COLORS[col.colorIndex % COLUMN_COLORS.length];
+          return (
+            <th key={col.key} className={`px-3 py-3 text-center min-w-[110px] sticky top-0 z-20 ${colors.header}`}>
+              <p className="text-sm font-black truncate max-w-[140px] mx-auto" title={col.label}>
+                {col.label}
+              </p>
+              <p className={`text-xs font-bold ${colors.code}`}>
+                {col.kind === "groupCombined" ? "รวม" : col.code}
+              </p>
+            </th>
+          );
+        })}
+      </tr>
+    </thead>
+    <tbody>
+      {students.map(s => (
+        <tr key={s.id} className="border-t border-slate-100 hover:bg-sky-50/60">
+          <td className="px-5 py-3 sticky left-0 z-10 bg-sky-50">
+            <p className="text-base font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name}</p>
+            <p className="text-sm text-slate-500 font-bold">เลขที่ {s.seat_number}</p>
+          </td>
+          {activeColumns.map(col => {
+            const colors = COLUMN_COLORS[col.colorIndex % COLUMN_COLORS.length];
 
-                        if (tab === "attendance") {
-                          const cell = col.kind === "single" ? attendMatrix[s.id]?.[col.section.id] : undefined;
-                          return (
-                            <td key={col.key} className={`text-center px-3 py-3 ${colors.cell}`}>
-                              {cell && cell.total > 0 ? (
-                                <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-black ${
-                                  cell.present / cell.total >= 0.8 ? "bg-emerald-50 text-emerald-600" : cell.present / cell.total >= 0.5 ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600"
-                                }`}>
-                                  {cell.present}/{cell.total}
-                                </span>
-                              ) : <span className="text-slate-200 text-xs">-</span>}
-                            </td>
-                          );
-                        }
+            if (tab === "attendance") {
+              const cell = col.kind === "single" ? attendMatrix[s.id]?.[col.section.id] : undefined;
+              return (
+                <td key={col.key} className={`text-center px-3 py-3 ${colors.cell}`}>
+                  {cell && cell.total > 0 ? (
+                    <span className={`inline-flex px-2 py-1 rounded-full text-sm font-black ${
+                      cell.present / cell.total >= 0.8 ? "bg-emerald-50 text-emerald-600" : cell.present / cell.total >= 0.5 ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600"
+                    }`}>
+                      {cell.present}/{cell.total}
+                    </span>
+                  ) : <span className="text-slate-300 text-sm">-</span>}
+                </td>
+              );
+            }
 
-                        // tab === "grades"
-                        if (col.kind === "groupCombined") {
-                          const g = groupCombinedCell(s.id, col.members);
-                          return (
-                            <td key={col.key} className={`text-center px-3 py-3 ${colors.cell}`}>
-                              {g ? (
-                                <span className="inline-flex px-2 py-1 rounded-full text-sm font-black bg-fuchsia-50 text-fuchsia-600">
-                                  {g.combined}
-                                </span>
-                              ) : <span className="text-slate-200 text-xs">-</span>}
-                            </td>
-                          );
-                        }
+            // tab === "grades"
+            if (col.kind === "groupCombined") {
+              const g = groupCombinedCell(s.id, col.members);
+              return (
+                <td key={col.key} className={`text-center px-3 py-3 ${colors.cell}`}>
+                  {g ? (
+                    <span className="inline-flex px-2 py-1 rounded-full text-base font-black bg-fuchsia-50 text-fuchsia-600">
+                      {g.combined}
+                    </span>
+                  ) : <span className="text-slate-300 text-sm">-</span>}
+                </td>
+              );
+            }
 
-                        // "single" or "groupMember"
-                        const cell = gradeMatrix[s.id]?.[col.section.id];
-return (
-  <td key={col.key} className={`text-center px-3 py-3 ${colors.cell}`}>
-    {cell ? (
-      <div className="flex flex-col items-center">
-       <span className="text-sm font-black text-slate-700">
-         {cell.grandTotal}<span className="text-slate-400 font-bold text-[10px]">/{cell.totalMax}</span>
-       </span>
-        {col.kind === "single" && (
-          <span className="text-[10px] font-black text-fuchsia-500">{cell.grade}</span>
-        )}
-      </div>
-    ) : <span className="text-slate-200 text-xs">-</span>}
-  </td>
-);
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            // "single" or "groupMember"
+            const cell = gradeMatrix[s.id]?.[col.section.id];
+            return (
+              <td key={col.key} className={`text-center px-3 py-3 ${colors.cell}`}>
+                {cell ? (
+                  <div className="flex flex-col items-center">
+                    <span className="text-base font-black text-slate-700">
+                      {cell.grandTotal}<span className="text-slate-400 font-bold text-sm">/{cell.totalMax}</span>
+                    </span>
+                    {col.kind === "single" && (
+                      <span className="text-sm font-black text-fuchsia-500">{cell.grade}</span>
+                    )}
+                  </div>
+                ) : <span className="text-slate-300 text-sm">-</span>}
+              </td>
+            );
+          })}
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
           )}
         </>
       )}

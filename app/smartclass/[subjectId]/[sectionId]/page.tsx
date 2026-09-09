@@ -2706,7 +2706,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
         const { data: studentsData } = await supabase
           .from("students")
           .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url")
-          .eq("classroom_id", sec.classroom_id)
+          .eq("classroom_id", sec.classroom_id).is("moved_out_at", null)
           .order("seat_number");
         setStudents((studentsData ?? []) as Student[]);
       }

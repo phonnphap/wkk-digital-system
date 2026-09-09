@@ -193,6 +193,7 @@ if (scope === "grade_level" && !gradeLevelIdParam) {
     const { data: students } = await admin
       .from("students")
       .select("id, prefix, first_name, last_name, seat_number, classroom_id")
+      .is("moved_out_at", null)
       .in("classroom_id", classroomIds);
     if (!students || students.length === 0) return NextResponse.json(emptyResult(role));
 
