@@ -439,11 +439,16 @@ function AssessPage({ currentUser, isAdmin }) {
 
   // โหลดคะแนนที่เคยบันทึกไว้ของห้องนี้
   useEffect(() => {
-    if (!selectedClass || !g || students.length === 0) return;
-    const cid = selectedClass.classroom_id || selectedClass.id;
-    supabase.from("reading_writing_records").select("*")
-      .eq("classroom_id", cid).eq("academic_year_id", selectedClass.academic_year_id)
-      .then(({ data }) => {
+  if (!selectedClass || !g || students.length === 0) return;
+  if (!selectedClass.academic_year_id) {
+    console.warn("classroom missing academic_year_id:", selectedClass);
+    return; // อย่ายิง query ถ้าไม่มีค่านี้
+  }
+  const cid = selectedClass.classroom_id || selectedClass.id;
+  supabase.from("reading_writing_records").select("*")
+    .eq("classroom_id", cid)
+    .eq("academic_year_id", selectedClass.academic_year_id)
+    .then(({ data, error }) => {
         const map = {};
         (data || []).forEach(r => { map[r.student_id] = r; });
         setValues(prev => {
