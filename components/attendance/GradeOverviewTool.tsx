@@ -517,12 +517,12 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
         // ★ แก้บั๊ก: ต้องใช้ "scaledFormative" (ตัวที่สเกลแล้ว เต็ม 70) แทน grandTotal ดิบ
     // และใช้ "formativeMaxScore" (70) แทน totalMaxScore ดิบ (39) เพื่อให้ตรงกับคอลัมน์คะแนนเก็บ
     const displayTotal = usesComponentGrading
-      ? scaledFormative + specialTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0)
-      : grandTotal;
+   ? assignmentTotal + specialTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0)
+   : grandTotal;
 
     const displayMax = usesComponentGrading
-      ? formativeMaxScore + examMaxTotal   // เต็มคะแนนเก็บ (70) + เต็มสอบเฉพาะที่มีคะแนนแล้ว
-      : totalMaxScore;
+   ? totalMaxScore + examMaxTotal   // เต็มจริงของชิ้นงานที่สร้างไว้ + เต็มสอบเฉพาะที่มีคะแนนแล้ว
+   : totalMaxScore;
 
     return {
       student: s, subMap, presetTotals, assignmentTotal, submittedCount,
@@ -2413,7 +2413,6 @@ function StudentReportModal({
 </span>
           </div>
         </div>
-
                 {showSpecialScores && (
           <div className="mb-5">
             <p className="text-sm font-black text-slate-600 mb-2">⭐ คะแนนพิเศษรวม</p>

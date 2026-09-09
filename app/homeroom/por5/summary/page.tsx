@@ -171,6 +171,7 @@ export default function Por5SummaryPage() {
       const { data: sectionRows } = await supabase
         .from("subject_sections")
         .select("id, subject_id, is_active, subjects(subject_code, name_th, subject_type, hours_per_year, score_group_code, score_group_weight_percent)")
+ .select("id, subject_id, is_active, formative_max_score, midterm_max_score, final_max_score, subjects(subject_code, name_th, subject_type, hours_per_year, score_group_code, score_group_weight_percent, grading_mode)")
         .eq("classroom_id", selectedClassroom.classroom_id)
         .eq("is_active", true);
 
@@ -220,6 +221,9 @@ export default function Por5SummaryPage() {
           const submissions = json.submissions ?? [];
           const scoreEvents = json.scoreEvents ?? [];
           const criteria = json.criteria ?? [];
+           const examScores = json.examScores ?? [];
+ const rawMidtermMax = json.rawMidtermMaxScore ?? null;
+ const rawFinalMax = json.rawFinalMaxScore ?? null;
           const totalMax = assignments.reduce((s: number, a: any) => s + (a.max_score ?? 0), 0);
           const sortedCriteria = [...criteria].sort((a: any, b: any) => b.min_percent - a.min_percent);
 
