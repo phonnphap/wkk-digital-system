@@ -1153,7 +1153,55 @@ function PendingSuggestionsCard({ meetings, onOpen, onView }: {
     </div>
   );
 }
+// ✅ เพิ่มคอมโพเนนต์นี้ไว้เหนือ ReviewerAssignmentModal (หรือที่ไหนก็ได้ในไฟล์)
+function ReviewerSelect({ teachers, value, onChange, disabled }: {
+  teachers: Teacher[]; value: string; onChange: (id: string) => void; disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const wrapRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectedTeacher = teachers.find(t => t.id === value);
+  const filtered = teachers.filter(t => fullName(t).toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div ref={wrapRef} className="relative w-[170px] shrink-0">
+      <button type="button" disabled={disabled} onClick={() => setOpen(o => !o)}
+        className="w-full bg-white border-2 border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 text-left focus:outline-none focus:border-blue-400 disabled:opacity-50 truncate">
+        {selectedTeacher ? fullName(selectedTeacher) : "— ไม่มีคนตรวจ —"}
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-56 right-0 bg-white border-2 border-slate-200 rounded-xl shadow-lg overflow-hidden">
+          <input autoFocus type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="🔍 ค้นหาชื่อ..."
+            className="w-full px-3 py-2 text-xs font-bold border-b border-slate-100 focus:outline-none" />
+          <div className="max-h-48 overflow-y-auto divide-y divide-slate-50">
+            <button type="button" onClick={() => { onChange(""); setOpen(false); setSearch(""); }}
+              className="w-full text-left px-3 py-2 text-xs font-bold text-slate-400 hover:bg-slate-50">
+              — ไม่มีคนตรวจ —
+            </button>
+            {filtered.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-slate-400">ไม่พบชื่อ</div>
+            ) : filtered.map(t => (
+              <button key={t.id} type="button" onClick={() => { onChange(t.id); setOpen(false); setSearch(""); }}
+                className={`w-full text-left px-3 py-2 text-xs font-bold hover:bg-blue-50 ${t.id === value ? "text-blue-600 bg-blue-50" : "text-slate-700"}`}>
+                {fullName(t)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 // ✅ โมดัลสำหรับแอดมิน: ตั้งค่าคนตรวจงานประจำกลุ่ม (กลุ่มสาระ / สายชั้น) — ผู้ที่ถูกเลือกจะเห็นรายงานทุกรายการของกลุ่มนั้น แต่แก้ไขไม่ได้
 function ReviewerAssignmentModal({ subjectGroups, gradeGroups, allTeachers, groupReviewers, onSave, onClose }: {
   subjectGroups: { key: string; label: string }[];
@@ -1165,6 +1213,15 @@ function ReviewerAssignmentModal({ subjectGroups, gradeGroups, allTeachers, grou
 }) {
   const [tab, setTab] = useState<MeetingScope>("subject");
   const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  // ✅ ตัดบัญชีที่มี role เกี่ยวข้องกับผู้ดูแลระบบ/ผู้บริหารออกจากตัวเลือกคนตรวจงาน
+  // (ครอบคลุมทั้ง admin, general_admin, director, deputy_director ฯลฯ ไม่ใช่แค่ที่ตรงเป๊ะกับ ADMIN_ROLES_SET)
+  const eligibleReviewers = useMemo(() => {
+    return allTeachers.filter(t => {
+      const role = (t.role ?? "").toLowerCase();
+      return !role.includes("admin") && !role.includes("director");
+    });
+  }, [allTeachers]);
 
   function currentReviewerId(scope: MeetingScope, key: string): string {
     return groupReviewers.find(r => r.scope === scope && r.group_key === key)?.reviewer_id ?? "";
@@ -1209,11 +1266,12 @@ function ReviewerAssignmentModal({ subjectGroups, gradeGroups, allTeachers, grou
                   <p className="font-bold text-slate-700 text-sm truncate">{g.label}</p>
                   {val && <p className="text-emerald-600 text-[11px] font-bold mt-0.5">✅ มีคนตรวจแล้ว</p>}
                 </div>
-                <select value={val} disabled={busy} onChange={e => handleChange(tab, g.key, e.target.value)}
-                  className="bg-white border-2 border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-400 max-w-[170px] shrink-0">
-                  <option value="">— ไม่มีคนตรวจ —</option>
-                  {allTeachers.map(t => <option key={t.id} value={t.id}>{fullName(t)}</option>)}
-                </select>
+                <ReviewerSelect
+                  teachers={eligibleReviewers}
+                  value={val}
+                  disabled={busy}
+                  onChange={v => handleChange(tab, g.key, v)}
+                />
                 {busy && <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin shrink-0" />}
               </div>
             );
