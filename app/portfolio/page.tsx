@@ -613,13 +613,21 @@ const [savingSig, setSavingSig] = useState(false);
     !selectedHasOut &&
     !selectedOnLeave &&
     !selectedIsReligiousCeremony &&
-    selectedDayRow?.status !== "leave" &&
     !!selectedDayRow?.note &&
     !selectedNoScanIn &&
     !selectedNoScanOut &&
     !selectedMeetingExcuse &&
     !selectedNoScanExemptIn &&
     !selectedNoScanExemptOut;
+
+     const selectedIsUnfiledLeave =
+   !selectedIsHoliday &&
+   selectedHasEnrichedRow &&
+   !selectedHasIn &&
+   !selectedHasOut &&
+   !selectedOnLeave &&
+   !selectedIsReligiousCeremony &&
+     selectedDayRow?.status === "leave";
   // ★ "รอข้อมูล" คือยังไม่มี enriched row เข้ามาเลยสำหรับวันนั้น (ระบบยังไม่ประมวลผล/ยังไม่ sync)
   const selectedDayIsPending = !selectedIsHoliday &&  !selectedHasEnrichedRow && !selectedOnLeave && selectedDay <= todayStr;
   const selectedRemark = buildRemark(selectedDayRow?.note, selectedOnLeave);
@@ -1181,8 +1189,9 @@ const [savingSig, setSavingSig] = useState(false);
                         <AlertCircle className="w-5 h-5" />
                       </div>
                       <div>
-                        <p className="text-sm font-black text-rose-600">ขาดงาน</p>
-                        <p className="text-xs text-rose-400 font-bold mt-0.5">ไม่มีการลงเวลาเข้า-ออกในวันนี้</p>
+                        <p className="text-sm font-black text-rose-600">{selectedIsUnfiledLeave ? "ขาดงาน (รอการส่งใบลาในระบบ)" : "ขาดงาน"}</p>
+                        <p className="text-xs text-rose-400 font-bold mt-0.5">{selectedIsUnfiledLeave ? "มีหมายเหตุระบุว่าลา แต่ยังไม่พบใบลาที่ยื่นในระบบ" : "ไม่มีการลงเวลาเข้า-ออกในวันนี้"}
+</p>
                       </div>
                     </div>
                     {selectedRemark && (
@@ -1256,7 +1265,6 @@ const [savingSig, setSavingSig] = useState(false);
                         !hasOut &&
                         !onLeave &&
                         !isReligiousRow &&
-                        d.status !== "leave" &&
                         !!d.note &&
                         !noScanInRow &&
                         !noScanOutRow &&
@@ -1264,6 +1272,7 @@ const [savingSig, setSavingSig] = useState(false);
                         !noScanExemptInRow &&
                         !noScanExemptOutRow;
 
+                      const isUnfiledLeaveRow = !isWeekend && !isFuture && !dayHoliday && d.hasEnrichedRow && !hasIn && !hasOut && !onLeave && !isReligiousRow && d.status === "leave";
                       const inStatus = monthlyCheckInStatus(d, onLeave, isReligiousRow);
                       const outStatus = monthlyCheckOutStatus(d, onLeave, isReligiousRow);
 
@@ -1282,7 +1291,7 @@ const [savingSig, setSavingSig] = useState(false);
                             </td>
                           ) : isAbsentRow ? (
                             <td colSpan={2} className="px-3 py-2 text-center">
-                              <span className="inline-block px-2.5 py-1 rounded-md text-xs font-bold text-rose-600 bg-rose-50">ขาดงาน</span>
+                              <span className="inline-block px-2.5 py-1 rounded-md text-xs font-bold text-rose-600 bg-rose-50">{isUnfiledLeaveRow ? "รอใบลา" : "ขาดงาน"}</span>
                             </td>
                           ) : (
                             <>

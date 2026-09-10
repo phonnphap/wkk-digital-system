@@ -657,13 +657,21 @@ export default function AdminTeacherDetailPage() {
     !selectedHasOut &&
     !selectedOnLeave &&
     !selectedIsReligiousCeremony &&
-    selectedDayRow?.status !== "leave" &&
     !!selectedDayRow?.note &&
     !selectedNoScanIn &&
     !selectedNoScanOut &&
     !selectedMeetingExcuse &&
     !selectedNoScanExemptIn &&
     !selectedNoScanExemptOut;
+
+      const selectedIsUnfiledLeave =
+   !selectedIsHoliday &&
+   selectedHasEnrichedRow &&
+   !selectedHasIn &&
+   !selectedHasOut &&
+   !selectedOnLeave &&
+   !selectedIsReligiousCeremony &&
+     selectedDayRow?.status === "leave";
   // ★ "รอข้อมูล" คือยังไม่มี enriched row เข้ามาเลยสำหรับวันนั้น (ระบบยังไม่ประมวลผล/ยังไม่ sync)
   const selectedDayIsPending = !selectedIsHoliday && !selectedHasEnrichedRow && !selectedOnLeave && selectedDay <= todayStr;
   const selectedRemark = buildRemark(selectedDayRow?.note, selectedOnLeave);
@@ -701,13 +709,30 @@ export default function AdminTeacherDetailPage() {
           { check_in_time: r.check_in_time, check_out_time: r.check_out_time, note: r.note },
           approvedPersonalLeaveDates.has(r.work_date)
         );
-        if (!r.hasEnrichedRow || onLeave || r.status === "leave" || isReligious) return false;
+        if (!r.hasEnrichedRow || onLeave || r.status === "leave" || isReligious) 
         if (r.check_in_time || r.check_out_time) return false;
         if (!r.note) return false;
         if (isMeetingExcuseNote(r.note) && !isHalfDayMorningLeave(r.note) && !isMorningOnlyExemptNote(r.note)) return false;
         if (isNoScanInExempted(r.note) || isNoScanOutExempted(r.note)) return false;
         return !isNoScanNote(r.note);
       }).length;
+
+      let presentCount = 0, lateCount = 0, onTimeReturnCount = 0, leftEarlyCount = 0;
+     rows.forEach((r) => {
+       if (!r.hasEnrichedRow) return;
+       if (r.check_in_time) {
+         const isLateRaw = r.status === "late" || r.status === "late_and_left_early";
+         const isLate = isLateRaw && !isMorningLateExempted(r.note, r.check_in_time);
+         if (isLate) lateCount++; else presentCount++;
+       }
+       if (r.check_out_time) {
+         const isEarlyRaw = r.status === "left_early" || r.status === "late_and_left_early";
+         const isEarly = isEarlyRaw && !isEarlyLeaveExempted(r.note, r.check_out_time);
+         if (isEarly) leftEarlyCount++; else onTimeReturnCount++;
+       } else if (isMeetingExcuseNote(r.note) && !isHalfDayMorningLeave(r.note) && !isMorningOnlyExemptNote(r.note)) {
+         onTimeReturnCount++;
+       }
+     });
 
       // ★ นับจำนวนวันลาในเดือนนี้ — อิงจากช่วงวันจริงของเดือนปีงบ ไม่ใช่แค่วันที่มีแถว attendance
       const year = calendarYearForFiscalMonth(m);
@@ -721,10 +746,10 @@ export default function AdminTeacherDetailPage() {
       return {
         month: m,
         label: MONTH_LABEL[m],
-        present: cnt("present"),
-        late: cnt("late") + cnt("late_and_left_early"),
-        onTimeReturn: cnt("present") + cnt("late"),
-        leftEarly: cnt("left_early") + cnt("late_and_left_early"),
+        present: presentCount,
+       late: lateCount,
+       onTimeReturn: onTimeReturnCount,
+       leftEarly: leftEarlyCount,
         absent: absentCount,
         noScanIn: noScanInCount,
         noScanOut: noScanOutCount,
@@ -949,8 +974,9 @@ export default function AdminTeacherDetailPage() {
                         <AlertCircle className="w-5 h-5" />
                       </div>
                       <div>
-                        <p className="text-sm font-black text-rose-600">ขาดงาน</p>
-                        <p className="text-xs text-rose-400 font-bold mt-0.5">ไม่มีการลงเวลาเข้า-ออกในวันนี้</p>
+                        <p className="text-sm font-black text-rose-600">{selectedIsUnfiledLeave ? "ขาดงาน (รอการส่งใบลาในระบบ)" : "ขาดงาน"}</p>
+                        <p className="text-xs text-rose-400 font-bold mt-0.5">{selectedIsUnfiledLeave ? "มีหมายเหตุระบุว่าลา แต่ยังไม่พบใบลาที่ยื่นในระบบ" : "ไม่มีการลงเวลาเข้า-ออกในวันนี้"}
+</p>
                       </div>
                     </div>
                     {selectedRemark && (
@@ -1025,7 +1051,6 @@ export default function AdminTeacherDetailPage() {
                         !hasOut &&
                         !onLeave &&
                         !isReligiousRow &&
-                        d.status !== "leave" &&
                         !!d.note &&
                         !noScanInRow &&
                         !noScanOutRow &&
@@ -1033,7 +1058,8 @@ export default function AdminTeacherDetailPage() {
                         !noScanExemptInRow &&
                         !noScanExemptOutRow;
 
-                      const inStatus = monthlyCheckInStatus(d, onLeave, isReligiousRow);
+                      const isUnfiledLeaveRow = !isWeekend && !isFuture && !dayHoliday && d.hasEnrichedRow && !hasIn && !hasOut && !onLeave && !isReligiousRow && d.status === "leave";
+                        const inStatus = monthlyCheckInStatus(d, onLeave, isReligiousRow);
                       const outStatus = monthlyCheckOutStatus(d, onLeave, isReligiousRow);
 
                       return (
@@ -1051,7 +1077,7 @@ export default function AdminTeacherDetailPage() {
                             </td>
                           ) : isAbsentRow ? (
                             <td colSpan={2} className="px-3 py-2 text-center">
-                              <span className="inline-block px-2.5 py-1 rounded-md text-xs font-bold text-rose-600 bg-rose-50">ขาดงาน</span>
+                              <span className="inline-block px-2.5 py-1 rounded-md text-xs font-bold text-rose-600 bg-rose-50">{isUnfiledLeaveRow ? "รอใบลา" : "ขาดงาน"}</span>
                             </td>
                           ) : (
                             <>

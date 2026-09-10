@@ -2906,7 +2906,42 @@ async function fetchAllLeaveRequests(usersMap: Record<string, UserMapEntry>, fy:
   }
   return attachUsers(all, usersMap);
 }
+const HISTORY_PAGE_SIZE = 20;
 
+async function fetchHistoryLeaveRequestsPage(
+  usersMap: Record<string, UserMapEntry>,
+  fy: number,
+  page: number,
+  filters: { type: LeaveType | "all"; status: LeaveStatus | "all"; grade: string },
+  pageSize: number = HISTORY_PAGE_SIZE
+): Promise<{ rows: any[]; totalCount: number }> {
+  const { start, end } = fiscalYearRange(fy);
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  let query = supabase
+    .from("leave_requests")
+    .select(
+      "id,user_id,leave_type,start_date,end_date,days_count,status,reason,document_url,created_at,approver_1_status,approver_2_status,approver_3_status,approver_1_id,approver_2_id,approver_3_id",
+      { count: "estimated" }
+    )
+    .gte("start_date", start)
+    .lte("start_date", end)
+    .order("created_at", { ascending: false })
+    .range(from, to);
+
+  if (filters.status !== "all") query = query.eq("status", filters.status);
+  if (filters.type !== "all") query = query.eq("leave_type", filters.type);
+  if (filters.grade !== "all") {
+    const ids = Object.values(usersMap).filter(u => u.grade_level === filters.grade).map(u => u.id);
+    if (ids.length === 0) return { rows: [], totalCount: 0 };
+    query = query.in("user_id", ids);
+  }
+
+  const { data, error, count } = await query;
+  if (error) { console.error("[fetchHistoryLeaveRequestsPage]", error.message); return { rows: [], totalCount: 0 }; }
+  return { rows: attachUsers(data ?? [], usersMap), totalCount: count ?? 0 };
+}
 // ★ ค้นหาใบลาจากชื่อครู — ยิงตรงด้วยชื่อ ไม่ต้องพึ่งข้อมูลที่โหลดไว้ก่อน
 async function searchLeaveRequestsByName(query: string, usersMap: Record<string, UserMapEntry>) {
   const q = query.trim();
@@ -2955,7 +2990,26 @@ const [searching, setSearching] = useState(false);
 
 const [pendingPage, setPendingPage] = useState(1);
 const [pendingTotalCount, setPendingTotalCount] = useState(0);
+const [historyRows, setHistoryRows] = useState<LeaveRequest[]>([]);
+const [historyPage, setHistoryPage] = useState(1);
+const [historyTotalCount, setHistoryTotalCount] = useState(0);
+const [historyLoading, setHistoryLoading] = useState(false);
 
+const loadHistoryPage = useCallback(async (page: number) => {
+  if (!usersMapLoadedRef.current) return;
+  setHistoryLoading(true);
+  const { rows, totalCount } = await fetchHistoryLeaveRequestsPage(
+    usersMap, filterFY, page, { type: filterType, status: filterStatus, grade: filterGrade }
+  );
+  setHistoryRows(rows as unknown as LeaveRequest[]);
+  setHistoryTotalCount(totalCount);
+  setHistoryPage(page);
+  setHistoryLoading(false);
+}, [usersMap, filterFY, filterType, filterStatus, filterGrade]);
+
+useEffect(() => {
+  if (tab === "history") loadHistoryPage(1);
+}, [tab, filterFY, filterType, filterStatus, filterGrade, loadHistoryPage]);
 const loadPendingPage = useCallback(async (page: number) => {
   if (!usersMapLoadedRef.current || page < 1) return;
   setLoading(true);
@@ -3297,29 +3351,36 @@ const allGrades = ["all", ...uniqueGrades];
                       {canApprove&&sl&&myStatus&&myStatus!=="pending"&&(<div className={`mt-3 text-center text-sm font-black py-2 rounded-xl ${myStatus==="approved"?"bg-green-100 text-green-700":"bg-red-100 text-red-700"}`}>{myStatus==="approved"?"✅ คุณอนุมัติแล้ว":"❌ คุณไม่อนุมัติ"}</div>)}
                       {canApprove&&!sl&&(<p className="mt-3 text-xs text-slate-400 text-center">คุณไม่ใช่ผู้อนุมัติในรายการนี้</p>)}
                     </div>
-                    {!loading && pendingTotalCount > PENDING_PAGE_SIZE && (
-  <div className="flex items-center justify-center gap-3 pt-2">
-    <button
-      onClick={() => loadPendingPage(pendingPage - 1)}
-      disabled={pendingPage <= 1}
-      className="px-4 py-2 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm disabled:opacity-40"
-    >← ย้อนกลับ</button>
-    <span className="text-sm font-bold text-slate-500">
-      หน้า {pendingPage} / {Math.max(1, Math.ceil(pendingTotalCount / PENDING_PAGE_SIZE))} ({pendingTotalCount} รายการ)
-    </span>
-    <button
-      onClick={() => loadPendingPage(pendingPage + 1)}
-      disabled={pendingPage >= Math.ceil(pendingTotalCount / PENDING_PAGE_SIZE)}
-      className="px-4 py-2 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm disabled:opacity-40"
-    >หน้าถัดไป →</button>
-  </div>
-)}
+                
                   </div>
                 );
               })}
+
           </div>
         )}
+{tab==="pending"&&(
+  <div className="space-y-3 pb-24"> {/* เว้นที่ด้านล่างกันแถบทับการ์ดสุดท้าย */}
+    {/* ...การ์ดทั้งหมดเหมือนเดิม (ไม่มีปุ่มเปลี่ยนหน้าอยู่ข้างในแล้ว)... */}
 
+    {!loading && pendingTotalCount > PENDING_PAGE_SIZE && (
+      <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] px-4 py-3 flex items-center justify-center gap-3">
+        <button
+          onClick={() => loadPendingPage(pendingPage - 1)}
+          disabled={pendingPage <= 1}
+          className="px-4 py-2 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm disabled:opacity-40"
+        >← ย้อนกลับ</button>
+        <span className="text-sm font-bold text-slate-500">
+          หน้า {pendingPage} / {Math.max(1, Math.ceil(pendingTotalCount / PENDING_PAGE_SIZE))} ({pendingTotalCount} รายการ)
+        </span>
+        <button
+          onClick={() => loadPendingPage(pendingPage + 1)}
+          disabled={pendingPage >= Math.ceil(pendingTotalCount / PENDING_PAGE_SIZE)}
+          className="px-4 py-2 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm disabled:opacity-40"
+        >หน้าถัดไป →</button>
+      </div>
+    )}
+  </div>
+)}
         {tab==="history"&&(
           <div>
             <div className="flex gap-2 mb-4 flex-wrap">
