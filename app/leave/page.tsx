@@ -2858,14 +2858,23 @@ function attachUsers(rows: any[], usersMap: Record<string, UserMapEntry>) {
   return rows.map(r => ({ ...r, user: usersMap[r.user_id] ?? null }));
 }
 
-async function fetchPendingLeaveRequests(usersMap: Record<string, UserMapEntry>) {
-  const { data, error } = await supabase
+const PENDING_PAGE_SIZE = 10;
+
+async function fetchPendingLeaveRequestsPage(
+  usersMap: Record<string, UserMapEntry>,
+  page: number,
+  pageSize: number = PENDING_PAGE_SIZE
+): Promise<{ rows: any[]; totalCount: number }> {
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const { data, error, count } = await supabase
     .from("leave_requests")
-    .select("*")
+    .select("*", { count: "estimated" })
     .eq("status", "pending")
-    .order("created_at", { ascending: true }); // ★ เก่าสุดขึ้นก่อน — รอนานสุดเห็นก่อน
-  if (error || !data) return [];
-  return attachUsers(data, usersMap);
+    .order("created_at", { ascending: false }) // ★ ล่าสุดก่อน ตามที่ต้องการ
+    .range(from, to);
+  if (error) { console.error("[fetchPendingLeaveRequestsPage]", error.message); return { rows: [], totalCount: 0 }; }
+  return { rows: attachUsers(data ?? [], usersMap), totalCount: count ?? 0 };
 }
 
 function fiscalYearRange(fy: number): { start: string; end: string } {
@@ -2944,14 +2953,29 @@ const [searchQuery, setSearchQuery] = useState("");
 const [searchResults, setSearchResults] = useState<LeaveRequest[] | null>(null);
 const [searching, setSearching] = useState(false);
 
+const [pendingPage, setPendingPage] = useState(1);
+const [pendingTotalCount, setPendingTotalCount] = useState(0);
+
+const loadPendingPage = useCallback(async (page: number) => {
+  if (!usersMapLoadedRef.current || page < 1) return;
+  setLoading(true);
+  const { rows, totalCount } = await fetchPendingLeaveRequestsPage(usersMap, page);
+  setRequests(rows as unknown as LeaveRequest[]);
+  setPendingTotalCount(totalCount);
+  setPendingPage(page);
+  setLoading(false);
+}, [usersMap]);
+
 // ★ โหลด users map ครั้งเดียว แล้วต่อด้วยรายการรออนุมัติ (เร็ว)
 const initialLoad = useCallback(async () => {
   setLoading(true);
   const map = await loadUsersMap();
   setUsersMap(map);
   usersMapLoadedRef.current = true;
-  const pending = await fetchPendingLeaveRequests(map);
-  setRequests(pending as unknown as LeaveRequest[]);
+  const { rows, totalCount } = await fetchPendingLeaveRequestsPage(map, 1);
+  setRequests(rows as unknown as LeaveRequest[]);
+  setPendingTotalCount(totalCount);
+  setPendingPage(1);
   setLoading(false);
 }, []);
 
@@ -3101,10 +3125,9 @@ if(error){alert("❌ บันทึกไม่สำเร็จ: "+error.mess
 // ถ้ายังไม่เคยโหลด ก็แค่รีเฟรชรายการรออนุมัติพอ
 if (fullDataLoadedRef.current) {
   fullDataLoadedRef.current = false;
-  await ensureFullDataLoaded(filterFY);   // ✅ ส่ง filterFY เข้าไปด้วย
+  await ensureFullDataLoaded(filterFY);
 } else {
-  const pending = await fetchPendingLeaveRequests(usersMap);
-  setRequests(pending as unknown as LeaveRequest[]);
+  await loadPendingPage(pendingPage);
 }
 
 setPendingApproveId(null);
@@ -3227,10 +3250,14 @@ const allGrades = ["all", ...uniqueGrades];
         </div>
         <div className="flex gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
           {[["pending","⏳ รออนุมัติ"],["history","📋 ทั้งหมด"],["summary","👥 รายบุคคล"],["official","🏛️ ไปราชการ"],["graph","📊 กราฟ"]].map(([k,l])=>(
-            <button key={k} onClick={()=>{ setTab(k as any); if (k !== "pending") ensureFullDataLoaded(filterFY); }} className={`flex-1 py-2.5 rounded-xl text-sm font-black flex items-center justify-center gap-1 ${tab===k?"bg-white text-slate-800 shadow border border-slate-200":"text-slate-500 hover:text-slate-700"}`}>
-              {l}{k==="pending"&&pendingList.length>0&&<span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">{pendingList.length}</span>}
-            </button>
-          ))}
+  <button key={k} onClick={()=>{
+    setTab(k as any);
+    if (k === "pending") { fullDataLoadedRef.current = false; loadPendingPage(1); }
+    else ensureFullDataLoaded(filterFY);
+  }} className={`flex-1 py-2.5 rounded-xl text-sm font-black flex items-center justify-center gap-1 ${tab===k?"bg-white text-slate-800 shadow border border-slate-200":"text-slate-500 hover:text-slate-700"}`}>
+    {l}{k==="pending"&&pendingTotalCount>0&&<span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">{pendingTotalCount}</span>}
+  </button>
+))}
         </div>
 
         {tab==="pending"&&(
@@ -3270,6 +3297,23 @@ const allGrades = ["all", ...uniqueGrades];
                       {canApprove&&sl&&myStatus&&myStatus!=="pending"&&(<div className={`mt-3 text-center text-sm font-black py-2 rounded-xl ${myStatus==="approved"?"bg-green-100 text-green-700":"bg-red-100 text-red-700"}`}>{myStatus==="approved"?"✅ คุณอนุมัติแล้ว":"❌ คุณไม่อนุมัติ"}</div>)}
                       {canApprove&&!sl&&(<p className="mt-3 text-xs text-slate-400 text-center">คุณไม่ใช่ผู้อนุมัติในรายการนี้</p>)}
                     </div>
+                    {!loading && pendingTotalCount > PENDING_PAGE_SIZE && (
+  <div className="flex items-center justify-center gap-3 pt-2">
+    <button
+      onClick={() => loadPendingPage(pendingPage - 1)}
+      disabled={pendingPage <= 1}
+      className="px-4 py-2 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm disabled:opacity-40"
+    >← ย้อนกลับ</button>
+    <span className="text-sm font-bold text-slate-500">
+      หน้า {pendingPage} / {Math.max(1, Math.ceil(pendingTotalCount / PENDING_PAGE_SIZE))} ({pendingTotalCount} รายการ)
+    </span>
+    <button
+      onClick={() => loadPendingPage(pendingPage + 1)}
+      disabled={pendingPage >= Math.ceil(pendingTotalCount / PENDING_PAGE_SIZE)}
+      className="px-4 py-2 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-black text-sm disabled:opacity-40"
+    >หน้าถัดไป →</button>
+  </div>
+)}
                   </div>
                 );
               })}
