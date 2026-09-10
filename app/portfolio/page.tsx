@@ -995,7 +995,7 @@ const [savingSig, setSavingSig] = useState(false);
         {/* Performance period + leave + attendance summary */}
         <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
-            <h3 className="text-sm font-extrabold text-slate-800">📊 สรุปผลการปฏิบัติงาน</h3>
+            <h3 className="text-sm font-extrabold text-slate-800">📊 สรุปสถิติการเข้าปฏิบัติงาน</h3>
             <div className="flex gap-1.5 bg-slate-100 rounded-xl p-1">
               {(
                 [
