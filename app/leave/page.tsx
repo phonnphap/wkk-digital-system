@@ -2870,17 +2870,18 @@ async function fetchPendingLeaveRequests(usersMap: Record<string, UserMapEntry>)
 
 async function fetchAllLeaveRequests(usersMap: Record<string, UserMapEntry>) {
   const PAGE_SIZE = 1000;
+  const MAX_ROWS = 6000; // ★ กันดึงทั้งตารางตอนข้อมูลสะสมเยอะ — จำกัดไว้ก่อนตันเวลา
   const { count, error: countErr } = await supabase
     .from("leave_requests")
     .select("id", { count: "exact", head: true });
-  const totalCount = count ?? 0;
+  const totalCount = Math.min(count ?? 0, MAX_ROWS);
   if (countErr || totalCount === 0) return [];
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
   const pagePromises = Array.from({ length: totalPages }, (_, i) =>
     supabase.from("leave_requests").select("*")
       .order("created_at", { ascending: false })
-      .range(i * PAGE_SIZE, i * PAGE_SIZE + PAGE_SIZE - 1)
+      .range(i * PAGE_SIZE, Math.min(i * PAGE_SIZE + PAGE_SIZE - 1, MAX_ROWS - 1))
   );
   const results = await Promise.all(pagePromises);
   const flat = results.flatMap(r => r.data ?? []);
@@ -3002,11 +3003,20 @@ useEffect(() => {
       updates[`approver_${slotNum}_signature`]=approverSigUrl;
       updates[`approver_${slotNum}_approved_at`]=new Date().toLocaleDateString("th-TH",{day:"numeric",month:"long",year:"numeric",timeZone:"Asia/Bangkok"});
     }
-    if(action==="rejected"&&reason){updates[`approver_${slotNum}_reject_reason`]=reason;updates.reject_reason=reason;}
+            if(action==="rejected"&&reason){updates[`approver_${slotNum}_reject_reason`]=reason;updates.reject_reason=reason;}
+
+    // ★ ผู้อนุมัติลำดับ 2 กดอนุมัติ → ให้ผู้อนุมัติลำดับ 3 อนุมัติทันทีอัตโนมัติ ไม่ต้องรอกด
+    const autoApproveSlot3 = slotNum===2 && action==="approved" && !!req.approver_3_id;
+    if(autoApproveSlot3){
+      const approver3Sig = usersMap[req.approver_3_id!]?.signature_url || "";
+      updates.approver_3_status = "approved";
+      updates.approver_3_signature = approver3Sig;
+      updates.approver_3_approved_at = new Date().toLocaleDateString("th-TH",{day:"numeric",month:"long",year:"numeric",timeZone:"Asia/Bangkok"});
+    }
 
     const s1=slotNum===1?action:req.approver_1_status;
     const s2=slotNum===2?action:req.approver_2_status;
-    const s3=slotNum===3?action:req.approver_3_status;
+    const s3=autoApproveSlot3?"approved":(slotNum===3?action:req.approver_3_status);
     const teacherName=fullName((req as any).user);
     const typeCfg=LEAVE_TYPE_CONFIG[req.leave_type];
     const teacherEmail=(req as any).user?.email;
