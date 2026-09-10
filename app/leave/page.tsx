@@ -2868,24 +2868,34 @@ async function fetchPendingLeaveRequests(usersMap: Record<string, UserMapEntry>)
   return attachUsers(data, usersMap);
 }
 
-async function fetchAllLeaveRequests(usersMap: Record<string, UserMapEntry>) {
-  const PAGE_SIZE = 1000;
-  const MAX_ROWS = 6000; // ★ กันดึงทั้งตารางตอนข้อมูลสะสมเยอะ — จำกัดไว้ก่อนตันเวลา
-  const { count, error: countErr } = await supabase
-    .from("leave_requests")
-    .select("id", { count: "exact", head: true });
-  const totalCount = Math.min(count ?? 0, MAX_ROWS);
-  if (countErr || totalCount === 0) return [];
+function fiscalYearRange(fy: number): { start: string; end: string } {
+  const safeFy = Number.isFinite(fy) ? fy : getCurrentFiscalYear(); // ★ กัน NaN/undefined
+  return { start: `${safeFy - 1}-10-01`, end: `${safeFy}-09-30` };
+}
 
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
-  const pagePromises = Array.from({ length: totalPages }, (_, i) =>
-    supabase.from("leave_requests").select("*")
+async function fetchAllLeaveRequests(usersMap: Record<string, UserMapEntry>, fy: number) {
+  const { start, end } = fiscalYearRange(fy);
+  const PAGE_SIZE = 1000;
+  let all: any[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("leave_requests")
+      .select("*")
+      .gte("start_date", start)
+      .lte("start_date", end)
       .order("created_at", { ascending: false })
-      .range(i * PAGE_SIZE, Math.min(i * PAGE_SIZE + PAGE_SIZE - 1, MAX_ROWS - 1))
-  );
-  const results = await Promise.all(pagePromises);
-  const flat = results.flatMap(r => r.data ?? []);
-  return attachUsers(flat, usersMap);
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) { console.error("[fetchAllLeaveRequests]", error.message); break; }
+    if (!data || data.length === 0) break;
+
+    all = all.concat(data);
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return attachUsers(all, usersMap);
 }
 
 // ★ ค้นหาใบลาจากชื่อครู — ยิงตรงด้วยชื่อ ไม่ต้องพึ่งข้อมูลที่โหลดไว้ก่อน
@@ -2947,20 +2957,29 @@ const initialLoad = useCallback(async () => {
 
 useEffect(()=>{ initialLoad(); }, [initialLoad]);
 
-// ★ โหลดข้อมูลทั้งหมด — เรียกเฉพาะตอนกดแท็บที่ต้องใช้ (ครั้งแรกครั้งเดียว)
-const ensureFullDataLoaded = useCallback(async () => {
-  if (fullDataLoadedRef.current || !usersMapLoadedRef.current) return;
+const lastLoadedFYRef = useRef<number | null>(null);
+
+const ensureFullDataLoaded = useCallback(async (fy: number) => {
+  if (!usersMapLoadedRef.current) return;
+  const safeFy = Number.isFinite(fy) ? fy : getCurrentFiscalYear(); // ★ กันพลาด
+  if (fullDataLoadedRef.current && lastLoadedFYRef.current === safeFy) return;
   fullDataLoadedRef.current = true;
+  lastLoadedFYRef.current = safeFy;
   setLoading(true);
   try {
-    const all = await fetchAllLeaveRequests(usersMap);
+    const all = await fetchAllLeaveRequests(usersMap, safeFy);
     setRequests(all as unknown as LeaveRequest[]);
   } catch (err) {
     console.error("[ensureFullDataLoaded] error:", err);
-    fullDataLoadedRef.current = false; // ให้ลองใหม่ได้ถ้า error
+    fullDataLoadedRef.current = false;
   }
   setLoading(false);
 }, [usersMap]);
+
+// โหลดใหม่อัตโนมัติเมื่อเปลี่ยนปีงบประมาณ ขณะอยู่แท็บที่ไม่ใช่ pending
+useEffect(() => {
+  if (tab !== "pending") ensureFullDataLoaded(filterFY);
+}, [filterFY, tab, ensureFullDataLoaded]);
 
 // ★ ค้นหาชื่อครู — debounce กันยิง query ถี่เกินไปตอนพิมพ์
 useEffect(() => {
@@ -3082,7 +3101,7 @@ if(error){alert("❌ บันทึกไม่สำเร็จ: "+error.mess
 // ถ้ายังไม่เคยโหลด ก็แค่รีเฟรชรายการรออนุมัติพอ
 if (fullDataLoadedRef.current) {
   fullDataLoadedRef.current = false;
-  await ensureFullDataLoaded();
+  await ensureFullDataLoaded(filterFY);   // ✅ ส่ง filterFY เข้าไปด้วย
 } else {
   const pending = await fetchPendingLeaveRequests(usersMap);
   setRequests(pending as unknown as LeaveRequest[]);
@@ -3208,7 +3227,7 @@ const allGrades = ["all", ...uniqueGrades];
         </div>
         <div className="flex gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
           {[["pending","⏳ รออนุมัติ"],["history","📋 ทั้งหมด"],["summary","👥 รายบุคคล"],["official","🏛️ ไปราชการ"],["graph","📊 กราฟ"]].map(([k,l])=>(
-            <button key={k} onClick={()=>{ setTab(k as any); if (k !== "pending") ensureFullDataLoaded(); }} className={`flex-1 py-2.5 rounded-xl text-sm font-black flex items-center justify-center gap-1 ${tab===k?"bg-white text-slate-800 shadow border border-slate-200":"text-slate-500 hover:text-slate-700"}`}>
+            <button key={k} onClick={()=>{ setTab(k as any); if (k !== "pending") ensureFullDataLoaded(filterFY); }} className={`flex-1 py-2.5 rounded-xl text-sm font-black flex items-center justify-center gap-1 ${tab===k?"bg-white text-slate-800 shadow border border-slate-200":"text-slate-500 hover:text-slate-700"}`}>
               {l}{k==="pending"&&pendingList.length>0&&<span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">{pendingList.length}</span>}
             </button>
           ))}

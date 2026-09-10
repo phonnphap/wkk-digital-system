@@ -110,9 +110,7 @@ export default function AdminTeachersListPage() {
       supabase
         .from("users")
         .select(
-  `id, title, first_name, last_name, role, email, position, avatar_url, subject_group,
-   department:departments!users_department_id_fkey(name),
-   grade_level:grade_levels!users_grade_level_id_fkey(name)`
+  "id, title, first_name, last_name, role, email, position, avatar_url, subject_group, department:departments!users_department_id_fkey(name), grade_level:grade_levels!users_grade_level_fkey(name)"
 )
         .order("first_name", { ascending: true }),
       supabase
