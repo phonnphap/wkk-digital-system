@@ -48,8 +48,10 @@ type LateEntry = {
   record_id: string;
   student: Student;
   room_name: string;
-  grade_level: string | null; // ★ เพิ่ม — เก็บสายชั้นดิบไว้ใช้จัดเรียง/สรุป
+  grade_level: string | null;
   recorded_at: string;
+  recorded_by: string | null;
+  recorded_source: string | null;
 };
 
 // ★ ใช้ select เดียวกันทุกจุด กันลืมฟิลด์ตกหล่น
@@ -82,6 +84,14 @@ function gradeLineLabel(stage: string, level: number) {
   if (stage === "มัธยมศึกษาตอนต้น") return `ม.${level}`;
   if (stage === "มัธยมศึกษาตอนปลาย") return `ม.${level}`;
   return `${stage} ${level}`;
+}
+
+const GENERAL_MARK_START = "07:45:00";
+const GENERAL_MARK_END = "15:30:00";
+const GENERAL_UNDO_CUTOFF = "09:00:00";
+
+function nowThaiTime() {
+  return new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "Asia/Bangkok" });
 }
 
   function todayISO() {
@@ -283,7 +293,7 @@ async function regenerateToken() {
     const { data, error } = await supabase
   .from("attendance_records")
   .select(
-    `id, recorded_at, student:students(id, seat_number, student_code, national_id, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id, classroom:classrooms(room_name, grade_level:grade_group))`
+    `id, recorded_at, recorded_by, recorded_source, student:students(id, seat_number, student_code, national_id, prefix, first_name, last_name, nick_name, birth_date, gender, classroom_id, classroom:classrooms(room_name, grade_level:grade_group))`
   )
   .eq("attendance_date", todayISO())
   .eq("status", "late")
@@ -296,14 +306,16 @@ async function regenerateToken() {
     }
 
     const entries: LateEntry[] = (data ?? [])
-      .filter((r: any) => r.student)
-      .map((r: any) => ({
-        record_id: r.id,
-        student: r.student,
-        room_name: formatClassLabel(r.student?.classroom) || "-",
-        grade_level: r.student?.classroom?.grade_level ?? null, // ★ เก็บสายชั้นดิบไว้จัดเรียง/สรุป
-        recorded_at: r.recorded_at,
-      }));
+  .filter((r: any) => r.student)
+  .map((r: any) => ({
+    record_id: r.id,
+    student: r.student,
+    room_name: formatClassLabel(r.student?.classroom) || "-",
+    grade_level: r.student?.classroom?.grade_level ?? null,
+    recorded_at: r.recorded_at,
+    recorded_by: r.recorded_by ?? null,
+    recorded_source: r.recorded_source ?? null,
+  }));
     setLateToday(entries);
     setLoadingLate(false);
   }
@@ -435,53 +447,67 @@ async function regenerateToken() {
   }
 
   async function markLate(student: Student) {
-    setSaving(true);
-    setErrorMsg("");
+  setSaving(true);
+  setErrorMsg("");
 
-    const { data: savedRows, error } = await supabase
-      .from("attendance_records")
-            .upsert(
-        {
-          student_id: student.id,
-          classroom_id: student.classroom_id,
-          attendance_date: todayISO(),
-          status: "late",
-          recorded_source: "gate_scan",
-          recorded_at: new Date().toISOString(),
-        },
-        { onConflict: "student_id,attendance_date" }
-      )
-      .select();
-
-    setSaving(false);
-
-    if (error) {
-      setErrorMsg("บันทึกไม่สำเร็จ: " + error.message);
+  if (myRole !== "admin") {
+    const t = nowThaiTime();
+    if (t < GENERAL_MARK_START || t > GENERAL_MARK_END) {
+      setSaving(false);
+      setErrorMsg(`บันทึกนักเรียนมาสายได้เฉพาะช่วงเวลา ${GENERAL_MARK_START.slice(0,5)}–${GENERAL_MARK_END.slice(0,5)} น. เท่านั้น`);
       return;
     }
-    if (!savedRows || savedRows.length === 0) {
-      setErrorMsg("ไม่สามารถบันทึกได้ — ระบบไม่พบสิทธิ์ในการบันทึก กรุณาตรวจสอบ RLS policy ของตาราง attendance_records");
-      return;
-    }
-
-    setPendingStudent(null);
-    setQuery("");
-    loadLateToday();
   }
 
-  async function undoLate(recordId: string, recordedAt: string) {
-  const isToday = recordedAt.slice(0, 10) === todayISO();
-  if (!isToday && myRole !== "admin") {
-    alert("ไม่สามารถยกเลิกรายการของวันอื่นได้ — ยกเลิกได้เฉพาะแอดมินเท่านั้น");
+  const { data: savedRows, error } = await supabase
+    .from("attendance_records")
+    .upsert(
+      {
+        student_id: student.id,
+        classroom_id: student.classroom_id,
+        attendance_date: todayISO(),
+        status: "late",
+        recorded_source: "gate_scan",
+        recorded_by: myProfileId || null,
+        recorded_at: new Date().toISOString(),
+      },
+      { onConflict: "student_id,attendance_date" }
+    )
+    .select();
+
+  setSaving(false);
+  if (error) { setErrorMsg("บันทึกไม่สำเร็จ: " + error.message); return; }
+  if (!savedRows || savedRows.length === 0) {
+    setErrorMsg("ไม่สามารถบันทึกได้ — ระบบไม่พบสิทธิ์ในการบันทึก กรุณาตรวจสอบ RLS policy");
     return;
+  }
+  setPendingStudent(null);
+  setQuery("");
+  loadLateToday();
+}
+
+  async function undoLate(entry: LateEntry) {
+  const isToday = entry.recorded_at.slice(0, 10) === todayISO();
+
+  if (myRole === "admin") {
+    // ผ่านทุกกรณี
+  } else if (entry.recorded_source === "council_link") {
+    if (!isToday) { alert("ไม่สามารถยกเลิกรายการของวันอื่นได้ — กรุณาแจ้งแอดมิน"); return; }
+  } else {
+    if (!isToday) { alert("ไม่สามารถยกเลิกรายการของวันอื่นได้ — กรุณาแจ้งแอดมิน"); return; }
+    if (entry.recorded_by !== myProfileId) {
+      alert("ยกเลิกได้เฉพาะรายการที่ตัวเองบันทึกเท่านั้น — กรุณาแจ้งแอดมิน");
+      return;
+    }
+    if (nowThaiTime() > GENERAL_UNDO_CUTOFF) {
+      alert(`ยกเลิกได้เฉพาะก่อนเวลา ${GENERAL_UNDO_CUTOFF.slice(0,5)} น. เท่านั้น — เกินเวลานี้กรุณาแจ้งแอดมิน`);
+      return;
+    }
   }
 
   if (!confirm("ยืนยันยกเลิกสถานะ 'มาสาย' รายการนี้?")) return;
   const { data: deletedRows, error } = await supabase
-    .from("attendance_records")
-    .delete()
-    .eq("id", recordId)
-    .select();
+    .from("attendance_records").delete().eq("id", entry.record_id).select();
   if (error) { alert("ยกเลิกไม่สำเร็จ: " + error.message); return; }
   if (!deletedRows || deletedRows.length === 0) {
     alert("ไม่สามารถยกเลิกได้ — ระบบไม่พบสิทธิ์ในการแก้ไขรายการนี้");
@@ -766,9 +792,7 @@ async function regenerateToken() {
                             {e.room_name} · เลขที่ {e.student.seat_number ?? "-"} · {timeThai(e.recorded_at)} น.
                           </p>
                         </div>
-                        <button
-  onClick={() => undoLate(e.record_id, e.recorded_at)}
-  title="ยกเลิกรายการนี้"
+                        <button onClick={() => undoLate(e)} title="ยกเลิกรายการนี้"
   className="shrink-0 rounded-xl p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"
 >
   <Undo2 className="h-4 w-4" />

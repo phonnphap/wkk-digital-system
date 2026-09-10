@@ -121,6 +121,44 @@ function characteristicLabel(level: string): string {
   return map[level] ?? "-";
 }
 
+// ★ ประมาณความกว้างของข้อความไทย/อังกฤษ เพื่อคำนวณความกว้างของเส้นใต้ (blank) ให้พอดีกับข้อความ
+function estimateTextWidthPx(text: string, pxPerChar = 13, basePadding = 24): number {
+  const len = (text ?? "").length;
+  return len * pxPerChar + basePadding;
+}
+
+// ★ ช่องกรอกข้อมูลด้านบน (ชื่อ / เลขประจำตัว / ห้อง / เลขที่) — label ตามด้วยเส้นใต้ที่ข้อความจะถูกจัดกึ่งกลาง
+function InfoField({ label, value, grow = 1 }: { label: string; value: string; grow?: number }) {
+  return (
+    <div className="flex items-baseline" style={{ flexGrow: grow, flexBasis: 0, minWidth: "fit-content" }}>
+      <span className="whitespace-nowrap">{label}</span>
+      <span className="flex-1 text-center border-b border-black mx-2 px-1 whitespace-nowrap overflow-hidden text-ellipsis">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+// ★ บรรทัดลงชื่อ — "ลงชื่อ" ชิดซ้ายตรงกันทุกช่อง เส้นใต้ขยายพอดีกับชื่อในวงเล็บ และชื่อจะอยู่กึ่งกลางเส้นใต้พอดี
+function SignatureField({ role, nameLabel }: { role: string; nameLabel?: string }) {
+  const lineWidthPx = Math.max(140, estimateTextWidthPx(nameLabel ?? ""));
+  return (
+    <div className="inline-block text-left signature-field">
+      <div className="flex items-baseline whitespace-nowrap">
+        <span>ลงชื่อ</span>
+        <span
+          className="border-b border-black inline-block mx-1"
+          style={{ width: `${lineWidthPx}px` }}
+        >&nbsp;</span>
+        <span className="whitespace-nowrap">{role}</span>
+      </div>
+      <div style={{ width: `${lineWidthPx}px`, marginLeft: "3.2em" }} className="text-center">
+        {nameLabel ? `(${nameLabel})` : "\u00A0"}
+      </div>
+    </div>
+  );
+}
+
 export default function Vp4Report({
   classroomLevel,
   classroomLabel,
@@ -360,11 +398,12 @@ export default function Vp4Report({
               )}
             </div>
 
-            <div className="flex flex-wrap justify-between gap-4 text-xl mb-3 w-full print:mb-1">
-              <span>ชื่อ {s.prefix}{s.first_name} {s.last_name}</span>
-              <span>เลขประจำตัว {s.student_code ?? "-"}</span>
-              <span>ห้อง {classroomLevel === "primary" ? roomParts.room : classroomLabel}</span>
-              <span>เลขที่ {s.seat_number}</span>
+            {/* ★ ชื่อ / เลขประจำตัว / ห้อง / เลขที่ — ข้อความที่ดึงจากระบบจัดกึ่งกลางเส้นใต้ของแต่ละช่อง */}
+            <div className="flex flex-wrap items-baseline gap-4 text-xl mb-3 w-full print:mb-1">
+              <InfoField label="ชื่อ" value={`${s.prefix ?? ""}${s.first_name} ${s.last_name}`} grow={3} />
+              <InfoField label="เลขประจำตัว" value={s.student_code ?? "-"} grow={2} />
+              <InfoField label="ห้อง" value={String(classroomLevel === "primary" ? roomParts.room : classroomLabel)} grow={1} />
+              <InfoField label="เลขที่" value={String(s.seat_number)} grow={1} />
             </div>
 
             <table className="w-full border-collapse text-xl vp4-table table-fixed">
@@ -386,12 +425,12 @@ export default function Vp4Report({
                   <th className="border px-2 py-1 font-black" rowSpan={2}>ประเภท</th>
                   <th className="border px-2 py-1 font-black" rowSpan={2}>{classroomLevel === "primary" ? "ชั่วโมง" : "หน่วยกิต"}</th>
                   <th className="border px-2 py-1 font-black" colSpan={2}>การประเมินผลสัมฤทธิ์</th>
-                  <th className="border px-2 py-1 font-black" rowSpan={2}>คุณลักษณะ<br/>อันพึงประสงค์</th>
-                  <th className="border px-2 py-1 font-black" rowSpan={2}>อ่าน เขียน<br/>คิด วิเคราะห์</th>
+                  <th className="border px-2 py-1 font-black" rowSpan={2}>คุณลักษณะ</th>
+                  <th className="border px-2 py-1 font-black" rowSpan={2}>อ่านคิด<br/>วิเคราะห์เขียน</th>
                   <th className="border px-2 py-1 font-black" rowSpan={2}>หมายเหตุ</th>
                 </tr>
                 <tr className="border text-xl text-slate-500">
-                  <th className="border px-2 py-1 font-black">คะแนนที่ได้</th>
+                  <th className="border px-2 py-1 font-black">คะแนน</th>
                   <th className="border px-2 py-1 font-black">ผลการเรียน</th>
                 </tr>
               </thead>
@@ -479,23 +518,19 @@ export default function Vp4Report({
             {/* ★ เว้น 1 บรรทัดก่อนลงชื่อครูที่ปรึกษา */}
             <div className="h-8 print:h-6"></div>
 
-            {/* ★ ลายเซ็นครูที่ปรึกษา (และผู้ปกครอง สำหรับมัธยม) */}
+            {/* ★ ลายเซ็นครูที่ปรึกษา (และผู้ปกครอง สำหรับมัธยม) — "ลงชื่อ" ชิดซ้ายตรงกันทุกช่อง */}
             <div className={`grid ${classroomLevel === "primary" ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"} gap-6 text-xl`}>
               {classroomLevel === "primary" ? (
                 <>
-                  <div className="flex justify-center">
-                    <div className="inline-block text-left">ลงชื่อ .......................... ครูที่ปรึกษา<br/>({formatFullName(resolvedAdvisors[0])})</div>
-                  </div>
-                  <div className="flex justify-center">
-                    <div className="inline-block text-left">ลงชื่อ .......................... ครูที่ปรึกษา<br/>({formatFullName(resolvedAdvisors[1])})</div>
-                  </div>
+                  <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(resolvedAdvisors[0])} />
+                  <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(resolvedAdvisors[1])} />
                 </>
               ) : (
-                <div className="sm:col-span-2 flex justify-center">
-                  <div className="inline-block text-left">
-                    ลงชื่อ .......................... ครูที่ปรึกษา<br/>
-                    ({formatFullName(resolvedAdvisors[0])}{resolvedAdvisors[1] ? " / " + formatFullName(resolvedAdvisors[1]) : ""})
-                  </div>
+                <div className="sm:col-span-2">
+                  <SignatureField
+                    role="ครูที่ปรึกษา"
+                    nameLabel={`${formatFullName(resolvedAdvisors[0])}${resolvedAdvisors[1] ? " / " + formatFullName(resolvedAdvisors[1]) : ""}`}
+                  />
                 </div>
               )}
             </div>
@@ -506,21 +541,13 @@ export default function Vp4Report({
             <div className={`grid ${classroomLevel === "primary" ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"} gap-6 text-xl`}>
               {classroomLevel === "primary" ? (
                 <>
-                  <div className="flex justify-center">
-                    <div className="inline-block text-left">ลงชื่อ .......................... ผู้อำนวยการโรงเรียน<br/>({directorName})</div>
-                  </div>
-                  <div className="flex justify-center">
-                    <div className="inline-block text-left">ลงชื่อ .......................... ผู้ปกครอง</div>
-                  </div>
+                  <SignatureField role="ผู้อำนวยการโรงเรียน" nameLabel={directorName} />
+                  <SignatureField role="ผู้ปกครอง" />
                 </>
               ) : (
                 <>
-                  <div className="flex justify-center">
-                    <div className="inline-block text-left">ลงชื่อ .......................... ผู้บริหารสถานศึกษา<br/>({directorName})</div>
-                  </div>
-                  <div className="flex justify-center">
-                    <div className="inline-block text-left">ลงชื่อ .......................... ผู้ปกครอง</div>
-                  </div>
+                  <SignatureField role="ผู้บริหารสถานศึกษา" nameLabel={directorName} />
+                  <SignatureField role="ผู้ปกครอง" />
                 </>
               )}
             </div>
