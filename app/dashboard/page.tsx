@@ -24,6 +24,14 @@ const ATTENDANCE_IMPORT_ALLOWED_EMAILS = [
   "sumalin@khienkhet.ac.th",
   // เพิ่มอีเมลคนอื่นที่ต้องการให้สิทธิ์ได้ที่นี่
 ];
+const DASHBOARD_ADMIN_ROLES = ["admin", "director", "deputy_director"];
+const DASHBOARD_ADMIN_EMAILS = ["sumalin@khienkhet.ac.th"];
+
+function isDashboardAdminViewer(role: string | null | undefined, email: string | null | undefined): boolean {
+  if (role && DASHBOARD_ADMIN_ROLES.includes(role)) return true;
+  if (email && DASHBOARD_ADMIN_EMAILS.includes(email.trim().toLowerCase())) return true;
+  return false;
+}
 
 // ★ ไฟล์เสียงแจ้งเตือน — วางไฟล์ไว้ที่ public/sounds/ui alert.mp3
 // (แนะนำให้เปลี่ยนชื่อไฟล์เป็น ui-alert.mp3 ไม่มีเว้นวรรค จะปลอดภัยกว่า
@@ -206,7 +214,8 @@ export default function DashboardPage() {
         // นำ prefix มาต่อกับชื่อที่ดึงมาได้
         setUserPrefix(prefix);
         setUserName(finalName);
-        setIsAdmin(profile.role === "admin");
+        const emailForCheck = (user.email || user.user_metadata?.email || "").toLowerCase();
+setIsAdmin(isDashboardAdminViewer(profile.role, emailForCheck));
         setMyProfileId(profile.id);
         setMyRole(profile.role || "");
         setMyGradeLevel(profile.grade_level || null);
