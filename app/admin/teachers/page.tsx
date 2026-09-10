@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { User, Search, GraduationCap, ArrowLeft, Loader2, Users, CalendarDays, BarChart3 } from "lucide-react";
+import { User, Search, GraduationCap, ArrowLeft, Loader2, Users, CheckCircle2, Clock, XCircle } from "lucide-react";
 
 const ADMIN_ROLES = ["director", "deputy_director", "admin"];
 const ADMIN_EMAILS = ["sumalin@khienkhet.ac.th"];
@@ -15,17 +15,37 @@ function isAdminViewer(role: string | null | undefined, email: string | null | u
   return false;
 }
 
+// ── ครูที่ role หรืออีเมลมีคำว่า "admin" ให้ตัดออกจากรายชื่อครูทั้งหมด ──
+function isAdminAccount(t: { role: string | null; email: string | null }): boolean {
+  if (t.role && ADMIN_ROLES.includes(t.role)) return true;
+  if (t.email && t.email.trim().toLowerCase().includes("admin")) return true;
+  return false;
+}
+
+// ตารางลงเวลาเข้า-ออกจริง อ้างอิงจากหน้า portfolio (teacher_attendance_records: work_date, check_in_time, check_out_time)
+const ATTENDANCE_TABLE = "teacher_attendance_records";
+const ATTENDANCE_DATE_COL = "work_date";
+const ATTENDANCE_CHECKIN_COL = "check_in_time";
+const ATTENDANCE_CHECKOUT_COL = "check_out_time";
+
 type TeacherRow = {
   id: string;
   title: string | null;
   first_name: string;
   last_name: string;
   role: string | null;
+  email: string | null;
   position: string | null;
   avatar_url: string | null;
-  grade_level: string | null;
   subject_group: string | null;
   department: { name: string } | null;
+  // TODO: ยืนยันชื่อความสัมพันธ์/คอลัมน์กับตาราง grade_levels จริง ยังไม่พบใน schema ที่ให้มา
+  grade_level: { name: string } | null;
+};
+
+type AttendanceInfo = {
+  check_in_time: string | null;
+  check_out_time: string | null;
 };
 
 const ROLE_LABEL: Record<string, string> = {
@@ -39,6 +59,22 @@ const ROLE_LABEL: Record<string, string> = {
   grade_head: "หัวหน้าสายชั้น",
 };
 
+// ตรวจว่าเป็นอักษรไทยหรือไม่ เพื่อใช้เรียง ก-ฮ ก่อน แล้วตามด้วย a-z
+function isThaiName(name: string): boolean {
+  return /[\u0E00-\u0E7F]/.test(name);
+}
+
+function compareTeacherNames(a: TeacherRow, b: TeacherRow): number {
+  const aName = a.first_name || "";
+  const bName = b.first_name || "";
+  const aThai = isThaiName(aName);
+  const bThai = isThaiName(bName);
+  if (aThai && !bThai) return -1;
+  if (!aThai && bThai) return 1;
+  if (aThai && bThai) return aName.localeCompare(bName, "th");
+  return aName.localeCompare(bName, "en", { sensitivity: "base" });
+}
+
 export default function AdminTeachersListPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -48,6 +84,7 @@ export default function AdminTeachersListPage() {
   const [loading, setLoading] = useState(true);
   const [teachers, setTeachers] = useState<TeacherRow[]>([]);
   const [onLeaveToday, setOnLeaveToday] = useState<Set<string>>(new Set());
+  const [attendanceToday, setAttendanceToday] = useState<Map<string, AttendanceInfo>>(new Map());
 
   const [search, setSearch] = useState("");
   const [gradeFilter, setGradeFilter] = useState<string>("all");
@@ -69,10 +106,12 @@ export default function AdminTeachersListPage() {
     setLoading(true);
     const today = new Date().toISOString().split("T")[0];
 
-    const [{ data: teacherRows }, { data: leaves }] = await Promise.all([
+    const [{ data: teacherRows }, { data: leaves }, { data: attendanceRows }] = await Promise.all([
       supabase
         .from("users")
-        .select("id, title, first_name, last_name, role, position, avatar_url, grade_level, subject_group, department:departments(name)")
+        .select(
+          "id, title, first_name, last_name, role, email, position, avatar_url, subject_group, department:departments(name), grade_level:grade_levels(name)"
+        )
         .order("first_name", { ascending: true }),
       supabase
         .from("leave_requests")
@@ -80,34 +119,92 @@ export default function AdminTeachersListPage() {
         .eq("status", "approved")
         .lte("start_date", today)
         .gte("end_date", today),
+      supabase
+        .from(ATTENDANCE_TABLE)
+        .select(`user_id, ${ATTENDANCE_CHECKIN_COL}, ${ATTENDANCE_CHECKOUT_COL}`)
+        .eq(ATTENDANCE_DATE_COL, today),
     ]);
 
-    setTeachers((teacherRows as unknown as TeacherRow[]) || []);
+    // เอาโรลที่เป็นแอดมิน/ผู้บริหาร และบัญชีที่อีเมลมีคำว่า "admin" ออกจากรายชื่อครูทั้งหมด
+    const teacherOnly = ((teacherRows as unknown as TeacherRow[]) || []).filter(
+      (t) => !isAdminAccount({ role: t.role, email: t.email })
+    );
+
+    setTeachers(teacherOnly);
     setOnLeaveToday(new Set((leaves || []).map((r: any) => r.user_id)));
+
+    const attMap = new Map<string, AttendanceInfo>();
+    (attendanceRows || []).forEach((r: any) => {
+      attMap.set(r.user_id, {
+        check_in_time: r[ATTENDANCE_CHECKIN_COL] ?? null,
+        check_out_time: r[ATTENDANCE_CHECKOUT_COL] ?? null,
+      });
+    });
+    setAttendanceToday(attMap);
+
     setLoading(false);
   }
 
   const gradeLevels = useMemo(() => {
     const set = new Set<string>();
-    teachers.forEach((t) => t.grade_level && set.add(t.grade_level));
+    teachers.forEach((t) => t.grade_level?.name && set.add(t.grade_level.name));
     return Array.from(set).sort();
   }, [teachers]);
 
   const filteredTeachers = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return teachers.filter((t) => {
-      const matchesGrade = gradeFilter === "all" || t.grade_level === gradeFilter;
-      const fullName = `${t.first_name} ${t.last_name}`.toLowerCase();
-      const matchesSearch = !q || fullName.includes(q) || (t.position ?? "").toLowerCase().includes(q);
-      return matchesGrade && matchesSearch;
-    });
+    return teachers
+      .filter((t) => {
+        const matchesGrade = gradeFilter === "all" || t.grade_level?.name === gradeFilter;
+        const fullName = `${t.first_name} ${t.last_name}`.toLowerCase();
+        const matchesSearch = !q || fullName.includes(q) || (t.position ?? "").toLowerCase().includes(q);
+        return matchesGrade && matchesSearch;
+      })
+      .sort(compareTeacherNames);
   }, [teachers, search, gradeFilter]);
 
   const stats = useMemo(() => {
     const total = teachers.length;
     const leaveCount = teachers.filter((t) => onLeaveToday.has(t.id)).length;
-    return { total, leaveCount, presentCount: total - leaveCount };
+    return { total, presentCount: total - leaveCount };
   }, [teachers, onLeaveToday]);
+
+  function formatTime(iso: string | null): string {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso; // เผื่อคอลัมน์เป็น time string เช่น "08:15:00" อยู่แล้ว
+      return d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return iso;
+    }
+  }
+
+  function renderStatus(t: TeacherRow) {
+    if (onLeaveToday.has(t.id)) {
+      return (
+        <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-lg bg-blue-50 text-blue-600">
+          🔵 ลาวันนี้
+        </span>
+      );
+    }
+    const att = attendanceToday.get(t.id);
+    if (att?.check_in_time) {
+      return (
+        <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          ลงเวลาแล้ว {formatTime(att.check_in_time)}
+          {att.check_out_time ? ` – ${formatTime(att.check_out_time)}` : ""}
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-500">
+        <XCircle className="w-3.5 h-3.5" />
+        ยังไม่ลงเวลา
+      </span>
+    );
+  }
 
   if (checking) {
     return (
@@ -149,8 +246,8 @@ export default function AdminTeachersListPage() {
           <span className="text-sm text-slate-800 font-extrabold">ข้อมูลครูทั้งหมด</span>
         </div>
 
-        {/* สรุปภาพรวม + ปุ่มดูกราฟ */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* สรุปภาพรวม */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center">
               <Users className="w-6 h-6" />
@@ -169,20 +266,6 @@ export default function AdminTeachersListPage() {
               <p className="text-2xl font-black text-emerald-600">{stats.presentCount} คน</p>
             </div>
           </div>
-          <button
-            onClick={() => router.push("/admin/attendance-overview")}
-            className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center gap-4 hover:border-blue-300 hover:shadow-md transition-all text-left"
-          >
-            <div className="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center">
-              <BarChart3 className="w-6 h-6" />
-            </div>
-            <div>
-              <p className="text-xs font-bold text-slate-400 flex items-center gap-1">
-                <CalendarDays className="w-3.5 h-3.5" /> ครูลาวันนี้ {stats.leaveCount} คน
-              </p>
-              <p className="text-sm font-black text-blue-600">📊 ดูสรุปภาพรวมทั้งโรงเรียน →</p>
-            </div>
-          </button>
         </div>
 
         {/* ตัวกรอง */}
@@ -208,43 +291,57 @@ export default function AdminTeachersListPage() {
           </select>
         </div>
 
-        {/* รายชื่อครู */}
+        {/* ตารางรายชื่อครู */}
         {loading ? (
           <div className="flex justify-center py-20 text-slate-400"><Loader2 className="w-6 h-6 animate-spin" /></div>
         ) : filteredTeachers.length === 0 ? (
           <div className="text-center py-20 text-slate-400 text-sm">ไม่พบครูที่ตรงกับเงื่อนไข</div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredTeachers.map((t) => {
-              const onLeave = onLeaveToday.has(t.id);
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => router.push(`/admin/teachers/${t.id}`)}
-                  className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:border-blue-300 hover:shadow-md transition-all text-left flex items-center gap-3"
-                >
-                  <div className="w-12 h-12 rounded-xl bg-blue-600 text-white flex items-center justify-center overflow-hidden shrink-0">
-                    {t.avatar_url ? <img src={t.avatar_url} alt="" className="w-full h-full object-cover" /> : <User className="w-5 h-5" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-extrabold text-slate-800 truncate">
-                      {t.title}{t.first_name} {t.last_name}
-                    </p>
-                    <p className="text-xs text-slate-400 truncate">{t.position || ROLE_LABEL[t.role ?? ""] || "—"}</p>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      {t.grade_level && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">
-                          <GraduationCap className="w-3 h-3" /> {t.grade_level}
-                        </span>
-                      )}
-                      {onLeave && (
-                        <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">🔵 ลาวันนี้</span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="text-left px-4 py-3 font-black text-slate-500 text-xs">ชื่อ</th>
+                    <th className="text-left px-4 py-3 font-black text-slate-500 text-xs hidden sm:table-cell">สายชั้น</th>
+                    <th className="text-left px-4 py-3 font-black text-slate-500 text-xs">สถานะการลงเวลาวันนี้</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTeachers.map((t) => (
+                    <tr
+                      key={t.id}
+                      onClick={() => router.push(`/admin/teachers/${t.id}`)}
+                      className="border-b border-slate-100 last:border-0 hover:bg-slate-50 cursor-pointer transition-colors"
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center overflow-hidden shrink-0">
+                            {t.avatar_url ? <img src={t.avatar_url} alt="" className="w-full h-full object-cover" /> : <User className="w-4 h-4" />}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-extrabold text-slate-800 truncate">
+                              {t.title}{t.first_name} {t.last_name}
+                            </p>
+                            <p className="text-xs text-slate-400 truncate">{t.position || ROLE_LABEL[t.role ?? ""] || "—"}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 hidden sm:table-cell">
+                        {t.grade_level?.name ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">
+                            <GraduationCap className="w-3 h-3" /> {t.grade_level.name}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300 text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">{renderStatus(t)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </main>
