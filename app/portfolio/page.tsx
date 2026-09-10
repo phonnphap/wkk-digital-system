@@ -140,6 +140,28 @@ function isHalfDayAfternoonLeave(note: string | null | undefined): boolean {
   return HALF_DAY_AFTERNOON_KEYWORDS.some((kw) => note.includes(kw));
 }
 
+// ── ไปประกอบพิธีทางศาสนา: ต้องมีใบลากิจอนุมัติแล้วตรงวันที่ + ไม่มีเวลาเข้า-ออก ถึงจะนับเป็นสถานะนี้ ──
+const RELIGIOUS_CEREMONY_KEYWORDS = ["ไปประกอบพิธีทางศาสนา", "ลาไปประกอบพิธี"];
+function isReligiousCeremonyNote(note: string | null | undefined): boolean {
+  if (!note) return false;
+  return RELIGIOUS_CEREMONY_KEYWORDS.some((kw) => note.includes(kw));
+}
+
+// ── ยกเว้นเฉพาะฝั่งเข้า (เช้า) เท่านั้น — ฝั่งออก/บ่ายยังต้องแสกนออกตามปกติ (ไม่ยกเว้น)
+//    ต้องเช็คคำเฉพาะเจาะจงเหล่านี้ "ก่อน" คำกว้างอย่าง "ราชการ"/"ประชุม" เสมอ ──
+const MORNING_ONLY_EXEMPT_KEYWORDS = ["ไปราชการ (เช้า)", "ไปราชการ(เช้า)", "ขออนุญาตเช้า(ฉุกเฉิน)", "ขออนุญาตเช้า (ฉุกเฉิน)"];
+function isMorningOnlyExemptNote(note: string | null | undefined): boolean {
+  if (!note) return false;
+  return MORNING_ONLY_EXEMPT_KEYWORDS.some((kw) => note.includes(kw));
+}
+
+// ── ยกเว้นเฉพาะฝั่งออก (เย็น) เท่านั้น — ฝั่งเข้า/เช้ายังต้องแสกนเข้าตามปกติ (ไม่ยกเว้น) ──
+const EVENING_ONLY_EXEMPT_KEYWORDS = ["ขออนุญาตเย็น(ฉุกเฉิน)", "ขออนุญาตเย็น (ฉุกเฉิน)"];
+function isEveningOnlyExemptNote(note: string | null | undefined): boolean {
+  if (!note) return false;
+  return EVENING_ONLY_EXEMPT_KEYWORDS.some((kw) => note.includes(kw));
+}
+
 // ── แปลงเวลา "HH:mm[:ss]" เป็นจำนวนนาที เพื่อใช้เทียบช่วงเวลาที่ได้รับอนุญาตพิเศษ ──
 function timeToMinutes(t: string | null | undefined): number | null {
   if (!t) return null;
@@ -189,18 +211,22 @@ function isMorningLateExempted(note: string | null | undefined, checkInTime: str
   return isMorningLatePermitNote(note) && withinMorningLatePermitWindow(checkInTime);
 }
 
-// ── ไม่แสดง "ไม่แสกนมา" ฝั่งเข้า เมื่อหมายเหตุเข้าเงื่อนไขยกเว้น (ยกเว้นกรณีลาครึ่งบ่าย ซึ่งช่วงเช้ายังต้องแสกนเข้าปกติ) ──
+// ── ไม่แสดง "ไม่แสกนมา" ฝั่งเข้า เมื่อหมายเหตุเข้าเงื่อนไขยกเว้น
+//    ยกเว้น: ลาครึ่งบ่าย (ช่วงเช้ายังต้องแสกนเข้าปกติ) และ "ยกเว้นเฉพาะเย็น" (ฝั่งเช้ายังต้องแสกนเข้าปกติ) ──
 function isNoScanInExempted(note: string | null | undefined): boolean {
   if (!note) return false;
   if (isHalfDayAfternoonLeave(note)) return false;
-  return isNoScanExemptNote(note);
+  if (isEveningOnlyExemptNote(note)) return false;
+  return isNoScanExemptNote(note) || isMorningOnlyExemptNote(note);
 }
 
-// ── ไม่แสดง "ไม่แสกนกลับ" ฝั่งออก เมื่อหมายเหตุเข้าเงื่อนไขยกเว้น (ยกเว้นกรณีลาครึ่งเช้า ซึ่งช่วงบ่ายยังต้องแสกนออกปกติ) ──
+// ── ไม่แสดง "ไม่แสกนกลับ" ฝั่งออก เมื่อหมายเหตุเข้าเงื่อนไขยกเว้น
+//    ยกเว้น: ลาครึ่งเช้า (ช่วงบ่ายยังต้องแสกนออกปกติ) และ "ยกเว้นเฉพาะเช้า" (ฝั่งบ่ายยังต้องแสกนออกปกติ) ──
 function isNoScanOutExempted(note: string | null | undefined): boolean {
   if (!note) return false;
   if (isHalfDayMorningLeave(note)) return false;
-  return isNoScanExemptNote(note);
+  if (isMorningOnlyExemptNote(note)) return false;
+  return isNoScanExemptNote(note) || isEveningOnlyExemptNote(note);
 }
 
 // ── ตัดสินว่า "ไม่แสกนมา" (checkIn ขาดหาย) — เข้าเงื่อนไขนี้เมื่อไม่มีเวลาเข้า, ไม่ได้ลา,
@@ -217,10 +243,21 @@ function isNoScanIn(row: { check_in_time: string | null; note: string | null; st
 function isNoScanOut(row: { check_out_time: string | null; note: string | null; status: string | null }, onLeave: boolean): boolean {
   if (row.check_out_time) return false;
   if (onLeave || row.status === "leave") return false;
-  if (isMeetingExcuseNote(row.note) && !isHalfDayMorningLeave(row.note)) return false; // นับเป็นกลับตรงเวลาแทน ไม่ใช่ไม่แสกน
+  if (isMeetingExcuseNote(row.note) && !isHalfDayMorningLeave(row.note) && !isMorningOnlyExemptNote(row.note)) return false; // นับเป็นกลับตรงเวลาแทน ไม่ใช่ไม่แสกน
   if (isNoScanOutExempted(row.note)) return false;
   if (!row.note) return true;
   return isNoScanNote(row.note);
+}
+
+// ── ตัดสินว่าวันนี้เป็น "ไปประกอบพิธีทางศาสนา" หรือไม่ — ต้องไม่มีเวลาเข้า-ออกทั้งคู่, ไม่ได้ลาในระบบทั่วไป (จะถูก override เป็นสถานะนี้แทน),
+//    note ตรงคำที่กำหนด และวันนั้นต้องมีใบลากิจ (personal) ที่อนุมัติแล้วครอบคลุมวันที่นี้ ──
+function isReligiousCeremonyDay(
+  row: { check_in_time: string | null; check_out_time: string | null; note: string | null },
+  hasApprovedPersonalLeave: boolean
+): boolean {
+  if (row.check_in_time || row.check_out_time) return false;
+  if (!isReligiousCeremonyNote(row.note)) return false;
+  return hasApprovedPersonalLeave;
 }
 
 const MONTH_LABEL: Record<number, string> = {
@@ -366,6 +403,32 @@ async function fetchApprovedLeaveDates(supabase: any, userId: string): Promise<S
   }
 }
 
+// ── ดึงวันที่ที่มี "ใบลากิจ" (personal) อนุมัติแล้วโดยเฉพาะ — ใช้เช็คเงื่อนไข "ไปประกอบพิธีทางศาสนา" ──
+async function fetchApprovedPersonalLeaveDates(supabase: any, userId: string): Promise<Set<string>> {
+  try {
+    const { data, error } = await supabase
+      .from("leave_requests")
+      .select("start_date,end_date,status,leave_type")
+      .eq("user_id", userId)
+      .eq("status", "approved")
+      .eq("leave_type", "personal");
+    if (error || !data) return new Set();
+    const set = new Set<string>();
+    data.forEach((r: any) => {
+      if (!r.start_date || !r.end_date) return;
+      const cursor = new Date(r.start_date);
+      const end = new Date(r.end_date);
+      while (cursor <= end) {
+        set.add(toDateInputValue(cursor));
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    });
+    return set;
+  } catch {
+    return new Set();
+  }
+}
+
 // ── รวมข้อความหมายเหตุ + สถานะการลาในระบบ (ตัดข้อความซ้ำอีกชั้น กันกรณี note มีคำว่า "ลาในระบบแล้ว" ติดมาแล้ว) ──
 function buildRemark(note: string | null | undefined, onLeave: boolean): string | null {
   const parts = dedupeNoteParts([note, onLeave ? "ลาในระบบแล้ว" : null]);
@@ -373,11 +436,17 @@ function buildRemark(note: string | null | undefined, onLeave: boolean): string 
 }
 
 // ── สถานะกล่อง "มา" มุมมองรายวัน ──
-function dayCheckInInfo(row: AttendanceRow | null | undefined, onLeave: boolean) {
+function dayCheckInInfo(row: AttendanceRow | null | undefined, onLeave: boolean, isReligiousCeremony: boolean) {
   if (!row?.check_in_time) {
-    // ลำดับความสำคัญ: ลา > ยกเว้นตามภารกิจ (ราชการ/ทัศนศึกษา/เข้าค่าย/ลากิจ/ลาป่วย/ไฟดับ ฯลฯ) > ไม่แสกน > ไม่ได้ลงเวลา
+    // ลำดับความสำคัญ: ไปประกอบพิธีทางศาสนา > ลา > ยกเว้นเฉพาะเช้า > ยกเว้นตามภารกิจ (เต็มวัน) > ไม่แสกน > ไม่ได้ลงเวลา
+    if (isReligiousCeremony) {
+      return { time: null as string | null, label: "ไปประกอบพิธีทางศาสนา", tone: "blue" as Tone };
+    }
     if (onLeave || row?.status === "leave") {
       return { time: null as string | null, label: "ลา", tone: "blue" as Tone };
+    }
+    if (isMorningOnlyExemptNote(row?.note)) {
+      return { time: null as string | null, label: "ปฏิบัติงานตามภารกิจ", tone: "green" as Tone };
     }
     if (isNoScanInExempted(row?.note)) {
       return { time: null as string | null, label: "ปฏิบัติงานตามภารกิจ", tone: "green" as Tone };
@@ -397,14 +466,20 @@ function dayCheckInInfo(row: AttendanceRow | null | undefined, onLeave: boolean)
 }
 
 // ── สถานะกล่อง "กลับ" มุมมองรายวัน ──
-function dayCheckOutInfo(row: AttendanceRow | null | undefined, onLeave: boolean) {
+function dayCheckOutInfo(row: AttendanceRow | null | undefined, onLeave: boolean, isReligiousCeremony: boolean) {
   if (!row?.check_out_time) {
-    // ลำดับความสำคัญ: ลา > ประชุม/ราชการ (ถือว่ากลับตรงเวลา) > ยกเว้นตามภารกิจ > ไม่แสกน > ไม่ได้ลงเวลา
+    // ลำดับความสำคัญ: ไปประกอบพิธีทางศาสนา > ลา > ประชุม/ราชการ (กลับตรงเวลา) > ยกเว้นเฉพาะเย็น > ยกเว้นตามภารกิจ (เต็มวัน) > ไม่แสกน > ไม่ได้ลงเวลา
+    if (isReligiousCeremony) {
+      return { time: null as string | null, label: "ไปประกอบพิธีทางศาสนา", tone: "blue" as Tone };
+    }
     if (onLeave || row?.status === "leave") {
       return { time: null as string | null, label: "ลา", tone: "blue" as Tone };
     }
-    if (isMeetingExcuseNote(row?.note) && !isHalfDayMorningLeave(row?.note)) {
+    if (isMeetingExcuseNote(row?.note) && !isHalfDayMorningLeave(row?.note) && !isMorningOnlyExemptNote(row?.note)) {
       return { time: null as string | null, label: "กลับตรงเวลา", tone: "green" as Tone };
+    }
+    if (isEveningOnlyExemptNote(row?.note)) {
+      return { time: null as string | null, label: "ปฏิบัติงานตามภารกิจ", tone: "green" as Tone };
     }
     if (isNoScanOutExempted(row?.note)) {
       return { time: null as string | null, label: "ปฏิบัติงานตามภารกิจ", tone: "green" as Tone };
@@ -424,9 +499,15 @@ function dayCheckOutInfo(row: AttendanceRow | null | undefined, onLeave: boolean
 }
 
 // ── สถานะ "เวลาเข้า" มุมมองรายเดือน ──
-function monthlyCheckInStatus(row: { check_in_time: string | null; status: string | null; late_minutes: number; note: string | null }, onLeave: boolean) {
+function monthlyCheckInStatus(
+  row: { check_in_time: string | null; status: string | null; late_minutes: number; note: string | null },
+  onLeave: boolean,
+  isReligiousCeremony: boolean
+) {
   if (!row.check_in_time) {
+    if (isReligiousCeremony) return { text: "ไปประกอบพิธี", tone: "blue" as Tone };
     if (onLeave || row.status === "leave") return { text: "ลา", tone: "blue" as Tone };
+    if (isMorningOnlyExemptNote(row.note)) return { text: "ตามภารกิจ", tone: "green" as Tone };
     if (isNoScanInExempted(row.note)) return { text: "ตามภารกิจ", tone: "green" as Tone };
     if (isNoScanIn(row, onLeave)) return { text: "ไม่แสกนมา", tone: "purple" as Tone };
     return { text: "ไม่ลงเวลา", tone: "red" as Tone };
@@ -438,10 +519,16 @@ function monthlyCheckInStatus(row: { check_in_time: string | null; status: strin
 }
 
 // ── สถานะ "เวลาออก" มุมมองรายเดือน ──
-function monthlyCheckOutStatus(row: { check_out_time: string | null; status: string | null; note: string | null }, onLeave: boolean) {
+function monthlyCheckOutStatus(
+  row: { check_out_time: string | null; status: string | null; note: string | null },
+  onLeave: boolean,
+  isReligiousCeremony: boolean
+) {
   if (!row.check_out_time) {
+    if (isReligiousCeremony) return { text: "ไปประกอบพิธี", tone: "blue" as Tone };
     if (onLeave || row.status === "leave") return { text: "ลา", tone: "blue" as Tone };
-    if (isMeetingExcuseNote(row.note) && !isHalfDayMorningLeave(row.note)) return { text: "กลับตรงเวลา", tone: "green" as Tone };
+    if (isMeetingExcuseNote(row.note) && !isHalfDayMorningLeave(row.note) && !isMorningOnlyExemptNote(row.note)) return { text: "กลับตรงเวลา", tone: "green" as Tone };
+    if (isEveningOnlyExemptNote(row.note)) return { text: "ตามภารกิจ", tone: "green" as Tone };
     if (isNoScanOutExempted(row.note)) return { text: "ตามภารกิจ", tone: "green" as Tone };
     if (isNoScanOut(row, onLeave)) return { text: "ไม่แสกนกลับ", tone: "purple" as Tone };
     return { text: "ยังไม่ออกงาน", tone: "slate" as Tone };
@@ -473,6 +560,7 @@ export default function TeacherPortfolioPage() {
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
   const [onLeaveDates, setOnLeaveDates] = useState<Set<string>>(new Set());
+  const [approvedPersonalLeaveDates, setApprovedPersonalLeaveDates] = useState<Set<string>>(new Set());
 
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportForm, setSupportForm] = useState({ category: "edit_locked_field", subject: "", message: "" });
@@ -497,6 +585,11 @@ const [savingSig, setSavingSig] = useState(false);
   const selectedHasIn = !!selectedDayRow?.check_in_time;
   const selectedHasOut = !!selectedDayRow?.check_out_time;
   const selectedHasEnrichedRow = selectedDayRow?.hasEnrichedRow ?? false;
+  const selectedHasApprovedPersonalLeave = approvedPersonalLeaveDates.has(selectedDay);
+  const selectedIsReligiousCeremony = isReligiousCeremonyDay(
+    { check_in_time: selectedDayRow?.check_in_time ?? null, check_out_time: selectedDayRow?.check_out_time ?? null, note: selectedDayRow?.note ?? null },
+    selectedHasApprovedPersonalLeave
+  );
   const selectedNoScanIn = isNoScanIn(
     { check_in_time: selectedDayRow?.check_in_time ?? null, note: selectedDayRow?.note ?? null, status: selectedDayRow?.status ?? null },
     selectedOnLeave
@@ -505,11 +598,13 @@ const [savingSig, setSavingSig] = useState(false);
     { check_out_time: selectedDayRow?.check_out_time ?? null, note: selectedDayRow?.note ?? null, status: selectedDayRow?.status ?? null },
     selectedOnLeave
   );
-  const selectedMeetingExcuse = isMeetingExcuseNote(selectedDayRow?.note) && !isHalfDayMorningLeave(selectedDayRow?.note);
+  const selectedMeetingExcuse =
+    isMeetingExcuseNote(selectedDayRow?.note) && !isHalfDayMorningLeave(selectedDayRow?.note) && !isMorningOnlyExemptNote(selectedDayRow?.note);
   const selectedNoScanExemptIn = isNoScanInExempted(selectedDayRow?.note);
   const selectedNoScanExemptOut = isNoScanOutExempted(selectedDayRow?.note);
   const selectedIsHoliday = !!isHoliday(selectedDay, holidayMap);
-  // ★ "ขาดงาน" เฉพาะกรณีที่ระบบประมวลผลวันนั้นแล้ว ไม่มีเวลาเข้า-ออก ไม่ได้ลา และ "มีหมายเหตุที่ไม่ใช่กรณีไม่แสกน/ประชุม/ยกเว้นตามภารกิจ"
+  // ★ "ขาดงาน" เฉพาะกรณีที่ระบบประมวลผลวันนั้นแล้ว ไม่มีเวลาเข้า-ออก ไม่ได้ลา ไม่ใช่ไปประกอบพิธีทางศาสนา
+  //    และ "มีหมายเหตุที่ไม่ใช่กรณีไม่แสกน/ประชุม/ยกเว้นตามภารกิจ"
   //    (ถ้าไม่มีหมายเหตุเลย ให้ถือเป็น "ไม่แสกนมา/ไม่แสกนกลับ" ไม่ใช่ขาดงาน — ต้องรอการยืนยัน)
   const selectedDayIsAbsent =
   !selectedIsHoliday &&   
@@ -517,6 +612,7 @@ const [savingSig, setSavingSig] = useState(false);
     !selectedHasIn &&
     !selectedHasOut &&
     !selectedOnLeave &&
+    !selectedIsReligiousCeremony &&
     selectedDayRow?.status !== "leave" &&
     !!selectedDayRow?.note &&
     !selectedNoScanIn &&
@@ -547,13 +643,24 @@ const [savingSig, setSavingSig] = useState(false);
       // ★ นับ "ไม่แสกนมา" / "ไม่แสกนกลับ" แยกฝั่งเข้า-ออก จากทุกแถวที่ประมวลผลแล้ว (ไม่ผูกกับ status field)
       const noScanInCount = rows.filter((r) => r.hasEnrichedRow && isNoScanIn(r, onLeaveDates.has(r.work_date))).length;
       const noScanOutCount = rows.filter((r) => r.hasEnrichedRow && isNoScanOut(r, onLeaveDates.has(r.work_date))).length;
-      // ★ ขาดงานจริง = ไม่มีเวลาเข้า-ออกเลย ไม่ได้ลา และมีหมายเหตุที่ไม่ใช่กรณีไม่แสกน/ประชุม/ยกเว้นตามภารกิจ
+      // ★ นับ "ไปประกอบพิธีทางศาสนา" แยกต่างหาก
+      const religiousCeremonyCount = rows.filter((r) =>
+        isReligiousCeremonyDay(
+          { check_in_time: r.check_in_time, check_out_time: r.check_out_time, note: r.note },
+          approvedPersonalLeaveDates.has(r.work_date)
+        )
+      ).length;
+      // ★ ขาดงานจริง = ไม่มีเวลาเข้า-ออกเลย ไม่ได้ลา ไม่ใช่ไปประกอบพิธี และมีหมายเหตุที่ไม่ใช่กรณีไม่แสกน/ประชุม/ยกเว้นตามภารกิจ
       const absentCount = rows.filter((r) => {
         const onLeave = onLeaveDates.has(r.work_date);
-        if (!r.hasEnrichedRow || onLeave || r.status === "leave") return false;
+        const isReligious = isReligiousCeremonyDay(
+          { check_in_time: r.check_in_time, check_out_time: r.check_out_time, note: r.note },
+          approvedPersonalLeaveDates.has(r.work_date)
+        );
+        if (!r.hasEnrichedRow || onLeave || r.status === "leave" || isReligious) return false;
         if (r.check_in_time || r.check_out_time) return false;
         if (!r.note) return false;
-        if (isMeetingExcuseNote(r.note) && !isHalfDayMorningLeave(r.note)) return false;
+        if (isMeetingExcuseNote(r.note) && !isHalfDayMorningLeave(r.note) && !isMorningOnlyExemptNote(r.note)) return false;
         if (isNoScanInExempted(r.note) || isNoScanOutExempted(r.note)) return false;
         return !isNoScanNote(r.note);
       }).length;
@@ -578,12 +685,13 @@ const [savingSig, setSavingSig] = useState(false);
         absent: absentCount,
         noScanIn: noScanInCount,
         noScanOut: noScanOutCount,
+        religiousCeremony: religiousCeremonyCount,
         leaveCount: leaveCountForMonth,
         noteCount,
         pendingCount,
       };
     });
-  }, [attendance, period, onLeaveDates]);
+  }, [attendance, period, onLeaveDates, approvedPersonalLeaveDates]);
 
   // ── ตารางรายวันของเดือนที่เลือก (ใช้ตอน period === "month") ──
   const dailyAttendance = useMemo(() => {
@@ -665,6 +773,7 @@ const [savingSig, setSavingSig] = useState(false);
         enrichedMap,
         timesMap,
         onLeaveSet,
+        approvedPersonalLeaveSet,
       ] = await Promise.all([
         supabase.from("v_leave_summary").select("leave_type,total_days,used_days,remaining_days").eq("user_id", me.id).eq("fiscal_year", fy),
         supabase.from("v_leave_count_summary").select("used_count,remaining_count").eq("user_id", me.id).eq("fiscal_year", fy).maybeSingle(),
@@ -679,6 +788,7 @@ const [savingSig, setSavingSig] = useState(false);
         fetchEnrichedAttendance(supabase, me.id, fy),
         fetchAttendanceTimes(supabase, me.id, fy),
         fetchApprovedLeaveDates(supabase, me.id),
+        fetchApprovedPersonalLeaveDates(supabase, me.id),
         fetchHolidayMap(fiscalYearDateRange(fy).start, fiscalYearDateRange(fy).end),
       ]);
       setLeaveSummary(quotaRows || []);
@@ -689,6 +799,7 @@ const [savingSig, setSavingSig] = useState(false);
       setMaterials(mat || []);
       setAttendance(mergeAttendance(enrichedMap, timesMap));
       setOnLeaveDates(onLeaveSet || new Set());
+      setApprovedPersonalLeaveDates(approvedPersonalLeaveSet || new Set());
 
       const tasks: PendingTask[] = [];
       const { count: myPendingLeave } = await supabase
@@ -778,8 +889,8 @@ const [savingSig, setSavingSig] = useState(false);
   }
   if (!profile) return null;
 
-  const checkInInfo = dayCheckInInfo(selectedDayRow, selectedOnLeave);
-  const checkOutInfo = dayCheckOutInfo(selectedDayRow, selectedOnLeave);
+  const checkInInfo = dayCheckInInfo(selectedDayRow, selectedOnLeave, selectedIsReligiousCeremony);
+  const checkOutInfo = dayCheckOutInfo(selectedDayRow, selectedOnLeave, selectedIsReligiousCeremony);
 
   return (
   <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800 font-sans antialiased">
@@ -995,7 +1106,7 @@ const [savingSig, setSavingSig] = useState(false);
         {/* Performance period + leave + attendance summary */}
         <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
-            <h3 className="text-sm font-extrabold text-slate-800">📊 สรุปสถิติการเข้าปฏิบัติงาน</h3>
+            <h3 className="text-sm font-extrabold text-slate-800">📊 สรุปผลการปฏิบัติงาน</h3>
             <div className="flex gap-1.5 bg-slate-100 rounded-xl p-1">
               {(
                 [
@@ -1128,10 +1239,14 @@ const [savingSig, setSavingSig] = useState(false);
                       const dayHoliday = isHoliday(dateStr, holidayMap);  
                       const noScanInRow = isNoScanIn(d, onLeave);
                       const noScanOutRow = isNoScanOut(d, onLeave);
-                      const meetingExcuseRow = isMeetingExcuseNote(d.note) && !isHalfDayMorningLeave(d.note);
+                      const meetingExcuseRow = isMeetingExcuseNote(d.note) && !isHalfDayMorningLeave(d.note) && !isMorningOnlyExemptNote(d.note);
                       const noScanExemptInRow = isNoScanInExempted(d.note);
                       const noScanExemptOutRow = isNoScanOutExempted(d.note);
-                      // ★ แยก "รอข้อมูล" / "ขาดงานจริง (มีหมายเหตุ ไม่ใช่กรณีไม่แสกน/ประชุม/ยกเว้นตามภารกิจ)" ออกจากการแสดงเวลาแบบปกติ
+                      const isReligiousRow = isReligiousCeremonyDay(
+                        { check_in_time: d.check_in_time, check_out_time: d.check_out_time, note: d.note },
+                        approvedPersonalLeaveDates.has(dateStr)
+                      );
+                      // ★ แยก "รอข้อมูล" / "ขาดงานจริง (มีหมายเหตุ ไม่ใช่กรณีไม่แสกน/ประชุม/ยกเว้นตามภารกิจ/ไปประกอบพิธี)" ออกจากการแสดงเวลาแบบปกติ
                       const isPendingRow = !isWeekend && !isFuture && !d.hasEnrichedRow && !onLeave;
                       const isAbsentRow =
                         !isWeekend &&
@@ -1140,6 +1255,7 @@ const [savingSig, setSavingSig] = useState(false);
                         !hasIn &&
                         !hasOut &&
                         !onLeave &&
+                        !isReligiousRow &&
                         d.status !== "leave" &&
                         !!d.note &&
                         !noScanInRow &&
@@ -1148,8 +1264,8 @@ const [savingSig, setSavingSig] = useState(false);
                         !noScanExemptInRow &&
                         !noScanExemptOutRow;
 
-                      const inStatus = monthlyCheckInStatus(d, onLeave);
-                      const outStatus = monthlyCheckOutStatus(d, onLeave);
+                      const inStatus = monthlyCheckInStatus(d, onLeave, isReligiousRow);
+                      const outStatus = monthlyCheckOutStatus(d, onLeave, isReligiousRow);
 
                       return (
                         <tr key={d.day} className={isWeekend ? "bg-slate-50/60" : "hover:bg-slate-50/60"}>
@@ -1207,6 +1323,7 @@ const [savingSig, setSavingSig] = useState(false);
                       <th className="text-center px-3 py-2 font-bold text-orange-600 text-xs">กลับก่อน</th>
                       <th className="text-center px-3 py-2 font-bold text-rose-600 text-xs">ขาด</th>
                       <th className="text-center px-3 py-2 font-bold text-blue-600 text-xs">ลา</th>
+                      <th className="text-center px-3 py-2 font-bold text-blue-600 text-xs">ไปประกอบพิธี</th>
                       <th className="text-center px-3 py-2 font-bold text-violet-600 text-xs">ไม่แสกนมา</th>
                       <th className="text-center px-3 py-2 font-bold text-violet-600 text-xs">ไม่แสกนกลับ</th>
                       <th className="text-center px-3 py-2 font-bold text-slate-400 text-xs">รอข้อมูล</th>
@@ -1223,6 +1340,7 @@ const [savingSig, setSavingSig] = useState(false);
                         <td className="px-3 py-2 text-center font-black text-orange-600">{m.leftEarly || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-rose-600">{m.absent || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-blue-600">{m.leaveCount || "-"}</td>
+                        <td className="px-3 py-2 text-center font-black text-blue-600">{m.religiousCeremony || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-violet-600">{m.noScanIn || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-violet-600">{m.noScanOut || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-slate-400">{m.pendingCount || "-"}</td>
