@@ -51,12 +51,12 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
 ];
 
 const BANNER_MENU: { key: BannerMenuKey; label: string; icon: string }[] = [
-  { key: "assignments", label: "มอบหมายงาน", icon: "📌" },
-  { key: "attendanceInfo", label: "ข้อมูลเช็กชื่อ", icon: "🗓️" },
-  { key: "totalScore", label: "คะแนนรวม", icon: "⭐" },
-  { key: "reports", label: "เอกสาร/รายงาน", icon: "📁" },
-  { key: "insights", label: "ข้อมูลเชิงลึก", icon: "📊" },
   { key: "settings", label: "ตั้งค่ารายวิชา", icon: "⚙️" },
+  { key: "reports", label: "เอกสาร/รายงาน", icon: "📁" },
+    { key: "assignments", label: "มอบหมายงาน", icon: "📌" },
+    { key: "totalScore", label: "คะแนนรวม", icon: "⭐" },
+      { key: "attendanceInfo", label: "ข้อมูลเช็กชื่อ", icon: "🗓️" },
+  { key: "insights", label: "ข้อมูลเชิงลึก", icon: "📊" },
 ];
 
 // Fallback presets shown even before the teacher has saved any of their own
