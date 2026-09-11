@@ -744,7 +744,9 @@ function SwapRequestModal({
   const [pickedTeacherId, setPickedTeacherId] = useState(() =>
     editingRequest && mode === "normal" ? editingRequest.target_teacher_id : ""
   );
-  const [reason, setReason] = useState(initialReason ?? "");
+  const [reason, setReason] = useState(isEditing ? (initialReason ?? "") : "");
+// ★ ข้อความ marker อัตโนมัติ (แลกคาบคืน) — ล็อกไว้ไม่ให้ผู้ใช้แก้ไข กันเผลอลบจน hasActiveRepayFor... หาไม่เจอ
+const lockedAutoReason = (mode === "repay" && !isEditing) ? (initialReason ?? "") : null;
   const [saving, setSaving] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [onLeaveIds, setOnLeaveIds] = useState<Set<string>>(new Set());
@@ -828,6 +830,10 @@ function SwapRequestModal({
   if (!validate()) return;
   setSaving(true);
   const targetId = mode === "repay" ? fixedTargetTeacherId! : pickedTeacherId;
+  // ★ บังคับให้ reason ที่บันทึกจริง มี marker ติดอยู่เสมอในโหมด repay
+  const finalReason = lockedAutoReason
+    ? (reason.trim() ? `${lockedAutoReason} — ${reason.trim()}` : lockedAutoReason)
+    : reason;
 
   if (isEditing) {
     // ★ แก้ไขคำขอเดิม — เปลี่ยนกลับเป็น pending ให้อีกฝ่ายคอนเฟิร์มใหม่เสมอ เพราะเนื้อหาเปลี่ยน
@@ -983,10 +989,16 @@ function SwapRequestModal({
 
           {/* เหตุผล */}
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">เหตุผล</label>
-            <textarea value={reason} onChange={e=>setReason(e.target.value)} rows={3}
-              placeholder="ระบุเหตุผลเพิ่มเติม (ถ้ามี)" className={iCls()+" resize-none"} />
-          </div>
+  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">เหตุผล</label>
+  {lockedAutoReason && (
+    <div className="mb-2 text-xs text-slate-600 bg-[#FDF2F8] border border-[#FBCFE8] rounded-xl px-3 py-2">
+      🔒 {lockedAutoReason}
+    </div>
+  )}
+  <textarea value={reason} onChange={e=>setReason(e.target.value)} rows={3}
+    placeholder={lockedAutoReason ? "ระบุเหตุผลเพิ่มเติม (ถ้ามี)" : "ระบุเหตุผลเพิ่มเติม (ถ้ามี)"}
+    className={iCls()+" resize-none"} />
+</div>
         </div>
         <div className="px-6 py-4 border-t border-[#FCE7F3] flex gap-2 justify-end shrink-0 bg-[#FDF2F8] rounded-b-2xl">
           <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#FBCFE8] text-slate-600 text-sm font-medium">ยกเลิก</button>
