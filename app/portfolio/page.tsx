@@ -665,7 +665,7 @@ const [savingSig, setSavingSig] = useState(false);
           { check_in_time: r.check_in_time, check_out_time: r.check_out_time, note: r.note },
           approvedPersonalLeaveDates.has(r.work_date)
         );
-        if (!r.hasEnrichedRow || onLeave || r.status === "leave" || isReligious) return false;
+        if (!r.hasEnrichedRow || onLeave || r.status === "leave" || isReligious) 
         if (r.check_in_time || r.check_out_time) return false;
         if (!r.note) return false;
         if (isMeetingExcuseNote(r.note) && !isHalfDayMorningLeave(r.note) && !isMorningOnlyExemptNote(r.note)) return false;

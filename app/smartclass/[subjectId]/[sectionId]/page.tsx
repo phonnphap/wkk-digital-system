@@ -169,7 +169,12 @@ function playCheer() {
     o.stop(now + 0.8);
   } catch {}
 }
-
+// เพิ่ม constant + helper ไว้นอก component หรือบนสุดของไฟล์ก็ได้
+const CREDIT_HOURS_PER_UNIT = 40; // 1 หน่วยกิต = 40 ชม./ปี
+function computeCreditFromHours(hours: number): number {
+  const raw = hours / CREDIT_HOURS_PER_UNIT;
+  return Math.round(raw * 2) / 2; // ปัดให้เป็นขั้นละ 0.5 (0.5, 1.0, 1.5, ...)
+}
 // เสียงไฟล์จริงตอนให้คะแนน: บวก -> point +.mp3, ลบ -> point -.mp3 (อยู่ใน public/sounds/)
 // เผื่อโหลดไฟล์ไม่สำเร็จ (ยังไม่ได้วางไฟล์ไว้ใน public/sounds/) จะ fallback ไปใช้เสียงสังเคราะห์ playDing() แทนอัตโนมัติ
 function playPointSound(points: number) {
@@ -1914,6 +1919,7 @@ function SubjectSettingsTab({
 const [showSpecialScores, setShowSpecialScores] = useState<boolean>(
   section.show_special_scores ?? true
 );
+const [autoCredit, setAutoCredit] = useState(true);
   const [allowLateSubmission, setAllowLateSubmission] = useState<boolean>(section.allow_late_submission ?? true);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -1922,7 +1928,7 @@ const [showSpecialScores, setShowSpecialScores] = useState<boolean>(
   "name_only" | "name_and_id" | "id_and_dob"
 >(section.student_access_mode ?? "name_only");
   const gradingStructure = "formative_midterm_final" as const;
-  const [gradeRounding, setGradeRounding] = useState<"up" | "truncate">(
+const [gradeRounding, setGradeRounding] = useState<"round_up" | "truncate">(
   (subject as any)?.grade_rounding_mode ?? "truncate"
 );
   const useMidterm = true;
@@ -2062,7 +2068,20 @@ async function saveScoreGroup(withSubjectIds?: string[]) {
     setSavingGroup(false);
   }
 }
+function handleHoursPerYearChange(v: string) {
+  setHoursPerYear(v);
+  if (autoCredit) {
+    const num = Number(v);
+    setCreditHours(v.trim() === "" || Number.isNaN(num) ? "" : String(computeCreditFromHours(num)));
+  }
+}
 
+function handleAutoCreditToggle(checked: boolean) {
+  setAutoCredit(checked);
+  if (checked && hoursPerYear.trim() !== "") {
+    setCreditHours(String(computeCreditFromHours(Number(hoursPerYear))));
+  }
+}
 async function removeFromGroup() {
   if (!subject) return;
   if (!window.confirm("นำวิชานี้ออกจากกลุ่มรวมคะแนนหรือไม่?")) return;
@@ -2219,32 +2238,42 @@ async function removeFromGroup() {
 </div>
         {/* หน่วยกิต + ชม./ปี */}
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <p className="text-m font-black text-slate-500 mb-2">จำนวนหน่วยกิต</p>
-            <input
-              type="number"
-              step="0.5"
-              min="0"
-              disabled={readOnly}
-              value={creditHours}
-              onChange={e => setCreditHours(e.target.value)}
-              placeholder="เช่น 1.0"
-              className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold disabled:bg-slate-50 disabled:text-slate-600"
-            />
-          </div>
-          <div>
-            <p className="text-m font-black text-slate-500 mb-2">จำนวนชั่วโมง/ปี</p>
-            <input
-              type="number"
-              min="0"
-              disabled={readOnly}
-              value={hoursPerYear}
-              onChange={e => setHoursPerYear(e.target.value)}
-              placeholder="เช่น 40"
-              className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold disabled:bg-slate-50 disabled:text-slate-600"
-            />
-          </div>
-        </div>
+  <div>
+    <p className="text-m font-black text-slate-500 mb-2">จำนวนหน่วยกิต</p>
+    <input
+      type="number" step="0.5" min="0"
+      disabled={readOnly || autoCredit}
+      value={creditHours}
+      onChange={e => setCreditHours(e.target.value)}
+      placeholder="เช่น 1.0"
+      className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold disabled:bg-slate-50 disabled:text-slate-600"
+    />
+  </div>
+  <div>
+    <p className="text-m font-black text-slate-500 mb-2">จำนวนชั่วโมง/ปี</p>
+    <input
+      type="number" min="0"
+      disabled={readOnly}
+      value={hoursPerYear}
+      onChange={e => handleHoursPerYearChange(e.target.value)}
+      placeholder="เช่น 40"
+      className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-bold disabled:bg-slate-50 disabled:text-slate-600"
+    />
+  </div>
+</div>
+
+<label className="flex items-center gap-2">
+  <input
+    type="checkbox"
+    disabled={readOnly}
+    checked={autoCredit}
+    onChange={e => handleAutoCreditToggle(e.target.checked)}
+    className="w-4 h-4 accent-fuchsia-500"
+  />
+  <span className="text-[18px] font-bold text-slate-600">
+    คำนวณหน่วยกิตอัตโนมัติจากชั่วโมง/ปี (40 ชม./ปี = 1 หน่วยกิต, ปัดขั้นละ 0.5)
+  </span>
+</label>
         {/* ★ เพิ่มใหม่: รูปแบบการตัดเกรด */}
         <div>
           <p className="text-m font-black text-slate-500 mb-2">รูปแบบการวัดผล</p>
@@ -2330,17 +2359,17 @@ async function removeFromGroup() {
   <p className="text-m font-black text-slate-500 mb-2">การปัดเศษคะแนน/เกรด</p>
   <div className="flex gap-2">
     {[
-      { key: "up", label: "ปัดขึ้นเมื่อมีเศษ" },
-      { key: "truncate", label: "ตัดเศษทิ้ง" },
-    ].map(opt => (
-      <button key={opt.key} type="button" disabled={readOnly}
-        onClick={() => setGradeRounding(opt.key as any)}
-        className={`px-4 py-2 rounded-xl font-black text-m border-2 disabled:opacity-50 ${
-          gradeRounding === opt.key ? "bg-fuchsia-500 border-fuchsia-500 text-white" : "bg-white border-slate-200 text-slate-500"
-        }`}>
-        {opt.label}
-      </button>
-    ))}
+  { key: "round_up", label: "ปัดขึ้นเมื่อมีเศษ" },
+  { key: "truncate", label: "ตัดเศษทิ้ง" },
+].map(opt => (
+  <button key={opt.key} type="button" disabled={readOnly}
+    onClick={() => setGradeRounding(opt.key as any)}
+    className={`px-4 py-2 rounded-xl font-black text-m border-2 disabled:opacity-50 ${
+      gradeRounding === opt.key ? "bg-fuchsia-500 border-fuchsia-500 text-white" : "bg-white border-slate-200 text-slate-500"
+    }`}>
+    {opt.label}
+  </button>
+))}
   </div>
 </div>
         {/* รหัสกลุ่มรวมคะแนน */}

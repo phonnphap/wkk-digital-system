@@ -572,14 +572,21 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
     // ★ แก้: payload ตรงกับสคีมาจริงของ repair_requests แล้ว
     //   - photo_urls (jsonb) แทน image_urls (คอลัมน์เดิมถูกลบไปแล้ว)
     //   - ไม่ส่ง ticket_no / location เพราะมี default ให้แล้วที่ฝั่ง DB
-    // ★ บางหมวดหมู่ (เช่น เครือข่ายอินเตอร์เน็ต) ต้องมอบหมายงานให้ครูที่รับผิดชอบทันทีตอนแจ้งซ่อม
-    //   ถ้ายังไม่เคยมีการมอบหมายไว้ก่อน (assigned_to ว่าง) ให้ใช้ค่าจาก CATEGORY_AUTO_ASSIGN แทน
-    const autoAssignId = CATEGORY_AUTO_ASSIGN[category];
+    // ★ มอบหมายงานอัตโนมัติให้ "ครูผู้ดูแลอาคารทุกคน" (buildings.repair_user_ids) ทันทีตอนแจ้งซ่อมใหม่
+    //   ไม่ต้องเลือกว่าจะมอบให้ใครคนใดคนหนึ่ง — มอบให้ทุกคนที่ดูแลอาคารนั้น พร้อมรวมผู้รับผิดชอบเฉพาะหมวดหมู่ (ถ้ามี)
+    const selectedBuilding = buildings.find(b => b.id === buildingId);
+    const buildingCaretakerIds = (selectedBuilding as any)?.repair_user_ids ?? [];
+    const categoryAssignId = CATEGORY_AUTO_ASSIGN[category];
+    const autoAssignIds = Array.from(new Set([...buildingCaretakerIds, ...(categoryAssignId ? [categoryAssignId] : [])]));
     const payload = {
       title: title.trim(), description: desc.trim(), building_id: buildingId,
       room: room.trim(), category, priority, photo_urls: imageUrls,
       reporter_id: currentUser.id, status: existing?.status ?? "pending",
-      assigned_to: existing?.assigned_to ?? autoAssignId ?? null,
+      // ★ assigned_user_ids (jsonb array คอลัมน์ใหม่) เก็บผู้รับมอบหมายทุกคน
+      //   ตอนแก้ไขรายการเดิม ให้คงรายชื่อที่มอบหมายไว้แล้วไม่เปลี่ยนอัตโนมัติซ้ำ
+      assigned_user_ids: existing?.id ? ((existing as any).assigned_user_ids ?? autoAssignIds) : autoAssignIds,
+      // ★ คง assigned_to (คอลัมน์เดิม) ไว้เพื่อ backward-compat กับโค้ด/รายงานอื่นที่อาจยังอ้างอิงอยู่
+      assigned_to: existing?.assigned_to ?? (autoAssignIds[0] ?? null),
     };
     const isNewRequest = !existing?.id;
     if (existing?.id) {
@@ -609,6 +616,7 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
     // ★ เด้งเตือนครูที่รับผิดชอบอาคารนี้ทันที (จาก buildings.repair_user_ids) เฉพาะตอนแจ้งซ่อมใหม่
     //   ดึงอีเมลของครูดูแลอาคารแยกอีกครั้ง (allUsers ที่โหลดไว้ปกติไม่มี email) แล้วยิงอีเมลแจ้งเตือนทีละคน
     //   fire-and-forget ทั้งหมด ไม่กระทบการบันทึกหลักหากส่งไม่สำเร็จ
+    // ★ ตอนนี้มอบหมายให้ครูดูแลอาคารทุกคนแล้ว (ไม่ใช่แค่คนเดียว) จึงอีเมลแจ้งทุกคนใน buildingCaretakerIds เช่นเดิม
     if (isNewRequest) {
       const bld = buildings.find(b => b.id === buildingId);
       const repairIds = (bld as any)?.repair_user_ids ?? [];
@@ -625,7 +633,7 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
                 body: JSON.stringify({
                   to: t.email,
                   subject: `🔧 แจ้งซ่อมใหม่ในอาคารที่ท่านดูแล: ${title.trim()}`,
-                  body: `มีการแจ้งซ่อมใหม่ในอาคาร "${bld?.name ?? "-"}" ซึ่งท่านเป็นผู้รับผิดชอบดูแล\n\nหัวข้อ: ${title.trim()}\nหมวดหมู่: ${category}\nห้อง/บริเวณ: ${room.trim() || "-"}\nความเร่งด่วน: ${PRIORITY_CFG[priority]?.label ?? priority}\nรายละเอียด: ${desc.trim() || "-"}\nผู้แจ้ง: ${fullName(currentUser)}\n\nกรุณาเข้าระบบแจ้งซ่อมเพื่อดำเนินการต่อ`,
+                  body: `มีการแจ้งซ่อมใหม่ในอาคาร "${bld?.name ?? "-"}" ซึ่งท่านเป็นผู้รับผิดชอบดูแล (มอบหมายงานให้ท่านโดยอัตโนมัติแล้ว)\n\nหัวข้อ: ${title.trim()}\nหมวดหมู่: ${category}\nห้อง/บริเวณ: ${room.trim() || "-"}\nความเร่งด่วน: ${PRIORITY_CFG[priority]?.label ?? priority}\nรายละเอียด: ${desc.trim() || "-"}\nผู้แจ้ง: ${fullName(currentUser)}\n\nกรุณาเข้าระบบแจ้งซ่อมเพื่อดำเนินการต่อ`,
                 }),
               }).catch((e) => console.warn("[repair] ส่งอีเมลเตือนครูดูแลอาคารไม่สำเร็จ (ไม่กระทบการบันทึก):", e));
             });
@@ -838,7 +846,11 @@ function DetailModal({ request, canManage, allUsers, currentUserId, isAdmin, isP
   onUpdate: () => void; onClose: () => void;
 }) {
   const [status, setStatus] = useState(request.status);
-  const [assignedTo, setAssignedTo] = useState(request.assigned_to ?? "");
+  // ★ เปลี่ยนจาก assigned_to (คนเดียว) เป็น assigned_user_ids (มอบหมายได้หลายคน)
+  //   ค่าเริ่มต้นอ่านจาก assigned_user_ids ถ้ามี ไม่งั้น fallback ไปที่ assigned_to เดิม (backward-compat)
+  const [assignedIds, setAssignedIds] = useState<string[]>(
+    (request as any).assigned_user_ids ?? (request.assigned_to ? [request.assigned_to] : [])
+  );
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   // ★ เพิ่ม: งบประมาณต่อรายการ (ใช้ตอนสร้างบันทึกข้อความ)
@@ -848,7 +860,7 @@ function DetailModal({ request, canManage, allUsers, currentUserId, isAdmin, isP
   const [budgetSource, setBudgetSource] = useState<string>((request as any).budget_source ?? "");
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
-  // ★ ครูที่ดูแลอาคารนี้ (repair_user_ids) — ใช้กรอง dropdown "มอบหมายให้"
+  // ★ ครูที่ดูแลอาคารนี้ (repair_user_ids) — ใช้กรองรายชื่อผู้ที่มอบหมายได้
   const buildingRepairIds = (request.building as any)?.repair_user_ids ?? [];
   const assignableUsers = buildingRepairIds.length > 0
     ? allUsers.filter(u => buildingRepairIds.includes(u.id))
@@ -858,12 +870,16 @@ function DetailModal({ request, canManage, allUsers, currentUserId, isAdmin, isP
   const inspectorIds = (request.building as any)?.inspector_user_ids ?? [];
   const inspectorNames = allUsers.filter(u => inspectorIds.includes(u.id)).map(fullName);
 
+  function toggleAssignee(id: string) {
+    setAssignedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
+  }
+
   // ★ สิทธิ์แก้ไข/ลบรายการ:
   //   - แอดมิน/ผู้ดูแลโครงการ: แก้ไข/ลบได้เสมอ
-  //   - ครูผู้แจ้งเอง: แก้ไข/ลบได้ ตราบใดที่ยังไม่ถูกมอบหมายงาน (assigned_to ยังว่าง)
-  //     เมื่อถูกมอบหมายแล้ว ครูผู้แจ้งจะไม่สามารถแก้ไข/ลบได้อีก
+  //   - ครูผู้แจ้งเอง: แก้ไข/ลบได้ ตราบใดที่ยังไม่ถูกมอบหมายงาน (assigned_user_ids/assigned_to ยังว่าง)
+  //     เมื่อถูกมอบหมายแล้ว (เช่น มอบหมายอัตโนมัติให้ครูดูแลอาคารตอนแจ้งซ่อม) ครูผู้แจ้งจะไม่สามารถแก้ไข/ลบได้อีก
   const isReporter = request.reporter_id === currentUserId;
-  const isLocked = !!request.assigned_to;
+  const isLocked = ((request as any).assigned_user_ids?.length ?? 0) > 0 || !!request.assigned_to;
   const canEditDelete = isAdmin || isProjManager || (isReporter && !isLocked);
 
   const handleUpdate = async () => {
@@ -871,7 +887,9 @@ function DetailModal({ request, canManage, allUsers, currentUserId, isAdmin, isP
     // ★ แก้: ใช้ completed_at (คอลัมน์จริงในตาราง) แทน resolved_at
     //   และเช็คสถานะ 'completed' (ตรงกับ enum) แทน 'resolved'
     const { error } = await supabase.from("repair_requests").update({
-      status, assigned_to: assignedTo || null,
+      status,
+      assigned_user_ids: assignedIds,
+      assigned_to: assignedIds[0] ?? null, // ★ คงคอลัมน์เดิมไว้เพื่อ backward-compat
       estimated_cost: estimatedCost.trim() ? Number(estimatedCost) : null,
       budget_source: budgetSource.trim() || null,
       updated_at: new Date().toISOString(),
@@ -933,6 +951,11 @@ function DetailModal({ request, canManage, allUsers, currentUserId, isAdmin, isP
               🛠️ ครูดูแลตึกนี้ (อ้างอิง): {inspectorNames.join(", ")}
             </p>
           )}
+          {assignedIds.length > 0 && (
+            <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+              ✅ มอบหมายงานให้: {allUsers.filter(u=>assignedIds.includes(u.id)).map(fullName).join(", ") || `${assignedIds.length} คน`}
+            </p>
+          )}
 
           <div className="pt-2 border-t border-slate-100">
             {canEditDelete ? (
@@ -969,13 +992,21 @@ function DetailModal({ request, canManage, allUsers, currentUserId, isAdmin, isP
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-400 mb-1">
-                  มอบหมายให้ {buildingRepairIds.length===0 && <span className="text-amber-500 font-normal">(อาคารนี้ยังไม่ได้ตั้งค่าครูดูแล แสดงทุกคน)</span>}
+                  มอบหมายให้ (เลือกได้หลายคน) {buildingRepairIds.length===0 && <span className="text-amber-500 font-normal">(อาคารนี้ยังไม่ได้ตั้งค่าครูดูแล แสดงทุกคน)</span>}
                 </label>
-                <select value={assignedTo} onChange={e=>setAssignedTo(e.target.value)}
-                  className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none">
-                  <option value="">— ยังไม่ได้มอบหมาย —</option>
-                  {assignableUsers.map(u=><option key={u.id} value={u.id}>{fullName(u)}</option>)}
-                </select>
+                <div className="max-h-40 overflow-y-auto space-y-1 border-2 border-blue-100 rounded-xl p-2 bg-white">
+                  {assignableUsers.length === 0 && (
+                    <p className="text-xs text-slate-400 px-2 py-1">ไม่มีรายชื่อให้เลือก</p>
+                  )}
+                  {assignableUsers.map(u=>(
+                    <label key={u.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-blue-50 cursor-pointer">
+                      <input type="checkbox" checked={assignedIds.includes(u.id)}
+                        onChange={()=>toggleAssignee(u.id)}
+                        className="w-4 h-4 accent-blue-600 shrink-0" />
+                      <span className="text-sm text-slate-700">{fullName(u)}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1023,6 +1054,8 @@ export default function Page() {
   const [tab,          setTab]         = useState<"dashboard"|"list"|"mine">("list");
   const [filterStatus, setFilterStatus]= useState("");
   const [filterBldg,   setFilterBldg]  = useState("");
+  // ★ ตัวกรองด่วน "เฉพาะตึกที่ฉันดูแล" สำหรับครูที่เป็นผู้ดูแลอาคาร ให้ดูเฉพาะรายการของตึกตัวเองง่ายๆ
+  const [onlyMyBuildings, setOnlyMyBuildings] = useState(false);
   const [showForm,     setShowForm]    = useState(false);
   const [editingReq,   setEditingReq]  = useState<RepairRequest|null>(null);
   const [showManagers, setShowManagers]= useState(false);
@@ -1094,15 +1127,16 @@ export default function Page() {
   useEffect(()=>{if(!loading&&user) loadData();},[loading,user,loadData]);
 
   const visibleRequests = useMemo(()=>{
+    // ★ ให้ทุกคนเห็นรายการแจ้งซ่อมทั้งโรงเรียน เพื่อไม่ให้แจ้งรายการซ้ำกัน
+    //   (เดิมครูทั่วไป/ผู้ดูแลอาคารเห็นแค่ของตัวเอง/อาคารตัวเอง ตอนนี้เปิดให้เห็นทั้งหมดเสมอ)
     let list = requests;
-    if (!canSeeAll && isBuildingManager)
+    // ★ ตัวกรองด่วน "เฉพาะตึกที่ฉันดูแล" ใช้ได้เฉพาะผู้ที่เป็นผู้ดูแลอาคาร
+    if (onlyMyBuildings && isBuildingManager)
       list = list.filter(r => myBuildingIds.has(r.building_id ?? ""));
-    else if (!canSeeAll)
-  list = list.filter(r => r.reporter_id === user?.id);
     if (filterBldg)   list = list.filter(r => r.building_id === filterBldg);
     if (filterStatus) list = list.filter(r => r.status === filterStatus);
     return list;
-  },[requests,canSeeAll,isBuildingManager,myBuildingIds,user,filterStatus,filterBldg]);
+  },[requests,onlyMyBuildings,isBuildingManager,myBuildingIds,filterStatus,filterBldg]);
 
   const myRequests = useMemo(()=>requests.filter(r=>r.reporter_id===user?.id),[requests,user]);
 
@@ -1268,18 +1302,23 @@ export default function Page() {
                   {Object.entries(STATUS_CFG).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
-              {canSeeAll && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">อาคาร</label>
-                  <select value={filterBldg} onChange={e=>setFilterBldg(e.target.value)}
-                    className="border-2 border-blue-200 rounded-xl px-3 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none">
-                    <option value="">ทั้งหมด</option>
-                    {buildings.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">อาคาร</label>
+                <select value={filterBldg} onChange={e=>setFilterBldg(e.target.value)}
+                  className="border-2 border-blue-200 rounded-xl px-3 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none">
+                  <option value="">ทั้งหมด</option>
+                  {buildings.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+              {isBuildingManager && (
+                <button onClick={()=>setOnlyMyBuildings(v=>!v)}
+                  className={`px-3 py-2 text-xs font-bold rounded-xl border-2 transition-colors self-end
+                    ${onlyMyBuildings ? "bg-orange-500 border-orange-500 text-white" : "bg-white border-slate-200 text-slate-500 hover:border-orange-300"}`}>
+                  🏢 เฉพาะตึกที่ฉันดูแล
+                </button>
               )}
-              {(filterStatus||filterBldg)&&(
-                <button onClick={()=>{setFilterStatus("");setFilterBldg("");}}
+              {(filterStatus||filterBldg||onlyMyBuildings)&&(
+                <button onClick={()=>{setFilterStatus("");setFilterBldg("");setOnlyMyBuildings(false);}}
                   className="px-3 py-2 text-xs text-slate-400 hover:text-slate-600 underline self-end">ล้าง</button>
               )}
               <div className="flex-1"/>
