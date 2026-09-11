@@ -308,6 +308,10 @@ export default function AttendancePage() {
 }, [date]);
 
 const todayHoliday = isHoliday(date, holidayMap);
+// ★ วันหยุดสุดสัปดาห์ / วันหยุดนักขัตฤกษ์ ห้ามเช็คชื่อ (ล็อกทั้งวัน กันเช็คผิด)
+const selectedDow = parseISODateLocal(date).getDay();
+const isWeekendSelected = selectedDow === 0 || selectedDow === 6;
+const isDateLocked = isWeekendSelected || !!todayHoliday;
 
   function openDatePicker() {
     const el = dateInputRef.current;
@@ -434,10 +438,12 @@ const todayHoliday = isHoliday(date, holidayMap);
   }, [students]);
 
   function setStatus(studentId: string, status: AttendanceStatus) {
+    if (isDateLocked) return; // ★ กันเช็คชื่อวันหยุด/เสาร์-อาทิตย์
     setStatusMap((prev) => ({ ...prev, [studentId]: status }));
   }
 
   function setAllStatus(status: AttendanceStatus) {
+  if (isDateLocked) return; // ★ กันตั้งค่าทั้งห้องในวันหยุด/เสาร์-อาทิตย์
   const map: Record<string, AttendanceStatus> = { ...statusMap };
   students.forEach((s) => { if (!lockedMap[s.id]) map[s.id] = status; });
   setStatusMap(map);
@@ -445,6 +451,15 @@ const todayHoliday = isHoliday(date, holidayMap);
 
   async function handleSave() {
   if (!selectedClass || students.length === 0) return;
+  if (isDateLocked) {
+    // ★ กันบันทึกข้อมูลเช็คชื่อในวันหยุด/เสาร์-อาทิตย์
+    alert(
+      todayHoliday
+        ? `ไม่สามารถบันทึกการเช็คชื่อได้ เนื่องจากวันนี้เป็นวันหยุด: ${todayHoliday.name}`
+        : "ไม่สามารถบันทึกการเช็คชื่อได้ เนื่องจากวันนี้เป็นวันเสาร์-อาทิตย์"
+    );
+    return;
+  }
   setSaving(true);
   setSavedMsg("");
 
@@ -601,8 +616,11 @@ const todayHoliday = isHoliday(date, holidayMap);
               {STATUS_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
+                  disabled={isDateLocked}
                   onClick={() => setAllStatus(opt.value)}
-                  className="rounded-full border-2 border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50"
+                  className={`rounded-full border-2 border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 ${
+                    isDateLocked ? "opacity-40 cursor-not-allowed hover:bg-white" : ""
+                  }`}
                 >
                   ทุกคน{opt.label}
                 </button>
@@ -636,9 +654,11 @@ const todayHoliday = isHoliday(date, holidayMap);
                   ))}
                 </div>
 
-                {todayHoliday && (
+                {isDateLocked && (
   <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">
-    📅 วันนี้เป็นวันหยุด: {todayHoliday.name} — ถ้ามีเรียนชดเชยสามารถเช็คชื่อได้ตามปกติ
+    🔒 {todayHoliday
+      ? `วันนี้เป็นวันหยุด: ${todayHoliday.name}`
+      : "วันนี้เป็นวันเสาร์-อาทิตย์"} — ไม่สามารถเช็คชื่อหรือบันทึกข้อมูลของวันนี้ได้
   </div>
 )}
 
@@ -693,11 +713,11 @@ const todayHoliday = isHoliday(date, holidayMap);
                         {STATUS_OPTIONS.map((opt) => (
   <button
     key={opt.value}
-    disabled={lockedMap[s.id]}
+    disabled={lockedMap[s.id] || isDateLocked}
     onClick={() => setStatus(s.id, opt.value)}
     className={`rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
       current === opt.value ? opt.activeCls : "bg-slate-100 text-slate-400 hover:bg-slate-200"
-    } ${lockedMap[s.id] ? "opacity-50 cursor-not-allowed" : ""}`}
+    } ${lockedMap[s.id] || isDateLocked ? "opacity-50 cursor-not-allowed" : ""}`}
   >
     {opt.label}
   </button>
@@ -716,11 +736,11 @@ const todayHoliday = isHoliday(date, holidayMap);
                 {savedMsg && <span className="text-sm font-semibold text-emerald-600">{savedMsg}</span>}
                 <button
                   onClick={handleSave}
-                  disabled={saving}
+                  disabled={saving || isDateLocked}
                   className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:shadow-xl disabled:translate-y-0 disabled:opacity-50 disabled:shadow-none"
                 >
                   <Save className="h-4 w-4" />
-                  {saving ? "กำลังบันทึก..." : "บันทึกการเช็คชื่อ"}
+                  {saving ? "กำลังบันทึก..." : isDateLocked ? "ไม่สามารถเช็คชื่อวันนี้ได้" : "บันทึกการเช็คชื่อ"}
                 </button>
               </div>
             )}
