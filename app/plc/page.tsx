@@ -411,11 +411,12 @@ function RingProgress({ pct, size = 56, stroke = 6, color = "#3b82f6" }: { pct: 
   );
 }
 
-function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, canEdit, gradeLevelMap, subjectMap, deputySignatureUrl, directorSignatureUrl }: {
+function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, canEdit, gradeLevelMap, subjectMap, deputySignatureUrl, directorSignatureUrl, showFillSuggestion, onFillSuggestion }: {
   meeting: PLCMeeting; allTeachers: Teacher[]; onClose: () => void;
   onEdit: (m: PLCMeeting) => void; onDelete: (id: string) => void; canEdit: boolean;
   gradeLevelMap: Record<string, string>; subjectMap: Record<string, string>;
   deputySignatureUrl?: string; directorSignatureUrl?: string;
+  showFillSuggestion?: boolean; onFillSuggestion?: () => void;
 }) {
   const participants = getParticipants(meeting, allTeachers);
   const facilitator  = allTeachers.find(t => t.id === meeting.facilitator_id);
@@ -579,20 +580,26 @@ function ReportDetailModal({ meeting, allTeachers, onClose, onEdit, onDelete, ca
             </div>
           )}
         </div>
-        <div className="border-t border-slate-100 px-6 py-4 flex gap-2 shrink-0 bg-slate-50 rounded-b-3xl">
-          <button onClick={handlePrint} disabled={printing}
-            className="px-4 py-2.5 rounded-xl border-2 border-slate-300 bg-white text-slate-700 font-black text-sm hover:bg-slate-100 disabled:opacity-50 flex items-center gap-1.5">
-            {printing ? <span className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"/> : "🖨️"} พิมพ์รายงาน
-          </button>
-          {canEdit ? (
-            <>
-              <button onClick={() => { onClose(); onEdit(meeting); }} className="px-4 py-2.5 rounded-xl border-2 border-blue-200 bg-blue-50 text-blue-700 font-black text-sm hover:bg-blue-100">✏️ แก้ไข</button>
-              <button onClick={() => { if (confirm("ยืนยันการลบ?")) { onDelete(meeting.id); onClose(); } }} className="px-4 py-2.5 rounded-xl border-2 border-red-200 bg-red-50 text-red-600 font-black text-sm hover:bg-red-100">🗑️ ลบ</button>
-            </>
-          ) : (
-            <span className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-400 font-bold text-xs flex items-center gap-1.5">🔒 แก้ไขได้เฉพาะผู้บันทึกรายงานนี้เท่านั้น</span>
-          )}
-        </div>
+        <div className="border-t border-slate-100 px-6 py-4 flex items-center gap-2 shrink-0 bg-slate-50 rounded-b-3xl">
+  <button onClick={handlePrint} disabled={printing}
+    className="px-4 py-2.5 rounded-xl border-2 border-slate-300 bg-white text-slate-700 font-black text-sm hover:bg-slate-100 disabled:opacity-50 flex items-center gap-1.5">
+    {printing ? <span className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"/> : "🖨️"} พิมพ์รายงาน
+  </button>
+  {canEdit ? (
+    <>
+      <button onClick={() => { onClose(); onEdit(meeting); }} className="px-4 py-2.5 rounded-xl border-2 border-blue-200 bg-blue-50 text-blue-700 font-black text-sm hover:bg-blue-100">✏️ แก้ไข</button>
+      <button onClick={() => { if (confirm("ยืนยันการลบ?")) { onDelete(meeting.id); onClose(); } }} className="px-4 py-2.5 rounded-xl border-2 border-red-200 bg-red-50 text-red-600 font-black text-sm hover:bg-red-100">🗑️ ลบ</button>
+    </>
+  ) : (
+    <span className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-400 font-bold text-xs flex items-center gap-1.5">🔒 แก้ไขได้เฉพาะผู้บันทึกรายงานนี้เท่านั้น</span>
+  )}
+  {showFillSuggestion && onFillSuggestion && (
+    <button onClick={onFillSuggestion}
+      className="ml-auto px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-sm shadow-sm">
+      💬 กรอกเลย →
+    </button>
+  )}
+</div>
       </div>
     </div>
   );
@@ -1116,8 +1123,8 @@ function PendingSuggestionModal({ meeting, allTeachers, currentUserId, onSave, o
 }
 
 // ✅ การ์ดแสดงรายการประชุมที่ผู้ใช้ปัจจุบันเข้าร่วมแต่ยังไม่ได้กรอกข้อเสนอแนะของตนเอง — ทำหน้าที่ "เด้ง" เตือนให้ผู้เข้าร่วมกรอกเอง
-function PendingSuggestionsCard({ meetings, onOpen, onView }: {
-  meetings: PLCMeeting[]; onOpen: (m: PLCMeeting) => void; onView: (m: PLCMeeting) => void;
+function PendingSuggestionsCard({ meetings, onView }: {
+  meetings: PLCMeeting[]; onView: (m: PLCMeeting) => void;
 }) {
   if (meetings.length === 0) return null;
   return (
@@ -1137,16 +1144,10 @@ function PendingSuggestionsCard({ meetings, onOpen, onView }: {
               <p className="font-bold text-slate-800 text-sm line-clamp-1">{m.title}</p>
               <p className="text-slate-400 text-xs">📅 {toThaiDate(m.meeting_date)}{m.session_number ? ` · ครั้งที่ ${m.session_number}` : ""}</p>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button onClick={() => onView(m)}
-                className="text-xs font-black px-3 py-1.5 rounded-xl border-2 border-slate-300 bg-white text-slate-600 hover:bg-slate-50">
-                👁️ ดูรายงาน
-              </button>
-              <button onClick={() => onOpen(m)}
-                className="text-xs font-black px-3 py-1.5 rounded-xl bg-amber-500 text-white hover:bg-amber-600">
-                กรอกเลย →
-              </button>
-            </div>
+            <button onClick={() => onView(m)}
+              className="text-xs font-black px-3 py-1.5 rounded-xl border-2 border-amber-300 bg-white text-amber-600 hover:bg-amber-50 shrink-0">
+              👁️ ดูรายงาน
+            </button>
           </div>
         ))}
       </div>
@@ -2007,7 +2008,6 @@ setGradeLevelMap(glMap);
           <>
             <PendingSuggestionsCard 
   meetings={pendingSuggestions} 
-  onOpen={m => setSuggestMeeting(m)} 
   onView={m => setViewMeeting(m)} 
 />
             <div className="flex flex-col items-center gap-3 py-4">
@@ -2249,18 +2249,24 @@ setGradeLevelMap(glMap);
         />
       )}
       {viewMeeting && user && (
-        <ReportDetailModal
-          meeting={viewMeeting} allTeachers={allTeachers}
-          onClose={() => setViewMeeting(null)}
-          onEdit={m => { setViewMeeting(null); setEditMeeting(m); setModalOpen(true); }}
-          onDelete={id => { handleDelete(id); setViewMeeting(null); }}
-          canEdit={canEditMeeting(viewMeeting)}
-          gradeLevelMap={gradeLevelMap}
-          subjectMap={subjectMap}
-          deputySignatureUrl={deputySignature}
-          directorSignatureUrl={directorSignature}
-        />
-      )}
+  <ReportDetailModal
+    meeting={viewMeeting} allTeachers={allTeachers}
+    onClose={() => setViewMeeting(null)}
+    onEdit={m => { setViewMeeting(null); setEditMeeting(m); setModalOpen(true); }}
+    onDelete={id => { handleDelete(id); setViewMeeting(null); }}
+    canEdit={canEditMeeting(viewMeeting)}
+    gradeLevelMap={gradeLevelMap}
+    subjectMap={subjectMap}
+    deputySignatureUrl={deputySignature}
+    directorSignatureUrl={directorSignature}
+    showFillSuggestion={
+      viewMeeting.facilitator_id !== user.id &&
+      attendsMeeting(user.id, viewMeeting) &&
+      !(viewMeeting.participant_suggestions?.[user.id] ?? "").trim()
+    }
+    onFillSuggestion={() => { setViewMeeting(null); setSuggestMeeting(viewMeeting); }}
+  />
+)}
       {suggestMeeting && user && (
         <PendingSuggestionModal
           meeting={suggestMeeting}
