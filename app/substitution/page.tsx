@@ -744,9 +744,14 @@ function SwapRequestModal({
   const [pickedTeacherId, setPickedTeacherId] = useState(() =>
     editingRequest && mode === "normal" ? editingRequest.target_teacher_id : ""
   );
-  const [reason, setReason] = useState(isEditing ? (initialReason ?? "") : "");
-// ★ ข้อความ marker อัตโนมัติ (แลกคาบคืน) — ล็อกไว้ไม่ให้ผู้ใช้แก้ไข กันเผลอลบจน hasActiveRepayFor... หาไม่เจอ
-const lockedAutoReason = (mode === "repay" && !isEditing) ? (initialReason ?? "") : null;
+   // ★ FIX: แยก reason ออกเป็น 2 ส่วน — "marker" (ล็อกแก้ไม่ได้ ใช้เช็คว่าแลกคืนแล้วหรือยัง) + "หมายเหตุเพิ่มเติม" (แก้ไขได้อิสระ)
+  // สาเหตุเดิม: initialReason ถูกยัดใส่ textarea เดียวกันแบบแก้ไขได้ พอผู้ใช้พิมพ์ทับ/แก้ข้อความ
+  // ทำให้ marker หายไปจาก reason ที่บันทึกจริง → hasActiveRepayForSwap/hasActiveRepayForSub หาไม่เจอตลอดไป → ปุ่ม "แลกคาบคืน" ไม่มีวันหาย
+  const lockedAutoReason = (mode === "repay" && !isEditing) ? (initialReason ?? "") : null;
+  const [reason, setReason] = useState(() => {
+    if (isEditing) return initialReason ?? "";
+    return ""; // โหมด repay สร้างใหม่: ช่องนี้เก็บแค่ "หมายเหตุเพิ่มเติม" ผู้ใช้พิมพ์เอง ไม่ใช่ marker
+  });
   const [saving, setSaving] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [onLeaveIds, setOnLeaveIds] = useState<Set<string>>(new Set());
@@ -826,11 +831,12 @@ const lockedAutoReason = (mode === "repay" && !isEditing) ? (initialReason ?? ""
     return Object.keys(e).length === 0;
   };
 
-  const handleSave = async () => {
+   const handleSave = async () => {
   if (!validate()) return;
   setSaving(true);
   const targetId = mode === "repay" ? fixedTargetTeacherId! : pickedTeacherId;
-  // ★ บังคับให้ reason ที่บันทึกจริง มี marker ติดอยู่เสมอในโหมด repay
+  // ★ FIX: ต่อ marker (ล็อกไว้) เข้ากับหมายเหตุที่ผู้ใช้พิมพ์เอง ก่อนบันทึกลง DB เสมอ
+  // กันเคส user แก้/ลบข้อความจนระบบเช็ค "แลกคืนแล้วหรือยัง" ไม่เจอ
   const finalReason = lockedAutoReason
     ? (reason.trim() ? `${lockedAutoReason} — ${reason.trim()}` : lockedAutoReason)
     : reason;
@@ -841,7 +847,7 @@ const lockedAutoReason = (mode === "repay" && !isEditing) ? (initialReason ?? ""
       target_teacher_id: targetId,
       requester_entry_id: selectedEntry!.id,
       swap_date: swapDate,
-      reason,
+      reason: finalReason,
       status: "pending",
       responded_at: null,
     }).eq("id", editingRequest!.id);
@@ -853,10 +859,10 @@ const lockedAutoReason = (mode === "repay" && !isEditing) ? (initialReason ?? ""
     return;
   }
 
-  const { error } = await supabase.from("class_swap_requests").insert([{
+    const { error } = await supabase.from("class_swap_requests").insert([{
     requester_id: user.id, target_teacher_id: targetId,
     requester_entry_id: selectedEntry!.id, target_entry_id: null,
-    swap_date: swapDate, reason, status: "pending", academic_year_id: academicYearId,
+    swap_date: swapDate, reason: finalReason, status: "pending", academic_year_id: academicYearId,   // ★ เปลี่ยนจาก reason
   }]);
   setSaving(false);
   if (error) { alert("❌ "+error.message); return; }
