@@ -998,7 +998,7 @@ return (
           {isMounted ? `สวัสดี ${userPrefix} ${userName} 👋` : "สวัสดี 👋"}
         </h1>
         <p className="text-sm md:text-base text-blue-100 mt-2 font-semibold opacity-90">
-          ยินดีต้อนรับสู่ระบบสารสนเทศอัจฉริยะ โรงเรียนวัดเขียนเขต
+          ยินดีต้อนรับสู่ระบบ WKK Smart School โรงเรียนวัดเขียนเขต
         </p>
         <div onClick={() => router.push("/face-scan")}
           className="mt-5 inline-flex items-center gap-2 text-xs bg-emerald-500 text-white font-extrabold px-4 py-2 rounded-xl shadow-sm cursor-pointer hover:bg-emerald-600 transition-all">
