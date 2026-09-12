@@ -2045,21 +2045,28 @@ async function saveScoreGroup(withSubjectIds?: string[]) {
     return;
   }
 
-  setSavingGroup(true);
+    setSavingGroup(true);
   setGroupError(null);
   try {
-    await supabase.from("subject_score_groups").upsert({
+    const { error: groupUpsertErr } = await supabase.from("subject_score_groups").upsert({
       group_code: code,
       group_name: groupName.trim() || targets.map(s => s.name_th).join(" / "),
       main_subject_code: mainSubjectCode.trim() || targets[0]?.subject_code || code,
     });
-    await Promise.all(
-      targets.map(t =>
-        supabase.from("subjects")
-          .update({ score_group_code: code, score_group_weight_percent: Number(memberWeightEdits[t.id]) || 0 })
-          .eq("id", t.id)
-      )
-    );
+    if (groupUpsertErr) throw groupUpsertErr;
+
+    // ★ เปลี่ยนจาก .update() ตรงๆ (ติด RLS เมื่อรวมกลุ่มข้ามครูผู้สอน) เป็นเรียก RPC
+    // ที่ SECURITY DEFINER แทน เพื่อให้อัปเดตวิชาของครูคนอื่นในกลุ่มได้ครบทุกคน
+    const { error: rpcErr } = await supabase.rpc("set_subject_score_group", {
+      p_subject_ids: targets.map(t => t.id),
+      p_group_code: code,
+      p_weights: targets.map(t => ({
+        subject_id: t.id,
+        weight_percent: Number(memberWeightEdits[t.id]) || 0,
+      })),
+    });
+    if (rpcErr) throw rpcErr;
+
     setScoreGroupCode(code);
     onSubjectSaved({ score_group_code: code, score_group_weight_percent: Number(memberWeightEdits[subject.id]) || 100 } as any);
   } catch (e: any) {
@@ -2085,9 +2092,15 @@ function handleAutoCreditToggle(checked: boolean) {
 async function removeFromGroup() {
   if (!subject) return;
   if (!window.confirm("นำวิชานี้ออกจากกลุ่มรวมคะแนนหรือไม่?")) return;
-  await supabase.from("subjects")
-    .update({ score_group_code: null, score_group_weight_percent: 100 })
-    .eq("id", subject.id);
+
+  const { error: rpcErr } = await supabase.rpc("remove_subject_from_score_group", {
+    p_subject_id: subject.id,
+  });
+  if (rpcErr) {
+    setGroupError(rpcErr.message ?? "นำวิชาออกจากกลุ่มไม่สำเร็จ");
+    return;
+  }
+
   setScoreGroupCode("");
   setGroupMembers([]);
   onSubjectSaved({ score_group_code: null } as any);
