@@ -2048,16 +2048,9 @@ async function saveScoreGroup(withSubjectIds?: string[]) {
   setSavingGroup(true);
   setGroupError(null);
   try {
-    // ★ แก้: group_name -> display_name (ชื่อคอลัมน์จริงในตาราง)
-    // ★ แก้: เอา main_subject_code ออก เพราะตารางนี้ไม่มีคอลัมน์นี้จริง (มีแค่ group_code, display_name, updated_at)
-    const { error: groupUpsertErr } = await supabase.from("subject_score_groups").upsert({
-  group_code: code,
-  display_name: groupName.trim() || targets.map(s => s.name_th).join(" / "),
-});
-if (groupUpsertErr) throw groupUpsertErr;
-
-    // ★ เปลี่ยนจาก .update() ตรงๆ (ติด RLS เมื่อรวมกลุ่มข้ามครูผู้สอน) เป็นเรียก RPC
-    // ที่ SECURITY DEFINER แทน เพื่อให้อัปเดตวิชาของครูคนอื่นในกลุ่มได้ครบทุกคน
+    // ★ รวม upsert กลุ่ม + อัปเดต subjects เข้าไปใน RPC เดียว (SECURITY DEFINER)
+    // เพราะตาราง subject_score_groups ไม่มี INSERT/UPDATE policy ให้ client เรียกตรงๆ
+    // และ subjects ก็ติด RLS เมื่อรวมกลุ่มข้ามครูผู้สอน
     const { error: rpcErr } = await supabase.rpc("set_subject_score_group", {
       p_subject_ids: targets.map(t => t.id),
       p_group_code: code,
@@ -2065,6 +2058,7 @@ if (groupUpsertErr) throw groupUpsertErr;
         subject_id: t.id,
         weight_percent: Number(memberWeightEdits[t.id]) || 0,
       })),
+      p_display_name: groupName.trim() || targets.map(s => s.name_th).join(" / "),
     });
     if (rpcErr) throw rpcErr;
 
