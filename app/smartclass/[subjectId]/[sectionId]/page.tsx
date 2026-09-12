@@ -1982,11 +1982,11 @@ useEffect(() => {
   (async () => {
     const { data: groupRow } = await supabase
       .from("subject_score_groups")
-      .select("group_code, group_name, main_subject_code")
+      .select("group_code, display_name")
       .eq("group_code", scoreGroupCode)
       .maybeSingle();
-    setGroupName(groupRow?.group_name ?? "");
-    setMainSubjectCode(groupRow?.main_subject_code ?? "");
+    setGroupName(groupRow?.display_name ?? "");
+    setMainSubjectCode("");
 
     const { data: memberRows } = await supabase
       .from("subjects")
@@ -2045,15 +2045,16 @@ async function saveScoreGroup(withSubjectIds?: string[]) {
     return;
   }
 
-    setSavingGroup(true);
+  setSavingGroup(true);
   setGroupError(null);
   try {
+    // ★ แก้: group_name -> display_name (ชื่อคอลัมน์จริงในตาราง)
+    // ★ แก้: เอา main_subject_code ออก เพราะตารางนี้ไม่มีคอลัมน์นี้จริง (มีแค่ group_code, display_name, updated_at)
     const { error: groupUpsertErr } = await supabase.from("subject_score_groups").upsert({
-      group_code: code,
-      group_name: groupName.trim() || targets.map(s => s.name_th).join(" / "),
-      main_subject_code: mainSubjectCode.trim() || targets[0]?.subject_code || code,
-    });
-    if (groupUpsertErr) throw groupUpsertErr;
+  group_code: code,
+  display_name: groupName.trim() || targets.map(s => s.name_th).join(" / "),
+});
+if (groupUpsertErr) throw groupUpsertErr;
 
     // ★ เปลี่ยนจาก .update() ตรงๆ (ติด RLS เมื่อรวมกลุ่มข้ามครูผู้สอน) เป็นเรียก RPC
     // ที่ SECURITY DEFINER แทน เพื่อให้อัปเดตวิชาของครูคนอื่นในกลุ่มได้ครบทุกคน
