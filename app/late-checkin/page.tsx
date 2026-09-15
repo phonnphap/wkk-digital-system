@@ -168,6 +168,14 @@ const [shareModalOpen, setShareModalOpen] = useState(false);
 const [savingSettings, setSavingSettings] = useState(false);
 const [openTimeDraft, setOpenTimeDraft] = useState("");
 const [closeTimeDraft, setCloseTimeDraft] = useState("");
+const [myHomeroomClassroomIds, setMyHomeroomClassroomIds] = useState<Set<string>>(new Set());
+
+useEffect(() => {
+  supabase.rpc("get_my_classrooms").then(({ data, error }: { data: { classroom_id: string }[] | null; error: any }) => {
+    if (error) { console.warn("[late-checkin] โหลดห้องที่เป็นครูประจำชั้นไม่สำเร็จ:", error.message); return; }
+    setMyHomeroomClassroomIds(new Set((data ?? []).map((c) => c.classroom_id)));
+  });
+}, []);
 
 useEffect(() => {
   if (settings) {
@@ -488,6 +496,7 @@ async function regenerateToken() {
 
   async function undoLate(entry: LateEntry) {
   const isToday = entry.recorded_at.slice(0, 10) === todayISO();
+  const isMyHomeroomClass = myHomeroomClassroomIds.has(entry.student.classroom_id); // ★ เพิ่มบรรทัดนี้
 
   if (myRole === "admin") {
     // ผ่านทุกกรณี
@@ -495,8 +504,9 @@ async function regenerateToken() {
     if (!isToday) { alert("ไม่สามารถยกเลิกรายการของวันอื่นได้ — กรุณาแจ้งแอดมิน"); return; }
   } else {
     if (!isToday) { alert("ไม่สามารถยกเลิกรายการของวันอื่นได้ — กรุณาแจ้งแอดมิน"); return; }
-    if (entry.recorded_by !== myProfileId) {
-      alert("ยกเลิกได้เฉพาะรายการที่ตัวเองบันทึกเท่านั้น — กรุณาแจ้งแอดมิน");
+    // ★ อนุญาตถ้าเป็นคนบันทึกเอง "หรือ" เป็นครูประจำชั้น (คนใดคนหนึ่งใน 2 คน) ของห้องนักเรียนคนนี้
+    if (entry.recorded_by !== myProfileId && !isMyHomeroomClass) {
+      alert("ยกเลิกได้เฉพาะรายการที่ตัวเองบันทึก หรือของนักเรียนในห้องที่ตัวเองเป็นครูประจำชั้นเท่านั้น — กรุณาแจ้งแอดมิน");
       return;
     }
     if (nowThaiTime() > GENERAL_UNDO_CUTOFF) {
