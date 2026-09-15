@@ -170,6 +170,25 @@ const [savingSettings, setSavingSettings] = useState(false);
 const [openTimeDraft, setOpenTimeDraft] = useState("");
 const [closeTimeDraft, setCloseTimeDraft] = useState("");
 const [myHomeroomClassroomIds, setMyHomeroomClassroomIds] = useState<Set<string>>(new Set());
+const LATE_DUTY_POINT_ID = "c93c2d7b-0084-4606-93f5-6433d26e7246"; // ★ จุดเวร "ดูแลนักเรียนมาสาย"
+
+const [isDutyToday, setIsDutyToday] = useState(false);
+
+useEffect(() => {
+  if (!myProfileId) return;
+  supabase
+    .from("duty_assignments")
+    .select("morning_teachers, afternoon_teachers")
+    .eq("duty_date", todayISO())
+    .eq("duty_point_id", LATE_DUTY_POINT_ID)
+    .maybeSingle()
+    .then(({ data, error }) => {
+      if (error) { console.warn("[late-checkin] เช็คเวรวันนี้ไม่สำเร็จ:", error.message); return; }
+      const morning: string[] = data?.morning_teachers ?? [];
+      const afternoon: string[] = data?.afternoon_teachers ?? [];
+      setIsDutyToday(morning.includes(myProfileId) || afternoon.includes(myProfileId));
+    });
+}, [myProfileId]);
 
 useEffect(() => {
   supabase.rpc("get_my_classrooms").then(({ data, error }: { data: { classroom_id: string }[] | null; error: any }) => {
@@ -497,21 +516,22 @@ async function regenerateToken() {
 
   async function undoLate(entry: LateEntry) {
   const isToday = entry.recorded_at.slice(0, 10) === todayISO();
-  const isMyHomeroomClass = myHomeroomClassroomIds.has(entry.student.classroom_id); // ★ เพิ่ม
+  const isMyHomeroomClass = myHomeroomClassroomIds.has(entry.student.classroom_id);
+  const isDutyGateScan = isDutyToday && entry.recorded_source === "gate_scan"; // ★ เพิ่ม
 
   if (myRole === "admin") {
     // ผ่านทุกกรณี
   } else if (!isToday) {
     alert("ไม่สามารถยกเลิกรายการของวันอื่นได้ — กรุณาแจ้งแอดมิน");
     return;
+  } else if (isDutyGateScan) {
+    // ★ ครูเวรจุด "ดูแลนักเรียนมาสาย" ของวันนี้ — ยกเลิกได้ทุกรายการ gate_scan ไม่มี cutoff เวลา
   } else if (isMyHomeroomClass) {
-    // ★ ครูประจำชั้น (คนที่ 1 หรือ 2) ยกเลิกรายการของห้องตัวเองได้ แม้ไม่ใช่คนบันทึกเอง — ก่อน 15:30 น.
     if (nowThaiTime() > HOMEROOM_UNDO_CUTOFF) {
       alert(`ครูประจำชั้นยกเลิกได้เฉพาะก่อนเวลา ${HOMEROOM_UNDO_CUTOFF.slice(0, 5)} น. เท่านั้น — เกินเวลานี้กรุณาแจ้งแอดมิน`);
       return;
     }
   } else {
-    // ★ ครูทั่วไป/สภานักเรียนที่บันทึกจับสายเอง — ต้องเป็นคนบันทึกเอง และก่อน 12:00 น.
     if (entry.recorded_by !== myProfileId) {
       alert("ยกเลิกได้เฉพาะรายการที่ตัวเองบันทึก หรือของนักเรียนในห้องที่ตัวเองเป็นครูประจำชั้นเท่านั้น — กรุณาแจ้งแอดมิน");
       return;
