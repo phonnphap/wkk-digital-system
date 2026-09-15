@@ -88,7 +88,8 @@ function gradeLineLabel(stage: string, level: number) {
 
 const GENERAL_MARK_START = "07:45:00";
 const GENERAL_MARK_END = "15:30:00";
-const GENERAL_UNDO_CUTOFF = "09:00:00";
+const GENERAL_UNDO_CUTOFF = "12:00:00";   // ★ เปลี่ยนจาก 09:00 เป็น 12:00
+const HOMEROOM_UNDO_CUTOFF = "15:30:00";  // ★ เพิ่มใหม่ — cutoff เฉพาะครูประจำชั้น
 
 function nowThaiTime() {
   return new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "Asia/Bangkok" });
@@ -496,21 +497,27 @@ async function regenerateToken() {
 
   async function undoLate(entry: LateEntry) {
   const isToday = entry.recorded_at.slice(0, 10) === todayISO();
-  const isMyHomeroomClass = myHomeroomClassroomIds.has(entry.student.classroom_id); // ★ เพิ่มบรรทัดนี้
+  const isMyHomeroomClass = myHomeroomClassroomIds.has(entry.student.classroom_id); // ★ เพิ่ม
 
   if (myRole === "admin") {
     // ผ่านทุกกรณี
-  } else if (entry.recorded_source === "council_link") {
-    if (!isToday) { alert("ไม่สามารถยกเลิกรายการของวันอื่นได้ — กรุณาแจ้งแอดมิน"); return; }
+  } else if (!isToday) {
+    alert("ไม่สามารถยกเลิกรายการของวันอื่นได้ — กรุณาแจ้งแอดมิน");
+    return;
+  } else if (isMyHomeroomClass) {
+    // ★ ครูประจำชั้น (คนที่ 1 หรือ 2) ยกเลิกรายการของห้องตัวเองได้ แม้ไม่ใช่คนบันทึกเอง — ก่อน 15:30 น.
+    if (nowThaiTime() > HOMEROOM_UNDO_CUTOFF) {
+      alert(`ครูประจำชั้นยกเลิกได้เฉพาะก่อนเวลา ${HOMEROOM_UNDO_CUTOFF.slice(0, 5)} น. เท่านั้น — เกินเวลานี้กรุณาแจ้งแอดมิน`);
+      return;
+    }
   } else {
-    if (!isToday) { alert("ไม่สามารถยกเลิกรายการของวันอื่นได้ — กรุณาแจ้งแอดมิน"); return; }
-    // ★ อนุญาตถ้าเป็นคนบันทึกเอง "หรือ" เป็นครูประจำชั้น (คนใดคนหนึ่งใน 2 คน) ของห้องนักเรียนคนนี้
-    if (entry.recorded_by !== myProfileId && !isMyHomeroomClass) {
+    // ★ ครูทั่วไป/สภานักเรียนที่บันทึกจับสายเอง — ต้องเป็นคนบันทึกเอง และก่อน 12:00 น.
+    if (entry.recorded_by !== myProfileId) {
       alert("ยกเลิกได้เฉพาะรายการที่ตัวเองบันทึก หรือของนักเรียนในห้องที่ตัวเองเป็นครูประจำชั้นเท่านั้น — กรุณาแจ้งแอดมิน");
       return;
     }
     if (nowThaiTime() > GENERAL_UNDO_CUTOFF) {
-      alert(`ยกเลิกได้เฉพาะก่อนเวลา ${GENERAL_UNDO_CUTOFF.slice(0,5)} น. เท่านั้น — เกินเวลานี้กรุณาแจ้งแอดมิน`);
+      alert(`ยกเลิกได้เฉพาะก่อนเวลา ${GENERAL_UNDO_CUTOFF.slice(0, 5)} น. เท่านั้น — เกินเวลานี้กรุณาแจ้งแอดมิน`);
       return;
     }
   }
@@ -615,23 +622,23 @@ async function regenerateToken() {
 
         <div className="mt-6 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-indigo-500">งานเวรประจำวัน</p>
+            <p className="text-m font-bold uppercase tracking-wider text-indigo-500">งานเวรประจำวัน</p>
             <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-800 sm:text-3xl">
               บันทึกนักเรียนมาสาย
             </h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-m text-slate-500">
               สแกนบัตร พิมพ์ชื่อ หรือเลือกชั้น/ห้อง เพื่อบันทึกนักเรียนที่มาสายหน้าโรงเรียน
             </p>
           </div>
           <button
             onClick={() => router.push(DUTY_REPORT_PATH)}
-            className="flex items-center gap-1.5 rounded-2xl border-2 border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-600 shadow-sm transition hover:-translate-y-0.5 hover:bg-indigo-50 hover:shadow-md"
+            className="flex items-center gap-1.5 rounded-2xl border-2 border-indigo-200 bg-white px-4 py-2.5 text-m font-semibold text-indigo-600 shadow-sm transition hover:-translate-y-0.5 hover:bg-indigo-50 hover:shadow-md"
           >
             <ClipboardList className="h-4 w-4" /> รายงานเวรประจำวัน
           </button>
           <button
   onClick={() => setShareModalOpen(true)}
-  className="flex items-center gap-1.5 rounded-2xl border-2 border-emerald-200 bg-white px-4 py-2.5 text-sm font-semibold text-emerald-600 shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-50 hover:shadow-md"
+  className="flex items-center gap-1.5 rounded-2xl border-2 border-emerald-200 bg-white px-4 py-2.5 text-m font-semibold text-emerald-600 shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-50 hover:shadow-md"
 >
   <Share2 className="h-4 w-4" /> แชร์ให้สภานักเรียน
 </button>
@@ -639,7 +646,7 @@ async function regenerateToken() {
 
         
         {errorMsg && (
-          <div className="mt-5 flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">
+          <div className="mt-5 flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-m font-semibold text-rose-600">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {errorMsg}
           </div>
         )}
@@ -649,10 +656,10 @@ async function regenerateToken() {
   {isCouncilTimeLocked ? (
     <div className="rounded-3xl border-2 border-amber-200 bg-amber-50 p-6 text-center">
       <Lock className="mx-auto h-8 w-8 text-amber-500" />
-      <p className="mt-2 text-sm font-bold text-amber-700">
+      <p className="mt-2 text-m font-bold text-amber-700">
         ระบบนี้ปิดสำหรับสภานักเรียนในขณะนี้
       </p>
-      <p className="mt-1 text-xs text-amber-600">
+      <p className="mt-1 text-m text-amber-600">
         {settings?.council_enabled
           ? `เปิดให้ใช้งานเวลา ${settings?.open_time?.slice(0, 5)} - ${settings?.close_time?.slice(0, 5)} น.`
           : "ปิดใช้งานชั่วคราวโดยแอดมิน"}
@@ -674,14 +681,14 @@ async function regenerateToken() {
             value={scanValue}
             onChange={(e) => setScanValue(e.target.value)}
             placeholder="สแกนบาร์โค้ด (เครื่องสแกน USB) หรือพิมพ์รหัส/เลขบัตร ปชช. แล้วกด Enter"
-            className="w-full border-none bg-transparent text-sm font-medium text-slate-700 outline-none placeholder:text-slate-400"
+            className="w-full border-none bg-transparent text-m font-medium text-slate-700 outline-none placeholder:text-slate-400"
           />
         </form>
 
         <button
           type="button"
           onClick={() => setScannerOpen(true)}
-          className="flex shrink-0 items-center justify-center gap-2 rounded-3xl bg-gradient-to-r from-indigo-600 to-blue-500 px-5 py-4 text-sm font-semibold text-white shadow-md shadow-indigo-200 transition hover:-translate-y-0.5 hover:shadow-lg sm:w-auto"
+          className="flex shrink-0 items-center justify-center gap-2 rounded-3xl bg-gradient-to-r from-indigo-600 to-blue-500 px-5 py-4 text-m font-semibold text-white shadow-md shadow-indigo-200 transition hover:-translate-y-0.5 hover:shadow-lg sm:w-auto"
         >
           <Camera className="h-5 w-5" /> เปิดกล้องสแกน
         </button>
@@ -694,7 +701,7 @@ async function regenerateToken() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="พิมพ์ค้นหาชื่อ นามสกุล ชื่อเล่น หรือรหัสนักเรียน..."
-            className="w-full border-none bg-transparent text-sm outline-none placeholder:text-slate-400"
+            className="w-full border-none bg-transparent text-m outline-none placeholder:text-slate-400"
           />
           {query && (
             <button onClick={() => setQuery("")} className="text-slate-300 hover:text-slate-500">
@@ -708,7 +715,7 @@ async function regenerateToken() {
             <button
               key={g}
               onClick={() => { setGradeLevel(g); setRoomId(""); setQuery(""); }}
-              className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
+              className={`rounded-xl px-3 py-1.5 text-m font-bold transition ${
                 gradeLevel === g
                   ? "bg-indigo-600 text-white shadow-sm"
                   : "bg-slate-100 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600"
@@ -725,7 +732,7 @@ async function regenerateToken() {
               <button
                 key={r.classroom_id}
                 onClick={() => setRoomId(r.classroom_id)}
-                className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
+                className={`rounded-xl px-3 py-1.5 text-m font-bold transition ${
                   roomId === r.classroom_id
                     ? "bg-sky-500 text-white shadow-sm"
                     : "bg-slate-50 text-slate-500 ring-1 ring-slate-200 hover:bg-sky-50 hover:text-sky-600"
@@ -739,10 +746,10 @@ async function regenerateToken() {
 
         <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {loadingStudents ? (
-            <p className="col-span-full py-6 text-center text-sm text-slate-400">กำลังโหลด...</p>
+            <p className="col-span-full py-6 text-center text-m text-slate-400">กำลังโหลด...</p>
           ) : roomId ? (
             filteredRoomStudents.length === 0 ? (
-              <p className="col-span-full py-6 text-center text-sm text-slate-400">ไม่พบนักเรียนที่ตรงกับคำค้นหา</p>
+              <p className="col-span-full py-6 text-center text-m text-slate-400">ไม่พบนักเรียนที่ตรงกับคำค้นหา</p>
             ) : (
               filteredRoomStudents.map((s) => (
                 <StudentPickRow key={s.id} student={s} isLate={alreadyLateIds.has(s.id)} showClass={false} onPick={() => setPendingStudent(s)} />
@@ -750,14 +757,14 @@ async function regenerateToken() {
             )
           ) : query.trim().length >= 2 ? (
             globalSearchResults.length === 0 ? (
-              <p className="col-span-full py-6 text-center text-sm text-slate-400">ไม่พบนักเรียนที่ตรงกับคำค้นหา</p>
+              <p className="col-span-full py-6 text-center text-m text-slate-400">ไม่พบนักเรียนที่ตรงกับคำค้นหา</p>
             ) : (
               globalSearchResults.map((s) => (
                 <StudentPickRow key={s.id} student={s} isLate={alreadyLateIds.has(s.id)} showClass onPick={() => setPendingStudent(s)} />
               ))
             )
           ) : (
-            <p className="col-span-full py-6 text-center text-sm text-slate-400">
+            <p className="col-span-full py-6 text-center text-m text-slate-400">
               เลือกระดับชั้น/ห้อง หรือพิมพ์ค้นหาชื่อนักเรียน (อย่างน้อย 2 ตัวอักษร)
             </p>
           )}
@@ -770,7 +777,7 @@ async function regenerateToken() {
           <div className="space-y-5">
             <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
               <div className="flex items-center justify-between">
-  <p className="text-sm font-extrabold text-slate-800">สแกนบัตรนักเรียน</p>
+  <p className="text-m font-extrabold text-slate-800">สแกนบัตรนักเรียน</p>
   <div className="flex items-center gap-2">
     {torchSupported && (
       <button
@@ -786,19 +793,19 @@ async function regenerateToken() {
 </div>
               <div className="mt-3 max-h-[26rem] space-y-1.5 overflow-y-auto">
                 {loadingLate ? (
-                  <p className="py-6 text-center text-sm text-slate-400">กำลังโหลด...</p>
+                  <p className="py-6 text-center text-m text-slate-400">กำลังโหลด...</p>
                 ) : lateToday.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-slate-400">ยังไม่มีนักเรียนมาสายวันนี้</p>
+                  <p className="py-6 text-center text-m text-slate-400">ยังไม่มีนักเรียนมาสายวันนี้</p>
                 ) : (
                   lateToday.map((e) => {
                     const displayPrefix = getDisplayPrefix(e.student.gender, e.student.birth_date, e.student.prefix);
                     return (
                       <div key={e.record_id} className="flex items-center justify-between gap-2 rounded-2xl bg-slate-50 px-3 py-2.5">
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-semibold text-slate-700">
+                          <p className="truncate text-[16px] font-semibold text-slate-700">
                             {displayPrefix}{e.student.first_name} {e.student.last_name}
                           </p>
-                          <p className="truncate text-[11px] text-slate-400">
+                          <p className="truncate text-[16px] text-slate-400">
                             {e.room_name} · เลขที่ {e.student.seat_number ?? "-"} · {timeThai(e.recorded_at)} น.
                           </p>
                         </div>
@@ -817,19 +824,19 @@ async function regenerateToken() {
             {summaryByRoom.length > 0 && (
               <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-800">
+                  <p className="flex items-center gap-1.5 text-m font-extrabold text-slate-800">
                     <Users className="h-4 w-4 text-indigo-500" /> สรุปตามห้อง
                   </p>
                   <button
                     onClick={() => setSummarySortMode((m) => (m === "grade" ? "count" : "grade"))}
-                    className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold text-indigo-500 transition hover:bg-indigo-50"
+                    className="shrink-0 rounded-lg px-2 py-1 text-[16px] font-semibold text-indigo-500 transition hover:bg-indigo-50"
                   >
                     {summarySortMode === "grade" ? "เรียงจากขาดมากสุด" : "เรียงตามชั้น/ห้อง"}
                   </button>
                 </div>
                 <div className="mt-3 space-y-1.5">
                   {summaryByRoom.map((row) => (
-                    <div key={row.room} className="flex items-center justify-between text-sm">
+                    <div key={row.room} className="flex items-center justify-between text-m">
                       <span className="text-slate-500">{row.room}</span>
                       <span className="font-bold text-slate-700">{row.count} คน</span>
                     </div>
@@ -840,10 +847,10 @@ async function regenerateToken() {
 
             {summaryByGradeLine.lines.length > 0 && (
               <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
-                <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-800">
+                <p className="flex items-center gap-1.5 text-m font-extrabold text-slate-800">
                   <ClipboardList className="h-4 w-4 text-violet-500" /> สรุปตามสายชั้น
                 </p>
-                <div className="mt-3 space-y-3 text-sm">
+                <div className="mt-3 space-y-3 text-m">
                   {STAGE_ORDER.map((stage) => {
                     const stageLines = summaryByGradeLine.lines.filter((l) => l.stage === stage);
                     if (stageLines.length === 0) return null;
@@ -859,8 +866,8 @@ async function regenerateToken() {
                           ))}
                         </div>
                         <div className="mt-1 flex items-center justify-between border-t border-dashed border-slate-200 pt-1">
-                          <span className="text-xs font-bold text-indigo-500">{stage}ทั้งหมด</span>
-                          <span className="text-xs font-black text-indigo-600">{stageTotal} คน</span>
+                          <span className="text-m font-bold text-indigo-500">{stage}ทั้งหมด</span>
+                          <span className="text-m font-black text-indigo-600">{stageTotal} คน</span>
                         </div>
                       </div>
                     );
@@ -868,8 +875,8 @@ async function regenerateToken() {
 
                   {summaryByGradeLine.totalCombined > 0 && (
                     <div className="flex items-center justify-between rounded-xl bg-violet-50 px-3 py-2">
-                      <span className="text-xs font-bold text-violet-600">รวม ประถม+ม.ต้น+ม.ปลาย</span>
-                      <span className="text-xs font-black text-violet-700">{summaryByGradeLine.totalCombined} คน</span>
+                      <span className="text-m font-bold text-violet-600">รวม ประถม+ม.ต้น+ม.ปลาย</span>
+                      <span className="text-m font-black text-violet-700">{summaryByGradeLine.totalCombined} คน</span>
                     </div>
                   )}
                 </div>
@@ -883,7 +890,7 @@ async function regenerateToken() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 backdrop-blur-sm">
             <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
               <div className="flex items-center justify-between">
-                <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-800">
+                <p className="flex items-center gap-1.5 text-m font-extrabold text-slate-800">
                   <Camera className="h-4 w-4 text-indigo-500" /> สแกนบาร์โค้ด/คิวอาร์บัตรนักเรียน
                 </p>
                 <button
@@ -899,15 +906,15 @@ async function regenerateToken() {
                 {cameraStarting && (
                   <div className="absolute inset-0 flex items-center justify-center bg-slate-900/70 text-white">
                     <Loader2 className="h-6 w-6 animate-spin" />
-                    <span className="ml-2 text-sm">กำลังเปิดกล้อง...</span>
+                    <span className="ml-2 text-m">กำลังเปิดกล้อง...</span>
                   </div>
                 )}
               </div>
 
               {cameraError && (
-                <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">{cameraError}</p>
+                <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-m font-semibold text-rose-600">{cameraError}</p>
               )}
-              <p className="mt-3 text-center text-xs text-slate-400">
+              <p className="mt-3 text-center text-m text-slate-400">
                 วางบาร์โค้ด/คิวอาร์บนบัตรนักเรียนให้อยู่ในกรอบ ระบบจะบันทึกอัตโนมัติเมื่ออ่านสำเร็จ
               </p>
             </div>
@@ -917,7 +924,7 @@ async function regenerateToken() {
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 backdrop-blur-sm">
     <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
       <div className="flex items-center justify-between">
-        <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-800">
+        <p className="flex items-center gap-1.5 text-m font-extrabold text-slate-800">
           <Share2 className="h-4 w-4 text-emerald-500" /> ลิงก์สำหรับสภานักเรียน
         </p>
         <button onClick={() => setShareModalOpen(false)} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100">
@@ -930,20 +937,20 @@ async function regenerateToken() {
       </div>
 
       <div className="mt-3 flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
-        <p className="flex-1 truncate text-xs text-slate-500">{shareUrl}</p>
+        <p className="flex-1 truncate text-m text-slate-500">{shareUrl}</p>
         <button onClick={copyShareLink} className="shrink-0 rounded-lg bg-emerald-500 px-2.5 py-1.5 text-white">
           <Copy className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      <p className="mt-2 text-center text-[11px] text-slate-400">
+      <p className="mt-2 text-center text-[16px] text-slate-400">
         ให้สภานักเรียนสแกน QR หรือกดลิงก์นี้ ไม่ต้องล็อกอิน — ใช้ได้เฉพาะช่วงเวลาที่กำหนดด้านล่าง
       </p>
 
       {/* ตั้งค่าเปิด/ปิด + ช่วงเวลา (แสดงให้ทุกคนเห็น แต่บันทึกได้เฉพาะ admin ผ่าน RLS) */}
       <div className="mt-5 space-y-3 border-t border-slate-100 pt-4">
         <div className="flex items-center justify-between">
-          <p className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
+          <p className="flex items-center gap-1.5 text-m font-bold text-slate-600">
             <Settings2 className="h-3.5 w-3.5" /> เปิดใช้งานสำหรับสภา
           </p>
           <button
@@ -957,30 +964,30 @@ async function regenerateToken() {
 
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="text-[11px] text-slate-400">เปิดเวลา</label>
+            <label className="text-[16px] text-slate-400">เปิดเวลา</label>
             <input
   type="time"
   value={openTimeDraft}
   onChange={(e) => setOpenTimeDraft(e.target.value)}
   onBlur={() => { if (/^\d{2}:\d{2}$/.test(openTimeDraft)) saveSettings({ open_time: openTimeDraft + ":00" }); }}
-  className="w-full rounded-xl border-2 border-slate-200 px-2 py-1.5 text-sm"
+  className="w-full rounded-xl border-2 border-slate-200 px-2 py-1.5 text-m"
 />
           </div>
           <div>
-            <label className="text-[11px] text-slate-400">ปิดเวลา</label>
+            <label className="text-[16px] text-slate-400">ปิดเวลา</label>
             <input
   type="time"
   value={closeTimeDraft}
   onChange={(e) => setCloseTimeDraft(e.target.value)}
   onBlur={() => { if (/^\d{2}:\d{2}$/.test(closeTimeDraft)) saveSettings({ close_time: closeTimeDraft + ":00" }); }}
-  className="w-full rounded-xl border-2 border-slate-200 px-2 py-1.5 text-sm"
+  className="w-full rounded-xl border-2 border-slate-200 px-2 py-1.5 text-m"
 />
           </div>
         </div>
 
         <button
           onClick={regenerateToken}
-          className="w-full rounded-xl border-2 border-rose-200 px-3 py-2 text-xs font-semibold text-rose-500 hover:bg-rose-50"
+          className="w-full rounded-xl border-2 border-rose-200 px-3 py-2 text-m font-semibold text-rose-500 hover:bg-rose-50"
         >
           สร้างลิงก์ใหม่ (ยกเลิกลิงก์เก่า)
         </button>
@@ -996,30 +1003,30 @@ async function regenerateToken() {
               <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-rose-100 text-rose-500">
                 <Clock className="h-7 w-7" />
               </span>
-              <p className="mt-4 text-sm text-slate-400">ยืนยันบันทึกว่านักเรียนคนนี้มาสาย</p>
-              <p className="mt-1 text-lg font-extrabold text-slate-800">
+              <p className="mt-4 text-m text-slate-400">ยืนยันบันทึกว่านักเรียนคนนี้มาสาย</p>
+              <p className="mt-1 text-xl font-extrabold text-slate-800">
                 {getDisplayPrefix(pendingStudent.gender, pendingStudent.birth_date, pendingStudent.prefix)}
                 {pendingStudent.first_name} {pendingStudent.last_name}
               </p>
-              {pendingStudent.nick_name && <p className="text-sm text-slate-400">({pendingStudent.nick_name})</p>}
+              {pendingStudent.nick_name && <p className="text-m text-slate-400">({pendingStudent.nick_name})</p>}
               {/* ★ แสดง ชั้น/ห้อง + เลขที่ ให้ชัดเจนก่อนยืนยัน */}
-              <p className="mt-1 text-sm font-semibold text-indigo-600">
+              <p className="mt-1 text-m font-semibold text-indigo-600">
                 {formatClassLabel(pendingStudent.classroom) || "ไม่ระบุห้อง"} · เลขที่ {pendingStudent.seat_number ?? "-"}
               </p>
               {alreadyLateIds.has(pendingStudent.id) && (
-                <p className="mt-2 text-xs font-bold text-amber-600">⚠️ นักเรียนคนนี้ถูกบันทึกว่ามาสายไปแล้ววันนี้</p>
+                <p className="mt-2 text-m font-bold text-amber-600">⚠️ นักเรียนคนนี้ถูกบันทึกว่ามาสายไปแล้ววันนี้</p>
               )}
               <div className="mt-6 flex gap-2">
                 <button
                   onClick={() => setPendingStudent(null)}
-                  className="flex-1 rounded-xl border-2 border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                  className="flex-1 rounded-xl border-2 border-slate-200 px-4 py-2.5 text-m font-semibold text-slate-600 transition hover:bg-slate-50"
                 >
                   ยกเลิก
                 </button>
                 <button
                   onClick={() => markLate(pendingStudent)}
                   disabled={saving}
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-rose-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-rose-200 transition hover:-translate-y-0.5 hover:shadow-lg disabled:translate-y-0 disabled:opacity-50"
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-rose-500 px-4 py-2.5 text-m font-semibold text-white shadow-md shadow-rose-200 transition hover:-translate-y-0.5 hover:shadow-lg disabled:translate-y-0 disabled:opacity-50"
                 >
                   <CheckCircle2 className="h-4 w-4" />
                   {saving ? "กำลังบันทึก..." : "ยืนยันมาสาย"}
@@ -1045,22 +1052,22 @@ function StudentPickRow({
         isLate ? "bg-rose-50 ring-1 ring-rose-200" : "bg-slate-50 hover:bg-indigo-50"
       }`}
     >
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-sky-400 text-xs font-bold text-white">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-sky-400 text-m font-bold text-white">
         {student.seat_number ?? "-"}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-semibold text-slate-800">
+        <p className="truncate text-[16px] font-semibold text-slate-800">
           {displayPrefix}{student.first_name} {student.last_name}
           {student.nick_name && <span className="ml-1 font-normal text-slate-400">({student.nick_name})</span>}
         </p>
         {/* ★ แสดง ชั้น/ห้อง (เมื่อเป็นผลค้นหาข้ามห้อง) + เลขที่ เป็นข้อความชัดเจน */}
-        <p className="truncate text-[11px] text-slate-400">
+        <p className="truncate text-[16px] text-slate-400">
   {showClass && classLabel ? `${classLabel} · ` : ""}เลขที่ {student.seat_number ?? "-"}
   {student.student_code ? ` · ${student.student_code}` : ""}
   {typeof student.behavior_score === "number" ? ` · คงเหลือ ${student.behavior_score} คะแนน` : ""}
 </p>
       </div>
-      {isLate && <span className="shrink-0 text-[10px] font-black text-rose-500">มาสายแล้ว</span>}
+      {isLate && <span className="shrink-0 text-[16px] font-black text-rose-500">มาสายแล้ว</span>}
     </button>
   );
 }
