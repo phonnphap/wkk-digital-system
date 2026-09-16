@@ -285,7 +285,7 @@ const rows = affectedIds.map((studentId) => ({
   action,
   points,
   category,
-  description: note.trim() || null,
+  description: note.trim() || "",
   recorded_by: myProfileId || null,
   incident_date: todayISO(),
 }));
