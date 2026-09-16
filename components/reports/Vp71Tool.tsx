@@ -85,7 +85,33 @@ function indicatorNumberOf(line: string): string {
   const match = line.match(/^(\d+)/);
   return match ? match[1] : "-";
 }
+
 function indicatorTextOnly(line: string): string {
+  return line.replace(/^\d+\s*/, "");
+}
+
+// ★★★ NEW — ดึง "รหัส" ของตัวชี้วัด/ผลการเรียนรู้
+// วิชาพื้นฐาน (เช่น "ว 4.2 ป.5/1 การพัฒนาทักษะ...") → รหัสคือ "ว 4.2 ป.5/1" (token ที่มี "/" รวมด้วย)
+// วิชาเพิ่มเติม (เช่น "1 ผลการเรียนรู้...") → รหัสคือเลขนำหน้า "1" (เหมือนเดิม)
+function indicatorCodeOf(line: string, isBasicSubject: boolean): string {
+  if (isBasicSubject) {
+    const slashIdx = line.indexOf("/");
+    if (slashIdx !== -1) {
+      let end = line.indexOf(" ", slashIdx);
+      if (end === -1) end = line.length;
+      const code = line.slice(0, end).trim();
+      if (code) return code;
+    }
+  }
+  const match = line.match(/^(\d+)/);
+  return match ? match[1] : "-";
+}
+
+// ★★★ NEW — ดึงเนื้อความคำอธิบาย โดยตัด "รหัส" ที่หาได้ออกจากหน้าบรรทัด
+function indicatorTextAfterCode(line: string, code: string): string {
+  if (code !== "-" && line.startsWith(code)) {
+    return line.slice(code.length).trim();
+  }
   return line.replace(/^\d+\s*/, "");
 }
 
@@ -136,6 +162,7 @@ export default function Vp71Tool({
   const indicatorLabel = resolvedSubjectType === "additional" ? "ผลการเรียนรู้" : "ตัวชี้วัด";
   const indicatorAbbr = resolvedSubjectType === "additional" ? "ผช." : "ตช.";
   const indicatorItemLabel = resolvedSubjectType === "additional" ? "ผลการเรียนรู้" : "ตัวชี้วัด";
+  const isBasicSubject = resolvedSubjectType !== "additional"; 
 
   // ★★★ NEW — คลังตัวชี้วัดของวิชานี้ (สำหรับปุ่ม "เลือกจากคลัง")
   // หมายเหตุ: ชื่อคอลัมน์ code/description เป็นการสมมติ — เช็ค schema จริงของ learning_indicators ก่อนใช้งาน
@@ -455,6 +482,7 @@ if (active) setIndicatorBank(
           indicatorLabel={indicatorLabel}
           indicatorAbbr={indicatorAbbr}
           indicatorItemLabel={indicatorItemLabel}
+          isBasicSubject={isBasicSubject}
           midtermMaxScore={midtermMaxScore}
           finalMaxScore={finalMaxScore}
           formativeMaxScore={formativeMaxScore}
@@ -828,7 +856,7 @@ function EditPlanView({
    ========================================================================= */
 
 function ReportView({
-  subjectId, subjectCode, subjectTitle, academicYearId, currentUserId,
+  subjectId, subjectCode, subjectTitle, academicYearId, currentUserId, isBasicSubject,
   sectionId, students, units, readOnly, indicatorLabel, indicatorAbbr, indicatorItemLabel,
   midtermMaxScore, finalMaxScore, formativeMaxScore,
 }: {
@@ -844,6 +872,7 @@ function ReportView({
   indicatorLabel: string;
   indicatorAbbr: string;
   indicatorItemLabel: string;
+  isBasicSubject: boolean; 
   midtermMaxScore: number;
   finalMaxScore: number;
   formativeMaxScore: number;
@@ -1019,8 +1048,8 @@ function ReportView({
                 <Fragment key={u.unit_no}>
                   {indicatorLinesOf(u).map((line, idx) => (
   <th key={`${u.unit_no}-i${idx}`} className="border border-slate-300 px-2 py-1 font-bold whitespace-nowrap" title={line}>
-  {indicatorNumberOf(line)}
-</th>
+    {indicatorCodeOf(line, isBasicSubject)}
+  </th>
 ))}
                   <th className="border border-slate-300 px-2 py-1 font-black whitespace-nowrap bg-fuchsia-50 print:bg-slate-100">สรุป</th>                </Fragment>
               ))}
@@ -1077,11 +1106,15 @@ function ReportView({
           <div key={u.unit_no}>
             <p className="font-black text-slate-500">หน่วยที่ {u.unit_no} {u.unit_name}</p>
             <ul className="pl-4 list-disc space-y-0.5">
-  {indicatorLinesOf(u).map((line, idx) => (
-    <li key={idx} className="font-bold text-slate-500">
-      <span className="text-slate-400">{indicatorLabel} ข้อที่ {indicatorNumberOf(line)}:</span> {indicatorTextOnly(line)}
-    </li>
-  ))}
+  {indicatorLinesOf(u).map((line, idx) => {
+    const code = indicatorCodeOf(line, isBasicSubject);
+    const prefix = isBasicSubject ? `${indicatorLabel}ที่` : `${indicatorLabel} ข้อที่`;
+    return (
+      <li key={idx} className="font-bold text-slate-500">
+        <span className="text-slate-400">{prefix} {code}:</span> {indicatorTextAfterCode(line, code)}
+      </li>
+    );
+  })}
 </ul>
           </div>
         ))}

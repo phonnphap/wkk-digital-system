@@ -127,34 +127,32 @@ function estimateTextWidthPx(text: string, pxPerChar = 13, basePadding = 24): nu
   return len * pxPerChar + basePadding;
 }
 
-// ★ ช่องกรอกข้อมูลด้านบน (ชื่อ / เลขประจำตัว / ห้อง / เลขที่) — label ตามด้วยเส้นใต้ที่ข้อความจะถูกจัดกึ่งกลาง
+// ★ ช่องกรอกข้อมูลด้านบน (ชื่อ / เลขประจำตัว / ห้อง / เลขที่) — label ตามด้วยข้อความที่จัดกึ่งกลาง (ไม่มีเส้นใต้)
 function InfoField({ label, value, grow = 1 }: { label: string; value: string; grow?: number }) {
   return (
     <div className="flex items-baseline" style={{ flexGrow: grow, flexBasis: 0, minWidth: "fit-content" }}>
       <span className="whitespace-nowrap">{label}</span>
-      <span className="flex-1 text-center border-b border-black mx-2 px-1 whitespace-nowrap overflow-hidden text-ellipsis">
+      <span className="flex-1 text-center mx-2 px-1 whitespace-nowrap overflow-hidden text-ellipsis">
         {value}
       </span>
     </div>
   );
 }
 
-// ★ บรรทัดลงชื่อ — "ลงชื่อ" ชิดซ้ายตรงกันทุกช่อง เส้นใต้ขยายพอดีกับชื่อในวงเล็บ และชื่อจะอยู่กึ่งกลางเส้นใต้พอดี
-function SignatureField({ role, nameLabel }: { role: string; nameLabel?: string }) {
-  const lineWidthPx = Math.max(140, estimateTextWidthPx(nameLabel ?? ""));
+// ★ บรรทัดลงชื่อ — "ลงชื่อ" ชิดซ้ายตรงกันทุกช่อง เส้นใต้กับชื่อในวงเล็บอยู่ในคอลัมน์เดียวกัน
+//    ทำให้ชื่อในวงเล็บอยู่กึ่งกลางเส้นใต้พอดี ไม่ว่าความยาวของคำว่า "ลงชื่อ" หรือ role จะเป็นเท่าใด
+function SignatureField({ role, nameLabel, lineWidthPx: fixedLineWidthPx }: { role: string; nameLabel?: string; lineWidthPx?: number }) {
+  const lineWidthPx = fixedLineWidthPx ?? Math.max(140, estimateTextWidthPx(nameLabel ?? ""));
   return (
-    <div className="inline-block text-left signature-field">
-      <div className="flex items-baseline whitespace-nowrap">
-        <span>ลงชื่อ</span>
-        <span
-          className="border-b border-black inline-block mx-1"
-          style={{ width: `${lineWidthPx}px` }}
-        >&nbsp;</span>
-        <span className="whitespace-nowrap">{role}</span>
+    <div className="inline-flex items-baseline text-left signature-field">
+      <span className="whitespace-nowrap">ลงชื่อ</span>
+      <div className="flex flex-col items-center mx-1" style={{ width: `${lineWidthPx}px` }}>
+        <span className="border-b border-black w-full text-center">&nbsp;</span>
+        <span className="text-center whitespace-nowrap">
+          {nameLabel ? `(${nameLabel})` : "\u00A0"}
+        </span>
       </div>
-      <div style={{ width: `${lineWidthPx}px`, marginLeft: "3.2em" }} className="text-center">
-        {nameLabel ? `(${nameLabel})` : "\u00A0"}
-      </div>
+      <span className="whitespace-nowrap">{role}</span>
     </div>
   );
 }
@@ -168,7 +166,7 @@ export default function Vp4Report({
   directorName,
   advisorNames,
   students,
-  sections,
+  sections: sectionsProp,
   gradeMatrix,
   attendMatrix,
   groupNames = {},
@@ -188,6 +186,10 @@ export default function Vp4Report({
   groupNames?: Record<string, string>;
   onBack: () => void;
 }) {
+  // ★ ส21101 (สังคมศึกษาฯ) ไม่มีในตารางสอน ป.1 แล้ว จึงต้องไม่แสดงในใบเกรด/ปพ นี้
+  const EXCLUDED_SUBJECT_CODES = ["ส21101"];
+  const sections = sectionsProp.filter(sec => !EXCLUDED_SUBJECT_CODES.includes(sec.subject_code));
+
   const router = useRouter();
   const [overallScores, setOverallScores] = useState<Record<string, { characteristic: string; readThinkWrite: string }>>({});
   // ★ null = ดูทั้งห้อง, มีค่า = ดูเฉพาะนักเรียนคนนั้น
@@ -398,7 +400,7 @@ export default function Vp4Report({
               )}
             </div>
 
-            {/* ★ ชื่อ / เลขประจำตัว / ห้อง / เลขที่ — ข้อความที่ดึงจากระบบจัดกึ่งกลางเส้นใต้ของแต่ละช่อง */}
+            {/* ★ ชื่อ / เลขประจำตัว / ห้อง / เลขที่ — ไม่มีเส้นใต้ */}
             <div className="flex flex-wrap items-baseline gap-4 text-xl mb-3 w-full print:mb-1">
               <InfoField label="ชื่อ" value={`${s.prefix ?? ""}${s.first_name} ${s.last_name}`} grow={3} />
               <InfoField label="เลขประจำตัว" value={s.student_code ?? "-"} grow={2} />
@@ -515,47 +517,75 @@ export default function Vp4Report({
               </div>
             )}
 
-            {/* ★ เว้น 1 บรรทัดก่อนลงชื่อครูที่ปรึกษา */}
+            {/* ★ เว้นช่องว่างก่อนลงชื่อครูที่ปรึกษา (4 บรรทัด) */}
+            <div className="h-8 print:h-6"></div>
+            <div className="h-8 print:h-6"></div>
+            <div className="h-8 print:h-6"></div>
             <div className="h-8 print:h-6"></div>
 
-            {/* ★ ลายเซ็นครูที่ปรึกษา (และผู้ปกครอง สำหรับมัธยม) — "ลงชื่อ" ชิดซ้ายตรงกันทุกช่อง */}
-            <div className={`grid ${classroomLevel === "primary" ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"} gap-6 text-xl`}>
-              {classroomLevel === "primary" ? (
-                <>
-                  <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(resolvedAdvisors[0])} />
-                  <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(resolvedAdvisors[1])} />
-                </>
-              ) : (
-                <div className="sm:col-span-2">
-                  <SignatureField
-                    role="ครูที่ปรึกษา"
-                    nameLabel={`${formatFullName(resolvedAdvisors[0])}${resolvedAdvisors[1] ? " / " + formatFullName(resolvedAdvisors[1]) : ""}`}
-                  />
-                </div>
-              )}
-            </div>
+            {/* ★ ลายเซ็นครูที่ปรึกษา (และผู้ปกครอง สำหรับมัธยม) — "ลงชื่อ" ชิดซ้ายตรงกันทุกช่อง เส้นใต้ยาวเท่ากันทั้ง 4 ช่อง มีช่องว่างตรงกลางก่อน "ลงชื่อ" ถัดไป */}
+            {(() => {
+              // ★ คำนวณความกว้างเส้นใต้ลายเซ็นให้เท่ากันทั้ง 4 ช่อง โดยใช้ความกว้างของชื่อที่ยาวที่สุดเป็นเกณฑ์
+              const advisorCombinedName =
+                classroomLevel === "primary"
+                  ? null
+                  : `${formatFullName(resolvedAdvisors[0])}${resolvedAdvisors[1] ? " / " + formatFullName(resolvedAdvisors[1]) : ""}`;
+              const allSignatureNames = classroomLevel === "primary"
+                ? [formatFullName(resolvedAdvisors[0]), formatFullName(resolvedAdvisors[1]), directorName, ""]
+                : [advisorCombinedName ?? "", directorName, ""];
+              const signatureLineWidthPx = Math.max(
+                140,
+                ...allSignatureNames.map(n => estimateTextWidthPx(n ?? ""))
+              );
 
-            {/* ★ เว้น 1 บรรทัดก่อนลายเซ็นผู้อำนวยการ */}
-            <div className="h-8 print:h-6"></div>
+              return (
+                <>
+                  <div className={`grid ${classroomLevel === "primary" ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"} signature-grid text-xl`}>
+                    {classroomLevel === "primary" ? (
+                      <>
+                        <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(resolvedAdvisors[0])} lineWidthPx={signatureLineWidthPx} />
+                        <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(resolvedAdvisors[1])} lineWidthPx={signatureLineWidthPx} />
+                      </>
+                    ) : (
+                      <div className="sm:col-span-2">
+                        <SignatureField
+                          role="ครูที่ปรึกษา"
+                          nameLabel={advisorCombinedName ?? undefined}
+                          lineWidthPx={signatureLineWidthPx}
+                        />
+                      </div>
+                    )}
+                  </div>
 
-            <div className={`grid ${classroomLevel === "primary" ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"} gap-6 text-xl`}>
-              {classroomLevel === "primary" ? (
-                <>
-                  <SignatureField role="ผู้อำนวยการโรงเรียน" nameLabel={directorName} />
-                  <SignatureField role="ผู้ปกครอง" />
+                  {/* ★ เว้นก่อนลายเซ็นผู้อำนวยการ (เพิ่มอีก 2 บรรทัดจากเดิม รวมเป็น 3 บรรทัด) */}
+                  <div className="h-8 print:h-6"></div>
+                  <div className="h-8 print:h-6"></div>
+                  <div className="h-8 print:h-6"></div>
+
+                  <div className={`grid ${classroomLevel === "primary" ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"} signature-grid text-xl`}>
+                    {classroomLevel === "primary" ? (
+                      <>
+                        <SignatureField role="ผู้อำนวยการโรงเรียน" nameLabel={directorName} lineWidthPx={signatureLineWidthPx} />
+                        <SignatureField role="ผู้ปกครอง" lineWidthPx={signatureLineWidthPx} />
+                      </>
+                    ) : (
+                      <>
+                        <SignatureField role="ผู้บริหารสถานศึกษา" nameLabel={directorName} lineWidthPx={signatureLineWidthPx} />
+                        <SignatureField role="ผู้ปกครอง" lineWidthPx={signatureLineWidthPx} />
+                      </>
+                    )}
+                  </div>
                 </>
-              ) : (
-                <>
-                  <SignatureField role="ผู้บริหารสถานศึกษา" nameLabel={directorName} />
-                  <SignatureField role="ผู้ปกครอง" />
-                </>
-              )}
-            </div>
+              );
+            })()}
           </div>
         );
       })}
 
       <style jsx global>{`
+        .signature-grid {
+          gap: 7rem;
+        }
         @media print {
           @page { size: A4; margin: 8mm; }
           .vp4-page {
@@ -574,6 +604,7 @@ export default function Vp4Report({
           .vp4-page .mt-8 { margin-top: 8px !important; }
           .vp4-page .h-8 { height: 10px !important; }
           .vp4-page .gap-6 { gap: 10px !important; }
+          .vp4-page .signature-grid { gap: 60px !important; }
           .vp4-table { table-layout: fixed; width: 100%; }
           .vp4-table th, .vp4-table td { font-size: 13px; padding: 2px 4px; line-height: 1.25; }
           .vp4-table th { font-weight: 900; }
