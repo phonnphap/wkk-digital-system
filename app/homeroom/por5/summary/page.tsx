@@ -250,12 +250,12 @@ if (teacherIds.length > 0) {
       const groupCodes = Array.from(new Set(secs.map(s => s.score_group_code).filter(Boolean))) as string[];
       if (groupCodes.length > 0) {
         const { data: groupRows } = await supabase
-          .from("subject_score_groups")
-          .select("group_code, group_name")
-          .in("group_code", groupCodes);
-        const map: Record<string, string> = {};
-        (groupRows ?? []).forEach((g: any) => { map[g.group_code] = g.group_name; });
-        setGroupNames(map);
+  .from("subject_score_groups")
+  .select("group_code, display_name")   // ✅ แก้ชื่อคอลัมน์
+  .in("group_code", groupCodes);
+const map: Record<string, string> = {};
+(groupRows ?? []).forEach((g: any) => { map[g.group_code] = g.display_name; });  // ✅ แก้ตรงนี้ด้วย
+setGroupNames(map);
       }
 
       const gMatrix: Record<string, Record<string, GradeCell>> = {};
