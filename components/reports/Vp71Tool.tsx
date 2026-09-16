@@ -19,7 +19,14 @@ type Unit = {
 };
 
 // ★ ข้อมูลชิ้นงานที่ผูกหน่วยนี้ + น้ำหนักคะแนนที่คำนวณอัตโนมัติ
-type UnitLinkedAssignment = { id: string; title: string; max_score: number; computed_weight: number };
+type UnitLinkedAssignment = {
+  id: string;
+  title: string;
+  max_score: number;
+  computed_weight: number;
+  instance_ids: string[];
+  section_count: number;
+};
 type UnitScoreInfo = { totalMaxScore: number; scorePoints: number; assignments: UnitLinkedAssignment[] };
 
 // ★★ NEW — สำหรับหน้ารายงานคะแนน นร.ทั้งหมด
@@ -149,14 +156,15 @@ export default function Vp71Tool({
       setLoadingUnitScores(false);
     }
   }
-  async function handleUnlinkAssignment(assignmentId: string) {
+  async function handleUnlinkAssignment(assignmentIds: string[]) {
   if (readOnly) return;
-  if (!confirm("เอาชิ้นงานนี้ออกจากหน่วยการเรียนรู้นี้? (ชิ้นงานจะยังอยู่ในห้องเรียนเดิม แค่ไม่ถูกนับคะแนนในหน่วยนี้อีก)")) return;
+  const label = assignmentIds.length > 1 ? `${assignmentIds.length} ห้อง` : "ห้องนี้";
+  if (!confirm(`เอาชิ้นงานนี้ออกจากหน่วยการเรียนรู้นี้ (${label})? (ชิ้นงานจะยังอยู่ในห้องเรียนเดิม แค่ไม่ถูกนับคะแนนในหน่วยนี้อีก)`)) return;
   try {
     const { error } = await supabase
       .from("assignments")
       .update({ teaching_unit_no: null, selected_indicator_lines: null })
-      .eq("id", assignmentId);
+      .in("id", assignmentIds);
     if (error) throw error;
     loadUnitScores();
   } catch (e: any) {
@@ -164,15 +172,16 @@ export default function Vp71Tool({
   }
 }
 
-async function handleDeleteLinkedAssignment(assignmentId: string, title: string) {
+async function handleDeleteLinkedAssignment(assignmentIds: string[], title: string) {
   if (readOnly) return;
-  if (!confirm(`ลบชิ้นงาน "${title}" ถาวร?\nข้อมูลการส่งงาน/คะแนนของนักเรียนที่ผูกกับชิ้นนี้ทั้งหมดจะถูกลบไปด้วย และย้อนกลับไม่ได้`)) return;
+  const label = assignmentIds.length > 1 ? ` (ทั้งหมด ${assignmentIds.length} ห้องที่ใช้ชื่อนี้)` : "";
+  if (!confirm(`ลบชิ้นงาน "${title}" ถาวร${label}?\nข้อมูลการส่งงาน/คะแนนของนักเรียนที่ผูกกับชิ้นนี้ทั้งหมดจะถูกลบไปด้วย และย้อนกลับไม่ได้`)) return;
   try {
-    await supabase.from("assignment_submissions").delete().eq("assignment_id", assignmentId);
-    await supabase.from("assignment_students").delete().eq("assignment_id", assignmentId);
-    await supabase.from("assignment_attachments").delete().eq("assignment_id", assignmentId);
-    await supabase.from("assignment_cross_sections").delete().eq("source_assignment_id", assignmentId);
-    await supabase.from("assignments").delete().eq("id", assignmentId);
+    await supabase.from("assignment_submissions").delete().in("assignment_id", assignmentIds);
+    await supabase.from("assignment_students").delete().in("assignment_id", assignmentIds);
+    await supabase.from("assignment_attachments").delete().in("assignment_id", assignmentIds);
+    await supabase.from("assignment_cross_sections").delete().in("source_assignment_id", assignmentIds);
+    await supabase.from("assignments").delete().in("id", assignmentIds);
     loadUnitScores();
   } catch (e: any) {
     alert("ลบไม่สำเร็จ: " + (e?.message ?? "unknown error"));
@@ -348,10 +357,10 @@ function EditPlanView({
   addUnit: () => void;
   totalHours: number;
   totalScore: number;
-  indicatorLabel: string;   
+  indicatorLabel: string;
   indicatorItemLabel: string;
-  onUnlinkAssignment: (assignmentId: string) => void;         
-  onDeleteAssignment: (assignmentId: string, title: string) => void; 
+  onUnlinkAssignment: (assignmentIds: string[]) => void;          // ★ แก้เป็น string[]
+  onDeleteAssignment: (assignmentIds: string[], title: string) => void; // ★ แก้เป็น string[]
 }) {
   if (loading) {
     return <div className="text-center py-16 text-slate-300 font-bold text-base">กำลังโหลด...</div>;
@@ -421,24 +430,24 @@ function EditPlanView({
                   />
                 </td>
                 <td className="px-2 py-2">
-                  {loadingUnitScores ? (
-                    <span className="text-[12px] text-slate-300 font-bold">กำลังโหลด...</span>
-                  ) : !u.score_points ? (
-                    <span className="text-[12px] text-slate-300 font-bold">— ยังไม่ตั้งคะแนนเก็บ —</span>
-                  ) : linkedCount === 0 ? (
-                    <span className="inline-block px-2 py-1 rounded-full text-[12px] font-black bg-amber-50 text-amber-600">
-                      ⚠️ ยังไม่มีชิ้นงานผูก
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setExpandedUnit(isExpanded ? null : u.unit_no)}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[12px] font-black bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
-                    >
-                      ✅ ผูกแล้ว {linkedCount} ชิ้น (รวม {fmtScore(info!.totalMaxScore)} คะแนนดิบ) {isExpanded ? "▲" : "▼"}
-                    </button>
-                  )}
-                </td>
+  {loadingUnitScores ? (
+    <span className="text-[12px] text-slate-300 font-bold">กำลังโหลด...</span>
+  ) : !u.score_points ? (
+    <span className="text-[12px] text-slate-300 font-bold">— ยังไม่ตั้งคะแนนเก็บ —</span>
+  ) : linkedCount === 0 ? (
+    <span className="inline-block px-2 py-1 rounded-full text-[12px] font-black bg-amber-50 text-amber-600">
+      ⚠️ ยังไม่มีชิ้นงานผูก
+    </span>
+  ) : (
+    <button
+      type="button"
+      onClick={() => setExpandedUnit(isExpanded ? null : u.unit_no)}
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[12px] font-black bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+    >
+      ✅ ผูกแล้ว {linkedCount} ชิ้น (รวม {fmtScore(info!.totalMaxScore)} คะแนนดิบ) {isExpanded ? "▲" : "▼"}
+    </button>
+  )}
+</td>
                 <td className="text-center px-1 py-2 print:hidden">
                   {!readOnly && units.length > 1 && (
                     <button onClick={() => removeUnit(i)} className="text-red-400 hover:text-red-600 font-black">✕</button>
@@ -453,9 +462,16 @@ function EditPlanView({
         ระบบคำนวณน้ำหนักคะแนนของแต่ละชิ้นงานอัตโนมัติ ให้รวมกันเท่ากับคะแนนเก็บที่ตั้งไว้ ({fmtScore(u.score_points ?? 0)} คะแนน) เสมอ
       </p>
       <div className="space-y-1">
-        {info.assignments.map(a => (
+        {info.assignments.map((a) => (
           <div key={a.id} className="flex items-center justify-between bg-white rounded-lg border border-emerald-100 px-3 py-1.5">
-            <span className="font-bold text-slate-600 truncate pr-2">{a.title}</span>
+            <span className="font-bold text-slate-600 truncate pr-2">
+              {a.title}
+              {a.section_count > 1 && (
+                <span className="ml-1.5 text-[12px] font-black text-indigo-500">
+                  · ใช้ร่วม {a.section_count} ห้อง
+                </span>
+              )}
+            </span>
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-slate-400 font-bold">
                 เต็ม {fmtScore(a.max_score)} → <span className="text-emerald-600 font-black">{fmtScore(a.computed_weight)} คะแนนจริง</span>
@@ -464,15 +480,15 @@ function EditPlanView({
                 <>
                   <button
                     type="button"
-                    onClick={() => onUnlinkAssignment(a.id)}
+                    onClick={() => onUnlinkAssignment(a.instance_ids)}
                     title="เอาออกจากหน่วยนี้ (ชิ้นงานยังอยู่ในห้องเรียนเดิม)"
                     className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-600 font-black text-[12px]"
                   >
-                    🔗 เอาออก
+                    🔗 เอาออก{a.section_count > 1 ? `ทุกห้อง (${a.section_count})` : ""}
                   </button>
                   <button
                     type="button"
-                    onClick={() => onDeleteAssignment(a.id, a.title)}
+                    onClick={() => onDeleteAssignment(a.instance_ids, a.title)}
                     title="ลบชิ้นงานนี้ถาวร"
                     className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-black text-[12px]"
                   >
@@ -481,7 +497,7 @@ function EditPlanView({
                 </>
               )}
             </div>
-          </div>
+          </div>        
         ))}
       </div>
     </td>

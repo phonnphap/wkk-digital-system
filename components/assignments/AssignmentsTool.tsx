@@ -2366,22 +2366,24 @@ function CrossSectionTab({
     try {
       for (const targetSectionId of selected) {
         const { data: cloned } = await supabase
-          .from("assignments")
-          .insert({
-            subject_section_id: targetSectionId,
-            title: assignment.title,
-            description: assignment.description,
-            type: assignment.type,
-            assigned_at: assignment.assigned_at,
-            due_date: assignment.due_date,
-            max_score: assignment.max_score,
-            allow_weight: assignment.allow_weight,
-            weight_percent: assignment.weight_percent,
-            grading_criteria_note: assignment.grading_criteria_note,
-            status: "published",
-            published_at: new Date().toISOString(),
-            created_by: currentUserId || null,
-          })
+  .from("assignments")
+  .insert({
+    subject_section_id: targetSectionId,
+    title: assignment.title,
+    description: assignment.description,
+    type: assignment.type,
+    assigned_at: assignment.assigned_at,
+    due_date: assignment.due_date,
+    max_score: assignment.max_score,
+    allow_weight: assignment.allow_weight,
+    weight_percent: assignment.weight_percent,
+    grading_criteria_note: assignment.grading_criteria_note,
+    teaching_unit_no: assignment.teaching_unit_no ?? null,               // ★ เพิ่ม
+    selected_indicator_lines: assignment.selected_indicator_lines ?? null, // ★ เพิ่ม
+    status: "published",
+    published_at: new Date().toISOString(),
+    created_by: currentUserId || null,
+  })
           .select()
           .maybeSingle();
 
@@ -3150,10 +3152,10 @@ function ImportAssignmentModal({
     setPickedCard(card);
     setSelectedIds(new Set());
     const { data } = await supabase
-      .from("assignments")
-      .select("id, title, description, type, assigned_at, due_date, max_score, allow_weight, weight_percent, grading_criteria_note, rubric_id, status")
-      .eq("subject_section_id", card.subject_section_id)
-      .order("assigned_at", { ascending: false });
+  .from("assignments")
+  .select("id, title, description, type, assigned_at, due_date, max_score, allow_weight, weight_percent, grading_criteria_note, rubric_id, status, teaching_unit_no, selected_indicator_lines")
+  .eq("subject_section_id", card.subject_section_id)
+  .order("assigned_at", { ascending: false });
     setSourceAssignments((data ?? []) as Assignment[]);
     setStep("pick");
   }
@@ -3175,23 +3177,25 @@ function ImportAssignmentModal({
         if (!a) continue;
 
         const { data: cloned, error } = await supabase
-          .from("assignments")
-          .insert({
-            subject_section_id: sectionId,
-            title: a.title,
-            description: a.description,
-            type: a.type,
-            assigned_at: new Date().toISOString(),
-            due_date: a.due_date,
-            max_score: a.max_score,
-            allow_weight: a.allow_weight,
-            weight_percent: a.weight_percent,
-            grading_criteria_note: a.grading_criteria_note,
-            rubric_id: a.rubric_id ?? null,
-            status: "draft",
-            published_at: null,
-            created_by: currentUserId || null,
-          })
+  .from("assignments")
+  .insert({
+    subject_section_id: sectionId,
+    title: a.title,
+    description: a.description,
+    type: a.type,
+    assigned_at: new Date().toISOString(),
+    due_date: a.due_date,
+    max_score: a.max_score,
+    allow_weight: a.allow_weight,
+    weight_percent: a.weight_percent,
+    grading_criteria_note: a.grading_criteria_note,
+    rubric_id: a.rubric_id ?? null,
+    teaching_unit_no: a.teaching_unit_no ?? null,               // ★ เพิ่ม
+    selected_indicator_lines: a.selected_indicator_lines ?? null, // ★ เพิ่ม
+    status: "draft",
+    published_at: null,
+    created_by: currentUserId || null,
+  })
           .select()
           .maybeSingle();
         if (error) throw error;

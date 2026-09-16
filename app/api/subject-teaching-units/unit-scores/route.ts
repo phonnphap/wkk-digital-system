@@ -2,18 +2,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-// GET /api/subject-teaching-units/unit-scores?subject_id=xxx&academic_year_id=yyy
-//
-// ═══════════════════════════════════════════════════════════════════════
-// รวมคะแนนชิ้นงานที่ "ผูกหน่วยการเรียนรู้" (assignments.teaching_unit_no)
-// จากทุก section/ห้อง/ครูที่สอนวิชานี้ (วผ.7.1 ใช้ร่วมกันทั้งวิชา ไม่ใช่แค่ห้องเดียว)
-//
-// น้ำหนักคะแนนจริงของแต่ละชิ้นงาน = (max_score ของชิ้นงาน ÷ ผลรวม max_score
-// ของทุกชิ้นงานที่ผูกหน่วยเดียวกัน) × score_points ของหน่วยนั้น
-// -> รวมกันแล้วเท่ากับ score_points ที่ตั้งไว้ในหน่วยเสมอ (ถ้ามีชิ้นงานผูกอยู่)
-//
-// นับเฉพาะชิ้นงานที่ status = "published" เท่านั้น (แบบร่างยังไม่นับ)
-// ═══════════════════════════════════════════════════════════════════════
+type RawAssignment = {
+  id: string;
+  title: string;
+  max_score: number;
+  teaching_unit_no: number;
+  subject_section_id: string;
+};
+
+type Group = {
+  title: string;
+  max_score: number;
+  instance_ids: string[];
+  instance_sections: string[];
+};
+
+type LinkedAssignmentOut = {
+  id: string;
+  title: string;
+  max_score: number;
+  computed_weight: number;
+  instance_ids: string[];
+  section_count: number;
+};
+
+type UnitScoreOut = {
+  totalMaxScore: number;
+  scorePoints: number;
+  assignments: LinkedAssignmentOut[];
+};
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -25,7 +43,6 @@ export async function GET(req: NextRequest) {
 
     const admin = createAdminClient();
 
-    // 1) หน่วยการเรียนรู้ของวิชานี้ (+ปีการศึกษาถ้าระบุ)
     let unitsQuery = admin
       .from("subject_teaching_units")
       .select("unit_no, score_points")
@@ -34,14 +51,12 @@ export async function GET(req: NextRequest) {
     const { data: units, error: uErr } = await unitsQuery;
     if (uErr) throw uErr;
 
-    // 2) ทุก section ของวิชานี้ (ทุกห้อง/ทุกครูที่สอนวิชานี้)
     let secQuery = admin.from("subject_sections").select("id").eq("subject_id", subject_id);
     if (academic_year_id) secQuery = secQuery.eq("academic_year_id", academic_year_id);
     const { data: sections, error: secErr } = await secQuery;
     if (secErr) throw secErr;
-    const sectionIds = (sections ?? []).map((s: any) => s.id);
+    const sectionIds: string[] = (sections ?? []).map((s: any) => s.id);
 
-    // 3) ชิ้นงานที่เผยแพร่แล้วและผูกหน่วยไว้ จากทุก section ข้างต้น
     const { data: assignments, error: aErr } = sectionIds.length
       ? await admin
           .from("assignments")
@@ -49,32 +64,54 @@ export async function GET(req: NextRequest) {
           .in("subject_section_id", sectionIds)
           .not("teaching_unit_no", "is", null)
           .eq("status", "published")
-      : { data: [] as any[], error: null };
+      : { data: [] as RawAssignment[], error: null };
     if (aErr) throw aErr;
 
-    // 4) จัดกลุ่มตามหน่วย แล้วคำนวณน้ำหนักอัตโนมัติให้รวมเท่า score_points
-    const byUnit: Record<number, { id: string; title: string; max_score: number }[]> = {};
-    (assignments ?? []).forEach((a: any) => {
+    // จัดกลุ่มตามหน่วย แล้วภายในหน่วยจัดกลุ่มย่อยตาม "ชื่องาน" (trim + lowercase)
+    // ชิ้นงานชื่อเดียวกันข้ามห้อง (เช่น import/มอบหมายข้ามห้องมา) นับ max_score แค่ครั้งเดียว
+    const byUnit = new Map<number, Map<string, Group>>();
+
+    (assignments ?? []).forEach((a: RawAssignment) => {
       const no = a.teaching_unit_no;
       if (no === null || no === undefined) return;
-      if (!byUnit[no]) byUnit[no] = [];
-      byUnit[no].push({ id: a.id, title: a.title, max_score: a.max_score ?? 0 });
+
+      if (!byUnit.has(no)) byUnit.set(no, new Map<string, Group>());
+      const groupMap = byUnit.get(no)!;
+
+      const key = (a.title ?? "").trim().toLowerCase();
+      const existing = groupMap.get(key);
+      if (existing) {
+        existing.instance_ids.push(a.id);
+        existing.instance_sections.push(a.subject_section_id);
+        existing.max_score = Math.max(existing.max_score, a.max_score ?? 0);
+      } else {
+        groupMap.set(key, {
+          title: a.title,
+          max_score: a.max_score ?? 0,
+          instance_ids: [a.id],
+          instance_sections: [a.subject_section_id],
+        });
+      }
     });
 
-    const unitScores: Record<
-      number,
-      { totalMaxScore: number; scorePoints: number; assignments: { id: string; title: string; max_score: number; computed_weight: number }[] }
-    > = {};
+    const unitScores: Record<number, UnitScoreOut> = {};
+
     (units ?? []).forEach((u: any) => {
-      const list = byUnit[u.unit_no] ?? [];
-      const totalMaxScore = list.reduce((s, x) => s + (x.max_score || 0), 0);
+      const groupMap = byUnit.get(u.unit_no);
+      const groups: Group[] = groupMap ? Array.from(groupMap.values()) : [];
+      const totalMaxScore = groups.reduce((s, g) => s + (g.max_score || 0), 0);
       const scorePoints = u.score_points ?? 0;
+
       unitScores[u.unit_no] = {
         totalMaxScore,
         scorePoints,
-        assignments: list.map(x => ({
-          ...x,
-          computed_weight: totalMaxScore > 0 ? (x.max_score / totalMaxScore) * scorePoints : 0,
+        assignments: groups.map((g) => ({
+          id: g.instance_ids[0],
+          title: g.title,
+          max_score: g.max_score,
+          computed_weight: totalMaxScore > 0 ? (g.max_score / totalMaxScore) * scorePoints : 0,
+          instance_ids: g.instance_ids,
+          section_count: new Set(g.instance_sections).size,
         })),
       };
     });
