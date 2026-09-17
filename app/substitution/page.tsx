@@ -810,6 +810,8 @@ function SwapRequestModal({
 }, [swapDate]);
 
   // ★ ครูที่ว่าง — เรียงลำดับแบบเดียวกับตอนแอดมินจัดสอนแทน (สายชั้นเดียวกันก่อน) + โชว์จำนวนคาบ
+  // ★ FIX: ใช้เงื่อนไขการเรียงลำดับ (sortTeachersByGrade + substitutePriority) แบบเดียวกันทุกคนที่ใช้ระบบ
+  // ไม่ว่าจะเป็นครูทั่วไป (ขอแลกคาบเอง) หรือหัวหน้าสายชั้น/แอดมิน (จัดสอนแทน) — ให้เกณฑ์การจัดลำดับตรงกันเป๊ะ
   const candidateTeachers = useMemo(() => {
   if (!selectedEntry || dow === null) return [] as User[];
   const free = computeFreeTeachersForEntry(selectedEntry, swapDate, allEntries, allTeachers, user.id, swapRequests)
@@ -1664,6 +1666,11 @@ const canEditSwap = useCallback((r: SwapRequest) => {
   if (isSpecificAdmin && r.status !== "cancelled") return true;
   return r.requester_id === user?.id && r.status === "pending";
 }, [isSpecificAdmin, user]);
+// ★ เช็คว่า record นี้เป็น "คำขอแลกคาบคืน" (repay) เองหรือไม่ — ดูจาก marker ข้อความในเหตุผล
+// ใช้กันไม่ให้ปุ่ม "🔄 แลกคาบคืน" โผล่ซ้ำบนการ์ดของคำขอแลกคืนเอง (จะวนซ้ำไม่รู้จบ)
+const isRepaySwapRequest = useCallback((r: SwapRequest) => {
+  return !!r.reason?.includes("ขอแลกคาบคืนให้");
+}, []);
 // ★ เช็คว่าเคยขอ "แลกคาบคืน" สำหรับรายการสอนแทนนี้ไปแล้วหรือยัง (ยัง pending/accepted อยู่)
 // ใช้ reason เป็นตัวอ้างอิง เพราะข้อความมีวันที่+คาบเดิมที่ไม่ซ้ำกันอยู่แล้ว
 const hasActiveRepayForSub = useCallback((r: SubRecord) => {
@@ -1853,9 +1860,12 @@ const handleAdminSwapDeleteAny = async (id: string) => {
   setEditingSwapDate(null);
   await loadData();
 };
+  // ★ FIX: ยกเลิกคำขอแลกคาบ — ลบรายการออกจากฐานข้อมูลถาวรทันที ไม่ต้องเก็บไว้เป็นประวัติ (status "cancelled") อีกต่อไป
+  // ตามที่ผู้ใช้ต้องการ: กดยกเลิกแล้วให้หายไปเลย ไม่ต้องมีรายการ "ยกเลิก" ค้างให้เห็นในประวัติ
   const handleSwapCancel = async (id: string) => {
-    if (!confirm("ยืนยันการยกเลิกคำขอ?")) return;
-    await supabase.from("class_swap_requests").update({ status: "cancelled" }).eq("id", id);
+    if (!confirm("ยืนยันการยกเลิกคำขอ? รายการนี้จะถูกลบออกจากระบบทันทีและกู้คืนไม่ได้")) return;
+    const { error } = await supabase.from("class_swap_requests").delete().eq("id", id);
+    if (error) { alert("❌ ยกเลิกไม่สำเร็จ: " + error.message); return; }
     await loadData();
   };
 
@@ -2431,7 +2441,9 @@ const adminFilteredSwaps = useMemo(() => {
                           <button onClick={() => handleSwapCancel(r.id)}
                             className="text-xs text-red-500 hover:text-red-700 font-bold underline">ยกเลิกคำขอ</button>
                         )}
-                        {r.requester_id === user?.id && r.status === "accepted" && !hasActiveRepayForSwap(r) && (
+                        {/* ★ FIX: เพิ่มเงื่อนไข !isRepaySwapRequest(r) — คำขอที่เป็น "แลกคาบคืน" เองจะไม่มีปุ่มแลกคาบคืนซ้ำอีก
+                            กันปัญหาปุ่มค้าง/วนซ้ำไม่รู้จบ และทำให้ปุ่มหายไปทั้ง 2 การ์ด (การ์ดต้นทาง + การ์ดแลกคืน) เมื่อแลกคืนสำเร็จแล้ว */}
+                        {r.requester_id === user?.id && r.status === "accepted" && !isRepaySwapRequest(r) && !hasActiveRepayForSwap(r) && (
   <button onClick={() => {
     setSwapMode("repay");
     setSwapFixedTargetTeacherId(r.target_teacher_id);

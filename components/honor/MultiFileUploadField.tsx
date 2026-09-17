@@ -64,7 +64,7 @@ export default function MultiFileUploadField({ label, value, onChange, max = 4 }
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-xs font-black text-slate-500 uppercase tracking-wider">
+      <span className="text-m font-black text-slate-500 uppercase tracking-wider">
         {label} <span className="text-slate-400 font-normal normal-case">(สูงสุด {max} ไฟล์ · รูปภาพหรือ PDF)</span>
       </span>
 
@@ -94,7 +94,7 @@ export default function MultiFileUploadField({ label, value, onChange, max = 4 }
               <button
                 type="button"
                 onClick={() => removeAt(i)}
-                className="absolute top-1 right-1 w-6 h-6 rounded-full bg-rose-500 text-white text-xs font-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                className="absolute top-1 right-1 w-6 h-6 rounded-full bg-rose-500 text-white text-m font-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
                 aria-label="ลบไฟล์นี้"
               >
                 ×
@@ -114,8 +114,8 @@ export default function MultiFileUploadField({ label, value, onChange, max = 4 }
 
       {error && (
         <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
-          <p className="text-rose-600 text-xs font-bold flex-1">⚠️ {error}</p>
-          <button type="button" onClick={() => setError(null)} className="text-rose-400 text-xs font-black">
+          <p className="text-rose-600 text-m font-bold flex-1">⚠️ {error}</p>
+          <button type="button" onClick={() => setError(null)} className="text-rose-400 text-m font-black">
             ✕
           </button>
         </div>
@@ -129,10 +129,10 @@ export default function MultiFileUploadField({ label, value, onChange, max = 4 }
         >
           <span className="text-2xl">{uploading ? '⏳' : '📎'}</span>
           <div>
-            <p className="font-bold text-slate-600 text-sm">
+            <p className="font-bold text-slate-600 text-m">
               {uploading ? 'กำลังอัปโหลด...' : `เพิ่มไฟล์ (เหลืออีก ${remaining} ไฟล์)`}
             </p>
-            <p className="text-slate-400 text-xs">รองรับ JPG, PNG, PDF ขนาดไม่เกิน 5MB ต่อไฟล์</p>
+            <p className="text-slate-400 text-m">รองรับ JPG, PNG, PDF ขนาดไม่เกิน 5MB ต่อไฟล์</p>
           </div>
           <input
             ref={inputRef}
@@ -147,7 +147,7 @@ export default function MultiFileUploadField({ label, value, onChange, max = 4 }
       ) : (
         <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5">
           <span>✅</span>
-          <p className="text-emerald-700 text-sm font-bold">แนบครบ {max} ไฟล์แล้ว</p>
+          <p className="text-emerald-700 text-m font-bold">แนบครบ {max} ไฟล์แล้ว</p>
         </div>
       )}
     </div>

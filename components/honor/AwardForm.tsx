@@ -54,7 +54,7 @@ function emptyForm(): AwardFormInput {
   };
 }
 
-const labelCls = 'text-xs text-slate-500 font-bold uppercase tracking-wide';
+const labelCls = 'text-m text-slate-500 font-bold uppercase tracking-wide';
 
 // ★ ตัดอักขระที่ OneDrive path ห้ามใช้ออก (เช่น '/' ใน "ศิลปะ/วัฒนธรรม") กันสร้างโฟลเดอร์เกินชั้นที่ตั้งใจ
 function sanitizeFolderSegment(s: string) {
@@ -122,7 +122,7 @@ function TagInput({ tags, onChange }: { tags: string[]; onChange: (tags: string[
       {tags.map((tag) => (
         <span
           key={tag}
-          className="inline-flex items-center gap-1 rounded-full bg-navy/8 text-navy text-xs font-medium px-2.5 py-1"
+          className="inline-flex items-center gap-1 rounded-full bg-navy/8 text-navy text-m font-medium px-2.5 py-1"
         >
           {tag}
           <button
@@ -147,7 +147,7 @@ function TagInput({ tags, onChange }: { tags: string[]; onChange: (tags: string[
         }}
         onBlur={commit}
         placeholder={tags.length === 0 ? 'พิมพ์แท็กแล้วกด Enter เช่น สพฐ, STEM' : 'เพิ่มแท็ก...'}
-        className="flex-1 min-w-[120px] text-sm outline-none py-1"
+        className="flex-1 min-w-[120px] text-m outline-none py-1"
       />
     </div>
   );
@@ -216,8 +216,8 @@ function OneDriveMultiImageUpload({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-slate-500 font-bold uppercase tracking-wide">{label}</span>
-        <span className="text-xs text-slate-400 font-bold">{value.length}/{max} รูป</span>
+        <span className="text-m text-slate-500 font-bold uppercase tracking-wide">{label}</span>
+        <span className="text-m text-slate-400 font-bold">{value.length}/{max} รูป</span>
       </div>
 
       {value.length > 0 && (
@@ -229,7 +229,7 @@ function OneDriveMultiImageUpload({
               <button
                 type="button"
                 onClick={() => removeAt(idx)}
-                className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white text-xs font-black flex items-center justify-center shadow hover:bg-red-600 opacity-90 hover:opacity-100 transition-opacity"
+                className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white text-m font-black flex items-center justify-center shadow hover:bg-red-600 opacity-90 hover:opacity-100 transition-opacity"
                 aria-label="ลบรูปนี้"
               >
                 ✕
@@ -241,7 +241,7 @@ function OneDriveMultiImageUpload({
 
       {remaining > 0 && (
         <label
-          className={`flex items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-4 text-sm font-bold cursor-pointer transition-all ${
+          className={`flex items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-4 text-m font-bold cursor-pointer transition-all ${
             uploading
               ? 'border-slate-200 bg-slate-50 text-slate-400 pointer-events-none'
               : 'border-blue-200 bg-blue-50/50 text-blue-700 hover:border-blue-400 hover:bg-blue-50'
@@ -267,7 +267,7 @@ function OneDriveMultiImageUpload({
         </label>
       )}
 
-      {error && <p className="text-xs text-red-600 font-bold">⚠️ {error}</p>}
+      {error && <p className="text-m text-red-600 font-bold">⚠️ {error}</p>}
     </div>
   );
 }
@@ -323,7 +323,7 @@ function OneDriveDocumentUpload({
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-xs text-slate-500 font-bold uppercase tracking-wide">{label}</span>
+      <span className="text-m text-slate-500 font-bold uppercase tracking-wide">{label}</span>
 
       {value ? (
         <div className="flex items-center gap-3 rounded-xl border-2 border-blue-100 bg-blue-50/50 px-3 py-2.5">
@@ -342,16 +342,16 @@ function OneDriveDocumentUpload({
               href={value.url}
               target="_blank"
               rel="noreferrer"
-              className="text-sm font-bold text-blue-800 hover:underline truncate block"
+              className="text-m font-bold text-blue-800 hover:underline truncate block"
             >
               {value.name}
             </a>
-            <span className="text-xs text-slate-400 font-medium">อัปโหลดแล้ว · เปิดดูไฟล์</span>
+            <span className="text-m text-slate-400 font-medium">อัปโหลดแล้ว · เปิดดูไฟล์</span>
           </div>
           <button
             type="button"
             onClick={() => onChange(null)}
-            className="w-8 h-8 rounded-lg bg-red-50 border border-red-200 text-red-500 font-black text-sm shrink-0 hover:bg-red-100 transition-colors"
+            className="w-8 h-8 rounded-lg bg-red-50 border border-red-200 text-red-500 font-black text-m shrink-0 hover:bg-red-100 transition-colors"
             aria-label="ลบไฟล์นี้"
           >
             ✕
@@ -359,7 +359,7 @@ function OneDriveDocumentUpload({
         </div>
       ) : (
         <label
-          className={`flex items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-4 text-sm font-bold cursor-pointer transition-all ${
+          className={`flex items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-4 text-m font-bold cursor-pointer transition-all ${
             uploading
               ? 'border-slate-200 bg-slate-50 text-slate-400 pointer-events-none'
               : 'border-blue-200 bg-blue-50/50 text-blue-700 hover:border-blue-400 hover:bg-blue-50'
@@ -384,7 +384,7 @@ function OneDriveDocumentUpload({
         </label>
       )}
 
-      {error && <p className="text-xs text-red-600 font-bold">⚠️ {error}</p>}
+      {error && <p className="text-m text-red-600 font-bold">⚠️ {error}</p>}
     </div>
   );
 }
@@ -513,13 +513,13 @@ function TeacherNameField({ value, deptMap, invalid, onTextChange, onSelect }: {
         placeholder="พิมพ์ชื่อ/นามสกุลเพื่อค้นหาในระบบ..." className={fieldCls(invalid)} />
       {open && (loading || results.length > 0 || errorMsg) && (
         <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border-2 border-blue-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
-          {loading ? <div className="px-3 py-2.5 text-xs text-slate-400">🔍 กำลังค้นหา...</div>
-            : errorMsg ? <div className="px-3 py-2.5 text-xs text-red-600 font-bold">⚠️ ค้นหาไม่สำเร็จ: {errorMsg}</div>
+          {loading ? <div className="px-3 py-2.5 text-m text-slate-400">🔍 กำลังค้นหา...</div>
+            : errorMsg ? <div className="px-3 py-2.5 text-m text-red-600 font-bold">⚠️ ค้นหาไม่สำเร็จ: {errorMsg}</div>
             : results.map((hit) => (
               <button type="button" key={hit.id} onMouseDown={(e) => e.preventDefault()} onClick={() => { onSelect(hit); setOpen(false); }}
-                className="w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 flex flex-col border-b border-slate-50 last:border-0">
+                className="w-full text-left px-3 py-2.5 text-m hover:bg-blue-50 flex flex-col border-b border-slate-50 last:border-0">
                 <span className="font-bold text-slate-800">{hit.displayName}</span>
-                {hit.department && <span className="text-xs text-slate-400">{hit.department}</span>}
+                {hit.department && <span className="text-m text-slate-400">{hit.department}</span>}
               </button>
             ))}
         </div>
@@ -556,13 +556,13 @@ function ExecutiveNameField({ value, invalid, onTextChange, onSelect }: {
         placeholder="พิมพ์ชื่อ/นามสกุลเพื่อค้นหาในระบบ..." className={fieldCls(invalid)} />
       {open && (loading || results.length > 0 || errorMsg) && (
         <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border-2 border-blue-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
-          {loading ? <div className="px-3 py-2.5 text-xs text-slate-400">🔍 กำลังค้นหา...</div>
-            : errorMsg ? <div className="px-3 py-2.5 text-xs text-red-600 font-bold">⚠️ ค้นหาไม่สำเร็จ: {errorMsg}</div>
+          {loading ? <div className="px-3 py-2.5 text-m text-slate-400">🔍 กำลังค้นหา...</div>
+            : errorMsg ? <div className="px-3 py-2.5 text-m text-red-600 font-bold">⚠️ ค้นหาไม่สำเร็จ: {errorMsg}</div>
             : results.map((hit) => (
               <button type="button" key={hit.id} onMouseDown={(e) => e.preventDefault()} onClick={() => { onSelect(hit); setOpen(false); }}
-                className="w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 flex flex-col border-b border-slate-50 last:border-0">
+                className="w-full text-left px-3 py-2.5 text-m hover:bg-blue-50 flex flex-col border-b border-slate-50 last:border-0">
                 <span className="font-bold text-slate-800">{hit.displayName}</span>
-                {hit.position && <span className="text-xs text-slate-400">{hit.position}</span>}
+                {hit.position && <span className="text-m text-slate-400">{hit.position}</span>}
               </button>
             ))}
         </div>
@@ -600,13 +600,13 @@ function StudentNameField({ value, classroomMap, invalid, onTextChange, onSelect
         placeholder="พิมพ์ชื่อ/นามสกุล/รหัสนักเรียนเพื่อค้นหา..." className={fieldCls(invalid)} />
       {open && (loading || results.length > 0 || errorMsg) && (
         <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border-2 border-blue-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
-          {loading ? <div className="px-3 py-2.5 text-xs text-slate-400">🔍 กำลังค้นหา...</div>
-            : errorMsg ? <div className="px-3 py-2.5 text-xs text-red-600 font-bold">⚠️ ค้นหาไม่สำเร็จ: {errorMsg}</div>
+          {loading ? <div className="px-3 py-2.5 text-m text-slate-400">🔍 กำลังค้นหา...</div>
+            : errorMsg ? <div className="px-3 py-2.5 text-m text-red-600 font-bold">⚠️ ค้นหาไม่สำเร็จ: {errorMsg}</div>
             : results.map((hit) => (
               <button type="button" key={hit.id} onMouseDown={(e) => e.preventDefault()} onClick={() => { onSelect(hit); setOpen(false); }}
-                className="w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 flex flex-col border-b border-slate-50 last:border-0">
+                className="w-full text-left px-3 py-2.5 text-m hover:bg-blue-50 flex flex-col border-b border-slate-50 last:border-0">
                 <span className="font-bold text-slate-800">{hit.displayName}</span>
-                <span className="text-xs text-slate-400">{[hit.student_id, hit.grade_level, hit.classroom].filter(Boolean).join(' · ')}</span>
+                <span className="text-m text-slate-400">{[hit.student_id, hit.grade_level, hit.classroom].filter(Boolean).join(' · ')}</span>
               </button>
             ))}
         </div>
@@ -663,15 +663,15 @@ function RecipientsEditor({ category, recipients, submitted, onChange }: {
   return (
     <div className="space-y-3">
       {loadError && (
-        <div className="rounded-xl border-2 border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">⚠️ {loadError}</div>
+        <div className="rounded-xl border-2 border-red-300 bg-red-50 px-3 py-2 text-m font-bold text-red-700">⚠️ {loadError}</div>
       )}
 
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-sm text-ink">
+        <h3 className="font-semibold text-m text-ink">
           ผู้รับรางวัล {supportsTeam && <span className="text-muted font-normal">(รองรับรางวัลประเภททีม)</span>}
         </h3>
         {supportsTeam && (
-          <button type="button" onClick={addRow} className="text-xs font-semibold text-gold-dark hover:underline">+ เพิ่มผู้รับรางวัล</button>
+          <button type="button" onClick={addRow} className="text-m font-semibold text-gold-dark hover:underline">+ เพิ่มผู้รับรางวัล</button>
         )}
       </div>
 
@@ -681,8 +681,8 @@ function RecipientsEditor({ category, recipients, submitted, onChange }: {
           return (
             <div key={i} className="rounded-md border border-navy/10 bg-parchment2/40 p-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-xs text-muted font-medium">
+                <label className="flex flex-col gap-1 text-m">
+                  <span className="text-m text-muted font-medium">
                     {category === 'School' ? 'ชื่อโรงเรียน *' : category === 'Executive' ? 'ชื่อผู้บริหาร *' : 'ชื่อ-สกุล *'}
                   </span>
 
@@ -704,22 +704,22 @@ function RecipientsEditor({ category, recipients, submitted, onChange }: {
                     <input type="text" value={r.recipient_name} onChange={(e) => update(i, { recipient_name: e.target.value })} className={fieldCls(nameInvalid)} />
                   )}
 
-                  {nameInvalid && <p className="text-xs text-red-500">กรุณากรอกชื่อผู้รับรางวัล</p>}
-                  {isSchool && <p className="text-xs text-muted">ชื่อโรงเรียนถูกกำหนดอัตโนมัติ ไม่สามารถแก้ไขได้</p>}
+                  {nameInvalid && <p className="text-m text-red-500">กรุณากรอกชื่อผู้รับรางวัล</p>}
+                  {isSchool && <p className="text-m text-muted">ชื่อโรงเรียนถูกกำหนดอัตโนมัติ ไม่สามารถแก้ไขได้</p>}
                 </label>
 
                 {category === 'Student' && (
                   <>
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="text-xs text-muted font-medium">รหัสนักเรียน</span>
+                    <label className="flex flex-col gap-1 text-m">
+                      <span className="text-m text-muted font-medium">รหัสนักเรียน</span>
                       <input type="text" value={r.student_id ?? ''} onChange={(e) => update(i, { student_id: e.target.value })} className={fieldCls(false, 'font-mono')} />
                     </label>
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="text-xs text-muted font-medium">ระดับชั้น</span>
+                    <label className="flex flex-col gap-1 text-m">
+                      <span className="text-m text-muted font-medium">ระดับชั้น</span>
                       <input type="text" placeholder="เช่น มัธยมศึกษาตอนต้น" value={r.grade_level ?? ''} onChange={(e) => update(i, { grade_level: e.target.value })} className={fieldCls(false)} />
                     </label>
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="text-xs text-muted font-medium">ห้องเรียน</span>
+                    <label className="flex flex-col gap-1 text-m">
+                      <span className="text-m text-muted font-medium">ห้องเรียน</span>
                       <input type="text" placeholder="เช่น ม.3/1" value={r.classroom ?? ''} onChange={(e) => update(i, { classroom: e.target.value })} className={fieldCls(false)} />
                     </label>
                   </>
@@ -727,12 +727,12 @@ function RecipientsEditor({ category, recipients, submitted, onChange }: {
 
                 {category === 'Teacher' && (
                   <>
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="text-xs text-muted font-medium">กลุ่มสาระ/ฝ่ายงาน</span>
+                    <label className="flex flex-col gap-1 text-m">
+                      <span className="text-m text-muted font-medium">กลุ่มสาระ/ฝ่ายงาน</span>
                       <input type="text" value={r.department ?? ''} onChange={(e) => update(i, { department: e.target.value })} className={fieldCls(false)} />
                     </label>
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="text-xs text-muted font-medium">บทบาทในรางวัล</span>
+                    <label className="flex flex-col gap-1 text-m">
+                      <span className="text-m text-muted font-medium">บทบาทในรางวัล</span>
                       <select value={r.role ?? ''} onChange={(e) => update(i, { role: (e.target.value || null) as Recipient['role'] })} className={fieldCls(false)}>
                         <option value="">— เลือก —</option>
                         {RECIPIENT_ROLE_OPTIONS.map((role) => <option key={role} value={role}>{RECIPIENT_ROLE_LABELS[role]}</option>)}
@@ -742,15 +742,15 @@ function RecipientsEditor({ category, recipients, submitted, onChange }: {
                 )}
 
                 {category === 'Executive' && (
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="text-xs text-muted font-medium">ตำแหน่ง</span>
+                  <label className="flex flex-col gap-1 text-m">
+                    <span className="text-m text-muted font-medium">ตำแหน่ง</span>
                     <input type="text" value={r.department ?? ''} onChange={(e) => update(i, { department: e.target.value })} className={fieldCls(false)} />
                   </label>
                 )}
               </div>
 
               {supportsTeam && recipients.length > 1 && (
-                <button type="button" onClick={() => removeRow(i)} className="mt-2 text-xs text-clay hover:underline">− ลบผู้รับรางวัลคนนี้</button>
+                <button type="button" onClick={() => removeRow(i)} className="mt-2 text-m text-clay hover:underline">− ลบผู้รับรางวัลคนนี้</button>
               )}
             </div>
           );
@@ -858,13 +858,13 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-6" style={{ fontFamily: THAI_FONT }}>
       {error && (
-        <div className="rounded-xl border-2 border-red-300 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 flex items-center gap-2">
-          <span className="text-lg">⚠️</span>{error}
+        <div className="rounded-xl border-2 border-red-300 bg-red-50 px-4 py-3 text-m font-bold text-red-700 flex items-center gap-2">
+          <span className="text-xl">⚠️</span>{error}
         </div>
       )}
 
       <section className="rounded-2xl border border-blue-100 bg-white shadow-sm p-6 space-y-5">
-        <h2 className="font-bold text-blue-900 text-lg flex items-center gap-2">
+        <h2 className="font-bold text-blue-900 text-xl flex items-center gap-2">
           <span className="text-orange-500">📋</span> ข้อมูลรางวัล
         </h2>
 
@@ -873,7 +873,7 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
           <div className="flex flex-wrap gap-2">
             {CATEGORY_OPTIONS.map((c) => (
               <button key={c} type="button" onClick={() => handleCategoryChange(c)}
-                className={`px-4 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${
+                className={`px-4 py-2.5 rounded-xl text-m font-bold border-2 transition-all ${
                   form.category === c ? 'bg-blue-900 text-white border-blue-900 shadow-md scale-[1.02]' : 'bg-white text-blue-900 border-blue-200 hover:border-blue-400 hover:bg-blue-50'
                 }`}>
                 {CATEGORY_LABELS[c]}
@@ -887,7 +887,7 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
           <input type="text" value={form.title}
             onChange={(e) => { set('title', e.target.value); if (errors.title) setErrors((er) => ({ ...er, title: undefined })); }}
             className={fieldCls(!!errors.title)} />
-          {errors.title && <span className="text-xs text-red-600 font-bold">{errors.title}</span>}
+          {errors.title && <span className="text-m text-red-600 font-bold">{errors.title}</span>}
         </label>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -896,7 +896,7 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
             <input type="date" value={form.date_received}
               onChange={(e) => { set('date_received', e.target.value); if (errors.date_received) setErrors((er) => ({ ...er, date_received: undefined })); }}
               className={fieldCls(!!errors.date_received)} />
-            {errors.date_received && <span className="text-xs text-red-600 font-bold">{errors.date_received}</span>}
+            {errors.date_received && <span className="text-m text-red-600 font-bold">{errors.date_received}</span>}
           </label>
 
           <label className="flex flex-col gap-1.5">
@@ -904,7 +904,7 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
             <input type="number" value={form.academic_year}
               onChange={(e) => { set('academic_year', Number(e.target.value)); if (errors.academic_year) setErrors((er) => ({ ...er, academic_year: undefined })); }}
               className={fieldCls(!!errors.academic_year)} />
-            {errors.academic_year && <span className="text-xs text-red-600 font-bold">{errors.academic_year}</span>}
+            {errors.academic_year && <span className="text-m text-red-600 font-bold">{errors.academic_year}</span>}
           </label>
 
           <label className="flex flex-col gap-1.5">
@@ -943,7 +943,7 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
       </section>
 
       <section className={`rounded-2xl border bg-white shadow-sm p-6 transition-all ${errors.recipients ? 'border-red-400 ring-4 ring-red-100' : 'border-blue-100'}`}>
-        {errors.recipients && <p className="text-xs text-red-600 font-bold mb-3">⚠️ {errors.recipients}</p>}
+        {errors.recipients && <p className="text-m text-red-600 font-bold mb-3">⚠️ {errors.recipients}</p>}
         <RecipientsEditor
           category={form.category}
           recipients={form.recipients}
@@ -953,11 +953,11 @@ export default function AwardForm({ initial }: { initial?: AwardFormInput }) {
       </section>
 
       <section className="rounded-2xl border border-blue-100 bg-white shadow-sm p-6 space-y-4">
-        <h2 className="font-bold text-blue-900 text-lg flex items-center gap-2">
+        <h2 className="font-bold text-blue-900 text-xl flex items-center gap-2">
           <span className="text-orange-500">📎</span> ไฟล์แนบและลิงก์
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <OneDriveMultiImageUpload label="ภาพถ่ายเกียรติบัตร/รับรางวัล (อัปโหลดได้สูงสุด 4 รูป)" value={images} onChange={handleImagesChange} folderPath={folderPath} max={4} />
+          <OneDriveMultiImageUpload label="ภาพถ่ายเกียรติบัตร/รับรางวัล (อัปโหลดได้สูงสุด 6 รูป)" value={images} onChange={handleImagesChange} folderPath={folderPath} max={6} />
           <OneDriveDocumentUpload label="แนบไฟล์เอกสารที่เกี่ยวข้อง" value={certificate} onChange={handleCertificateChange} folderPath={folderPath} accept="application/pdf,image/*,.doc,.docx" />
         </div>
         <label className="flex flex-col gap-1.5">

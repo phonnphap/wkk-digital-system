@@ -30,7 +30,7 @@ export function StatsCards({ byCategory }: { byCategory: Record<string, number> 
           <span className="text-2xl" aria-hidden>{STATS_ICONS[cat]}</span>
           <div>
             <p className="text-2xl font-display font-semibold text-navy">{byCategory[cat] ?? 0}</p>
-            <p className="text-xs text-muted">{CATEGORY_LABELS[cat]}</p>
+            <p className="text-m text-muted">{CATEGORY_LABELS[cat]}</p>
           </div>
         </div>
       ))}
@@ -54,7 +54,7 @@ export function ExportButton({ awards }: { awards: AwardWithRecipients[] }) {
       onClick={handleExport}
       disabled={awards.length === 0}
       style={{ fontFamily: THAI_FONT }}
-      className="inline-flex items-center gap-2 rounded-md bg-laurel text-white px-4 py-2 text-sm font-semibold hover:bg-laurel/90 disabled:opacity-40 disabled:cursor-not-allowed focus-gold transition-colors"
+      className="inline-flex items-center gap-2 rounded-md bg-laurel text-white px-4 py-2 text-m font-semibold hover:bg-laurel/90 disabled:opacity-40 disabled:cursor-not-allowed focus-gold transition-colors"
     >
       <span aria-hidden>⇩</span>
       ส่งออก Excel ({awards.length} รายการ)
@@ -69,12 +69,12 @@ function Select({ label, value, onChange, children }: {
   label: string; value: string; onChange: (v: string) => void; children: React.ReactNode;
 }) {
   return (
-    <label className="flex flex-col gap-1 text-sm">
-      <span className="text-xs text-muted font-medium">{label}</span>
+    <label className="flex flex-col gap-1 text-m">
+      <span className="text-m text-muted font-medium">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded-md border border-navy/15 bg-white px-3 py-2 text-sm text-ink focus-gold focus:outline-none"
+        className="rounded-md border border-navy/15 bg-white px-3 py-2 text-m text-ink focus-gold focus:outline-none"
       >
         {children}
       </select>
@@ -89,14 +89,14 @@ export function FilterBar({ filters, years, departments, onChange }: {
 
   return (
     <div className="card-honor p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-end" style={{ fontFamily: THAI_FONT }}>
-      <label className="flex flex-col gap-1 text-sm col-span-2 lg:col-span-1">
-        <span className="text-xs text-muted font-medium">ค้นหา</span>
+      <label className="flex flex-col gap-1 text-m col-span-2 lg:col-span-1">
+        <span className="text-m text-muted font-medium">ค้นหา</span>
         <input
           type="text"
           placeholder="ชื่อรางวัล, หน่วยงาน..."
           value={filters.search ?? ''}
           onChange={(e) => update({ search: e.target.value })}
-          className="rounded-md border border-navy/15 bg-white px-3 py-2 text-sm text-ink focus-gold focus:outline-none"
+          className="rounded-md border border-navy/15 bg-white px-3 py-2 text-m text-ink focus-gold focus:outline-none"
         />
       </label>
 

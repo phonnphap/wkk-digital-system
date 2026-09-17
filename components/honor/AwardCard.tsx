@@ -36,7 +36,7 @@ export function RibbonBadge({ level }: { level: AwardLevel }) {
 export function AwardTypeTag({ type }: { type: AwardType }) {
   return (
     <span
-      className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-navy/5 text-navy border border-navy/10"
+      className="inline-flex items-center px-2.5 py-0.5 rounded-full text-m font-medium bg-navy/5 text-navy border border-navy/10"
       style={{ fontFamily: THAI_FONT }}
     >
       {AWARD_TYPE_LABELS[type]}
@@ -69,11 +69,11 @@ export default function AwardCard({ award }: { award: AwardWithRecipients }) {
       <div className="p-4 flex-1 flex flex-col gap-2">
         <p className="eyebrow">{CATEGORY_LABELS[award.category]} · ปีการศึกษา {award.academic_year}</p>
         <h3 className="font-display font-semibold text-ink leading-snug line-clamp-2">{award.title}</h3>
-        <p className="text-sm text-muted line-clamp-1">{displayNames}</p>
+        <p className="text-m text-muted line-clamp-1">{displayNames}</p>
 
         <div className="mt-auto pt-2 flex items-center justify-between">
           <AwardTypeTag type={award.award_type} />
-          <span className="text-xs text-muted font-mono">{formatThaiDate(award.date_received)}</span>
+          <span className="text-m text-muted font-mono">{formatThaiDate(award.date_received)}</span>
         </div>
       </div>
     </Link>
@@ -90,7 +90,7 @@ export function AwardImageGallery({ images, coverFallback, title }: { images: st
   const [lightbox, setLightbox] = useState(false);
 
   if (list.length === 0) {
-    return <div className="text-sm text-slate-400 italic py-6 text-center" style={{ fontFamily: THAI_FONT }}>ไม่มีภาพแนบ</div>;
+    return <div className="text-m text-slate-400 italic py-6 text-center" style={{ fontFamily: THAI_FONT }}>ไม่มีภาพแนบ</div>;
   }
 
   return (
@@ -105,12 +105,12 @@ export function AwardImageGallery({ images, coverFallback, title }: { images: st
         />
         <a
           href={list[activeIndex]} download target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
-          className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-white text-xs font-bold flex items-center gap-1.5"
+          className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-white text-m font-bold flex items-center gap-1.5"
         >
           ⬇️ ดาวน์โหลดรูปนี้
         </a>
         {list.length > 1 && (
-          <span className="absolute top-3 left-3 px-2.5 py-1 rounded-lg bg-black/60 text-white text-xs font-bold">
+          <span className="absolute top-3 left-3 px-2.5 py-1 rounded-lg bg-black/60 text-white text-m font-bold">
             {activeIndex + 1} / {list.length}
           </span>
         )}
@@ -132,7 +132,7 @@ export function AwardImageGallery({ images, coverFallback, title }: { images: st
         <div className="flex flex-wrap gap-2">
           {list.map((url, i) => (
             <a key={url + i} href={url} download target="_blank" rel="noopener noreferrer"
-              className="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-100">
+              className="text-m font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-100">
               ⬇️ รูปที่ {i + 1}
             </a>
           ))}
@@ -171,7 +171,7 @@ export function DeleteAwardButton({ id, canDelete }: { id: string; canDelete: bo
   if (!confirming) {
     return (
       <button onClick={() => setConfirming(true)} style={{ fontFamily: THAI_FONT }}
-        className="rounded-xl border-2 border-red-300 bg-red-50 text-red-600 px-4 py-2.5 text-sm font-bold hover:bg-red-100 hover:border-red-400 transition-colors">
+        className="rounded-xl border-2 border-red-300 bg-red-50 text-red-600 px-4 py-2.5 text-m font-bold hover:bg-red-100 hover:border-red-400 transition-colors">
         🗑️ ลบรางวัลนี้
       </button>
     );
@@ -179,7 +179,7 @@ export function DeleteAwardButton({ id, canDelete }: { id: string; canDelete: bo
 
   return (
     <div className="flex items-center gap-2 rounded-xl border-2 border-red-300 bg-red-50 px-3 py-2 shadow-sm" style={{ fontFamily: THAI_FONT }}>
-      <span className="text-sm text-red-700 font-bold">⚠️ ยืนยันการลบ?</span>
+      <span className="text-m text-red-700 font-bold">⚠️ ยืนยันการลบ?</span>
       <button
         disabled={deleting}
         onClick={async () => {
@@ -188,11 +188,11 @@ export function DeleteAwardButton({ id, canDelete }: { id: string; canDelete: bo
           router.push('/honor/awards');
           router.refresh();
         }}
-        className="rounded-lg bg-red-600 text-white px-3 py-1.5 text-xs font-black hover:bg-red-700 active:scale-[0.97] disabled:opacity-50 shadow-sm transition-all"
+        className="rounded-lg bg-red-600 text-white px-3 py-1.5 text-m font-black hover:bg-red-700 active:scale-[0.97] disabled:opacity-50 shadow-sm transition-all"
       >
         {deleting ? 'กำลังลบ...' : 'ยืนยันลบ'}
       </button>
-      <button onClick={() => setConfirming(false)} className="rounded-lg border-2 border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors">
+      <button onClick={() => setConfirming(false)} className="rounded-lg border-2 border-slate-300 bg-white px-3 py-1.5 text-m font-bold text-slate-600 hover:bg-slate-50 transition-colors">
         ไม่ลบ
       </button>
     </div>
