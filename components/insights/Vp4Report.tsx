@@ -121,6 +121,14 @@ function characteristicLabel(level: string): string {
   return map[level] ?? "-";
 }
 
+// ★ ตรวจสอบว่าเป็นภาคเรียนที่ 1 หรือไม่ (รองรับค่าที่อาจเป็น "1", "ภาคเรียนที่ 1", "เทอม 1" ฯลฯ)
+function isFirstSemester(semester?: string): boolean {
+  if (!semester) return false;
+  const s = semester.trim();
+  if (s === "1") return true;
+  return /1/.test(s) && !/2/.test(s);
+}
+
 // ★ ประมาณความกว้างของข้อความไทย/อังกฤษ เพื่อคำนวณความกว้างของเส้นใต้ (blank) ให้พอดีกับข้อความ
 function estimateTextWidthPx(text: string, pxPerChar = 13, basePadding = 24): number {
   const len = (text ?? "").length;
@@ -147,7 +155,7 @@ function SignatureField({ role, nameLabel, lineWidthPx: fixedLineWidthPx }: { ro
     <div className="inline-flex items-baseline text-left signature-field">
       <span className="whitespace-nowrap">ลงชื่อ</span>
       <div className="flex flex-col items-center mx-1" style={{ width: `${lineWidthPx}px` }}>
-        <span className="border-b border-black w-full text-center">&nbsp;</span>
+        <span className="border-b-2 border-dotted border-gray-400 w-full text-center">&nbsp;</span>
         <span className="text-center whitespace-nowrap">
           {nameLabel ? `(${nameLabel})` : "\u00A0"}
         </span>
@@ -191,6 +199,8 @@ export default function Vp4Report({
   const sections = sectionsProp.filter(sec => !EXCLUDED_SUBJECT_CODES.includes(sec.subject_code));
 
   const router = useRouter();
+  // ★ ประถมศึกษา ภาคเรียนที่ 1: ยังไม่มีผลการเรียน/เกรดเฉลี่ยสรุป ให้แสดงคะแนนเต็มและคะแนนที่ได้แทน
+  const isPrimarySemester1 = classroomLevel === "primary" && isFirstSemester(semester);
   const [overallScores, setOverallScores] = useState<Record<string, { characteristic: string; readThinkWrite: string }>>({});
   // ★ null = ดูทั้งห้อง, มีค่า = ดูเฉพาะนักเรียนคนนั้น
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
@@ -432,8 +442,8 @@ export default function Vp4Report({
                   <th className="border px-2 py-1 font-black" rowSpan={2}>หมายเหตุ</th>
                 </tr>
                 <tr className="border text-xl text-slate-500">
-                  <th className="border px-2 py-1 font-black">คะแนน</th>
-                  <th className="border px-2 py-1 font-black">ผลการเรียน</th>
+                  <th className="border px-2 py-1 font-black">{isPrimarySemester1 ? "คะแนนเต็ม" : "คะแนน"}</th>
+                  <th className="border px-2 py-1 font-black">{isPrimarySemester1 ? "คะแนนที่ได้" : "ผลการเรียน"}</th>
                 </tr>
               </thead>
               <tbody>
@@ -444,14 +454,21 @@ export default function Vp4Report({
                       const v = classroomLevel === "primary" ? m.hours_per_year : m.credit_hours;
                       return sum + (v ?? 0);
                     }, 0);
+                    const groupFullScore = row.members.reduce((sum, m) => {
+                      return sum + (gradeMatrix[s.id]?.[m.id]?.totalMax ?? 0);
+                    }, 0);
                     return (
                       <tr key={row.groupCode} className="border">
                         <td className="border px-2 py-1 text-center">{row.code}</td>
                         <td className="border px-2 py-1 break-words">{row.name}</td>
                         <td className="border px-2 py-1 text-center">พื้นฐาน</td>
                         <td className="border px-2 py-1 text-center">{unitSum || "-"}</td>
-                        <td className="border px-2 py-1 text-center font-black text-black">{combined ?? "-"}</td>
-                        <td className="border px-2 py-1 text-center font-black text-black">-</td>
+                        <td className="border px-2 py-1 text-center font-black text-black">
+                          {isPrimarySemester1 ? (groupFullScore || "-") : (combined ?? "-")}
+                        </td>
+                        <td className="border px-2 py-1 text-center font-black text-black">
+                          {isPrimarySemester1 ? (combined ?? "-") : "-"}
+                        </td>
                         <td className="border px-2 py-1 text-center">{overall?.characteristic ?? "-"}</td>
                         <td className="border px-2 py-1 text-center">{overall?.readThinkWrite ?? "-"}</td>
                         <td className="border px-2 py-1"></td>
@@ -470,10 +487,18 @@ export default function Vp4Report({
                       <td className="border px-2 py-1 text-center">{subjectTypeLabel(sec)}</td>
                       <td className="border px-2 py-1 text-center">{isActivity ? "-" : (unitValue ?? "-")}</td>
                       <td className="border px-2 py-1 text-center font-black text-black">
-                        {isActivity ? "-" : (cell?.percentage != null ? Math.round(cell.percentage) : "-")}
+                        {isActivity
+                          ? "-"
+                          : isPrimarySemester1
+                            ? (cell?.totalMax ?? "-")
+                            : (cell?.percentage != null ? Math.round(cell.percentage) : "-")}
                       </td>
                       <td className="border px-2 py-1 text-center font-black text-black">
-                        {isActivity ? activityResult(attendMatrix[s.id]?.[sec.id]) : (cell?.grade ?? "-")}
+                        {isActivity
+                          ? activityResult(attendMatrix[s.id]?.[sec.id])
+                          : isPrimarySemester1
+                            ? (cell?.grandTotal ?? "-")
+                            : (cell?.grade ?? "-")}
                       </td>
                       <td className="border px-2 py-1 text-center">{overall?.characteristic ?? "-"}</td>
                       <td className="border px-2 py-1 text-center">{overall?.readThinkWrite ?? "-"}</td>
@@ -485,11 +510,13 @@ export default function Vp4Report({
             </table>
 
             {classroomLevel === "primary" ? (
-              // ★ คะแนนเฉลี่ยขึ้นบรรทัดใหม่ (เดิมอยู่บรรทัดเดียวกัน)
-              <div className="flex flex-col gap-1 text-xl mt-3">
-                <span>ระดับผลการเรียนเฉลี่ย {gpa}</span>
-                <span>คะแนนเฉลี่ยร้อยละ {avgPercent}</span>
-              </div>
+              isPrimarySemester1 ? null : (
+                // ★ คะแนนเฉลี่ยขึ้นบรรทัดใหม่ (เดิมอยู่บรรทัดเดียวกัน)
+                <div className="flex flex-col gap-1 text-xl mt-3">
+                  <span>ระดับผลการเรียนเฉลี่ย {gpa}</span>
+                  <span>คะแนนเฉลี่ยร้อยละ {avgPercent}</span>
+                </div>
+              )
             ) : (
               <div className="mt-4 flex flex-col sm:flex-row gap-6 text-xl">
                 <table className="border-collapse text-xl flex-1 vp4-table">
@@ -557,23 +584,22 @@ export default function Vp4Report({
                     )}
                   </div>
 
-                  {/* ★ เว้นก่อนลายเซ็นผู้อำนวยการ (เพิ่มอีก 2 บรรทัดจากเดิม รวมเป็น 3 บรรทัด) */}
+                  {/* ★ เว้นก่อนลายเซ็นผู้อำนวยการ (3 บรรทัด) */}
                   <div className="h-8 print:h-6"></div>
                   <div className="h-8 print:h-6"></div>
                   <div className="h-8 print:h-6"></div>
 
-                  <div className={`grid ${classroomLevel === "primary" ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"} signature-grid text-xl`}>
-                    {classroomLevel === "primary" ? (
-                      <>
-                        <SignatureField role="ผู้อำนวยการโรงเรียน" nameLabel={directorName} lineWidthPx={signatureLineWidthPx} />
-                        <SignatureField role="ผู้ปกครอง" lineWidthPx={signatureLineWidthPx} />
-                      </>
-                    ) : (
-                      <>
-                        <SignatureField role="ผู้บริหารสถานศึกษา" nameLabel={directorName} lineWidthPx={signatureLineWidthPx} />
-                        <SignatureField role="ผู้ปกครอง" lineWidthPx={signatureLineWidthPx} />
-                      </>
-                    )}
+                  {/* ★ ลงชื่อ ผอ. และผู้ปกครอง ย้ายไปด้านขวา (ตรงตำแหน่งครูคนที่ 2) เรียงซ้อนกันตามแนวตั้ง */}
+                  <div className="grid grid-cols-2 signature-grid text-xl">
+                    <div></div>
+                    <div className="flex flex-col gap-8 print:gap-4">
+                      <SignatureField
+                        role={classroomLevel === "primary" ? "ผู้อำนวยการโรงเรียน" : "ผู้บริหารสถานศึกษา"}
+                        nameLabel={directorName}
+                        lineWidthPx={signatureLineWidthPx}
+                      />
+                      <SignatureField role="ผู้ปกครอง" lineWidthPx={signatureLineWidthPx} />
+                    </div>
                   </div>
                 </>
               );
