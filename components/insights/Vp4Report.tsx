@@ -129,7 +129,10 @@ function isFirstSemester(semester?: string): boolean {
   return /1/.test(s) && !/2/.test(s);
 }
 
-// ★ ประมาณความกว้างของข้อความไทย/อังกฤษ เพื่อคำนวณความกว้างของเส้นใต้ (blank) ให้พอดีกับข้อความ
+// ★ ความกว้างเส้นใต้ลงชื่อ — ใช้ค่าคงที่เดียวกันทุกช่อง (ไม่คำนวณจากความยาวชื่อ) เพื่อให้ยาวเท่ากันเสมอ ทั้งบนจอและตอนพิมพ์
+const SIGNATURE_LINE_WIDTH_PX = 260;
+
+// ★ ประมาณความกว้างของข้อความไทย/อังกฤษ (ใช้เป็นค่า fallback เท่านั้น)
 function estimateTextWidthPx(text: string, pxPerChar = 13, basePadding = 24): number {
   const len = (text ?? "").length;
   return len * pxPerChar + basePadding;
@@ -150,7 +153,7 @@ function InfoField({ label, value, grow = 1 }: { label: string; value: string; g
 // ★ บรรทัดลงชื่อ — "ลงชื่อ" ชิดซ้ายตรงกันทุกช่อง เส้นใต้กับชื่อในวงเล็บอยู่ในคอลัมน์เดียวกัน
 //    ทำให้ชื่อในวงเล็บอยู่กึ่งกลางเส้นใต้พอดี ไม่ว่าความยาวของคำว่า "ลงชื่อ" หรือ role จะเป็นเท่าใด
 function SignatureField({ role, nameLabel, lineWidthPx: fixedLineWidthPx }: { role: string; nameLabel?: string; lineWidthPx?: number }) {
-  const lineWidthPx = fixedLineWidthPx ?? Math.max(140, estimateTextWidthPx(nameLabel ?? ""));
+  const lineWidthPx = fixedLineWidthPx ?? SIGNATURE_LINE_WIDTH_PX;
   return (
     <div className="inline-flex items-baseline text-left signature-field">
       <span className="whitespace-nowrap">ลงชื่อ</span>
@@ -561,7 +564,7 @@ export default function Vp4Report({
                 ? [formatFullName(resolvedAdvisors[0]), formatFullName(resolvedAdvisors[1]), directorName, ""]
                 : [advisorCombinedName ?? "", directorName, ""];
               const signatureLineWidthPx = Math.max(
-                140,
+                SIGNATURE_LINE_WIDTH_PX,
                 ...allSignatureNames.map(n => estimateTextWidthPx(n ?? ""))
               );
 
@@ -598,6 +601,8 @@ export default function Vp4Report({
                         nameLabel={directorName}
                         lineWidthPx={signatureLineWidthPx}
                       />
+                      {/* ★ เว้นเพิ่มอีก 1 บรรทัดก่อนลงชื่อผู้ปกครอง */}
+                      <div className="h-8 print:h-6"></div>
                       <SignatureField role="ผู้ปกครอง" lineWidthPx={signatureLineWidthPx} />
                     </div>
                   </div>
