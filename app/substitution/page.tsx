@@ -174,6 +174,27 @@ function sourceOf(note?: string | null): keyof typeof SOURCE_LABEL {
   if (note?.includes("เจาะจง")) return "specific";
   return "admin";
 }
+
+// ══════════════════════════════════════════════════════════
+// ★ FIX (root cause ของปุ่ม "แลกคาบคืน" ไม่หาย): เดิมเช็คว่าแลกคืนแล้วหรือยังโดยเทียบ
+// ข้อความวันที่+ชื่อคาบ (slot_label) ที่แปะไว้ใน reason ซึ่ง "ไม่เสถียร" — ถ้า requester_entry
+// ของคำขอต้นทาง resolve ไม่ได้ตอนเช็ค (เช่น ตารางสอนถูกแก้/ปีการศึกษาเปลี่ยน) ข้อความที่คำนวณสดจะ
+// ไม่ตรงกับข้อความที่บันทึกไว้ตอนสร้างคำขอแลกคืน ทำให้ระบบคิดว่า "ยังไม่เคยแลกคืน" ทั้งที่แลกคืนไปแล้ว
+// ⇒ เปลี่ยนมาฝัง "รหัสอ้างอิง" ที่ไม่มีวันเปลี่ยน (เช่น [ref:sw:<id ของคำขอแลกคาบเดิม>] หรือ
+// [ref:sub:<id ของรายการสอนแทนเดิม>]) ต่อท้าย reason แทน แล้วเทียบด้วย id ตรงๆ แม่นยำ 100%
+// (ยังคง fallback ไปเทียบข้อความวันที่แบบเดิมไว้ด้วย เพื่อให้ข้อมูลเก่าก่อนแก้ไขนี้ยังทำงานถูกต้อง)
+// ══════════════════════════════════════════════════════════
+const REPAY_REF_REGEX = /\s*\[ref:([^\]]+)\]\s*$/i;
+function extractRepayRef(reason?: string | null): string | null {
+  if (!reason) return null;
+  const m = reason.match(REPAY_REF_REGEX);
+  return m ? m[1] : null;
+}
+// ★ ใช้ตัดรหัสอ้างอิงทิ้งก่อนแสดงผลให้ครูเห็น (ครูไม่จำเป็นต้องเห็น id ทางเทคนิค)
+function stripRepayRef(reason?: string | null): string {
+  if (!reason) return "";
+  return reason.replace(REPAY_REF_REGEX, "").trim();
+}
 // ✅ ดึงข้อมูลทุกแถวจาก Supabase แบบไม่จำกัดที่ 1000 แถว (วนดึงทีละหน้าจนครบ)
 async function fetchAllRows<T = any>(query: any): Promise<T[]> {
   const pageSize = 1000;
@@ -720,12 +741,15 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
 function SwapRequestModal({
   user, allEntries, allTeachers, allTimeSlots, academicYearId, homeroomMap,
   initialReason: initialReasonProp, mode: modeProp = "normal",
-  fixedTargetTeacherId: fixedTargetTeacherIdProp,
+  fixedTargetTeacherId: fixedTargetTeacherIdProp, repayRefId,
   editingRequest, onSave, onClose, swapRequests, 
 }: {
   user: User; allEntries: TimetableEntry[]; allTeachers: User[]; allTimeSlots: any[]; academicYearId: string;
   homeroomMap: Record<string, string>;
   initialReason?: string; mode?: "normal" | "repay"; fixedTargetTeacherId?: string;
+  // ★ FIX: รหัสอ้างอิงของ "คำขอเดิม/รายการสอนแทนเดิม" ที่กำลังขอแลกคืนให้ (เช่น "sw:<id>" หรือ "sub:<id>")
+  // ใช้ฝังต่อท้าย reason ตอนบันทึก เพื่อให้เช็ค "แลกคืนแล้วหรือยัง" แม่นยำ 100% ไม่ขึ้นกับข้อความวันที่/ชื่อคาบที่อาจ resolve ไม่ได้ภายหลัง
+  repayRefId?: string;
   editingRequest?: SwapRequest | null;
   onSave: () => void; onClose: () => void; swapRequests: SwapRequest[];
 }) {
@@ -735,7 +759,10 @@ function SwapRequestModal({
     ? (editingRequest!.reason?.includes("ขอแลกคาบคืนให้") ? "repay" : "normal")
     : modeProp;
   const fixedTargetTeacherId = isEditing ? editingRequest!.target_teacher_id : fixedTargetTeacherIdProp;
-  const initialReason = isEditing ? (editingRequest!.reason ?? "") : initialReasonProp;
+  // ★ FIX: ถ้าแก้ไขคำขอแลกคืนเดิม ให้ดึงรหัสอ้างอิงเดิมที่ฝังไว้ใน DB กลับมาใช้ต่อ (กันหลุด/หายตอนแก้ไข)
+  // และตัดรหัสอ้างอิงออกจากข้อความก่อนเอาไปโชว์ในกล่องแก้ไข ไม่ให้ครูเห็นรหัสทางเทคนิค
+  const effectiveRepayRef = isEditing ? extractRepayRef(editingRequest!.reason) : (repayRefId ?? null);
+  const initialReason = isEditing ? stripRepayRef(editingRequest!.reason ?? "") : initialReasonProp;
 
   const [swapDate, setSwapDate] = useState(() => editingRequest?.swap_date ?? ymd(new Date()));
   const [selectedEntry, setSelectedEntry] = useState<TimetableEntry | null>(() =>
@@ -839,9 +866,12 @@ function SwapRequestModal({
   const targetId = mode === "repay" ? fixedTargetTeacherId! : pickedTeacherId;
   // ★ FIX: ต่อ marker (ล็อกไว้) เข้ากับหมายเหตุที่ผู้ใช้พิมพ์เอง ก่อนบันทึกลง DB เสมอ
   // กันเคส user แก้/ลบข้อความจนระบบเช็ค "แลกคืนแล้วหรือยัง" ไม่เจอ
-  const finalReason = lockedAutoReason
+  const finalReasonText = lockedAutoReason
     ? (reason.trim() ? `${lockedAutoReason} — ${reason.trim()}` : lockedAutoReason)
     : reason;
+  // ★ FIX: ต่อรหัสอ้างอิง [ref:...] ท้ายสุดเสมอ (ถ้ามี) — ใช้เช็คว่า "แลกคืนแล้วหรือยัง" แบบแม่นยำ
+  // แยกจากข้อความที่ครูเห็น เพราะ stripRepayRef() จะตัดส่วนนี้ออกก่อนแสดงผลทุกที่
+  const finalReason = effectiveRepayRef ? `${finalReasonText} [ref:${effectiveRepayRef}]` : finalReasonText;
 
   if (isEditing) {
     // ★ แก้ไขคำขอเดิม — เปลี่ยนกลับเป็น pending ให้อีกฝ่ายคอนเฟิร์มใหม่เสมอ เพราะเนื้อหาเปลี่ยน
@@ -1607,6 +1637,8 @@ export default function SubstitutionPage() {
   const [swapInitialReason, setSwapInitialReason] = useState<string | undefined>(undefined);
   const [swapMode, setSwapMode] = useState<"normal"|"repay">("normal");
   const [swapFixedTargetTeacherId, setSwapFixedTargetTeacherId] = useState<string | undefined>(undefined);
+  // ★ FIX: รหัสอ้างอิงคำขอ/รายการสอนแทนเดิมที่กำลัง "แลกคาบคืน" ให้ — เช่น "sw:<id คำขอแลกคาบเดิม>" หรือ "sub:<id รายการสอนแทนเดิม>"
+  const [swapRepayRefId, setSwapRepayRefId] = useState<string | undefined>(undefined);
   const [editingSub, setEditingSub] = useState<SubRecord|null>(null);
   const [adminSwapFilterStatus, setAdminSwapFilterStatus] = useState<"all"|"pending"|"accepted"|"rejected"|"cancelled">("all");
 const [adminSwapFilterTeacher, setAdminSwapFilterTeacher] = useState("");
@@ -1666,21 +1698,25 @@ const canEditSwap = useCallback((r: SwapRequest) => {
   if (isSpecificAdmin && r.status !== "cancelled") return true;
   return r.requester_id === user?.id && r.status === "pending";
 }, [isSpecificAdmin, user]);
-// ★ เช็คว่า record นี้เป็น "คำขอแลกคาบคืน" (repay) เองหรือไม่ — ดูจาก marker ข้อความในเหตุผล
+// ★ เช็คว่า record นี้เป็น "คำขอแลกคาบคืน" (repay) เองหรือไม่
 // ใช้กันไม่ให้ปุ่ม "🔄 แลกคาบคืน" โผล่ซ้ำบนการ์ดของคำขอแลกคืนเอง (จะวนซ้ำไม่รู้จบ)
+// ★ FIX: เช็คทั้งรหัสอ้างอิง [ref:...] แบบใหม่ (แม่นยำ) และข้อความ "ขอแลกคาบคืนให้" แบบเดิม (รองรับข้อมูลเก่า)
 const isRepaySwapRequest = useCallback((r: SwapRequest) => {
-  return !!r.reason?.includes("ขอแลกคาบคืนให้");
+  return !!r.reason?.includes("[ref:") || !!r.reason?.includes("ขอแลกคาบคืนให้");
 }, []);
 // ★ เช็คว่าเคยขอ "แลกคาบคืน" สำหรับรายการสอนแทนนี้ไปแล้วหรือยัง (ยัง pending/accepted อยู่)
-// ใช้ reason เป็นตัวอ้างอิง เพราะข้อความมีวันที่+คาบเดิมที่ไม่ซ้ำกันอยู่แล้ว
+// ★ FIX (root cause ปุ่มไม่หาย): เดิมเทียบแค่ข้อความวันที่+ชื่อคาบ ซึ่งไม่เสถียรถ้า slot_label
+// ของรายการเปลี่ยน/ resolve ไม่ได้ภายหลัง ⇒ เช็คด้วยรหัสอ้างอิง [ref:sub:<id>] ที่ผูกกับ record.id ตรงๆ ก่อน (แม่นยำ 100%)
+// แล้วค่อย fallback ไปเทียบข้อความแบบเดิม เพื่อให้คำขอแลกคืนที่สร้างไว้ก่อนแก้ไขนี้ยังทำงานถูกต้อง
 const hasActiveRepayForSub = useCallback((r: SubRecord) => {
   if (!user || !r.substitute_teacher_id) return false;
-  const marker = `${thaiDate(r.substitute_date)} (${r.slot_label ?? "-"})`;
+  const refMarker = `[ref:sub:${r.id}]`;
+  const textMarker = `${thaiDate(r.substitute_date)} (${r.slot_label ?? "-"})`;
   return swapRequests.some(sw =>
     sw.requester_id === user.id &&
     sw.target_teacher_id === r.substitute_teacher_id &&
     sw.status !== "cancelled" && sw.status !== "rejected" &&
-    !!sw.reason?.includes(marker)
+    (!!sw.reason?.includes(refMarker) || !!sw.reason?.includes(textMarker))
   );
 }, [swapRequests, user]);
 
@@ -2057,15 +2093,20 @@ const incomingSwaps = useMemo(() =>
   enrichedSwapRequests.filter(r => r.target_teacher_id === user?.id && r.status === "pending")
 , [enrichedSwapRequests, user]);
 
+// ★ FIX (root cause ปุ่มไม่หาย): เดิมเทียบแค่ข้อความ "วันที่ (ชื่อคาบ)" ซึ่งจะพังทันทีที่
+// r.requester_entry resolve slot_label ไม่ได้ตอนนี้ (เช่น มีตารางสอนซ้ำวันเดียวกันหลายคาบ ทำให้ข้อความชนกัน
+// หรือ entry ถูกแก้/หาไม่เจอ) ⇒ เช็คด้วยรหัสอ้างอิง [ref:sw:<id คำขอเดิม>] ที่ผูกกับ r.id ตรงๆ ก่อน (แม่นยำ 100%
+// ไม่ขึ้นกับข้อมูลตารางสอนที่อาจเปลี่ยนภายหลัง) แล้วค่อย fallback ไปเทียบข้อความแบบเดิมสำหรับคำขอแลกคืนที่สร้างไว้ก่อนแก้ไขนี้
 const hasActiveRepayForSwap = useCallback((r: SwapRequest) => {
   if (!user) return false;
-  const marker = `${thaiDate(r.swap_date)} (${r.requester_entry?.slot_label ?? "-"})`;
+  const refMarker = `[ref:sw:${r.id}]`;
+  const textMarker = `${thaiDate(r.swap_date)} (${r.requester_entry?.slot_label ?? "-"})`;
   return enrichedSwapRequests.some(sw =>
     sw.id !== r.id &&
     sw.requester_id === user.id &&
     sw.target_teacher_id === r.target_teacher_id &&
     sw.status !== "cancelled" && sw.status !== "rejected" &&
-    !!sw.reason?.includes(marker)
+    (!!sw.reason?.includes(refMarker) || !!sw.reason?.includes(textMarker))
   );
 }, [enrichedSwapRequests, user]);
   // ── สรุปภาพรวมการแลกคาบทั้งโรงเรียน (สำหรับแอดมิน/ผอ./รองผอ.) ──
@@ -2216,7 +2257,7 @@ const adminFilteredSwaps = useMemo(() => {
           <h1 className="text-white font-extrabold text-lg leading-tight tracking-tight">แลกคาบ &amp; สอนแทน</h1>
           <p className="text-[#FBCFE8] text-xs sm:text-sm font-medium">{fullName(user)} · ปีการศึกษา {academicYear?.year_name}</p>
         </div>
-        <button onClick={() => { setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); setShowSwapModal(true); }}
+        <button onClick={() => { setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); setSwapRepayRefId(undefined); setShowSwapModal(true); }}
           className="px-4 py-2 bg-[#FB7185] hover:bg-[#BE185D] text-[#9D174D] text-sm font-bold rounded-xl shadow-sm transition-colors shrink-0">
           + ขอแลกคาบ
         </button>
@@ -2254,7 +2295,7 @@ const adminFilteredSwaps = useMemo(() => {
           <div className="w-full p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-slate-700 text-base">คำขอแลกคาบของฉัน</h2>
-              <button onClick={() => { setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); setShowSwapModal(true); }}
+              <button onClick={() => { setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); setSwapRepayRefId(undefined); setShowSwapModal(true); }}
                 className="px-4 py-2 bg-[#FB7185] hover:bg-[#BE185D] text-white text-sm font-bold rounded-xl">
                 + ขอแลกคาบใหม่
               </button>
@@ -2343,7 +2384,7 @@ const adminFilteredSwaps = useMemo(() => {
                 <p className="text-sm font-bold text-slate-800">
                   {fullName(r.requester)} <span className="text-slate-400 font-normal">ขอแลกกับ</span> {fullName(r.target_teacher)}
                 </p>
-                {r.reason && <p className="text-xs text-slate-500 mt-1">{r.reason}</p>}
+                {r.reason && <p className="text-xs text-slate-500 mt-1">{stripRepayRef(r.reason)}</p>}
               </div>
               {r.status === "pending" ? (
   <div className="flex gap-2 shrink-0">
@@ -2391,7 +2432,7 @@ const adminFilteredSwaps = useMemo(() => {
                           {STATUS_SWAP[r.status]?.label}
                         </span>
                       </div>
-                      {r.reason && <p className="text-sm text-slate-600 mb-3 bg-white rounded-xl px-3 py-2">{r.reason}</p>}
+                      {r.reason && <p className="text-sm text-slate-600 mb-3 bg-white rounded-xl px-3 py-2">{stripRepayRef(r.reason)}</p>}
                       <div className="flex gap-2">
                         <button onClick={() => handleSwapRespond(r.id, true)}
                           className="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold">
@@ -2435,7 +2476,7 @@ const adminFilteredSwaps = useMemo(() => {
                           {STATUS_SWAP[r.status]?.label}
                         </span>
                       </div>
-                      {r.reason && <p className="text-xs text-slate-500 mb-2">{r.reason}</p>}
+                      {r.reason && <p className="text-xs text-slate-500 mb-2">{stripRepayRef(r.reason)}</p>}
                       <div className="flex items-center gap-3">
                         {r.requester_id === user?.id && r.status === "pending" && (
                           <button onClick={() => handleSwapCancel(r.id)}
@@ -2448,6 +2489,7 @@ const adminFilteredSwaps = useMemo(() => {
     setSwapMode("repay");
     setSwapFixedTargetTeacherId(r.target_teacher_id);
     setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.target_teacher)} ที่เคยรับแลกคาบให้เมื่อ ${thaiDate(r.swap_date)} (${r.requester_entry?.slot_label ?? "-"})`);
+    setSwapRepayRefId(`sw:${r.id}`); // ★ FIX: ผูกรหัสอ้างอิงกับ id ของคำขอเดิมตรงๆ ให้เช็คแลกคืนแล้วหรือยังแม่นยำ
     setShowSwapModal(true);
   }}
     className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200">
@@ -2685,6 +2727,7 @@ const adminFilteredSwaps = useMemo(() => {
         setSwapMode("repay");
         setSwapFixedTargetTeacherId(r.substitute_teacher_id);
         setSwapInitialReason(`ขอแลกคาบคืนให้ ${fullName(r.substitute_teacher)} ที่เคยสอนแทนให้เมื่อ ${thaiDate(r.substitute_date)} (${r.slot_label ?? "-"})`);
+        setSwapRepayRefId(`sub:${r.id}`); // ★ FIX: ผูกรหัสอ้างอิงกับ id ของรายการสอนแทนเดิมตรงๆ ให้เช็คแลกคืนแล้วหรือยังแม่นยำ
         setShowSwapModal(true);
       }}
       className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-bold border border-purple-200 transition-colors"
@@ -2822,7 +2865,7 @@ const adminFilteredSwaps = useMemo(() => {
                             <p className="text-sm font-bold text-slate-800 mt-1">
                               {fullName(r.requester)} <span className="text-slate-400 font-normal">↔</span> {fullName(r.target_teacher)}
                             </p>
-                            {r.reason && <p className="text-xs text-slate-400 mt-0.5 truncate">{r.reason}</p>}
+                            {r.reason && <p className="text-xs text-slate-400 mt-0.5 truncate">{stripRepayRef(r.reason)}</p>}
                           </div>
                         </div>
                       );
@@ -2859,10 +2902,11 @@ const adminFilteredSwaps = useMemo(() => {
     initialReason={swapInitialReason}
     mode={swapMode}
     fixedTargetTeacherId={swapFixedTargetTeacherId}
+    repayRefId={swapRepayRefId}
     editingRequest={editingSwap}
     swapRequests={swapRequests}   // ★ เพิ่ม
-    onSave={async()=>{ setShowSwapModal(false); setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); setEditingSwap(null); await loadData(); }}
-    onClose={()=>{ setShowSwapModal(false); setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); setEditingSwap(null); }}
+    onSave={async()=>{ setShowSwapModal(false); setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); setSwapRepayRefId(undefined); setEditingSwap(null); await loadData(); }}
+    onClose={()=>{ setShowSwapModal(false); setSwapMode("normal"); setSwapFixedTargetTeacherId(undefined); setSwapInitialReason(undefined); setSwapRepayRefId(undefined); setEditingSwap(null); }}
   />
 )}
       {assignLeave && academicYear && (
