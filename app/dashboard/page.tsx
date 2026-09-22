@@ -25,7 +25,7 @@ const ATTENDANCE_IMPORT_ALLOWED_EMAILS = [
   // เพิ่มอีเมลคนอื่นที่ต้องการให้สิทธิ์ได้ที่นี่
 ];
 const DASHBOARD_ADMIN_ROLES = ["admin", "director", "deputy_director"];
-const DASHBOARD_ADMIN_EMAILS = ["sumalin@khienkhet.ac.th"];
+const DASHBOARD_ADMIN_EMAILS = ["sumalin@khienkhet.ac.th","phonnapha@khienkhet.ac.th"];
 
 function isDashboardAdminViewer(role: string | null | undefined, email: string | null | undefined): boolean {
   if (role && DASHBOARD_ADMIN_ROLES.includes(role)) return true;

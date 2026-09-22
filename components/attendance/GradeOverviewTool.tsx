@@ -1341,13 +1341,9 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 
 {gradingMode === "numeric" && (
   <>
-    <th className="px-3 py-3 text-center min-w-[90px] bg-indigo-50/70">
-      <p className="text-m font-black text-indigo-700">คะแนนเก็บ</p>
-      <p className="text-[18px] text-indigo-300 font-bold">เต็ม {formativeMaxScore}</p>
-    </th>
     {useMidterm && (
   <th className="px-3 py-3 text-center min-w-[90px] bg-teal-50/70">
-    <p className="text-m font-black text-teal-700">กลางภาค</p>
+    <p className="text-m font-black text-teal-700">กลางภาค/กลางปี</p>
     {readOnly ? (
       <p className="text-[18px] text-teal-300 font-bold">
         {rawMidtermMax ? `กรอกเต็ม ${rawMidtermMax} → นน. ${midtermMaxScore}` : `เต็ม ${midtermMaxScore}`}
@@ -1365,6 +1361,10 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     )}
   </th>
 )}
+    <th className="px-3 py-3 text-center min-w-[90px] bg-indigo-50/70">
+      <p className="text-m font-black text-indigo-700">คะแนนเก็บ</p>
+      <p className="text-[18px] text-indigo-300 font-bold">เต็ม {formativeMaxScore + (useMidterm ? midtermMaxScore : 0)}</p>
+    </th>
 <th className="px-3 py-3 text-center min-w-[90px] bg-orange-50/70">
   <p className="text-m font-black text-orange-700">ปลายภาค</p>
   {readOnly ? (
@@ -1509,10 +1509,6 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
                 
 {gradingMode === "numeric" && (
   <>
-    <td className="text-center px-3 py-3">
-      <span className="text-m font-black text-indigo-600">{fmtScore(r.scaledFormative)}</span>
-      <span className="text-slate-400 font-bold text-sm">/{formativeMaxScore}</span>
-    </td>
     {useMidterm && (
   <td className="text-center px-3 py-3">
     <EditableExamCell
@@ -1530,6 +1526,12 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     />
   </td>
 )}
+    <td className="text-center px-3 py-3">
+      <span className="text-m font-black text-indigo-600">
+        {fmtScore(r.scaledFormative + (useMidterm ? (r.midtermScore ?? 0) : 0))}
+      </span>
+      <span className="text-slate-400 font-bold text-sm">/{formativeMaxScore + (useMidterm ? midtermMaxScore : 0)}</span>
+    </td>
 <td className="text-center px-3 py-3">
   <EditableExamCell
     value={r.finalScore}
