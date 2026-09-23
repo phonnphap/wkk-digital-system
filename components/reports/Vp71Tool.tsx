@@ -673,7 +673,7 @@ function EditPlanView({
                         <input
                           value={u.unit_name} disabled={readOnly}
                           onChange={e => updateUnit(u._key, "unit_name", e.target.value)}
-                          placeholder="เช่น หน่วยที่ 1 ระบบคอมพิวเตอร์"
+                          placeholder="เช่น ระบบคอมพิวเตอร์"
                           className="w-full border-2 border-slate-200 rounded-lg px-2 py-1.5 font-bold disabled:bg-slate-50"
                         />
                       ) : (
