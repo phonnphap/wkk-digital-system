@@ -2054,6 +2054,103 @@ async function desyncSubjectSection({
   }
 }
   // ══════════════════════════════════════════════════════════════════════════
+  // ✅ syncAllSections — ปุ่มกดมือ ไล่ตรวจทั้งระบบให้ subject_sections ตรงกับ
+  // timetable_entries ทั้งหมด (เผื่อ auto-sync พลาดหรือมีข้อมูลเก่าที่ยังไม่ตรงกัน)
+  // เฉพาะแอดมินเท่านั้นที่กดได้
+  // ══════════════════════════════════════════════════════════════════════════
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ created: number; updated: number; closed: number } | null>(null);
+
+  async function syncAllSections() {
+    if (!user) return;
+    setSyncing(true);
+    setSyncResult(null);
+    let created = 0, updated = 0, closed = 0;
+
+    try {
+      // ดึง timetable_entries ทั้งหมดทุกปีการศึกษา
+      const allEntries = await fetchAllRows<TimetableEntry>(
+        supabase.from("timetable_entries").select("*")
+      );
+
+      // ดึง subject_sections ทั้งหมดมาไว้ในหน่วยความจำ (ลด round-trip)
+      const { data: allSections } = await supabase
+        .from("subject_sections")
+        .select("id, subject_id, classroom_id, academic_year_id, teacher_id, co_teacher_id, is_active");
+      const sections = (allSections ?? []) as any[];
+
+      // จัดกลุ่ม entries ตาม subject+classroom+ปี เพื่อหาว่าใครสอนคู่ไหนบ้าง (สูงสุด 2 คน)
+      type GroupKey = string;
+      const groups = new Map<GroupKey, { subjectId: string; classroomId: string; academicYearId: string; teacherIds: string[] }>();
+      allEntries.forEach(e => {
+        const key = `${e.subject_id}|${e.classroom_id}|${e.academic_year_id}`;
+        if (!groups.has(key)) {
+          groups.set(key, { subjectId: e.subject_id, classroomId: e.classroom_id, academicYearId: e.academic_year_id, teacherIds: [] });
+        }
+        const g = groups.get(key)!;
+        if (!g.teacherIds.includes(e.teacher_id)) g.teacherIds.push(e.teacher_id);
+        if (e.teacher_id_2 && !g.teacherIds.includes(e.teacher_id_2)) g.teacherIds.push(e.teacher_id_2);
+      });
+
+      // 1) สร้าง/อัปเดต section ให้ตรงกับตารางสอนปัจจุบัน (ข้ามกลุ่มที่มีครูเกิน 2 คน — ต้องจัดการเอง)
+      for (const g of groups.values()) {
+        if (g.teacherIds.length > 2) {
+          console.warn("[syncAllSections] มีครูเกิน 2 คนสำหรับคู่นี้ ข้ามไป ต้องจัดการเอง:", g);
+          continue;
+        }
+        const existing = sections.find(s =>
+          s.subject_id === g.subjectId && s.classroom_id === g.classroomId && s.academic_year_id === g.academicYearId
+        );
+        const before = existing ? JSON.stringify([existing.teacher_id, existing.co_teacher_id, existing.is_active]) : null;
+
+        await syncSubjectSection({
+          subjectId: g.subjectId, classroomId: g.classroomId, academicYearId: g.academicYearId,
+          teacherId: g.teacherIds[0], teacherId2: g.teacherIds[1] ?? null, createdBy: user.id,
+        });
+
+        if (!existing) created++;
+        else {
+          // เช็คว่ามีการเปลี่ยนแปลงจริงไหม (sync อาจไม่ทำอะไรถ้าตรงอยู่แล้ว)
+          const { data: after } = await supabase
+            .from("subject_sections").select("teacher_id, co_teacher_id, is_active")
+            .eq("id", existing.id).maybeSingle();
+          const afterStr = after ? JSON.stringify([after.teacher_id, after.co_teacher_id, after.is_active]) : null;
+          if (afterStr !== before) updated++;
+        }
+      }
+
+      // 2) desync: หา section ที่ active อยู่ แต่ครูไม่มีคาบคู่นี้ในตารางสอนแล้ว
+      for (const s of sections) {
+        if (!s.is_active) continue;
+        const key = `${s.subject_id}|${s.classroom_id}|${s.academic_year_id}`;
+        const g = groups.get(key);
+        const stillTeaching = (tid: string) => g?.teacherIds.includes(tid) ?? false;
+
+        if (s.teacher_id && !stillTeaching(s.teacher_id)) {
+          await desyncSubjectSection({
+            subjectId: s.subject_id, classroomId: s.classroom_id, academicYearId: s.academic_year_id,
+            teacherId: s.teacher_id,
+          });
+          closed++;
+        }
+        if (s.co_teacher_id && !stillTeaching(s.co_teacher_id)) {
+          await desyncSubjectSection({
+            subjectId: s.subject_id, classroomId: s.classroom_id, academicYearId: s.academic_year_id,
+            teacherId: s.co_teacher_id,
+          });
+          closed++;
+        }
+      }
+
+      setSyncResult({ created, updated, closed });
+    } catch (err: any) {
+      console.error("[syncAllSections] error:", err);
+      alert("❌ ซิงค์ไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
+    } finally {
+      setSyncing(false);
+    }
+  }
+  // ══════════════════════════════════════════════════════════════════════════
   // ✅ ใหม่: ensureRealTimeSlot — แก้ปัญหา "กดเพิ่มคาบแล้วไม่มีอะไรเกิดขึ้น"
   // สาเหตุ: บางคาบ (เช่นคาบเฉพาะของอนุบาล 09:30–09:50) เป็นแค่ "virtual slot" ที่สร้างจาก
   // template ในหน้าเว็บ (id ขึ้นต้นด้วย tmpl-) เพราะยังไม่มีแถวจริงในตาราง time_slots ของ DB
@@ -2515,6 +2612,23 @@ const totalScheduledPeriods = entries.length;
     onClose={() => setShowClubAdmin(false)} onReload={loadClubs}
   />
 )}
+{syncResult && (
+  <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSyncResult(null)}>
+    <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="bg-teal-600 px-6 py-4">
+        <h3 className="text-lg font-black text-white">✅ ซิงค์ Smart Class เสร็จแล้ว</h3>
+      </div>
+      <div className="p-5 space-y-2 text-sm">
+        <p>🆕 สร้างใหม่: <b>{syncResult.created}</b> รายการ</p>
+        <p>♻️ อัปเดต: <b>{syncResult.updated}</b> รายการ</p>
+        <p>🔒 ปิด (ไม่มีคนสอนแล้ว): <b>{syncResult.closed}</b> รายการ</p>
+      </div>
+      <div className="px-5 pb-5">
+        <button onClick={() => setSyncResult(null)} className="w-full py-2.5 rounded-xl bg-teal-600 text-white font-black text-sm">ปิด</button>
+      </div>
+    </div>
+  </div>
+)}
 {showAddSubjectRequest && (
   <AddSubjectRequestModal
     subjects={subjects}
@@ -2583,6 +2697,17 @@ const totalScheduledPeriods = entries.length;
   <button onClick={() => setShowClubAdmin(true)}
     className="px-3 py-2 rounded-xl border-2 border-purple-200 bg-purple-50 text-purple-700 font-black text-sm hover:bg-purple-100">
     🎪 จัดการชุมนุม
+  </button>
+)}
+{/* ✅ เพิ่มปุ่มนี้ — เฉพาะแอดมินเท่านั้น */}
+{isAdmin && (
+  <button onClick={async () => {
+      if (!confirm("จะไล่ตรวจ Smart Class ทั้งระบบให้ตรงกับตารางสอนปัจจุบัน ต้องการดำเนินการต่อหรือไม่?")) return;
+      await syncAllSections();
+    }}
+    disabled={syncing}
+    className="px-3 py-2 rounded-xl border-2 border-teal-200 bg-teal-50 text-teal-700 font-black text-sm hover:bg-teal-100 disabled:opacity-50 flex items-center gap-1.5">
+    {syncing ? "⏳ กำลังซิงค์..." : "🔄 ซิงค์ Smart Class"}
   </button>
 )}
             </div>

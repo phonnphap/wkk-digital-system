@@ -253,7 +253,8 @@ export default function GradeOverviewTool({
   midtermMaxScore = 0,                         // ★ เพิ่ม
   finalMaxScore = 30, 
   currentStudentId, 
-  showSpecialScores = true
+  showSpecialScores = true,
+  educationLevel = "secondary"          // ★ เพิ่ม: "primary" (ประถม) -> กลางปี/ปลายปี, "secondary" (มัธยม) -> กลางภาค/ปลายภาค
 }: {
   sectionId: string;
   subjectTitle: string;
@@ -274,6 +275,7 @@ export default function GradeOverviewTool({
   finalMaxScore?: number;
   currentStudentId?: string;
   showSpecialScores?: boolean;
+  educationLevel?: "primary" | "secondary"; // ★ เพิ่ม: ใช้ตัดสินใจว่าจะเรียก "กลางปี/ปลายปี" (ประถม) หรือ "กลางภาค/ปลายภาค" (มัธยม)
 }) {
   const [tab, setTab] = useState<ViewTab>("table");
   const [loading, setLoading] = useState(true);
@@ -294,6 +296,14 @@ export default function GradeOverviewTool({
   // ★ โครงสร้างคะแนนเหลือแบบเดียว (เก็บ+กลางภาค+ปลายภาค) จึงแสดงคอลัมน์กลางภาคเสมอ
   // ไม่ผูกกับค่า gradingStructure ที่อาจเป็นข้อมูลเก่าจากฐานข้อมูลอีกต่อไป
   const useMidterm = true;
+  // ★ ชื่อคอลัมน์สอบขึ้นอยู่กับระดับชั้นที่ตั้งค่าไว้ในรายวิชา: ประถม -> กลางปี/ปลายปี, มัธยม -> กลางภาค/ปลายภาค
+  const examLabels = useMemo(
+    () =>
+      educationLevel === "primary"
+        ? { midterm: "กลางปี", final: "ปลายปี" }
+        : { midterm: "กลางภาค", final: "ปลายภาค" },
+    [educationLevel]
+  );
   const [rawMidtermMax, setRawMidtermMax] = useState<number | null>(null);
 const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
   // ★ ลำดับคอลัมน์ชิ้นงานที่ครูลากสลับเอง (จำไว้ต่อห้องเรียนใน localStorage)
@@ -1112,7 +1122,8 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   onUpdateAssignmentWeight={handleUpdateAssignmentWeight}
   readOnly={effectiveReadOnly}
   gradingMode={gradingMode}
-  useMidterm={useMidterm}                       
+  useMidterm={useMidterm}
+  examLabels={examLabels}                       
   formativeMaxScore={formativeMaxScore}          
   midtermMaxScore={midtermMaxScore}              
   finalMaxScore={finalMaxScore}                 
@@ -1153,7 +1164,8 @@ function GradeTable({
   onUpdateExamScore, getLateInfo, readOnly, gradingMode = "numeric",
   useMidterm = false, formativeMaxScore = 0, midtermMaxScore = 0, finalMaxScore = 0,
   onReorderAssignments, rawMidtermMax, rawFinalMax, onChangeRawMidtermMax, onChangeRawFinalMax, onSaveExamConfig,  
-  onToast, onResetScore, onResetExamScore, onUpdateAssignmentWeight,  
+  onToast, onResetScore, onResetExamScore, onUpdateAssignmentWeight,
+  examLabels = { midterm: "กลางภาค", final: "ปลายภาค" },  
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
@@ -1179,7 +1191,8 @@ function GradeTable({
   onToast?: (message: string, type?: "success" | "error" | "info") => void; 
   onResetScore: (studentId: string, assignmentId: string) => void;
   onResetExamScore: (studentId: string, examType: "midterm" | "final") => void;
-  onUpdateAssignmentWeight: (assignmentId: string, weightPercent: number | null, allowWeight: boolean) => void; 
+  onUpdateAssignmentWeight: (assignmentId: string, weightPercent: number | null, allowWeight: boolean) => void;
+  examLabels?: { midterm: string; final: string };  // ★ เพิ่ม: ชื่อคอลัมน์สอบตามระดับชั้น (ประถม/มัธยม)
 }) {
   const [activeCell, setActiveCell] = useState<ActiveCell>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
@@ -1382,7 +1395,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
   <>
     {useMidterm && (
   <th className="px-3 py-3 text-center min-w-[90px] bg-teal-50/70">
-    <p className="text-m font-black text-teal-700">กลางภาค/กลางปี</p>
+    <p className="text-m font-black text-teal-700">{examLabels.midterm}</p>
     {readOnly ? (
       <p className="text-[18px] text-teal-300 font-bold">
         {rawMidtermMax ? `กรอกเต็ม ${rawMidtermMax} → นน. ${midtermMaxScore}` : `เต็ม ${midtermMaxScore}`}
@@ -1405,7 +1418,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
       <p className="text-[18px] text-indigo-300 font-bold">เต็ม {formativeMaxScore + (useMidterm ? midtermMaxScore : 0)}</p>
     </th>
 <th className="px-3 py-3 text-center min-w-[90px] bg-orange-50/70">
-  <p className="text-m font-black text-orange-700">ปลายภาค</p>
+  <p className="text-m font-black text-orange-700">{examLabels.final}</p>
   {readOnly ? (
     <p className="text-[18px] text-orange-300 font-bold">
       {rawFinalMax ? `กรอกเต็ม ${rawFinalMax} → นน. ${finalMaxScore}` : `เต็ม ${finalMaxScore}`}
@@ -1684,7 +1697,7 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
               }}
               className="w-full text-left px-4 py-2 text-sm font-bold text-red-500 hover:bg-red-50 flex items-center gap-2 whitespace-nowrap"
             >
-              ♻️ รีเซทคะแนน{contextMenu.examType === "midterm" ? "กลางภาค" : "ปลายภาค"} (กลับเป็นยังไม่ได้กรอก)
+              ♻️ รีเซทคะแนน{contextMenu.examType === "midterm" ? examLabels.midterm : examLabels.final} (กลับเป็นยังไม่ได้กรอก)
             </button>
           ) : (
             <AssignmentWeightPopover
