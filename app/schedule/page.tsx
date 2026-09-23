@@ -104,17 +104,16 @@ function isAdminRole(role?: string | null): boolean {
   return role.toLowerCase().includes("admin");
 }
 
-type UserProfile = {
-  id: string; title?: string; first_name?: string; last_name?: string; full_name?: string;
-  email: string; role: string; position?: string;
-  grade_level?: string;
-  extra_roles?: string[]; department_id?: string; // ← เพิ่ม
-};
 type TimeSlot   = { id: string; slot_number: number; start_time: string; end_time: string; slot_label?: string; is_break: boolean; schedule_type?: string };
-type Subject    = { id: string; subject_code: string; name_th: string; subject_group?: string };
+type Subject = { id: string; subject_code: string; name_th: string; subject_group?: string; periods_per_week?: number };
 type Teacher = {
   id: string; title?: string; first_name?: string; last_name?: string; full_name?: string; position?: string;
-  role?: string; grade_level?: string; department_id?: string; // ← เพิ่ม
+  role?: string; grade_level?: string; department_id?: string; extra_roles?: string[]; can_arrange_schedule?: boolean;
+};
+type UserProfile = {
+  id: string; title?: string; first_name?: string; last_name?: string; full_name?: string;
+  email: string; role: string; position?: string; grade_level?: string;
+  extra_roles?: string[]; department_id?: string; can_arrange_schedule?: boolean;
 };
 type Classroom  = { id: string; room_number: number; room_name?: string; grade_group?: string; academic_year_id?: string; schedule_type?: string; homeroom_teacher_id?: string; homeroom_teacher_2_id?: string };
 type TimetableEntry = {
@@ -140,6 +139,126 @@ type SubjectAdditionRequest = {
   reject_reason?: string; reviewed_by?: string; reviewed_at?: string; created_at: string;
   requester?: any;
 };
+type AutoScheduleParams = {
+  classroom: Classroom;
+  subjectId: string;
+  teacherId: string;
+  teacherId2?: string | null;
+  periodsNeeded: number;
+  entries: TimetableEntry[];        // คาบทั้งหมดที่มีอยู่แล้ว "ทุกห้อง" (ใช้เช็คครูชนกัน)
+  classrooms: Classroom[];          // ห้องทั้งหมด (ใช้หา building group ของห้องอื่นที่ครูสอนอยู่)
+  timeSlots: TimeSlot[];            // เวลาของ "ห้องนี้" (ผ่าน buildRoomSlots ตาม schedule_type แล้ว)
+  teachers: Teacher[];
+  lockedPeriods: { grade_label: string; day_of_week: number; slot_label: string }[];
+  gradeLabel: string;
+};
+
+function computeAutoScheduleSlots(p: AutoScheduleParams): { assignments: { day_of_week: number; time_slot: TimeSlot }[]; warnings: string[] } {
+  const { classroom, subjectId, teacherId, teacherId2, periodsNeeded, entries, classrooms,
+    timeSlots, teachers, lockedPeriods, gradeLabel } = p;
+
+  const teachingSlots = timeSlots.filter(s => !s.is_break).sort((a, b) => a.start_time.localeCompare(b.start_time));
+  const myBuildingGroup = getBuildingGroup(classroom);
+  const involvedTeacherIds = [teacherId, teacherId2].filter(Boolean) as string[];
+
+  function isTeacherGradeHead(tid: string): boolean {
+    const t = teachers.find(x => x.id === tid);
+    return !!t?.extra_roles?.includes("grade_head");
+  }
+
+  // ★ หัวหน้าสาย ว่าง 3 คาบแรกวันพุธเสมอ (day_of_week = 3)
+  function isWednesdayReserved(day: number, slot: TimeSlot): boolean {
+    if (day !== 3) return false;
+    const first3 = teachingSlots.slice(0, 3).map(s => s.id);
+    if (!first3.includes(slot.id)) return false;
+    return involvedTeacherIds.some(isTeacherGradeHead);
+  }
+
+  function isLocked(day: number, slot: TimeSlot): boolean {
+    return lockedPeriods.some(lp => lp.grade_label === gradeLabel && lp.day_of_week === day && lp.slot_label === slot.slot_label);
+  }
+
+  function slotStartOf(id: string) { return timeSlots.find(s => s.id === id)?.start_time?.slice(0, 5); }
+
+  function classroomOccupied(day: number, slot: TimeSlot): boolean {
+    const start = slot.start_time.slice(0, 5);
+    return entries.some(e => e.classroom_id === classroom.id && e.day_of_week === day &&
+      (e.time_slot_id === slot.id || slotStartOf(e.time_slot_id) === start));
+  }
+
+  function subjectAlreadyOnDay(day: number, extra: { day_of_week: number }[]): boolean {
+    const already = entries.some(e => e.classroom_id === classroom.id && e.day_of_week === day && e.subject_id === subjectId);
+    return already || extra.some(a => a.day_of_week === day);
+  }
+
+  function teacherEntriesOnDay(tid: string, day: number): TimetableEntry[] {
+    return entries.filter(e => e.day_of_week === day && (e.teacher_id === tid || e.teacher_id_2 === tid));
+  }
+
+  function teacherBusyAtSlot(tid: string, day: number, slot: TimeSlot): boolean {
+    const start = slot.start_time.slice(0, 5);
+    return teacherEntriesOnDay(tid, day).some(e => e.time_slot_id === slot.id || slotStartOf(e.time_slot_id) === start);
+  }
+
+  function teacherDailyCountReached(tid: string, day: number, extraCountToday: number): boolean {
+    return teacherEntriesOnDay(tid, day).length + extraCountToday >= 5; // ★ ไม่เกิน 5 คาบ/วัน
+  }
+
+  // ★ ถ้าครูมีคาบติดกัน (ก่อน/หลัง) ต้องอยู่กลุ่มอาคารเดียวกับห้องนี้
+  function buildingConflict(tid: string, day: number, slotIdx: number): boolean {
+    const neighborIdxs = [slotIdx - 1, slotIdx + 1].filter(i => i >= 0 && i < teachingSlots.length);
+    for (const idx of neighborIdxs) {
+      const neighborSlot = teachingSlots[idx];
+      const start = neighborSlot.start_time.slice(0, 5);
+      const otherEntry = teacherEntriesOnDay(tid, day).find(e => e.time_slot_id === neighborSlot.id || slotStartOf(e.time_slot_id) === start);
+      if (otherEntry) {
+        const otherRoom = classrooms.find(c => c.id === otherEntry.classroom_id);
+        if (otherRoom && otherRoom.id !== classroom.id && getBuildingGroup(otherRoom) !== myBuildingGroup) return true;
+      }
+    }
+    return false;
+  }
+
+  const assignments: { day_of_week: number; time_slot: TimeSlot }[] = [];
+  const warnings: string[] = [];
+  const days = [1, 2, 3, 4, 5];
+  const perDayCountThisRun: Record<string, number> = {}; // key: `${tid}-${day}`
+  let dayPointer = 0;
+  let guard = 0;
+
+  while (assignments.length < periodsNeeded && guard < 300) {
+    guard++;
+    const day = days[dayPointer % days.length];
+    dayPointer++;
+
+    if (subjectAlreadyOnDay(day, assignments)) continue; // ★ ไม่จัดวิชาเดียวกันซ้ำในวันเดียวกัน
+
+    let placed = false;
+    for (let idx = 0; idx < teachingSlots.length; idx++) {
+      const slot = teachingSlots[idx];
+      if (classroomOccupied(day, slot)) continue;
+      if (isLocked(day, slot)) continue;
+      if (isWednesdayReserved(day, slot)) continue;
+      if (involvedTeacherIds.some(tid => teacherBusyAtSlot(tid, day, slot))) continue;
+      if (involvedTeacherIds.some(tid => teacherDailyCountReached(tid, day, perDayCountThisRun[`${tid}-${day}`] ?? 0))) continue;
+      if (involvedTeacherIds.some(tid => buildingConflict(tid, day, idx))) continue;
+
+      assignments.push({ day_of_week: day, time_slot: slot });
+      involvedTeacherIds.forEach(tid => {
+        const k = `${tid}-${day}`;
+        perDayCountThisRun[k] = (perDayCountThisRun[k] ?? 0) + 1;
+      });
+      placed = true;
+      break;
+    }
+    if (!placed && dayPointer > days.length * 4) {
+      warnings.push(`หาคาบว่างที่ตรงเงื่อนไขไม่พอ (จัดได้ ${assignments.length}/${periodsNeeded} คาบ) กรุณาจัดที่เหลือด้วยตนเอง`);
+      break;
+    }
+  }
+
+  return { assignments, warnings };
+}
 
 const GRADE_LABELS_MS = ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"];
 const ALL_GRADE_LABELS = ["อ.2", "อ.3", "ป.1", "ป.2", "ป.3", "ป.4", "ป.5", "ป.6", "ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"];
@@ -149,6 +268,46 @@ function getClassroomGradeLabel(c: { room_name?: string }): string {
   return m ? `${m[1]}.${m[2]}` : "";
 }
 
+// ★ ใหม่: ห้อง ม.1–ม.6 เท่านั้นที่ต้องแยกเทอม 1/2 · อ./ป. แสดงรวมทุกเทอมเสมอ
+function isSecondaryClassroom(c: { room_name?: string }): boolean {
+  return getClassroomGradeLabel(c).startsWith("ม.");
+}
+
+// ★ ใหม่: ห้องนี้ (ผูกกับ academic_year_id หนึ่งแถว) อยู่เทอมไหน — ไม่ระบุ = เทอม 1
+function getSemesterForClassroom(room: Classroom, yearsRaw: AcademicYearRaw[]): number {
+  const yr = yearsRaw.find(y => y.id === room.academic_year_id);
+  return yr?.semester ?? 1;
+}
+
+// ★ ใหม่: กรองห้องตามเทอมที่เลือก — มีผลเฉพาะ ม.1–ม.6, อ./ป. ผ่านฟิลเตอร์นี้เสมอ
+function filterRoomsBySemester(rooms: Classroom[], semester: number, yearsRaw: AcademicYearRaw[]): Classroom[] {
+  return rooms.filter(r => !isSecondaryClassroom(r) || getSemesterForClassroom(r, yearsRaw) === semester);
+}
+// ★ ใหม่: กลุ่มอาคาร/ชั้น derive จากเลขห้องอัตโนมัติ — ห้อง 1-3 กลุ่มเดียวกัน, 4-6 อีกกลุ่ม ฯลฯ
+function getBuildingGroup(room: Classroom): number {
+  const n = room.room_number ?? 0;
+  return Math.ceil(n / 3) || 1;
+}
+
+const SCHEDULABLE_GRADE_LABELS = ["ป.1","ป.2","ป.3","ป.4","ป.5","ป.6","ม.1","ม.2","ม.3","ม.4","ม.5","ม.6"];
+
+// ★ ใหม่: เช็คว่าห้องนี้จัดคาบครบตามหลักสูตร (periods_per_week ของแต่ละวิชา) หรือยัง
+function classroomCompletionStatus(classroom: Classroom, subjects: Subject[], entries: TimetableEntry[]) {
+  const gradeLabel = getClassroomGradeLabel(classroom);
+  const applicable = subjects.filter(s => parseGradeFromSubjectCode(s.subject_code)?.includes(gradeLabel));
+  const roomEntries = entries.filter(e => e.classroom_id === classroom.id);
+  let totalRequired = 0, totalScheduled = 0;
+  const missing: { subject: Subject; missingPeriods: number }[] = [];
+  applicable.forEach(s => {
+    const required = s.periods_per_week ?? 0;
+    if (required <= 0) return;
+    const scheduled = roomEntries.filter(e => e.subject_id === s.id).length;
+    totalRequired += required;
+    totalScheduled += Math.min(scheduled, required);
+    if (scheduled < required) missing.push({ subject: s, missingPeriods: required - scheduled });
+  });
+  return { totalRequired, totalScheduled, missing };
+}
 function scheduleTypeForGradeLabel(label: string): string {
   if (label.startsWith("อ.")) return "kindergarten";
   if (label.startsWith("ป.")) return "primary";
@@ -158,7 +317,37 @@ function scheduleTypeForGradeLabel(label: string): string {
   }
   return "primary";
 }
-
+function GradeHeadPermissionModal({ teachers, onClose, onToggle }: {
+  teachers: Teacher[]; onClose: () => void; onToggle: (teacherId: string, value: boolean) => Promise<void>;
+}) {
+  const gradeHeads = teachers.filter(t => t.extra_roles?.includes("grade_head"));
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="bg-indigo-600 px-6 py-4">
+          <h3 className="text-lg font-black text-white">🔑 สิทธิ์จัดตารางสายชั้น</h3>
+          <p className="text-sm text-white/70">อนุญาตให้หัวหน้าสายจัดตารางสอนได้เอง (แอดมินจัดได้เสมออยู่แล้ว)</p>
+        </div>
+        <div className="p-5 space-y-2 max-h-[60vh] overflow-y-auto">
+          {gradeHeads.length === 0 && <p className="text-center text-slate-400 py-6 text-sm">ยังไม่มีผู้ใช้ role หัวหน้าสาย</p>}
+          {gradeHeads.map(t => (
+            <div key={t.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200">
+              <div>
+                <p className="font-bold text-slate-800 text-sm">{displayName(t)}</p>
+                <p className="text-xs text-slate-400">สาย {t.grade_level ?? "—"}</p>
+              </div>
+              <button onClick={() => onToggle(t.id, !t.can_arrange_schedule)}
+                className={`w-12 h-7 rounded-full transition-all relative ${t.can_arrange_schedule ? "bg-emerald-500" : "bg-slate-300"}`}>
+                <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-all ${t.can_arrange_schedule ? "left-5" : "left-0.5"}`} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="px-5 pb-5"><button onClick={onClose} className="w-full py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">ปิด</button></div>
+      </div>
+    </div>
+  );
+}
 // ── helpers ───────────────────────────────────────────────────────────────────
 function fullName(u: any) {
   if (!u) return "—";
@@ -278,7 +467,180 @@ async function fetchAllRows<T = any>(query: any): Promise<T[]> {
   }
   return all;
 }
+function LockedPeriodsModal({ lockedPeriods, academicYearId, onClose, onReload }: {
+  lockedPeriods: { id: string; grade_label: string; day_of_week: number; slot_label: string; label: string }[];
+  academicYearId: string; onClose: () => void; onReload: () => Promise<void>;
+}) {
+  const [grade, setGrade] = useState(SCHEDULABLE_GRADE_LABELS[0]);
+  const [day, setDay] = useState(1);
+  const [slotLabel, setSlotLabel] = useState("");
+  const [label, setLabel] = useState("");
+  const [saving, setSaving] = useState(false);
 
+  const type = scheduleTypeForGradeLabel(grade);
+  const tmpl = SCHEDULE_TEMPLATES.find(t => t.key === type)!;
+  const periodSlots = tmpl.slots.filter(s => !s.is_break);
+  const gradeLocks = lockedPeriods.filter(l => l.grade_label === grade);
+
+  async function addLock() {
+    if (!slotLabel || !label.trim()) { alert("กรุณาเลือกคาบและกรอกชื่อกิจกรรม"); return; }
+    setSaving(true);
+    await (supabase.from("locked_periods") as any).insert([{ grade_label: grade, day_of_week: day, slot_label: slotLabel, label: label.trim(), academic_year_id: academicYearId }]);
+    setLabel(""); await onReload(); setSaving(false);
+  }
+  async function removeLock(id: string) {
+    if (!confirm("ยกเลิกการล็อกคาบนี้?")) return;
+    await supabase.from("locked_periods").delete().eq("id", id);
+    await onReload();
+  }
+
+  const inp = "bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-800 text-sm font-bold focus:border-rose-400 focus:outline-none";
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="bg-rose-600 px-6 py-4">
+          <h3 className="text-lg font-black text-white">🔒 ล็อกคาบ</h3>
+          <p className="text-sm text-white/70">ระบบจัดตารางอัตโนมัติจะข้ามคาบที่ล็อกไว้เสมอ</p>
+        </div>
+        <div className="p-5 space-y-3 overflow-y-auto flex-1">
+          <div className="grid grid-cols-2 gap-2">
+            <select value={grade} onChange={e => { setGrade(e.target.value); setSlotLabel(""); }} className={inp}>
+              {SCHEDULABLE_GRADE_LABELS.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+            <select value={day} onChange={e => setDay(Number(e.target.value))} className={inp}>
+              {DAYS.map((d, i) => <option key={d} value={i + 1}>{d}</option>)}
+            </select>
+            <select value={slotLabel} onChange={e => setSlotLabel(e.target.value)} className={inp}>
+              <option value="">— เลือกคาบ —</option>
+              {periodSlots.map(s => <option key={s.slot_label} value={s.slot_label}>{s.slot_label} ({s.start_time}-{s.end_time})</option>)}
+            </select>
+            <input value={label} onChange={e => setLabel(e.target.value)} placeholder="เช่น ลูกเสือ-เนตรนารี" className={inp} />
+          </div>
+          <button onClick={addLock} disabled={saving} className="w-full py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-sm disabled:opacity-50">
+            {saving ? "⏳..." : "+ เพิ่มคาบล็อก"}
+          </button>
+          <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+            {gradeLocks.length === 0 ? <div className="text-center py-6 text-slate-400 text-sm">ยังไม่มีคาบล็อกสำหรับชั้นนี้</div> :
+              gradeLocks.map(l => (
+                <div key={l.id} className="px-4 py-3 flex items-center justify-between gap-2 bg-white">
+                  <p className="text-sm font-bold text-slate-700">🔒 {DAYS[l.day_of_week - 1]} · {l.slot_label} · {l.label}</p>
+                  <button onClick={() => removeLock(l.id)} className="px-3 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs font-black">ลบ</button>
+                </div>
+              ))}
+          </div>
+        </div>
+        <div className="px-5 pb-5 pt-2 border-t border-slate-100"><button onClick={onClose} className="w-full py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">ปิด</button></div>
+      </div>
+    </div>
+  );
+}
+function AutoArrangeModal({ classroom, subjects, teachers, entries, classrooms, timeSlots, lockedPeriods, onClose, onArrange }: {
+  classroom: Classroom; subjects: Subject[]; teachers: Teacher[];
+  entries: TimetableEntry[]; classrooms: Classroom[]; timeSlots: TimeSlot[];
+  lockedPeriods: { grade_label: string; day_of_week: number; slot_label: string }[];
+  onClose: () => void;
+  onArrange: (assignments: { day_of_week: number; time_slot: TimeSlot }[], subjectId: string, teacherId: string, teacherId2?: string) => Promise<void>;
+}) {
+  const gradeLabel = getClassroomGradeLabel(classroom);
+  const applicableSubjects = subjects.filter(s => parseGradeFromSubjectCode(s.subject_code)?.includes(gradeLabel));
+  const [subjectId, setSubjectId] = useState("");
+  const [teacherId, setTeacherId] = useState("");
+  const [teacherId2, setTeacherId2] = useState("");
+  const [periodsOverride, setPeriodsOverride] = useState<number | "">("");
+  const [preview, setPreview] = useState<{ day_of_week: number; time_slot: TimeSlot }[] | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [running, setRunning] = useState(false);
+
+  const subject = subjects.find(s => s.id === subjectId);
+  const alreadyScheduled = entries.filter(e => e.classroom_id === classroom.id && e.subject_id === subjectId).length;
+  const configuredPerWeek = subject?.periods_per_week ?? null;
+  const periodsNeeded = periodsOverride !== "" ? Number(periodsOverride) : Math.max(0, (configuredPerWeek ?? 0) - alreadyScheduled);
+  const roomSlots = buildRoomSlots(classroom.schedule_type, timeSlots);
+
+  function runPreview() {
+    if (!subjectId || !teacherId || periodsNeeded <= 0) { alert("กรุณาเลือกวิชา ครู และระบุจำนวนคาบที่ต้องการจัด"); return; }
+    const result = computeAutoScheduleSlots({
+      classroom, subjectId, teacherId, teacherId2: teacherId2 || null, periodsNeeded,
+      entries, classrooms, timeSlots: roomSlots, teachers, lockedPeriods, gradeLabel,
+    });
+    setPreview(result.assignments);
+    setWarnings(result.warnings);
+  }
+  async function confirmArrange() {
+    if (!preview || preview.length === 0) return;
+    setRunning(true);
+    await onArrange(preview, subjectId, teacherId, teacherId2 || undefined);
+    setRunning(false);
+    onClose();
+  }
+
+  const inp = "w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm font-bold focus:border-violet-400 focus:outline-none";
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="bg-violet-600 px-6 py-4">
+          <h3 className="text-lg font-black text-white">⚡ จัดตารางอัตโนมัติ</h3>
+          <p className="text-sm text-white/70">ห้อง {classroom.grade_group} {classroom.room_name} · เลือกทีละรายวิชา</p>
+        </div>
+        <div className="p-5 space-y-3 overflow-y-auto flex-1">
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">รายวิชา *</label>
+            <select value={subjectId} onChange={e => { setSubjectId(e.target.value); setPreview(null); }} className={inp}>
+              <option value="">— เลือกรายวิชา —</option>
+              {applicableSubjects.map(s => <option key={s.id} value={s.id}>{s.subject_code} {s.name_th}</option>)}
+            </select>
+            {subject && <p className="text-xs text-slate-400 mt-1">กำหนดไว้ {configuredPerWeek ?? "ยังไม่ตั้งค่า"} คาบ/สัปดาห์ · จัดไปแล้ว {alreadyScheduled} คาบ</p>}
+          </div>
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">ครูผู้สอน คนที่ 1 *</label>
+            <select value={teacherId} onChange={e => setTeacherId(e.target.value)} className={inp}>
+              <option value="">— เลือกครู —</option>
+              {teachers.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">ครูผู้สอน คนที่ 2 (ถ้ามี)</label>
+            <select value={teacherId2} onChange={e => setTeacherId2(e.target.value)} className={inp}>
+              <option value="">— ไม่มี —</option>
+              {teachers.filter(t => t.id !== teacherId).map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">
+              จำนวนคาบที่จะจัดรอบนี้ {configuredPerWeek == null && <span className="text-amber-500">(ยังไม่ตั้งค่าคาบ/สัปดาห์ กรุณาระบุเอง)</span>}
+            </label>
+            <input type="number" min={1} value={periodsOverride === "" ? "" : periodsOverride}
+              onChange={e => setPeriodsOverride(e.target.value === "" ? "" : Number(e.target.value))}
+              placeholder={String(periodsNeeded || 1)} className={inp} />
+          </div>
+          <button onClick={runPreview} className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-black text-sm">
+            🔍 หาคาบว่างให้ดูก่อน
+          </button>
+          {preview && (
+            <div className="bg-violet-50 border-2 border-violet-200 rounded-xl p-3">
+              <p className="text-xs font-black text-violet-700 mb-2">พบคาบว่างที่เหมาะสม {preview.length} คาบ:</p>
+              <div className="space-y-1">
+                {preview.map((a, i) => (
+                  <p key={i} className="text-xs text-slate-600">• {DAYS[a.day_of_week - 1]} · {a.time_slot.slot_label} ({formatTime(a.time_slot.start_time)}-{formatTime(a.time_slot.end_time)})</p>
+                ))}
+              </div>
+              {warnings.map((w, i) => <p key={i} className="text-xs text-amber-600 font-bold mt-2">⚠️ {w}</p>)}
+            </div>
+          )}
+        </div>
+        <div className="px-5 pb-5 pt-2 border-t border-slate-100 flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">ยกเลิก</button>
+          <button onClick={confirmArrange} disabled={!preview || preview.length === 0 || running}
+            className="flex-[2] py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm disabled:opacity-50">
+            {running ? "⏳ กำลังบันทึก..." : `✅ ยืนยันจัด ${preview?.length ?? 0} คาบ`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Entry Modal ───────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1614,6 +1976,7 @@ export default function SchedulePage() {
   const [academicYearsRaw, setAcademicYearsRaw] = useState<AcademicYearRaw[]>([]);
   const [academicYears,    setAcademicYears]    = useState<{ id: string; year_name: string }[]>([]);
   const [selectedYear,     setSelectedYear]     = useState("");
+  const [selectedSemester, setSelectedSemester] = useState<number>(1); 
   const [selectedRoom,     setSelectedRoom]     = useState("");
   const [viewMode, setViewMode] = useState<"room"|"teacher"|"requests"|"duplicates"|"dashboard"|"gradeSchedule">("room");
   const [selectedDayDetail, setSelectedDayDetail] = useState<number | null>(null);
@@ -1645,6 +2008,39 @@ const loadClubs = useCallback(async () => {
 
   setClubs(((clubsData ?? []) as any[]).map(c => ({ ...c, teacher: teacherMap[c.teacher_id] })));
 }, [selectedYear, academicYearsRaw]);
+const [showGradeHeadPermission, setShowGradeHeadPermission] = useState(false);
+const [lockedPeriods, setLockedPeriods] = useState<any[]>([]);
+const [showLockedPeriods, setShowLockedPeriods] = useState(false);
+
+const loadLockedPeriods = useCallback(async () => {
+  if (!selectedYear) return;
+  const selRow = academicYearsRaw.find(y => y.id === selectedYear);
+  const yearIds = selRow ? academicYearsRaw.filter(y => y.year_name === selRow.year_name).map(y => y.id) : [selectedYear];
+  const { data } = await supabase.from("locked_periods").select("*").in("academic_year_id", yearIds);
+  setLockedPeriods(data ?? []);
+}, [selectedYear, academicYearsRaw]);
+const [showAutoArrange, setShowAutoArrange] = useState(false);
+
+async function handleAutoArrangeConfirm(
+  assignments: { day_of_week: number; time_slot: TimeSlot }[],
+  subjectId: string, teacherId: string, teacherId2?: string
+) {
+  if (!selectedClassroom) return;
+  for (const a of assignments) {
+    await handleSaveDirect({
+      classroom_id: selectedClassroom.id, subject_id: subjectId,
+      teacher_id: teacherId, teacher_id_2: teacherId2 ?? null,
+      day_of_week: a.day_of_week, time_slot_id: a.time_slot.id, time_slot: a.time_slot,
+      academic_year_id: selectedYear,
+    });
+  }
+}
+useEffect(() => { loadLockedPeriods(); }, [loadLockedPeriods]);
+
+async function toggleGradeHeadPermission(teacherId: string, value: boolean) {
+  await (supabase.from("users") as any).update({ can_arrange_schedule: value }).eq("id", teacherId);
+  setTeachers(prev => prev.map(t => t.id === teacherId ? { ...t, can_arrange_schedule: value } : t));
+}
 
 useEffect(() => { loadClubs(); }, [loadClubs]);
 
@@ -1659,13 +2055,13 @@ useEffect(() => { loadClubs(); }, [loadClubs]);
 
       let profileData: any = null;
       const { data: byAuthId } = await supabase.from("users")
-        .select("id,first_name,last_name,full_name,email,role,position,grade_level,extra_roles,department_id")
+        .select("id,first_name,last_name,full_name,email,role,position,grade_level,extra_roles,department_id,can_arrange_schedule")
         .eq("auth_id", authUser.id).maybeSingle();
       profileData = byAuthId;
 
       if (!profileData && email) {
         const { data: byEmail } = await supabase.from("users")
-          .select("id,first_name,last_name,full_name,email,role,position,grade_level,extra_roles,department_id")
+          .select("id,first_name,last_name,full_name,email,role,position,grade_level,extra_roles,department_id,can_arrange_schedule")
           .eq("email", email).maybeSingle();
         profileData = byEmail;
         if (profileData) await (supabase.from("users") as any).update({ auth_id: authUser.id }).eq("id", profileData.id);
@@ -1682,10 +2078,10 @@ useEffect(() => { loadClubs(); }, [loadClubs]);
           .order("year_name", { ascending: false })
           .order("semester", { ascending: false }),
         supabase.from("time_slots").select("*").order("start_time"),
-        supabase.from("subjects").select("id,subject_code,name_th,subject_group").order("subject_code"),
-        supabase.from("users")
-          .select("id,title,first_name,last_name,full_name,position,role,grade_level,department_id")
-          .order("first_name"),
+supabase.from("subjects").select("id,subject_code,name_th,subject_group,periods_per_week").order("subject_code"),
+supabase.from("users")
+  .select("id,title,first_name,last_name,full_name,position,role,grade_level,department_id,extra_roles,can_arrange_schedule")
+  .order("first_name"),
         // ★ FIX: ดึงห้องทั้งหมด ไม่ filter
         supabase.from("classrooms")
           .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type,homeroom_teacher_id,homeroom_teacher_2_id")
@@ -1717,8 +2113,12 @@ useEffect(() => { loadClubs(); }, [loadClubs]);
 
         // ★ FIX: หาห้องที่ตรงปี ถ้าไม่มีเลย → แสดงทั้งหมด
         const sameYearIds = yearsRaw.filter(y => y.year_name === currentYearRow.year_name).map(y => y.id);
-        const matched     = allRooms.filter(r => sameYearIds.includes(r.academic_year_id ?? ""));
-        const roomList    = matched.length > 0 ? matched : allRooms; // ★ fallback แสดงทั้งหมด
+        const matched      = allRooms.filter(r => sameYearIds.includes(r.academic_year_id ?? ""));
+        const baseRoomList = matched.length > 0 ? matched : allRooms; // ★ fallback แสดงทั้งหมด
+
+        const initSemester = currentYearRow.semester ?? 1;
+        setSelectedSemester(initSemester);
+        const roomList = filterRoomsBySemester(baseRoomList, initSemester, yearsRaw); // ★ ใหม่
 
         setClassrooms(roomList);
 
@@ -1740,15 +2140,16 @@ useEffect(() => { loadClubs(); }, [loadClubs]);
 
   // ── Re-filter classrooms ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!selectedYear || academicYearsRaw.length === 0 || allClassrooms.length === 0) return;
-    const selRow  = academicYearsRaw.find(y => y.id === selectedYear);
-    if (!selRow) return;
-    const sameIds = academicYearsRaw.filter(y => y.year_name === selRow.year_name).map(y => y.id);
-    const matched = allClassrooms.filter(r => sameIds.includes(r.academic_year_id ?? ""));
-    const list    = matched.length > 0 ? matched : allClassrooms;
-    setClassrooms(list);
-    if (list.length > 0 && !list.find(r => r.id === selectedRoom)) setSelectedRoom(list[0].id);
-  }, [selectedYear, academicYearsRaw, allClassrooms]);
+  if (!selectedYear || academicYearsRaw.length === 0 || allClassrooms.length === 0) return;
+  const selRow  = academicYearsRaw.find(y => y.id === selectedYear);
+  if (!selRow) return;
+  const sameIds  = academicYearsRaw.filter(y => y.year_name === selRow.year_name).map(y => y.id);
+  const matched  = allClassrooms.filter(r => sameIds.includes(r.academic_year_id ?? ""));
+  const baseList = matched.length > 0 ? matched : allClassrooms;
+  const list = filterRoomsBySemester(baseList, selectedSemester, academicYearsRaw); // ★ ใหม่
+  setClassrooms(list);
+  if (list.length > 0 && !list.find(r => r.id === selectedRoom)) setSelectedRoom(list[0].id);
+}, [selectedYear, selectedSemester, academicYearsRaw, allClassrooms]); // ★ เพิ่ม selectedSemester
 
   // ── roomTimeSlots ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1909,11 +2310,11 @@ useEffect(() => {
       .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type,homeroom_teacher_id,homeroom_teacher_2_id").order("grade_group").order("room_number");
     const allRooms = (data ?? []) as Classroom[];
     setAllClassrooms(allRooms);
-    const selRow  = academicYearsRaw.find(y => y.id === selectedYear);
+        const selRow  = academicYearsRaw.find(y => y.id === selectedYear);
     if (selRow) {
       const sameIds = academicYearsRaw.filter(y => y.year_name === selRow.year_name).map(y => y.id);
       const matched = allRooms.filter(r => sameIds.includes(r.academic_year_id ?? ""));
-      setClassrooms(matched.length > 0 ? matched : allRooms);
+      setClassrooms(filterRoomsBySemester(matched.length > 0 ? matched : allRooms, selectedSemester, academicYearsRaw)); // ★ แก้บรรทัดนี้
     } else setClassrooms(allRooms);
   }
   async function checkAndNotifyConflict(classroomId: string, dayOfWeek: number, timeSlotId: string) {
@@ -2474,7 +2875,7 @@ async function desyncSubjectSection({
   if (!user)   return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><p className="text-red-500 font-black">❌ กรุณาเข้าสู่ระบบก่อน</p></div>;
 
   const isAdmin           = isAdminRole(user.role);
-  const canManageGradeSchedule = isAdmin || (user.extra_roles ?? []).includes("grade_head");
+  const canManageGradeSchedule = isAdmin || ((user.extra_roles ?? []).includes("grade_head") && !!user.can_arrange_schedule);
   const isApprover        = APPROVER_ROLES.includes(user.role) || isAdminRole(user.role);
   const canEditDirect     = isAdmin;
   const selectedClassroom = classrooms.find(c => c.id === selectedRoom);
@@ -2595,6 +2996,9 @@ const totalScheduledPeriods = entries.length;
 
   return (
     <div className="min-h-screen bg-slate-50 print:bg-white">
+      {showGradeHeadPermission && (
+  <GradeHeadPermissionModal teachers={teachers} onClose={() => setShowGradeHeadPermission(false)} onToggle={toggleGradeHeadPermission} />
+)}
       {showSettings && selectedClassroom && (
         <ScheduleSettingsModal onClose={() => setShowSettings(false)} onApply={applyScheduleType} />
       )}
@@ -2604,6 +3008,14 @@ const totalScheduledPeriods = entries.length;
     day={selectedDayDetail} entries={myEntries} timeSlots={timeSlots}
     subjects={subjects} teachers={teachers} classrooms={classrooms} userId={user.id}
     onClose={() => setSelectedDayDetail(null)}
+  />
+)}
+{showAutoArrange && selectedClassroom && (
+  <AutoArrangeModal
+    classroom={selectedClassroom} subjects={subjects} teachers={teachers}
+    entries={entries} classrooms={allClassrooms} timeSlots={timeSlots} lockedPeriods={lockedPeriods}
+    onClose={() => setShowAutoArrange(false)}
+    onArrange={handleAutoArrangeConfirm}
   />
 )}
 {showClubAdmin && (
@@ -2629,6 +3041,9 @@ const totalScheduledPeriods = entries.length;
     </div>
   </div>
 )}
+{showLockedPeriods && (
+  <LockedPeriodsModal lockedPeriods={lockedPeriods} academicYearId={selectedYear} onClose={() => setShowLockedPeriods(false)} onReload={loadLockedPeriods} />
+)}
 {showAddSubjectRequest && (
   <AddSubjectRequestModal
     subjects={subjects}
@@ -2648,9 +3063,19 @@ const totalScheduledPeriods = entries.length;
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)}
-              className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none">
-              {academicYears.map(y => <option key={y.id} value={y.id}>{y.year_name}</option>)}
-            </select>
+  className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-slate-700 text-sm font-bold focus:outline-none">
+  {academicYears.map(y => <option key={y.id} value={y.id}>{y.year_name}</option>)}
+</select>
+
+{/* ★ ใหม่: สลับเทอม — มีผลเฉพาะห้อง ม.1–ม.6 / อ.-ป. แสดงรวมทุกเทอมเสมอ */}
+<div className="flex bg-slate-100 rounded-xl p-1 gap-0.5" title="แยกเทอมเฉพาะ ม.1–ม.6 · อ./ป. แสดงรวมทุกเทอม">
+  {[1, 2].map(s => (
+    <button key={s} onClick={() => setSelectedSemester(s)}
+      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${selectedSemester === s ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
+      เทอม {s}
+    </button>
+  ))}
+</div>
             <div className="flex bg-slate-100 rounded-xl p-1 gap-0.5">
               <button onClick={() => setViewMode("room")}
                 className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${viewMode === "room" ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
@@ -2669,6 +3094,12 @@ const totalScheduledPeriods = entries.length;
                   <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">{pendingCount + pendingSubjectCount}</span>
                 )}
               </button>
+              {isAdmin && (
+  <button onClick={() => setShowGradeHeadPermission(true)}
+    className="px-3 py-2 rounded-xl border-2 border-indigo-200 bg-indigo-50 text-indigo-700 font-black text-sm hover:bg-indigo-100">
+    🔑 สิทธิ์ หน.สาย
+  </button>
+)}
               {isAdmin && (
                 <button onClick={() => setViewMode("dashboard")}
                   className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${viewMode === "dashboard" ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
@@ -2708,6 +3139,12 @@ const totalScheduledPeriods = entries.length;
     disabled={syncing}
     className="px-3 py-2 rounded-xl border-2 border-teal-200 bg-teal-50 text-teal-700 font-black text-sm hover:bg-teal-100 disabled:opacity-50 flex items-center gap-1.5">
     {syncing ? "⏳ กำลังซิงค์..." : "🔄 ซิงค์ Smart Class"}
+  </button>
+)}
+{(isAdmin || canManageGradeSchedule) && (
+  <button onClick={() => setShowLockedPeriods(true)}
+    className="px-3 py-2 rounded-xl border-2 border-rose-200 bg-rose-50 text-rose-700 font-black text-sm hover:bg-rose-100">
+    🔒 ล็อกคาบ
   </button>
 )}
             </div>
@@ -2787,6 +3224,7 @@ const totalScheduledPeriods = entries.length;
                             <span className="truncate">{room.room_name ?? `ห้อง ${room.room_number}`}</span>
                             {isAdmin && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md shrink-0 ml-1 ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-400"}`}>{tLabel}</span>}
                           </button>
+                          
                         );
                       })}
                     </div>
@@ -2814,16 +3252,23 @@ const totalScheduledPeriods = entries.length;
 
           {/* ── ห้อง ── */}
           {viewMode === "room" && selectedClassroom && (
-            <div>
-              <div className="flex items-center justify-between mb-4 flex-wrap gap-2 print:hidden">
-                <div>
-                  <h2 className="text-xl font-black text-slate-800">{selectedClassroom.grade_group} {selectedClassroom.room_name}</h2>
-                  <p className="text-slate-400 text-sm">
-                    {roomEntries.length} คาบ · ตาราง{currentScheduleType}
-                    {!canEditDirect && <span className="ml-2 text-amber-600 font-bold text-xs">· คลิกคาบที่คุณสอนเพื่อขอแก้ไข</span>}
-                  </p>
-                </div>
-              </div>
+  <div>
+    <div className="flex items-center justify-between mb-4 flex-wrap gap-2 print:hidden">
+      <div>
+        <h2 className="text-xl font-black text-slate-800">{selectedClassroom.grade_group} {selectedClassroom.room_name}</h2>
+        <p className="text-slate-400 text-sm">
+          {roomEntries.length} คาบ · ตาราง{currentScheduleType}
+          {isSecondaryClassroom(selectedClassroom) && <span className="ml-2 text-indigo-500 font-bold">· เทอม {selectedSemester}</span>}
+          {!canEditDirect && <span className="ml-2 text-amber-600 font-bold text-xs">· คลิกคาบที่คุณสอนเพื่อขอแก้ไข</span>}
+        </p>
+      </div>
+      {(isAdmin || canManageGradeSchedule) && selectedClassroom.schedule_type !== "kindergarten" && (
+        <button onClick={() => setShowAutoArrange(true)}
+          className="px-3 py-2 rounded-xl border-2 border-violet-200 bg-violet-50 text-violet-700 font-black text-sm hover:bg-violet-100 shrink-0">
+          ⚡ จัดอัตโนมัติ
+        </button>
+      )}
+    </div>
               <TimetableGrid
   key={`${selectedRoom}-${roomEntries.length}`}
   classroom={selectedClassroom} entries={roomEntries} timeSlots={roomTimeSlots}
@@ -2934,7 +3379,7 @@ const totalScheduledPeriods = entries.length;
                     className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm shrink-0">
                     ➕ ขอเพิ่มรายวิชา
                   </button>
-                )}
+                )}               
               </div>
               <div className={`mb-4 rounded-2xl border-2 px-4 py-3 flex items-center gap-3 ${isApprover ? "bg-indigo-50 border-indigo-200" : "bg-blue-50 border-blue-200"}`}>
                 <span className="text-xl">{isApprover ? "🔑" : "👤"}</span>
