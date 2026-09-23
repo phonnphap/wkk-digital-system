@@ -1934,6 +1934,125 @@ useEffect(() => {
       console.warn("[checkAndNotifyConflict] error:", err);
     }
   }
+  async function handleDeleteEntry(id: string) {
+    const entry = entries.find(e => e.id === id) ?? allEntriesForCheck.find(e => e.id === id);
+    await supabase.from("timetable_entries").delete().eq("id", id);
+    await loadEntries();
+    if (entry) {
+      await desyncSubjectSection({
+        subjectId: entry.subject_id, classroomId: entry.classroom_id,
+        academicYearId: entry.academic_year_id, teacherId: entry.teacher_id,
+      });
+      if (entry.teacher_id_2) {
+        await desyncSubjectSection({
+          subjectId: entry.subject_id, classroomId: entry.classroom_id,
+          academicYearId: entry.academic_year_id, teacherId: entry.teacher_id_2,
+        });
+      }
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+// ✅ syncSubjectSection — ทำให้ subject_sections ตรงกับ timetable_entries เสมอ
+// เรียกทุกครั้งหลัง insert/update timetable_entries สำเร็จ
+// ══════════════════════════════════════════════════════════════════════════
+async function syncSubjectSection({
+  subjectId, classroomId, academicYearId, teacherId, teacherId2, createdBy,
+}: {
+  subjectId: string; classroomId: string; academicYearId: string;
+  teacherId: string; teacherId2?: string | null; createdBy: string;
+}) {
+  try {
+    const { data: existing } = await supabase
+      .from("subject_sections")
+      .select("id, teacher_id, co_teacher_id, is_active")
+      .eq("subject_id", subjectId)
+      .eq("classroom_id", classroomId)
+      .eq("academic_year_id", academicYearId)
+      .maybeSingle();
+
+    if (!existing) {
+      // ยังไม่มี section เลย → สร้างใหม่
+      const joinCode = Math.random().toString(36).slice(2, 8);
+      const { error } = await (supabase.from("subject_sections") as any).insert([{
+        subject_id: subjectId, classroom_id: classroomId, academic_year_id: academicYearId,
+        teacher_id: teacherId, co_teacher_id: teacherId2 || null,
+        join_code: joinCode, is_active: true, created_by: createdBy,
+      }]);
+      if (error) console.error("[syncSubjectSection] insert error:", error);
+      return;
+    }
+
+    // มี section อยู่แล้ว → เช็คว่าครูตรงไหม ถ้าไม่ตรงให้เติม/อัปเดต
+    const currentTeachers = [existing.teacher_id, existing.co_teacher_id].filter(Boolean);
+    const wantedTeachers = [teacherId, teacherId2].filter(Boolean) as string[];
+    const missing = wantedTeachers.filter(t => !currentTeachers.includes(t));
+
+    const patch: any = {};
+    if (!existing.is_active) patch.is_active = true; // เผื่อเคยถูกปิดไปแล้วมีคนกลับมาสอนใหม่
+
+    if (missing.length > 0) {
+      if (!existing.teacher_id) patch.teacher_id = missing[0];
+      else if (!existing.co_teacher_id) patch.co_teacher_id = missing.find(m => m !== existing.teacher_id) ?? missing[0];
+      // ถ้าเต็มทั้ง 2 ช่องแล้วแต่ยังมีคนขาด (ครูคนที่ 3) — log ไว้เตือนแอดมิน ไม่ auto-overwrite
+      else console.warn("[syncSubjectSection] มีครูเกิน 2 คนสำหรับ", { subjectId, classroomId }, "ครูที่ขาด:", missing);
+    }
+
+    if (Object.keys(patch).length > 0) {
+      const { error } = await (supabase.from("subject_sections") as any).update(patch).eq("id", existing.id);
+      if (error) console.error("[syncSubjectSection] update error:", error);
+    }
+  } catch (err) {
+    console.error("[syncSubjectSection] unexpected error:", err);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// ✅ desyncSubjectSection — ถอดครูออกจาก section เมื่อไม่มีคาบสอนคู่นี้เหลือแล้ว
+// เรียกหลังลบ/แก้ไข timetable_entries (เผื่อครูคนนั้นเลิกสอนคู่ subject+classroom นี้)
+// ══════════════════════════════════════════════════════════════════════════
+async function desyncSubjectSection({
+  subjectId, classroomId, academicYearId, teacherId,
+}: {
+  subjectId: string; classroomId: string; academicYearId: string; teacherId: string;
+}) {
+  try {
+    // เช็คก่อนว่าครูคนนี้ยังมีคาบของ subject+classroom คู่นี้เหลืออยู่ไหม
+    const { data: stillTeaching } = await supabase
+      .from("timetable_entries")
+      .select("id")
+      .eq("subject_id", subjectId)
+      .eq("classroom_id", classroomId)
+      .or(`teacher_id.eq.${teacherId},teacher_id_2.eq.${teacherId}`)
+      .limit(1);
+    if (stillTeaching && stillTeaching.length > 0) return; // ยังสอนอยู่ ไม่ต้องทำอะไร
+
+    const { data: section } = await supabase
+      .from("subject_sections")
+      .select("id, teacher_id, co_teacher_id")
+      .eq("subject_id", subjectId)
+      .eq("classroom_id", classroomId)
+      .eq("academic_year_id", academicYearId)
+      .maybeSingle();
+    if (!section) return;
+
+    if (section.co_teacher_id === teacherId) {
+      await (supabase.from("subject_sections") as any).update({ co_teacher_id: null }).eq("id", section.id);
+    } else if (section.teacher_id === teacherId) {
+      if (section.co_teacher_id) {
+        // เลื่อน co_teacher ขึ้นมาแทน
+        await (supabase.from("subject_sections") as any)
+          .update({ teacher_id: section.co_teacher_id, co_teacher_id: null })
+          .eq("id", section.id);
+      } else {
+        // ไม่มีใครสอนเลย — ปิด section (ไม่ลบถาวร เผื่อมีข้อมูลนักเรียน/คะแนนผูกอยู่)
+        await (supabase.from("subject_sections") as any).update({ is_active: false }).eq("id", section.id);
+      }
+    }
+  } catch (err) {
+    console.error("[desyncSubjectSection] unexpected error:", err);
+  }
+}
   // ══════════════════════════════════════════════════════════════════════════
   // ✅ ใหม่: ensureRealTimeSlot — แก้ปัญหา "กดเพิ่มคาบแล้วไม่มีอะไรเกิดขึ้น"
   // สาเหตุ: บางคาบ (เช่นคาบเฉพาะของอนุบาล 09:30–09:50) เป็นแค่ "virtual slot" ที่สร้างจาก
@@ -1974,8 +2093,6 @@ useEffect(() => {
     try {
       const realSlotId = await ensureRealTimeSlot(data.time_slot_id, data.time_slot);
 
-      // ✅ NEW: เช็คก่อนบันทึกว่ามีคาบอยู่ในช่องนี้แล้วหรือไม่ (กันเคสหน้าจอไม่ sync กับ DB)
-      // ถ้ากำลังแก้ไขคาบเดิม (data.id) ให้ไม่นับตัวเอง
       const { data: clash, error: clashErr } = await supabase
         .from("timetable_entries")
         .select("id")
@@ -1985,28 +2102,33 @@ useEffect(() => {
         .eq("academic_year_id", data.academic_year_id);
       if (clashErr) throw clashErr;
       const otherClash = (clash ?? []).filter(c => c.id !== data.id);
-if (otherClash.length > 0) {
-  const confirmOverwrite = confirm(
-    "⚠️ ช่องนี้มีคาบเรียนอยู่แล้วในระบบ (แต่หน้าจอไม่แสดง)\n\n" +
-    "ต้องการบันทึกทับคาบเดิมด้วยข้อมูลใหม่นี้เลยหรือไม่?"
-  );
-  if (!confirmOverwrite) { await loadEntries(); return; }
+      if (otherClash.length > 0) {
+        const confirmOverwrite = confirm(
+          "⚠️ ช่องนี้มีคาบเรียนอยู่แล้วในระบบ (แต่หน้าจอไม่แสดง)\n\n" +
+          "ต้องการบันทึกทับคาบเดิมด้วยข้อมูลใหม่นี้เลยหรือไม่?"
+        );
+        if (!confirmOverwrite) { await loadEntries(); return; }
 
-  // เขียนทับแถวที่ซ้ำแถวแรก แทนการ insert ใหม่
-  const { error: overwriteErr } = await (supabase.from("timetable_entries") as any)
-    .update({
-      subject_id: data.subject_id,
-      teacher_id: data.teacher_id,
-      teacher_id_2: data.teacher_id_2 ?? null,
-      time_slot_id: realSlotId,
-    })
-    .eq("id", otherClash[0].id);
-  if (overwriteErr) throw overwriteErr;
-  await loadEntries();
-  return;
-}
+        // ✅ แก้: ใส่ค่าจริงแทน /* ... */
+        const { error: overwriteErr } = await (supabase.from("timetable_entries") as any)
+          .update({
+            subject_id: data.subject_id,
+            teacher_id: data.teacher_id,
+            teacher_id_2: data.teacher_id_2 ?? null,
+            time_slot_id: realSlotId,
+          })
+          .eq("id", otherClash[0].id);
+        if (overwriteErr) throw overwriteErr;
+        await loadEntries();
+        await syncSubjectSection({
+          subjectId: data.subject_id, classroomId: data.classroom_id, academicYearId: data.academic_year_id,
+          teacherId: data.teacher_id, teacherId2: data.teacher_id_2, createdBy: user!.id,
+        });
+        return;
+      }
 
       if (data.id) {
+        // ✅ แก้: ใส่ค่าจริงแทน /* ... */
         const { error } = await (supabase.from("timetable_entries") as any)
           .update({
             subject_id: data.subject_id, teacher_id: data.teacher_id, teacher_id_2: data.teacher_id_2 ?? null,
@@ -2015,6 +2137,7 @@ if (otherClash.length > 0) {
           .eq("id", data.id);
         if (error) throw error;
       } else {
+        // ✅ แก้: ใส่ค่าจริงแทน /* ... */
         const { error } = await (supabase.from("timetable_entries") as any).insert([{
           classroom_id: data.classroom_id, subject_id: data.subject_id,
           teacher_id: data.teacher_id, teacher_id_2: data.teacher_id_2 ?? null,
@@ -2025,6 +2148,10 @@ if (otherClash.length > 0) {
       }
       await loadEntries();
       await checkAndNotifyConflict(data.classroom_id, data.day_of_week, realSlotId);
+      await syncSubjectSection({
+        subjectId: data.subject_id, classroomId: data.classroom_id, academicYearId: data.academic_year_id,
+        teacherId: data.teacher_id, teacherId2: data.teacher_id_2, createdBy: user!.id,
+      });
     } catch (err: any) {
       console.error("[handleSaveDirect] error:", err);
 
@@ -2111,7 +2238,19 @@ if (otherClash.length > 0) {
         .eq("id", requestId);
       if (updErr) throw updErr;
       await Promise.all([loadEntries(), loadChangeRequests()]);
-      await checkAndNotifyConflict(req.classroom_id, req.day_of_week, req.time_slot_id); // ★ เพิ่มบรรทัดนี้
+      await checkAndNotifyConflict(req.classroom_id, req.day_of_week, req.time_slot_id);
+      // ✅ เพิ่มบรรทัดนี้ — sync section ให้ตรงกับที่อนุมัติไป
+      await syncSubjectSection({
+        subjectId: req.new_subject_id, classroomId: req.classroom_id, academicYearId: req.academic_year_id,
+        teacherId: req.new_teacher_id, teacherId2: req.new_teacher_id_2, createdBy: user.id,
+      });
+      // ★ ถ้าวิชา/ห้องเดิมเปลี่ยนไป ให้ desync ของเก่าด้วย (ครูเก่าอาจไม่ได้สอนคู่เดิมแล้ว)
+      if (req.old_teacher_id && (req.old_subject_id !== req.new_subject_id)) {
+        await desyncSubjectSection({
+          subjectId: req.old_subject_id!, classroomId: req.classroom_id, academicYearId: req.academic_year_id,
+          teacherId: req.old_teacher_id,
+        });
+      }
       if (req.requester?.email) {
         sendTeamsDM("academic", req.requester.email,
           `✅ คำขอแก้ไขตารางสอนของคุณได้รับการอนุมัติแล้ว (${DAYS[(req.day_of_week ?? 1) - 1]})`);
@@ -2570,7 +2709,7 @@ const totalScheduledPeriods = entries.length;
       clubsForGrade={clubs.filter(c => c.grade_label === getClassroomGradeLabel(selectedClassroom))}
       onSave={handleSaveDirect}
       onRequestChange={handleRequestChange}
-      onDelete={async (id) => { await supabase.from("timetable_entries").delete().eq("id", id); await loadEntries(); }}
+      onDelete={handleDeleteEntry}
     />
     </div>  
   )} 
@@ -2587,7 +2726,7 @@ const totalScheduledPeriods = entries.length;
     entries={entries}
     academicYearId={selectedYear}
     onSaveEntry={handleSaveDirect}
-    onDeleteEntry={async (id) => { await supabase.from("timetable_entries").delete().eq("id", id); await loadEntries(); }}
+    onDeleteEntry={handleDeleteEntry}
   />
 )}
 
@@ -2709,7 +2848,7 @@ const totalScheduledPeriods = entries.length;
                   classrooms={classrooms} allClassrooms={allClassrooms} subjects={subjects} teachers={teachers} timeSlots={timeSlots}
                   canManage={isAdmin}
                   scopeLabel={isAdmin ? undefined : "แสดงเฉพาะคาบสอนของคุณที่ถูกจัดซ้อนกัน (สอนพร้อมกัน 2 ห้องในเวลาเดียวกันไม่ได้)"}
-                  onDeleteEntry={async (id) => { await supabase.from("timetable_entries").delete().eq("id", id); await Promise.all([loadEntries(), loadAllEntriesForCheck()]); }}
+                  onDeleteEntry={async (id) => { await handleDeleteEntry(id); await loadAllEntriesForCheck(); }}
                 />
               </div>
             </div>
@@ -2842,7 +2981,7 @@ const totalScheduledPeriods = entries.length;
       groups={teacherConflictGroups}
       classrooms={classrooms} allClassrooms={allClassrooms} subjects={subjects} teachers={teachers} timeSlots={timeSlots}
       canManage={true}
-      onDeleteEntry={async (id) => { await supabase.from("timetable_entries").delete().eq("id", id); await Promise.all([loadEntries(), loadAllEntriesForCheck()]); }}
+      onDeleteEntry={async (id) => { await handleDeleteEntry(id); await loadAllEntriesForCheck(); }}
     />
   </div>
 )}

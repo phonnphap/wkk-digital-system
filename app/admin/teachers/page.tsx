@@ -140,7 +140,9 @@ function isMorningOnlyExemptNote(note: string | null | undefined): boolean {
 }
 
 // ── ยกเว้นเฉพาะฝั่งออก (เย็น) เท่านั้น — ฝั่งเข้า/เช้ายังต้องสแกนเข้าตามปกติ (ไม่ยกเว้น) ──
-const EVENING_ONLY_EXEMPT_KEYWORDS = ["ขออนุญาตเย็น(ฉุกเฉิน)", "ขออนุญาตเย็น (ฉุกเฉิน)"];
+// ── ยกเว้นเฉพาะฝั่งออก (เย็น) เท่านั้น — ฝั่งเข้า/เช้ายังต้องสแกนเข้าตามปกติ (ไม่ยกเว้น)
+//    ★ "ประชุมครู" ตั้งใจให้ขึ้น "ปฏิบัติงานตามภารกิจ" เฉพาะฝั่งเวลากลับเท่านั้น ส่วนเวลามาให้เช็คตามปกติ (สาย/ไม่สแกนมา ตามจริง) ──
+const EVENING_ONLY_EXEMPT_KEYWORDS = ["ขออนุญาตเย็น(ฉุกเฉิน)", "ขออนุญาตเย็น (ฉุกเฉิน)", "ประชุมครู"];
 function isEveningOnlyExemptNote(note: string | null | undefined): boolean {
   if (!note) return false;
   return EVENING_ONLY_EXEMPT_KEYWORDS.some((kw) => note.includes(kw));

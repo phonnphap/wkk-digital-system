@@ -97,7 +97,8 @@ function isOffsiteMissionNote(note: string | null | undefined): boolean {
 
 // ── ★ "ปฏิบัติงานตามภารกิจ" แยกฝั่งตามหมายเหตุ — ไม่ว่าจะสแกนนิ้วหรือไม่ก็ตาม ให้ขึ้นเป็นภารกิจ
 //    และไม่นับเป็น มาสาย / กลับก่อน / ไม่สแกน / ขาดงาน ในฝั่งนั้น
-//    • ภารกิจเต็มวัน (เช่น "ทัศนศึกษา", "ประชุมครู")           → ฝั่งเข้า + ฝั่งออก
+//    • ภารกิจเต็มวัน (เช่น "ทัศนศึกษา", "เข้าค่าย")           → ฝั่งเข้า + ฝั่งออก
+//    • "ประชุมครู"                                              → เฉพาะฝั่งออก/เวลากลับ (ฝั่งเข้าต้องสแกน/เช็คสายตามปกติ — ดู EVENING_ONLY_EXEMPT_KEYWORDS)
 //    • "ไปราชการ (เช้า)" หรือ "ครึ่งเช้า"                         → เฉพาะฝั่งเข้า (ฝั่งออกต้องสแกนตามปกติ)
 //    • "ครึ่งบ่าย" หรือ "ขออนุญาตเย็น(ฉุกเฉิน)"                  → เฉพาะฝั่งออก (ฝั่งเข้าต้องสแกนตามปกติ) ──
 const MISSION_LABEL = "ปฏิบัติงานตามภารกิจ";
@@ -199,8 +200,9 @@ function isMorningOnlyExemptNote(note: string | null | undefined): boolean {
   return MORNING_ONLY_EXEMPT_KEYWORDS.some((kw) => note.includes(kw));
 }
 
-// ── ยกเว้นเฉพาะฝั่งออก (เย็น) เท่านั้น — ฝั่งเข้า/เช้ายังต้องสแกนเข้าตามปกติ (ไม่ยกเว้น) ──
-const EVENING_ONLY_EXEMPT_KEYWORDS = ["ขออนุญาตเย็น(ฉุกเฉิน)", "ขออนุญาตเย็น (ฉุกเฉิน)"];
+// ── ยกเว้นเฉพาะฝั่งออก (เย็น) เท่านั้น — ฝั่งเข้า/เช้ายังต้องสแกนเข้าตามปกติ (ไม่ยกเว้น)
+//    ★ "ประชุมครู" ตั้งใจให้ขึ้น "ปฏิบัติงานตามภารกิจ" เฉพาะฝั่งเวลากลับเท่านั้น ส่วนเวลามาให้เช็คตามปกติ (สาย/ไม่สแกนมา ตามจริง) ──
+const EVENING_ONLY_EXEMPT_KEYWORDS = ["ขออนุญาตเย็น(ฉุกเฉิน)", "ขออนุญาตเย็น (ฉุกเฉิน)", "ประชุมครู"];
 function isEveningOnlyExemptNote(note: string | null | undefined): boolean {
   if (!note) return false;
   return EVENING_ONLY_EXEMPT_KEYWORDS.some((kw) => note.includes(kw));
@@ -1532,20 +1534,25 @@ export default function TeacherPortfolioPage() {
               <div className="overflow-x-auto rounded-2xl border border-slate-100">
                 <table className="w-full text-sm">
                   <thead>
+                    {/* ★ แถวหัวตารางกลุ่ม: "เวลามาปฏิบัติงาน" ครอบ มาตรงเวลา/มาสาย/ไม่สแกนมา และ "เวลากลับ" ครอบ กลับตรงเวลา/กลับก่อน/ไม่สแกนกลับ */}
+                    <tr className="bg-slate-50">
+                      <th rowSpan={2} className="text-left px-3 py-2 font-bold text-slate-500 text-xs align-bottom border-b border-slate-100">เดือน</th>
+                      <th rowSpan={2} className="text-center px-3 py-2 font-bold text-slate-600 text-xs align-bottom border-b border-slate-100">วันทำงานรวม/เดือน</th>
+                      <th colSpan={3} className="text-center px-3 py-1.5 font-black text-emerald-700 text-xs bg-emerald-50/70 border-b border-x border-emerald-100">🕗 เวลามาปฏิบัติงาน</th>
+                      <th colSpan={3} className="text-center px-3 py-1.5 font-black text-orange-700 text-xs bg-orange-50/70 border-b border-x border-orange-100">🚪 เวลากลับ</th>
+                      <th rowSpan={2} className="text-center px-3 py-2 font-bold text-rose-600 text-xs align-bottom border-b border-slate-100">ขาด</th>
+                      <th rowSpan={2} className="text-center px-3 py-2 font-bold text-blue-600 text-xs align-bottom border-b border-slate-100">ลา</th>
+                      <th rowSpan={2} className="text-center px-3 py-2 font-bold text-blue-600 text-xs align-bottom border-b border-slate-100">ไปประกอบพิธี</th>
+                      {countPending && <th rowSpan={2} className="text-center px-3 py-2 font-bold text-slate-400 text-xs align-bottom border-b border-slate-100">รอข้อมูล</th>}
+                      <th rowSpan={2} className="text-left px-3 py-2 font-bold text-slate-500 text-xs align-bottom border-b border-slate-100">หมายเหตุ</th>
+                    </tr>
                     <tr className="bg-slate-50 border-b border-slate-100">
-                      <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">เดือน</th>
-                      <th className="text-center px-3 py-2 font-bold text-slate-600 text-xs">วันทำงานรวม/เดือน</th>
-                      <th className="text-center px-3 py-2 font-bold text-emerald-600 text-xs">มาปฏิบัติงาน</th>
-                      <th className="text-center px-3 py-2 font-bold text-amber-600 text-xs">มาสาย</th>
-                      <th className="text-center px-3 py-2 font-bold text-emerald-600 text-xs">กลับตรงเวลา</th>
-                      <th className="text-center px-3 py-2 font-bold text-orange-600 text-xs">กลับก่อน</th>
-                      <th className="text-center px-3 py-2 font-bold text-rose-600 text-xs">ขาด</th>
-                      <th className="text-center px-3 py-2 font-bold text-blue-600 text-xs">ลา</th>
-                      <th className="text-center px-3 py-2 font-bold text-blue-600 text-xs">ไปประกอบพิธี</th>
-                      <th className="text-center px-3 py-2 font-bold text-violet-600 text-xs">ไม่สแกนมา</th>
-                      <th className="text-center px-3 py-2 font-bold text-violet-600 text-xs">ไม่สแกนกลับ</th>
-                      {countPending && <th className="text-center px-3 py-2 font-bold text-slate-400 text-xs">รอข้อมูล</th>}
-                      <th className="text-left px-3 py-2 font-bold text-slate-500 text-xs">หมายเหตุ</th>
+                      <th className="text-center px-3 py-2 font-bold text-emerald-600 text-xs bg-emerald-50/40 border-x border-emerald-100">มาตรงเวลา</th>
+                      <th className="text-center px-3 py-2 font-bold text-amber-600 text-xs bg-emerald-50/40">มาสาย</th>
+                      <th className="text-center px-3 py-2 font-bold text-violet-600 text-xs bg-emerald-50/40 border-r border-emerald-100">ไม่สแกนมา</th>
+                      <th className="text-center px-3 py-2 font-bold text-emerald-600 text-xs bg-orange-50/40 border-l border-orange-100">กลับตรงเวลา</th>
+                      <th className="text-center px-3 py-2 font-bold text-orange-600 text-xs bg-orange-50/40">กลับก่อน</th>
+                      <th className="text-center px-3 py-2 font-bold text-violet-600 text-xs bg-orange-50/40 border-r border-orange-100">ไม่สแกนกลับ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
@@ -1553,15 +1560,15 @@ export default function TeacherPortfolioPage() {
                       <tr key={m.month} className="hover:bg-slate-50/60">
                         <td className="px-3 py-2 font-bold text-slate-700">{m.label}</td>
                         <td className="px-3 py-2 text-center font-black text-slate-600">{m.workingDays || "-"}</td>
-                        <td className="px-3 py-2 text-center font-black text-emerald-600">{m.present || "-"}</td>
+                        <td className="px-3 py-2 text-center font-black text-emerald-600 border-l border-emerald-50">{m.present || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-amber-600">{m.late || "-"}</td>
-                        <td className="px-3 py-2 text-center font-black text-emerald-600">{m.onTimeReturn || "-"}</td>
+                        <td className="px-3 py-2 text-center font-black text-violet-600 border-r border-emerald-50">{m.noScanIn || "-"}</td>
+                        <td className="px-3 py-2 text-center font-black text-emerald-600 border-l border-orange-50">{m.onTimeReturn || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-orange-600">{m.leftEarly || "-"}</td>
+                        <td className="px-3 py-2 text-center font-black text-violet-600 border-r border-orange-50">{m.noScanOut || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-rose-600">{m.absent || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-blue-600">{m.leaveCount || "-"}</td>
                         <td className="px-3 py-2 text-center font-black text-blue-600">{m.religiousCeremony || "-"}</td>
-                        <td className="px-3 py-2 text-center font-black text-violet-600">{m.noScanIn || "-"}</td>
-                        <td className="px-3 py-2 text-center font-black text-violet-600">{m.noScanOut || "-"}</td>
                         {countPending && <td className="px-3 py-2 text-center font-black text-slate-400">{m.pendingCount || "-"}</td>}
                         <td className="px-3 py-2 text-xs text-slate-500 font-bold">{m.noteCount > 0 ? `${m.noteCount} วัน` : "—"}</td>
                       </tr>

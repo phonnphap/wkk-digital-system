@@ -626,6 +626,42 @@ const effectiveReadOnly = readOnly || !!currentStudentId;
     showToast("บันทึกคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error");
   }
 }
+// ★ รีเซทคะแนนสอบ (กลางภาค/ปลายภาค) กลับเป็น "ยังไม่ได้กรอก"
+async function handleResetExamScore(studentId: string, examType: "midterm" | "final") {
+  if (readOnly) return;
+  try {
+    const res = await fetch("/api/subject-grades/exam-score", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject_section_id: sectionId,
+        student_id: studentId,
+        exam_type: examType,
+        score: null,
+        raw_score: null,
+        raw_max_score: null,
+        graded_by: currentUserId || null,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? "รีเซทคะแนนไม่สำเร็จ");
+
+    if (json.deleted) {
+      setExamScores(prev => prev.filter(e => !(e.student_id === studentId && e.exam_type === examType)));
+    } else {
+      // ★ ไม่ว่า API จะคืน submission ที่อัปเดตแล้วมาหรือไม่ ก็เคลียร์ค่าในฝั่ง state ให้เป็น "ยังไม่ได้กรอก" เสมอ
+      setExamScores(prev => {
+        const exists = prev.some(e => e.student_id === studentId && e.exam_type === examType);
+        const cleared = { student_id: studentId, exam_type: examType, score: null, raw_score: null, raw_max_score: null };
+        if (exists) return prev.map(e => (e.student_id === studentId && e.exam_type === examType ? { ...e, ...cleared } : e));
+        return [...prev, cleared];
+      });
+    }
+    showToast("รีเซทคะแนนสำเร็จ", "success");
+  } catch (e: any) {
+    showToast("รีเซทคะแนนไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error");
+  }
+}
 async function handleUpdateScore(studentId: string, assignmentId: string, newScore: number) {
   if (readOnly) return;
   const assignment = assignments.find(a => a.id === assignmentId);
@@ -1019,7 +1055,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
         <div>
           <h2 className="font-black text-slate-800 text-xl">คะแนนรวม</h2>
           <p className="text-slate-400 text-m font-bold">
-            {effectiveReadOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที · กด Enter หรือลูกศร ↑↓←→ เพื่อบันทึกและย้ายไปช่องข้างเคียง · วางคะแนนจาก Excel ได้ทีละหลายช่อง · ลากหัวตารางชิ้นงานเพื่อสลับลำดับได้"}
+            {effectiveReadOnly ? "มุมมองดูอย่างเดียว — ดูและดาวน์โหลด/พิมพ์ได้ แก้ไขไม่ได้" : "คลิกที่คะแนนงาน หรือคะแนนพิเศษ เพื่อแก้ไข/ให้คะแนนได้ทันที · กด Enter หรือลูกศร ↑↓←→ เพื่อบันทึกและย้ายไปช่องข้างเคียง · วางคะแนนจาก Excel ได้ทีละหลายช่อง · ลากหัวตารางชิ้นงานเพื่อสลับลำดับได้ · คลิกขวาที่คะแนนเพื่อรีเซท"}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -1072,6 +1108,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   onUpdateExamScore={handleUpdateExamScore}    
   getLateInfo={getLateInfo}
   onResetScore={handleResetScore}
+  onResetExamScore={handleResetExamScore}
   onUpdateAssignmentWeight={handleUpdateAssignmentWeight}
   readOnly={effectiveReadOnly}
   gradingMode={gradingMode}
@@ -1103,6 +1140,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
 }
 type ContextMenuState =
   | { type: "score"; x: number; y: number; studentId: string; assignmentId: string }
+  | { type: "exam"; x: number; y: number; studentId: string; examType: "midterm" | "final" }
   | { type: "header"; x: number; y: number; assignmentId: string }
   | null;
 // ★ ตอนนี้ activeCell อ้างอิงด้วย "col" (assignment id / preset:id / midterm / final) + studentId
@@ -1115,7 +1153,7 @@ function GradeTable({
   onUpdateExamScore, getLateInfo, readOnly, gradingMode = "numeric",
   useMidterm = false, formativeMaxScore = 0, midtermMaxScore = 0, finalMaxScore = 0,
   onReorderAssignments, rawMidtermMax, rawFinalMax, onChangeRawMidtermMax, onChangeRawFinalMax, onSaveExamConfig,  
-  onToast, onResetScore, onUpdateAssignmentWeight,  
+  onToast, onResetScore, onResetExamScore, onUpdateAssignmentWeight,  
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
@@ -1139,7 +1177,8 @@ function GradeTable({
   onChangeRawFinalMax: (v: number | null) => void;                
   onSaveExamConfig: (examType: "midterm" | "final", rawMax: number | null) => void; 
   onToast?: (message: string, type?: "success" | "error" | "info") => void; 
-  onResetScore: (studentId: string, assignmentId: string) => void;                                  
+  onResetScore: (studentId: string, assignmentId: string) => void;
+  onResetExamScore: (studentId: string, examType: "midterm" | "final") => void;
   onUpdateAssignmentWeight: (assignmentId: string, weightPercent: number | null, allowWeight: boolean) => void; 
 }) {
   const [activeCell, setActiveCell] = useState<ActiveCell>(null);
@@ -1510,7 +1549,15 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
 {gradingMode === "numeric" && (
   <>
     {useMidterm && (
-  <td className="text-center px-3 py-3">
+  <td
+    className="text-center px-3 py-3"
+    onContextMenu={e => {                         // ★ เพิ่ม: คลิกขวารีเซทคะแนนกลางภาค
+      if (readOnly) return;
+      if (r.midtermRaw === null) return;          // ไม่มีคะแนนให้รีเซท
+      e.preventDefault();
+      setContextMenu({ type: "exam", x: e.clientX, y: e.clientY, studentId: s.id, examType: "midterm" });
+    }}
+  >
     <EditableExamCell
       value={r.midtermScore}
       rawValue={r.midtermRaw}          // ★ เพิ่ม
@@ -1532,7 +1579,15 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
       </span>
       <span className="text-slate-400 font-bold text-sm">/{formativeMaxScore + (useMidterm ? midtermMaxScore : 0)}</span>
     </td>
-<td className="text-center px-3 py-3">
+<td
+  className="text-center px-3 py-3"
+  onContextMenu={e => {                         // ★ เพิ่ม: คลิกขวารีเซทคะแนนปลายภาค
+    if (readOnly) return;
+    if (r.finalRaw === null) return;            // ไม่มีคะแนนให้รีเซท
+    e.preventDefault();
+    setContextMenu({ type: "exam", x: e.clientX, y: e.clientY, studentId: s.id, examType: "final" });
+  }}
+>
   <EditableExamCell
     value={r.finalScore}
     rawValue={r.finalRaw}              // ★ เพิ่ม
@@ -1620,6 +1675,16 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
               className="w-full text-left px-4 py-2 text-sm font-bold text-red-500 hover:bg-red-50 flex items-center gap-2 whitespace-nowrap"
             >
               ♻️ รีเซทคะแนน (กลับเป็นยังไม่ได้กรอก)
+            </button>
+          ) : contextMenu.type === "exam" ? (
+            <button
+              onClick={() => {
+                onResetExamScore(contextMenu.studentId, contextMenu.examType);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-4 py-2 text-sm font-bold text-red-500 hover:bg-red-50 flex items-center gap-2 whitespace-nowrap"
+            >
+              ♻️ รีเซทคะแนน{contextMenu.examType === "midterm" ? "กลางภาค" : "ปลายภาค"} (กลับเป็นยังไม่ได้กรอก)
             </button>
           ) : (
             <AssignmentWeightPopover
@@ -1902,7 +1967,7 @@ function EditableExamCell({
   const weighted = isExamWeighted(rawMax, maxScore) && value !== null ? value : null;
 
   return (
-    <button onClick={onRequestEdit} title="คลิกเพื่อกรอกคะแนน"
+    <button onClick={onRequestEdit} title="คลิกเพื่อกรอกคะแนน (คลิกขวาเพื่อรีเซท)"
       className="flex flex-col items-center gap-0.5 mx-auto text-m font-black px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-700">
       {rawValue !== null ? (
         <span>{rawValue}<span className="text-slate-400 font-bold">/{inputMax}</span></span>
