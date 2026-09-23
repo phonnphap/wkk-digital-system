@@ -20,8 +20,9 @@ type Assignment = {
   allow_weight?: boolean;
   status?: string;
   due_date?: string | null;
-  teaching_unit_no?: number | null;  // ★ เพิ่ม
-  unit_name?: string | null;         // ★ เพิ่ม (ถ้า API ส่งมาให้)
+  teaching_unit_no?: number | null;
+  unit_name?: string | null;
+  sort_order?: number | null;  // ★ เพิ่ม: ลำดับคอลัมน์ที่ครูลากตั้งไว้ (มาจาก server ไม่ใช่ localStorage แล้ว)
 };
 
 type Preset = { id: string; label: string; points: number; emoji: string; sort_order: number };
@@ -306,11 +307,6 @@ export default function GradeOverviewTool({
   );
   const [rawMidtermMax, setRawMidtermMax] = useState<number | null>(null);
 const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
-  // ★ ลำดับคอลัมน์ชิ้นงานที่ครูลากสลับเอง (จำไว้ต่อห้องเรียนใน localStorage)
-  const [assignmentOrder, setAssignmentOrder] = useState<string[]>([]);
-  // ★ สถานะว่าลำดับที่บันทึกไว้ใน localStorage ถูกโหลดเข้ามาแล้วหรือยัง
-  // (ใช้กันไม่ให้ effect รวมชิ้นงานทับค่าที่โหลดมา ก่อนที่ assignments ตัวจริงจะมาถึง)
-  const savedOrderLoadedRef = useRef(false);
 
   // ★ Toast state
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -377,52 +373,37 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionId]);
 
-  // ★ โหลดลำดับคอลัมน์ที่บันทึกไว้ของห้องนี้
-  useEffect(() => {
-    savedOrderLoadedRef.current = false;
-    try {
-      const saved = localStorage.getItem(`grade-assignment-order-${sectionId}`);
-      if (saved) setAssignmentOrder(JSON.parse(saved));
-      else setAssignmentOrder([]);
-    } catch {
-      setAssignmentOrder([]);
-    } finally {
-      // ทำเครื่องหมายว่าอ่านค่าที่บันทึกไว้ (ถ้ามี) เข้ามาเรียบร้อยแล้ว
-      savedOrderLoadedRef.current = true;
-    }
-  }, [sectionId]);
-
-  // ★ เมื่อชิ้นงานเปลี่ยน (โหลดใหม่/เพิ่มชิ้นใหม่) ให้รวมเข้ากับลำดับที่จำไว้ ชิ้นใหม่ที่ยังไม่เคยเรียงจะถูกต่อท้าย
-  // ★ แก้บั๊ก: ถ้ายังไม่มีชิ้นงานเลย (assignments ยังโหลดไม่เสร็จ) ห้ามล้างลำดับที่เพิ่งอ่านจาก
-  // localStorage ทิ้ง ไม่งั้นพอรีเฟรชแล้วชิ้นงานยังไม่มา ลำดับที่เคยลากสลับไว้จะถูกรีเซ็ตกลับ
-  // เป็นลำดับเดิมทุกครั้ง
-  useEffect(() => {
-    if (assignments.length === 0) return; // รอให้ข้อมูลชิ้นงานจริงมาก่อน ค่อยรวมลำดับ
-    if (!savedOrderLoadedRef.current) return; // รอให้อ่านค่าที่บันทึกไว้เสร็จก่อน
-    setAssignmentOrder(prev => {
-      const known = new Set(assignments.map(a => a.id));
-      const filtered = prev.filter(id => known.has(id));
-      const missing = assignments.map(a => a.id).filter(id => !filtered.includes(id));
-      return [...filtered, ...missing];
+    // ★ เรียงชิ้นงานตาม sort_order ที่ API ส่งมา (server-side, ทุกบัญชี/ทุกเบราว์เซอร์เห็นตรงกัน)
+  // ชิ้นที่ยังไม่มี sort_order (null) จะถูกต่อท้ายเรียงตามลำดับเดิมจาก API
+  const orderedAssignments = useMemo(() => {
+    return [...assignments].sort((a, b) => {
+      const soA = a.sort_order ?? Number.MAX_SAFE_INTEGER;
+      const soB = b.sort_order ?? Number.MAX_SAFE_INTEGER;
+      return soA - soB;
     });
   }, [assignments]);
 
-  // ★ บันทึกลำดับคอลัมน์ลง localStorage ทุกครั้งที่เปลี่ยน
-  useEffect(() => {
-    if (assignmentOrder.length === 0) return;
+  // ★ บันทึกลำดับคอลัมน์ใหม่ลง server เมื่อครูลากสลับ (แทนที่ localStorage เดิม)
+  async function handleReorderAssignments(newOrderIds: string[]) {
+    if (readOnly) return;
+    // อัปเดตทันทีให้ลื่นไหล (optimistic update) ก่อนรอ server ตอบกลับ
+    setAssignments(prev => {
+      const orderMap = new Map(newOrderIds.map((id, idx) => [id, idx]));
+      return prev.map(a => ({ ...a, sort_order: orderMap.get(a.id) ?? a.sort_order }));
+    });
     try {
-      localStorage.setItem(`grade-assignment-order-${sectionId}`, JSON.stringify(assignmentOrder));
-    } catch {
-      // ไม่ critical
+      const res = await fetch("/api/assignments/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject_section_id: sectionId, ordered_ids: newOrderIds }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "บันทึกลำดับไม่สำเร็จ");
+    } catch (e: any) {
+      showToast("บันทึกลำดับคอลัมน์ไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error");
+      loadData(); // rollback: โหลดลำดับจริงจาก server กลับมาใหม่
     }
-  }, [assignmentOrder, sectionId]);
-
-  const orderedAssignments = useMemo(() => {
-    const map = new Map(assignments.map(a => [a.id, a]));
-    const ordered = assignmentOrder.map(id => map.get(id)).filter((a): a is Assignment => !!a);
-    // เผื่อกรณี assignmentOrder ยังไม่ทันอัปเดต (โหลดครั้งแรก) ให้ fallback เป็นลำดับต้นฉบับ
-    return ordered.length === assignments.length ? ordered : assignments;
-  }, [assignments, assignmentOrder]);
+  }
 
   const totalMaxScore = useMemo(
   () => assignments.reduce((sum, a) => sum + getAssignmentMaxContribution(a), 0),
@@ -527,11 +508,11 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
         // ★ แก้บั๊ก: ต้องใช้ "scaledFormative" (ตัวที่สเกลแล้ว เต็ม 70) แทน grandTotal ดิบ
     // และใช้ "formativeMaxScore" (70) แทน totalMaxScore ดิบ (39) เพื่อให้ตรงกับคอลัมน์คะแนนเก็บ
     const displayTotal = usesComponentGrading
-   ? assignmentTotal + specialTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0)
+   ? scaledFormative + specialTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0)
    : grandTotal;
 
     const displayMax = usesComponentGrading
-   ? totalMaxScore + examMaxTotal   // เต็มจริงของชิ้นงานที่สร้างไว้ + เต็มสอบเฉพาะที่มีคะแนนแล้ว
+   ? formativeMaxScore + (useMidterm ? midtermMaxScore : 0) + finalMaxScore   // เต็มคงที่ 100 เสมอ ไม่ผันตามว่ากรอกสอบหรือยัง
    : totalMaxScore;
 
     return {
@@ -1127,7 +1108,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   formativeMaxScore={formativeMaxScore}          
   midtermMaxScore={midtermMaxScore}              
   finalMaxScore={finalMaxScore}                 
-  onReorderAssignments={setAssignmentOrder}      
+  onReorderAssignments={handleReorderAssignments}      
   rawMidtermMax={rawMidtermMax}              
   rawFinalMax={rawFinalMax}                  
   onChangeRawMidtermMax={setRawMidtermMax}   

@@ -78,8 +78,12 @@ export async function GET(req: NextRequest) {
     ] = await Promise.all([
       admin
         .from("assignments")
-        .select("id, title, max_score, weight_percent, allow_weight, status, due_date")
+        // ★ เพิ่ม sort_order เพื่อให้ทุกบัญชี (ครู/นักเรียน/ทุกเบราว์เซอร์) เห็นลำดับคอลัมน์ตรงกัน
+        .select("id, title, max_score, weight_percent, allow_weight, status, due_date, sort_order")
         .eq("subject_section_id", subject_section_id)
+        // ★ เรียงตามลำดับที่ครูลากตั้งไว้ก่อน (sort_order) ชิ้นที่ยังไม่เคยตั้งลำดับ (null) จะอยู่ท้ายสุด
+        //   แล้วค่อย fallback เรียงตามวันที่สร้างสำหรับชิ้นที่ sort_order เท่ากัน/เป็น null ทั้งคู่
+        .order("sort_order", { ascending: true, nullsFirst: false })
         .order("assigned_at", { ascending: true }),
       admin
         .from("score_presets")
