@@ -139,75 +139,73 @@ type SubjectAdditionRequest = {
   reject_reason?: string; reviewed_by?: string; reviewed_at?: string; created_at: string;
   requester?: any;
 };
+type PairMode = "separate" | "double"; // ★ ใหม่: แยกคาบคนละวัน หรือคาบคู่ติดกันวันเดียว
+
 type AutoScheduleParams = {
   classroom: Classroom;
   subjectId: string;
   teacherId: string;
   teacherId2?: string | null;
   periodsNeeded: number;
+  pairMode: PairMode; // ★ ใหม่
   entries: TimetableEntry[];
   classrooms: Classroom[];
   timeSlots: TimeSlot[];
   teachers: Teacher[];
   lockedPeriods: { grade_label: string; day_of_week: number; slot_label: string }[];
   gradeLabel: string;
-  skipBuildingCheck?: boolean; // ★ ใหม่: ห้องปฏิบัติการ — ครูไม่เดินย้ายอาคาร ไม่ต้องเช็ค
+  skipBuildingCheck?: boolean;
 };
 
+// ★ ใหม่: เช็คว่าคาบสองคาบติดกันจริงไหม (ไม่มีคาบพักคั่นกลาง)
+function areSlotsAdjacent(a: TimeSlot, b: TimeSlot): boolean {
+  return a.end_time === b.start_time || b.end_time === a.start_time;
+}
+
 function computeAutoScheduleSlots(p: AutoScheduleParams): { assignments: { day_of_week: number; time_slot: TimeSlot }[]; warnings: string[] } {
-  const { classroom, subjectId, teacherId, teacherId2, periodsNeeded, entries, classrooms,
+  const { classroom, subjectId, teacherId, teacherId2, periodsNeeded, pairMode, entries, classrooms,
     timeSlots, teachers, lockedPeriods, gradeLabel, skipBuildingCheck } = p;
 
   const teachingSlots = timeSlots.filter(s => !s.is_break).sort((a, b) => a.start_time.localeCompare(b.start_time));
   const myBuildingGroup = getBuildingGroup(classroom);
   const involvedTeacherIds = [teacherId, teacherId2].filter(Boolean) as string[];
+  const days = [1, 2, 3, 4, 5];
 
   function isTeacherGradeHead(tid: string): boolean {
     const t = teachers.find(x => x.id === tid);
     return !!t?.extra_roles?.includes("grade_head");
   }
-
-  // ★ หัวหน้าสาย ว่าง 3 คาบแรกวันพุธเสมอ (day_of_week = 3)
   function isWednesdayReserved(day: number, slot: TimeSlot): boolean {
     if (day !== 3) return false;
     const first3 = teachingSlots.slice(0, 3).map(s => s.id);
     if (!first3.includes(slot.id)) return false;
     return involvedTeacherIds.some(isTeacherGradeHead);
   }
-
   function isLocked(day: number, slot: TimeSlot): boolean {
     return lockedPeriods.some(lp => lp.grade_label === gradeLabel && lp.day_of_week === day && lp.slot_label === slot.slot_label);
   }
-
   function slotStartOf(id: string) { return timeSlots.find(s => s.id === id)?.start_time?.slice(0, 5); }
-
   function classroomOccupied(day: number, slot: TimeSlot): boolean {
     const start = slot.start_time.slice(0, 5);
     return entries.some(e => e.classroom_id === classroom.id && e.day_of_week === day &&
       (e.time_slot_id === slot.id || slotStartOf(e.time_slot_id) === start));
   }
-
-  function subjectAlreadyOnDay(day: number, extra: { day_of_week: number }[]): boolean {
+  function subjectAlreadyOnDay(day: number, placedThisRun: { day_of_week: number }[]): boolean {
     const already = entries.some(e => e.classroom_id === classroom.id && e.day_of_week === day && e.subject_id === subjectId);
-    return already || extra.some(a => a.day_of_week === day);
+    return already || placedThisRun.some(a => a.day_of_week === day);
   }
-
   function teacherEntriesOnDay(tid: string, day: number): TimetableEntry[] {
     return entries.filter(e => e.day_of_week === day && (e.teacher_id === tid || e.teacher_id_2 === tid));
   }
-
   function teacherBusyAtSlot(tid: string, day: number, slot: TimeSlot): boolean {
     const start = slot.start_time.slice(0, 5);
     return teacherEntriesOnDay(tid, day).some(e => e.time_slot_id === slot.id || slotStartOf(e.time_slot_id) === start);
   }
-
-  function teacherDailyCountReached(tid: string, day: number, extraCountToday: number): boolean {
-    return teacherEntriesOnDay(tid, day).length + extraCountToday >= 5; // ★ ไม่เกิน 5 คาบ/วัน
+  function teacherDailyCount(tid: string, day: number): number {
+    return teacherEntriesOnDay(tid, day).length;
   }
-
-    // ★ ถ้าครูมีคาบติดกัน (ก่อน/หลัง) ต้องอยู่กลุ่มอาคารเดียวกับห้องนี้
-  function buildingConflict(tid: string, day: number, slotIdx: number): boolean {
-    if (skipBuildingCheck) return false; // ★ ห้องปฏิบัติการ: ครูอยู่ประจำที่ นักเรียนมาหาครู ไม่ต้องเช็คอาคาร
+  function buildingConflictAt(tid: string, day: number, slotIdx: number): boolean {
+    if (skipBuildingCheck) return false;
     const neighborIdxs = [slotIdx - 1, slotIdx + 1].filter(i => i >= 0 && i < teachingSlots.length);
     for (const idx of neighborIdxs) {
       const neighborSlot = teachingSlots[idx];
@@ -220,88 +218,145 @@ function computeAutoScheduleSlots(p: AutoScheduleParams): { assignments: { day_o
     }
     return false;
   }
+  // ★ ใหม่: slot นี้ติดกับคาบที่ครูมีอยู่แล้ววันนี้ไหม (ไม่มีพักคั่น) — ใช้ลดคะแนนเพื่อเว้นเวลาพัก
+  function isAdjacentToExisting(tid: string, day: number, slotIdx: number): boolean {
+    const neighborIdxs = [slotIdx - 1, slotIdx + 1].filter(i => i >= 0 && i < teachingSlots.length);
+    return neighborIdxs.some(idx => {
+      const neighborSlot = teachingSlots[idx];
+      const start = neighborSlot.start_time.slice(0, 5);
+      return teacherEntriesOnDay(tid, day).some(e => e.time_slot_id === neighborSlot.id || slotStartOf(e.time_slot_id) === start);
+    });
+  }
 
   const assignments: { day_of_week: number; time_slot: TimeSlot }[] = [];
   const warnings: string[] = [];
-  const days = [1, 2, 3, 4, 5];
-  const perDayCountThisRun: Record<string, number> = {}; // key: `${tid}-${day}`
-  let dayPointer = 0;
-  let guard = 0;
+  const extraCountToday: Record<string, number> = {}; // key: `${tid}-${day}` — คาบที่ "จะจัด" รอบนี้ นับแยกจาก entries จริง
 
-  while (assignments.length < periodsNeeded && guard < 300) {
-    guard++;
-    const day = days[dayPointer % days.length];
-    dayPointer++;
+  function dailyCountWithExtra(tid: string, day: number): number {
+    return teacherDailyCount(tid, day) + (extraCountToday[`${tid}-${day}`] ?? 0);
+  }
+  function slotValidSingle(day: number, slotIdx: number): boolean {
+    const slot = teachingSlots[slotIdx];
+    if (classroomOccupied(day, slot)) return false;
+    if (isLocked(day, slot)) return false;
+    if (isWednesdayReserved(day, slot)) return false;
+    if (involvedTeacherIds.some(tid => teacherBusyAtSlot(tid, day, slot))) return false;
+    if (involvedTeacherIds.some(tid => buildingConflictAt(tid, day, slotIdx))) return false;
+    return true;
+  }
 
-    if (subjectAlreadyOnDay(day, assignments)) continue; // ★ ไม่จัดวิชาเดียวกันซ้ำในวันเดียวกัน
-
-    let placed = false;
-    for (let idx = 0; idx < teachingSlots.length; idx++) {
-      const slot = teachingSlots[idx];
-      if (classroomOccupied(day, slot)) continue;
-      if (isLocked(day, slot)) continue;
-      if (isWednesdayReserved(day, slot)) continue;
-      if (involvedTeacherIds.some(tid => teacherBusyAtSlot(tid, day, slot))) continue;
-      if (involvedTeacherIds.some(tid => teacherDailyCountReached(tid, day, perDayCountThisRun[`${tid}-${day}`] ?? 0))) continue;
-      if (involvedTeacherIds.some(tid => buildingConflict(tid, day, idx))) continue;
-
-      assignments.push({ day_of_week: day, time_slot: slot });
-      involvedTeacherIds.forEach(tid => {
-        const k = `${tid}-${day}`;
-        perDayCountThisRun[k] = (perDayCountThisRun[k] ?? 0) + 1;
-      });
-      placed = true;
-      break;
+  if (pairMode === "double") {
+    // ★ คาบคู่ติดกันวันเดียว — จับเป็นบล็อกละ 2 คาบ
+    const blocks = Math.floor(periodsNeeded / 2);
+    if (periodsNeeded % 2 !== 0) {
+      warnings.push(`วิชานี้ตั้งไว้ ${periodsNeeded} คาบ (คี่) แต่เลือกโหมดคาบคู่ — จะจัดให้ ${blocks * 2} คาบ ส่วนที่เหลือกรุณาจัดเองภายหลัง`);
     }
-    if (!placed && dayPointer > days.length * 4) {
-      warnings.push(`หาคาบว่างที่ตรงเงื่อนไขไม่พอ (จัดได้ ${assignments.length}/${periodsNeeded} คาบ) กรุณาจัดที่เหลือด้วยตนเอง`);
-      break;
+    for (let b = 0; b < blocks; b++) {
+      let best: { day: number; idx1: number; idx2: number; score: number } | null = null;
+      for (const day of days) {
+        if (subjectAlreadyOnDay(day, assignments)) continue;
+        for (let idx = 0; idx < teachingSlots.length - 1; idx++) {
+          const s1 = teachingSlots[idx], s2 = teachingSlots[idx + 1];
+          if (!areSlotsAdjacent(s1, s2)) continue;
+          if (!slotValidSingle(day, idx) || !slotValidSingle(day, idx + 1)) continue;
+          if (involvedTeacherIds.some(tid => dailyCountWithExtra(tid, day) + 2 > 5)) continue; // ★ ไม่เกิน 5 คาบ/วัน
+          const score = involvedTeacherIds.reduce((acc, tid) => acc + dailyCountWithExtra(tid, day), 0); // ★ เลือกวันที่ครูว่างที่สุด (กระจายทั่วสัปดาห์)
+          if (!best || score < best.score) best = { day, idx1: idx, idx2: idx + 1, score };
+        }
+      }
+      if (!best) {
+        warnings.push(`หาคาบคู่ว่างไม่พอ (จัดได้ ${assignments.length}/${blocks * 2} คาบ) กรุณาจัดที่เหลือด้วยตนเอง`);
+        break;
+      }
+      assignments.push({ day_of_week: best.day, time_slot: teachingSlots[best.idx1] });
+      assignments.push({ day_of_week: best.day, time_slot: teachingSlots[best.idx2] });
+      involvedTeacherIds.forEach(tid => {
+        const k = `${tid}-${best!.day}`;
+        extraCountToday[k] = (extraCountToday[k] ?? 0) + 2;
+      });
+    }
+  } else {
+    // ★ แยกคาบ (คนละวัน) — เลือก "คาบที่ดีที่สุด" ทุกรอบ ไม่ใช่คาบแรกที่เจอ
+    let guard = 0;
+    while (assignments.length < periodsNeeded && guard < 500) {
+      guard++;
+      let best: { day: number; idx: number; score: number } | null = null;
+      for (const day of days) {
+        if (subjectAlreadyOnDay(day, assignments)) continue;
+        for (let idx = 0; idx < teachingSlots.length; idx++) {
+          if (!slotValidSingle(day, idx)) continue;
+          if (involvedTeacherIds.some(tid => dailyCountWithExtra(tid, day) + 1 > 5)) continue; // ★ ไม่เกิน 5 คาบ/วัน
+          const loadScore = involvedTeacherIds.reduce((acc, tid) => acc + dailyCountWithExtra(tid, day), 0) * 10; // ★ กระจายวันที่ว่างที่สุดก่อน
+          const adjPenalty = involvedTeacherIds.some(tid => isAdjacentToExisting(tid, day, idx)) ? 3 : 0; // ★ เลี่ยงติดคาบเดิม เพื่อเว้นเวลาพัก
+          const score = loadScore + adjPenalty;
+          if (!best || score < best.score) best = { day, idx, score };
+        }
+      }
+      if (!best) {
+        warnings.push(`หาคาบว่างที่ตรงเงื่อนไขไม่พอ (จัดได้ ${assignments.length}/${periodsNeeded} คาบ) กรุณาจัดที่เหลือด้วยตนเอง`);
+        break;
+      }
+      assignments.push({ day_of_week: best.day, time_slot: teachingSlots[best.idx] });
+      involvedTeacherIds.forEach(tid => {
+        const k = `${tid}-${best!.day}`;
+        extraCountToday[k] = (extraCountToday[k] ?? 0) + 1;
+      });
     }
   }
 
   return { assignments, warnings };
 }
-type BatchAutoScheduleParams = {
-  classroomsOrdered: Classroom[]; // ห้องที่เลือก เรียงลำดับที่จะจัดแล้ว (ห้องเรียน = เรียงตามอาคาร, ห้องแล็บ = ตามที่ผู้ใช้เลือก 1→7 หรือ 7→1)
+type SubjectJob = { // ★ ใหม่: 1 แถวในคิว = 1 วิชา + ครู + จำนวนคาบ + โหมดคาบคู่/แยก
   subjectId: string;
   teacherId: string;
   teacherId2?: string | null;
-  periodsPerRoom: number;       // จำนวนคาบ/สัปดาห์ ต่อ 1 ห้อง
+  periods: number;
+  pairMode: PairMode;
+};
+
+type BatchAutoScheduleParams = {
+  classroomsOrdered: Classroom[];
+  jobs: SubjectJob[]; // ★ เปลี่ยนจากวิชาเดี่ยว เป็นคิวหลายวิชา
   roomKind: "lab" | "classroom";
-  entries: TimetableEntry[];    // คาบทั้งหมดที่มีอยู่แล้ว (ทุกห้อง)
+  entries: TimetableEntry[];
   allClassrooms: Classroom[];
-  allTimeSlots: TimeSlot[];     // time_slots จาก DB ทั้งหมด (ยังไม่ผ่าน buildRoomSlots)
+  allTimeSlots: TimeSlot[];
   teachers: Teacher[];
   lockedPeriods: { grade_label: string; day_of_week: number; slot_label: string }[];
 };
+
 function computeBatchAutoSchedule(p: BatchAutoScheduleParams) {
-  const results: { classroom: Classroom; assignments: { day_of_week: number; time_slot: TimeSlot }[]; warnings: string[] }[] = [];
+  const results: {
+    classroom: Classroom;
+    jobResults: { job: SubjectJob; assignments: { day_of_week: number; time_slot: TimeSlot }[]; warnings: string[] }[];
+  }[] = [];
   let workingEntries = [...p.entries];
 
   for (const classroom of p.classroomsOrdered) {
     const gradeLabel = getClassroomGradeLabel(classroom);
     const roomSlots = buildRoomSlots(classroom.schedule_type, p.allTimeSlots);
-    const result = computeAutoScheduleSlots({
-      classroom, subjectId: p.subjectId, teacherId: p.teacherId, teacherId2: p.teacherId2 ?? null,
-      periodsNeeded: p.periodsPerRoom,
-      entries: workingEntries,
-      classrooms: p.allClassrooms,
-      timeSlots: roomSlots,
-      teachers: p.teachers,
-      lockedPeriods: p.lockedPeriods,
-      gradeLabel,
-      skipBuildingCheck: p.roomKind === "lab",
-    });
-    results.push({ classroom, assignments: result.assignments, warnings: result.warnings });
+    const jobResults: { job: SubjectJob; assignments: { day_of_week: number; time_slot: TimeSlot }[]; warnings: string[] }[] = [];
 
-    const fakeEntries: TimetableEntry[] = result.assignments.map(a => ({
-      id: `pending-${classroom.id}-${a.time_slot.id}`,
-      classroom_id: classroom.id, subject_id: p.subjectId,
-      teacher_id: p.teacherId, teacher_id_2: p.teacherId2 ?? undefined,
-      day_of_week: a.day_of_week, time_slot_id: a.time_slot.id,
-      academic_year_id: classroom.academic_year_id ?? "",
-    }));
-    workingEntries = [...workingEntries, ...fakeEntries];
+    for (const job of p.jobs) {
+      const result = computeAutoScheduleSlots({
+        classroom, subjectId: job.subjectId, teacherId: job.teacherId, teacherId2: job.teacherId2 ?? null,
+        periodsNeeded: job.periods, pairMode: job.pairMode,
+        entries: workingEntries, classrooms: p.allClassrooms, timeSlots: roomSlots,
+        teachers: p.teachers, lockedPeriods: p.lockedPeriods, gradeLabel,
+        skipBuildingCheck: p.roomKind === "lab",
+      });
+      jobResults.push({ job, assignments: result.assignments, warnings: result.warnings });
+
+      const fakeEntries: TimetableEntry[] = result.assignments.map(a => ({
+        id: `pending-${classroom.id}-${job.subjectId}-${a.time_slot.id}`,
+        classroom_id: classroom.id, subject_id: job.subjectId,
+        teacher_id: job.teacherId, teacher_id_2: job.teacherId2 ?? undefined,
+        day_of_week: a.day_of_week, time_slot_id: a.time_slot.id,
+        academic_year_id: classroom.academic_year_id ?? "",
+      }));
+      workingEntries = [...workingEntries, ...fakeEntries];
+    }
+    results.push({ classroom, jobResults });
   }
   return results;
 }
@@ -330,6 +385,16 @@ function getYearNameForClassroom(room: Classroom, yearsRaw: AcademicYearRaw[]): 
 // ★ ใหม่: กรองห้องตามเทอมที่เลือก — มีผลเฉพาะ ม.1–ม.6, อ./ป. ผ่านฟิลเตอร์นี้เสมอ
 function filterRoomsBySemester(rooms: Classroom[], semester: number, yearsRaw: AcademicYearRaw[]): Classroom[] {
   return rooms.filter(r => !isSecondaryClassroom(r) || getSemesterForClassroom(r, yearsRaw) === semester);
+}
+// ★ ใหม่: กรอง entries ให้เหลือเฉพาะของเทอมที่กำลังดูอยู่ (มีผลเฉพาะห้อง ม.1–ม.6)
+// ป้องกันบั๊ก: ถ้าไม่กรอง ระบบจะเอาคาบของอีกเทอมมานับรวมว่าครู "ไม่ว่าง" ทำให้คาบว่างหมดเร็วผิดปกติ
+function filterEntriesBySemester(entries: TimetableEntry[], allClassrooms: Classroom[], semester: number, yearsRaw: AcademicYearRaw[]): TimetableEntry[] {
+  return entries.filter(e => {
+    const room = allClassrooms.find(c => c.id === e.classroom_id);
+    if (!room) return true;
+    if (!isSecondaryClassroom(room)) return true;
+    return getSemesterForClassroom(room, yearsRaw) === semester;
+  });
 }
 // ★ ใหม่: กลุ่มอาคาร/ชั้น derive จากเลขห้องอัตโนมัติ — ห้อง 1-3 กลุ่มเดียวกัน, 4-6 อีกกลุ่ม ฯลฯ
 // ★ แก้: อาคาร A = ห้อง 1-3, อาคาร B = ห้อง 4 เป็นต้นไป (ตามที่ระบุ ไม่ใช่แบ่งทุก 3 ห้อง)
@@ -587,12 +652,12 @@ function LockedPeriodsModal({ lockedPeriods, academicYearId, onClose, onReload }
 function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjects, teachers,
   entries, allTimeSlots, lockedPeriods, onClose, onArrange }: {
   gradeLabel?: string;
-  classroomsAll: Classroom[]; // ห้องทั้งหมดในปี/เทอมที่กำลังดูอยู่
+  classroomsAll: Classroom[];
   subjects: Subject[]; teachers: Teacher[];
   entries: TimetableEntry[]; allTimeSlots: TimeSlot[];
   lockedPeriods: { grade_label: string; day_of_week: number; slot_label: string }[];
   onClose: () => void;
-  onArrange: (jobs: { classroom: Classroom; assignments: { day_of_week: number; time_slot: TimeSlot }[] }[], subjectId: string, teacherId: string, teacherId2?: string) => Promise<void>;
+  onArrange: (jobs: { classroom: Classroom; subjectId: string; teacherId: string; teacherId2?: string; assignments: { day_of_week: number; time_slot: TimeSlot }[] }[]) => Promise<void>;
 }) {
   const [grade, setGrade] = useState(initialGrade ?? SCHEDULABLE_GRADE_LABELS[0]);
   const gradeRooms = classroomsAll
@@ -600,27 +665,33 @@ function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjec
     .sort((a, b) => (a.room_number ?? 0) - (b.room_number ?? 0));
 
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
-  const [subjectId, setSubjectId] = useState("");
-  const [teacherId, setTeacherId] = useState("");
-  const [teacherId2, setTeacherId2] = useState("");
-  const [periodsPerRoom, setPeriodsPerRoom] = useState<number | "">("");
   const [roomKind, setRoomKind] = useState<"classroom" | "lab">("classroom");
   const [labOrder, setLabOrder] = useState<"asc" | "desc">("asc");
-  const [preview, setPreview] = useState<{ classroom: Classroom; assignments: { day_of_week: number; time_slot: TimeSlot }[]; warnings: string[] }[] | null>(null);
+
+  const [jobs, setJobs] = useState<SubjectJob[]>([]);
+  const [newSubjectId, setNewSubjectId] = useState("");
+  const [newTeacherId, setNewTeacherId] = useState("");
+  const [newTeacherId2, setNewTeacherId2] = useState("");
+  const [newPeriods, setNewPeriods] = useState<number | "">("");
+  const [newPairMode, setNewPairMode] = useState<PairMode>("separate");
+
+  const [preview, setPreview] = useState<{ classroom: Classroom; jobResults: { job: SubjectJob; assignments: { day_of_week: number; time_slot: TimeSlot }[]; warnings: string[] }[] }[] | null>(null);
   const [running, setRunning] = useState(false);
 
   const applicableSubjects = subjects.filter(s => parseGradeFromSubjectCode(s.subject_code)?.includes(grade));
-  const subject = subjects.find(s => s.id === subjectId);
-  const defaultPeriods = subject?.periods_per_week ?? "";
+  const newSubject = subjects.find(s => s.id === newSubjectId);
 
-  function toggleRoom(id: string) {
-    setSelectedRoomIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  function toggleRoom(id: string) { setSelectedRoomIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); setPreview(null); }
+  function toggleAllRooms() { setSelectedRoomIds(prev => prev.length === gradeRooms.length ? [] : gradeRooms.map(r => r.id)); setPreview(null); }
+
+  function addJob() {
+    const periods = newPeriods === "" ? Number(newSubject?.periods_per_week || 0) : Number(newPeriods);
+    if (!newSubjectId || !newTeacherId || periods <= 0) { alert("กรุณาเลือกวิชา ครู และจำนวนคาบ"); return; }
+    setJobs(prev => [...prev, { subjectId: newSubjectId, teacherId: newTeacherId, teacherId2: newTeacherId2 || null, periods, pairMode: newPairMode }]);
+    setNewSubjectId(""); setNewTeacherId(""); setNewTeacherId2(""); setNewPeriods(""); setNewPairMode("separate");
     setPreview(null);
   }
-  function toggleAllRooms() {
-    setSelectedRoomIds(prev => prev.length === gradeRooms.length ? [] : gradeRooms.map(r => r.id));
-    setPreview(null);
-  }
+  function removeJob(idx: number) { setJobs(prev => prev.filter((_, i) => i !== idx)); setPreview(null); }
 
   function orderedSelectedRooms(): Classroom[] {
     const selected = gradeRooms.filter(r => selectedRoomIds.includes(r.id));
@@ -628,7 +699,6 @@ function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjec
       const sorted = [...selected].sort((a, b) => (a.room_number ?? 0) - (b.room_number ?? 0));
       return labOrder === "asc" ? sorted : sorted.reverse();
     }
-    // ★ ห้องเรียนทั่วไป: จัดกลุ่มอาคารให้ติดกันเสมอ (1-3 อาคารหนึ่ง, 4 ขึ้นไปอีกอาคารหนึ่ง)
     return [...selected].sort((a, b) => {
       const ga = getBuildingGroup(a), gb = getBuildingGroup(b);
       if (ga !== gb) return ga - gb;
@@ -637,16 +707,10 @@ function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjec
   }
 
   function runPreview() {
-    const periods = periodsPerRoom === "" ? Number(defaultPeriods || 0) : Number(periodsPerRoom);
-    if (!subjectId || !teacherId || selectedRoomIds.length === 0 || periods <= 0) {
-      alert("กรุณาเลือกวิชา ครู ห้องอย่างน้อย 1 ห้อง และจำนวนคาบ/ห้อง");
-      return;
-    }
-    const ordered = orderedSelectedRooms();
+    if (selectedRoomIds.length === 0 || jobs.length === 0) { alert("กรุณาเลือกห้องอย่างน้อย 1 ห้อง และเพิ่มวิชาอย่างน้อย 1 วิชา"); return; }
     const results = computeBatchAutoSchedule({
-      classroomsOrdered: ordered, subjectId, teacherId, teacherId2: teacherId2 || null,
-      periodsPerRoom: periods, roomKind, entries, allClassrooms: classroomsAll,
-      allTimeSlots, teachers, lockedPeriods,
+      classroomsOrdered: orderedSelectedRooms(), jobs, roomKind, entries,
+      allClassrooms: classroomsAll, allTimeSlots, teachers, lockedPeriods,
     });
     setPreview(results);
   }
@@ -654,35 +718,31 @@ function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjec
   async function confirmArrange() {
     if (!preview) return;
     setRunning(true);
-    await onArrange(preview.map(r => ({ classroom: r.classroom, assignments: r.assignments })), subjectId, teacherId, teacherId2 || undefined);
+    const flat: { classroom: Classroom; subjectId: string; teacherId: string; teacherId2?: string; assignments: { day_of_week: number; time_slot: TimeSlot }[] }[] = [];
+    preview.forEach(r => r.jobResults.forEach(jr => {
+      flat.push({ classroom: r.classroom, subjectId: jr.job.subjectId, teacherId: jr.job.teacherId, teacherId2: jr.job.teacherId2 ?? undefined, assignments: jr.assignments });
+    }));
+    await onArrange(flat);
     setRunning(false);
     onClose();
   }
 
   const inp = "w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm font-bold focus:border-violet-400 focus:outline-none";
+  const subjName = (id: string) => { const s = subjects.find(x => x.id === id); return s ? `${s.subject_code} ${s.name_th}` : "—"; };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="bg-violet-600 px-6 py-4">
-          <h3 className="text-lg font-black text-white">⚡ จัดตารางอัตโนมัติ (หลายห้องพร้อมกัน)</h3>
-          <p className="text-sm text-white/70">เลือกชั้น → ห้อง → วิชา แล้วให้ระบบจัดคาบให้ทันที</p>
+          <h3 className="text-lg font-black text-white">⚡ จัดตารางอัตโนมัติ (หลายห้อง หลายวิชา)</h3>
+          <p className="text-sm text-white/70">เลือกชั้น → ห้อง → เพิ่มวิชาได้หลายวิชา แล้วให้ระบบจัดคาบให้ทันที</p>
         </div>
         <div className="p-5 space-y-4 overflow-y-auto flex-1">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">ชั้น *</label>
-              <select value={grade} onChange={e => { setGrade(e.target.value); setSelectedRoomIds([]); setSubjectId(""); setPreview(null); }} className={inp}>
-                {SCHEDULABLE_GRADE_LABELS.map(g => <option key={g} value={g}>{g}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">รายวิชา *</label>
-              <select value={subjectId} onChange={e => { setSubjectId(e.target.value); setPreview(null); }} className={inp}>
-                <option value="">— เลือกรายวิชา —</option>
-                {applicableSubjects.map(s => <option key={s.id} value={s.id}>{s.subject_code} {s.name_th}</option>)}
-              </select>
-            </div>
+          <div>
+            <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">ชั้น *</label>
+            <select value={grade} onChange={e => { setGrade(e.target.value); setSelectedRoomIds([]); setJobs([]); setPreview(null); }} className={inp}>
+              {SCHEDULABLE_GRADE_LABELS.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
           </div>
 
           <div>
@@ -701,46 +761,20 @@ function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjec
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">ครูผู้สอน คนที่ 1 *</label>
-              <select value={teacherId} onChange={e => { setTeacherId(e.target.value); setPreview(null); }} className={inp}>
-                <option value="">— เลือกครู —</option>
-                {teachers.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">ครูผู้สอน คนที่ 2 (ถ้ามี)</label>
-              <select value={teacherId2} onChange={e => { setTeacherId2(e.target.value); setPreview(null); }} className={inp}>
-                <option value="">— ไม่มี —</option>
-                {teachers.filter(t => t.id !== teacherId).map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">
-              จำนวนคาบ/สัปดาห์ ต่อ 1 ห้อง {subject && <span className="text-slate-400 font-normal normal-case">(วิชานี้ตั้งไว้ {subject.periods_per_week ?? "ยังไม่ตั้งค่า"} คาบ/สัปดาห์)</span>}
-            </label>
-            <input type="number" min={1} value={periodsPerRoom === "" ? "" : periodsPerRoom}
-              onChange={e => { setPeriodsPerRoom(e.target.value === "" ? "" : Number(e.target.value)); setPreview(null); }}
-              placeholder={String(defaultPeriods || 1)} className={inp} />
-          </div>
-
           <div>
             <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">ประเภทห้องเรียน *</label>
             <div className="flex gap-2">
               <button onClick={() => { setRoomKind("classroom"); setPreview(null); }}
                 className={`flex-1 py-2.5 rounded-xl text-xs font-black border-2 ${roomKind === "classroom" ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-200 text-slate-600"}`}>
-                🏫 ห้องเรียนทั่วไป (สอนถึงห้องนักเรียน)
+                🏫 ห้องเรียนทั่วไป
               </button>
               <button onClick={() => { setRoomKind("lab"); setPreview(null); }}
                 className={`flex-1 py-2.5 rounded-xl text-xs font-black border-2 ${roomKind === "lab" ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-200 text-slate-600"}`}>
-                🔬 ห้องปฏิบัติการ (นักเรียนมาหาครู)
+                🔬 ห้องปฏิบัติการ
               </button>
             </div>
             {roomKind === "classroom" ? (
-              <p className="text-xs text-slate-400 mt-1.5">💡 ระบบจะเรียงห้อง 1–3 และ 4 ขึ้นไปให้อยู่ติดกันเสมอ (คนละอาคาร ครูเดินสอนต่อเนื่องข้ามอาคารไม่ได้)</p>
+              <p className="text-xs text-slate-400 mt-1.5">💡 ห้อง 1–3 และ 4 ขึ้นไปจะถูกจัดให้อยู่ติดกันเสมอ (คนละอาคาร)</p>
             ) : (
               <div className="flex gap-2 mt-2">
                 <button onClick={() => { setLabOrder("asc"); setPreview(null); }}
@@ -755,7 +789,61 @@ function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjec
             )}
           </div>
 
-          <button onClick={runPreview} className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-black text-sm">
+          <div className="border-t-2 border-dashed border-slate-200 pt-4">
+            <label className="block text-xs font-black text-slate-500 uppercase mb-2">➕ เพิ่มวิชาที่จะจัด (เพิ่มได้หลายวิชา)</label>
+            <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <select value={newSubjectId} onChange={e => setNewSubjectId(e.target.value)} className={inp}>
+                  <option value="">— เลือกรายวิชา —</option>
+                  {applicableSubjects.map(s => <option key={s.id} value={s.id}>{s.subject_code} {s.name_th}</option>)}
+                </select>
+                <input type="number" min={1} value={newPeriods === "" ? "" : newPeriods}
+                  onChange={e => setNewPeriods(e.target.value === "" ? "" : Number(e.target.value))}
+                  placeholder={newSubject?.periods_per_week ? `${newSubject.periods_per_week} คาบ/สัปดาห์ (ค่าเริ่มต้น)` : "จำนวนคาบ/สัปดาห์"}
+                  className={inp} />
+                <select value={newTeacherId} onChange={e => setNewTeacherId(e.target.value)} className={inp}>
+                  <option value="">— เลือกครูผู้สอน —</option>
+                  {teachers.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
+                </select>
+                <select value={newTeacherId2} onChange={e => setNewTeacherId2(e.target.value)} className={inp}>
+                  <option value="">— ครูคนที่ 2 (ถ้ามี) —</option>
+                  {teachers.filter(t => t.id !== newTeacherId).map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setNewPairMode("separate")}
+                  className={`flex-1 py-2 rounded-xl text-xs font-black border-2 ${newPairMode === "separate" ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-200 text-slate-600"}`}>
+                  แยกคาบ (คนละวัน)
+                </button>
+                <button onClick={() => setNewPairMode("double")}
+                  className={`flex-1 py-2 rounded-xl text-xs font-black border-2 ${newPairMode === "double" ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-200 text-slate-600"}`}>
+                  คาบคู่ติดกัน (วันเดียว 2 คาบรวด)
+                </button>
+              </div>
+              <button onClick={addJob} className="w-full py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-black text-sm">
+                + เพิ่มวิชานี้เข้าคิว
+              </button>
+            </div>
+          </div>
+
+          {jobs.length > 0 && (
+            <div>
+              <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">คิววิชาที่จะจัด ({jobs.length})</label>
+              <div className="divide-y divide-slate-100 border-2 border-slate-200 rounded-xl overflow-hidden">
+                {jobs.map((j, i) => (
+                  <div key={i} className="px-4 py-2.5 flex items-center justify-between gap-2 bg-white">
+                    <div className="text-sm">
+                      <span className="font-bold text-slate-800">{subjName(j.subjectId)}</span>
+                      <span className="text-slate-400"> · {displayName(teachers.find(t => t.id === j.teacherId))}{j.teacherId2 ? ` + ${displayName(teachers.find(t => t.id === j.teacherId2))}` : ""} · {j.periods} คาบ/สัปดาห์ · {j.pairMode === "double" ? "คาบคู่" : "แยกคาบ"}</span>
+                    </div>
+                    <button onClick={() => removeJob(i)} className="px-2 py-1 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs font-black shrink-0">ลบ</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button onClick={runPreview} className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm">
             🔍 รันหาคาบว่างให้ดูก่อน
           </button>
 
@@ -763,13 +851,18 @@ function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjec
             <div className="space-y-2">
               {preview.map(r => (
                 <div key={r.classroom.id} className="bg-violet-50 border-2 border-violet-200 rounded-xl p-3">
-                  <p className="text-xs font-black text-violet-700 mb-1.5">{r.classroom.room_name} — จัดได้ {r.assignments.length} คาบ</p>
-                  <div className="space-y-0.5">
-                    {r.assignments.map((a, i) => (
-                      <p key={i} className="text-xs text-slate-600">• {DAYS[a.day_of_week - 1]} · {a.time_slot.slot_label} ({formatTime(a.time_slot.start_time)}-{formatTime(a.time_slot.end_time)})</p>
-                    ))}
-                  </div>
-                  {r.warnings.map((w, i) => <p key={i} className="text-xs text-amber-600 font-bold mt-1">⚠️ {w}</p>)}
+                  <p className="text-xs font-black text-violet-700 mb-1.5">{r.classroom.room_name}</p>
+                  {r.jobResults.map((jr, i) => (
+                    <div key={i} className="mb-1.5 last:mb-0">
+                      <p className="text-xs font-bold text-slate-700">{subjName(jr.job.subjectId)} — จัดได้ {jr.assignments.length} คาบ</p>
+                      <div className="space-y-0.5 pl-2">
+                        {jr.assignments.map((a, k) => (
+                          <p key={k} className="text-xs text-slate-600">• {DAYS[a.day_of_week - 1]} · {a.time_slot.slot_label} ({formatTime(a.time_slot.start_time)}-{formatTime(a.time_slot.end_time)})</p>
+                        ))}
+                      </div>
+                      {jr.warnings.map((w, k) => <p key={k} className="text-xs text-amber-600 font-bold pl-2">⚠️ {w}</p>)}
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
@@ -779,7 +872,7 @@ function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjec
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">ยกเลิก</button>
           <button onClick={confirmArrange} disabled={!preview || running}
             className="flex-[2] py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm disabled:opacity-50">
-            {running ? "⏳ กำลังบันทึก..." : `✅ ยืนยันจัดทั้งหมด ${preview?.reduce((s, r) => s + r.assignments.length, 0) ?? 0} คาบ`}
+            {running ? "⏳ กำลังบันทึก..." : `✅ ยืนยันจัดทั้งหมด ${preview?.reduce((s, r) => s + r.jobResults.reduce((s2, jr) => s2 + jr.assignments.length, 0), 0) ?? 0} คาบ`}
           </button>
         </div>
       </div>
@@ -2167,14 +2260,13 @@ const loadLockedPeriods = useCallback(async () => {
 const [showAutoArrange, setShowAutoArrange] = useState(false);
 
 async function handleAutoArrangeConfirm(
-  jobs: { classroom: Classroom; assignments: { day_of_week: number; time_slot: TimeSlot }[] }[],
-  subjectId: string, teacherId: string, teacherId2?: string
+  jobs: { classroom: Classroom; subjectId: string; teacherId: string; teacherId2?: string; assignments: { day_of_week: number; time_slot: TimeSlot }[] }[]
 ) {
   for (const job of jobs) {
     for (const a of job.assignments) {
       await handleSaveDirect({
-        classroom_id: job.classroom.id, subject_id: subjectId,
-        teacher_id: teacherId, teacher_id_2: teacherId2 ?? null,
+        classroom_id: job.classroom.id, subject_id: job.subjectId,
+        teacher_id: job.teacherId, teacher_id_2: job.teacherId2 ?? null,
         day_of_week: a.day_of_week, time_slot_id: a.time_slot.id, time_slot: a.time_slot,
         academic_year_id: job.classroom.academic_year_id ?? selectedYear,
       });
@@ -3163,7 +3255,8 @@ const totalScheduledPeriods = entries.length;
     gradeLabel={selectedClassroom ? getClassroomGradeLabel(selectedClassroom) : undefined}
     classroomsAll={classrooms}
     subjects={subjects} teachers={teachers}
-    entries={entries} allTimeSlots={timeSlots} lockedPeriods={lockedPeriods}
+    entries={filterEntriesBySemester(entries, allClassrooms, selectedSemester, academicYearsRaw)}
+    allTimeSlots={timeSlots} lockedPeriods={lockedPeriods}
     onClose={() => setShowAutoArrange(false)}
     onArrange={handleAutoArrangeConfirm}
   />
