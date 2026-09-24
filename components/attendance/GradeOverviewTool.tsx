@@ -414,25 +414,14 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
   return students.map(s => {
     const subMap: Record<string, Submission> = {};
     submissions.filter(sub => sub.student_id === s.id).forEach(sub => { subMap[sub.assignment_id] = sub; });
-
-        // ★ แก้บั๊ก: แยกชิ้นงาน "มีน้ำหนัก" (นับแต้มคงที่ตรงๆ ไม่ยืด/หด) ออกจาก
-    // ชิ้นงาน "ไม่มีน้ำหนัก" (สเกลตามสัดส่วนให้เติมเต็มพื้นที่ที่เหลือของคะแนนเก็บ)
-    const weightedList = assignments.filter(isWeighted);
-    const unweightedList = assignments.filter(a => !isWeighted(a));
-
-    const weightedMaxTotal = weightedList.reduce((sum, a) => sum + (a.weight_percent ?? 0), 0);
-    const weightedEarnedTotal = weightedList.reduce(
+        // ★ ปรับใหม่ตามที่ครูต้องการ: "คะแนนเก็บ" คือผลรวมดิบของคะแนนชิ้นงานทุกชิ้นบวกกันตรงๆ
+    // (ใช้น้ำหนักถ้าชิ้นนั้นเปิดน้ำหนักไว้ ไม่งั้นใช้คะแนนดิบตรงๆ) ไม่มีการยืด/หดให้พอดีกับ
+    // formativeMaxScore (คะแนนเก็บที่ตั้งไว้ในหน้าตั้งค่ารายวิชา) อีกต่อไป เพราะทำให้ตัวเลข
+    // คลาดเคลื่อนไปจากคะแนนจริงที่ครูให้
+    const assignmentTotal = assignments.reduce(
       (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
       0
     );
-
-    const unweightedMaxTotal = unweightedList.reduce((sum, a) => sum + (a.max_score ?? 0), 0);
-    const unweightedEarnedTotal = unweightedList.reduce(
-      (sum, a) => sum + (subMap[a.id]?.score ?? 0),
-      0
-    );
-
-    const assignmentTotal = weightedEarnedTotal + unweightedEarnedTotal;
 
     const submittedCount = assignments.filter(a => subMap[a.id]?.score !== null && subMap[a.id]?.score !== undefined).length;
     const midtermRow = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm");
@@ -469,24 +458,33 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
         ? (attendanceRate === null ? null : attendanceRate >= passThresholdPercent ? "ผ่าน" : "ไม่ผ่าน")
         : null;
 
-        // ★ แก้บั๊ก: ชิ้นงานมีน้ำหนัก = นับแต้มคงที่ตรงๆ (ไม่ยืด/หด)
-    // ชิ้นงานไม่มีน้ำหนัก = สเกลตามสัดส่วนให้เติมเต็ม "พื้นที่ที่เหลือ" ของคะแนนเก็บ
-    // (เต็มเก็บ - ผลรวมน้ำหนักที่ตั้งไว้ทั้งหมด)
-    const remainingCapacity = Math.max(0, formativeMaxScore - weightedMaxTotal);
-    const scaledUnweighted =
-      unweightedMaxTotal > 0 ? (unweightedEarnedTotal / unweightedMaxTotal) * remainingCapacity : 0;
-    const scaledFormative = weightedEarnedTotal + scaledUnweighted;
+                const usesComponentGrading = gradingMode === "numeric"; // โครงสร้างเก็บ/กลาง/ปลาย ใช้เฉพาะโหมด numeric
 
-    // ★ เพิ่ม: รวมคะแนนสุดท้าย (แทนที่ grandTotal เดิมที่ใช้ assignmentTotal+specialTotal ตรงๆ)
-    const usesComponentGrading = gradingMode === "numeric"; // โครงสร้างเก็บ/กลาง/ปลาย ใช้เฉพาะโหมด numeric
-    const componentTotal = usesComponentGrading
-      ? scaledFormative + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0)
-      : null;
-    const componentPercentage = usesComponentGrading ? componentTotal! : null; // เต็ม 100 อยู่แล้วโดยดีไซน์
+    // ★ "เก็บ" (คะแนนงานทั้งหมด + กลางภาค) — ตัวเลขจริง ไม่ยืด/หด
+    // numerator: ผลรวมชิ้นงานจริง + คะแนนกลางภาคจริง (ไม่รวมคะแนนพิเศษ)
+    // denominator: ผลรวมคะแนนเต็มจริงของชิ้นงานทั้งหมด (totalMaxScore) + คะแนนเต็มกลางภาคที่ตั้งไว้ (midtermMaxScore)
+    //              ไม่ใช่ formativeMaxScore ที่ตั้งในหน้าตั้งค่า เพราะตัวเลขนั้นเป็นแค่เป้าหมาย ไม่ใช่ผลรวมจริง
+    const formativeEarned = usesComponentGrading
+      ? assignmentTotal + (useMidterm ? (midtermScore ?? 0) : 0)
+      : assignmentTotal;
+    const formativeMax = usesComponentGrading
+      ? totalMaxScore + (useMidterm ? midtermMaxScore : 0)
+      : totalMaxScore;
 
-    const percentage = usesComponentGrading
-      ? (componentPercentage ?? 0)
-      : (totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * 100 : 0);   // fallback เดิมเผื่อยังไม่ตั้งค่า
+    // grandTotal เดิม (คะแนนดิบ+พิเศษ) ยังเก็บไว้ใช้ในที่อื่น (เช่น Export/PodiumView) ไม่กระทบของเดิม
+    const grandTotal = assignmentTotal + specialTotal;
+
+    // ★ "รวม" = เก็บ (งาน+กลางภาค) + คะแนนพิเศษ + ปลายภาค
+    // denominator = เต็มเก็บจริง (formativeMax) + เต็มปลายภาค (finalMaxScore) — คะแนนพิเศษไม่มี "เต็ม" จึงไม่บวกเข้าตัวหาร
+    const displayTotal = usesComponentGrading
+      ? formativeEarned + specialTotal + (finalScore ?? 0)
+      : grandTotal;
+    const displayMax = usesComponentGrading
+      ? formativeMax + finalMaxScore
+      : totalMaxScore;
+
+    // ★ % และเกรด ต้องคำนวณจากตัวเลขชุดเดียวกับที่แสดงในคอลัมน์ "รวม" เป๊ะ ไม่งั้นตัวเลขกับ % จะไม่ตรงกันอีก
+    const percentage = displayMax > 0 ? (displayTotal / displayMax) * 100 : 0;
 
     let grade = "-";
     const sortedCriteria = [...criteria].sort((a, b) => b.min_percent - a.min_percent);
@@ -494,38 +492,18 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
       if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
     }
 
-        // grandTotal เดิม (คะแนนดิบ+พิเศษ) ยังเก็บไว้ใช้ในที่อื่น (เช่น Export/PodiumView) ไม่กระทบของเดิม
-    const grandTotal = assignmentTotal + specialTotal;
-
-    // ★ แก้บั๊ก: คอลัมน์ "รวม" ต้องใช้สูตรเดียวกับ percentage ไม่งั้นตัวเลขกับ % จะไม่ตรงกัน
-    // โหมด numeric (เก็บ+กลางภาค+ปลายภาค) -> ใช้ componentTotal เต็ม 100
-    // โหมด pass_fail (ไม่ใช้ระบบนี้) -> ใช้ grandTotal/totalMaxScore แบบเดิม
-            // ★ แก้: นับเต็มกลางภาค/ปลายภาคเฉพาะตอนที่นักเรียนคนนั้นมีคะแนนแล้วเท่านั้น (ยังไม่กรอก = ไม่นับทั้งเต็มและคะแนน)
-    const examMaxTotal = usesComponentGrading
-      ? (useMidterm && midtermRaw !== null ? midtermMaxScore : 0) + (finalRaw !== null ? finalMaxScore : 0)
-      : 0;
-
-        // ★ แก้บั๊ก: ต้องใช้ "scaledFormative" (ตัวที่สเกลแล้ว เต็ม 70) แทน grandTotal ดิบ
-    // และใช้ "formativeMaxScore" (70) แทน totalMaxScore ดิบ (39) เพื่อให้ตรงกับคอลัมน์คะแนนเก็บ
-    const displayTotal = usesComponentGrading
-   ? scaledFormative + specialTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0)
-   : grandTotal;
-
-    const displayMax = usesComponentGrading
-   ? formativeMaxScore + (useMidterm ? midtermMaxScore : 0) + finalMaxScore   // เต็มคงที่ 100 เสมอ ไม่ผันตามว่ากรอกสอบหรือยัง
-   : totalMaxScore;
-
     return {
       student: s, subMap, presetTotals, assignmentTotal, submittedCount,
       onTimeCount, lateCount, onTimeRate, totalDaysLate,
       specialTotal, percentage, grade, grandTotal,
       attendanceRate, passFailStatus,
-      scaledFormative, midtermScore, finalScore, componentTotal, midtermRaw, finalRaw,
-      displayTotal, displayMax, // ★ เพิ่ม
+      formativeEarned, formativeMax, midtermScore, finalScore, midtermRaw, finalRaw,
+      displayTotal, displayMax,
     };
   });
 }, [students, submissions, assignments, effectivePresets, scoreEvents, criteria, totalMaxScore,
-    attendanceMap, gradingMode, passThresholdPercent, examScores, formativeMaxScore, midtermMaxScore, finalMaxScore, useMidterm]); // ★ เพิ่ม dependency
+    attendanceMap, gradingMode, passThresholdPercent, examScores, midtermMaxScore, finalMaxScore, useMidterm,
+    rawMidtermMax, rawFinalMax]);
   // ★ ถ้าเป็นมุมมองนักเรียน กรองให้เหลือแถวตัวเองเท่านั้น
 const visibleRows = useMemo(() => {
   if (!currentStudentId) return rows;
@@ -1394,9 +1372,9 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     )}
   </th>
 )}
-    <th className="px-3 py-3 text-center min-w-[90px] bg-indigo-50/70">
+        <th className="px-3 py-3 text-center min-w-[90px] bg-indigo-50/70">
       <p className="text-m font-black text-indigo-700">คะแนนเก็บ</p>
-      <p className="text-[18px] text-indigo-300 font-bold">เต็ม {formativeMaxScore + (useMidterm ? midtermMaxScore : 0)}</p>
+      <p className="text-[18px] text-indigo-300 font-bold">เต็ม {fmtScore(totalMaxScore + (useMidterm ? midtermMaxScore : 0))}</p>
     </th>
 <th className="px-3 py-3 text-center min-w-[90px] bg-orange-50/70">
   <p className="text-m font-black text-orange-700">{examLabels.final}</p>
@@ -1567,11 +1545,11 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     />
   </td>
 )}
-    <td className="text-center px-3 py-3">
+        <td className="text-center px-3 py-3">
       <span className="text-m font-black text-indigo-600">
-        {fmtScore(r.scaledFormative + (useMidterm ? (r.midtermScore ?? 0) : 0))}
+        {fmtScore(r.formativeEarned)}
       </span>
-      <span className="text-slate-400 font-bold text-sm">/{formativeMaxScore + (useMidterm ? midtermMaxScore : 0)}</span>
+      <span className="text-slate-400 font-bold text-sm">/{fmtScore(r.formativeMax)}</span>
     </td>
 <td
   className="text-center px-3 py-3"
@@ -2116,15 +2094,15 @@ function buildRowsType() {
     grade: string;
     grandTotal: number;
     attendanceRate: number | null;
-    passFailStatus: "ผ่าน" | "ไม่ผ่าน" | null;
-    scaledFormative: number;        
-    midtermScore: number | null;    
-    finalScore: number | null;      
-    componentTotal: number | null;  
-    midtermRaw: number | null;      
-    finalRaw: number | null; 
-    displayTotal: number;    // ★ เพิ่ม
-    displayMax: number; 
+        passFailStatus: "ผ่าน" | "ไม่ผ่าน" | null;
+    formativeEarned: number;   // ★ เปลี่ยนจาก scaledFormative — ตัวเลขจริง ไม่ยืด/หด
+    formativeMax: number;      // ★ เพิ่ม — เต็มจริงของ "เก็บ" (assignments max รวม + midterm max)
+    midtermScore: number | null;
+    finalScore: number | null;
+    midtermRaw: number | null;
+    finalRaw: number | null;
+    displayTotal: number;
+    displayMax: number;
   }[];
 }
 

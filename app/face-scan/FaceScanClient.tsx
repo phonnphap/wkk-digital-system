@@ -77,9 +77,11 @@ export default function FaceScanPage() {
   // ฐานข้อมูลแล้ว ระบบจะไม่ยืนยันตัวตนทันที แต่จะให้ "กระพริบตา" ตามธรรมชาติ
   // ก่อน โดยวัดจาก Eye Aspect Ratio (EAR) จากจุด landmark รอบดวงตา — ภาพนิ่ง
   // (รูปถ่าย/สกรีนช็อต) จะไม่สามารถกระพริบตาได้ จึงผ่านขั้นตอนนี้ไม่ได้
-  const EAR_OPEN_THRESHOLD = 0.25;
-  const EAR_CLOSED_THRESHOLD = 0.19;
-  const LIVENESS_DURATION_MS = 7000;
+  // เกณฑ์ EAR ปรับตัวเองตามค่าที่วัดได้จริงจากกล้อง/แสง/ใบหน้าแต่ละคน แทนค่าคงที่ตายตัว
+  // (ค่าคงที่ตายตัวเป็นสาเหตุที่ทำให้ตรวจจับการกระพริบตาไม่ติดในบางอุปกรณ์)
+  const EAR_CLOSE_RATIO = 0.72; // สัดส่วนที่ถือว่า "หลับตา" เทียบกับค่าฐาน
+  const EAR_OPEN_RATIO = 0.85;  // สัดส่วนที่ถือว่า "ลืมตา" กลับมาแล้ว เทียบกับค่าฐาน
+  const LIVENESS_DURATION_MS = 10000;
   const LIVENESS_INTERVAL_MS = 150;
 
   const TERM1_START = new Date('2026-05-14T00:00:00+07:00');
@@ -167,6 +169,8 @@ export default function FaceScanPage() {
   const blinkFoundRef = useRef(false);
   const livenessStartRef = useRef(0);
   const candidateRef = useRef<{ id: string; name: string; similarity: string } | null>(null);
+  const earBaselineRef = useRef<number | null>(null);
+  const [blinkHint, setBlinkHint] = useState(false); // true เมื่อกำลังรอ "ลืมตา" กลับ (ใช้โชว์ฟีดแบ็ก)
 
   const canOffsiteScan = allowOffsiteScan && officialLeaveOk === true;
 
@@ -386,6 +390,8 @@ export default function FaceScanPage() {
     setScanStage('idle');
     eyeOpenRef.current = true;
     blinkFoundRef.current = false;
+    earBaselineRef.current = null;
+    setBlinkHint(false);
     candidateRef.current = null;
   };
 
@@ -454,6 +460,8 @@ export default function FaceScanPage() {
     candidateRef.current = candidate;
     eyeOpenRef.current = true;
     blinkFoundRef.current = false;
+    earBaselineRef.current = null;
+    setBlinkHint(false);
     livenessStartRef.current = Date.now();
     setScanStage('liveness');
     setLivenessSecondsLeft(Math.ceil(LIVENESS_DURATION_MS / 1000));
@@ -486,9 +494,19 @@ export default function FaceScanPage() {
         const rightEAR = eyeAspectRatio(det.landmarks.getRightEye());
         const avgEAR = (leftEAR + rightEAR) / 2;
 
-        if (eyeOpenRef.current && avgEAR < EAR_CLOSED_THRESHOLD) {
+        // ค่าฐาน (baseline) คือค่า EAR ตอนตาเปิดปกติ ปรับตัวขึ้นทีละนิดทุกครั้งที่ยังถือว่าลืมตาอยู่
+        if (earBaselineRef.current === null) earBaselineRef.current = avgEAR;
+        if (eyeOpenRef.current) {
+          earBaselineRef.current = earBaselineRef.current * 0.9 + avgEAR * 0.1;
+          earBaselineRef.current = Math.min(0.45, Math.max(0.15, earBaselineRef.current));
+        }
+        const closeThresh = earBaselineRef.current * EAR_CLOSE_RATIO;
+        const openThresh = earBaselineRef.current * EAR_OPEN_RATIO;
+
+        if (eyeOpenRef.current && avgEAR < closeThresh) {
           eyeOpenRef.current = false;
-        } else if (!eyeOpenRef.current && avgEAR > EAR_OPEN_THRESHOLD) {
+          setBlinkHint(true);
+        } else if (!eyeOpenRef.current && avgEAR > openThresh) {
           eyeOpenRef.current = true;
           blinkFoundRef.current = true;
         }
@@ -538,6 +556,8 @@ export default function FaceScanPage() {
     candidateRef.current = null;
     eyeOpenRef.current = true;
     blinkFoundRef.current = false;
+    earBaselineRef.current = null;
+    setBlinkHint(false);
     setStatus("ระบบพร้อมสแกนใบหน้า");
     if (streamRef.current) {
       setScanStage('detecting');
@@ -753,7 +773,7 @@ export default function FaceScanPage() {
             {isCameraActive && isLivenessPhase && (
               <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-[#5E5CE6] text-white text-xs font-semibold px-4 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 whitespace-nowrap">
                 <IconEye className="w-3.5 h-3.5 blink-pulse" />
-                กระพริบตา · {livenessSecondsLeft} วิ
+                {blinkHint ? "ลืมตากลับมาได้เลย" : "กระพริบตาตามปกติ"} · {livenessSecondsLeft} วิ
               </div>
             )}
           </div>

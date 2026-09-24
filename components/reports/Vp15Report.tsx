@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const GRADE_LEVELS = ["0", "1", "1.5", "2", "2.5", "3", "3.5", "4"];
+
+// ★ ดึงเลขห้องท้ายสุดจาก room_label เพื่อใช้เรียงลำดับ เช่น "ม.1/7" -> 7, "ป.4/12" -> 12
+// ถ้าหา /เลข ไม่เจอ ให้ถือว่าเป็นค่ามากสุด (Infinity) จะได้ถูกเรียงไปอยู่ท้ายตารางเสมอ ไม่ปนกับห้องปกติ
+function getRoomSortKey(roomLabel: string): number {
+  const match = roomLabel.match(/\/(\d+)\s*$/);
+  return match ? parseInt(match[1], 10) : Number.POSITIVE_INFINITY;
+}
 
 export default function Vp15Report({
   subjectId, academicYearId, subjectTitle, subjectCode, onBack,
@@ -37,6 +44,11 @@ export default function Vp15Report({
     })();
   }, [subjectId, academicYearId]);
 
+  // ★ เรียงห้องจากน้อยไปมากตามเลขท้าย room_label (/1, /2, ... /7) ก่อนแสดงผล
+  const sortedRows = useMemo(() => {
+    return [...rows].sort((a, b) => getRoomSortKey(a.room_label) - getRoomSortKey(b.room_label));
+  }, [rows]);
+
   function handlePrint() {
     window.print();
   }
@@ -61,7 +73,7 @@ export default function Vp15Report({
         <div className="text-center py-16 text-slate-300 font-bold text-base">กำลังโหลด...</div>
       ) : error ? (
         <p className="text-red-600 text-m font-bold bg-red-50 border-2 border-red-200 rounded-xl px-5 py-3">❌ {error}</p>
-      ) : rows.length === 0 ? (
+      ) : sortedRows.length === 0 ? (
         <p className="text-center text-slate-400 font-bold text-base py-10">ยังไม่มีห้องเรียนของวิชานี้</p>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-6 print:p-0 print:border-none print:shadow-none">
@@ -87,7 +99,7 @@ export default function Vp15Report({
                 </tr>
               </thead>
               <tbody>
-                {rows.map(r => (
+                {sortedRows.map(r => (
                   <tr key={r.section_id} className="hover:bg-slate-50/60">
                     <td className="border border-slate-200 px-2 py-1.5 font-bold">{r.room_label}</td>
                     <td className="border border-slate-200 px-2 py-1.5 font-black">{r.total_students}</td>
