@@ -171,6 +171,8 @@ export default function StudentPortalSubjectPage() {
   const [studentSubmitEnabled, setStudentSubmitEnabled] = useState(true);
   const [allowLateSubmission, setAllowLateSubmission] = useState(true);
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
+    const [rawMidtermMax, setRawMidtermMax] = useState<number | null>(null);
+const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
 
   const fetchAssignments = useCallback(async () => {
   if (!sectionId) return;
@@ -232,17 +234,28 @@ const fetchSubjectInfo = useCallback(async () => {
     const sections: any[] = data.sections ?? [];
     const matched = sections.find((s) => s.id === sectionId);
 
-    const classroom = data.classroom;
+        const classroom = data.classroom;
 const classLabel = classroom?.grade_group
   ? `${classroom.grade_group}${classroom.room_name ? `/${classroom.room_name}` : ""}`
   : (classroom?.room_name ?? null);
 
+// ★ แก้บั๊ก: เดิมไม่เคยส่งค่าตั้งค่าคะแนน (grading_mode, formative/midterm/final max score) มาด้วย
+// ทำให้ GradeOverviewTool fallback ไปใช้ default ตายตัว (70/0/30) เสมอ ไม่ตรงกับที่ครูตั้งไว้จริง
+// จึงทำให้ "เต็ม" ผิด และคะแนนกลางภาคหายไป (เพราะ midtermMaxScore เป็น 0 เสมอ)
 setSubjectInfo({
   subject_name: matched?.subject?.name_th ?? "",
   class_code: matched?.subject?.subject_code ?? null,
   class_name: classLabel,
-  class_room_label: classroom?.room_name ?? null,   // ★ เก็บแค่ "ป.3/1"
+  class_room_label: classroom?.room_name ?? null,
   academic_year: data.academic_year ?? null,
+  homeroom_teacher_name: classroom?.homeroom_teacher_name ?? null,       // ★ เพิ่ม (เดิมก็ไม่เคยส่งมาเช่นกัน)
+  subject_teacher_name: matched?.subject_teacher_name ?? null,           // ★ เพิ่ม
+  grading_mode: matched?.grading_mode ?? "numeric",                      // ★ เพิ่ม
+  pass_threshold_percent: matched?.pass_threshold_percent ?? 50,         // ★ เพิ่ม
+  grading_structure: matched?.grading_structure ?? "formative_midterm_final", // ★ เพิ่ม
+  formative_max_score: matched?.formative_max_score ?? 70,               // ★ เพิ่ม
+  midterm_max_score: matched?.midterm_max_score ?? 0,                    // ★ เพิ่ม
+  final_max_score: matched?.final_max_score ?? 30,                       // ★ เพิ่ม
 });
 
     // ★ เก็บข้อมูลตัวนักเรียนไว้ใช้ส่งต่อให้ GradeOverviewTool (ข้อ 2.2)
@@ -263,6 +276,15 @@ setSubjectInfo({
     // เงียบไว้ ไม่ให้กระทบหน้าอื่น
   }
 }, [studentId, sectionId]);
+  // ★ ค่าคะแนนเต็มจริงของโครงสร้างคะแนน (เก็บ/กลางภาค/ปลายภาค) ที่ตั้งไว้ในตาราง subject_sections
+  // ดึงจาก /api/subject-grades/summary (field gradingConfig) เพื่อใช้เป็นค่าจริงเสมอ
+  // แทนที่จะพึ่ง props formativeMaxScore/midtermMaxScore/finalMaxScore ที่ผู้เรียกใช้ component นี้
+  // (เช่น หน้านักเรียน) อาจส่งมาไม่ตรงกับค่าที่ตั้งไว้จริง ทำให้ครู/นักเรียนเห็นตัวเลขไม่ตรงกัน
+  const [sectionGradingConfig, setSectionGradingConfig] = useState<{
+    formative_max_score: number | null;
+    midterm_max_score: number | null;
+    final_max_score: number | null;
+  } | null>(null);
 
 useEffect(() => {
   fetchSubjectInfo();
