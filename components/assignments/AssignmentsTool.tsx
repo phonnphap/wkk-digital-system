@@ -550,6 +550,7 @@ function AssignmentList({
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkSaving, setBulkSaving] = useState<"draft" | "published" | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const [order, setOrder] = useState<Assignment[]>(assignments);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -609,7 +610,32 @@ function AssignmentList({
     }
     setBulkSaving(null);
   }
+  async function bulkDelete() {
+  if (selectedIds.size === 0) return;
+  if (
+    !confirm(
+      `ต้องการลบชิ้นงานที่เลือกทั้งหมด ${selectedIds.size} ชิ้นใช่หรือไม่?\nการลบนี้ไม่สามารถย้อนกลับได้ และจะลบข้อมูลการส่งงาน/คะแนนของนักเรียนที่ผูกกับชิ้นงานเหล่านี้ทั้งหมดด้วย`
+    )
+  )
+    return;
 
+  setBulkDeleting(true);
+  try {
+    const ids = Array.from(selectedIds);
+    await supabase.from("assignment_submissions").delete().in("assignment_id", ids);
+    await supabase.from("assignment_students").delete().in("assignment_id", ids);
+    await supabase.from("assignment_attachments").delete().in("assignment_id", ids);
+    await supabase.from("assignment_cross_sections").delete().in("source_assignment_id", ids);
+    await supabase.from("assignments").delete().in("id", ids);
+
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    await onRefresh();
+  } catch (e: any) {
+    alert("ลบชิ้นงานที่เลือกไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+  }
+  setBulkDeleting(false);
+}
   function handleDragStart(e: React.DragEvent, index: number) {
     setDragIndex(index);
     e.dataTransfer.effectAllowed = "move";
@@ -707,19 +733,27 @@ function AssignmentList({
           </label>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => bulkSetStatus("draft")}
-              disabled={selectedIds.size === 0 || bulkSaving !== null}
-              className="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-base disabled:opacity-50"
-            >
-              {bulkSaving === "draft" ? "กำลังบันทึก..." : "บันทึกแบบร่างที่เลือก"}
-            </button>
-            <button
-              onClick={() => bulkSetStatus("published")}
-              disabled={selectedIds.size === 0 || bulkSaving !== null}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base shadow disabled:opacity-50"
-            >
-              {bulkSaving === "published" ? "กำลังเผยแพร่..." : "เผยแพร่ที่เลือก"}
-            </button>
+    onClick={() => bulkSetStatus("draft")}
+    disabled={selectedIds.size === 0 || bulkSaving !== null || bulkDeleting}
+    className="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-base disabled:opacity-50"
+  >
+    {bulkSaving === "draft" ? "กำลังบันทึก..." : "บันทึกแบบร่างที่เลือก"}
+  </button>
+  <button
+    onClick={() => bulkSetStatus("published")}
+    disabled={selectedIds.size === 0 || bulkSaving !== null || bulkDeleting}
+    className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 text-white font-black text-base shadow disabled:opacity-50"
+  >
+    {bulkSaving === "published" ? "กำลังเผยแพร่..." : "เผยแพร่ที่เลือก"}
+  </button>
+  {/* ★ ใหม่: ปุ่มลบที่เลือก */}
+  <button
+    onClick={bulkDelete}
+    disabled={selectedIds.size === 0 || bulkSaving !== null || bulkDeleting}
+    className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black text-base shadow disabled:opacity-50"
+  >
+    {bulkDeleting ? "กำลังลบ..." : "🗑️ ลบที่เลือก"}
+  </button>
           </div>
         </div>
       )}

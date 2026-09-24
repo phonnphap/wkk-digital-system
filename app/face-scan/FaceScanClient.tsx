@@ -3,7 +3,6 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useRef } from "react";
-
 import { useRouter } from 'next/navigation';
 import { createClient } from "@/lib/supabase/client";
 
@@ -14,55 +13,127 @@ interface UserRow {
   face_features: any;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   ไอคอนเส้น (สไตล์ SF Symbols) — ใช้แทนอิโมจิส่วนใหญ่เพื่อความสะอาดตา
+   ────────────────────────────────────────────────────────────────────────── */
+function IconCheck({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function IconPin({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <circle cx="12" cy="9.5" r="2.4" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+function IconCamera({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M4 8.5A1.5 1.5 0 0 1 5.5 7H8l1.2-1.8A1.5 1.5 0 0 1 10.45 4.5h3.1a1.5 1.5 0 0 1 1.25.7L16 7h2.5A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <circle cx="12" cy="13" r="3.3" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+function IconEye({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="2.6" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+function IconShield({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M12 3.5l6.5 2.4v5.3c0 4.4-2.8 7.9-6.5 9.3-3.7-1.4-6.5-4.9-6.5-9.3V5.9L12 3.5Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M9.2 12.1l2 2 3.6-3.9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function IconX({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function FaceScanPage() {
 
-const supabase = createClient();
+  const supabase = createClient();
 
-const SCHOOL_LAT = 14.000541081931873;
-const SCHOOL_LNG = 100.6766971783887;
-const ALLOWED_RADIUS = 75;
-// ยกค่า threshold ออกมาเป็นค่ากลาง (เดิม hardcode อยู่ใน loop) — ปรับตามตัวอย่าง scan.html
-const MATCH_THRESHOLD = 0.4;
+  const SCHOOL_LAT = 14.000541081931873;
+  const SCHOOL_LNG = 100.6766971783887;
+  const ALLOWED_RADIUS = 75;
+  const MATCH_THRESHOLD = 0.4;
 
-// ── ภาคเรียนที่ 1/2569: 14 พ.ค. 2569 – 9 ต.ค. 2569 ──────────────────────────
-const TERM1_START = new Date('2026-05-14T00:00:00+07:00');
-const TERM1_END   = new Date('2026-10-09T23:59:59+07:00');
+  // ── liveness (anti-photo-spoofing) ──────────────────────────────────────
+  // กันการเอารูปถ่าย/ภาพในจอมือถือมาสแกนแทนตัวจริง: หลังจากเจอใบหน้าที่ตรงกับ
+  // ฐานข้อมูลแล้ว ระบบจะไม่ยืนยันตัวตนทันที แต่จะให้ "กระพริบตา" ตามธรรมชาติ
+  // ก่อน โดยวัดจาก Eye Aspect Ratio (EAR) จากจุด landmark รอบดวงตา — ภาพนิ่ง
+  // (รูปถ่าย/สกรีนช็อต) จะไม่สามารถกระพริบตาได้ จึงผ่านขั้นตอนนี้ไม่ได้
+  const EAR_OPEN_THRESHOLD = 0.25;
+  const EAR_CLOSED_THRESHOLD = 0.19;
+  const LIVENESS_DURATION_MS = 7000;
+  const LIVENESS_INTERVAL_MS = 150;
 
-function isInTerm1(date: Date): boolean {
-  return date >= TERM1_START && date <= TERM1_END;
-}
+  const TERM1_START = new Date('2026-05-14T00:00:00+07:00');
+  const TERM1_END = new Date('2026-10-09T23:59:59+07:00');
 
-function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371e3;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-    Math.cos((lat2 * Math.PI) / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(R * c);
-}
+  function isInTerm1(date: Date): boolean {
+    return date >= TERM1_START && date <= TERM1_END;
+  }
 
-function toThaiTime(isoString: string): string {
-  return new Date(isoString).toLocaleTimeString('th-TH', {
-    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok'
-  });
-}
+  function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371e3;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return Math.round(R * c);
+  }
 
-function toThaiDateTime(isoString: string): string {
-  return new Date(isoString).toLocaleString('th-TH', {
-    day: 'numeric', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok'
-  });
-}
+  function toThaiTime(isoString: string): string {
+    return new Date(isoString).toLocaleTimeString('th-TH', {
+      hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok'
+    });
+  }
+
+  function toThaiDateTime(isoString: string): string {
+    return new Date(isoString).toLocaleString('th-TH', {
+      day: 'numeric', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok'
+    });
+  }
+
+  // Eye Aspect Ratio: ค่าจะต่ำลงอย่างชัดเจนเมื่อหลับตา แล้วกลับขึ้นเมื่อลืมตา
+  function eyeAspectRatio(eye: { x: number; y: number }[]): number {
+    if (!eye || eye.length < 6) return 1;
+    const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+      Math.hypot(a.x - b.x, a.y - b.y);
+    const A = dist(eye[1], eye[5]);
+    const B = dist(eye[2], eye[4]);
+    const C = dist(eye[0], eye[3]);
+    if (C === 0) return 1;
+    return (A + B) / (2 * C);
+  }
+
   const faceApiRef = useRef<any>(null);
   const [faceapi, setFaceapi] = useState<any>(null);
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const livenessIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const [currentDateTime, setCurrentDateTime] = useState({ time: '', date: '' });
   const [status, setStatus] = useState("กำลังเตรียมระบบสแกน...");
@@ -74,26 +145,32 @@ function toThaiDateTime(isoString: string): string {
   const [historyData, setHistoryData] = useState<any[]>([]);
   const [summary, setSummary] = useState({
     monthly: { normal: 0, late: 0, mission: 0 },
-    term:    { normal: 0, late: 0, mission: 0 }
+    term: { normal: 0, late: 0, mission: 0 }
   });
   const [faceMatcher, setFaceMatcher] = useState<any>(null);
 
-  // ── เพิ่มใหม่ จากตัวอย่าง scan.html ──────────────────────────────────────────
-  const [modelsReady, setModelsReady] = useState(false);           // โมเดล + ฐานข้อมูลใบหน้าพร้อมหรือยัง
-  const [userNames, setUserNames] = useState<Record<string, string>>({}); // map id -> ชื่อ-สกุล สำหรับแสดงใน modal
-  const [pendingMatch, setPendingMatch] = useState<{ id: string; name: string; similarity: string } | null>(null); // รอยืนยันก่อนบันทึกจริง
+  const [modelsReady, setModelsReady] = useState(false);
+  const [userNames, setUserNames] = useState<Record<string, string>>({});
+  const [pendingMatch, setPendingMatch] = useState<{ id: string; name: string; similarity: string } | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
-  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null); // ค่าความคลาดเคลื่อนของ GPS ที่เครื่องรายงานมา (เมตร)
-  const isDetectingRef = useRef(false); // กันไม่ให้ยิง detectSingleFace ซ้อนกันตอนเครื่องช้า
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const isDetectingRef = useRef(false);
 
-  // ── เพิ่มใหม่: ตรวจใบลาไปราชการก่อนอนุญาตสแกนนอกพื้นที่ ─────────────────────
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [officialLeaveOk, setOfficialLeaveOk] = useState<boolean | null>(null); // null=ยังไม่ตรวจ, true/false=ผลตรวจ
+  const [officialLeaveOk, setOfficialLeaveOk] = useState<boolean | null>(null);
   const [checkingLeave, setCheckingLeave] = useState(false);
+
+  // ── สถานะขั้นตอนการสแกน: detecting (กำลังหาหน้า) → liveness (ให้กระพริบตา) → confirm (ยืนยัน) ──
+  const [scanStage, setScanStage] = useState<'idle' | 'detecting' | 'liveness' | 'confirm'>('idle');
+  const [livenessSecondsLeft, setLivenessSecondsLeft] = useState(0);
+  const eyeOpenRef = useRef(true);
+  const blinkFoundRef = useRef(false);
+  const livenessStartRef = useRef(0);
+  const candidateRef = useRef<{ id: string; name: string; similarity: string } | null>(null);
 
   const canOffsiteScan = allowOffsiteScan && officialLeaveOk === true;
 
-  // ── 1. นาฬิกา + GPS ──────────────────────────────────────────────────────────
+  // ── 1. นาฬิกา + GPS ──────────────────────────────────────────────────────
   useEffect(() => {
     const timer = setInterval(() => {
       const now = new Date();
@@ -110,10 +187,6 @@ function toThaiDateTime(isoString: string): string {
           const dist = calculateDistance(latitude, longitude, SCHOOL_LAT, SCHOOL_LNG);
           setDistanceFromSchool(dist);
           setGpsAccuracy(Math.round(accuracy));
-
-          // ── ผ่อนปรนตามค่าความแม่นยำของ GPS เอง (accuracy) ──────────────────
-          // GPS มือถือ (โดยเฉพาะในอาคาร) มีค่าคลาดเคลื่อนได้หลักสิบถึงหลักร้อยเมตร
-          // ถ้าหักลบ accuracy ออกแล้วยังอยู่ในรัศมีที่กำหนด ให้ถือว่า "อยู่ในพื้นที่"
           const effectiveDist = Math.max(0, dist - accuracy);
           setIsInsideSchool(effectiveDist <= ALLOWED_RADIUS);
         },
@@ -124,7 +197,7 @@ function toThaiDateTime(isoString: string): string {
     return () => clearInterval(timer);
   }, []);
 
-  // ── 2. โหลดสถิติทันทีจาก session ที่ล็อคอินอยู่แล้ว ──────────────────────────
+  // ── 2. โหลดสถิติจาก session ปัจจุบัน ─────────────────────────────────────
   useEffect(() => {
     const loadInitialStats = async () => {
       try {
@@ -149,24 +222,21 @@ function toThaiDateTime(isoString: string): string {
     loadInitialStats();
   }, []);
 
-  // ── 3. โหลด AI Model + face vectors (แบ่งเป็นขั้นตอน 1/2, 2/2 ตามตัวอย่าง scan.html) ─
+  // ── 3. โหลดโมเดล AI + เวกเตอร์ใบหน้าจากตาราง users เดิม (ไม่มีการสร้างผู้ใช้ใหม่) ──
   useEffect(() => {
     const init = async () => {
       try {
-        setStatus("1/2 กำลังโหลดโมเดล AI...");
+        setStatus("1/2 กำลังโหลดโมเดล AI");
         const fa = await import('face-api.js');
         setFaceapi(fa);
         faceApiRef.current = fa;
-        // ใช้ TinyFaceDetector แทน SsdMobilenetv1 สำหรับหน้าสแกน — เบากว่ามาก
-        // เหมาะกับ loop ตรวจจับต่อเนื่องทุกวินาที ลดอาการหน่วง/ช้าบนมือถือ
-        // (ต้องมีไฟล์ tiny_face_detector_model-weights_manifest.json + shard อยู่ใน /public/models ด้วย)
         await Promise.all([
           fa.nets.tinyFaceDetector.loadFromUri('/models'),
           fa.nets.faceLandmark68Net.loadFromUri('/models'),
           fa.nets.faceRecognitionNet.loadFromUri('/models')
         ]);
 
-        setStatus("2/2 กำลังโหลดฐานข้อมูลใบหน้า...");
+        setStatus("2/2 กำลังโหลดฐานข้อมูลใบหน้า");
         const { data, error } = await supabase
           .from('users')
           .select('id, first_name, last_name, face_features')
@@ -176,7 +246,6 @@ function toThaiDateTime(isoString: string): string {
 
         const users = data || [];
 
-        // เก็บชื่อไว้ใช้แสดงผลใน modal ยืนยันตัวตน (ไม่ต้อง query ซ้ำตอนเจอใบหน้า)
         const nameMap: Record<string, string> = {};
         users.forEach(u => {
           const fullName = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
@@ -209,28 +278,28 @@ function toThaiDateTime(isoString: string): string {
 
         if (descriptors.length === 0) {
           setFaceMatcher(null);
-          setStatus("⚠️ ระบบพร้อม (ไม่พบข้อมูลใบหน้าในระบบ)");
+          setStatus("ระบบพร้อม (ยังไม่พบข้อมูลใบหน้าในระบบ)");
         } else {
           setFaceMatcher(new fa.FaceMatcher(descriptors, 0.55));
-          setStatus("🟢 ระบบพร้อมสแกนใบหน้า");
+          setStatus("ระบบพร้อมสแกนใบหน้า");
         }
         setModelsReady(true);
       } catch (err) {
         console.error(err);
-        setStatus("❌ โหลดโมเดลล้มเหลว กรุณา refresh");
+        setStatus("โหลดโมเดลไม่สำเร็จ กรุณารีเฟรชหน้านี้");
       }
     };
     init();
   }, []);
 
-  // ── 4. ดึงสถิติและประวัติ ─────────────────────────────────────────────────────
+  // ── 4. สถิติ + ประวัติ ────────────────────────────────────────────────────
   const refreshStats = async (userId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('teacher_attendance')
-      .select('id, check_time, type, status, is_onsite')
-      .eq('user_id', userId)
-      .order('check_time', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('teacher_attendance')
+        .select('id, check_time, type, status, is_onsite')
+        .eq('user_id', userId)
+        .order('check_time', { ascending: false });
 
       if (error) throw error;
       if (!data || data.length === 0) {
@@ -243,22 +312,16 @@ function toThaiDateTime(isoString: string): string {
 
       const now = new Date();
       const thisMonth = now.getMonth();
-      const thisYear  = now.getFullYear();
-      const monthly   = { normal: 0, late: 0, mission: 0 };
-      const term      = { normal: 0, late: 0, mission: 0 };
+      const thisYear = now.getFullYear();
+      const monthly = { normal: 0, late: 0, mission: 0 };
+      const term = { normal: 0, late: 0, mission: 0 };
 
       data.filter((log: any) => log.type === 'check_in').forEach((log: any) => {
         const d = new Date(log.check_time);
         const isMonth = d.getMonth() === thisMonth && d.getFullYear() === thisYear;
-
-        // priority: สาย > ไปราชการ > ปกติ
         const bucket = log.status?.includes('สาย') ? 'late'
           : log.is_onsite === false ? 'mission' : 'normal';
-
-        // นับเฉพาะที่อยู่ในช่วงภาคเรียนที่ 1
-        if (isInTerm1(d)) {
-          term[bucket as keyof typeof term]++;
-        }
+        if (isInTerm1(d)) term[bucket as keyof typeof term]++;
         if (isMonth) monthly[bucket as keyof typeof monthly]++;
       });
 
@@ -268,7 +331,7 @@ function toThaiDateTime(isoString: string): string {
     }
   };
 
-  // ── 4.5 ตรวจสอบใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้ ───────────────────────
+  // ── 4.5 ตรวจใบลาไปราชการ ─────────────────────────────────────────────────
   async function checkOfficialLeaveToday(userId: string): Promise<boolean> {
     try {
       const today = new Date().toISOString().split('T')[0];
@@ -296,7 +359,7 @@ function toThaiDateTime(isoString: string): string {
       return;
     }
     if (!currentUserId) {
-      window.alert("⚠️ ไม่พบข้อมูลผู้ใช้ กรุณาเข้าสู่ระบบใหม่แล้วลองอีกครั้ง");
+      window.alert("ไม่พบข้อมูลผู้ใช้ กรุณาเข้าสู่ระบบใหม่แล้วลองอีกครั้ง");
       return;
     }
     setCheckingLeave(true);
@@ -305,22 +368,30 @@ function toThaiDateTime(isoString: string): string {
     setOfficialLeaveOk(ok);
     setAllowOffsiteScan(ok);
     if (!ok) {
-      window.alert("⚠️ ไม่พบใบลาไปราชการที่ได้รับอนุมัติสำหรับวันนี้\nกรุณายื่นและรอการอนุมัติใบลาไปราชการก่อนจึงจะสแกนนอกพื้นที่ได้");
+      window.alert("ไม่พบใบลาไปราชการที่ได้รับอนุมัติสำหรับวันนี้\nกรุณายื่นและรอการอนุมัติใบลาไปราชการก่อนจึงจะสแกนนอกพื้นที่ได้");
     }
   }
 
-  // ── 5. กล้อง ──────────────────────────────────────────────────────────────────
-  const stopVideo = () => {
+  // ── 5. กล้อง ──────────────────────────────────────────────────────────────
+  const clearAllTimers = () => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    if (livenessIntervalRef.current) { clearInterval(livenessIntervalRef.current); livenessIntervalRef.current = null; }
+  };
+
+  const stopVideo = () => {
+    clearAllTimers();
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
     if (videoRef.current) videoRef.current.srcObject = null;
     setIsCameraActive(false);
+    setScanStage('idle');
+    eyeOpenRef.current = true;
+    blinkFoundRef.current = false;
+    candidateRef.current = null;
   };
 
   const startVideo = async () => {
-    // ── gate ตำแหน่ง GPS ก่อนเปิดกล้อง (แนวทางจาก scan.html ที่เช็ค GPS ก่อนเริ่มสแกนเสมอ) ──
     if (!isInsideSchool && !canOffsiteScan) {
-      setStatus("⛔ อยู่นอกพื้นที่โรงเรียน กรุณาเข้าใกล้จุดเช็คอิน หรือติ๊กยืนยันปฏิบัติราชการนอกสถานที่ (ต้องมีใบลาไปราชการที่อนุมัติแล้ว)");
+      setStatus("อยู่นอกพื้นที่โรงเรียน กรุณาเข้าใกล้จุดเช็คอิน หรือยืนยันปฏิบัติราชการนอกสถานที่ด้านล่าง");
       return;
     }
     try {
@@ -329,19 +400,19 @@ function toThaiDateTime(isoString: string): string {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         setIsCameraActive(true);
-        setStatus("✅ กำลังสแกน... มองกล้องตรงๆ");
-        if (intervalRef.current) clearInterval(intervalRef.current);
+        setScanStage('detecting');
+        setStatus("กำลังสแกน — มองกล้องตรง ๆ");
         detectFaceLoop();
       }
     } catch {
-      setStatus("❌ ตรวจไม่พบอุปกรณ์กล้อง");
+      setStatus("ตรวจไม่พบอุปกรณ์กล้อง");
     }
   };
 
-  // ── 6. Loop ตรวจจับใบหน้า ─────────────────────────────────────────────────────
+  // ── 6. Loop ตรวจจับ + จับคู่ใบหน้า ───────────────────────────────────────
   const detectFaceLoop = () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
     intervalRef.current = setInterval(async () => {
-      // กันยิงซ้อน: ถ้ารอบก่อนหน้ายังประมวลผลไม่เสร็จ (เครื่องช้า/สัญญาณกล้องหน่วง) ให้ข้ามรอบนี้ไปก่อน
       if (isDetectingRef.current) return;
       if (!videoRef.current || !streamRef.current || !faceMatcher || !faceApiRef.current) return;
 
@@ -349,7 +420,6 @@ function toThaiDateTime(isoString: string): string {
       const fa = faceApiRef.current;
 
       try {
-        // TinyFaceDetector เร็วกว่า SsdMobilenetv1 มาก เหมาะกับ loop ต่อเนื่องแบบนี้
         const detection = await fa
           .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
           .withFaceLandmarks()
@@ -360,19 +430,15 @@ function toThaiDateTime(isoString: string): string {
           const similarity = ((1 - match.distance) * 100).toFixed(1);
 
           if (match.label !== 'unknown' && match.distance < MATCH_THRESHOLD) {
-            // เจอใบหน้าตรงกันชัดเจน — หยุดสแกนแล้วให้ผู้ใช้ "ยืนยัน" เองก่อนค่อยเขียนลงฐานข้อมูล
-            // (เดิมระบบจะบันทึกทันที ปรับตามตัวอย่าง scan.html ที่มี modal ยืนยันก่อนเสมอ)
-            if (intervalRef.current) clearInterval(intervalRef.current);
             const name = userNames[match.label] || match.label;
-            setStatus(`✅ พบใบหน้า (${similarity}% ตรงกัน) กรุณายืนยันตัวตน`);
-            setPendingMatch({ id: match.label, name, similarity });
+            startLivenessCheck({ id: match.label, name, similarity });
           } else if (match.label !== 'unknown') {
-            setStatus(`🔍 พบใบหน้า แต่ยังไม่ชัด (${similarity}%) ขยับเข้าใกล้กล้องอีกนิด`);
+            setStatus(`พบใบหน้า แต่ยังไม่ชัด (${similarity}%) ขยับเข้าใกล้กล้องอีกนิด`);
           } else {
-            setStatus(`📷 กำลังสแกน... (ไม่พบข้อมูล ${similarity}%)`);
+            setStatus(`กำลังสแกน... (ไม่พบข้อมูลตรงกัน ${similarity}%)`);
           }
         } else {
-          setStatus("📷 กรุณาขยับหน้าให้อยู่ในกรอบสแกน");
+          setStatus("กรุณาจัดใบหน้าให้อยู่ในกรอบสแกน");
         }
       } finally {
         isDetectingRef.current = false;
@@ -380,7 +446,85 @@ function toThaiDateTime(isoString: string): string {
     }, 800);
   };
 
-  // ── 7. ยืนยัน / ยกเลิก การจับคู่ใบหน้า ────────────────────────────────────────
+  // ── 6.5 การยืนยันว่าเป็นคนจริง (liveness) ด้วยการกระพริบตา ──────────────────
+  // ป้องกันการนำรูปถ่ายหรือภาพนิ่งบนหน้าจอมาสแกนแทนตัวจริง: ต้องตรวจพบการ
+  // กระพริบตาตามธรรมชาติภายในเวลาที่กำหนด และยืนยันตัวตนซ้ำอีกครั้งก่อนบันทึกเวลา
+  function startLivenessCheck(candidate: { id: string; name: string; similarity: string }) {
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    candidateRef.current = candidate;
+    eyeOpenRef.current = true;
+    blinkFoundRef.current = false;
+    livenessStartRef.current = Date.now();
+    setScanStage('liveness');
+    setLivenessSecondsLeft(Math.ceil(LIVENESS_DURATION_MS / 1000));
+    setStatus(`พบคุณ ${candidate.name} — กรุณากระพริบตาตามปกติเพื่อยืนยันว่าเป็นคนจริง`);
+
+    livenessIntervalRef.current = setInterval(async () => {
+      const fa = faceApiRef.current;
+      if (!videoRef.current || !fa) return;
+
+      const elapsed = Date.now() - livenessStartRef.current;
+      const remainMs = Math.max(0, LIVENESS_DURATION_MS - elapsed);
+      setLivenessSecondsLeft(Math.ceil(remainMs / 1000));
+
+      if (elapsed > LIVENESS_DURATION_MS) {
+        if (livenessIntervalRef.current) { clearInterval(livenessIntervalRef.current); livenessIntervalRef.current = null; }
+        candidateRef.current = null;
+        setScanStage('detecting');
+        setStatus("ยืนยันไม่สำเร็จ ไม่พบการกระพริบตา กรุณาลองใหม่อีกครั้ง");
+        detectFaceLoop();
+        return;
+      }
+
+      try {
+        const det = await fa
+          .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+          .withFaceLandmarks();
+        if (!det) return;
+
+        const leftEAR = eyeAspectRatio(det.landmarks.getLeftEye());
+        const rightEAR = eyeAspectRatio(det.landmarks.getRightEye());
+        const avgEAR = (leftEAR + rightEAR) / 2;
+
+        if (eyeOpenRef.current && avgEAR < EAR_CLOSED_THRESHOLD) {
+          eyeOpenRef.current = false;
+        } else if (!eyeOpenRef.current && avgEAR > EAR_OPEN_THRESHOLD) {
+          eyeOpenRef.current = true;
+          blinkFoundRef.current = true;
+        }
+
+        if (blinkFoundRef.current) {
+          if (livenessIntervalRef.current) { clearInterval(livenessIntervalRef.current); livenessIntervalRef.current = null; }
+
+          // ยืนยันซ้ำอีกครั้งว่ายังเป็นคนเดิมที่ตรวจพบตอนแรก ก่อนเปิด modal ยืนยัน
+          const finalDet = await fa
+            .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+
+          const candidate = candidateRef.current;
+          if (finalDet && faceMatcher && candidate) {
+            const reMatch = faceMatcher.findBestMatch(finalDet.descriptor);
+            if (reMatch.label === candidate.id && reMatch.distance < MATCH_THRESHOLD) {
+              setScanStage('confirm');
+              setStatus("ยืนยันตัวตนจริงสำเร็จ");
+              setPendingMatch(candidate);
+              return;
+            }
+          }
+          // ยืนยันซ้ำไม่ผ่าน — เริ่มสแกนใหม่
+          candidateRef.current = null;
+          setScanStage('detecting');
+          setStatus("ยืนยันตัวตนไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+          detectFaceLoop();
+        }
+      } catch {
+        // ข้าม error ชั่วคราวระหว่างตรวจ ไม่ต้องหยุด loop
+      }
+    }, LIVENESS_INTERVAL_MS);
+  }
+
+  // ── 7. ยืนยัน / ยกเลิก การจับคู่ใบหน้า ────────────────────────────────────
   const confirmMatch = async () => {
     if (!pendingMatch || isConfirming) return;
     setIsConfirming(true);
@@ -391,21 +535,23 @@ function toThaiDateTime(isoString: string): string {
 
   const cancelMatch = () => {
     setPendingMatch(null);
-    setStatus("🟢 ระบบพร้อมสแกนใบหน้า");
-    // เปิดกล้องสแกนต่อให้ทันที ไม่ต้องกดเปิดกล้องใหม่
+    candidateRef.current = null;
+    eyeOpenRef.current = true;
+    blinkFoundRef.current = false;
+    setStatus("ระบบพร้อมสแกนใบหน้า");
     if (streamRef.current) {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      setScanStage('detecting');
       detectFaceLoop();
     }
   };
 
-  // ── 8. บันทึกเวลา ─────────────────────────────────────────────────────────────
+  // ── 8. บันทึกเวลา ─────────────────────────────────────────────────────────
   const processAttendance = async (scannedUserId: string) => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { window.alert("❌ กรุณาเข้าสู่ระบบก่อน"); return; }
+    if (!user) { window.alert("กรุณาเข้าสู่ระบบก่อน"); return; }
 
     if (!isInsideSchool && !canOffsiteScan) {
-      window.alert("❌ คุณอยู่นอกพื้นที่โรงเรียน\nกรุณาติ๊กยืนยันการปฏิบัติราชการนอกสถานที่ (ต้องมีใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้)");
+      window.alert("คุณอยู่นอกพื้นที่โรงเรียน\nกรุณายืนยันการปฏิบัติราชการนอกสถานที่ (ต้องมีใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้)");
       stopVideo();
       return;
     }
@@ -414,18 +560,18 @@ function toThaiDateTime(isoString: string): string {
       .from('users').select('id').eq('email', user.email ?? '').maybeSingle();
 
     if (!foundUser) {
-      window.alert("❌ ไม่พบข้อมูลผู้ใช้\nemail: " + user.email);
+      window.alert("ไม่พบข้อมูลผู้ใช้\nemail: " + user.email);
       stopVideo();
       return;
     }
 
     const finalUserId: string = (foundUser as any).id;
-    const today  = new Date().toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0];
     const nowISO = new Date().toISOString();
     const thaiTime = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok' });
     const thaiDate = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Bangkok' });
 
-    const now    = new Date();
+    const now = new Date();
     const isLate = attendanceType === 'check_in' &&
       (now.getHours() * 60 + now.getMinutes() > 7 * 60 + 45);
     const statusText = attendanceType === 'check_in'
@@ -440,7 +586,7 @@ function toThaiDateTime(isoString: string): string {
 
       if (existing) {
         const existTime = toThaiTime((existing as any).check_time);
-        window.alert(`⚠️ บันทึกเวลาเข้างานวันนี้ไปแล้ว\n🕐 เวลา: ${existTime} น.`);
+        window.alert(`บันทึกเวลาเข้างานวันนี้ไปแล้ว\nเวลา: ${existTime} น.`);
         stopVideo();
         return;
       }
@@ -451,14 +597,13 @@ function toThaiDateTime(isoString: string): string {
       }] as any);
 
       if (!error) {
-        window.alert(`✅ บันทึกเวลาเข้างานสำเร็จ\n📅 ${thaiDate}\n🕐 ${thaiTime} น.\n📊 ${statusText}`);
+        window.alert(`บันทึกเวลาเข้างานสำเร็จ\n${thaiDate}\n${thaiTime} น.\n${statusText}`);
         await refreshStats(finalUserId);
       } else {
-        window.alert("❌ ผิดพลาด: " + error.message);
+        window.alert("ผิดพลาด: " + error.message);
       }
 
     } else {
-      // ✅ กันซ้ำเช่นเดียวกับ check_in — เช็คว่าเช็คเอาท์วันนี้ไปแล้วหรือยัง
       const { data: existingOut } = await supabase
         .from('teacher_attendance').select('id, check_time')
         .eq('user_id', finalUserId).eq('attendance_date', today).eq('type', 'check_out')
@@ -466,7 +611,7 @@ function toThaiDateTime(isoString: string): string {
 
       if (existingOut) {
         const existTime = toThaiTime((existingOut as any).check_time);
-        window.alert(`⚠️ บันทึกเวลาออกงานวันนี้ไปแล้ว\n🕐 เวลา: ${existTime} น.`);
+        window.alert(`บันทึกเวลาออกงานวันนี้ไปแล้ว\nเวลา: ${existTime} น.`);
         stopVideo();
         return;
       }
@@ -477,166 +622,190 @@ function toThaiDateTime(isoString: string): string {
       }] as any);
 
       if (!error) {
-        window.alert(`✅ บันทึกเวลาออกงานสำเร็จ\n📅 ${thaiDate}\n🕐 ${thaiTime} น.`);
+        window.alert(`บันทึกเวลาออกงานสำเร็จ\n${thaiDate}\n${thaiTime} น.`);
         await refreshStats(finalUserId);
       } else {
-        window.alert("❌ ผิดพลาด: " + error.message);
+        window.alert("ผิดพลาด: " + error.message);
       }
     }
 
     stopVideo();
   };
 
-  // ── UI ────────────────────────────────────────────────────────────────────────
+  const isLivenessPhase = scanStage === 'liveness';
+  const isDetectingPhase = scanStage === 'detecting';
+
+  // ── UI ──────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-blue-50 text-slate-800" style={{ fontFamily: "'Sarabun','TH Sarabun New',sans-serif" }}>
-      
-      {/* ย้ายมารวมกันตรงนี้ทั้งหมดเพื่อป้องกัน Nested Tags */}
+    <div
+      className="min-h-screen bg-[#F5F5F7] text-[#1D1D1F]"
+      style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Thai', 'Sarabun', 'Noto Sans Thai', sans-serif" }}
+    >
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap');
       `}</style>
 
       <style jsx>{`
-        /* วงแหวนไล่สีหมุนรอบวงกลม (mask ให้เหลือแต่ขอบ) คล้ายแอนิเมชัน Face ID ของ Apple */
-        .face-scan-ring {
-          width: 100%;
-          height: 100%;
-          border-radius: 9999px;
+        .ring-detect {
           background: conic-gradient(
             from 0deg,
             transparent 0deg,
-            rgba(34, 211, 238, 0.05) 40deg,
-            #22d3ee 90deg,
-            #a5f3fc 110deg,
-            rgba(34, 211, 238, 0.05) 150deg,
-            transparent 200deg,
+            rgba(10, 132, 255, 0.06) 40deg,
+            #0A84FF 100deg,
+            #7dc0ff 130deg,
+            rgba(10, 132, 255, 0.06) 170deg,
+            transparent 220deg,
             transparent 360deg
           );
-          -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
-          mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
-          animation: faceScanSpin 1.6s linear infinite;
+          -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 6px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 6px));
+          animation: ringSpin 1.7s linear infinite;
         }
-        @keyframes faceScanSpin {
-          to { transform: rotate(360deg); }
+        .ring-liveness {
+          background: conic-gradient(
+            from 0deg,
+            transparent 0deg,
+            rgba(94, 92, 230, 0.08) 40deg,
+            #5E5CE6 100deg,
+            #b9b8f7 130deg,
+            rgba(94, 92, 230, 0.08) 170deg,
+            transparent 220deg,
+            transparent 360deg
+          );
+          -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 6px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 6px));
+          animation: ringSpin 1s linear infinite;
         }
+        @keyframes ringSpin { to { transform: rotate(360deg); } }
+        @keyframes softPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.55; transform: scale(0.9); }
+        }
+        .blink-pulse { animation: softPulse 1.1s ease-in-out infinite; }
       `}</style>
 
-      {/* ── Header บนสุด — ปุ่มกลับหน้าหลัก ย้ายมาไว้ด้านบนเหมือนระบบอื่น ───────── */}
-      <div className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-blue-100 shadow-sm px-4 py-3 flex items-center gap-3">
+      {/* ── แถบบนแบบ Apple Nav Bar: โปร่งแสง เบลอพื้นหลัง เส้นขอบบาง ── */}
+      <div className="sticky top-0 z-40 bg-white/75 backdrop-blur-xl border-b border-black/5 px-4 py-3 flex items-center gap-3">
         <button type="button" onClick={() => router.push('/')}
-          className="w-10 h-10 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 flex items-center justify-center text-lg transition-colors">
-          🏠
+          className="w-9 h-9 rounded-full bg-black/[0.04] hover:bg-black/[0.07] flex items-center justify-center transition-colors active:scale-95">
+          <IconPin className="w-4.5 h-4.5 text-[#1D1D1F]" />
         </button>
         <div>
-          <h1 className="text-sm sm:text-base font-bold text-slate-800 leading-none">ระบบลงเวลาปฏิบัติงาน</h1>
-          <p className="text-slate-400 text-xs">โรงเรียนวัดเขียนเขต</p>
+          <h1 className="text-[15px] font-semibold text-[#1D1D1F] leading-none">ระบบลงเวลาปฏิบัติงาน</h1>
+          <p className="text-[#86868B] text-xs mt-1">โรงเรียนวัดเขียนเขต</p>
         </div>
       </div>
 
       <div className="flex flex-col items-center justify-start p-4 sm:p-6">
 
         {/* หัวเวลา */}
-        <div className="text-center mt-4 mb-8 w-full max-w-xl">
-          <div className="text-6xl sm:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-500 to-blue-600 tracking-tight font-mono">
+        <div className="text-center mt-6 mb-8 w-full max-w-xl">
+          <div className="text-6xl sm:text-7xl font-semibold tracking-tight tabular-nums text-[#1D1D1F]">
             {currentDateTime.time || "00:00:00"}
           </div>
-          <div className="text-slate-500 mt-2 font-semibold text-lg sm:text-xl">วัน{currentDateTime.date || "กำลังโหลด..."}</div>
+          <div className="text-[#86868B] mt-2 font-medium text-base sm:text-lg">
+            วัน{currentDateTime.date || "กำลังโหลด..."}
+          </div>
         </div>
 
         {/* แผงสแกน */}
-        <div className="bg-white border border-blue-100 rounded-[2.5rem] p-6 sm:p-8 w-full max-w-xl shadow-[0_15px_40px_-15px_rgba(59,130,246,0.25)]">
+        <div className="bg-white/90 backdrop-blur border border-black/5 rounded-[32px] p-6 sm:p-8 w-full max-w-xl shadow-[0_2px_40px_-12px_rgba(0,0,0,0.15)]">
 
-          {/* GPS Badge */}
+          {/* GPS badge */}
           <div className="flex justify-center mb-6">
-            <div className={`px-6 py-2.5 rounded-full text-sm font-bold flex items-center gap-3 border-2 ${isInsideSchool ? 'bg-emerald-50 text-emerald-600 border-emerald-300' : 'bg-amber-50 text-amber-600 border-amber-300'}`}>
-              <div className={`w-3 h-3 rounded-full animate-pulse ${isInsideSchool ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-              {isInsideSchool ? "📍 คุณอยู่ในพื้นที่โรงเรียน" : `⚠️ อยู่นอกพื้นที่ (${distanceFromSchool} ม.${gpsAccuracy ? ` ±${gpsAccuracy} ม.` : ''})`}
+            <div className={`px-5 py-2 rounded-full text-[13px] font-medium flex items-center gap-2 ${isInsideSchool ? 'bg-[#30D158]/10 text-[#1E8E3E]' : 'bg-[#FF9F0A]/12 text-[#B8720A]'}`}>
+              <IconPin className="w-3.5 h-3.5" />
+              {isInsideSchool ? "อยู่ในพื้นที่โรงเรียน" : `นอกพื้นที่ (${distanceFromSchool} ม.${gpsAccuracy ? ` ±${gpsAccuracy} ม.` : ''})`}
             </div>
           </div>
-          {/* คำอธิบายเมื่อ GPS ฟันธงว่านอกพื้นที่ทั้งที่ยืนอยู่ในโรงเรียนจริง */}
           {!isInsideSchool && gpsAccuracy !== null && (
-            <p className="text-center text-[11px] text-slate-400 -mt-4 mb-4">
-              ค่า GPS มีความคลาดเคลื่อนได้เอง โดยเฉพาะในอาคาร ลองออกไปที่โล่งแจ้งแล้วรอ 10-15 วินาทีให้ค่านิ่งก่อน
+            <p className="text-center text-[11px] text-[#86868B] -mt-4 mb-4">
+              ค่า GPS มีความคลาดเคลื่อนได้เอง โดยเฉพาะในอาคาร ลองออกไปที่โล่งแจ้งแล้วรอสักครู่ให้ค่านิ่งก่อน
             </p>
           )}
 
           {/* กล้อง */}
           <div className="relative w-72 h-72 mx-auto mb-8">
-            <div className="absolute inset-0 rounded-full border-[8px] border-blue-50 shadow-inner" />
+            <div className="absolute inset-0 rounded-full border-[6px] border-[#F5F5F7]" />
 
-            {/* วงแหวนสแกนหมุนรอบวงกลม แบบ Apple Face ID — เพิ่มใหม่ตามที่ขอ */}
-            {isCameraActive && !pendingMatch && (
+            {isCameraActive && isDetectingPhase && (
               <div className="absolute -inset-3 rounded-full pointer-events-none overflow-hidden">
-                <div className="face-scan-ring" />
+                <div className="ring-detect w-full h-full" />
               </div>
             )}
-            {isCameraActive && !pendingMatch && (
-              <div className="absolute -inset-1 rounded-full border-2 border-cyan-300/50 animate-ping pointer-events-none" />
+            {isCameraActive && isLivenessPhase && (
+              <div className="absolute -inset-3 rounded-full pointer-events-none overflow-hidden">
+                <div className="ring-liveness w-full h-full" />
+              </div>
             )}
 
-            <div className="w-full h-full rounded-full overflow-hidden border-4 border-cyan-400 shadow-[0_0_50px_-8px_rgba(6,182,212,0.5)] bg-slate-50">
+            <div className={`w-full h-full rounded-full overflow-hidden border-[3px] shadow-[0_0_0_1px_rgba(0,0,0,0.03)] bg-[#FAFAFA] transition-colors ${isLivenessPhase ? 'border-[#5E5CE6]' : 'border-[#0A84FF]'}`}>
               <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
               {!isCameraActive && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-50">
-                  <span className="text-5xl mb-3">📷</span>
-                  <span className="text-xs uppercase tracking-widest font-bold text-slate-400">กล้องปิดการทำงาน</span>
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-[#86868B] bg-[#FAFAFA]">
+                  <IconCamera className="w-10 h-10 mb-3 text-[#C7C7CC]" />
+                  <span className="text-[13px] font-medium text-[#AEAEB2]">กล้องปิดการทำงาน</span>
                 </div>
               )}
             </div>
+
+            {/* ป้ายบอกขั้นตอน liveness ลอยอยู่ใต้วงกลม */}
+            {isCameraActive && isLivenessPhase && (
+              <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-[#5E5CE6] text-white text-xs font-semibold px-4 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 whitespace-nowrap">
+                <IconEye className="w-3.5 h-3.5 blink-pulse" />
+                กระพริบตา · {livenessSecondsLeft} วิ
+              </div>
+            )}
           </div>
 
-          {/* (ลบแท็ก style jsx เดิมที่อยู่ตรงนี้ออกแล้ว) */}
-
           <div className="space-y-5">
-            {/* Toggle check_in / check_out */}
-            <div className="grid grid-cols-2 gap-3 bg-blue-50/60 p-2 rounded-2xl border border-blue-100">
+            {/* Toggle check_in / check_out — segmented control สไตล์ Apple */}
+            <div className="grid grid-cols-2 gap-1 bg-black/[0.045] p-1 rounded-2xl">
               <button type="button" onClick={() => setAttendanceType('check_in')}
-                className={`py-4 rounded-xl font-bold text-base transition-all ${attendanceType === 'check_in' ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}>
-                เข้างาน (Check In)
+                className={`py-3.5 rounded-xl font-semibold text-[15px] transition-all ${attendanceType === 'check_in' ? 'bg-white text-[#1D1D1F] shadow-[0_1px_4px_rgba(0,0,0,0.12)]' : 'text-[#86868B]'}`}>
+                เข้างาน
               </button>
               <button type="button" onClick={() => setAttendanceType('check_out')}
-                className={`py-4 rounded-xl font-bold text-base transition-all ${attendanceType === 'check_out' ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}>
-                ออกงาน (Check Out)
+                className={`py-3.5 rounded-xl font-semibold text-[15px] transition-all ${attendanceType === 'check_out' ? 'bg-white text-[#1D1D1F] shadow-[0_1px_4px_rgba(0,0,0,0.12)]' : 'text-[#86868B]'}`}>
+                ออกงาน
               </button>
             </div>
 
-            {/* ปุ่มเปิด/ปิดกล้อง — ล็อกไว้จนกว่าโมเดลจะพร้อม และต้องอยู่ในพื้นที่ (หรือมีใบลาไปราชการที่อนุมัติแล้ว) ก่อน */}
             <button type="button" onClick={isCameraActive ? stopVideo : startVideo}
               disabled={!modelsReady || (!isInsideSchool && !canOffsiteScan)}
-              className={`w-full py-4 rounded-2xl font-bold text-base tracking-wide transition-all active:scale-[0.98] shadow-lg disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 ${isCameraActive ? 'bg-gradient-to-r from-rose-500 to-red-500 text-white' : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white'}`}>
-              {isCameraActive ? "❌ ยกเลิกและปิดกล้องสแกน" : "📷 เปิดกล้องเพื่อสแกนใบหน้า"}
+              className={`w-full py-4 rounded-2xl font-semibold text-[16px] transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 ${isCameraActive ? 'bg-[#FF3B30] text-white' : 'bg-[#0A84FF] text-white'}`}>
+              {isCameraActive ? "ยกเลิกและปิดกล้อง" : "เปิดกล้องเพื่อสแกนใบหน้า"}
             </button>
 
             {!modelsReady && (
-              <p className="text-center text-xs text-slate-400 -mt-2">⏳ กำลังเตรียมระบบ กรุณารอสักครู่...</p>
+              <p className="text-center text-xs text-[#86868B] -mt-2">กำลังเตรียมระบบ กรุณารอสักครู่...</p>
             )}
             {modelsReady && !isInsideSchool && !canOffsiteScan && (
-              <p className="text-center text-xs text-amber-500 -mt-2">⛔ ต้องอยู่ในพื้นที่โรงเรียนจึงจะสแกนได้ หรือติ๊กยืนยันปฏิบัติราชการนอกสถานที่ด้านล่าง (ต้องมีใบลาไปราชการที่อนุมัติแล้ว)</p>
+              <p className="text-center text-xs text-[#B8720A] -mt-2">ต้องอยู่ในพื้นที่โรงเรียนจึงจะสแกนได้ หรือยืนยันปฏิบัติราชการนอกสถานที่ด้านล่าง</p>
             )}
 
-            {/* Offsite checkbox — ตรวจใบลาไปราชการก่อนอนุญาต */}
             {!isInsideSchool && (
               <div>
-                <label className="flex items-center gap-4 bg-amber-50 p-4 rounded-2xl border-2 border-amber-200 cursor-pointer hover:bg-amber-100 transition-all">
+                <label className="flex items-center gap-4 bg-[#FF9F0A]/8 p-4 rounded-2xl border border-[#FF9F0A]/20 cursor-pointer hover:bg-[#FF9F0A]/12 transition-all">
                   <input type="checkbox" checked={allowOffsiteScan} disabled={checkingLeave}
                     onChange={e => handleOffsiteToggle(e.target.checked)}
-                    className="w-6 h-6 rounded accent-amber-500" />
-                  <span className="text-sm text-amber-700 font-bold leading-tight">ยืนยันว่ากำลังปฏิบัติราชการนอกสถานที่ / ไปราชการ</span>
+                    className="w-5 h-5 rounded accent-[#FF9F0A]" />
+                  <span className="text-[14px] text-[#B8720A] font-medium leading-tight">ยืนยันว่ากำลังปฏิบัติราชการนอกสถานที่ / ไปราชการ</span>
                 </label>
                 {checkingLeave && (
-                  <p className="text-xs text-amber-500 mt-1.5 text-center animate-pulse">⏳ กำลังตรวจสอบใบลาไปราชการ...</p>
+                  <p className="text-xs text-[#B8720A] mt-1.5 text-center animate-pulse">กำลังตรวจสอบใบลาไปราชการ...</p>
                 )}
                 {!checkingLeave && officialLeaveOk === true && (
-                  <p className="text-xs text-emerald-600 mt-1.5 text-center font-bold">✅ พบใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้ สามารถสแกนได้</p>
+                  <p className="text-xs text-[#1E8E3E] mt-1.5 text-center font-medium">พบใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้ สามารถสแกนได้</p>
                 )}
                 {!checkingLeave && officialLeaveOk === false && (
-                  <p className="text-xs text-red-500 mt-1.5 text-center font-bold">❌ ไม่พบใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้</p>
+                  <p className="text-xs text-[#FF3B30] mt-1.5 text-center font-medium">ไม่พบใบลาไปราชการที่อนุมัติแล้วสำหรับวันนี้</p>
                 )}
               </div>
             )}
 
             {/* Status bar */}
-            <p className="text-center text-sm text-blue-600 font-bold bg-blue-50/60 py-2 rounded-xl border border-blue-100 tracking-wide">
+            <p className="text-center text-[13px] text-[#48484A] font-medium bg-black/[0.035] py-2.5 rounded-xl tracking-wide">
               {status}
             </p>
           </div>
@@ -645,15 +814,15 @@ function toThaiDateTime(isoString: string): string {
         {/* สถิติ */}
         <div className="mt-8 grid grid-cols-2 gap-4 w-full max-w-xl">
           {[
-            { label: 'สถิติประจำเดือนนี้', data: summary.monthly },
-            { label: 'สถิติภาคเรียนที่ 1/2569', data: summary.term }
+            { label: 'ประจำเดือนนี้', data: summary.monthly },
+            { label: 'ภาคเรียนที่ 1/2569', data: summary.term }
           ].map((item, i) => (
-            <div key={i} className="bg-white border border-blue-100 p-5 rounded-3xl shadow-sm">
-              <p className="text-blue-500 font-bold text-xs uppercase mb-4 tracking-wider border-b border-blue-50 pb-1">📊 {item.label}</p>
+            <div key={i} className="bg-white/90 backdrop-blur border border-black/5 p-5 rounded-3xl shadow-[0_1px_20px_-10px_rgba(0,0,0,0.12)]">
+              <p className="text-[#86868B] font-semibold text-[12px] mb-4 border-b border-black/[0.04] pb-2">{item.label}</p>
               <div className="space-y-2.5">
-                <div className="flex justify-between text-sm font-bold"><span className="text-slate-400">ปกติ:</span><span className="text-emerald-500">{item.data.normal} ครั้ง</span></div>
-                <div className="flex justify-between text-sm font-bold"><span className="text-slate-400">สาย:</span><span className="text-rose-500">{item.data.late} ครั้ง</span></div>
-                <div className="flex justify-between text-sm font-bold"><span className="text-slate-400">ไปราชการ:</span><span className="text-amber-500">{item.data.mission} ครั้ง</span></div>
+                <div className="flex justify-between text-[14px] font-medium"><span className="text-[#86868B]">ปกติ</span><span className="text-[#1E8E3E]">{item.data.normal} ครั้ง</span></div>
+                <div className="flex justify-between text-[14px] font-medium"><span className="text-[#86868B]">สาย</span><span className="text-[#FF3B30]">{item.data.late} ครั้ง</span></div>
+                <div className="flex justify-between text-[14px] font-medium"><span className="text-[#86868B]">ไปราชการ</span><span className="text-[#B8720A]">{item.data.mission} ครั้ง</span></div>
               </div>
             </div>
           ))}
@@ -661,34 +830,34 @@ function toThaiDateTime(isoString: string): string {
 
         {/* ประวัติย้อนหลัง */}
         <div className="mt-8 w-full max-w-xl mb-12">
-          <div className="bg-white border border-blue-100 rounded-3xl p-6 shadow-sm">
-            <h3 className="text-base font-bold text-slate-600 uppercase tracking-wider mb-4">🕒 รายการบันทึกย้อนหลัง</h3>
-            <div className="space-y-3">
+          <div className="bg-white/90 backdrop-blur border border-black/5 rounded-3xl p-6 shadow-[0_1px_20px_-10px_rgba(0,0,0,0.12)]">
+            <h3 className="text-[13px] font-semibold text-[#86868B] mb-4">รายการบันทึกย้อนหลัง</h3>
+            <div className="space-y-2">
               {historyData.length > 0 ? historyData.map((log: any) => (
-                <div key={log.id} className="flex items-center justify-between p-4 bg-blue-50/40 rounded-2xl border border-blue-50 hover:bg-blue-50 transition-all">
+                <div key={log.id} className="flex items-center justify-between p-4 bg-black/[0.025] rounded-2xl hover:bg-black/[0.045] transition-all">
                   <div className="flex flex-col">
-                    <span className="text-base font-bold text-slate-800">
+                    <span className="text-[15px] font-semibold text-[#1D1D1F]">
                       {toThaiTime(log.check_time)} น.
                     </span>
-                    <span className="text-xs text-slate-400">
+                    <span className="text-[12px] text-[#86868B]">
                       {toThaiDateTime(log.check_time)}
                     </span>
                   </div>
-                  <div className={`px-3 py-1 rounded-xl text-xs font-bold ${
+                  <div className={`px-3 py-1 rounded-xl text-[12px] font-semibold ${
                     log.type === 'check_out'
-                      ? 'bg-blue-100 text-blue-600 border border-blue-200'
+                      ? 'bg-[#0A84FF]/10 text-[#0A84FF]'
                       : log.status?.includes('สาย')
-                        ? 'bg-rose-100 text-rose-600 border border-rose-200'
-                        : 'bg-emerald-100 text-emerald-600 border border-emerald-200'
+                        ? 'bg-[#FF3B30]/10 text-[#FF3B30]'
+                        : 'bg-[#30D158]/10 text-[#1E8E3E]'
                   }`}>
-                    {log.type === 'check_out' ? '🔒 ออกงาน' : `🔓 ${log.status}`}
+                    {log.type === 'check_out' ? 'ออกงาน' : log.status}
                   </div>
-                  <div className="text-xs text-slate-500 font-bold">
-                    {log.is_onsite ? "🏫 ใน รร." : "💼 นอกพื้นที่"}
+                  <div className="text-[12px] text-[#86868B] font-medium">
+                    {log.is_onsite ? "ในโรงเรียน" : "นอกพื้นที่"}
                   </div>
                 </div>
               )) : (
-                <div className="text-center py-8 text-slate-400 text-sm font-bold italic bg-blue-50/30 rounded-2xl border border-blue-50">
+                <div className="text-center py-8 text-[#AEAEB2] text-[14px] font-medium bg-black/[0.02] rounded-2xl">
                   ยังไม่มีข้อมูลรายการบันทึกเวลาล่าสุด
                 </div>
               )}
@@ -697,31 +866,35 @@ function toThaiDateTime(isoString: string): string {
         </div>
       </div>
 
-      {/* ── Modal ยืนยันตัวตน — เพิ่มใหม่ตามแนวคิดจาก confirmModal ใน scan.html ──── */}
+      {/* ── Modal ยืนยันตัวตน ── */}
       {pendingMatch && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm bg-white border border-blue-100 rounded-3xl p-8 text-center shadow-2xl">
-            <div className="mx-auto mb-4 w-20 h-20 rounded-full bg-cyan-50 border-2 border-cyan-200 flex items-center justify-center text-4xl">
-              🙋
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm bg-white border border-black/5 rounded-[32px] p-8 text-center shadow-2xl">
+            <div className="mx-auto mb-4 w-16 h-16 rounded-full bg-[#30D158]/10 flex items-center justify-center">
+              <IconShield className="w-7 h-7 text-[#1E8E3E]" />
             </div>
-            <p className="text-xs text-slate-400 mb-1">ตรวจพบใบหน้า</p>
-            <p className="text-2xl font-bold text-blue-600 mb-4 break-words">{pendingMatch.name}</p>
-            <div className="inline-block bg-emerald-50 border border-emerald-200 text-emerald-600 px-5 py-2 rounded-full font-bold text-sm mb-2">
+            <div className="flex items-center justify-center gap-1.5 mb-1">
+              <IconCheck className="w-3.5 h-3.5 text-[#1E8E3E]" />
+              <p className="text-[12px] text-[#1E8E3E] font-semibold">ยืนยันว่าเป็นคนจริงแล้ว</p>
+            </div>
+            <p className="text-2xl font-semibold text-[#1D1D1F] mb-4 break-words">{pendingMatch.name}</p>
+            <div className="inline-block bg-[#0A84FF]/10 text-[#0A84FF] px-5 py-2 rounded-full font-semibold text-sm mb-2">
               {attendanceType === 'check_in' ? 'พร้อมยืนยันเข้างาน' : 'พร้อมยืนยันออกงาน'}
             </div>
-            <p className="text-xs text-slate-400 mb-6">ความเหมือน: {pendingMatch.similarity}%</p>
+            <p className="text-xs text-[#86868B] mb-6">ความเหมือนใบหน้า {pendingMatch.similarity}%</p>
 
             <button type="button" onClick={confirmMatch} disabled={isConfirming}
-              className="w-full py-4 rounded-2xl font-bold text-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg mb-3 disabled:opacity-50 transition-all">
-              {isConfirming ? '⏳ กำลังบันทึก...' : (attendanceType === 'check_in' ? '✅ ยืนยันเข้างาน' : '✅ ยืนยันออกงาน')}
+              className="w-full py-4 rounded-2xl font-semibold text-[16px] bg-[#0A84FF] text-white shadow-lg mb-3 disabled:opacity-50 transition-all active:scale-[0.98]">
+              {isConfirming ? 'กำลังบันทึก...' : (attendanceType === 'check_in' ? 'ยืนยันเข้างาน' : 'ยืนยันออกงาน')}
             </button>
             <button type="button" onClick={cancelMatch} disabled={isConfirming}
-              className="w-full py-3 rounded-2xl font-bold text-sm bg-rose-50 border border-rose-200 text-rose-500 hover:bg-rose-100 transition-all disabled:opacity-50">
-              ❌ ไม่ใช่ฉัน / สแกนใหม่
+              className="w-full py-3.5 rounded-2xl font-semibold text-[15px] bg-black/[0.04] text-[#FF3B30] hover:bg-black/[0.06] transition-all disabled:opacity-50 flex items-center justify-center gap-1.5">
+              <IconX className="w-4 h-4" />
+              ไม่ใช่ฉัน / สแกนใหม่
             </button>
           </div>
         </div>
       )}
     </div>
   );
-  }
+}
