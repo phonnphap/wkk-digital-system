@@ -60,6 +60,20 @@ export async function GET(req: NextRequest) {
     .select("id, room_name, grade_group, homeroom_teacher_id, homeroom_teacher_2_id")
     .eq("id", student.classroom_id)
     .maybeSingle();
+      // ★ เพิ่ม: ดึงปีการศึกษา/ภาคเรียนปัจจุบัน จากตาราง academic_years (is_current = true)
+  const { data: currentYear, error: yearErr } = await supabaseAdmin
+    .from("academic_years")
+    .select("year_name, semester")
+    .eq("is_current", true)
+    .maybeSingle();
+
+  if (yearErr) {
+    console.error("[timetable] academic_years query error:", yearErr);
+  }
+
+  const academicYearLabel = currentYear
+    ? `${currentYear.year_name}/${currentYear.semester}`
+    : null;
 
   if (classroomErr) {
     console.error("[timetable] classroom query error:", classroomErr);
@@ -97,7 +111,7 @@ export async function GET(req: NextRequest) {
   }
 
   const sectionList = sections ?? [];
-  const commonInfo = {
+    const commonInfo = {
     student: {
       id: student.id,
       prefix: getAutoPrefix(student.gender, student.birth_date, student.prefix),
@@ -112,6 +126,7 @@ export async function GET(req: NextRequest) {
       last_name: t.last_name ?? "",
       full_name: t.full_name ?? "",
     })),
+    academic_year: academicYearLabel, // ★ เพิ่ม
   };
 
   if (sectionList.length === 0) {

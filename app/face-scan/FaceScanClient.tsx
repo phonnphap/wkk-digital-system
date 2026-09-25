@@ -79,10 +79,9 @@ export default function FaceScanPage() {
   // (รูปถ่าย/สกรีนช็อต) จะไม่สามารถกระพริบตาได้ จึงผ่านขั้นตอนนี้ไม่ได้
   // เกณฑ์ EAR ปรับตัวเองตามค่าที่วัดได้จริงจากกล้อง/แสง/ใบหน้าแต่ละคน แทนค่าคงที่ตายตัว
   // (ค่าคงที่ตายตัวเป็นสาเหตุที่ทำให้ตรวจจับการกระพริบตาไม่ติดในบางอุปกรณ์)
-  const EAR_CLOSE_RATIO = 0.72; // สัดส่วนที่ถือว่า "หลับตา" เทียบกับค่าฐาน
-  const EAR_OPEN_RATIO = 0.85;  // สัดส่วนที่ถือว่า "ลืมตา" กลับมาแล้ว เทียบกับค่าฐาน
+  const EAR_CLOSE_RATIO = 0.8;  // สัดส่วนที่ถือว่า "หลับตา" เทียบกับค่าฐาน (ผ่อนขึ้นเล็กน้อยให้จับง่ายขึ้น)
   const LIVENESS_DURATION_MS = 10000;
-  const LIVENESS_INTERVAL_MS = 150;
+  const LIVENESS_INTERVAL_MS = 100;
 
   const TERM1_START = new Date('2026-05-14T00:00:00+07:00');
   const TERM1_END = new Date('2026-10-09T23:59:59+07:00');
@@ -485,8 +484,10 @@ export default function FaceScanPage() {
       }
 
       try {
+        // ใช้ inputSize เล็กสำหรับสุ่มตรวจ EAR ทุกเฟรม (เร็วกว่ามาก โดยเฉพาะบนมือถือ)
+        // เพื่อให้ไม่พลาดจังหวะที่ตาหลับจริง ๆ ซึ่งมักกินเวลาสั้นกว่าที่กล้อง/โมเดลจะประมวลผลทัน
         const det = await fa
-          .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+          .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 }))
           .withFaceLandmarks();
         if (!det) return;
 
@@ -494,21 +495,18 @@ export default function FaceScanPage() {
         const rightEAR = eyeAspectRatio(det.landmarks.getRightEye());
         const avgEAR = (leftEAR + rightEAR) / 2;
 
-        // ค่าฐาน (baseline) คือค่า EAR ตอนตาเปิดปกติ ปรับตัวขึ้นทีละนิดทุกครั้งที่ยังถือว่าลืมตาอยู่
+        // ค่าฐาน (baseline) คือค่า EAR ตอนตาเปิดปกติ ปรับตัวไปเรื่อย ๆ จนกว่าจะจับการกระพริบได้
+        // เมื่อจับ "หลับตา" ได้แม้แค่เฟรมเดียวก็ถือว่าเจอการกระพริบแล้ว ไม่ต้องรอจับจังหวะลืมตากลับ
+        // (จังหวะลืมตาคืนมักเร็วเกินกว่าจะสุ่มเจอบนอุปกรณ์ที่ประมวลผลช้า)
         if (earBaselineRef.current === null) earBaselineRef.current = avgEAR;
-        if (eyeOpenRef.current) {
+        if (!blinkFoundRef.current) {
           earBaselineRef.current = earBaselineRef.current * 0.9 + avgEAR * 0.1;
           earBaselineRef.current = Math.min(0.45, Math.max(0.15, earBaselineRef.current));
-        }
-        const closeThresh = earBaselineRef.current * EAR_CLOSE_RATIO;
-        const openThresh = earBaselineRef.current * EAR_OPEN_RATIO;
-
-        if (eyeOpenRef.current && avgEAR < closeThresh) {
-          eyeOpenRef.current = false;
-          setBlinkHint(true);
-        } else if (!eyeOpenRef.current && avgEAR > openThresh) {
-          eyeOpenRef.current = true;
-          blinkFoundRef.current = true;
+          const closeThresh = earBaselineRef.current * EAR_CLOSE_RATIO;
+          if (avgEAR < closeThresh) {
+            blinkFoundRef.current = true;
+            setBlinkHint(true);
+          }
         }
 
         if (blinkFoundRef.current) {
@@ -658,22 +656,30 @@ export default function FaceScanPage() {
   // ── UI ──────────────────────────────────────────────────────────────────
   return (
     <div
-      className="min-h-screen bg-[#F5F5F7] text-[#1D1D1F]"
+      className="min-h-screen relative text-[#1D1D1F] overflow-x-hidden"
       style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Thai', 'Sarabun', 'Noto Sans Thai', sans-serif" }}
     >
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap');
       `}</style>
 
+      {/* ── พื้นหลังไล่สีสดใสแบบ Apple aurora ── */}
+      <div className="fixed inset-0 -z-10 bg-[#F5F7FF]">
+        <div className="absolute -top-24 -left-24 w-[420px] h-[420px] rounded-full bg-[#0A84FF]/25 blur-[100px]" />
+        <div className="absolute top-1/3 -right-32 w-[460px] h-[460px] rounded-full bg-[#BF5AF2]/20 blur-[110px]" />
+        <div className="absolute bottom-0 left-1/4 w-[380px] h-[380px] rounded-full bg-[#30D158]/15 blur-[100px]" />
+        <div className="absolute bottom-10 right-0 w-[300px] h-[300px] rounded-full bg-[#FF9F0A]/15 blur-[90px]" />
+      </div>
+
       <style jsx>{`
         .ring-detect {
           background: conic-gradient(
             from 0deg,
             transparent 0deg,
-            rgba(10, 132, 255, 0.06) 40deg,
-            #0A84FF 100deg,
-            #7dc0ff 130deg,
-            rgba(10, 132, 255, 0.06) 170deg,
+            rgba(10, 132, 255, 0.08) 30deg,
+            #0A84FF 90deg,
+            #64D2FF 120deg,
+            rgba(10, 132, 255, 0.08) 170deg,
             transparent 220deg,
             transparent 360deg
           );
@@ -685,10 +691,10 @@ export default function FaceScanPage() {
           background: conic-gradient(
             from 0deg,
             transparent 0deg,
-            rgba(94, 92, 230, 0.08) 40deg,
-            #5E5CE6 100deg,
-            #b9b8f7 130deg,
-            rgba(94, 92, 230, 0.08) 170deg,
+            rgba(191, 90, 242, 0.1) 30deg,
+            #BF5AF2 90deg,
+            #FF6482 120deg,
+            rgba(191, 90, 242, 0.1) 170deg,
             transparent 220deg,
             transparent 360deg
           );
@@ -705,10 +711,10 @@ export default function FaceScanPage() {
       `}</style>
 
       {/* ── แถบบนแบบ Apple Nav Bar: โปร่งแสง เบลอพื้นหลัง เส้นขอบบาง ── */}
-      <div className="sticky top-0 z-40 bg-white/75 backdrop-blur-xl border-b border-black/5 px-4 py-3 flex items-center gap-3">
+      <div className="sticky top-0 z-40 bg-white/70 backdrop-blur-xl border-b border-black/5 px-4 py-3 flex items-center gap-3">
         <button type="button" onClick={() => router.push('/')}
-          className="w-9 h-9 rounded-full bg-black/[0.04] hover:bg-black/[0.07] flex items-center justify-center transition-colors active:scale-95">
-          <IconPin className="w-4.5 h-4.5 text-[#1D1D1F]" />
+          className="w-9 h-9 rounded-full bg-gradient-to-br from-[#0A84FF] to-[#5E5CE6] flex items-center justify-center transition-transform active:scale-95 shadow-[0_2px_10px_-2px_rgba(10,132,255,0.5)]">
+          <IconPin className="w-4.5 h-4.5 text-white" />
         </button>
         <div>
           <h1 className="text-[15px] font-semibold text-[#1D1D1F] leading-none">ระบบลงเวลาปฏิบัติงาน</h1>
@@ -720,16 +726,16 @@ export default function FaceScanPage() {
 
         {/* หัวเวลา */}
         <div className="text-center mt-6 mb-8 w-full max-w-xl">
-          <div className="text-6xl sm:text-7xl font-semibold tracking-tight tabular-nums text-[#1D1D1F]">
+          <div className="text-6xl sm:text-7xl font-semibold tracking-tight tabular-nums bg-gradient-to-r from-[#0A84FF] via-[#5E5CE6] to-[#BF5AF2] bg-clip-text text-transparent">
             {currentDateTime.time || "00:00:00"}
           </div>
-          <div className="text-[#86868B] mt-2 font-medium text-base sm:text-lg">
+          <div className="text-[#6E6E73] mt-2 font-medium text-base sm:text-lg">
             วัน{currentDateTime.date || "กำลังโหลด..."}
           </div>
         </div>
 
         {/* แผงสแกน */}
-        <div className="bg-white/90 backdrop-blur border border-black/5 rounded-[32px] p-6 sm:p-8 w-full max-w-xl shadow-[0_2px_40px_-12px_rgba(0,0,0,0.15)]">
+        <div className="bg-white/85 backdrop-blur-xl border border-white/60 rounded-[32px] p-6 sm:p-8 w-full max-w-xl shadow-[0_8px_50px_-12px_rgba(94,92,230,0.25)]">
 
           {/* GPS badge */}
           <div className="flex justify-center mb-6">
@@ -793,7 +799,7 @@ export default function FaceScanPage() {
 
             <button type="button" onClick={isCameraActive ? stopVideo : startVideo}
               disabled={!modelsReady || (!isInsideSchool && !canOffsiteScan)}
-              className={`w-full py-4 rounded-2xl font-semibold text-[16px] transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 ${isCameraActive ? 'bg-[#FF3B30] text-white' : 'bg-[#0A84FF] text-white'}`}>
+              className={`w-full py-4 rounded-2xl font-semibold text-[16px] transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 shadow-lg ${isCameraActive ? 'bg-gradient-to-r from-[#FF3B30] to-[#FF6961] text-white shadow-[#FF3B30]/25' : 'bg-gradient-to-r from-[#0A84FF] to-[#5E5CE6] text-white shadow-[#0A84FF]/25'}`}>
               {isCameraActive ? "ยกเลิกและปิดกล้อง" : "เปิดกล้องเพื่อสแกนใบหน้า"}
             </button>
 

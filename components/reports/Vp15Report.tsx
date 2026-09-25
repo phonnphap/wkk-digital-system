@@ -1,8 +1,33 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+
+const supabase = createClient();
 
 const GRADE_LEVELS = ["0", "1", "1.5", "2", "2.5", "3", "3.5", "4"];
+
+// ★ ต่อ title + ชื่อ + สกุล เป็นชื่อเต็มพร้อมคำนำหน้า (รูปแบบเดียวกับที่ใช้ใน Vp3Report/Vp4Report)
+function buildNameWithTitle(person: {
+  title?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  full_name?: string | null;
+} | null | undefined): string {
+  if (!person) return "";
+  const title = person.title ?? "";
+  const base =
+    person.full_name?.trim() ||
+    `${person.first_name ?? ""} ${person.last_name ?? ""}`.trim();
+  if (!base) return "";
+  if (title && base.startsWith(title)) return base;
+  return `${title}${base}`;
+}
+
+// ★ เช็คว่า extra_roles (array) มี role ที่ต้องการอยู่หรือไม่
+function hasRole(extraRoles: unknown, role: string): boolean {
+  return Array.isArray(extraRoles) && extraRoles.some(r => typeof r === "string" && r.includes(role));
+}
 
 // ★ ดึงเลขห้องท้ายสุดจาก room_label เพื่อใช้เรียงลำดับ เช่น "ม.1/7" -> 7, "ป.4/12" -> 12
 // ถ้าหา /เลข ไม่เจอ ให้ถือว่าเป็นค่ามากสุด (Infinity) จะได้ถูกเรียงไปอยู่ท้ายตารางเสมอ ไม่ปนกับห้องปกติ
@@ -24,6 +49,13 @@ export default function Vp15Report({
   const [error, setError] = useState("");
   const [rows, setRows] = useState<any[]>([]);
   const [grandTotal, setGrandTotal] = useState<any>(null);
+
+  // ★ ชื่อผู้ลงนามแต่ละตำแหน่ง — ดึงจากฐานข้อมูลเพื่อโชว์เป็นวงเล็บใต้ตำแหน่งตอนพิมพ์
+  const [teacherNames, setTeacherNames] = useState<string[]>([]);
+  const [deptHeadName, setDeptHeadName] = useState("");
+  const [academicHeadName, setAcademicHeadName] = useState("");
+  const [deputyDirectorName, setDeputyDirectorName] = useState("");
+  const [directorName, setDirectorName] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -48,6 +80,86 @@ export default function Vp15Report({
   const sortedRows = useMemo(() => {
     return [...rows].sort((a, b) => getRoomSortKey(a.room_label) - getRoomSortKey(b.room_label));
   }, [rows]);
+
+  // ★ ดึงชื่อผู้ลงนามทั้ง 5 ตำแหน่งสำหรับใส่วงเล็บใต้ตำแหน่งตอนพิมพ์
+  useEffect(() => {
+    (async () => {
+      try {
+        // 1) ครูประจำวิชา — เอาจากทุกห้อง (subject_sections) ของวิชานี้ ตัดชื่อซ้ำออก
+        //    ถ้ามีมากกว่า 1 คน (สอนคนละห้อง) จะรวมเป็น "ชื่อครู1 / ชื่อครู2"
+        let sectionQuery = supabase
+          .from("subject_sections")
+          .select("teacher_id")
+          .eq("subject_id", subjectId);
+        if (academicYearId) sectionQuery = sectionQuery.eq("academic_year_id", academicYearId);
+        const { data: sectionRows } = await sectionQuery;
+
+        const teacherIds = Array.from(
+          new Set((sectionRows ?? []).map((s: any) => s.teacher_id).filter(Boolean))
+        );
+
+        let teacherNameList: string[] = [];
+        if (teacherIds.length > 0) {
+          const { data: teacherRows } = await supabase
+            .from("users")
+            .select("id, title, first_name, last_name, full_name")
+            .in("id", teacherIds);
+          teacherNameList = (teacherRows ?? [])
+            .map((t: any) => buildNameWithTitle(t))
+            .filter(Boolean);
+        }
+        setTeacherNames(teacherNameList);
+
+        // 2) หา department_id ของวิชานี้ เพื่อใช้จับคู่ "หัวหน้ากลุ่มสาระ" ให้ตรงกลุ่มสาระของวิชา
+        const { data: subjectRow } = await supabase
+          .from("subjects")
+          .select("department_id")
+          .eq("id", subjectId)
+          .maybeSingle();
+        const subjectDeptId = (subjectRow as any)?.department_id ?? null;
+
+        // 3) ดึงผู้ใช้ทุกคนที่มี extra_roles เพื่อหาตำแหน่งบริหารทั้ง 4 ตำแหน่งที่เหลือ
+        const { data: roleUsers } = await supabase
+          .from("users")
+          .select("title, first_name, last_name, full_name, extra_roles, department_id")
+          .not("extra_roles", "is", null);
+
+        const users = roleUsers ?? [];
+
+        // หัวหน้ากลุ่มสาระ: extra_roles มี "department_head" และ department_id ตรงกับวิชานี้
+        const deptHead = subjectDeptId
+          ? users.find((u: any) => hasRole(u.extra_roles, "department_head") && u.department_id === subjectDeptId)
+          : null;
+        setDeptHeadName(buildNameWithTitle(deptHead as any));
+
+        // หัวหน้ากลุ่มบริหารวิชาการ: ตำแหน่งเดียวทั้งโรงเรียน ไม่ผูกกับกลุ่มสาระ
+        const academicHead = users.find((u: any) => hasRole(u.extra_roles, "academic_head"));
+        setAcademicHeadName(buildNameWithTitle(academicHead as any));
+
+        // รองผู้อำนวยการโรงเรียน
+        const deputyDirector = users.find((u: any) => hasRole(u.extra_roles, "deputy_director"));
+        setDeputyDirectorName(buildNameWithTitle(deputyDirector as any));
+
+        // ผู้อำนวยการโรงเรียน
+        const director = users.find((u: any) => hasRole(u.extra_roles, "director"));
+        setDirectorName(buildNameWithTitle(director as any));
+      } catch (e) {
+        console.error("[Vp15Report] โหลดชื่อผู้ลงนามไม่สำเร็จ:", e);
+      }
+    })();
+  }, [subjectId, academicYearId]);
+
+  // ★ รวมชื่อผู้ลงนามแต่ละตำแหน่งเข้ากับ role สำหรับ render ใต้เส้นลงชื่อ
+  const signatureRoles = useMemo(
+    () => [
+      { role: "ครูประจำวิชา", name: teacherNames.join(" / ") },
+      { role: "หัวหน้ากลุ่มสาระ", name: deptHeadName },
+      { role: "หัวหน้ากลุ่มบริหารวิชาการ", name: academicHeadName },
+      { role: "รองผู้อำนวยการโรงเรียน", name: deputyDirectorName },
+      { role: "ผู้อำนวยการโรงเรียน", name: directorName },
+    ],
+    [teacherNames, deptHeadName, academicHeadName, deputyDirectorName, directorName]
+  );
 
   function handlePrint() {
     window.print();
@@ -138,10 +250,15 @@ export default function Vp15Report({
             </div>
           )}
 
-          {/* ช่องลงชื่อสำหรับพิมพ์ */}
-          <div className="mt-10 space-y-8 text-m font-bold text-slate-600 print:mt-16">
-            {["ครูประจำวิชา", "หัวหน้ากลุ่มสาระ", "หัวหน้ากลุ่มบริหารวิชาการ", "รองผู้อำนวยการโรงเรียน", "ผู้อำนวยการโรงเรียน"].map(role => (
-              <p key={role} className="text-right pr-10">ลงชื่อ..................................................... {role}</p>
+          {/* ช่องลงชื่อสำหรับพิมพ์ — มีวงเล็บชื่อผู้ลงนามแสดงอยู่ใต้ตำแหน่งแต่ละช่อง */}
+          <div className="mt-10 space-y-6 text-m font-bold text-slate-600 print:mt-16">
+            {signatureRoles.map(({ role, name }) => (
+              <div key={role}>
+                <p className="text-right pr-10">ลงชื่อ..................................................... {role}</p>
+                <p className="text-right pr-10 text-slate-400 font-bold">
+                  ({name || "..............................."})
+                </p>
+              </div>
             ))}
           </div>
         </div>

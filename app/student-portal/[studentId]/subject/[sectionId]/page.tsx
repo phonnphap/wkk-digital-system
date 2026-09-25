@@ -170,9 +170,7 @@ export default function StudentPortalSubjectPage() {
   const [selfStudent, setSelfStudent] = useState<GradeStudent | null>(null);
   const [studentSubmitEnabled, setStudentSubmitEnabled] = useState(true);
   const [allowLateSubmission, setAllowLateSubmission] = useState(true);
-  const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
-    const [rawMidtermMax, setRawMidtermMax] = useState<number | null>(null);
-const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
+    const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
 
   const fetchAssignments = useCallback(async () => {
   if (!sectionId) return;
@@ -276,15 +274,6 @@ setSubjectInfo({
     // เงียบไว้ ไม่ให้กระทบหน้าอื่น
   }
 }, [studentId, sectionId]);
-  // ★ ค่าคะแนนเต็มจริงของโครงสร้างคะแนน (เก็บ/กลางภาค/ปลายภาค) ที่ตั้งไว้ในตาราง subject_sections
-  // ดึงจาก /api/subject-grades/summary (field gradingConfig) เพื่อใช้เป็นค่าจริงเสมอ
-  // แทนที่จะพึ่ง props formativeMaxScore/midtermMaxScore/finalMaxScore ที่ผู้เรียกใช้ component นี้
-  // (เช่น หน้านักเรียน) อาจส่งมาไม่ตรงกับค่าที่ตั้งไว้จริง ทำให้ครู/นักเรียนเห็นตัวเลขไม่ตรงกัน
-  const [sectionGradingConfig, setSectionGradingConfig] = useState<{
-    formative_max_score: number | null;
-    midterm_max_score: number | null;
-    final_max_score: number | null;
-  } | null>(null);
 
 useEffect(() => {
   fetchSubjectInfo();

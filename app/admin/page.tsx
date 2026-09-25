@@ -18,14 +18,12 @@ interface TeacherUser {
 }
 
 const REQUIRED_STABLE_FRAMES = 6; // ต้องตรวจพบหน้านิ่งต่อเนื่องกี่เฟรมถึงจะถ่ายอัตโนมัติ
-const SCAN_INTERVAL_MS = 200;
+const SCAN_INTERVAL_MS = 100; // เดิม 200ms — ลดลงได้เพราะตอนนี้ loop เบาลงมาก (ไม่คำนวณ descriptor ทุกเฟรมแล้ว)
 
 // ── liveness (กันภาพนิ่ง/รูปถ่ายมาลงทะเบียนแทนตัวจริง) ─────────────────────
-// วัดจาก Eye Aspect Ratio (EAR) และปรับเกณฑ์ตามค่าฐานที่วัดได้จริงจากกล้อง/แสง
-// ของแต่ละคนแบบเรียลไทม์ (ไม่ใช้ค่าคงที่ตายตัว) เพื่อให้ตรวจจับการกระพริบตา
-// ได้แม่นยำในทุกอุปกรณ์ ทุกสภาพแสง
-const EAR_CLOSE_RATIO = 0.72;
-const EAR_OPEN_RATIO = 0.85;
+// วัดจาก Eye Aspect Ratio (EAR) เทียบกับค่าฐานของแต่ละคน/กล้อง/แสงแบบเรียลไทม์
+// เกณฑ์ผ่อนปรนขึ้นจากเดิม เพื่อให้ใช้งานได้จริงบนกล้องมือถือหลากหลายรุ่น
+const EAR_CLOSE_RATIO = 0.80; // ลดลงจากค่าฐานแค่ ~20% ก็นับว่ากระพริบตาแล้ว (จับเฟรมเดียวพอ ไม่ต้องรอลืมตาคืน)
 
 function eyeAspectRatio(eye: { x: number; y: number }[]): number {
   if (!eye || eye.length < 6) return 1;
@@ -82,6 +80,7 @@ export default function AdminFaceRegisterPage() {
   const eyeOpenRef = useRef(true);
   const blinkFoundRef = useRef(false);
   const earBaselineRef = useRef<number | null>(null);
+  const finalizingRef = useRef(false);
 
   const [teachers, setTeachers] = useState<TeacherUser[]>([]);
   const [selectedTeacher, setSelectedTeacher] = useState<TeacherUser | null>(null);
@@ -97,6 +96,7 @@ export default function AdminFaceRegisterPage() {
 
   const [scanFeedback, setScanFeedback] = useState("");
   const [justCaptured, setJustCaptured] = useState(false);
+  const [blinkHint, setBlinkHint] = useState(false);
 
   const anglesCaptured = [descriptorFront, descriptorLeft, descriptorRight].filter(Boolean).length;
 
@@ -127,11 +127,13 @@ export default function AdminFaceRegisterPage() {
         const fa = await import('face-api.js');
         setFaceapi(fa);
 
-        if (!fa.nets.ssdMobilenetv1.isLoaded) {
-          await fa.nets.ssdMobilenetv1.loadFromUri('/models');
-          await fa.nets.faceLandmark68Net.loadFromUri('/models');
-          await fa.nets.faceRecognitionNet.loadFromUri('/models');
-        }
+        // ใช้ TinyFaceDetector แทน SsdMobilenetv1 — เบากว่ามาก โดยเฉพาะบนมือถือ
+        // ทำให้ loop ตรวจจับการกระพริบตาทำงานได้ถี่และไวพอที่จะจับจังหวะกระพริบตาจริงทัน
+        await Promise.all([
+          fa.nets.tinyFaceDetector.loadFromUri('/models'),
+          fa.nets.faceLandmark68Net.loadFromUri('/models'),
+          fa.nets.faceRecognitionNet.loadFromUri('/models'),
+        ]);
 
         setModelsLoaded(true);
         setStatus("ระบบ AI พร้อมใช้งาน");
@@ -145,11 +147,13 @@ export default function AdminFaceRegisterPage() {
 
   const stopVideo = () => {
     scanActiveRef.current = false;
+    finalizingRef.current = false;
     if (scanTimeoutRef.current) { window.clearTimeout(scanTimeoutRef.current); scanTimeoutRef.current = null; }
     stableFrameCountRef.current = 0;
     eyeOpenRef.current = true;
     blinkFoundRef.current = false;
     earBaselineRef.current = null;
+    setBlinkHint(false);
     setScanFeedback("");
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
@@ -169,7 +173,7 @@ export default function AdminFaceRegisterPage() {
     stopVideo();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: "user" },
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
         audio: false
       });
       streamRef.current = stream;
@@ -184,6 +188,7 @@ export default function AdminFaceRegisterPage() {
         eyeOpenRef.current = true;
         blinkFoundRef.current = false;
         earBaselineRef.current = null;
+        finalizingRef.current = false;
         scanActiveRef.current = true;
         window.setTimeout(() => scanLoop(angle), 500);
       }
@@ -194,14 +199,16 @@ export default function AdminFaceRegisterPage() {
 
   // ★ สแกนอัตโนมัติต่อเนื่อง: ต้องนิ่งครบเฟรม "และ" ตรวจพบการกระพริบตาอย่างน้อย 1
   // ครั้งก่อนจึงจะยอมถ่ายให้ — ป้องกันการยกรูปถ่าย/ภาพนิ่งมาลงทะเบียนแทนตัวจริง
-  // เกณฑ์กระพริบตาปรับตามค่าฐาน EAR ของแต่ละคน/กล้องแบบเรียลไทม์ ไม่ใช้ค่าคงที่ตายตัว
+  // จุดสำคัญที่ต่างจากเดิม: ระหว่างรอกระพริบตา loop นี้จะตรวจแค่ตำแหน่ง landmark
+  // (เบา เร็ว) เท่านั้น ไม่คำนวณ face descriptor (128 มิติ) ทุกเฟรมเหมือนเดิมอีก
+  // ต่อไป — เพราะการคำนวณ descriptor ทุกเฟรมคือสาเหตุหลักที่ทำให้ loop ช้าลงมาก
+  // บนมือถือ จนพลาดจังหวะกระพริบตาที่เกิดขึ้นเร็วกว่ารอบสแกน
   async function scanLoop(angle: "front" | "left" | "right") {
-    if (!scanActiveRef.current || !videoRef.current || !faceapi) return;
+    if (!scanActiveRef.current || !videoRef.current || !faceapi || finalizingRef.current) return;
     try {
       const detection = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6 }))
-        .withFaceLandmarks()
-        .withFaceDescriptor();
+        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 }))
+        .withFaceLandmarks();
 
       if (!scanActiveRef.current) return;
 
@@ -212,27 +219,37 @@ export default function AdminFaceRegisterPage() {
         const rightEAR = eyeAspectRatio(detection.landmarks.getRightEye());
         const avgEAR = (leftEAR + rightEAR) / 2;
 
+        // ค่าฐาน (baseline) คือค่า EAR ตอนตาเปิดปกติ ปรับตัวไปเรื่อย ๆ จนกว่าจะจับการกระพริบได้
+        // แค่จับ "หลับตา" ได้เฟรมเดียวก็ถือว่าเจอการกระพริบแล้ว — ไม่ต้องรอจับจังหวะลืมตา
+        // กลับคืนด้วย เพราะจังหวะลืมตาคืนมักเร็วเกินกว่าจะสุ่มเจอบนอุปกรณ์ที่ประมวลผลช้า
         if (earBaselineRef.current === null) earBaselineRef.current = avgEAR;
-        if (eyeOpenRef.current) {
+        if (!blinkFoundRef.current) {
           earBaselineRef.current = earBaselineRef.current * 0.9 + avgEAR * 0.1;
           earBaselineRef.current = Math.min(0.45, Math.max(0.15, earBaselineRef.current));
-        }
-        const closeThresh = earBaselineRef.current * EAR_CLOSE_RATIO;
-        const openThresh = earBaselineRef.current * EAR_OPEN_RATIO;
-
-        if (eyeOpenRef.current && avgEAR < closeThresh) {
-          eyeOpenRef.current = false;
-        } else if (!eyeOpenRef.current && avgEAR > openThresh) {
-          eyeOpenRef.current = true;
-          blinkFoundRef.current = true;
+          const closeThresh = earBaselineRef.current * EAR_CLOSE_RATIO;
+          if (avgEAR < closeThresh) {
+            blinkFoundRef.current = true;
+            setBlinkHint(true);
+          }
         }
 
         const stableReady = stableFrameCountRef.current >= REQUIRED_STABLE_FRAMES;
 
         if (stableReady && blinkFoundRef.current) {
-          scanActiveRef.current = false;
-          await finalizeCapture(angle, detection.descriptor);
-          return;
+          // เจอทั้งความนิ่งและการกระพริบตาแล้ว — คำนวณ descriptor ครั้งเดียวตอนนี้เท่านั้น
+          finalizingRef.current = true;
+          const finalDet = await faceapi
+            .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+
+          if (finalDet) {
+            scanActiveRef.current = false;
+            await finalizeCapture(angle, finalDet.descriptor);
+            return;
+          }
+          // เผื่อเฟรมสุดท้ายตรวจไม่เจอ (พลิกหน้าพอดี) — ลองใหม่ต่อ ไม่ถือว่าล้มเหลว
+          finalizingRef.current = false;
         } else if (stableReady && !blinkFoundRef.current) {
           setScanFeedback("เกือบเสร็จแล้ว — กระพริบตาเบา ๆ อีกครั้งเพื่อยืนยันว่าเป็นคนจริง");
         } else {
@@ -315,29 +332,35 @@ export default function AdminFaceRegisterPage() {
 
   return (
     <div
-      className="min-h-screen bg-[#F5F5F7] text-[#1D1D1F]"
+      className="min-h-screen relative overflow-hidden text-[#1D1D1F]"
       style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Thai', 'Sarabun', 'Noto Sans Thai', sans-serif" }}
     >
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap');
       `}</style>
 
+      {/* ── พื้นหลังไล่สีสดใส + บลอบสีนุ่ม ๆ ให้ดูมีชีวิตชีวาแบบแอป Apple สมัยใหม่ ── */}
+      <div className="fixed inset-0 -z-10 bg-gradient-to-b from-[#EAF3FF] via-[#F6F4FF] to-[#FFF3F8]" />
+      <div className="fixed -top-24 -left-20 w-72 h-72 rounded-full bg-[#0A84FF]/25 blur-3xl -z-10" />
+      <div className="fixed top-1/3 -right-24 w-80 h-80 rounded-full bg-[#5E5CE6]/20 blur-3xl -z-10" />
+      <div className="fixed bottom-0 left-1/4 w-64 h-64 rounded-full bg-[#FF9F0A]/15 blur-3xl -z-10" />
+
       {/* ── Nav bar โปร่งแสงสไตล์ Apple ── */}
-      <div className="sticky top-0 z-40 bg-white/75 backdrop-blur-xl border-b border-black/5 px-4 py-3">
+      <div className="sticky top-0 z-40 bg-white/70 backdrop-blur-xl border-b border-black/5 px-4 py-3">
         <div className="flex items-center gap-3">
           <button onClick={() => router.push("/dashboard")}
-            className="w-9 h-9 rounded-full bg-black/[0.04] hover:bg-black/[0.07] flex items-center justify-center text-[#1D1D1F] shrink-0 transition-colors active:scale-95">
+            className="w-9 h-9 rounded-full bg-white/80 hover:bg-white shadow-sm flex items-center justify-center text-[#1D1D1F] shrink-0 transition-colors active:scale-95">
             <IconHome className="w-4.5 h-4.5" />
           </button>
           <div>
             <h1 className="text-[15px] font-semibold text-[#1D1D1F] leading-none">ลงทะเบียนใบหน้าบุคลากร</h1>
-            <p className="text-[#86868B] text-xs mt-1">สแกนอัตโนมัติพร้อมยืนยันตัวจริงด้วยการกระพริบตา</p>
+            <p className="text-[#6E6E73] text-xs mt-1">สแกนอัตโนมัติพร้อมยืนยันตัวจริงด้วยการกระพริบตา</p>
           </div>
         </div>
       </div>
 
       <div className="max-w-xl mx-auto p-4 md:p-6">
-        <div className="bg-white/90 backdrop-blur border border-black/5 rounded-[32px] shadow-[0_2px_40px_-12px_rgba(0,0,0,0.15)] p-6 sm:p-8">
+        <div className="bg-white/85 backdrop-blur border border-white/60 rounded-[32px] shadow-[0_10px_50px_-15px_rgba(10,132,255,0.25)] p-6 sm:p-8">
 
           <p className="text-[13px] text-[#0A84FF] mb-6 font-medium flex items-center gap-1.5 justify-center text-center">
             <IconEye className="w-4 h-4 shrink-0" />
@@ -346,7 +369,7 @@ export default function AdminFaceRegisterPage() {
 
           {/* เลือกบุคลากร */}
           <div className="mb-6">
-            <label className="block text-xs font-semibold text-[#86868B] mb-1">รายชื่อบุคลากรที่ต้องการลงทะเบียนใบหน้า</label>
+            <label className="block text-xs font-semibold text-[#6E6E73] mb-1">รายชื่อบุคลากรที่ต้องการลงทะเบียนใบหน้า</label>
             <select
               onChange={(e) => {
                 setSelectedTeacher(teachers.find(t => t.id === e.target.value) || null);
@@ -366,34 +389,34 @@ export default function AdminFaceRegisterPage() {
           {/* มุมที่ต้องสแกน */}
           <div className="mb-3 flex flex-col gap-1.5 text-xs">
             <div className="flex items-center justify-between mb-0.5">
-              <span className="text-[#86868B] font-medium">เลือกมุมที่ต้องการสแกน</span>
+              <span className="text-[#6E6E73] font-medium">เลือกมุมที่ต้องการสแกน</span>
               <span className="text-[#0A84FF] font-semibold">{anglesCaptured}/3 มุม</span>
             </div>
             <div className="flex gap-1.5 mb-1">
               {[descriptorFront, descriptorLeft, descriptorRight].map((d, i) => (
-                <div key={i} className={`h-1.5 flex-1 rounded-full transition-all ${d ? 'bg-[#30D158]' : 'bg-black/10'}`} />
+                <div key={i} className={`h-1.5 flex-1 rounded-full transition-all ${d ? 'bg-gradient-to-r from-[#30D158] to-[#34C759]' : 'bg-black/10'}`} />
               ))}
             </div>
             <div className="flex justify-between gap-1 text-[12px] text-center">
               <button type="button" onClick={() => startVideo("front")} disabled={!selectedTeacher}
-                className={`flex-1 p-2.5 rounded-xl border font-semibold transition-all ${descriptorFront ? 'bg-[#30D158]/10 border-[#30D158]/30 text-[#1E8E3E]' : activeScanAngle === 'front' ? 'bg-[#0A84FF]/10 border-[#0A84FF]/40 text-[#0A84FF] ring-2 ring-[#0A84FF]/15' : 'bg-white border-black/10 text-[#6E6E73] hover:bg-black/[0.02]'}`}>
+                className={`flex-1 p-2.5 rounded-xl border font-semibold transition-all ${descriptorFront ? 'bg-[#30D158]/12 border-[#30D158]/35 text-[#1E8E3E]' : activeScanAngle === 'front' ? 'bg-gradient-to-br from-[#0A84FF]/15 to-[#5E5CE6]/15 border-[#0A84FF]/40 text-[#0A84FF] ring-2 ring-[#0A84FF]/15' : 'bg-white/80 border-black/10 text-[#6E6E73] hover:bg-white'}`}>
                 1. หน้าตรง {descriptorFront ? "✓" : ""}
               </button>
               <button type="button" onClick={() => startVideo("left")} disabled={!selectedTeacher}
-                className={`flex-1 p-2.5 rounded-xl border font-semibold transition-all ${descriptorLeft ? 'bg-[#30D158]/10 border-[#30D158]/30 text-[#1E8E3E]' : activeScanAngle === 'left' ? 'bg-[#0A84FF]/10 border-[#0A84FF]/40 text-[#0A84FF] ring-2 ring-[#0A84FF]/15' : 'bg-white border-black/10 text-[#6E6E73] hover:bg-black/[0.02]'}`}>
+                className={`flex-1 p-2.5 rounded-xl border font-semibold transition-all ${descriptorLeft ? 'bg-[#30D158]/12 border-[#30D158]/35 text-[#1E8E3E]' : activeScanAngle === 'left' ? 'bg-gradient-to-br from-[#0A84FF]/15 to-[#5E5CE6]/15 border-[#0A84FF]/40 text-[#0A84FF] ring-2 ring-[#0A84FF]/15' : 'bg-white/80 border-black/10 text-[#6E6E73] hover:bg-white'}`}>
                 2. เอียงซ้าย {descriptorLeft ? "✓" : ""}
               </button>
               <button type="button" onClick={() => startVideo("right")} disabled={!selectedTeacher}
-                className={`flex-1 p-2.5 rounded-xl border font-semibold transition-all ${descriptorRight ? 'bg-[#30D158]/10 border-[#30D158]/30 text-[#1E8E3E]' : activeScanAngle === 'right' ? 'bg-[#0A84FF]/10 border-[#0A84FF]/40 text-[#0A84FF] ring-2 ring-[#0A84FF]/15' : 'bg-white border-black/10 text-[#6E6E73] hover:bg-black/[0.02]'}`}>
+                className={`flex-1 p-2.5 rounded-xl border font-semibold transition-all ${descriptorRight ? 'bg-[#30D158]/12 border-[#30D158]/35 text-[#1E8E3E]' : activeScanAngle === 'right' ? 'bg-gradient-to-br from-[#0A84FF]/15 to-[#5E5CE6]/15 border-[#0A84FF]/40 text-[#0A84FF] ring-2 ring-[#0A84FF]/15' : 'bg-white/80 border-black/10 text-[#6E6E73] hover:bg-white'}`}>
                 3. เอียงขวา {descriptorRight ? "✓" : ""}
               </button>
             </div>
           </div>
 
           {/* กล้อง */}
-          <div className="flex flex-col items-center justify-center bg-[#FAFAFA] rounded-[28px] p-6 border border-black/5 mt-4">
+          <div className="flex flex-col items-center justify-center bg-gradient-to-b from-white to-[#F5F8FF] rounded-[28px] p-6 border border-black/5 mt-4">
             <div className="relative w-[220px] h-[220px]">
-              <div className="absolute inset-0 rounded-full overflow-hidden border-[3px] border-white shadow-[0_4px_30px_-8px_rgba(0,0,0,0.2)] bg-black/[0.03] flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full overflow-hidden border-[3px] border-white shadow-[0_8px_35px_-10px_rgba(10,132,255,0.35)] bg-black/[0.03] flex items-center justify-center">
                 <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
                 {!isCameraActive && (
                   <div className="absolute inset-0 bg-white/95 flex items-center justify-center text-[#86868B] text-xs text-center p-4">
@@ -416,7 +439,7 @@ export default function AdminFaceRegisterPage() {
                 <div
                   className="absolute inset-[-4px] rounded-full pointer-events-none scan-ring"
                   style={{
-                    background: 'conic-gradient(from 0deg, transparent 0%, transparent 55%, #0A84FF 85%, #7dc0ff 100%)',
+                    background: 'conic-gradient(from 0deg, transparent 0%, transparent 50%, #0A84FF 78%, #5E5CE6 92%, #FF2D92 100%)',
                     WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px))',
                     mask: 'radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px))',
                   }}
@@ -425,11 +448,18 @@ export default function AdminFaceRegisterPage() {
               {justCaptured && (
                 <div className="absolute inset-[-4px] rounded-full pointer-events-none ring-4 ring-[#30D158]/70 animate-pulse" />
               )}
+
+              {isCameraActive && !justCaptured && (
+                <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-[#5E5CE6] to-[#0A84FF] text-white text-[11px] font-semibold px-4 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 whitespace-nowrap">
+                  <IconEye className="w-3.5 h-3.5" />
+                  {blinkHint ? "ลืมตากลับมาได้เลย" : "กระพริบตาได้ตามปกติ"}
+                </div>
+              )}
             </div>
 
             {isCameraActive && (
-              <div className="mt-4 w-full max-w-[260px] text-center">
-                <p className={`text-xs font-semibold rounded-xl px-3 py-2 flex items-center justify-center gap-1.5 ${justCaptured ? 'bg-[#30D158]/10 text-[#1E8E3E]' : 'bg-[#0A84FF]/8 text-[#0A84FF]'}`}>
+              <div className="mt-5 w-full max-w-[260px] text-center">
+                <p className={`text-xs font-semibold rounded-xl px-3 py-2 flex items-center justify-center gap-1.5 ${justCaptured ? 'bg-[#30D158]/12 text-[#1E8E3E]' : 'bg-[#0A84FF]/10 text-[#0A84FF]'}`}>
                   {justCaptured && <IconCheck className="w-3.5 h-3.5" />}
                   {scanFeedback}
                 </p>
@@ -442,7 +472,7 @@ export default function AdminFaceRegisterPage() {
           </div>
 
           <div className="mt-6 text-center">
-            <div className="inline-block text-[13px] font-semibold text-[#0A84FF] bg-[#0A84FF]/8 px-5 py-2.5 rounded-xl max-w-full break-words">
+            <div className="inline-block text-[13px] font-semibold text-[#0A84FF] bg-[#0A84FF]/10 px-5 py-2.5 rounded-xl max-w-full break-words">
               {status}
             </div>
           </div>
@@ -452,7 +482,7 @@ export default function AdminFaceRegisterPage() {
               type="button"
               onClick={handleSaveAllData}
               disabled={!selectedTeacher || isSaving || anglesCaptured === 0}
-              className="w-full bg-[#0A84FF] hover:bg-[#0574e6] disabled:bg-black/10 disabled:text-[#AEAEB2] text-white font-semibold py-3.5 px-4 rounded-2xl shadow-lg transition-all text-[15px] active:scale-[0.99]"
+              className="w-full bg-gradient-to-r from-[#0A84FF] to-[#5E5CE6] disabled:bg-none disabled:bg-black/10 disabled:text-[#AEAEB2] text-white font-semibold py-3.5 px-4 rounded-2xl shadow-lg shadow-[#0A84FF]/25 transition-all text-[15px] active:scale-[0.99]"
             >
               {isSaving ? "กำลังบันทึก..." : "บันทึกข้อมูลใบหน้าลงฐานข้อมูล"}
             </button>
