@@ -1,6 +1,8 @@
 "use client";
 
-export const dynamic = 'force-dynamic';
+// หมายเหตุ: `export const dynamic = 'force-dynamic'` ถูกย้ายไปไว้ใน page.tsx (wrapper)
+// แทนแล้ว เพราะ config นี้มีผลเฉพาะตอนอยู่ในไฟล์ route (page.tsx/layout.tsx) เท่านั้น
+// ถ้าอยู่ในไฟล์ component ธรรมดาแบบนี้จะไม่มีผลอะไรเลย
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from 'next/navigation';
