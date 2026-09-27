@@ -36,6 +36,7 @@ type SectionRow = {
   allow_late_submission: boolean;
   student_access_mode?: "name_only" | "name_and_id" | "id_and_dob";
   show_special_scores?: boolean;
+  show_assignment_scores?: boolean;
 };
 type Student = { id: string; prefix?: string; first_name: string; last_name: string; nick_name?: string; seat_number: number; avatar_url?: string };
 type ScorePreset = { id: string; label: string; points: number; emoji: string; sort_order: number };
@@ -1919,6 +1920,10 @@ function SubjectSettingsTab({
 const [showSpecialScores, setShowSpecialScores] = useState<boolean>(
   section.show_special_scores ?? true
 );
+// ★ เพิ่ม: ควบคุมว่านักเรียนจะเห็นคะแนนรายชิ้นงานจริง หรือเห็นแค่สถานะ "ส่งแล้ว/ไม่ส่ง"
+const [showAssignmentScores, setShowAssignmentScores] = useState<boolean>(
+  section.show_assignment_scores ?? true
+);
 const [autoCredit, setAutoCredit] = useState(true);
   const [allowLateSubmission, setAllowLateSubmission] = useState<boolean>(section.allow_late_submission ?? true);
   const [saving, setSaving] = useState(false);
@@ -1961,7 +1966,8 @@ const [selectedSemester, setSelectedSemester] = useState<1 | 2>(
     formativeMax !== String((section as any).formative_max_score ?? 70) ||
     midtermMax !== String((section as any).midterm_max_score ?? 0) ||
     finalMax !== String((section as any).final_max_score ?? 30) ||
-    showSpecialScores !== (section.show_special_scores ?? true);
+    showSpecialScores !== (section.show_special_scores ?? true) ||
+    showAssignmentScores !== (section.show_assignment_scores ?? true);
     const [groupName, setGroupName] = useState("");
 const [mainSubjectCode, setMainSubjectCode] = useState("");
 const [groupMembers, setGroupMembers] = useState <
@@ -2135,6 +2141,7 @@ async function removeFromGroup() {
   midterm_max_score: Number(midtermMax) || 0,
   final_max_score: Number(finalMax) || 0,
   show_special_scores: showSpecialScores,
+  show_assignment_scores: showAssignmentScores,
 };
 
     try {
@@ -2569,7 +2576,22 @@ async function removeFromGroup() {
     className="w-5 h-5 accent-fuchsia-500 shrink-0"
   />
 </label>
-
+<label className="flex items-center justify-between rounded-xl border-2 border-slate-100 px-4 py-3 cursor-pointer">
+  <div>
+    <p className="text-base font-black text-slate-900">แสดงคะแนนชิ้นงานแต่ละชิ้นให้นักเรียนเห็น</p>
+    <p className="text-[18px] text-slate-600 font-bold mt-0.5">
+      ปิดไว้ถ้าไม่ต้องการให้นักเรียนเห็นคะแนนรายชิ้น — นักเรียนจะเห็นแค่ ✅ "ส่งงานแล้ว" หรือ "ไม่ส่งงาน"
+      แทน (ครูยังเห็นคะแนนทุกชิ้นตามปกติเสมอ ไม่มีผลกับหน้าครู)
+    </p>
+  </div>
+  <input
+    type="checkbox"
+    disabled={readOnly}
+    checked={showAssignmentScores}
+    onChange={e => setShowAssignmentScores(e.target.checked)}
+    className="w-5 h-5 accent-fuchsia-500 shrink-0"
+  />
+</label>
           <label className="flex items-center justify-between rounded-xl border-2 border-slate-100 px-4 py-3 cursor-pointer">
   <div>
     <p className="text-base font-black text-slate-900">เปิดให้นักเรียนล็อกอินดูงาน</p>
@@ -2724,7 +2746,7 @@ export default function SmartClassRosterPage() {
 // ทั้งที่ใน DB บันทึกเป็น false ไปแล้วจริง ๆ ตอนกดบันทึกก่อนหน้านี้)
 const { data: sec } = await supabase
   .from("subject_sections")
-  .select("id, join_code, classroom_id, student_portal_enabled, student_submit_enabled, allow_late_submission, student_access_mode, grading_structure, formative_max_score, midterm_max_score, final_max_score, show_special_scores")
+  .select("id, join_code, classroom_id, student_portal_enabled, student_submit_enabled, allow_late_submission, student_access_mode, grading_structure, formative_max_score, midterm_max_score, final_max_score, show_special_scores, show_assignment_scores")
   .eq("id", sectionId).maybeSingle();
 setSection(sec as SectionRow);
 
@@ -3101,6 +3123,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
     midtermMaxScore={(section as any).midterm_max_score}
     finalMaxScore={(section as any).final_max_score} 
     showSpecialScores={section.show_special_scores ?? true}
+    showAssignmentScores={section.show_assignment_scores ?? true}
     gradeRoundingMode={(subject as any).grade_rounding_mode ?? "truncate"}
           />
         )}

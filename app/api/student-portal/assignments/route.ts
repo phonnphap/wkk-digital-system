@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
   // เพื่อให้ฝั่งนักเรียนรู้ว่าครูปิดการส่งงานทั้งวิชาไว้หรือไม่ (คนละสวิตช์กับ "ส่งย้อนหลัง")
       const { data: section } = await supabase
     .from("subject_sections")
-    .select("id, allow_late_submission, student_submit_enabled")
+    .select("id, allow_late_submission, student_submit_enabled, show_assignment_scores")   // ★ เพิ่ม
     .eq("id", sectionId)
     .eq("classroom_id", student.classroom_id)
     .maybeSingle();
@@ -79,10 +79,22 @@ export async function GET(req: NextRequest) {
 
   // ★ แก้ไข: ส่ง allow_late_submission และ student_submit_enabled ของวิชานี้กลับไปด้วย
   // ให้ฝั่งหน้าเว็บใช้ปิดฟอร์มส่งงาน (default true เผื่อ field เป็น null)
+    const showScores = section.show_assignment_scores ?? true;
+
+  // ★ ปิดการแสดงคะแนน: ลบคะแนน/คอมเมนต์ครูออกจาก submission ที่ส่งกลับไป
+  // ให้เหลือแค่สถานะว่าส่งแล้วหรือยัง (frontend ควรเรนเดอร์ ✅ จากการที่ submissions มีค่า/status ไม่ใช่จาก score)
+  const assignmentsOut = (assignments ?? []).map((a: any) => ({
+    ...a,
+    submissions: (a.submissions ?? []).map((s: any) =>
+      showScores ? s : { ...s, score: null, teacher_comment: null }
+    ),
+  }));
+
   return NextResponse.json({
-    assignments,
+    assignments: assignmentsOut,
     allow_late_submission: section.allow_late_submission ?? true,
     student_submit_enabled: section.student_submit_enabled ?? true,
+    show_assignment_scores: showScores,   // ★ ให้ frontend รู้ว่าควรโชว์เครื่องหมายถูกแทนคะแนนไหม
   });
 }
 
