@@ -432,8 +432,11 @@ export default function FaceScanPage() {
       const fa = faceApiRef.current;
 
       try {
+        // ลดขนาดภาพที่ใช้ตรวจจับ (inputSize) จาก 224 เหลือ 160 เพื่อให้ประมวลผลไวขึ้นมาก
+        // โดยเฉพาะบนมือถือ — คุณภาพ descriptor ยังเพียงพอเพราะตอนนี้เทียบกับข้อมูล
+        // อ้างอิงครบทั้ง 3 มุมอยู่แล้ว (ไม่ได้พึ่งความละเอียดสูงจากภาพเดียวเหมือนเดิม)
         const detection = await fa
-          .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+          .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 }))
           .withFaceLandmarks()
           .withFaceDescriptor();
 
@@ -455,7 +458,7 @@ export default function FaceScanPage() {
       } finally {
         isDetectingRef.current = false;
       }
-    }, 800);
+    }, 300); // เดิม 800ms — ลดลงมากเพราะ inputSize เล็กลง ทำให้แต่ละรอบประมวลผลไวพอที่จะสแกนถี่ขึ้นได้โดยไม่หน่วง
   };
 
   // ── 6.5 การยืนยันว่าเป็นคนจริง (liveness) ด้วยการกระพริบตา ──────────────────
