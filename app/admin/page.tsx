@@ -18,23 +18,14 @@ interface TeacherUser {
 }
 
 const REQUIRED_STABLE_FRAMES = 6; // ต้องตรวจพบหน้านิ่งต่อเนื่องกี่เฟรมถึงจะถ่ายอัตโนมัติ
-const SCAN_INTERVAL_MS = 100; // เดิม 200ms — ลดลงได้เพราะตอนนี้ loop เบาลงมาก (ไม่คำนวณ descriptor ทุกเฟรมแล้ว)
+const SCAN_INTERVAL_MS = 100;
 
-// ── liveness (กันภาพนิ่ง/รูปถ่ายมาลงทะเบียนแทนตัวจริง) ─────────────────────
-// วัดจาก Eye Aspect Ratio (EAR) เทียบกับค่าฐานของแต่ละคน/กล้อง/แสงแบบเรียลไทม์
-// เกณฑ์ผ่อนปรนขึ้นจากเดิม เพื่อให้ใช้งานได้จริงบนกล้องมือถือหลากหลายรุ่น
-const EAR_CLOSE_RATIO = 0.80; // ลดลงจากค่าฐานแค่ ~20% ก็นับว่ากระพริบตาแล้ว (จับเฟรมเดียวพอ ไม่ต้องรอลืมตาคืน)
-
-function eyeAspectRatio(eye: { x: number; y: number }[]): number {
-  if (!eye || eye.length < 6) return 1;
-  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-    Math.hypot(a.x - b.x, a.y - b.y);
-  const A = dist(eye[1], eye[5]);
-  const B = dist(eye[2], eye[4]);
-  const C = dist(eye[0], eye[3]);
-  if (C === 0) return 1;
-  return (A + B) / (2 * C);
-}
+// หมายเหตุเรื่องความปลอดภัย: หน้านี้ไม่บังคับให้กระพริบตาแล้ว เพราะการลงทะเบียน
+// ใบหน้าทำโดย "แอดมินที่อยู่ต่อหน้าครูจริง ๆ" อยู่แล้ว (ดูหน้าจอ ควบคุมกล้องเอง)
+// ความเสี่ยงเรื่องเอารูปถ่ายมาแอบอ้างจึงถูกป้องกันด้วยคนจริงที่ยืนอยู่ตรงนั้น
+// ไม่จำเป็นต้องพึ่งการตรวจจับอัตโนมัติซ้ำอีกชั้น ระบบตรวจจับการกระพริบตายังคง
+// ใช้งานอยู่ที่ "หน้าสแกนเข้า-ออกงานประจำวัน" ซึ่งไม่มีแอดมินเฝ้าอยู่ด้วย จึงเป็น
+// จุดที่เสี่ยงต่อการเอารูปถ่ายมาสแกนแทนตัวจริงมากกว่า และยังคงบังคับกระพริบตาไว้เหมือนเดิม
 
 /* ── ไอคอนเส้นสไตล์ SF Symbols ── */
 function IconHome({ className = "" }: { className?: string }) {
@@ -77,9 +68,6 @@ export default function AdminFaceRegisterPage() {
   const scanActiveRef = useRef(false);
   const scanTimeoutRef = useRef<number | null>(null);
   const stableFrameCountRef = useRef(0);
-  const eyeOpenRef = useRef(true);
-  const blinkFoundRef = useRef(false);
-  const earBaselineRef = useRef<number | null>(null);
   const finalizingRef = useRef(false);
 
   const [teachers, setTeachers] = useState<TeacherUser[]>([]);
@@ -96,7 +84,6 @@ export default function AdminFaceRegisterPage() {
 
   const [scanFeedback, setScanFeedback] = useState("");
   const [justCaptured, setJustCaptured] = useState(false);
-  const [blinkHint, setBlinkHint] = useState(false);
 
   const anglesCaptured = [descriptorFront, descriptorLeft, descriptorRight].filter(Boolean).length;
 
@@ -150,10 +137,6 @@ export default function AdminFaceRegisterPage() {
     finalizingRef.current = false;
     if (scanTimeoutRef.current) { window.clearTimeout(scanTimeoutRef.current); scanTimeoutRef.current = null; }
     stableFrameCountRef.current = 0;
-    eyeOpenRef.current = true;
-    blinkFoundRef.current = false;
-    earBaselineRef.current = null;
-    setBlinkHint(false);
     setScanFeedback("");
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
@@ -185,9 +168,6 @@ export default function AdminFaceRegisterPage() {
         setStatus(`กำลังสแกนมุม${angleLabel(angle)}อัตโนมัติ — อยู่นิ่ง ๆ ในกรอบวงกลม`);
         setScanFeedback("กำลังเตรียมกล้อง...");
         stableFrameCountRef.current = 0;
-        eyeOpenRef.current = true;
-        blinkFoundRef.current = false;
-        earBaselineRef.current = null;
         finalizingRef.current = false;
         scanActiveRef.current = true;
         window.setTimeout(() => scanLoop(angle), 500);
@@ -197,12 +177,8 @@ export default function AdminFaceRegisterPage() {
     }
   };
 
-  // ★ สแกนอัตโนมัติต่อเนื่อง: ต้องนิ่งครบเฟรม "และ" ตรวจพบการกระพริบตาอย่างน้อย 1
-  // ครั้งก่อนจึงจะยอมถ่ายให้ — ป้องกันการยกรูปถ่าย/ภาพนิ่งมาลงทะเบียนแทนตัวจริง
-  // จุดสำคัญที่ต่างจากเดิม: ระหว่างรอกระพริบตา loop นี้จะตรวจแค่ตำแหน่ง landmark
-  // (เบา เร็ว) เท่านั้น ไม่คำนวณ face descriptor (128 มิติ) ทุกเฟรมเหมือนเดิมอีก
-  // ต่อไป — เพราะการคำนวณ descriptor ทุกเฟรมคือสาเหตุหลักที่ทำให้ loop ช้าลงมาก
-  // บนมือถือ จนพลาดจังหวะกระพริบตาที่เกิดขึ้นเร็วกว่ารอบสแกน
+  // ★ สแกนอัตโนมัติต่อเนื่อง: พอใบหน้านิ่งอยู่ในกรอบครบตามจำนวนเฟรมที่กำหนดแล้ว
+  // จะถ่ายให้อัตโนมัติทันที (ไม่บังคับกระพริบตา เพราะแอดมินเฝ้าอยู่หน้าจอเองอยู่แล้ว)
   async function scanLoop(angle: "front" | "left" | "right") {
     if (!scanActiveRef.current || !videoRef.current || !faceapi || finalizingRef.current) return;
     try {
@@ -214,29 +190,10 @@ export default function AdminFaceRegisterPage() {
 
       if (detection) {
         stableFrameCountRef.current += 1;
-
-        const leftEAR = eyeAspectRatio(detection.landmarks.getLeftEye());
-        const rightEAR = eyeAspectRatio(detection.landmarks.getRightEye());
-        const avgEAR = (leftEAR + rightEAR) / 2;
-
-        // ค่าฐาน (baseline) คือค่า EAR ตอนตาเปิดปกติ ปรับตัวไปเรื่อย ๆ จนกว่าจะจับการกระพริบได้
-        // แค่จับ "หลับตา" ได้เฟรมเดียวก็ถือว่าเจอการกระพริบแล้ว — ไม่ต้องรอจับจังหวะลืมตา
-        // กลับคืนด้วย เพราะจังหวะลืมตาคืนมักเร็วเกินกว่าจะสุ่มเจอบนอุปกรณ์ที่ประมวลผลช้า
-        if (earBaselineRef.current === null) earBaselineRef.current = avgEAR;
-        if (!blinkFoundRef.current) {
-          earBaselineRef.current = earBaselineRef.current * 0.9 + avgEAR * 0.1;
-          earBaselineRef.current = Math.min(0.45, Math.max(0.15, earBaselineRef.current));
-          const closeThresh = earBaselineRef.current * EAR_CLOSE_RATIO;
-          if (avgEAR < closeThresh) {
-            blinkFoundRef.current = true;
-            setBlinkHint(true);
-          }
-        }
-
         const stableReady = stableFrameCountRef.current >= REQUIRED_STABLE_FRAMES;
 
-        if (stableReady && blinkFoundRef.current) {
-          // เจอทั้งความนิ่งและการกระพริบตาแล้ว — คำนวณ descriptor ครั้งเดียวตอนนี้เท่านั้น
+        if (stableReady) {
+          // นิ่งครบแล้ว — คำนวณ descriptor ครั้งเดียวตอนนี้เท่านั้น (เบากว่าคำนวณทุกเฟรม)
           finalizingRef.current = true;
           const finalDet = await faceapi
             .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
@@ -248,10 +205,8 @@ export default function AdminFaceRegisterPage() {
             await finalizeCapture(angle, finalDet.descriptor);
             return;
           }
-          // เผื่อเฟรมสุดท้ายตรวจไม่เจอ (พลิกหน้าพอดี) — ลองใหม่ต่อ ไม่ถือว่าล้มเหลว
+          // เผื่อเฟรมสุดท้ายตรวจไม่เจอ (ขยับพอดี) — ลองใหม่ต่อ ไม่ถือว่าล้มเหลว
           finalizingRef.current = false;
-        } else if (stableReady && !blinkFoundRef.current) {
-          setScanFeedback("เกือบเสร็จแล้ว — กระพริบตาเบา ๆ อีกครั้งเพื่อยืนยันว่าเป็นคนจริง");
         } else {
           setScanFeedback(`ตรวจพบใบหน้า กำลังยืนยัน (${stableFrameCountRef.current}/${REQUIRED_STABLE_FRAMES})`);
         }
@@ -271,7 +226,7 @@ export default function AdminFaceRegisterPage() {
     else setDescriptorRight(descriptor);
 
     setJustCaptured(true);
-    setScanFeedback("ยืนยันตัวจริงและบันทึกใบหน้าสำเร็จ");
+    setScanFeedback("บันทึกใบหน้าสำเร็จ");
     setStatus(`บันทึกพิกัดใบหน้ามุม${angleLabel(angle)}สำเร็จ!`);
     window.setTimeout(() => { setJustCaptured(false); stopVideo(); }, 700);
   }
@@ -354,7 +309,7 @@ export default function AdminFaceRegisterPage() {
           </button>
           <div>
             <h1 className="text-[15px] font-semibold text-[#1D1D1F] leading-none">ลงทะเบียนใบหน้าบุคลากร</h1>
-            <p className="text-[#6E6E73] text-xs mt-1">สแกนอัตโนมัติพร้อมยืนยันตัวจริงด้วยการกระพริบตา</p>
+            <p className="text-[#6E6E73] text-xs mt-1">สแกนอัตโนมัติเมื่อใบหน้านิ่งในกรอบ (ยืนยันตัวตนโดยแอดมินที่ควบคุมกล้องอยู่)</p>
           </div>
         </div>
       </div>
@@ -364,7 +319,7 @@ export default function AdminFaceRegisterPage() {
 
           <p className="text-[13px] text-[#0A84FF] mb-6 font-medium flex items-center gap-1.5 justify-center text-center">
             <IconEye className="w-4 h-4 shrink-0" />
-            กล้องจะสแกนและถ่ายให้อัตโนมัติเมื่อใบหน้านิ่งอยู่ในกรอบและกระพริบตาตามปกติ
+            กล้องจะสแกนและถ่ายให้อัตโนมัติเมื่อใบหน้านิ่งอยู่ในกรอบ
           </p>
 
           {/* เลือกบุคลากร */}
@@ -447,13 +402,6 @@ export default function AdminFaceRegisterPage() {
               )}
               {justCaptured && (
                 <div className="absolute inset-[-4px] rounded-full pointer-events-none ring-4 ring-[#30D158]/70 animate-pulse" />
-              )}
-
-              {isCameraActive && !justCaptured && (
-                <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-[#5E5CE6] to-[#0A84FF] text-white text-[11px] font-semibold px-4 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 whitespace-nowrap">
-                  <IconEye className="w-3.5 h-3.5" />
-                  {blinkHint ? "ลืมตากลับมาได้เลย" : "กระพริบตาได้ตามปกติ"}
-                </div>
               )}
             </div>
 
