@@ -6,6 +6,7 @@ import Vp71Tool from "./Vp71Tool";
 import Vp15Report from "./Vp15Report";
 import Vp2Report from "./Vp2Report";
 import Vp3Report from "./Vp3Report";
+import Vp7Report from "./Vp7Report";
 
 type Student = { id: string; prefix?: string; first_name: string; last_name: string; seat_number: number };
 
@@ -18,12 +19,13 @@ const CHARACTERISTICS_ITEMS = [
   { key: "7", label: "รักความเป็นไทย" }, { key: "8", label: "มีจิตสาธารณะ" },
 ];
 
-type ReportKey = "vp2" | "vp3" | "vp15" | "vp71" | "readThinkWrite" | "characteristics";
+type ReportKey = "vp2" | "vp3" | "vp7" | "vp15" | "vp71" | "readThinkWrite" | "characteristics";
 
 const REPORT_CARDS: { key: ReportKey; label: string; icon: string; desc: string }[] = [
   { key: "readThinkWrite", label: "ประเมินอ่าน-คิด-เขียน", icon: "📖", desc: "ให้คะแนน 3 หัวข้อ ข้อละ 0-3 คะแนน พร้อมสรุปผ่าน/ไม่ผ่านอัตโนมัติ" },
   { key: "characteristics", label: "ประเมินคุณลักษณะอันพึงประสงค์", icon: "🌟", desc: "ให้คะแนน 8 ข้อคุณลักษณะ ข้อละ 0-3 คะแนน" },
   { key: "vp2", label: "วผ.2 (ประกาศผลคะแนนระหว่างเรียน)", icon: "📝", desc: "กรอกคะแนนหน่วยการเรียน + กลางภาค รายบุคคล พิมพ์ประกาศได้" },
+  { key: "vp7", label: "วผ.7 (ประกาศผลคะแนน + ผลการเรียน)", icon: "🏁", desc: "สรุปคะแนนหน่วยการเรียน/กลางภาค/ปลายภาค พร้อมตัดเกรดอัตโนมัติ พิมพ์ประกาศได้" },
   { key: "vp3", label: "วผ.3 (รายชื่อนักเรียนเวลาเรียนไม่ถึงเกณฑ์)", icon: "🗓️", desc: "บันทึกข้อความส่งรายชื่อนักเรียนที่มีเวลาเรียนไม่ถึง 60% และ 80%" },
   { key: "vp71", label: "วผ.7.1 (แผนวัดและประเมินผล)", icon: "📋", desc: "กรอกหน่วยการเรียนรู้+ตัวชี้วัด ใช้ร่วมกันทุกครูที่สอนวิชานี้" },
   { key: "vp15", label: "วผ.15 (สรุปผลสัมฤทธิ์รายวิชา)", icon: "📊", desc: "สรุปจำนวนนักเรียนตามระดับผลการเรียนของวิชาเดียวกันทุกห้อง — ดู/พิมพ์ได้ทุกคน" },
@@ -107,6 +109,19 @@ export default function ReportsHubTool({
       students={students} currentUserId={currentUserId} readOnly={readOnly}
       unitMaxScore={formativeMaxScore} midtermMaxScore={midtermMaxScore} gradeRoundingMode={gradeRoundingMode} 
       subjectTeacherNameFallback={subjectTeacherName} 
+      onBack={() => setActive(null)}
+    />
+  );
+}
+if (active === "vp7") {
+  return (
+    <Vp7Report
+      sectionId={sectionId} subjectId={subjectId} academicYearId={academicYearId}
+      subjectTitle={subjectTitle} subjectCode={subjectCode} classroomLabel={classroomLabel}
+      students={students} currentUserId={currentUserId} readOnly={readOnly}
+      formativeMaxScore={formativeMaxScore} midtermMaxScore={midtermMaxScore} finalMaxScore={finalMaxScore}
+      gradeRoundingMode={gradeRoundingMode}
+      subjectTeacherNameFallback={subjectTeacherName}
       onBack={() => setActive(null)}
     />
   );
