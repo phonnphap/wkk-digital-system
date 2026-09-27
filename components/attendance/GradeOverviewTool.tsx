@@ -247,15 +247,16 @@ export default function GradeOverviewTool({
   currentUserId,
   readOnly = false,
   hideActions = false,
-  gradingMode = "numeric",              // ★ เพิ่ม
+  gradingMode = "numeric",
   passThresholdPercent = 50,   
-  gradingStructure = "formative_midterm_final",       // ★ เพิ่ม: โครงสร้างคะแนนเหลือแบบเดียว (เก็บ+กลางภาค+ปลายภาค)
-  formativeMaxScore = 70,                      // ★ เพิ่ม
-  midtermMaxScore = 0,                         // ★ เพิ่ม
+  gradingStructure = "formative_midterm_final",
+  formativeMaxScore = 70,
+  midtermMaxScore = 0,
   finalMaxScore = 30, 
   currentStudentId, 
   showSpecialScores = true,
-  educationLevel = "secondary"          // ★ เพิ่ม: "primary" (ประถม) -> กลางปี/ปลายปี, "secondary" (มัธยม) -> กลางภาค/ปลายภาค
+  educationLevel = "secondary",
+  gradeRoundingMode = "truncate",        // ★ เพิ่ม: "round_up" ปัดขึ้น / "truncate" ตัดเศษทิ้ง
 }: {
   sectionId: string;
   subjectTitle: string;
@@ -268,7 +269,7 @@ export default function GradeOverviewTool({
   currentUserId?: string;
   readOnly?: boolean;
   hideActions?: boolean;
-  gradingMode?: "numeric" | "pass_fail";   // ★ เพิ่ม
+  gradingMode?: "numeric" | "pass_fail";
   passThresholdPercent?: number; 
   gradingStructure?: "formative_final" | "formative_midterm_final";
   formativeMaxScore?: number;
@@ -276,7 +277,8 @@ export default function GradeOverviewTool({
   finalMaxScore?: number;
   currentStudentId?: string;
   showSpecialScores?: boolean;
-  educationLevel?: "primary" | "secondary"; // ★ เพิ่ม: ใช้ตัดสินใจว่าจะเรียก "กลางปี/ปลายปี" (ประถม) หรือ "กลางภาค/ปลายภาค" (มัธยม)
+  educationLevel?: "primary" | "secondary";
+  gradeRoundingMode?: "round_up" | "truncate";   // ★ เพิ่ม
 }) {
   const [tab, setTab] = useState<ViewTab>("table");
   const [loading, setLoading] = useState(true);
@@ -458,14 +460,12 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
         ? (attendanceRate === null ? null : attendanceRate >= passThresholdPercent ? "ผ่าน" : "ไม่ผ่าน")
         : null;
 
-                const usesComponentGrading = gradingMode === "numeric"; // โครงสร้างเก็บ/กลาง/ปลาย ใช้เฉพาะโหมด numeric
+                                const usesComponentGrading = gradingMode === "numeric"; // โครงสร้างเก็บ/กลาง/ปลาย ใช้เฉพาะโหมด numeric
 
-    // ★ "เก็บ" (คะแนนงานทั้งหมด + กลางภาค) — ตัวเลขจริง ไม่ยืด/หด
-    // numerator: ผลรวมชิ้นงานจริง + คะแนนกลางภาคจริง (ไม่รวมคะแนนพิเศษ)
-    // denominator: ผลรวมคะแนนเต็มจริงของชิ้นงานทั้งหมด (totalMaxScore) + คะแนนเต็มกลางภาคที่ตั้งไว้ (midtermMaxScore)
-    //              ไม่ใช่ formativeMaxScore ที่ตั้งในหน้าตั้งค่า เพราะตัวเลขนั้นเป็นแค่เป้าหมาย ไม่ใช่ผลรวมจริง
+    // ★ แก้บั๊ก: "เก็บ" ต้องบวกคะแนนพิเศษ (บวก/ลบ) เข้าไปด้วย เพราะคะแนนพิเศษถูกนำไปคิดใน "รวม" อยู่แล้ว
+    // เดิมคอลัมน์นี้ไม่รวมคะแนนพิเศษ ทำให้ตัวเลข เก็บ+ปลายภาค ไม่เท่ากับ รวม
     const formativeEarned = usesComponentGrading
-      ? assignmentTotal + (useMidterm ? (midtermScore ?? 0) : 0)
+      ? assignmentTotal + (useMidterm ? (midtermScore ?? 0) : 0) + specialTotal
       : assignmentTotal;
     const formativeMax = usesComponentGrading
       ? totalMaxScore + (useMidterm ? midtermMaxScore : 0)
@@ -474,16 +474,24 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
     // grandTotal เดิม (คะแนนดิบ+พิเศษ) ยังเก็บไว้ใช้ในที่อื่น (เช่น Export/PodiumView) ไม่กระทบของเดิม
     const grandTotal = assignmentTotal + specialTotal;
 
-    // ★ "รวม" = เก็บ (งาน+กลางภาค) + คะแนนพิเศษ + ปลายภาค
-    // denominator = เต็มเก็บจริง (formativeMax) + เต็มปลายภาค (finalMaxScore) — คะแนนพิเศษไม่มี "เต็ม" จึงไม่บวกเข้าตัวหาร
-    const displayTotal = usesComponentGrading
-      ? formativeEarned + specialTotal + (finalScore ?? 0)
+    // ★ "รวม" = เก็บ (งาน+พิเศษ+กลางภาค) + ปลายภาค — specialTotal อยู่ใน formativeEarned แล้ว ไม่บวกซ้ำ
+    const displayTotalBeforeRound = usesComponentGrading
+      ? formativeEarned + (finalScore ?? 0)
       : grandTotal;
     const displayMax = usesComponentGrading
       ? formativeMax + finalMaxScore
       : totalMaxScore;
 
-    // ★ % และเกรด ต้องคำนวณจากตัวเลขชุดเดียวกับที่แสดงในคอลัมน์ "รวม" เป๊ะ ไม่งั้นตัวเลขกับ % จะไม่ตรงกันอีก
+    // ★ แก้บั๊ก: ปัดเศษคะแนนรวมตาม "การปัดเศษคะแนน/เกรด" ที่ตั้งไว้ในหน้าตั้งค่ารายวิชา
+    // - ปัดขึ้นเมื่อมีเศษ (round_up): 74.50 -> แสดง 75 และให้เกรดคิดจาก 75
+    // - ตัดเศษทิ้ง (truncate): 74.50 -> แสดง 74 และให้เกรดคิดจาก 74
+    // ปัดเป็นทศนิยม 2 ตำแหน่งก่อน เพื่อกันเลขทศนิยมเพี้ยนเล็กน้อยจาก floating point แล้วเก็บไว้เป็น "คะแนนจริง"
+    const displayTotalRaw = Math.round(displayTotalBeforeRound * 100) / 100;
+    const displayTotal = displayTotalRaw % 1 !== 0
+      ? (gradeRoundingMode === "round_up" ? Math.ceil(displayTotalRaw) : Math.floor(displayTotalRaw))
+      : displayTotalRaw;
+
+    // ★ % และเกรด คำนวณจากตัวเลขที่ปัดแล้ว (displayTotal) เพื่อให้ตรงกับตัวเลขที่แสดงในคอลัมน์ "รวม"
     const percentage = displayMax > 0 ? (displayTotal / displayMax) * 100 : 0;
 
     let grade = "-";
@@ -498,12 +506,12 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
       specialTotal, percentage, grade, grandTotal,
       attendanceRate, passFailStatus,
       formativeEarned, formativeMax, midtermScore, finalScore, midtermRaw, finalRaw,
-      displayTotal, displayMax,
+      displayTotal, displayMax, displayTotalRaw,   // ★ เพิ่ม displayTotalRaw
     };
   });
 }, [students, submissions, assignments, effectivePresets, scoreEvents, criteria, totalMaxScore,
     attendanceMap, gradingMode, passThresholdPercent, examScores, midtermMaxScore, finalMaxScore, useMidterm,
-    rawMidtermMax, rawFinalMax]);
+    rawMidtermMax, rawFinalMax, gradeRoundingMode]);
   // ★ ถ้าเป็นมุมมองนักเรียน กรองให้เหลือแถวตัวเองเท่านั้น
 const visibleRows = useMemo(() => {
   if (!currentStudentId) return rows;
@@ -1582,6 +1590,12 @@ const hasAnyUnitGroup = unitHeaderGroups.some(g => g.label);
     <span className="font-black text-m text-slate-700">
       {fmtScore(r.displayTotal)}<span className="text-slate-400 font-bold">/{fmtScore(r.displayMax)}</span>
     </span>
+    {/* ★ เพิ่ม: ถ้ามีการปัดเศษ (คะแนนจริงมีทศนิยม) ให้โชว์ตัวเลขจริงกำกับไว้ */}
+    {r.displayTotalRaw !== r.displayTotal && (
+      <span className="text-[11px] font-black text-violet-500 leading-tight whitespace-nowrap">
+        คะแนนจริง {fmtScore(r.displayTotalRaw)}
+      </span>
+    )}
     <div className="w-16 h-1.5 rounded-full bg-slate-100 overflow-hidden">
       <div
         className={`h-full rounded-full ${r.percentage >= 80 ? "bg-emerald-400" : r.percentage >= 50 ? "bg-amber-400" : "bg-rose-400"}`}
@@ -2103,6 +2117,7 @@ function buildRowsType() {
     finalRaw: number | null;
     displayTotal: number;
     displayMax: number;
+    displayTotalRaw: number; 
   }[];
 }
 
