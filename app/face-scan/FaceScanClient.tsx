@@ -1,8 +1,6 @@
 "use client";
 
-// หมายเหตุ: `export const dynamic = 'force-dynamic'` ถูกย้ายไปไว้ใน page.tsx (wrapper)
-// แทนแล้ว เพราะ config นี้มีผลเฉพาะตอนอยู่ในไฟล์ route (page.tsx/layout.tsx) เท่านั้น
-// ถ้าอยู่ในไฟล์ component ธรรมดาแบบนี้จะไม่มีผลอะไรเลย
+export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from 'next/navigation';
@@ -72,7 +70,10 @@ export default function FaceScanPage() {
   const SCHOOL_LAT = 14.000541081931873;
   const SCHOOL_LNG = 100.6766971783887;
   const ALLOWED_RADIUS = 75;
-  const MATCH_THRESHOLD = 0.4;
+  // เดิมตั้งไว้ 0.4 (ต้องเหมือน > 60%) ซึ่งเข้มกว่ามาตรฐานทั่วไปของ face-api.js
+  // (ปกติแนะนำแถว 0.5–0.6) ทำให้คนที่หน้าตรงกับฐานข้อมูลจริง ๆ ถูกปัดตกเพราะ
+  // แสง/มุมกล้องต่างจากตอนลงทะเบียนแค่นิดเดียว จึงผ่อนเป็น 0.5 (ต้องเหมือน > 50%)
+  const MATCH_THRESHOLD = 0.5;
 
   // ── liveness (anti-photo-spoofing) ──────────────────────────────────────
   // กันการเอารูปถ่าย/ภาพในจอมือถือมาสแกนแทนตัวจริง: หลังจากเจอใบหน้าที่ตรงกับ
@@ -266,17 +267,21 @@ export default function FaceScanPage() {
                 ? JSON.parse(u.face_features)
                 : u.face_features;
 
-              let arr: number[] | null = null;
+              // ใช้ descriptor ทุกมุมที่เคยลงทะเบียนไว้ (หน้าตรง/เอียงซ้าย/เอียงขวา) เป็นชุด
+              // อ้างอิงพร้อมกัน แทนที่จะหยิบมาแค่มุมเดียว — เพิ่มโอกาสจับคู่ถูกต้องเมื่อสแกน
+              // จริงในมุม/แสงที่ต่างจากตอนลงทะเบียน (เดิมโค้ดหยิบมาแค่คีย์แรกมุมเดียว
+              // ทำให้ความเหมือนมักออกมาต่ำกว่าที่ควรจะเป็น)
+              const arrays: number[][] = [];
               if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                const keys = Object.keys(parsed);
-                if (keys.length > 0 && Array.isArray(parsed[keys[0]])) arr = parsed[keys[0]];
-              } else if (Array.isArray(parsed)) {
-                arr = parsed;
+                Object.values(parsed).forEach((v: any) => {
+                  if (Array.isArray(v) && v.length === 128) arrays.push(v);
+                });
+              } else if (Array.isArray(parsed) && parsed.length === 128) {
+                arrays.push(parsed as number[]);
               }
-              if (arr && arr.length === 128) {
-                return new fa.LabeledFaceDescriptors(u.id, [new Float32Array(arr)]);
-              }
-              return null;
+
+              if (arrays.length === 0) return null;
+              return new fa.LabeledFaceDescriptors(u.id, arrays.map(a => new Float32Array(a)));
             } catch { return null; }
           })
           .filter((d): d is any => d !== null);
