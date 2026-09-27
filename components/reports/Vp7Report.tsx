@@ -348,7 +348,32 @@ export default function Vp7Report({
       const percentage = grandMaxScore > 0 ? (total / grandMaxScore) * 100 : 0;
       const grade = getGradeFromCriteria(percentage, criteria);
 
-      map[s.id] = { unit: unitRaw, midterm: midtermRaw, final: finalRaw, total, totalRaw, percentage, grade };
+      // ★ ทำให้ หน่วยการเรียน/กลางภาค/ปลายภาค แสดงเป็นเลขจำนวนเต็มไม่มีทศนิยม
+      // แต่ยังบวกกันแล้วได้เท่ากับ "รวม" (total) เป๊ะ — ใช้วิธี "largest remainder":
+      // ปัดลง (floor) ทุกช่องก่อน แล้วเอาผลต่างที่ยังขาดไปแจกให้ช่องที่มีเศษทศนิยมมากที่สุดก่อน
+      const parts: { key: "unit" | "midterm" | "final"; raw: number }[] = [{ key: "unit", raw: unitRaw }];
+      if (midtermRaw !== null) parts.push({ key: "midterm", raw: midtermRaw });
+      if (finalRaw !== null) parts.push({ key: "final", raw: finalRaw });
+
+      const withFloor = parts.map(p => ({ ...p, floor: Math.floor(p.raw), frac: p.raw - Math.floor(p.raw) }));
+      const roundedByKey: Record<string, number> = {};
+      withFloor.forEach(p => { roundedByKey[p.key] = p.floor; });
+      const diff = total - withFloor.reduce((sum, p) => sum + p.floor, 0);
+
+      if (diff > 0) {
+        // เศษทศนิยมมากสุดได้ +1 ก่อน (เรียงจากมากไปน้อย)
+        [...withFloor].sort((a, b) => b.frac - a.frac).slice(0, diff).forEach(p => { roundedByKey[p.key] += 1; });
+      } else if (diff < 0) {
+        // กรณีปัดเกินไปอีกทาง (พบยาก แต่กันไว้) — หักออกจากช่องที่เศษน้อยสุดก่อน
+        [...withFloor].sort((a, b) => a.frac - b.frac).slice(0, -diff).forEach(p => { roundedByKey[p.key] -= 1; });
+      }
+
+      map[s.id] = {
+        unit: roundedByKey.unit,
+        midterm: midtermRaw !== null ? roundedByKey.midterm : null,
+        final: finalRaw !== null ? roundedByKey.final : null,
+        total, totalRaw, percentage, grade,
+      };
     });
     return map;
   }, [students, submissions, assignments, examScores, scoreEvents, criteria, grandMaxScore, gradeRoundingMode]);
@@ -452,10 +477,10 @@ export default function Vp7Report({
       "เลขที่",
       "เลขประจำตัว",
       "ชื่อ นามสกุล",
-      `หน่วยการเรียน (${fmtScore(totalMaxScore)})`,
-      `กลางภาค (${midtermMaxScore})`,
-      `ปลายภาค (${finalMaxScore})`,
-      `รวม (${fmtScore(grandMaxScore)})`,
+      `หน่วยการเรียน\n(${fmtScore(totalMaxScore)})`,
+      `กลางภาค\n(${midtermMaxScore})`,
+      `ปลายภาค\n(${finalMaxScore})`,
+      `รวม\n(${fmtScore(grandMaxScore)})`,
       "ผลการเรียน",
       "หมายเหตุ",
     ];
@@ -697,10 +722,22 @@ export default function Vp7Report({
                   <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "10%" }}>หมายเหตุ</th>
                 </tr>
                 <tr>
-                  <th className="border border-slate-400 px-1 py-1 font-bold">หน่วยการเรียน ({fmtScore(totalMaxScore)})</th>
-                  <th className="border border-slate-400 px-1 py-1 font-bold">กลางภาค ({midtermMaxScore})</th>
-                  <th className="border border-slate-400 px-1 py-1 font-bold">ปลายภาค ({finalMaxScore})</th>
-                  <th className="border border-slate-400 px-1 py-1 font-bold">รวม ({fmtScore(grandMaxScore)})</th>
+                  <th className="border border-slate-400 px-1 py-1 font-bold">
+                    <span className="block">หน่วยการเรียน</span>
+                    <span className="block">({fmtScore(totalMaxScore)})</span>
+                  </th>
+                  <th className="border border-slate-400 px-1 py-1 font-bold">
+                    <span className="block">กลางภาค</span>
+                    <span className="block">({midtermMaxScore})</span>
+                  </th>
+                  <th className="border border-slate-400 px-1 py-1 font-bold">
+                    <span className="block">ปลายภาค</span>
+                    <span className="block">({finalMaxScore})</span>
+                  </th>
+                  <th className="border border-slate-400 px-1 py-1 font-bold">
+                    <span className="block">รวม</span>
+                    <span className="block">({fmtScore(grandMaxScore)})</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>

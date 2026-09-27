@@ -329,7 +329,13 @@ type TimesRow = {
   check_out_time: string | null;
   note: string | null;
 };
-type LeaveRow = { user_id: string; start_date: string; end_date: string };
+type LeaveRow = {
+  user_id: string;
+  start_date: string;
+  end_date: string;
+  leave_type: string | null;
+  days_count: number | null;
+};
 
 type StatsRaw = {
   enriched: EnrichedRow[];
@@ -345,6 +351,7 @@ type TeacherStat = {
   noIn: number;
   noOut: number;
   total: number;
+  leaveByType: Record<string, LeaveTypeCount>;
 };
 
 type SortKey = "late" | "early" | "noIn" | "noOut" | "total" | "name";
@@ -369,7 +376,20 @@ const ROLE_LABEL: Record<string, string> = {
   dept_head: "หัวหน้ากลุ่มสาระ",
   grade_head: "หัวหน้าสายชั้น",
 };
+type LeaveTypeCount = { count: number; days: number };
 
+const LEAVE_TYPE_LABEL: Record<string, string> = {
+  sick: "ลาป่วย",
+  personal: "ลากิจส่วนตัว",
+  official: "ไปราชการ",
+  maternity: "ลาคลอดบุตร",
+  ordination: "ลาอุปสมบท",
+  other: "ลาอื่นๆ",
+};
+const LEAVE_TYPE_ICON: Record<string, string> = {
+  sick: "🤒", personal: "📋", official: "🏛️", maternity: "👶", ordination: "🙏", other: "📌",
+};
+const LEAVE_TYPE_ORDER = ["sick", "personal", "official", "maternity", "ordination", "other"];
 // ตรวจว่าเป็นอักษรไทยหรือไม่ เพื่อใช้เรียง ก-ฮ ก่อน แล้วตามด้วย a-z
 function isThaiName(name: string): boolean {
   return /[\u0E00-\u0E7F]/.test(name);
@@ -488,7 +508,7 @@ export default function AdminTeachersListPage() {
         fetchAllRows((from, toIdx) =>
           supabase
             .from(ENRICHED_VIEW)
-            .select("user_id,work_date,status,note,leave_reason")
+            .select("user_id,start_date,end_date,leave_type,days_count")
             .gte("work_date", start)
             .lte("work_date", to)
             .range(from, toIdx)
@@ -593,7 +613,19 @@ export default function AdminTeachersListPage() {
         if (isNoScanIn({ check_in_time, note, status }, onLeave)) noIn++;
         if (isNoScanOut({ check_out_time, note, status }, onLeave)) noOut++;
       }
-      return { teacher: t, late, early, noIn, noOut, total: late + early + noIn + noOut };
+            // ★ สรุปสถิติการลาแยกประเภท — นับตามวันที่เริ่มลา (start_date) อยู่ในช่วงครึ่งปีนี้
+      const leaveByType: Record<string, LeaveTypeCount> = {};
+      const leaveRowsForUser = statsData.onLeaveRows.filter(
+        (l) => l.user_id === t.id && l.start_date >= start && l.start_date <= last
+      );
+      for (const l of leaveRowsForUser) {
+        const type = l.leave_type || "other";
+        if (!leaveByType[type]) leaveByType[type] = { count: 0, days: 0 };
+        leaveByType[type].count += 1;
+        leaveByType[type].days += Number(l.days_count) || 0;
+      }
+
+      return { teacher: t, late, early, noIn, noOut, total: late + early + noIn + noOut, leaveByType };
     });
 
     return { workingDays: workingDays.length, stats };
@@ -644,6 +676,17 @@ export default function AdminTeachersListPage() {
       }),
       { late: 0, early: 0, noIn: 0, noOut: 0 }
     );
+  }, [sortedStats]);
+    const leaveTotals = useMemo(() => {
+    const totals: Record<string, LeaveTypeCount> = {};
+    for (const s of sortedStats) {
+      for (const [type, v] of Object.entries(s.leaveByType)) {
+        if (!totals[type]) totals[type] = { count: 0, days: 0 };
+        totals[type].count += v.count;
+        totals[type].days += v.days;
+      }
+    }
+    return totals;
   }, [sortedStats]);
 
   const stats = useMemo(() => {
@@ -988,6 +1031,34 @@ export default function AdminTeachersListPage() {
                       </div>
                     </div>
                   ))}
+                </div>
+                                <div>
+                  <p className="text-xs font-black text-slate-500 mb-2">
+                    สรุปสถิติการลา (รวมทุกคนที่แสดงอยู่ · เฉพาะใบลาที่อนุมัติแล้ว)
+                  </p>
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                    {LEAVE_TYPE_ORDER.filter((type) => leaveTotals[type]).map((type) => {
+                      const v = leaveTotals[type];
+                      return (
+                        <div key={type} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-lg shrink-0">
+                            {LEAVE_TYPE_ICON[type] ?? "📌"}
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-400">{LEAVE_TYPE_LABEL[type] ?? type}</p>
+                            <p className="text-lg font-black text-slate-800">
+                              {v.count.toLocaleString("th-TH")} <span className="text-xs font-bold text-slate-400">ครั้ง</span>
+                              {"  ·  "}
+                              {v.days.toLocaleString("th-TH")} <span className="text-xs font-bold text-slate-400">วัน</span>
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {LEAVE_TYPE_ORDER.every((type) => !leaveTotals[type]) && (
+                      <p className="text-sm text-slate-400 col-span-full">ไม่มีข้อมูลการลาในช่วงนี้</p>
+                    )}
+                  </div>
                 </div>
 
                 <p className="text-xs font-bold text-slate-500">
