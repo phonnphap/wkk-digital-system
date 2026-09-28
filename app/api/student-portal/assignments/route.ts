@@ -79,23 +79,38 @@ export async function GET(req: NextRequest) {
 
   // ★ แก้ไข: ส่ง allow_late_submission และ student_submit_enabled ของวิชานี้กลับไปด้วย
   // ให้ฝั่งหน้าเว็บใช้ปิดฟอร์มส่งงาน (default true เผื่อ field เป็น null)
-    const showScores = section.show_assignment_scores ?? true;
+    // path จริง: /api/student-portal/assignments/route.ts (แก้ในฟังก์ชัน GET เดิม)
 
-  // ★ ปิดการแสดงคะแนน: ลบคะแนน/คอมเมนต์ครูออกจาก submission ที่ส่งกลับไป
-  // ให้เหลือแค่สถานะว่าส่งแล้วหรือยัง (frontend ควรเรนเดอร์ ✅ จากการที่ submissions มีค่า/status ไม่ใช่จาก score)
-  const assignmentsOut = (assignments ?? []).map((a: any) => ({
-    ...a,
-    submissions: (a.submissions ?? []).map((s: any) =>
-      showScores ? s : { ...s, score: null, teacher_comment: null }
-    ),
-  }));
+const showScores = section.show_assignment_scores ?? true;
 
-  return NextResponse.json({
-    assignments: assignmentsOut,
-    allow_late_submission: section.allow_late_submission ?? true,
-    student_submit_enabled: section.student_submit_enabled ?? true,
-    show_assignment_scores: showScores,   // ★ ให้ frontend รู้ว่าควรโชว์เครื่องหมายถูกแทนคะแนนไหม
-  });
+// ★ แก้บั๊ก: เดิม null score ทิ้งตรงๆ ทำให้หน้าเว็บที่เช็ค "score !== null" เพื่อบอกว่า
+// ตรวจแล้วหรือยัง เข้าใจผิดว่ายังไม่ได้ตรวจ (กลายเป็น "รอตรวจ" ทั้งที่ครูให้คะแนนแล้ว)
+// แก้เป็น: เก็บสถานะจริงไว้ในฟิลด์แยก (is_graded, is_submitted) ให้ frontend ใช้ตัดสิน
+// สถานะ "ส่งแล้ว/รอตรวจ/ตรวจแล้ว" จากฟิลด์เหล่านี้แทนการดู score ตรงๆ
+// ส่วน score ตัวเลขจริงจะซ่อนก็ต่อเมื่อ showScores = false เท่านั้น
+const assignmentsOut = (assignments ?? []).map((a: any) => ({
+  ...a,
+  submissions: (a.submissions ?? []).map((s: any) => {
+    const isGraded = s.score !== null && s.score !== undefined;
+    const isSubmitted = !!s.submitted_at || !!s.content || s.status !== "pending_review" || isGraded;
+    return showScores
+      ? { ...s, is_graded: isGraded, is_submitted: isSubmitted }
+      : {
+          ...s,
+          score: null,
+          teacher_comment: null,
+          is_graded: isGraded,      // ★ บอกความจริงว่าตรวจแล้วหรือยัง แม้จะซ่อนตัวเลขคะแนน
+          is_submitted: isSubmitted,
+        };
+  }),
+}));
+
+return NextResponse.json({
+  assignments: assignmentsOut,
+  allow_late_submission: section.allow_late_submission ?? true,
+  student_submit_enabled: section.student_submit_enabled ?? true,
+  show_assignment_scores: showScores,
+});
 }
 
 export async function POST(req: NextRequest) {

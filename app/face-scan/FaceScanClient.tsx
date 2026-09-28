@@ -83,7 +83,7 @@ export default function FaceScanPage() {
   // เกณฑ์ EAR ปรับตัวเองตามค่าที่วัดได้จริงจากกล้อง/แสง/ใบหน้าแต่ละคน แทนค่าคงที่ตายตัว
   // (ค่าคงที่ตายตัวเป็นสาเหตุที่ทำให้ตรวจจับการกระพริบตาไม่ติดในบางอุปกรณ์)
   const EAR_CLOSE_RATIO = 0.8;  // สัดส่วนที่ถือว่า "หลับตา" เทียบกับค่าฐาน (ผ่อนขึ้นเล็กน้อยให้จับง่ายขึ้น)
-  const LIVENESS_DURATION_MS = 10000;
+  const LIVENESS_DURATION_MS = 5000; // เดิม 10 วิ — คนกระพริบตาเองทุก 2-4 วิ อยู่แล้ว 5 วิพอ ถ้าไม่ทันระบบจะเริ่มรอบใหม่ให้อัตโนมัติ
   const LIVENESS_INTERVAL_MS = 100;
 
   const TERM1_START = new Date('2026-05-14T00:00:00+07:00');
@@ -172,6 +172,7 @@ export default function FaceScanPage() {
   const livenessStartRef = useRef(0);
   const candidateRef = useRef<{ id: string; name: string; similarity: string } | null>(null);
   const earBaselineRef = useRef<number | null>(null);
+  const livenessBusyRef = useRef(false); // กันเฟรมซ้อนกัน: ถ้ารอบก่อนยังประมวลผลไม่เสร็จให้ข้ามรอบนี้
   const [blinkHint, setBlinkHint] = useState(false); // true เมื่อกำลังรอ "ลืมตา" กลับ (ใช้โชว์ฟีดแบ็ก)
 
   const canOffsiteScan = allowOffsiteScan && officialLeaveOk === true;
@@ -476,7 +477,8 @@ export default function FaceScanPage() {
     setLivenessSecondsLeft(Math.ceil(LIVENESS_DURATION_MS / 1000));
     setStatus(`พบคุณ ${candidate.name} — กรุณากระพริบตาตามปกติเพื่อยืนยันว่าเป็นคนจริง`);
 
-    livenessIntervalRef.current = setInterval(async () => {
+    livenessBusyRef.current = false;
+    const tick = async () => {
       const fa = faceApiRef.current;
       if (!videoRef.current || !fa) return;
 
@@ -524,7 +526,7 @@ export default function FaceScanPage() {
 
           // ยืนยันซ้ำอีกครั้งว่ายังเป็นคนเดิมที่ตรวจพบตอนแรก ก่อนเปิด modal ยืนยัน
           const finalDet = await fa
-            .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+            .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 }))
             .withFaceLandmarks()
             .withFaceDescriptor();
 
@@ -547,6 +549,12 @@ export default function FaceScanPage() {
       } catch {
         // ข้าม error ชั่วคราวระหว่างตรวจ ไม่ต้องหยุด loop
       }
+    };
+
+    livenessIntervalRef.current = setInterval(() => {
+      if (livenessBusyRef.current) return; // รอบก่อนยังไม่เสร็จ ข้ามไปก่อนเพื่อไม่ให้เฟรมซ้อนกันจนช้า
+      livenessBusyRef.current = true;
+      tick().finally(() => { livenessBusyRef.current = false; });
     }, LIVENESS_INTERVAL_MS);
   }
 
