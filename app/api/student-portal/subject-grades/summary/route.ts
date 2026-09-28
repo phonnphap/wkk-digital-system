@@ -32,7 +32,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ไม่พบข้อมูลนักเรียน" }, { status: 404 });
   }
 
-  const { data: section } = await supabase
+  // ★ ตารางเหล่านี้ติด RLS เหมือนกับ endpoint อื่นๆ ของ student-portal
+  // custom student session ไม่ใช่ Supabase Auth เลยต้อง bypass ด้วย service-role client
+  const supabaseAdmin = createAdminClient();
+
+  const { data: section } = await supabaseAdmin
     .from("subject_sections")
     .select("id, midterm_max_score, final_max_score, show_assignment_scores")
     .eq("id", sectionId)
@@ -41,12 +45,6 @@ export async function GET(req: NextRequest) {
   if (!section) {
     return NextResponse.json({ error: "ไม่พบวิชาของนักเรียนคนนี้" }, { status: 404 });
   }
-
-  // ★ ตารางเหล่านี้ (assignments/assignment_submissions/score_presets/score_events/
-  // subject_exam_scores/grade_criteria) ติด RLS แบบเดียวกับที่คอมเมนต์ไว้ในไฟล์ assignments API เดิม
-  // custom student session ไม่ใช่ Supabase Auth เลยต้อง bypass ด้วย service-role client
-  // (สิทธิ์ถูกเช็คแล้วด้านบน: studentId ต้องตรงกับ session + ต้องอยู่ห้องเดียวกับ section)
-  const supabaseAdmin = createAdminClient();
 
   const [
     { data: assignments },
@@ -60,7 +58,8 @@ export async function GET(req: NextRequest) {
       .from("assignments")
       .select("id, title, max_score, allow_weight, weight_percent, status, due_date, teaching_unit_no, unit_name, sort_order")
       .eq("subject_section_id", sectionId)
-      .neq("status", "draft"),
+      .neq("status", "draft")
+      .order("sort_order", { ascending: true }),   // ★ ล็อกลำดับให้ตรงกับฝั่งครู
     supabaseAdmin
       .from("score_presets")
       .select("id, label, points, emoji, sort_order")

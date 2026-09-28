@@ -97,13 +97,15 @@ export async function GET(req: NextRequest) {
   }
 
   const { data: sections, error: sectionsErr } = await supabaseAdmin
-    .from("subject_sections")
-    .select(`
-      id, subject_id, classroom_id, student_portal_enabled,
-      subject:subjects ( id, subject_code, name_th )
-    `)
-    .eq("classroom_id", student.classroom_id)
-    .eq("student_portal_enabled", true);
+  .from("subject_sections")
+  .select(`
+    id, subject_id, classroom_id, student_portal_enabled,
+    grading_structure, formative_max_score, midterm_max_score, final_max_score,
+    show_assignment_scores, show_special_scores,
+    subject:subjects ( id, subject_code, name_th, grading_mode, pass_threshold_percent )
+  `)
+  .eq("classroom_id", student.classroom_id)
+  .eq("student_portal_enabled", true);
 
   if (sectionsErr) {
     console.error("[timetable] sections query error:", sectionsErr);
@@ -162,11 +164,17 @@ export async function GET(req: NextRequest) {
   }
 
   const result = sectionList.map((sec: any) => ({
-    id: sec.id,
-    subject: sec.subject ?? null,
-    timetable_entries: entryList
-      .filter((e) => e.subject_id === sec.subject_id)
-      .map((e) => {
+  id: sec.id,
+  subject: sec.subject ?? null,
+  grading_structure: sec.grading_structure,
+  formative_max_score: sec.formative_max_score,
+  midterm_max_score: sec.midterm_max_score,
+  final_max_score: sec.final_max_score,
+  show_assignment_scores: sec.show_assignment_scores,
+  show_special_scores: sec.show_special_scores,
+  timetable_entries: entryList
+    .filter((e) => e.subject_id === sec.subject_id)
+    .map((e) => {
         const slot = slotMap.get(e.time_slot_id);
         return {
           id: e.id,
@@ -174,7 +182,7 @@ export async function GET(req: NextRequest) {
           slot_number: slot?.slot_number ?? 0,
           start_time: slot?.start_time ?? "",
           end_time: slot?.end_time ?? "",
-        };
+};
       }),
   }));
 

@@ -6,6 +6,35 @@ type Student = { id: string; prefix?: string; first_name: string; last_name: str
 type Item = { key: string; label: string };
 type AssessmentType = "read_think_write" | "characteristics";
 type ScoreMap = Record<string, Record<string, number>>;
+import { createClient } from "@/lib/supabase/client";
+
+const supabase = createClient();
+
+type Criterion = { max_percent: number; min_percent: number; grade: string };
+
+function calcAge(birthDateStr: string): number {
+  const bd = new Date(birthDateStr);
+  const now = new Date();
+  let age = now.getFullYear() - bd.getFullYear();
+  const m = now.getMonth() - bd.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < bd.getDate())) age--;
+  return age;
+}
+
+// คำนำหน้าอัตโนมัติจากเพศ+อายุ (เกิน 15 ปี => นาย/นางสาว) เหมือน Vp7Report
+function computePrefix(gender: string | null, birthDate: string | null, fallback: string | null): string {
+  if (gender === "male") return birthDate && calcAge(birthDate) > 15 ? "นาย" : fallback || "เด็กชาย";
+  if (gender === "female") return birthDate && calcAge(birthDate) > 15 ? "นางสาว" : fallback || "เด็กหญิง";
+  return fallback ?? "";
+}
+
+function getGradeFromCriteria(percentage: number, criteria: Criterion[]): string {
+  const sorted = [...criteria].sort((a, b) => b.min_percent - a.min_percent);
+  for (const c of sorted) {
+    if (percentage >= c.min_percent && percentage <= c.max_percent) return c.grade;
+  }
+  return "-";
+}
 
 function levelFromPercent(pct: number): { level: number; label: string } {
   if (pct >= 86) return { level: 3, label: "ดีเยี่ยม" };
@@ -33,7 +62,8 @@ export default function ScoreSheetAssessmentTool({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [scores, setScores] = useState<ScoreMap>({});
-
+    const [prefixMap, setPrefixMap] = useState<Record<string, string>>({});
+  const [gradeMap, setGradeMap] = useState<Record<string, string>>({});
   const maxTotal = items.length * maxPerItem;
   // ปุ่มลัด: maxPerItem ... 1 (เช่น 3 2 1)
   const quickValues = useMemo(
@@ -57,6 +87,71 @@ export default function ScoreSheetAssessmentTool({
       }
     })();
   }, [sectionId, assessmentType]);
+    useEffect(() => {
+    (async () => {
+      // --- คำนำหน้า ---
+      try {
+        const ids = students.map(s => s.id);
+        if (ids.length > 0) {
+          const { data } = await supabase
+            .from("students")
+            .select("id, birth_date, gender")
+            .in("id", ids);
+          const pm: Record<string, string> = {};
+          (data ?? []).forEach((r: any) => {
+            const st = students.find(s => s.id === r.id);
+            pm[r.id] = computePrefix(r.gender ?? null, r.birth_date ?? null, st?.prefix ?? null);
+          });
+          setPrefixMap(pm);
+        }
+      } catch (e) {
+        console.warn("โหลดคำนำหน้าไม่สำเร็จ:", e);
+      }
+
+      // --- เกรดปัจจุบันของนักเรียน (จาก endpoint เดียวกับ วผ.7) ---
+      try {
+        const res = await fetch(`/api/subject-grades/summary?subject_section_id=${sectionId}`);
+        const json = await res.json();
+        if (!res.ok) return;
+
+        const assignments: any[] = (json.assignments ?? []).filter((a: any) => a.status !== "draft");
+        const submissions: any[] = json.submissions ?? [];
+        const examScores: any[] = json.examScores ?? [];
+        const scoreEvents: any[] = json.scoreEvents ?? [];
+        const criteria: Criterion[] = json.criteria ?? [];
+
+        const isW = (a: any) => !!(a.allow_weight && a.weight_percent != null && (a.max_score ?? 0) > 0);
+        const maxOf = (a: any) => (isW(a) ? a.weight_percent : a.max_score ?? 0);
+        const scoreOf = (a: any, raw: number | null | undefined) => {
+          if (raw == null) return 0;
+          return isW(a) ? (raw / (a.max_score || 1)) * a.weight_percent : raw;
+        };
+
+        const grandMax =
+          assignments.reduce((s, a) => s + maxOf(a), 0) +
+          Number(json.midtermMaxScore ?? 0) +
+          Number(json.finalMaxScore ?? 0);
+
+        const gm: Record<string, string> = {};
+        students.forEach(s => {
+          const unit =
+            assignments.reduce((sum, a) => {
+              const sub = submissions.find(x => x.student_id === s.id && x.assignment_id === a.id);
+              return sum + scoreOf(a, sub?.score);
+            }, 0) +
+            scoreEvents.filter(ev => ev.student_id === s.id).reduce((sum, ev) => sum + ev.points, 0);
+          const mid = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm")?.score ?? 0;
+          const fin = examScores.find(e => e.student_id === s.id && e.exam_type === "final")?.score ?? 0;
+          const total = Math.floor(Math.round((unit + mid + fin) * 100) / 100);
+          const pct = grandMax > 0 ? (total / grandMax) * 100 : 0;
+          gm[s.id] = getGradeFromCriteria(pct, criteria);
+        });
+        setGradeMap(gm);
+      } catch (e) {
+        console.warn("โหลดเกรดไม่สำเร็จ:", e);
+      }
+    })();
+  }, [sectionId, students]);
 
   function setScore(studentId: string, itemKey: string, value: number) {
     if (readOnly) return;
@@ -220,6 +315,7 @@ export default function ScoreSheetAssessmentTool({
                     )}
                   </th>
                 ))}
+                <th className="px-3 py-3 text-center font-black text-amber-700 min-w-[70px]">เกรดที่ได้<p className="text-[12px] text-amber-400 font-bold">ตอนนี้</p></th>
                 <th className="px-3 py-3 text-center font-black text-emerald-700 min-w-[70px]">คะแนน<p className="text-[12px] text-emerald-400 font-bold">เต็ม {maxTotal}</p></th>
                 <th className="px-3 py-3 text-center font-black text-slate-600 min-w-[60px]">ร้อยละ</th>
                 <th className="px-3 py-3 text-center font-black text-fuchsia-700 min-w-[90px]">ผลการประเมิน</th>
@@ -230,7 +326,7 @@ export default function ScoreSheetAssessmentTool({
                 <tr key={r.student.id} className="border-t border-slate-100 hover:bg-slate-50/60">
                   <td className="px-3 py-2 sticky left-0 bg-white">
                     <span className="font-black text-slate-500 mr-1">{i + 1}.</span>
-                    <span className="font-bold text-slate-700">{r.student.prefix}{r.student.first_name} {r.student.last_name}</span>
+                    <span className="font-bold text-slate-700">{prefixMap[r.student.id] ?? r.student.prefix ?? ""}{r.student.first_name} {r.student.last_name}</span>
                   </td>
                   {items.map(it => (
                     <td key={it.key} className="text-center px-2 py-2">
@@ -247,6 +343,15 @@ export default function ScoreSheetAssessmentTool({
                       )}
                     </td>
                   ))}
+                  <td className="text-center px-3 py-2">
+  <span className={`inline-block min-w-[2rem] px-2 py-1 rounded-lg font-black ${
+    ["0", "ร", "มส", "-"].includes(gradeMap[r.student.id] ?? "-")
+      ? "bg-red-50 text-red-600"
+      : "bg-amber-50 text-amber-700"
+  }`}>
+    {gradeMap[r.student.id] ?? "-"}
+  </span>
+</td>
                   <td className="text-center px-3 py-2 font-black text-emerald-600">{r.total}</td>
                   <td className="text-center px-3 py-2 font-bold text-slate-500">{r.percent.toFixed(1)}%</td>
                   <td className="text-center px-3 py-2">

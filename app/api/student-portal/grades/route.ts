@@ -35,22 +35,24 @@ export async function GET(req: NextRequest) {
   }
 
   const { data: section } = await supabase
-    .from("subject_sections")
-    .select("id, grading_mode, midterm_max_score, final_max_score, show_assignment_scores, grading_structure, formative_max_score")
-    .eq("id", sectionId)
-    .eq("classroom_id", student.classroom_id)
-    .maybeSingle();
+  .from("subject_sections")
+  .select("id, grading_mode, midterm_max_score, final_max_score, show_assignment_scores, grading_structure, formative_max_score")
+  .eq("id", sectionId)
+  .eq("classroom_id", student.classroom_id)
+  .maybeSingle();
 
-  if (!section) {
-    return NextResponse.json({ error: "ไม่พบวิชาของนักเรียนคนนี้" }, { status: 404 });
-  }
+if (!section) {
+  return NextResponse.json({ error: "ไม่พบวิชาของนักเรียนคนนี้" }, { status: 404 });
+}
 
-  // ★ ดึงชิ้นงานทั้งหมดของวิชา (ไม่กรอง draft ออกจาก assignments, ใช้ status filter แยก)
-  const { data: allAssignments } = await supabase
-    .from("assignments")
-    .select("id, title, max_score, allow_weight, weight_percent, status, due_date")
-    .eq("subject_section_id", section.id)
-    .neq("status", "draft");
+const showScores = section.show_assignment_scores ?? true;
+
+const { data: allAssignments } = await supabase
+  .from("assignments")
+  .select("id, title, max_score, allow_weight, weight_percent, status, due_date, sort_order")
+  .eq("subject_section_id", section.id)
+  .neq("status", "draft")
+  .order("sort_order", { ascending: true });   // ★ ล็อกลำดับให้ตรงกับฝั่งครู
 
   // ★ ดึงคะแนนที่นักเรียนคนนี้ได้ในแต่ละชิ้นงาน (ไม่กรอง score is not null แล้ว เพื่อให้รู้ว่าชิ้นไหนยังไม่มีคะแนน)
   const { data: rows, error } = await supabase
@@ -152,23 +154,25 @@ export async function GET(req: NextRequest) {
 
   // ★ รายละเอียดรายชิ้นงาน (คงไว้เพื่อ backward-compat กับหน้าที่อาจ render รายชิ้นอยู่)
   const grades = (allAssignments ?? []).map((a: any) => {
-    const sub = submissionByAssignmentId[a.id];
-    const pct = a.max_score > 0 && sub?.score != null ? (sub.score / a.max_score) * 100 : 0;
-    const isLate =
+  const sub = submissionByAssignmentId[a.id];
+  const isSubmitted = !!sub; // มีแถวใน assignment_submissions แล้ว = ส่งแล้ว
+  const pct = a.max_score > 0 && sub?.score != null ? (sub.score / a.max_score) * 100 : 0;
+  const isLate =
       sub?.is_late !== null && sub?.is_late !== undefined
         ? sub.is_late
         : !!(a.due_date && sub?.submitted_at && new Date(sub.submitted_at) > new Date(a.due_date));
 
     return {
-      assignment_id: a.id,
-      title: a.title,
-      score: sub?.score ?? null,
-      max_score: a.max_score,
-      weight_percent: a.weight_percent,
-      percentage: Math.round(pct * 100) / 100,
-      is_late: sub ? isLate : null,
-    };
-  });
+    assignment_id: a.id,
+    title: a.title,
+    is_submitted: isSubmitted,          // ★ เพิ่ม ให้ frontend ใช้แสดง ส่งงานแล้ว/ยังไม่ส่งงาน
+    score: showScores ? (sub?.score ?? null) : null,  // ★ ซ่อนคะแนนตามตั้งค่าจริง
+    max_score: a.max_score,
+    weight_percent: a.weight_percent,
+    percentage: showScores ? Math.round(pct * 100) / 100 : null,
+    is_late: sub ? isLate : null,
+  };
+});
 
   const { data: criteria } = await supabase
     .from("grade_criteria")

@@ -249,12 +249,12 @@ setSubjectInfo({
   academic_year: data.academic_year ?? null,
   homeroom_teacher_name: classroom?.homeroom_teacher_name ?? null,       // ★ เพิ่ม (เดิมก็ไม่เคยส่งมาเช่นกัน)
   subject_teacher_name: matched?.subject_teacher_name ?? null,           // ★ เพิ่ม
-  grading_mode: matched?.grading_mode ?? "numeric",                      // ★ เพิ่ม
-  pass_threshold_percent: matched?.pass_threshold_percent ?? 50,         // ★ เพิ่ม
-  grading_structure: matched?.grading_structure ?? "formative_midterm_final", // ★ เพิ่ม
-  formative_max_score: matched?.formative_max_score ?? 70,               // ★ เพิ่ม
-  midterm_max_score: matched?.midterm_max_score ?? 0,                    // ★ เพิ่ม
-  final_max_score: matched?.final_max_score ?? 30,                       // ★ เพิ่ม
+  grading_mode: matched?.subject?.grading_mode ?? "numeric",
+pass_threshold_percent: matched?.subject?.pass_threshold_percent ?? 50,
+grading_structure: matched?.grading_structure ?? "formative_midterm_final",
+formative_max_score: matched?.formative_max_score ?? 70,
+midterm_max_score: matched?.midterm_max_score ?? 0,
+final_max_score: matched?.final_max_score ?? 30,
 });
 
     // ★ เก็บข้อมูลตัวนักเรียนไว้ใช้ส่งต่อให้ GradeOverviewTool (ข้อ 2.2)
