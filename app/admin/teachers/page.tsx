@@ -505,33 +505,37 @@ export default function AdminTeachersListPage() {
       // ★ ดึง "สถานะที่ประมวลผลแล้ว" (v_attendance_enriched) + เวลาเข้า-ออกจริง + ใบลาที่อนุมัติแล้ว + วันหยุด
       //    ทั้งหมดในช่วงเวลาเดียว (ไม่กรองทีละคน) แล้วค่อยแยกคำนวณรายคนภายหลัง เพื่อลดจำนวนคำขอ
       const [enriched, times, onLeaveRows, holidayMap] = await Promise.all([
-        fetchAllRows((from, toIdx) =>
-          supabase
-            .from(ENRICHED_VIEW)
-            .select("user_id,start_date,end_date,leave_type,days_count")
-            .gte("work_date", start)
-            .lte("work_date", to)
-            .range(from, toIdx)
-        ),
-        fetchAllRows((from, toIdx) =>
-          supabase
-            .from(ATTENDANCE_TABLE)
-            .select(`user_id, ${ATTENDANCE_DATE_COL}, ${ATTENDANCE_CHECKIN_COL}, ${ATTENDANCE_CHECKOUT_COL}, note`)
-            .gte(ATTENDANCE_DATE_COL, start)
-            .lte(ATTENDANCE_DATE_COL, to)
-            .range(from, toIdx)
-        ),
-        fetchAllRows((from, toIdx) =>
-          supabase
-            .from("leave_requests")
-            .select("user_id,start_date,end_date")
-            .eq("status", "approved")
-            .lte("start_date", to)
-            .gte("end_date", start)
-            .range(from, toIdx)
-        ),
-        fetchHolidayMap(start, to),
-      ]);
+  // 1) view ที่ประมวลผลแล้ว → ใช้ work_date เท่านั้น (ห้ามมี start_date)
+  fetchAllRows((from, toIdx) =>
+    supabase
+      .from(ENRICHED_VIEW)
+      .select("user_id,work_date,status,note,leave_reason")
+      .gte("work_date", start)
+      .lte("work_date", to)
+      .range(from, toIdx)
+  ),
+  // 2) เวลาเข้า-ออกจริง
+  fetchAllRows((from, toIdx) =>
+    supabase
+      .from(ATTENDANCE_TABLE)
+      .select(`user_id, ${ATTENDANCE_DATE_COL}, ${ATTENDANCE_CHECKIN_COL}, ${ATTENDANCE_CHECKOUT_COL}, note`)
+      .gte(ATTENDANCE_DATE_COL, start)
+      .lte(ATTENDANCE_DATE_COL, to)
+      .range(from, toIdx)
+  ),
+  // 3) ใบลา → ที่นี่เท่านั้นที่ใช้ start_date / leave_type / days_count ได้
+  fetchAllRows((from, toIdx) =>
+    supabase
+      .from("leave_requests")
+      .select("user_id,start_date,end_date,leave_type,days_count")
+      .eq("status", "approved")
+      .lte("start_date", to)
+      .gte("end_date", start)
+      .range(from, toIdx)
+  ),
+  // 4) วันหยุด
+  fetchHolidayMap(start, to),
+]);
 
       if (reqId !== statsReq.current) return; // มีคำขอใหม่กว่าแล้ว
       setStatsData({
