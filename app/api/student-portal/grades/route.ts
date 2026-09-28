@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
 
   const { data: section } = await supabase
     .from("subject_sections")
-    .select("id, grading_mode, midterm_max_score, final_max_score")
+    .select("id, grading_mode, midterm_max_score, final_max_score, show_assignment_scores, grading_structure, formative_max_score")
     .eq("id", sectionId)
     .eq("classroom_id", student.classroom_id)
     .maybeSingle();

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 type Student = { id: string; prefix?: string; first_name: string; last_name: string; seat_number: number };
 type Item = { key: string; label: string };
 type AssessmentType = "read_think_write" | "characteristics";
+type ScoreMap = Record<string, Record<string, number>>;
 
 function levelFromPercent(pct: number): { level: number; label: string } {
   if (pct >= 86) return { level: 3, label: "ดีเยี่ยม" };
@@ -31,9 +32,14 @@ export default function ScoreSheetAssessmentTool({
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [scores, setScores] = useState<Record<string, Record<string, number>>>({});
+  const [scores, setScores] = useState<ScoreMap>({});
 
   const maxTotal = items.length * maxPerItem;
+  // ปุ่มลัด: maxPerItem ... 1 (เช่น 3 2 1)
+  const quickValues = useMemo(
+    () => Array.from({ length: maxPerItem }, (_, i) => maxPerItem - i),
+    [maxPerItem]
+  );
 
   useEffect(() => {
     (async () => {
@@ -41,7 +47,7 @@ export default function ScoreSheetAssessmentTool({
       try {
         const res = await fetch(`/api/student-assessments?subject_section_id=${sectionId}&assessment_type=${assessmentType}`);
         const json = await res.json();
-        const map: Record<string, Record<string, number>> = {};
+        const map: ScoreMap = {};
         (json.rows ?? []).forEach((r: any) => { map[r.student_id] = r.item_scores ?? {}; });
         setScores(map);
       } catch {
@@ -58,21 +64,55 @@ export default function ScoreSheetAssessmentTool({
     setScores(prev => ({ ...prev, [studentId]: { ...(prev[studentId] ?? {}), [itemKey]: clamped } }));
   }
 
+  async function postRow(studentId: string, itemScores: Record<string, number>) {
+    const res = await fetch("/api/student-assessments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject_section_id: sectionId,
+        student_id: studentId,
+        assessment_type: assessmentType,
+        item_scores: itemScores,
+        updated_by: currentUserId || null,
+      }),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+  }
+
   async function saveRow(studentId: string) {
     if (readOnly) return;
     setSaving(true);
     try {
-      await fetch("/api/student-assessments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject_section_id: sectionId,
-          student_id: studentId,
-          assessment_type: assessmentType,
-          item_scores: scores[studentId] ?? {},
-          updated_by: currentUserId || null,
-        }),
-      });
+      await postRow(studentId, scores[studentId] ?? {});
+    } catch (e: any) {
+      alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "unknown error"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ★ ตั้งคะแนนทีเดียวทั้งห้อง — itemKey = undefined หมายถึงทุกข้อ, ระบุ itemKey = เฉพาะคอลัมน์นั้น
+  async function applyToAll(value: number, itemKey?: string) {
+    if (readOnly) return;
+    const targetText = itemKey
+      ? `ข้อ "${items.find(i => i.key === itemKey)?.label}"`
+      : "ทุกข้อ";
+    if (!confirm(`ตั้งคะแนน ${targetText} ของนักเรียนทุกคนเป็น ${value} ?\n(แก้รายคนภายหลังได้)`)) return;
+
+    const next: ScoreMap = {};
+    students.forEach(s => {
+      const cur = scores[s.id] ?? {};
+      const row: Record<string, number> = { ...cur };
+      (itemKey ? [itemKey] : items.map(i => i.key)).forEach(k => { row[k] = value; });
+      // เติมข้อที่ยังไม่มีค่าให้เป็น 0 กัน undefined
+      items.forEach(it => { if (row[it.key] === undefined) row[it.key] = 0; });
+      next[s.id] = row;
+    });
+    setScores(next);
+
+    setSaving(true);
+    try {
+      await Promise.all(students.map(s => postRow(s.id, next[s.id])));
     } catch (e: any) {
       alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "unknown error"));
     } finally {
@@ -133,6 +173,24 @@ export default function ScoreSheetAssessmentTool({
         </div>
       </div>
 
+      {/* ★ ปุ่มเลือกทั้งหมด */}
+      {!readOnly && !loading && (
+        <div className="print:hidden flex items-center gap-2 flex-wrap bg-fuchsia-50 border border-fuchsia-100 rounded-2xl px-4 py-3">
+          <span className="font-black text-fuchsia-700 text-base">ตั้งทุกคน ทุกข้อ เป็น:</span>
+          {quickValues.map(v => (
+            <button
+              key={v}
+              onClick={() => applyToAll(v)}
+              disabled={saving}
+              className="w-11 h-11 rounded-xl bg-white border-2 border-fuchsia-200 hover:bg-fuchsia-500 hover:text-white hover:border-fuchsia-500 disabled:opacity-50 text-fuchsia-600 font-black text-lg transition"
+            >
+              {v}
+            </button>
+          ))}
+          <span className="text-slate-400 font-bold text-m">แล้วค่อยคลิกแก้รายคนที่ต่างออกไปในตารางด้านล่าง</span>
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center py-16 text-slate-300 font-bold text-base">กำลังโหลด...</div>
       ) : (
@@ -144,6 +202,22 @@ export default function ScoreSheetAssessmentTool({
                 {items.map(it => (
                   <th key={it.key} className="px-3 py-3 text-center font-black text-slate-600 min-w-[80px]">
                     {it.label}<p className="text-[12px] text-slate-400 font-bold">เต็ม {maxPerItem}</p>
+                    {/* ★ ปุ่มลัดทั้งคอลัมน์ */}
+                    {!readOnly && (
+                      <div className="flex justify-center gap-1 mt-1 print:hidden">
+                        {quickValues.map(v => (
+                          <button
+                            key={v}
+                            onClick={() => applyToAll(v, it.key)}
+                            disabled={saving}
+                            title={`ทุกคนได้ ${v} ในข้อนี้`}
+                            className="w-6 h-6 rounded-md bg-white border border-slate-200 hover:bg-fuchsia-500 hover:text-white hover:border-fuchsia-500 text-slate-500 text-[12px] font-black disabled:opacity-50"
+                          >
+                            {v}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </th>
                 ))}
                 <th className="px-3 py-3 text-center font-black text-emerald-700 min-w-[70px]">คะแนน<p className="text-[12px] text-emerald-400 font-bold">เต็ม {maxTotal}</p></th>

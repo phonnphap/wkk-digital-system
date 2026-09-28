@@ -60,7 +60,26 @@ function getGradeFromCriteria(percentage: number, criteria: Criterion[]): string
   }
   return "-";
 }
+type AssessItem = { key: string; label: string };
+type AssessMap = Record<string, Record<string, number>>;
 
+function levelLabelFromPercent(pct: number): string {
+  if (pct >= 86) return "ดีเยี่ยม";
+  if (pct >= 70) return "ดี";
+  if (pct >= 50) return "ผ่าน";
+  return "ไม่ผ่าน";
+}
+// ผลประเมินรายคน: ถ้ายังไม่เคยกรอกเลย ให้แสดง "-"
+function assessResultLabel(
+  itemScores: Record<string, number> | undefined,
+  items: AssessItem[],
+  maxPerItem: number
+): string {
+  if (!itemScores || items.length === 0) return "-";
+  const total = items.reduce((sum, it) => sum + (itemScores[it.key] ?? 0), 0);
+  const maxTotal = items.length * maxPerItem;
+  return levelLabelFromPercent(maxTotal > 0 ? (total / maxTotal) * 100 : 0);
+}
 // ★ คำนวณอายุ ณ วันนี้ (ปี)
 function calcAge(birthDateStr: string): number {
   const bd = new Date(birthDateStr);
@@ -151,6 +170,9 @@ export default function Vp7Report({
   finalMaxScore = 30,
   gradeRoundingMode = "truncate",
   subjectTeacherNameFallback,
+  rtwItems = [],
+  charItems = [],
+  assessmentMaxPerItem = 3,
   onBack,
 }: {
   sectionId: string;
@@ -167,6 +189,9 @@ export default function Vp7Report({
   finalMaxScore?: number;       // ★ เพิ่ม: วผ.7 มีคอลัมน์ "ปลายภาค" แยกจาก วผ.2
   gradeRoundingMode?: "up" | "truncate";
   subjectTeacherNameFallback?: string;
+  rtwItems?: AssessItem[];          // ข้อประเมิน อ่าน คิด เขียน
+  charItems?: AssessItem[];         // ข้อประเมิน คุณลักษณะอันพึงประสงค์
+  assessmentMaxPerItem?: number;    // คะแนนเต็มต่อข้อ (เดิม 3)
   onBack: () => void;
 }) {
   const [loading, setLoading] = useState(true);
@@ -188,7 +213,8 @@ export default function Vp7Report({
   const [scoreEvents, setScoreEvents] = useState<ScoreEvent[]>([]);
   const [criteria, setCriteria] = useState<Criterion[]>([]);   // ★ เพิ่ม
   const [remarks, setRemarks] = useState<Record<string, string>>({});
-
+  const [rtwScores, setRtwScores] = useState<AssessMap>({});
+  const [charScores, setCharScores] = useState<AssessMap>({});
   const [teacherSignatureName, setTeacherSignatureName] = useState("");
   const [deptHeadName, setDeptHeadName] = useState("");
   const [deptName, setDeptName] = useState("");
@@ -290,7 +316,24 @@ export default function Vp7Report({
           setScoreEvents(gradeJson.scoreEvents ?? []);
           setCriteria(gradeJson.criteria ?? []);
         }
-
+                // ★ ผลประเมิน อ่าน คิด เขียน / คุณลักษณะ — ดึงจาก API เดียวกับหน้าประเมิน
+        const loadAssess = async (type: "read_think_write" | "characteristics"): Promise<AssessMap> => {
+          const map: AssessMap = {};
+          try {
+            const res = await fetch(`/api/student-assessments?subject_section_id=${sectionId}&assessment_type=${type}`);
+            const json = await res.json();
+            (json.rows ?? []).forEach((r: any) => { map[r.student_id] = r.item_scores ?? {}; });
+          } catch (e) {
+            console.warn("โหลดผลประเมินไม่สำเร็จ:", type, e);
+          }
+          return map;
+        };
+        const [rtwMap, charMap] = await Promise.all([
+          loadAssess("read_think_write"),
+          loadAssess("characteristics"),
+        ]);
+        setRtwScores(rtwMap);
+        setCharScores(charMap);
         // หมายเหตุที่เคยกรอกไว้ (ถ้ามี) — เก็บแยกตารางจาก วผ.2 เพราะข้อความหมายเหตุมักคนละความหมายกัน
         // (ต้องสร้างตาราง vp7_progress_scores โครงเดียวกับ vp2_progress_scores:
         //  subject_section_id, student_id, remark, updated_by + unique(subject_section_id, student_id))
@@ -355,7 +398,11 @@ export default function Vp7Report({
       if (midtermRaw !== null) parts.push({ key: "midterm", raw: midtermRaw });
       if (finalRaw !== null) parts.push({ key: "final", raw: finalRaw });
 
-      const withFloor = parts.map(p => ({ ...p, floor: Math.floor(p.raw), frac: p.raw - Math.floor(p.raw) }));
+            // ปัดค่าลอยตัวก่อน (เช่น 9.9999999 -> 10) แล้วค่อยหา floor / เศษ
+      const withFloor = parts.map(p => {
+        const clean = Math.round(p.raw * 100) / 100;
+        return { ...p, floor: Math.floor(clean), frac: clean - Math.floor(clean) };
+      });
       const roundedByKey: Record<string, number> = {};
       withFloor.forEach(p => { roundedByKey[p.key] = p.floor; });
       const diff = total - withFloor.reduce((sum, p) => sum + p.floor, 0);
@@ -424,18 +471,11 @@ export default function Vp7Report({
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("แบบวัดผล 7");
 
-    const COLS = 9; // เลขที่, เลขประจำตัว, ชื่อ, หน่วยการเรียน, กลางภาค, ปลายภาค, รวม, ผลการเรียน, หมายเหตุ
+    const COLS = 11; // เลขที่, เลขประจำตัว, ชื่อ, หน่วยการเรียน, กลางภาค, ปลายภาค, รวม, ผลการเรียน, หมายเหตุ
 
-    ws.columns = [
-      { width: 6 },
-      { width: 12 },
-      { width: 28 },
-      { width: 14 },
-      { width: 10 },
-      { width: 10 },
-      { width: 9 },
-      { width: 12 },
-      { width: 18 },
+        ws.columns = [
+      { width: 6 }, { width: 12 }, { width: 28 }, { width: 14 }, { width: 10 },
+      { width: 10 }, { width: 9 }, { width: 12 }, { width: 13 }, { width: 14 }, { width: 18 },
     ];
 
     try {
@@ -473,15 +513,15 @@ export default function Vp7Report({
     });
 
     const tableHeaderRow = headerStartRow + 4;
-    const colHeaders = [
-      "เลขที่",
-      "เลขประจำตัว",
-      "ชื่อ นามสกุล",
+        const colHeaders = [
+      "เลขที่", "เลขประจำตัว", "ชื่อ นามสกุล",
       `หน่วยการเรียน\n(${fmtScore(totalMaxScore)})`,
       `กลางภาค\n(${midtermMaxScore})`,
       `ปลายภาค\n(${finalMaxScore})`,
       `รวม\n(${fmtScore(grandMaxScore)})`,
       "ผลการเรียน",
+      "อ่าน คิด เขียน",
+      "คุณลักษณะ\nอันพึงประสงค์",
       "หมายเหตุ",
     ];
     colHeaders.forEach((text, i) => {
@@ -494,14 +534,14 @@ export default function Vp7Report({
         left: { style: "thin" }, right: { style: "thin" },
       };
     });
-
+    ws.getRow(tableHeaderRow).height = 34;
     students.forEach((s, i) => {
       const info = extraInfo[s.id];
       const displayPrefix = computePrefix(info?.gender ?? null, info?.birth_date ?? null, s.prefix ?? null);
       const sc = scoreByStudent[s.id] ?? { unit: 0, midterm: null, final: null, total: 0, grade: "-" };
       const rowNum = tableHeaderRow + 1 + i;
 
-      const rowValues = [
+            const rowValues = [
         i + 1,
         info?.student_code ?? "",
         `${displayPrefix}${s.first_name} ${s.last_name}`,
@@ -510,6 +550,8 @@ export default function Vp7Report({
         sc.final ?? "",
         fmtScore(sc.total),
         sc.grade,
+        assessResultLabel(rtwScores[s.id], rtwItems, assessmentMaxPerItem),
+        assessResultLabel(charScores[s.id], charItems, assessmentMaxPerItem),
         remarks[s.id] ?? "",
       ];
 
@@ -557,13 +599,13 @@ export default function Vp7Report({
       "ครูประจำวิชา"
     );
     writeSignature(
-      sigRow1, 6, 7,
+      sigRow1, 7, 9,
       deptHeadName || ".......................................",
       `หัวหน้ากลุ่มสาระการเรียนรู้${deptName || "ฯ"}`
     );
 
     const sigRow2 = sigRow1 + 4;
-    writeSignature(sigRow2, 4, 6, directorName, "ผู้อำนวยการโรงเรียนวัดเขียนเขต");
+    writeSignature(sigRow2, 5, 7, directorName, "ผู้อำนวยการโรงเรียนวัดเขียนเขต");
 
     const buffer = await wb.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
@@ -710,36 +752,26 @@ export default function Vp7Report({
               </div>
             </div>
 
-            <table className="w-full table-fixed border-collapse text-base print:text-[13px] mt-4">
-              <thead>
-                <tr>
-                  <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "5%" }}>เลขที่</th>
-                  <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "9%" }}>เลขประจำตัว</th>
-                  <th rowSpan={2} className="border border-slate-400 px-2 py-1.5 text-center font-bold" style={{ width: "30%" }}>ชื่อ นามสกุล</th>
-
-                  <th colSpan={4} className="border border-slate-400 px-1 py-1 font-bold" style={{ width: "38%" }}>คะแนน</th>
-                  <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "8%" }}>ผลการเรียน</th>
-                  <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "10%" }}>หมายเหตุ</th>
-                </tr>
-                <tr>
-                  <th className="border border-slate-400 px-1 py-1 font-bold">
-                    <span className="block">หน่วยการเรียน</span>
-                    <span className="block">({fmtScore(totalMaxScore)})</span>
-                  </th>
-                  <th className="border border-slate-400 px-1 py-1 font-bold">
-                    <span className="block">กลางภาค</span>
-                    <span className="block">({midtermMaxScore})</span>
-                  </th>
-                  <th className="border border-slate-400 px-1 py-1 font-bold">
-                    <span className="block">ปลายภาค</span>
-                    <span className="block">({finalMaxScore})</span>
-                  </th>
-                  <th className="border border-slate-400 px-1 py-1 font-bold">
-                    <span className="block">รวม</span>
-                    <span className="block">({fmtScore(grandMaxScore)})</span>
-                  </th>
-                </tr>
-              </thead>
+            <table className="w-full table-fixed border-collapse text-base print:text-[12px] mt-4">
+  <thead>
+    <tr>
+      <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "4%" }}>เลขที่</th>
+      <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "8%" }}>เลขประจำตัว</th>
+      <th rowSpan={2} className="border border-slate-400 px-2 py-1.5 text-center font-bold" style={{ width: "25%" }}>ชื่อ นามสกุล</th>
+      <th colSpan={4} className="border border-slate-400 px-1 py-1 font-bold" style={{ width: "28%" }}>คะแนน</th>
+      <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "7%" }}>ผลการเรียน</th>
+      <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "9%" }}>อ่าน คิด เขียน</th>
+      <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "10%" }}>คุณลักษณะ<br />อันพึงประสงค์</th>
+      <th rowSpan={2} className="border border-slate-400 px-1 py-1.5 font-bold" style={{ width: "9%" }}>หมายเหตุ</th>
+    </tr>
+    <tr>
+      {/* ★ ชื่ออยู่บรรทัดบน คะแนนเต็มในวงเล็บอยู่บรรทัดล่างเสมอ */}
+      <th className="border border-slate-400 px-1 py-1 font-bold"><span className="block">หน่วยการเรียน</span><span className="block">({fmtScore(totalMaxScore)})</span></th>
+      <th className="border border-slate-400 px-1 py-1 font-bold"><span className="block">กลางภาค</span><span className="block">({midtermMaxScore})</span></th>
+      <th className="border border-slate-400 px-1 py-1 font-bold"><span className="block">ปลายภาค</span><span className="block">({finalMaxScore})</span></th>
+      <th className="border border-slate-400 px-1 py-1 font-bold"><span className="block">รวม</span><span className="block">({fmtScore(grandMaxScore)})</span></th>
+    </tr>
+  </thead>
               <tbody>
                 {students.map((s, i) => {
                   const info = extraInfo[s.id];
@@ -757,6 +789,12 @@ export default function Vp7Report({
                       <td className="border border-slate-400 text-center py-1">{sc.final ?? "-"}</td>
                       <td className="border border-slate-400 text-center py-1 font-bold">{fmtScore(sc.total)}</td>
                       <td className="border border-slate-400 text-center py-1 font-bold">{sc.grade}</td>
+                                            <td className="border border-slate-400 text-center py-1 whitespace-nowrap">
+                        {assessResultLabel(rtwScores[s.id], rtwItems, assessmentMaxPerItem)}
+                      </td>
+                      <td className="border border-slate-400 text-center py-1 whitespace-nowrap">
+                        {assessResultLabel(charScores[s.id], charItems, assessmentMaxPerItem)}
+                      </td>
                       <td className="border border-slate-400 text-center py-1">
                         {readOnly ? (
                           remarks[s.id] ?? ""

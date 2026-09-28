@@ -335,6 +335,7 @@ type LeaveRow = {
   end_date: string;
   leave_type: string | null;
   days_count: number | null;
+  status: string | null;
 };
 
 type StatsRaw = {
@@ -350,11 +351,16 @@ type TeacherStat = {
   early: number;
   noIn: number;
   noOut: number;
+  sickCount: number;
+  sickDays: number;
+  personalCount: number;
+  personalDays: number;
+  sick: number;      // = sickDays (ใช้เรียงลำดับ)
+  personal: number;  // = personalDays (ใช้เรียงลำดับ)
   total: number;
-  leaveByType: Record<string, LeaveTypeCount>;
 };
 
-type SortKey = "late" | "early" | "noIn" | "noOut" | "total" | "name";
+type SortKey = "late" | "early" | "noIn" | "noOut" | "sick" | "personal" | "total" | "name";
 type SortDir = "asc" | "desc";
 
 const SORT_LABEL: Record<SortKey, string> = {
@@ -362,6 +368,8 @@ const SORT_LABEL: Record<SortKey, string> = {
   early: "กลับก่อน",
   noIn: "ไม่สแกนมา",
   noOut: "ไม่สแกนกลับ",
+  sick: "ลาป่วย (วัน)",
+  personal: "ลากิจ (วัน)",
   total: "รวมทั้งหมด",
   name: "ชื่อ",
 };
@@ -376,25 +384,9 @@ const ROLE_LABEL: Record<string, string> = {
   dept_head: "หัวหน้ากลุ่มสาระ",
   grade_head: "หัวหน้าสายชั้น",
 };
-type LeaveTypeCount = { count: number; days: number };
-
-const LEAVE_TYPE_LABEL: Record<string, string> = {
-  sick: "ลาป่วย",
-  personal: "ลากิจส่วนตัว",
-  official: "ไปราชการ",
-  maternity: "ลาคลอดบุตร",
-  ordination: "ลาอุปสมบท",
-  other: "ลาอื่นๆ",
-};
-const LEAVE_TYPE_ICON: Record<string, string> = {
-  sick: "🤒", personal: "📋", official: "🏛️", maternity: "👶", ordination: "🙏", other: "📌",
-};
-const LEAVE_TYPE_ORDER = ["sick", "personal", "official", "maternity", "ordination", "other"];
-// ตรวจว่าเป็นอักษรไทยหรือไม่ เพื่อใช้เรียง ก-ฮ ก่อน แล้วตามด้วย a-z
 function isThaiName(name: string): boolean {
   return /[\u0E00-\u0E7F]/.test(name);
 }
-
 function compareTeacherNames(a: TeacherRow, b: TeacherRow): number {
   const aName = a.first_name || "";
   const bName = b.first_name || "";
@@ -523,13 +515,13 @@ export default function AdminTeachersListPage() {
       .lte(ATTENDANCE_DATE_COL, to)
       .range(from, toIdx)
   ),
-  // 3) ใบลา → ที่นี่เท่านั้นที่ใช้ start_date / leave_type / days_count ได้
+// 3) ใบลาที่ยื่นแล้ว (รออนุมัติ + อนุมัติแล้ว)
   fetchAllRows((from, toIdx) =>
     supabase
       .from("leave_requests")
-      .select("user_id,start_date,end_date,leave_type,days_count")
-      .eq("status", "approved")
-      .lte("start_date", to)
+      .select("user_id,start_date,end_date,leave_type,days_count,status")
+      .in("status", ["pending", "approved"])
+      .lte("start_date", end)
       .gte("end_date", start)
       .range(from, toIdx)
   ),
@@ -554,11 +546,10 @@ export default function AdminTeachersListPage() {
   }
 
   // ── คำนวณสถิติรายคน โดยใช้เงื่อนไขเดียวกับหน้า portfolio ทุกประการ (มติ/ภารกิจ/ขออนุญาต/ลาครึ่งวัน ฯลฯ) ──
-  const statsComputed = useMemo(() => {
+    const statsComputed = useMemo(() => {
     if (!statsData) return null;
-    const { start, end } = periodRange(period);
-    const last = end < todayStr ? end : todayStr;
-    if (start > last) return { workingDays: 0, stats: [] as TeacherStat[] };
+    const { start, end: periodEnd } = periodRange(period);
+    const last = periodEnd < todayStr ? periodEnd : todayStr;
 
     const teacherIds = new Set(teachers.map((t) => t.id));
 
@@ -579,9 +570,10 @@ export default function AdminTeachersListPage() {
       m.set(date, r);
     }
 
-    // ใบลาที่อนุมัติแล้ว → กระจายเป็นชุดวันที่ต่อคน
+    // ใบลาที่ "อนุมัติแล้ว" → กระจายเป็นชุดวันที่ต่อคน (ใช้ข้ามการนับสแกน/สาย)
     const onLeaveByUser = new Map<string, Set<string>>();
     for (const l of statsData.onLeaveRows) {
+      if (l.status !== "approved") continue;
       const ls = String(l.start_date).slice(0, 10);
       const le = String(l.end_date).slice(0, 10);
       const from = ls > start ? ls : start;
@@ -602,7 +594,7 @@ export default function AdminTeachersListPage() {
       const leaveSet = onLeaveByUser.get(t.id);
       for (const d of workingDays) {
         const e = eByDate?.get(d);
-        // ★ วันที่ยังไม่มีข้อมูลเข้าสู่ระบบ (ยังไม่ sync/ประมวลผล) ถือเป็น "รอข้อมูล" ไม่นำมานับสถิติ — เหมือนหน้า portfolio
+        // วันที่ยังไม่มีข้อมูลเข้าระบบ ถือเป็น "รอข้อมูล" ไม่นับสถิติ
         if (!e) continue;
         const tm = tByDate?.get(d);
         const onLeave = leaveSet?.has(d) ?? false;
@@ -617,19 +609,27 @@ export default function AdminTeachersListPage() {
         if (isNoScanIn({ check_in_time, note, status }, onLeave)) noIn++;
         if (isNoScanOut({ check_out_time, note, status }, onLeave)) noOut++;
       }
-            // ★ สรุปสถิติการลาแยกประเภท — นับตามวันที่เริ่มลา (start_date) อยู่ในช่วงครึ่งปีนี้
-      const leaveByType: Record<string, LeaveTypeCount> = {};
-      const leaveRowsForUser = statsData.onLeaveRows.filter(
-        (l) => l.user_id === t.id && l.start_date >= start && l.start_date <= last
-      );
-      for (const l of leaveRowsForUser) {
-        const type = l.leave_type || "other";
-        if (!leaveByType[type]) leaveByType[type] = { count: 0, days: 0 };
-        leaveByType[type].count += 1;
-        leaveByType[type].days += Number(l.days_count) || 0;
+
+      // สถิติการลา (รออนุมัติ + อนุมัติแล้ว) นับตามวันที่เริ่มลาอยู่ในช่วงครึ่งปี
+      let sickCount = 0, sickDays = 0, personalCount = 0, personalDays = 0;
+      for (const l of statsData.onLeaveRows) {
+        if (l.user_id !== t.id) continue;
+        const ls = String(l.start_date).slice(0, 10);
+        if (ls < start || ls > periodEnd) continue;
+        const days = Number(l.days_count) || 0;
+        if (l.leave_type === "sick") {
+          sickCount += 1; sickDays += days;
+        } else if (["personal", "other", "ordination"].includes(l.leave_type ?? "")) {
+          personalCount += 1; personalDays += days;
+        }
       }
 
-      return { teacher: t, late, early, noIn, noOut, total: late + early + noIn + noOut, leaveByType };
+      return {
+        teacher: t, late, early, noIn, noOut,
+        sickCount, sickDays, personalCount, personalDays,
+        sick: sickDays, personal: personalDays,
+        total: late + early + noIn + noOut + sickDays + personalDays,
+      };
     });
 
     return { workingDays: workingDays.length, stats };
@@ -681,17 +681,6 @@ export default function AdminTeachersListPage() {
       { late: 0, early: 0, noIn: 0, noOut: 0 }
     );
   }, [sortedStats]);
-    const leaveTotals = useMemo(() => {
-    const totals: Record<string, LeaveTypeCount> = {};
-    for (const s of sortedStats) {
-      for (const [type, v] of Object.entries(s.leaveByType)) {
-        if (!totals[type]) totals[type] = { count: 0, days: 0 };
-        totals[type].count += v.count;
-        totals[type].days += v.days;
-      }
-    }
-    return totals;
-  }, [sortedStats]);
 
   const stats = useMemo(() => {
     const total = teachers.length;
@@ -721,12 +710,13 @@ export default function AdminTeachersListPage() {
     }
   }
 
-  function formatTime(iso: string | null): string {
+   function formatTime(iso: string | null): string {
     if (!iso) return "";
+    if (/^\d{2}:\d{2}/.test(iso)) return iso.slice(0, 5); // เป็น time string อยู่แล้ว เช่น "08:15:00"
     try {
       const d = new Date(iso);
-      if (isNaN(d.getTime())) return iso; // เผื่อคอลัมน์เป็น time string เช่น "08:15:00" อยู่แล้ว
-      return d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+      if (isNaN(d.getTime())) return iso;
+      return d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
     } catch {
       return iso;
     }
@@ -790,6 +780,18 @@ export default function AdminTeachersListPage() {
     return (
       <span className={`inline-block min-w-[2rem] px-2 py-0.5 rounded-lg text-sm font-black ${tones[tone]} ${highlight ? "ring-2 ring-offset-1 ring-blue-300" : ""}`}>
         {n}
+      </span>
+    );
+  }
+    function renderLeaveCell(count: number, days: number, tone: "sky" | "violet", highlight: boolean) {
+    if (count === 0) return <span className="text-slate-300 font-bold">-</span>;
+    const tones = {
+      sky: "bg-sky-50 text-sky-700",
+      violet: "bg-violet-50 text-violet-700",
+    } as const;
+    return (
+      <span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded-lg text-xs font-black ${tones[tone]} ${highlight ? "ring-2 ring-offset-1 ring-blue-300" : ""}`}>
+        {count} ครั้ง · {days} วัน
       </span>
     );
   }
@@ -1036,34 +1038,6 @@ export default function AdminTeachersListPage() {
                     </div>
                   ))}
                 </div>
-                                <div>
-                  <p className="text-xs font-black text-slate-500 mb-2">
-                    สรุปสถิติการลา (รวมทุกคนที่แสดงอยู่ · เฉพาะใบลาที่อนุมัติแล้ว)
-                  </p>
-                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-                    {LEAVE_TYPE_ORDER.filter((type) => leaveTotals[type]).map((type) => {
-                      const v = leaveTotals[type];
-                      return (
-                        <div key={type} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-lg shrink-0">
-                            {LEAVE_TYPE_ICON[type] ?? "📌"}
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-400">{LEAVE_TYPE_LABEL[type] ?? type}</p>
-                            <p className="text-lg font-black text-slate-800">
-                              {v.count.toLocaleString("th-TH")} <span className="text-xs font-bold text-slate-400">ครั้ง</span>
-                              {"  ·  "}
-                              {v.days.toLocaleString("th-TH")} <span className="text-xs font-bold text-slate-400">วัน</span>
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {LEAVE_TYPE_ORDER.every((type) => !leaveTotals[type]) && (
-                      <p className="text-sm text-slate-400 col-span-full">ไม่มีข้อมูลการลาในช่วงนี้</p>
-                    )}
-                  </div>
-                </div>
 
                 <p className="text-xs font-bold text-slate-500">
                   {periodLabel(period)} · วันทำการทั้งหมด {statsComputed.workingDays} วัน (นับเฉพาะวันที่มีข้อมูลเข้าระบบแล้วต่อคน) · แสดง {sortedStats.length} คน
@@ -1084,6 +1058,8 @@ export default function AdminTeachersListPage() {
                             {renderSortHeader("กลับก่อน", "early", <LogOut className="w-3.5 h-3.5" />)}
                             {renderSortHeader("ไม่สแกนมา", "noIn", <LogIn className="w-3.5 h-3.5" />)}
                             {renderSortHeader("ไม่สแกนกลับ", "noOut", <AlertTriangle className="w-3.5 h-3.5" />)}
+                            {renderSortHeader("ลาป่วย", "sick", null)}
+                            {renderSortHeader("ลากิจ", "personal", null)}
                             {renderSortHeader("รวม", "total", null)}
                           </tr>
                         </thead>
@@ -1124,6 +1100,8 @@ export default function AdminTeachersListPage() {
                                 <td className="px-3 py-3 text-center">{renderCount(s.early, "orange", sortKey === "early")}</td>
                                 <td className="px-3 py-3 text-center">{renderCount(s.noIn, "red", sortKey === "noIn")}</td>
                                 <td className="px-3 py-3 text-center">{renderCount(s.noOut, "rose", sortKey === "noOut")}</td>
+                                                                <td className="px-3 py-3 text-center">{renderLeaveCell(s.sickCount, s.sickDays, "sky", sortKey === "sick")}</td>
+                                <td className="px-3 py-3 text-center">{renderLeaveCell(s.personalCount, s.personalDays, "violet", sortKey === "personal")}</td>
                                 <td className="px-3 py-3 text-center font-black text-slate-700">{s.total}</td>
                               </tr>
                             );
@@ -1140,6 +1118,7 @@ export default function AdminTeachersListPage() {
                   <p>มาสาย / กลับก่อน อ้างอิงจากสถานะที่ระบบประมวลผลแล้ว (v_attendance_enriched) หลังหักข้อยกเว้นจากหมายเหตุ เช่น ปฏิบัติงานตามภารกิจ (ราชการ/ประชุม/ทัศนศึกษา/เข้าค่าย/เยี่ยมบ้าน) ขออนุญาตเช้า/ออกก่อน ลาครึ่งวัน</p>
                   <p>ไม่สแกนมา / ไม่สแกนกลับ = วันทำการที่ไม่มีเวลาเข้า / เวลาออก และไม่เข้าเงื่อนไขยกเว้นข้างต้น</p>
                   <p>ไม่นับวันเสาร์–อาทิตย์ วันหยุดตามปฏิทินโรงเรียน วันที่มีใบลาอนุมัติแล้ว และวันที่ยังไม่มีข้อมูลเข้าระบบ (รอข้อมูล/ยังไม่ sync)</p>
+                  <p>ลาป่วย / ลากิจ นับจากใบลาที่ยื่นแล้ว (รวมที่ยังรออนุมัติ ไม่รวมฉบับร่าง/ไม่อนุมัติ/ยกเลิก) ซึ่งวันเริ่มลาอยู่ในช่วงครึ่งปีที่เลือก แสดงเป็น "ครั้ง · วัน" และช่อง "รวม" = มาสาย + กลับก่อน + ไม่สแกนมา + ไม่สแกนกลับ + จำนวนวันลาป่วย + จำนวนวันลากิจ</p>
                 </div>
               </>
             )}

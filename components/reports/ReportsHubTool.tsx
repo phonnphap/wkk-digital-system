@@ -122,6 +122,9 @@ if (active === "vp7") {
       formativeMaxScore={formativeMaxScore} midtermMaxScore={midtermMaxScore} finalMaxScore={finalMaxScore}
       gradeRoundingMode={gradeRoundingMode}
       subjectTeacherNameFallback={subjectTeacherName}
+      rtwItems={READ_THINK_WRITE_ITEMS} 
+      charItems={CHARACTERISTICS_ITEMS} 
+      assessmentMaxPerItem={3}
       onBack={() => setActive(null)}
     />
   );
