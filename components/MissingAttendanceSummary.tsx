@@ -240,7 +240,7 @@ export default function MissingAttendanceSummary({ classrooms, students, date }:
           <p className="mt-4 flex items-center text-sm text-slate-400">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" /> กำลังโหลด...
           </p>
-        ) : dayError ? (
+        ) : dayNote ? null /* วันหยุด/เสาร์-อาทิตย์: ไม่แสดงจำนวนห้องที่ไม่ได้เช็ค */ : dayError ? (
           <p className="mt-4 text-sm font-semibold text-rose-600">⚠️ {dayError}</p>
         ) : dayRows.none.length === 0 && dayRows.partial.length === 0 ? (
           <p className="mt-4 flex items-center gap-2 text-sm font-semibold text-emerald-600">
