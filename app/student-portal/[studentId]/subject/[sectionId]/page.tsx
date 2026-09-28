@@ -36,6 +36,7 @@ interface Submission {
   status: string;
   is_late: boolean | null;
   is_submitted?: boolean;
+  is_graded?: boolean;
   file_url?: string | null;
   file_name?: string | null;
   pass_fail_result?: PassFailResult;
@@ -512,18 +513,24 @@ const sortedAssignments = [...assignments].sort((a, b) => {
                             </span>
                           )
                         ) : sub.score !== null && sub.score !== undefined ? (
-                          <div className="flex flex-col items-center gap-1 px-5 py-3 rounded-xl bg-emerald-50 border border-emerald-200">
-                            <span className="text-3xl font-black text-emerald-600 leading-none">
-                              {sub.score}
-                              <span className="text-emerald-500 font-bold text-lg">/{a.max_score ?? "-"}</span>
-                            </span>
-                            {late && <span className="text-xs font-black text-orange-500 mt-1">⏰ ส่งช้า</span>}
-                          </div>
-                        ) : (
-                          <span className="inline-block px-5 py-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 text-lg font-black">
-                            ⏳ รอตรวจ
-                          </span>
-                        )}
+  <div className="flex flex-col items-center gap-1 px-5 py-3 rounded-xl bg-emerald-50 border border-emerald-200">
+    <span className="text-3xl font-black text-emerald-600 leading-none">
+      {sub.score}
+      <span className="text-emerald-500 font-bold text-lg">/{a.max_score ?? "-"}</span>
+    </span>
+    {late && <span className="text-xs font-black text-orange-500 mt-1">⏰ ส่งช้า</span>}
+  </div>
+) : sub.is_graded ? (
+  // ★ เพิ่ม: ครูตรวจแล้วแต่ตัวเลขคะแนนถูกซ่อนไว้ (ครูปิดแสดงคะแนนชิ้นงาน) → ต้องขึ้น "ส่งงานแล้ว" ไม่ใช่ "รอตรวจ"
+  <div className="flex flex-col items-center gap-1 px-5 py-3 rounded-xl bg-emerald-50 border border-emerald-200">
+    <span className="text-xl font-black text-emerald-600">✅ ส่งงานแล้ว</span>
+    {late && <span className="text-xs font-black text-orange-500 mt-1">⏰ ส่งช้า</span>}
+  </div>
+) : (
+  <span className="inline-block px-5 py-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 text-lg font-black">
+    ⏳ รอตรวจ
+  </span>
+)}
                       </div>
                     </div>
 
