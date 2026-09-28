@@ -21,6 +21,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { fetchHolidayMap, isHoliday, HolidayMap } from "@/lib/holidays";
+import MissingAttendanceSummary from "@/components/MissingAttendanceSummary";
 import {
   Home, ArrowLeft, Calendar, ChevronLeft, ChevronRight,
   ChevronDown, ChevronUp, Users, BarChart3, Loader2, TrendingUp,
@@ -29,6 +30,7 @@ import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
   CartesianGrid, XAxis, YAxis, Tooltip, Legend,
 } from "recharts";
+
 
 const supabase = createClient();
 
@@ -428,7 +430,13 @@ const todayHoliday = isHoliday(date, holidayMap);
     const set = new Set(baseData.classrooms.map((c) => extractGradeLevel(c.room_name)));
     return Array.from(set).sort(gradeSort);
   }, [baseData]);
-
+  const sortedClassrooms = useMemo(() => {
+  if (!baseData) return [];
+  return [...baseData.classrooms].sort((a, b) => {
+    const g = gradeSort(extractGradeLevel(a.room_name), extractGradeLevel(b.room_name));
+    return g !== 0 ? g : a.room_name.localeCompare(b.room_name, "th", { numeric: true });
+  });
+}, [baseData]);
   // กราฟแบบ "รายวัน" ใช้ข้อมูลจากตารางที่โหลดไว้แล้ว ไม่ต้อง fetch เพิ่ม — เปรียบเทียบทุกระดับชั้น + ทั้งโรงเรียนในวันเดียวกัน
   const dayChartData = useMemo<ChartPoint[]>(() => {
     const points: ChartPoint[] = gradeGroups.map((g) => ({
@@ -811,6 +819,13 @@ const todayHoliday = isHoliday(date, holidayMap);
             <p className="mt-4 text-[11px] text-slate-400">
               &quot;ยังไม่บันทึก&quot; หมายถึงนักเรียนที่ยังไม่มีการเช็คชื่อในวันนั้น (ครูประจำชั้นยังไม่ได้กดบันทึก) ไม่ได้แปลว่าขาดเรียน
             </p>
+            {baseData && (
+  <MissingAttendanceSummary
+    classrooms={sortedClassrooms}
+    students={baseData.students}
+    date={date}
+  />
+)}
           </>
         )}
 
