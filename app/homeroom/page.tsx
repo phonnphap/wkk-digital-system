@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   Users, ClipboardCheck, NotebookPen, UtensilsCrossed,
   UserCheck, FileEdit, Home, HeartHandshake, ArrowRight,
-  CalendarOff, BarChart3, FileText, KeyRound, Copy, QrCode,
+  FileText, KeyRound, Copy, QrCode,
   type LucideIcon,
 } from "lucide-react";
 
@@ -44,12 +44,6 @@ const SUBMENUS: SubMenuItem[] = [
   { key: "behavior", name: "บันทึกพฤติกรรม", desc: "บันทึกความดี / บันทึกความประพฤติ", icon: HeartHandshake, color: "bg-rose-500", path: "/behavior", status: "live" },
   { key: "home_visit", name: "เยี่ยมบ้าน", desc: "บันทึกข้อมูลการเยี่ยมบ้านนักเรียน", icon: Home, color: "bg-teal-600", path: "/home_visit", status: "in_progress" },
   { key: "por5", name: "ปพ.5", desc: "รายวิชา · สรุปผลคะแนน/การมาเรียน/เชิงลึกของทุกวิชา", icon: FileText, color: "bg-cyan-600", path: "/homeroom/por5", status: "live" },
-];
-
-const ADMIN_SUBMENUS: SubMenuItem[] = [
-  { key: "students_overview", name: "ทะเบียนนักเรียนทั้งโรงเรียน", desc: "ดูรายชื่อนักเรียนทุกห้อง เลือกกรองทีละห้องได้", icon: Users, color: "bg-blue-700", path: "/admin/students-overview", status: "live" },
-  { key: "attendance_overview", name: "สถิติการมาเรียนทั้งโรงเรียน", desc: "ภาพรวมการมา/ขาด/ลา/สาย ทุกห้องเรียน", icon: BarChart3, color: "bg-purple-600", path: "/admin/attendance-overview", status: "live" },
-  { key: "holidays", name: "จัดการวันหยุดเรียน", desc: "เพิ่ม/ลบวันหยุด เชื่อมกับเช็คชื่อ/สถิติ/ปฏิทินโรงเรียน", icon: CalendarOff, color: "bg-slate-700", path: "/admin/holidays", status: "live" },
 ];
 
 const STATUS_LABEL: Record<MenuStatus, { text: string; cls: string }> = {
@@ -235,19 +229,6 @@ export default function HomeroomHubPage() {
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
         {visibleSubmenus.map((item) => <MenuCard key={item.key} item={item} />)}
       </div>
-
-      {isAdmin && (
-        <div className="mt-10">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-xs font-black uppercase tracking-wider text-purple-600 bg-purple-50 border border-purple-200 rounded-full px-3 py-1">
-              🛡️ สำหรับผู้ดูแลระบบ
-            </span>
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {ADMIN_SUBMENUS.map((item) => <MenuCard key={item.key} item={item} />)}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
