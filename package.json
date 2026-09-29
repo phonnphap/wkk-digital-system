@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@azure/msal-node": "^5.4.3",
+    "@mediapipe/tasks-vision": "^1.0.1",
     "@sparticuz/chromium": "^149.0.0",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.107.0",

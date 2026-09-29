@@ -1,6 +1,8 @@
 "use client";
 
-export const dynamic = 'force-dynamic';
+// หมายเหตุ: `export const dynamic = 'force-dynamic'` ถูกย้ายไปไว้ใน page.tsx (wrapper)
+// แทนแล้ว เพราะ config นี้มีผลเฉพาะตอนอยู่ในไฟล์ route (page.tsx/layout.tsx) เท่านั้น
+// ถ้าอยู่ในไฟล์ component ธรรมดาแบบนี้จะไม่มีผลอะไรเลย
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from 'next/navigation';
@@ -78,11 +80,14 @@ export default function FaceScanPage() {
   // ── liveness (anti-photo-spoofing) ──────────────────────────────────────
   // กันการเอารูปถ่าย/ภาพในจอมือถือมาสแกนแทนตัวจริง: หลังจากเจอใบหน้าที่ตรงกับ
   // ฐานข้อมูลแล้ว ระบบจะไม่ยืนยันตัวตนทันที แต่จะให้ "กระพริบตา" ตามธรรมชาติ
-  // ก่อน โดยวัดจาก Eye Aspect Ratio (EAR) จากจุด landmark รอบดวงตา — ภาพนิ่ง
-  // (รูปถ่าย/สกรีนช็อต) จะไม่สามารถกระพริบตาได้ จึงผ่านขั้นตอนนี้ไม่ได้
-  // เกณฑ์ EAR ปรับตัวเองตามค่าที่วัดได้จริงจากกล้อง/แสง/ใบหน้าแต่ละคน แทนค่าคงที่ตายตัว
-  // (ค่าคงที่ตายตัวเป็นสาเหตุที่ทำให้ตรวจจับการกระพริบตาไม่ติดในบางอุปกรณ์)
-  const EAR_CLOSE_RATIO = 0.8;  // สัดส่วนที่ถือว่า "หลับตา" เทียบกับค่าฐาน (ผ่อนขึ้นเล็กน้อยให้จับง่ายขึ้น)
+  // ก่อน — ภาพนิ่ง (รูปถ่าย/สกรีนช็อต) จะไม่สามารถกระพริบตาได้ จึงผ่านขั้นตอนนี้ไม่ได้
+  //
+  // ใช้ MediaPipe Face Landmarker (ของ Google) ตรวจจับ "การกระพริบตา" แทนวิธีเดิม
+  // ที่คำนวณ Eye Aspect Ratio เองจากจุด landmark ของ face-api.js — MediaPipe มี
+  // โมเดล blendshape ที่ฝึกมาเฉพาะสำหรับอ่านสีหน้า/การเคลื่อนไหวของดวงตาโดยตรง
+  // (ค่า eyeBlinkLeft/eyeBlinkRight เป็นคะแนนความมั่นใจ 0-1 ไม่ต้องตั้งเกณฑ์เอง
+  // แบบ EAR ที่ผันผวนตามกล้อง/แสงของแต่ละเครื่อง) แม่นยำและไวกว่ามาก
+  const BLINK_SCORE_THRESHOLD = 0.5; // ค่า blendshape จาก MediaPipe ที่ถือว่า "กำลังหลับตา"
   const LIVENESS_DURATION_MS = 5000; // เดิม 10 วิ — คนกระพริบตาเองทุก 2-4 วิ อยู่แล้ว 5 วิพอ ถ้าไม่ทันระบบจะเริ่มรอบใหม่ให้อัตโนมัติ
   const LIVENESS_INTERVAL_MS = 100;
 
@@ -119,19 +124,10 @@ export default function FaceScanPage() {
     });
   }
 
-  // Eye Aspect Ratio: ค่าจะต่ำลงอย่างชัดเจนเมื่อหลับตา แล้วกลับขึ้นเมื่อลืมตา
-  function eyeAspectRatio(eye: { x: number; y: number }[]): number {
-    if (!eye || eye.length < 6) return 1;
-    const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-      Math.hypot(a.x - b.x, a.y - b.y);
-    const A = dist(eye[1], eye[5]);
-    const B = dist(eye[2], eye[4]);
-    const C = dist(eye[0], eye[3]);
-    if (C === 0) return 1;
-    return (A + B) / (2 * C);
-  }
+  // (คำนวณ EAR เองแบบเดิมถูกแทนที่ด้วย blendshape ของ MediaPipe แล้ว — ดูฟังก์ชัน startLivenessCheck)
 
   const faceApiRef = useRef<any>(null);
+  const mediaPipeRef = useRef<any>(null); // instance ของ MediaPipe FaceLandmarker (ใช้เฉพาะตอนตรวจกระพริบตา)
   const [faceapi, setFaceapi] = useState<any>(null);
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -167,13 +163,11 @@ export default function FaceScanPage() {
   // ── สถานะขั้นตอนการสแกน: detecting (กำลังหาหน้า) → liveness (ให้กระพริบตา) → confirm (ยืนยัน) ──
   const [scanStage, setScanStage] = useState<'idle' | 'detecting' | 'liveness' | 'confirm'>('idle');
   const [livenessSecondsLeft, setLivenessSecondsLeft] = useState(0);
-  const eyeOpenRef = useRef(true);
   const blinkFoundRef = useRef(false);
   const livenessStartRef = useRef(0);
   const candidateRef = useRef<{ id: string; name: string; similarity: string } | null>(null);
-  const earBaselineRef = useRef<number | null>(null);
   const livenessBusyRef = useRef(false); // กันเฟรมซ้อนกัน: ถ้ารอบก่อนยังประมวลผลไม่เสร็จให้ข้ามรอบนี้
-  const [blinkHint, setBlinkHint] = useState(false); // true เมื่อกำลังรอ "ลืมตา" กลับ (ใช้โชว์ฟีดแบ็ก)
+  const [blinkHint, setBlinkHint] = useState(false); // true เมื่อตรวจพบว่าเริ่มหลับตาแล้ว (ใช้โชว์ฟีดแบ็ก)
 
   const canOffsiteScan = allowOffsiteScan && officialLeaveOk === true;
 
@@ -233,7 +227,7 @@ export default function FaceScanPage() {
   useEffect(() => {
     const init = async () => {
       try {
-        setStatus("1/2 กำลังโหลดโมเดล AI");
+        setStatus("1/3 กำลังโหลดโมเดลจดจำใบหน้า");
         const fa = await import('face-api.js');
         setFaceapi(fa);
         faceApiRef.current = fa;
@@ -243,7 +237,47 @@ export default function FaceScanPage() {
           fa.nets.faceRecognitionNet.loadFromUri('/models')
         ]);
 
-        setStatus("2/2 กำลังโหลดฐานข้อมูลใบหน้า");
+        setStatus("2/3 กำลังโหลดโมเดลตรวจจับการกระพริบตา");
+        try {
+          const { FaceLandmarker, FilesetResolver } = await import('@mediapipe/tasks-vision');
+          const vision = await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+          );
+          let landmarker;
+          try {
+            // ลอง GPU (เร็วกว่า) ก่อน ถ้าอุปกรณ์/เบราว์เซอร์ไม่รองรับค่อย fallback เป็น CPU
+            landmarker = await FaceLandmarker.createFromOptions(vision, {
+              baseOptions: {
+                modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                delegate: "GPU",
+              },
+              outputFaceBlendshapes: true,
+              outputFacialTransformationMatrixes: false,
+              runningMode: "VIDEO",
+              numFaces: 1,
+            });
+          } catch {
+            landmarker = await FaceLandmarker.createFromOptions(vision, {
+              baseOptions: {
+                modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                delegate: "CPU",
+              },
+              outputFaceBlendshapes: true,
+              outputFacialTransformationMatrixes: false,
+              runningMode: "VIDEO",
+              numFaces: 1,
+            });
+          }
+          mediaPipeRef.current = landmarker;
+        } catch (mpErr) {
+          // ถ้าโหลด MediaPipe ไม่สำเร็จ (เช่น เน็ตหลุดตอนโหลด CDN) ระบบยังใช้งานได้
+          // แต่จะข้ามขั้นกระพริบตาไม่ได้ — แจ้งผู้ใช้ให้รีเฟรชแทนที่จะปล่อยให้ค้าง
+          console.error('MediaPipe load error:', mpErr);
+          setStatus("โหลดโมเดลตรวจจับการกระพริบตาไม่สำเร็จ กรุณารีเฟรชหน้านี้");
+          return;
+        }
+
+        setStatus("3/3 กำลังโหลดฐานข้อมูลใบหน้า");
         const { data, error } = await supabase
           .from('users')
           .select('id, first_name, last_name, face_features')
@@ -301,6 +335,9 @@ export default function FaceScanPage() {
       }
     };
     init();
+    return () => {
+      try { mediaPipeRef.current?.close?.(); } catch {}
+    };
   }, []);
 
   // ── 4. สถิติ + ประวัติ ────────────────────────────────────────────────────
@@ -395,9 +432,7 @@ export default function FaceScanPage() {
     if (videoRef.current) videoRef.current.srcObject = null;
     setIsCameraActive(false);
     setScanStage('idle');
-    eyeOpenRef.current = true;
     blinkFoundRef.current = false;
-    earBaselineRef.current = null;
     setBlinkHint(false);
     candidateRef.current = null;
   };
@@ -468,9 +503,7 @@ export default function FaceScanPage() {
   function startLivenessCheck(candidate: { id: string; name: string; similarity: string }) {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
     candidateRef.current = candidate;
-    eyeOpenRef.current = true;
     blinkFoundRef.current = false;
-    earBaselineRef.current = null;
     setBlinkHint(false);
     livenessStartRef.current = Date.now();
     setScanStage('liveness');
@@ -480,7 +513,8 @@ export default function FaceScanPage() {
     livenessBusyRef.current = false;
     const tick = async () => {
       const fa = faceApiRef.current;
-      if (!videoRef.current || !fa) return;
+      const landmarker = mediaPipeRef.current;
+      if (!videoRef.current || !fa || !landmarker) return;
 
       const elapsed = Date.now() - livenessStartRef.current;
       const remainMs = Math.max(0, LIVENESS_DURATION_MS - elapsed);
@@ -496,29 +530,20 @@ export default function FaceScanPage() {
       }
 
       try {
-        // ใช้ inputSize เล็กสำหรับสุ่มตรวจ EAR ทุกเฟรม (เร็วกว่ามาก โดยเฉพาะบนมือถือ)
-        // เพื่อให้ไม่พลาดจังหวะที่ตาหลับจริง ๆ ซึ่งมักกินเวลาสั้นกว่าที่กล้อง/โมเดลจะประมวลผลทัน
-        const det = await fa
-          .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 }))
-          .withFaceLandmarks();
-        if (!det) return;
+        // อ่านคะแนน blendshape "eyeBlinkLeft"/"eyeBlinkRight" จาก MediaPipe โดยตรง
+        // (ค่า 0-1 จากโมเดลที่ฝึกมาเฉพาะ ไม่ใช่การคำนวณเรขาคณิตเองแบบเดิม จึงแม่นยำ
+        // และคงที่กว่ามากในทุกกล้อง/แสง ไม่ต้องปรับเกณฑ์ทีละเครื่องอีกต่อไป)
+        const result = landmarker.detectForVideo(videoRef.current, performance.now());
+        const categories = result?.faceBlendshapes?.[0]?.categories;
+        if (!categories) return;
 
-        const leftEAR = eyeAspectRatio(det.landmarks.getLeftEye());
-        const rightEAR = eyeAspectRatio(det.landmarks.getRightEye());
-        const avgEAR = (leftEAR + rightEAR) / 2;
+        const leftBlink = categories.find((c: any) => c.categoryName === 'eyeBlinkLeft')?.score ?? 0;
+        const rightBlink = categories.find((c: any) => c.categoryName === 'eyeBlinkRight')?.score ?? 0;
+        const blinkScore = Math.max(leftBlink, rightBlink);
 
-        // ค่าฐาน (baseline) คือค่า EAR ตอนตาเปิดปกติ ปรับตัวไปเรื่อย ๆ จนกว่าจะจับการกระพริบได้
-        // เมื่อจับ "หลับตา" ได้แม้แค่เฟรมเดียวก็ถือว่าเจอการกระพริบแล้ว ไม่ต้องรอจับจังหวะลืมตากลับ
-        // (จังหวะลืมตาคืนมักเร็วเกินกว่าจะสุ่มเจอบนอุปกรณ์ที่ประมวลผลช้า)
-        if (earBaselineRef.current === null) earBaselineRef.current = avgEAR;
-        if (!blinkFoundRef.current) {
-          earBaselineRef.current = earBaselineRef.current * 0.9 + avgEAR * 0.1;
-          earBaselineRef.current = Math.min(0.45, Math.max(0.15, earBaselineRef.current));
-          const closeThresh = earBaselineRef.current * EAR_CLOSE_RATIO;
-          if (avgEAR < closeThresh) {
-            blinkFoundRef.current = true;
-            setBlinkHint(true);
-          }
+        if (!blinkFoundRef.current && blinkScore > BLINK_SCORE_THRESHOLD) {
+          blinkFoundRef.current = true;
+          setBlinkHint(true);
         }
 
         if (blinkFoundRef.current) {
@@ -570,9 +595,7 @@ export default function FaceScanPage() {
   const cancelMatch = () => {
     setPendingMatch(null);
     candidateRef.current = null;
-    eyeOpenRef.current = true;
     blinkFoundRef.current = false;
-    earBaselineRef.current = null;
     setBlinkHint(false);
     setStatus("ระบบพร้อมสแกนใบหน้า");
     if (streamRef.current) {
@@ -797,7 +820,7 @@ export default function FaceScanPage() {
             {isCameraActive && isLivenessPhase && (
               <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-[#5E5CE6] text-white text-xs font-semibold px-4 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 whitespace-nowrap">
                 <IconEye className="w-3.5 h-3.5 blink-pulse" />
-                {blinkHint ? "ลืมตากลับมาได้เลย" : "กระพริบตาตามปกติ"} · {livenessSecondsLeft} วิ
+                {blinkHint ? "ตรวจพบการกระพริบตาแล้ว กำลังยืนยัน..." : "กระพริบตาตามปกติ"} · {livenessSecondsLeft} วิ
               </div>
             )}
           </div>
