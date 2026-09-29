@@ -46,6 +46,9 @@ function levelFromPercent(pct: number): { level: number; label: string } {
 export default function ScoreSheetAssessmentTool({
   sectionId, assessmentType, title, classroomLabel, subjectTitle, items, maxPerItem,
   students, currentUserId, readOnly, onBack,
+  midtermMaxScore = 0,
+  finalMaxScore = 30,
+  gradeRoundingMode = "truncate",
 }: {
   sectionId: string;
   assessmentType: AssessmentType;
@@ -58,6 +61,9 @@ export default function ScoreSheetAssessmentTool({
   currentUserId?: string;
   readOnly?: boolean;
   onBack: () => void;
+midtermMaxScore?: number;
+  finalMaxScore?: number;
+  gradeRoundingMode?: "up" | "truncate";
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -129,29 +135,34 @@ export default function ScoreSheetAssessmentTool({
 
         const grandMax =
           assignments.reduce((s, a) => s + maxOf(a), 0) +
-          Number(json.midtermMaxScore ?? 0) +
-          Number(json.finalMaxScore ?? 0);
+  midtermMaxScore +
+  finalMaxScore;
 
         const gm: Record<string, string> = {};
-        students.forEach(s => {
-          const unit =
-            assignments.reduce((sum, a) => {
-              const sub = submissions.find(x => x.student_id === s.id && x.assignment_id === a.id);
-              return sum + scoreOf(a, sub?.score);
-            }, 0) +
-            scoreEvents.filter(ev => ev.student_id === s.id).reduce((sum, ev) => sum + ev.points, 0);
-          const mid = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm")?.score ?? 0;
-          const fin = examScores.find(e => e.student_id === s.id && e.exam_type === "final")?.score ?? 0;
-          const total = Math.floor(Math.round((unit + mid + fin) * 100) / 100);
-          const pct = grandMax > 0 ? (total / grandMax) * 100 : 0;
-          gm[s.id] = getGradeFromCriteria(pct, criteria);
-        });
-        setGradeMap(gm);
+students.forEach(s => {
+  const unit =
+    assignments.reduce((sum, a) => {
+      const sub = submissions.find(x => x.student_id === s.id && x.assignment_id === a.id);
+      return sum + scoreOf(a, sub?.score);
+    }, 0) +
+    scoreEvents.filter(ev => ev.student_id === s.id).reduce((sum, ev) => sum + ev.points, 0);
+  const mid = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm")?.score ?? 0;
+  const fin = examScores.find(e => e.student_id === s.id && e.exam_type === "final")?.score ?? 0;
+
+  const totalRaw = Math.round((unit + mid + fin) * 100) / 100;
+  const total = totalRaw % 1 !== 0
+    ? (gradeRoundingMode === "up" ? Math.ceil(totalRaw) : Math.floor(totalRaw))
+    : totalRaw;
+
+  const pct = grandMax > 0 ? (total / grandMax) * 100 : 0;
+  gm[s.id] = getGradeFromCriteria(pct, criteria);
+});
+setGradeMap(gm);
       } catch (e) {
         console.warn("โหลดเกรดไม่สำเร็จ:", e);
       }
     })();
-  }, [sectionId, students]);
+  }, [sectionId, students, midtermMaxScore, finalMaxScore, gradeRoundingMode]);
 
   function setScore(studentId: string, itemKey: string, value: number) {
     if (readOnly) return;
@@ -315,7 +326,6 @@ export default function ScoreSheetAssessmentTool({
                     )}
                   </th>
                 ))}
-                <th className="px-3 py-3 text-center font-black text-amber-700 min-w-[70px]">เกรดที่ได้<p className="text-[12px] text-amber-400 font-bold">ตอนนี้</p></th>
                 <th className="px-3 py-3 text-center font-black text-emerald-700 min-w-[70px]">คะแนน<p className="text-[12px] text-emerald-400 font-bold">เต็ม {maxTotal}</p></th>
                 <th className="px-3 py-3 text-center font-black text-slate-600 min-w-[60px]">ร้อยละ</th>
                 <th className="px-3 py-3 text-center font-black text-fuchsia-700 min-w-[90px]">ผลการประเมิน</th>
@@ -325,9 +335,23 @@ export default function ScoreSheetAssessmentTool({
               {rows.map((r, i) => (
                 <tr key={r.student.id} className="border-t border-slate-100 hover:bg-slate-50/60">
                   <td className="px-3 py-2 sticky left-0 bg-white">
-                    <span className="font-black text-slate-500 mr-1">{i + 1}.</span>
-                    <span className="font-bold text-slate-700">{prefixMap[r.student.id] ?? r.student.prefix ?? ""}{r.student.first_name} {r.student.last_name}</span>
-                  </td>
+  <div className="flex items-center gap-2 whitespace-nowrap">
+    <span className="font-black text-slate-500">{i + 1}.</span>
+    <span className="font-bold text-slate-700">
+      {prefixMap[r.student.id] ?? r.student.prefix ?? ""}{r.student.first_name} {r.student.last_name}
+    </span>
+    <span
+      title="เกรดปัจจุบันจากตารางคะแนนรวม"
+      className={`inline-block min-w-[2rem] text-center px-2 py-0.5 rounded-lg text-[13px] font-black ${
+        ["0", "ร", "มส", "-"].includes(gradeMap[r.student.id] ?? "-")
+          ? "bg-red-50 text-red-600"
+          : "bg-amber-50 text-amber-700"
+      }`}
+    >
+      เกรด {gradeMap[r.student.id] ?? "-"}
+    </span>
+  </div>
+</td>
                   {items.map(it => (
                     <td key={it.key} className="text-center px-2 py-2">
                       {readOnly ? (
@@ -342,16 +366,7 @@ export default function ScoreSheetAssessmentTool({
                         />
                       )}
                     </td>
-                  ))}
-                  <td className="text-center px-3 py-2">
-  <span className={`inline-block min-w-[2rem] px-2 py-1 rounded-lg font-black ${
-    ["0", "ร", "มส", "-"].includes(gradeMap[r.student.id] ?? "-")
-      ? "bg-red-50 text-red-600"
-      : "bg-amber-50 text-amber-700"
-  }`}>
-    {gradeMap[r.student.id] ?? "-"}
-  </span>
-</td>
+                  ))}          
                   <td className="text-center px-3 py-2 font-black text-emerald-600">{r.total}</td>
                   <td className="text-center px-3 py-2 font-bold text-slate-500">{r.percent.toFixed(1)}%</td>
                   <td className="text-center px-3 py-2">

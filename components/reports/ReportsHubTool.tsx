@@ -61,6 +61,9 @@ export default function ReportsHubTool({
         items={READ_THINK_WRITE_ITEMS} maxPerItem={3}
         students={students} currentUserId={currentUserId} readOnly={readOnly}
         onBack={() => setActive(null)}
+        midtermMaxScore={midtermMaxScore}
+  finalMaxScore={finalMaxScore}
+  gradeRoundingMode={gradeRoundingMode}
       />
     );
   }
@@ -73,6 +76,9 @@ export default function ReportsHubTool({
         items={CHARACTERISTICS_ITEMS} maxPerItem={3}
         students={students} currentUserId={currentUserId} readOnly={readOnly}
         onBack={() => setActive(null)}
+        midtermMaxScore={midtermMaxScore}
+  finalMaxScore={finalMaxScore}
+  gradeRoundingMode={gradeRoundingMode}
       />
     );
   }
