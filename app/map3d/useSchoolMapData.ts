@@ -51,6 +51,7 @@ export function useSchoolMapData() {
             location_id: floorById.get(x.floor_id)!.location_id,
             level: floorById.get(x.floor_id)!.level,
             x: x.x, z: x.z, w: x.w, d: x.d, door: [x.door_x, x.door_z],
+            type: x.room_type ?? "classroom", desks: x.desk_count ?? 30,
           } as MapRoom));
 
         setLocs(mappedLocs);

@@ -26,6 +26,8 @@ export interface MapRoom {
   x: number; z: number; w: number; d: number; // สัดส่วน 0..1 ของพื้นที่อาคาร
   door: XZ;                                    // สัดส่วน 0..1
   placeholder?: boolean;
+  type?: string;   // classroom | office | library | lab | toilet | hall | other
+  desks?: number;  // จำนวนโต๊ะนักเรียน (เฉพาะ classroom)
 }
 export interface MapNode { id: string; x: number; z: number }
 export interface MapEdge { a: string; b: string }
@@ -87,6 +89,22 @@ export const FALLBACK_EDGES: MapEdge[] = ([
 // ── การวางผังภายในอาคาร (พิกัดสัดส่วน 0..1) ──────────────────────────
 // ทางเดินกลางอยู่ที่ 0.5 ของแกนสั้น, บันไดอยู่ปลายแกนยาวด้านหนึ่ง
 export const isLongX = (loc: MapLocation) => loc.size[0] >= loc.size[1];
+
+/** จุดกึ่งกลางห้องในพิกัด world */
+export function roomCenter(loc: MapLocation, room: MapRoom): [number, number, number] {
+  return [
+    loc.pos[0] + (room.x + room.w / 2 - 0.5) * loc.size[0],
+    (room.level - 1) * FH,
+    loc.pos[1] + (room.z + room.d / 2 - 0.5) * loc.size[1],
+  ];
+}
+
+function roomType(loc: MapLocation, level: number): string {
+  if (loc.code === "8") return "office";
+  if (loc.code === "7" && level === 1) return "library";
+  if (loc.code === "10") return "hall";
+  return "classroom";
+}
 export const stairsNorm = (loc: MapLocation): XZ => (isLongX(loc) ? [0.03, 0.5] : [0.5, 0.03]);
 export const corridorNorm = (loc: MapLocation, p: XZ): XZ => (isLongX(loc) ? [p[0], 0.5] : [0.5, p[1]]);
 
@@ -116,6 +134,8 @@ export function genRooms(loc: MapLocation): MapRoom[] {
           code: `${loc.code}-${num}`,
           name: `ห้อง ${loc.code}-${num}`,
           x, z, w, d, door, placeholder: true,
+          type: roomType(loc, level),
+          desks: roomType(loc, level) === "classroom" ? 30 : 0,
         });
         n++;
       }

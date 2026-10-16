@@ -1,20 +1,17 @@
 "use client";
 
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Edges, Html, Line, OrbitControls } from "@react-three/drei";
+import { Line, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSchoolMapData } from "./useSchoolMapData";
 import { findPath, indoorRoute } from "./pathfinding";
-import {
-  FH, MapEdge, MapLocation, MapNode, MapRoom, isLongX, stairsNorm,
-} from "./schoolData";
+import { FH, MapLocation, MapRoom, roomCenter } from "./schoolData";
+import { BuildingModel, IndoorBuilding, TYPE_LABEL } from "./BuildingModel";
+import { Decor, Field, ParkingLot } from "./SceneDecor";
 
 type Dest = { type: "loc" | "room"; id: string } | null;
 type Goal = { pos: THREE.Vector3; target: THREE.Vector3 } | null;
-
-const heightOf = (l: MapLocation) =>
-  l.kind === "field" || l.kind === "parking" ? 0.06 : l.kind === "gate" ? 1 : Math.max(l.floors, 1) * FH;
 
 const OVERVIEW: Goal = { pos: new THREE.Vector3(-2, 22, 18), target: new THREE.Vector3(-2, 0, 0.5) };
 
@@ -25,133 +22,7 @@ function focusGoal(loc: MapLocation, level: number): Goal {
   return { target: t, pos: new THREE.Vector3(loc.pos[0], y + s * 0.9 + 4, loc.pos[1] + s * 0.55 + 3) };
 }
 
-/* ───────────────────────── 3D pieces ───────────────────────── */
-
-function Ground() {
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-2, -0.01, 0.5]}>
-      <planeGeometry args={[40, 24]} />
-      <meshStandardMaterial color="#d3f0c8" />
-    </mesh>
-  );
-}
-
-function Roads({ nodes, edges }: { nodes: MapNode[]; edges: MapEdge[] }) {
-  const pos = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
-  return (
-    <>
-      {edges.map((e, i) => {
-        const a = pos.get(e.a), b = pos.get(e.b);
-        if (!a || !b) return null;
-        const len = Math.hypot(b.x - a.x, b.z - a.z);
-        const ang = -Math.atan2(b.z - a.z, b.x - a.x);
-        return (
-          <mesh key={i} position={[(a.x + b.x) / 2, 0.01, (a.z + b.z) / 2]} rotation={[0, ang, 0]}>
-            <boxGeometry args={[len + 0.5, 0.02, 1.1]} />
-            <meshStandardMaterial color="#ced4da" />
-          </mesh>
-        );
-      })}
-    </>
-  );
-}
-
-function BuildingMesh({
-  loc, dim, selected, onPick,
-}: { loc: MapLocation; dim: boolean; selected: boolean; onPick: (id: string) => void }) {
-  const [hover, setHover] = useState(false);
-  const h = heightOf(loc);
-  return (
-    <group position={[loc.pos[0], 0, loc.pos[1]]}>
-      <mesh
-        position={[0, h / 2, 0]}
-        onClick={(e) => { e.stopPropagation(); onPick(loc.id); }}
-        onPointerOver={(e) => { e.stopPropagation(); setHover(true); document.body.style.cursor = "pointer"; }}
-        onPointerOut={() => { setHover(false); document.body.style.cursor = "auto"; }}
-      >
-        <boxGeometry args={[loc.size[0], h, loc.size[1]]} />
-        <meshStandardMaterial
-          color={loc.color}
-          transparent={dim}
-          opacity={dim ? 0.18 : 1}
-          emissive={hover || selected ? "#ffffff" : "#000000"}
-          emissiveIntensity={hover || selected ? 0.25 : 0}
-        />
-      </mesh>
-      {!dim && (
-        <Html position={[0, h + 0.5, 0]} center distanceFactor={18} zIndexRange={[20, 0]}>
-          <button
-            onClick={() => onPick(loc.id)}
-            className="w-7 h-7 rounded-full bg-rose-600 text-white text-xs font-black border-2 border-white shadow-lg"
-          >
-            {loc.code}
-          </button>
-        </Html>
-      )}
-    </group>
-  );
-}
-
-function RoomMesh({
-  loc, room, active, onPick,
-}: { loc: MapLocation; room: MapRoom; active: boolean; onPick: (r: MapRoom) => void }) {
-  const [hover, setHover] = useState(false);
-  const [w, d] = loc.size;
-  const cx = (room.x + room.w / 2 - 0.5) * w;
-  const cz = (room.z + room.d / 2 - 0.5) * d;
-  const y = (room.level - 1) * FH;
-  return (
-    <group position={[cx, y, cz]}>
-      <mesh
-        position={[0, 0.3, 0]}
-        onClick={(e) => { e.stopPropagation(); onPick(room); }}
-        onPointerOver={(e) => { e.stopPropagation(); setHover(true); document.body.style.cursor = "pointer"; }}
-        onPointerOut={() => { setHover(false); document.body.style.cursor = "auto"; }}
-      >
-        <boxGeometry args={[Math.max(room.w * w - 0.06, 0.05), 0.5, Math.max(room.d * d - 0.06, 0.05)]} />
-        <meshStandardMaterial color={active ? "#f59f00" : hover ? "#74c0fc" : "#a5d8ff"} />
-      </mesh>
-      <Html position={[0, 0.75, 0]} center distanceFactor={9} zIndexRange={[15, 0]}>
-        <div className="px-1.5 py-0.5 rounded bg-white/90 text-[10px] font-bold text-slate-700 whitespace-nowrap shadow pointer-events-none">
-          {room.name}
-        </div>
-      </Html>
-    </group>
-  );
-}
-
-function IndoorBuilding({
-  loc, rooms, floor, activeRoomId, onRoom,
-}: { loc: MapLocation; rooms: MapRoom[]; floor: number; activeRoomId?: string; onRoom: (r: MapRoom) => void }) {
-  const [w, d] = loc.size;
-  const st = stairsNorm(loc);
-  const y = (floor - 1) * FH;
-  return (
-    <group position={[loc.pos[0], 0, loc.pos[1]]}>
-      {Array.from({ length: floor }, (_, i) => i + 1).map((l) => (
-        <mesh key={l} position={[0, (l - 1) * FH + 0.04, 0]}>
-          <boxGeometry args={[w, 0.08, d]} />
-          <meshStandardMaterial color={l === floor ? "#f1f3f5" : "#868e96"} transparent opacity={l === floor ? 1 : 0.35} />
-        </mesh>
-      ))}
-      <mesh position={[0, y + FH / 2, 0]}>
-        <boxGeometry args={[w, FH, d]} />
-        <meshBasicMaterial transparent opacity={0.04} depthWrite={false} />
-        <Edges color={loc.color} />
-      </mesh>
-      {rooms.filter((r) => r.level === floor).map((r) => (
-        <RoomMesh key={r.id} loc={loc} room={r} active={r.id === activeRoomId} onPick={onRoom} />
-      ))}
-      <mesh position={[(st[0] - 0.5) * w, y + 0.25, (st[1] - 0.5) * d]}>
-        <boxGeometry args={[0.45, 0.35, 0.45]} />
-        <meshStandardMaterial color="#fd7e14" />
-      </mesh>
-      <Html position={[(st[0] - 0.5) * w, y + 0.7, (st[1] - 0.5) * d]} center distanceFactor={9}>
-        <div className="px-1 py-0.5 rounded bg-orange-500 text-white text-[9px] font-black pointer-events-none">บันได</div>
-      </Html>
-    </group>
-  );
-}
+/* ───────────────────────── Robot / Camera ───────────────────────── */
 
 function Robot({
   route, running, groupRef, home, onDone, speed = 3.2,
@@ -210,8 +81,8 @@ function Robot({
   return (
     <group ref={groupRef} scale={0.55}>
       <group ref={body}>
-        <mesh position={[0, 0.9, 0]}><boxGeometry args={[0.6, 0.7, 0.4]} /><meshStandardMaterial color="#f43f5e" /></mesh>
-        <mesh position={[0, 1.55, 0]}><sphereGeometry args={[0.32, 20, 20]} /><meshStandardMaterial color="#f8fafc" /></mesh>
+        <mesh position={[0, 0.9, 0]} castShadow><boxGeometry args={[0.6, 0.7, 0.4]} /><meshStandardMaterial color="#f43f5e" /></mesh>
+        <mesh position={[0, 1.55, 0]} castShadow><sphereGeometry args={[0.32, 20, 20]} /><meshStandardMaterial color="#f8fafc" /></mesh>
         <mesh position={[-0.12, 1.6, 0.27]}><sphereGeometry args={[0.06, 10, 10]} /><meshBasicMaterial color="#0f172a" /></mesh>
         <mesh position={[0.12, 1.6, 0.27]}><sphereGeometry args={[0.06, 10, 10]} /><meshBasicMaterial color="#0f172a" /></mesh>
         <mesh position={[0, 1.95, 0]}><cylinderGeometry args={[0.02, 0.02, 0.2]} /><meshStandardMaterial color="#334155" /></mesh>
@@ -262,6 +133,7 @@ export default function SchoolMap3D() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [floor, setFloor] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [dest, setDest] = useState<Dest>(null);
   const [query, setQuery] = useState("");
   const [route, setRoute] = useState<THREE.Vector3[]>([]);
@@ -277,6 +149,7 @@ export default function SchoolMap3D() {
 
   const home = useMemo(() => new THREE.Vector3(gate?.entrance[0] ?? 0, 0.12, gate?.entrance[1] ?? 0), [gate]);
   const activeLoc = activeId ? locById.get(activeId) : undefined;
+  const selectedRoom = selectedRoomId ? roomById.get(selectedRoomId) : undefined;
 
   const notifyParent = (event: string, payload: any = {}) => {
     try { window.parent?.postMessage({ type: "wkk-map", event, ...payload }, "*"); } catch { /* ignore */ }
@@ -284,41 +157,15 @@ export default function SchoolMap3D() {
 
   const enterIndoor = useCallback((loc: MapLocation, level: number) => {
     setMode("indoor"); setActiveId(loc.id); setFloor(level);
-    setGoal(focusGoal(loc, level)); setFollow(false); setSelectedId(null);
+    setGoal(focusGoal(loc, level)); setFollow(false); setSelectedId(null); setSelectedRoomId(null);
   }, []);
 
   const exitIndoor = () => {
     if (activeLoc) setRoute([new THREE.Vector3(activeLoc.entrance[0], 0.12, activeLoc.entrance[1])]);
     setRunning(false); stageRef.current = null;
-    setMode("outdoor"); setActiveId(null); setGoal(OVERVIEW); setFollow(false);
+    setMode("outdoor"); setActiveId(null); setSelectedRoomId(null); setGoal(OVERVIEW); setFollow(false);
     setMsg("ออกจากอาคารแล้ว");
   };
-
-  const startOutdoorNav = useCallback((d: Dest) => {
-    if (!d) return;
-    const room = d.type === "room" ? roomById.get(d.id) : undefined;
-    const loc = d.type === "room" ? (room ? locById.get(room.location_id) : undefined) : locById.get(d.id);
-    if (!loc || !fromLoc) return;
-    pendingRef.current = d;
-    setSelectedId(null); setMode("outdoor"); setActiveId(null);
-    if (fromLoc.id === loc.id) {          // อยู่ที่อาคารเดียวกันแล้ว
-      stageRef.current = "outdoor";
-      setRoute([new THREE.Vector3(...[loc.entrance[0], 0.12, loc.entrance[1]] as [number, number, number])]);
-      setTimeout(() => finishOutdoor(d), 0);
-      return;
-    }
-    const xz = findPath(nodes, edges, fromLoc.entrance, loc.entrance);
-    const pts: THREE.Vector3[] = [];
-    xz.forEach(([x, z]) => {
-      const v = new THREE.Vector3(x, 0.12, z);
-      if (!pts.length || pts[pts.length - 1].distanceTo(v) > 0.01) pts.push(v);
-    });
-    stageRef.current = "outdoor";
-    setRoute(pts); setRunning(true); setFollow(true); setGoal(null);
-    setMsg(`กำลังนำทางไป ${room ? room.name + " · " : ""}${loc.name}`);
-    notifyParent("navigate-start", { to: loc.code, room: room?.code });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromLoc, locById, roomById, nodes, edges]);
 
   const finishOutdoor = useCallback((d: Dest) => {
     setRunning(false);
@@ -335,7 +182,7 @@ export default function SchoolMap3D() {
     } else if (loc.kind === "building" && loc.floors > 0) {
       enterIndoor(loc, 1);
       stageRef.current = null;
-      setMsg(`ถึง ${loc.name} แล้ว — แตะห้องเพื่อให้พาไปได้เลย`);
+      setMsg(`ถึง ${loc.name} แล้ว — แตะห้องเพื่อดูรายละเอียดหรือให้พาไป`);
       notifyParent("arrived", { to: loc.code });
     } else {
       stageRef.current = null;
@@ -344,6 +191,31 @@ export default function SchoolMap3D() {
       notifyParent("arrived", { to: loc.code });
     }
   }, [roomById, locById, enterIndoor]);
+
+  const startOutdoorNav = useCallback((d: Dest) => {
+    if (!d) return;
+    const room = d.type === "room" ? roomById.get(d.id) : undefined;
+    const loc = d.type === "room" ? (room ? locById.get(room.location_id) : undefined) : locById.get(d.id);
+    if (!loc || !fromLoc) return;
+    pendingRef.current = d;
+    setSelectedId(null); setSelectedRoomId(null); setMode("outdoor"); setActiveId(null);
+    if (fromLoc.id === loc.id) {
+      stageRef.current = "outdoor";
+      setRoute([new THREE.Vector3(loc.entrance[0], 0.12, loc.entrance[1])]);
+      setTimeout(() => finishOutdoor(d), 0);
+      return;
+    }
+    const xz = findPath(nodes, edges, fromLoc.entrance, loc.entrance);
+    const pts: THREE.Vector3[] = [];
+    xz.forEach(([x, z]) => {
+      const v = new THREE.Vector3(x, 0.12, z);
+      if (!pts.length || pts[pts.length - 1].distanceTo(v) > 0.01) pts.push(v);
+    });
+    stageRef.current = "outdoor";
+    setRoute(pts); setRunning(true); setFollow(true); setGoal(null);
+    setMsg(`กำลังนำทางไป ${room ? room.name + " · " : ""}${loc.name}`);
+    notifyParent("navigate-start", { to: loc.code, room: room?.code });
+  }, [fromLoc, locById, roomById, nodes, edges, finishOutdoor]);
 
   const onRobotDone = useCallback(() => {
     if (stageRef.current === "outdoor") finishOutdoor(pendingRef.current);
@@ -361,9 +233,9 @@ export default function SchoolMap3D() {
     if (d.type === "room") {
       const room = roomById.get(d.id);
       const loc = room ? locById.get(room.location_id) : undefined;
-      if (room && loc && mode === "indoor" && activeId === loc.id) {   // อยู่ในอาคารนี้แล้ว → เดินในอาคารเลย
+      if (room && loc && mode === "indoor" && activeId === loc.id) {
         pendingRef.current = d; stageRef.current = "indoor";
-        setFloor(room.level); setGoal(focusGoal(loc, room.level));
+        setFloor(room.level); setGoal(focusGoal(loc, room.level)); setFollow(false);
         setRoute(indoorRoute(loc, room)); setRunning(true);
         setMsg(`กำลังพาไป ${room.name} (ชั้น ${room.level})`);
         return;
@@ -372,7 +244,13 @@ export default function SchoolMap3D() {
     startOutdoorNav(d);
   }, [roomById, locById, mode, activeId, startOutdoorNav]);
 
-  // ── รับคำสั่งจากหน้า Wix: postMessage({type:"wkk-map:navigate", code:"3"}) หรือ ?to=3 ──
+  const zoomRoom = (loc: MapLocation, room: MapRoom) => {
+    const c = roomCenter(loc, room);
+    const t = new THREE.Vector3(c[0], c[1], c[2]);
+    setGoal({ target: t, pos: t.clone().add(new THREE.Vector3(0, 2.2, 1.8)) });
+    setFollow(false);
+  };
+
   useEffect(() => {
     const h = (e: MessageEvent) => {
       if (e.data?.type !== "wkk-map:navigate") return;
@@ -387,7 +265,6 @@ export default function SchoolMap3D() {
     if (code) { const l = locs.find((x) => x.code === code); if (l) setDest({ type: "loc", id: l.id }); }
   }, [locs]);
 
-  // ── ค้นหา ──
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
     const items: { d: NonNullable<Dest>; label: string; sub: string }[] = [];
@@ -408,33 +285,52 @@ export default function SchoolMap3D() {
     ? dest.type === "loc" ? locById.get(dest.id)?.name : roomById.get(dest.id)?.name
     : null;
   const selectedLoc = selectedId ? locById.get(selectedId) : undefined;
-  const lineY = mode === "indoor" ? 0.2 : 0.18;
+  const pickOutdoor = (id: string) => {
+    if (mode !== "outdoor") return;
+    setSelectedId(id); setGoal(focusGoal(locById.get(id)!, 1)); setFollow(false);
+  };
 
   return (
     <div className="relative w-full h-full min-h-[480px] bg-sky-100 overflow-hidden font-sans">
-      <Canvas camera={{ position: [-2, 22, 18], fov: 45 }} dpr={[1, 2]} onPointerMissed={() => setSelectedId(null)}>
-        <color attach="background" args={["#dbeafe"]} />
-        <ambientLight intensity={0.85} />
-        <directionalLight position={[10, 20, 8]} intensity={1.1} />
-        <Ground />
-        <Roads nodes={nodes} edges={edges} />
-        {locs.map((l) =>
-          mode === "indoor" && l.id === activeId ? null : (
-            <BuildingMesh key={l.id} loc={l} dim={mode === "indoor"} selected={selectedId === l.id}
-              onPick={(id) => { if (mode === "outdoor") { setSelectedId(id); setGoal(focusGoal(locById.get(id)!, 1)); setFollow(false); } }} />
-          )
-        )}
+      <Canvas shadows camera={{ position: [-2, 22, 18], fov: 45 }} dpr={[1, 2]}
+        onPointerMissed={() => { setSelectedId(null); setSelectedRoomId(null); }}>
+        <color attach="background" args={["#cfe8ff"]} />
+        <fog attach="fog" args={["#cfe8ff", 45, 100]} />
+        <hemisphereLight args={["#ffffff", "#7a9a5a", 0.7]} />
+        <ambientLight intensity={0.35} />
+        <directionalLight
+          position={[12, 26, 14]} intensity={1.15} castShadow
+          shadow-mapSize={[2048, 2048]}
+          shadow-camera-left={-26} shadow-camera-right={26}
+          shadow-camera-top={26} shadow-camera-bottom={-26}
+          shadow-camera-near={1} shadow-camera-far={90}
+        />
+
+        <Decor nodes={nodes} edges={edges} gate={gate} robotRef={robotRef as any} indoor={mode === "indoor"} />
+
+        {locs.map((l) => {
+          if (mode === "indoor" && l.id === activeId) return null;
+          const dim = mode === "indoor";
+          if (l.kind === "field") return <Field key={l.id} loc={l} dim={dim} onPick={pickOutdoor} />;
+          if (l.kind === "parking") return <ParkingLot key={l.id} loc={l} dim={dim} onPick={pickOutdoor} />;
+          return <BuildingModel key={l.id} loc={l} dim={dim} selected={selectedId === l.id} onPick={pickOutdoor} />;
+        })}
+
         {mode === "indoor" && activeLoc && (
-          <IndoorBuilding loc={activeLoc} rooms={rooms.filter((r) => r.location_id === activeLoc.id)} floor={floor}
+          <IndoorBuilding
+            loc={activeLoc} rooms={rooms.filter((r) => r.location_id === activeLoc.id)} floor={floor}
             activeRoomId={dest?.type === "room" ? dest.id : undefined}
-            onRoom={(r) => goTo({ type: "room", id: r.id })} />
+            selectedRoomId={selectedRoomId}
+            onRoom={(r) => { setSelectedRoomId(r.id); }}
+          />
         )}
+
         {route.length > 1 && (
-          <Line points={route.map((p) => [p.x, p.y + lineY - 0.12, p.z] as [number, number, number])}
+          <Line points={route.map((p) => [p.x, p.y + 0.06, p.z] as [number, number, number])}
             color="#f43f5e" lineWidth={4} dashed dashSize={0.3} gapSize={0.2} />
         )}
         <Robot route={route} running={running} groupRef={robotRef as any} home={home} onDone={onRobotDone} />
-        <OrbitControls ref={controlsRef} makeDefault maxPolarAngle={Math.PI / 2.1} minDistance={3} maxDistance={45}
+        <OrbitControls ref={controlsRef} makeDefault maxPolarAngle={Math.PI / 2.1} minDistance={1.5} maxDistance={45}
           onStart={() => { setFollow(false); setGoal(null); }} />
         <CameraRig goal={goal} follow={follow} robotRef={robotRef as any} controlsRef={controlsRef} />
       </Canvas>
@@ -473,17 +369,37 @@ export default function SchoolMap3D() {
         </div>
       </div>
 
-      {/* ── ข้อมูลอาคารที่เลือก (outdoor) ── */}
+      {/* ── การ์ดอาคารที่เลือก (ภายนอก) ── */}
       {selectedLoc && mode === "outdoor" && (
         <div className="absolute bottom-16 left-3 w-[19rem] max-w-[calc(100%-1.5rem)] bg-white rounded-2xl shadow-xl border border-slate-200 p-3 space-y-2">
           <p className="text-sm font-black text-slate-800">{selectedLoc.code}. {selectedLoc.name}</p>
+          {selectedLoc.kind === "building" && (
+            <p className="text-[11px] text-slate-500">{selectedLoc.floors} ชั้น · {rooms.filter((r) => r.location_id === selectedLoc.id).length} ห้อง</p>
+          )}
           <div className="flex gap-2">
-            <button onClick={() => { setDest({ type: "loc", id: selectedLoc.id }); goTo({ type: "loc", id: selectedLoc.id }); }}
+            <button onClick={() => goTo({ type: "loc", id: selectedLoc.id })}
               className="flex-1 text-xs font-extrabold rounded-xl bg-blue-600 text-white py-2">🚶 นำทางไปที่นี่</button>
             {selectedLoc.kind === "building" && (
               <button onClick={() => enterIndoor(selectedLoc, 1)}
                 className="flex-1 text-xs font-extrabold rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 py-2">🏢 ดูภายในอาคาร</button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── การ์ดห้องที่เลือก (ภายใน) ── */}
+      {mode === "indoor" && activeLoc && selectedRoom && (
+        <div className="absolute bottom-16 left-3 w-[19rem] max-w-[calc(100%-1.5rem)] bg-white rounded-2xl shadow-xl border border-slate-200 p-3 space-y-2">
+          <p className="text-sm font-black text-slate-800">{selectedRoom.name} <span className="text-xs font-bold text-slate-400">ชั้น {selectedRoom.level}</span></p>
+          <p className="text-[11px] text-slate-500">
+            {TYPE_LABEL[selectedRoom.type ?? "classroom"] ?? "ห้อง"}
+            {(selectedRoom.type ?? "classroom") === "classroom" ? ` · โต๊ะนักเรียน ${selectedRoom.desks ?? 30} ตัว` : ""}
+          </p>
+          <div className="flex gap-2">
+            <button onClick={() => goTo({ type: "room", id: selectedRoom.id })}
+              className="flex-1 text-xs font-extrabold rounded-xl bg-blue-600 text-white py-2">🚶 พาไปห้องนี้</button>
+            <button onClick={() => zoomRoom(activeLoc, selectedRoom)}
+              className="flex-1 text-xs font-extrabold rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 py-2">🔍 ซูมดูห้อง</button>
           </div>
         </div>
       )}
@@ -497,7 +413,7 @@ export default function SchoolMap3D() {
           </div>
           <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-2 bg-white/95 rounded-2xl shadow-xl border border-slate-200 p-2">
             {Array.from({ length: Math.max(activeLoc.floors, 1) }, (_, i) => Math.max(activeLoc.floors, 1) - i).map((lv) => (
-              <button key={lv} onClick={() => { setFloor(lv); setGoal(focusGoal(activeLoc, lv)); setFollow(false); }}
+              <button key={lv} onClick={() => { setFloor(lv); setSelectedRoomId(null); setGoal(focusGoal(activeLoc, lv)); setFollow(false); }}
                 className={`w-12 h-10 rounded-xl text-xs font-black border ${floor === lv ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:border-blue-300"}`}>
                 ชั้น {lv}
               </button>
