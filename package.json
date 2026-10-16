@@ -10,6 +10,8 @@
   "dependencies": {
     "@azure/msal-node": "^5.4.3",
     "@mediapipe/tasks-vision": "^1.0.1",
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.2",
     "@sparticuz/chromium": "^149.0.0",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.107.0",
@@ -41,6 +43,7 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^3.4.17",
+    "three": "^0.186.1",
     "tsx": "^4.23.1",
     "xlsx": "^0.18.5"
   },
@@ -50,6 +53,7 @@
     "@types/qs": "^6.15.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.186.0",
     "typescript": "6.0.3"
   }
 }

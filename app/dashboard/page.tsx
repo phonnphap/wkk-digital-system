@@ -8,9 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   LayoutDashboard, UserCheck, CalendarDays, FileText,
   Wrench, Car, Monitor, FolderOpen, FileEdit, Trophy, Calendar, RefreshCw, Users, LogOut, Bell, Settings,
-  User,
-  GraduationCap,
-  UploadCloud   // ★ เพิ่มบรรทัดนี้
+  User,GraduationCap,UploadCloud, MapPin   // ★ เพิ่มบรรทัดนี้
 } from "lucide-react";
 
 // ══════════════════════════════════════════════════════════
@@ -678,6 +676,7 @@ function StatusBadge({ status }: { status: ItemStatus }) {
         { name: "จองรถ & ห้องประชุม", icon: <Car className="w-6 h-6" />, color: "bg-blue-600", path: "/booking" },
         { name: "ยืม-คืน อุปกรณ์ ICT", icon: <Monitor className="w-6 h-6" />, color: "bg-sky-600", path: "/ict-borrow", status: "wip"  as ItemStatus },
         { name: "แจ้งซ่อม (Helpdesk)", icon: <Wrench className="w-6 h-6" />, color: "bg-rose-600", path: "/repair", status: "beta"  as ItemStatus },
+        { name: "แผนผังโรงเรียน 3D", icon: <MapPin className="w-6 h-6" />, color: "bg-emerald-600", path: "/map3d", status: "beta" as ItemStatus },
       ]
     }
   ];
