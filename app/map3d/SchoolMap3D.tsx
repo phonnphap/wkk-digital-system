@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSchoolMapData } from "./useSchoolMapData";
 import { findPath, indoorRoute } from "./pathfinding";
 import { FH, MapLocation, MapRoom, roomCenter } from "./schoolData";
-import { BuildingModel, IndoorBuilding, TYPE_LABEL } from "./BuildingModel";
+import { BuildingModel, IndoorBuilding, TYPE_LABEL } from "./BuildingModel.ts";
 import { Decor, Field, ParkingLot } from "./SceneDecor";
 
 type Dest = { type: "loc" | "room"; id: string } | null;

@@ -7,7 +7,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MapEdge, MapLocation, MapNode, px } from "./schoolData";
 import {
   FENCE, FLAG_PX, GATE_GAP_CENTER, GATE_GAP_RADIUS, PAVILIONS_PX, POND, TREES_PX,
-} from "./decorData";
+} from "./DecorData";
 
 /* ───────────── helpers ───────────── */
 
