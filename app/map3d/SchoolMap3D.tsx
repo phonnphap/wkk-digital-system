@@ -9,7 +9,7 @@ import { findPath, indoorRoute } from "./pathfinding";
 import { FH, MapLocation, MapRoom, XZ, roomCenter } from "./schoolData";
 import { BuildingModel, IndoorBuilding, TYPE_LABEL } from "./BuildingModel";
 import { Decor, Field, ParkingLot } from "./SceneDecor";
-import { GATES, layoutWarnings } from "./DecorData";
+import { GATES, DEFAULT_DECOR, buildGates, layoutWarnings } from "./DecorData";
 import AdminPanel, { DEFAULT_SETTINGS, MapSettings } from "./AdminPanel";
 
 type Dest = { type: "loc" | "room" | "gate"; id: string } | null;
@@ -403,7 +403,15 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
           shadow-camera-near={1} shadow-camera-far={90}
         />
 
-        <Decor nodes={nodes} edges={edges} gate={guardHouse} robotRef={robotRef as any} indoor={mode === "indoor"} />
+        <Decor
+  decor={DEFAULT_DECOR}
+  gates={GATES}
+  nodes={nodes}
+  edges={edges}
+  gate={guardHouse}
+  robotRef={robotRef as any}
+  indoor={mode === "indoor"}
+/>
 
         {locs.map((l) => {
           if (mode === "indoor" && l.id === activeId) return null;
