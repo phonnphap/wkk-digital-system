@@ -3,7 +3,7 @@
 import * as THREE from "three";
 import { Edges, Html } from "@react-three/drei";
 import { useEffect, useMemo, useState } from "react";
-import { FH, MapLocation, MapRoom, isLongX, rotRad, stairsNorm } from "./schoolData";
+import { FH, MapLocation, MapRoom, isLongX, rotRad, corridorV, stairsList, CORRIDOR_W } from "./schoolData";
 import { Inst, Item, PinLabel } from "./SceneDecor";
 
 export const buildingHeight = (l: MapLocation) =>
@@ -306,7 +306,9 @@ export function IndoorBuilding({
   activeRoomId?: string; selectedRoomId?: string | null; onRoom: (r: MapRoom) => void;
 }) {
   const [w, d] = loc.size;
-  const st = stairsNorm(loc);
+  const stairs = stairsList(loc);
+  const cv = corridorV(loc);
+  const longX = isLongX(loc);
   const y = (floor - 1) * FH;
   return (
     <group position={[loc.pos[0], 0, loc.pos[1]]} rotation={[0, -rotRad(loc), 0]}>
@@ -321,20 +323,25 @@ export function IndoorBuilding({
         <meshBasicMaterial transparent opacity={0.04} depthWrite={false} />
         <Edges color={loc.color} />
       </mesh>
-      <mesh position={[0, y + 0.085, 0]} raycast={() => null}>
-        <boxGeometry args={isLongX(loc) ? [w * 0.98, 0.01, d * 0.16] : [w * 0.16, 0.01, d * 0.98]} />
+      {/* ทางเดิน */}
+      <mesh position={longX ? [0, y + 0.085, (cv - 0.5) * d] : [(cv - 0.5) * w, y + 0.085, 0]} raycast={() => null}>
+        <boxGeometry args={longX ? [w * 0.98, 0.01, d * CORRIDOR_W] : [w * CORRIDOR_W, 0.01, d * 0.98]} />
         <meshStandardMaterial color="#ffffff" />
       </mesh>
       {rooms.filter((r) => r.level === floor).map((r) => (
         <RoomMesh key={r.id} loc={loc} room={r} active={r.id === activeRoomId} selected={r.id === selectedRoomId} onPick={onRoom} />
       ))}
-      <mesh position={[(st[0] - 0.5) * w, y + 0.25, (st[1] - 0.5) * d]}>
-        <boxGeometry args={[0.45, 0.35, 0.45]} />
-        <meshStandardMaterial color="#fd7e14" />
-      </mesh>
-      <Html position={[(st[0] - 0.5) * w, y + 0.7, (st[1] - 0.5) * d]} center distanceFactor={9}>
-        <div className="px-1 py-0.5 rounded bg-orange-500 text-white text-[9px] font-black pointer-events-none">บันได</div>
-      </Html>
+      {stairs.map((st, i) => (
+        <group key={i}>
+          <mesh position={[(st[0] - 0.5) * w, y + 0.25, (st[1] - 0.5) * d]}>
+            <boxGeometry args={[0.45, 0.35, 0.45]} />
+            <meshStandardMaterial color="#fd7e14" />
+          </mesh>
+          <Html position={[(st[0] - 0.5) * w, y + 0.7, (st[1] - 0.5) * d]} center distanceFactor={9}>
+            <div className="px-1 py-0.5 rounded bg-orange-500 text-white text-[9px] font-black pointer-events-none">บันได</div>
+          </Html>
+        </group>
+      ))}
     </group>
   );
 }

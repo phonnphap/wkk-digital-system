@@ -45,6 +45,9 @@ export function useSchoolMapData() {
           color: x.color, floors: maxLevel[x.id] ?? x.floors_count,
           entrance: [x.entrance_x, x.entrance_z], building_id: x.building_id,
           rot: Number(x.rot ?? 0),
+          corridor: x.corridor_side ?? "center",
+          stairs: x.stairs_mode ?? "start",
+          perFloor: x.rooms_per_floor ?? undefined,
         } as MapLocation))
         .sort((a: MapLocation, b: MapLocation) => Number(a.code) - Number(b.code));
 
@@ -104,12 +107,18 @@ export function useSchoolMapData() {
     if (patch.color !== undefined) row.color = patch.color;
     if (patch.kind !== undefined) row.kind = patch.kind;
     if (patch.rot !== undefined) row.rot = patch.rot;
+    if (patch.corridor !== undefined) row.corridor_side = patch.corridor;
+    if (patch.stairs !== undefined) row.stairs_mode = patch.stairs;
+    if ("perFloor" in patch) row.rooms_per_floor = patch.perFloor ?? null;
     if (patch.pos) { row.pos_x = patch.pos[0]; row.pos_z = patch.pos[1]; }
     if (patch.size) { row.size_w = patch.size[0]; row.size_d = patch.size[1]; }
     if (patch.entrance) { row.entrance_x = patch.entrance[0]; row.entrance_z = patch.entrance[1]; }
     if (!Object.keys(row).length) return ok();
-    const { error } = await createClient().from("map_locations").update(row).eq("id", id);
-    return error ? fail(error) : ok();
+    const { data, error } = await createClient()
+      .from("map_locations").update(row).eq("id", id).select("id");
+    if (error) return fail(error);
+    if (!data?.length) return fail("บันทึกไม่เข้าฐานข้อมูล: ไม่มีสิทธิ์เขียน (RLS) หรือไม่พบแถว");
+    return ok();
   }, []);
 
   const setFloors = useCallback(async (id: string, count: number): Promise<SaveResult> => {
@@ -255,6 +264,28 @@ export function useSchoolMapData() {
     } catch (e) { return fail(e); }
   }, [load]);
 
+    /** ลบห้องของอาคารแล้วสร้างใหม่ตามผังปัจจุบัน (ทางเดิน/บันได/จำนวนห้องต่อแถว) */
+  const regenerateRooms = useCallback(async (locId: string): Promise<SaveResult> => {
+    const loc = locsRef.current.find((l) => l.id === locId);
+    if (!loc) return fail("ไม่พบอาคาร");
+    const next = { ...customRef.current }; delete next[locId];
+    customRef.current = next; setCustom(next);
+    const hasDb = dbRoomsRef.current.some((r) => r.location_id === locId);
+    if (sourceRef.current !== "supabase" || !hasDb) return ok("สร้างห้องตามผังใหม่แล้ว");
+    try {
+      const sb = createClient();
+      const { data: fl, error: e1 } = await sb.from("map_floors").select("id").eq("location_id", locId);
+      if (e1) return fail(e1);
+      const ids = (fl ?? []).map((f: any) => f.id);
+      if (ids.length) {
+        const { error } = await sb.from("map_rooms").delete().in("floor_id", ids);
+        if (error) return fail(error);
+      }
+      setDbRooms((prev) => prev.filter((r) => r.location_id !== locId));
+      return await saveGenerated(locId);
+    } catch (e) { return fail(e); }
+  }, [saveGenerated]);
+
   /** ปรับตำแหน่ง/ขนาด/การหมุน/ชนิดอาคารใน DB ให้ตรงกับผังตั้งต้นใหม่ + เติมโหนดประตู */
   const syncDefaultLayout = useCallback(async (): Promise<SaveResult> => {
     let count = 0;
@@ -281,7 +312,7 @@ export function useSchoolMapData() {
     return ok(`ปรับผัง ${count} สถานที่ + เส้นทางประตูแล้ว`);
   }, [updateLocation]);
 
-  const api = { updateLocation, setFloors, updateRoom, addRoom, deleteRoom, saveGenerated, syncDefaultLayout, reload: load };
+    const api = { updateLocation, setFloors, updateRoom, addRoom, deleteRoom, saveGenerated, regenerateRooms, syncDefaultLayout, reload: load };
   return { locs, rooms, nodes, edges, source, api };
 }
 

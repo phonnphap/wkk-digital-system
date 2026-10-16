@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { LocKind, MapLocation, MapRoom } from "./schoolData";
+import type { LocKind, MapLocation, MapRoom, CorridorSide, StairsMode } from "./schoolData";
 import type { MapApi, SaveResult } from "./useSchoolMapData";
 import { TYPE_LABEL } from "./BuildingModel";
 
@@ -39,8 +39,15 @@ function LocForm({ loc, api, run }: { loc: MapLocation; api: MapApi; run: (p: Pr
   const [z, setZ] = useState(+loc.pos[1].toFixed(2));
   const [w, setW] = useState(+loc.size[0].toFixed(2));
   const [d, setD] = useState(+loc.size[1].toFixed(2));
+  const [corridor, setCorridor] = useState<CorridorSide>(loc.corridor ?? "center");
+  const [stairs, setStairs] = useState<StairsMode>(loc.stairs ?? "start");
+  const [perFloor, setPerFloor] = useState(loc.perFloor ?? 0);
+  const longX = w >= d;
   const save = async () => {
-    const r = await run(api.updateLocation(loc.id, { name, kind, color, rot, pos: [x, z], size: [w, d] }));
+        const r = await run(api.updateLocation(loc.id, {
+      name, kind, color, rot, pos: [x, z], size: [w, d],
+      corridor, stairs, perFloor: perFloor > 0 ? perFloor : undefined,
+    }));
     if (r.ok && kind === "building" && floors !== loc.floors) await run(api.setFloors(loc.id, floors));
   };
   return (
@@ -56,6 +63,29 @@ function LocForm({ loc, api, run }: { loc: MapLocation; api: MapApi; run: (p: Pr
           <input type="color" className="w-full h-[30px] rounded-lg border border-slate-200" value={color} onChange={(e) => setColor(e.target.value)} /></label>
       </div>
       {kind === "building" && <Num label="จำนวนชั้น (1–8)" value={floors} step={1} min={1} onChange={(v) => setFloors(Math.max(1, Math.min(8, Math.round(v))))} />}
+              {kind === "building" && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block"><span className="block text-[10px] font-bold text-slate-400 mb-0.5">ทางเดิน</span>
+              <select className={inp} value={corridor} onChange={(e) => setCorridor(e.target.value as CorridorSide)}>
+                <option value="center">กลางอาคาร (2 แถว)</option>
+                <option value="a">{longX ? "ริมด้านเหนือ" : "ริมด้านซ้าย"} (แถวเดียว)</option>
+                <option value="b">{longX ? "ริมด้านใต้" : "ริมด้านขวา"} (แถวเดียว)</option>
+              </select></label>
+            <label className="block"><span className="block text-[10px] font-bold text-slate-400 mb-0.5">บันได</span>
+              <select className={inp} value={stairs} onChange={(e) => setStairs(e.target.value as StairsMode)}>
+                <option value="start">1 อัน ปลาย{longX ? "ซ้าย" : "บน"}</option>
+                <option value="end">1 อัน ปลาย{longX ? "ขวา" : "ล่าง"}</option>
+                <option value="both">2 อัน ทั้งสองปลาย</option>
+              </select></label>
+          </div>
+          <Num label="ห้องต่อแถว (0 = อัตโนมัติ)" value={perFloor} step={1} min={0}
+            onChange={(v) => setPerFloor(Math.max(0, Math.min(20, Math.round(v))))} />
+          <button
+            onClick={() => { if (confirm("ลบห้องทุกชั้นของอาคารนี้แล้วสร้างใหม่ตามผัง? (ชื่อ/ชนิดห้องที่แก้ไว้จะหาย)")) run(api.regenerateRooms(loc.id)); }}
+            className={`${btn} w-full bg-amber-50 text-amber-700 border border-amber-200`}>สร้างห้องใหม่ตามผังนี้</button>
+        </>
+      )}
       <Num label="หมุนอาคาร (องศา — ค่าลบ = ยกด้านขวาขึ้น)" value={rot} step={0.5} onChange={setRot} />
       <div className="grid grid-cols-2 gap-2">
         <Num label="ตำแหน่ง X" value={x} onChange={setX} />
@@ -145,7 +175,7 @@ export default function AdminPanel({
             <select className={inp} value={loc.id} onChange={(e) => setLocId(e.target.value)}>
               {locs.map((l) => <option key={l.id} value={l.id}>{l.code}. {l.name}</option>)}
             </select>
-            <LocForm key={`${loc.id}|${loc.pos}|${loc.size}|${loc.rot}|${loc.floors}|${loc.kind}`} loc={loc} api={api} run={run} />
+            <LocForm key={`${loc.id}|${loc.pos}|${loc.size}|${loc.rot}|${loc.floors}|${loc.kind}|${loc.corridor}|${loc.stairs}|${loc.perFloor}`} loc={loc} api={api} run={run} />
           </>
         )}
 

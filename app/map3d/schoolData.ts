@@ -18,6 +18,9 @@ export interface MapLocation {
   entrance: XZ;  // จุดทางเข้า (พิกัด world)
   building_id?: string | null;
   rot?: number;  // องศา หมุนอาคารรอบจุดกึ่งกลาง (ค่าลบ = ยกด้านขวาขึ้น ตามรั้วเฉียง)
+  corridor?: CorridorSide;   // center | a | b
+  stairs?: StairsMode;       // start | end | both
+  perFloor?: number;         // จำนวนห้องต่อแถว (ว่าง = อัตโนมัติ)
 }
 export interface MapRoom {
   id: string;
@@ -118,6 +121,25 @@ export const FALLBACK_EDGES: MapEdge[] = ([
 // ── การวางผังภายในอาคาร (พิกัดสัดส่วน 0..1) ──────────────────────────
 // ทางเดินกลางอยู่ที่ 0.5 ของแกนสั้น, บันไดอยู่ปลายแกนยาวด้านหนึ่ง
 export const isLongX = (loc: MapLocation) => loc.size[0] >= loc.size[1];
+export type CorridorSide = "center" | "a" | "b";
+export type StairsMode = "start" | "end" | "both";
+export const CORRIDOR_W = 0.16; // ความกว้างทางเดิน (สัดส่วนของแกนสั้น)
+
+/** ตำแหน่งแกนสั้น (0..1) ของกึ่งกลางทางเดิน: a = ริมเหนือ/ซ้าย, b = ริมใต้/ขวา */
+export const corridorV = (loc: MapLocation): number => {
+  const s = loc.corridor ?? "center";
+  return s === "a" ? 0.02 + CORRIDOR_W / 2 : s === "b" ? 0.98 - CORRIDOR_W / 2 : 0.5;
+};
+
+/** ตำแหน่งบันไดทั้งหมด (สัดส่วน 0..1) — อยู่ปลายทางเดินเสมอ */
+export function stairsList(loc: MapLocation): XZ[] {
+  const v = corridorV(loc);
+  const us = loc.stairs === "both" ? [0.03, 0.97] : loc.stairs === "end" ? [0.97] : [0.03];
+  return us.map((u) => (isLongX(loc) ? [u, v] : [v, u]) as XZ);
+}
+export const stairsNorm = (loc: MapLocation): XZ => stairsList(loc)[0];
+export const corridorNorm = (loc: MapLocation, p: XZ): XZ =>
+  isLongX(loc) ? [p[0], corridorV(loc)] : [corridorV(loc), p[1]];
 
 /** จุดกึ่งกลางห้องในพิกัด world (รวมการหมุนอาคาร) */
 export function roomCenter(loc: MapLocation, room: MapRoom): [number, number, number] {
@@ -135,28 +157,41 @@ function roomType(loc: MapLocation, level: number): string {
   if (loc.code === "10") return "hall";
   return "classroom";
 }
-export const stairsNorm = (loc: MapLocation): XZ => (isLongX(loc) ? [0.03, 0.5] : [0.5, 0.03]);
-export const corridorNorm = (loc: MapLocation, p: XZ): XZ => (isLongX(loc) ? [p[0], 0.5] : [0.5, p[1]]);
 
 /** สร้างห้องตัวอย่างอัตโนมัติ (ใช้เมื่อยังไม่มีข้อมูลห้องจริงใน map_rooms) */
 export function genRooms(loc: MapLocation): MapRoom[] {
   if (loc.kind !== "building") return [];
   const longX = isLongX(loc);
   const longLen = Math.max(loc.size[0], loc.size[1]);
-  const perSide = Math.max(2, Math.min(6, Math.round(longLen / 2)));
-  const span = 0.86 / perSide;
-  const out: MapRoom[] = [];
+  const side = loc.corridor ?? "center";
+  const st = loc.stairs ?? "start";
+  const uStart = st === "end" ? 0.04 : 0.1;
+  const uEnd = st === "start" ? 0.96 : 0.9;
   const conv = (u: number, v: number): XZ => (longX ? [u, v] : [v, u]);
+
+  const aStart = 0.02 + CORRIDOR_W + 0.01;       // ห้องเริ่มหลังทางเดินริม a
+  const bEnd = 0.98 - CORRIDOR_W - 0.01;         // ห้องสิ้นสุดก่อนทางเดินริม b
+  const rows =
+    side === "center" ? [{ v0: 0.04, vLen: 0.38, doorV: 0.42 }, { v0: 0.58, vLen: 0.38, doorV: 0.58 }]
+    : side === "a" ? [{ v0: aStart, vLen: 0.98 - aStart, doorV: aStart + 0.02 }]
+    : [{ v0: 0.02, vLen: bEnd - 0.02, doorV: bEnd - 0.02 }];
+
+  const perRow = loc.perFloor && loc.perFloor > 0
+    ? Math.round(loc.perFloor)
+    : side === "center"
+      ? Math.max(2, Math.min(6, Math.round(longLen / 2)))
+      : Math.max(3, Math.min(12, Math.round(longLen)));
+  const span = (uEnd - uStart) / perRow;
+
+  const out: MapRoom[] = [];
   for (let level = 1; level <= Math.max(loc.floors, 1); level++) {
     let n = 1;
-    for (let side = 0; side < 2; side++) {
-      for (let i = 0; i < perSide; i++) {
-        const u0 = 0.1 + i * span;
-        const v0 = side === 0 ? 0.04 : 0.58;
-        const vLen = 0.38;
-        const [x, z] = conv(u0, v0);
-        const [w, d] = longX ? [span - 0.01, vLen] : [vLen, span - 0.01];
-        const door = conv(u0 + (span - 0.01) / 2, side === 0 ? 0.42 : 0.58);
+    for (const row of rows) {
+      for (let i = 0; i < perRow; i++) {
+        const u0 = uStart + i * span;
+        const [x, z] = conv(u0, row.v0);
+        const [w, d] = longX ? [span - 0.01, row.vLen] : [row.vLen, span - 0.01];
+        const door = conv(u0 + (span - 0.01) / 2, row.doorV);
         const num = `${level}${String(n).padStart(2, "0")}`;
         out.push({
           id: `gen-${loc.code}-${level}-${n}`,
