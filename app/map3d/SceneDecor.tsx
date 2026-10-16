@@ -4,10 +4,8 @@ import * as THREE from "three";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { MapEdge, MapLocation, MapNode, px } from "./schoolData";
-import {
-  FENCE, FLAG_PX, GATES, PAVILIONS_PX, POND, TREES_PX,
-} from "./DecorData";
+import { FH, MapEdge, MapLocation, MapNode, px } from "./schoolData";
+import { DecorConfig, DecorItem, FENCE, GateDef } from "./DecorData";
 import { SchoolGates } from "./SchoolGates";
 
 /* ───────────── helpers ───────────── */
@@ -19,7 +17,6 @@ export type Item = {
   c?: string;
 };
 
-/** วาดวัตถุซ้ำจำนวนมากด้วย InstancedMesh (เบาเครื่อง) */
 export function Inst({ items, children, cast = false }: { items: Item[]; children: React.ReactNode; cast?: boolean }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   useLayoutEffect(() => {
@@ -63,6 +60,8 @@ function rng(seed: number) {
   };
 }
 
+const rad = (it: { rot?: number }) => -((it.rot ?? 0) * Math.PI) / 180;
+
 export function PinLabel({ code, y, onClick }: { code: string; y: number; onClick: () => void }) {
   return (
     <Html position={[0, y, 0]} center distanceFactor={18} zIndexRange={[20, 0]}>
@@ -74,22 +73,30 @@ export function PinLabel({ code, y, onClick }: { code: string; y: number; onClic
   );
 }
 
+const Tag = ({ y, children }: { y: number; children: React.ReactNode }) => (
+  <Html position={[0, y, 0]} center distanceFactor={12} zIndexRange={[10, 0]}>
+    <div className="pointer-events-none px-1.5 py-0.5 rounded bg-white/90 text-[9px] font-black text-slate-700 shadow whitespace-nowrap">{children}</div>
+  </Html>
+);
+
 /* ───────────── พื้น / ถนน / รั้ว ───────────── */
 
-export function Ground() {
+export function Ground({ onGround }: { onGround?: (x: number, z: number) => void }) {
   const shape = useMemo(() => {
     const s = new THREE.Shape();
     FENCE.forEach(([x, z], i) => (i ? s.lineTo(x, -z) : s.moveTo(x, -z)));
     s.closePath();
     return s;
   }, []);
+  const click = onGround ? (e: any) => { e.stopPropagation(); onGround(e.point.x, e.point.z); } : undefined;
   return (
     <>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-2, -0.06, 0.5]} receiveShadow>
+      {/* นอกโรงเรียน = สีดำ */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-2, -0.06, 0.5]} receiveShadow onClick={click}>
         <planeGeometry args={[120, 90]} />
-        <meshStandardMaterial color="#b0bec5" />
+        <meshStandardMaterial color="#111418" />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]} receiveShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]} receiveShadow onClick={click}>
         <shapeGeometry args={[shape]} />
         <meshStandardMaterial color="#8bc34a" />
       </mesh>
@@ -117,11 +124,11 @@ export function Roads({ nodes, edges }: { nodes: MapNode[]; edges: MapEdge[] }) 
   );
 }
 
-export function Fence() {
+export function Fence({ gates }: { gates: GateDef[] }) {
   const parts = useMemo(() => {
     const bars: Item[] = [], rails: Item[] = [], pillars: Item[] = [];
-      const nearGap = (x: number, z: number) =>
-      GATES.some((g) => Math.hypot(x - g.x, z - g.z) < g.width / 2 + 0.25);
+    const nearGap = (x: number, z: number) =>
+      gates.some((g) => Math.hypot(x - g.x, z - g.z) < g.width / 2 + 0.25);
     for (let i = 0; i < FENCE.length; i++) {
       const a = FENCE[i], b = FENCE[(i + 1) % FENCE.length];
       const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -148,67 +155,54 @@ export function Fence() {
       }
     }
     return { bars, rails, pillars };
-  }, []);
+  }, [gates]);
   return (
     <>
-      <Inst items={parts.bars}>
-        <cylinderGeometry args={[0.012, 0.012, 0.42, 5]} />
-        <meshStandardMaterial color="#343a40" />
-      </Inst>
-      <Inst items={parts.rails}>
-        <boxGeometry args={[1, 0.035, 0.035]} />
-        <meshStandardMaterial color="#212529" />
-      </Inst>
-      <Inst items={parts.pillars} cast>
-        <boxGeometry args={[0.1, 0.72, 0.1]} />
-        <meshStandardMaterial color="#adb5bd" />
-      </Inst>
+      <Inst items={parts.bars}><cylinderGeometry args={[0.012, 0.012, 0.42, 5]} /><meshStandardMaterial color="#343a40" /></Inst>
+      <Inst items={parts.rails}><boxGeometry args={[1, 0.035, 0.035]} /><meshStandardMaterial color="#212529" /></Inst>
+      <Inst items={parts.pillars} cast><boxGeometry args={[0.1, 0.72, 0.1]} /><meshStandardMaterial color="#adb5bd" /></Inst>
     </>
   );
 }
 
-/* ───────────── ต้นไม้ / ศาลา / สระ / เสาธง ───────────── */
+/* ───────────── ต้นไม้ / ศาลา / เสาธง ───────────── */
 
-export function Trees() {
+export function Trees({ items }: { items: DecorItem[] }) {
   const { trunks, crowns } = useMemo(() => {
     const r = rng(7);
     const trunks: Item[] = [], crowns: Item[] = [];
     const greens = ["#2e7d32", "#388e3c", "#43a047", "#558b2f", "#33691e"];
-    TREES_PX.forEach(([x, y, s]) => {
-      const [wx, wz] = px(x, y);
-      const sc = s * (0.85 + r() * 0.3);
-      trunks.push({ p: [wx, 0.2 * sc, wz], s: sc });
-      crowns.push({ p: [wx, 0.62 * sc, wz], s: sc * (0.9 + r() * 0.25), c: greens[Math.floor(r() * greens.length)] });
+    items.filter((t) => t.type === "tree").forEach((t) => {
+      const [wx, wz] = px(t.x, t.y);
+      const sc = (t.s ?? 1) * (0.85 + r() * 0.3);
+      const h = t.h ?? 1;
+      const k = 0.9 + r() * 0.25;
+      trunks.push({ p: [wx, 0.2 * sc * h, wz], s: [sc, sc * h, sc] });
+      crowns.push({ p: [wx, 0.4 * sc * h + 0.22 * sc, wz], s: sc * k, c: greens[Math.floor(r() * greens.length)] });
     });
     return { trunks, crowns };
-  }, []);
+  }, [items]);
   return (
     <>
-      <Inst items={trunks}>
-        <cylinderGeometry args={[0.035, 0.05, 0.4, 6]} />
-        <meshStandardMaterial color="#6d4c41" />
-      </Inst>
-      <Inst items={crowns} cast>
-        <icosahedronGeometry args={[0.3, 1]} />
-        <meshStandardMaterial color="#ffffff" flatShading />
-      </Inst>
+      <Inst items={trunks}><cylinderGeometry args={[0.035, 0.05, 0.4, 6]} /><meshStandardMaterial color="#6d4c41" /></Inst>
+      <Inst items={crowns} cast><icosahedronGeometry args={[0.3, 1]} /><meshStandardMaterial color="#ffffff" flatShading /></Inst>
     </>
   );
 }
 
-export function Pavilions() {
+export function Pavilions({ items }: { items: DecorItem[] }) {
   return (
     <>
-      {PAVILIONS_PX.map(([x, y, roof], i) => {
-        const [wx, wz] = px(x, y);
+      {items.filter((p) => p.type === "pavilion").map((p) => {
+        const [wx, wz] = px(p.x, p.y);
         return (
-          <group key={i} position={[wx, 0, wz]}>
+          <group key={p.id} position={[wx, 0, wz]} rotation={[0, rad(p), 0]}>
             <mesh position={[0, 0.02, 0]} receiveShadow><boxGeometry args={[0.72, 0.04, 0.72]} /><meshStandardMaterial color="#dee2e6" /></mesh>
             {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], k) => (
               <mesh key={k} position={[sx * 0.29, 0.28, sz * 0.29]}><cylinderGeometry args={[0.025, 0.025, 0.52, 6]} /><meshStandardMaterial color="#f8f9fa" /></mesh>
             ))}
             <mesh position={[0, 0.68, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-              <coneGeometry args={[0.62, 0.3, 4]} /><meshStandardMaterial color={roof} />
+              <coneGeometry args={[0.62, 0.3, 4]} /><meshStandardMaterial color={p.color ?? "#e5484d"} />
             </mesh>
             <mesh position={[0, 0.14, 0]}><boxGeometry args={[0.4, 0.04, 0.14]} /><meshStandardMaterial color="#a1887f" /></mesh>
           </group>
@@ -218,21 +212,123 @@ export function Pavilions() {
   );
 }
 
-export function Pond() {
-  const [x, z] = px(POND.cx, POND.cy);
+/** ซุ้มพระ: ศาลาเล็ก หลังคาทอง + พระพุทธรูป */
+function Shrine({ it }: { it: DecorItem }) {
+  const [x, z] = px(it.x, it.y);
   return (
-    <group position={[x, 0, z]}>
-      <mesh position={[0, 0.015, 0]}><boxGeometry args={[POND.w / 30 + 0.12, 0.03, POND.h / 30 + 0.12]} /><meshStandardMaterial color="#cfd8dc" /></mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, 0]}>
-        <planeGeometry args={[POND.w / 30, POND.h / 30]} />
-        <meshStandardMaterial color="#4fc3f7" roughness={0.15} metalness={0.2} />
-      </mesh>
+    <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
+      <mesh position={[0, 0.04, 0]} receiveShadow><boxGeometry args={[0.9, 0.08, 0.9]} /><meshStandardMaterial color="#e9ecef" /></mesh>
+      <mesh position={[0, 0.03, 0.52]}><boxGeometry args={[0.5, 0.05, 0.14]} /><meshStandardMaterial color="#dee2e6" /></mesh>
+      {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], k) => (
+        <mesh key={k} position={[sx * 0.34, 0.45, sz * 0.34]} castShadow><cylinderGeometry args={[0.03, 0.03, 0.74, 8]} /><meshStandardMaterial color="#f2b705" /></mesh>
+      ))}
+      <mesh position={[0, 0.98, 0]} rotation={[0, Math.PI / 4, 0]} castShadow><coneGeometry args={[0.78, 0.4, 4]} /><meshStandardMaterial color="#e8590c" /></mesh>
+      <mesh position={[0, 1.22, 0]}><coneGeometry args={[0.05, 0.16, 8]} /><meshStandardMaterial color="#fbbf24" /></mesh>
+      <mesh position={[0, 0.16, 0]}><boxGeometry args={[0.34, 0.16, 0.28]} /><meshStandardMaterial color="#8d6e63" /></mesh>
+      <mesh position={[0, 0.34, 0]}><sphereGeometry args={[0.11, 12, 12]} /><meshStandardMaterial color="#fbbf24" metalness={0.4} roughness={0.35} /></mesh>
+      <mesh position={[0, 0.5, 0]}><sphereGeometry args={[0.065, 12, 12]} /><meshStandardMaterial color="#fbbf24" metalness={0.4} roughness={0.35} /></mesh>
+      <Tag y={1.45}>🙏 {it.name || "ซุ้มพระ"}</Tag>
     </group>
   );
 }
 
-export function Flagpole() {
-  const [x, z] = px(FLAG_PX[0], FLAG_PX[1]);
+/** ตึกห้องน้ำนอกอาคาร */
+function ToiletBlock({ it }: { it: DecorItem }) {
+  const [x, z] = px(it.x, it.y);
+  const W = (it.w ?? 36) / 30, D = (it.d ?? 24) / 30, H = 0.7;
+  const name = it.name || "ห้องน้ำ";
+  const wall = it.color ?? (name.includes("หญิง") ? "#fcc2d7" : name.includes("ชาย") ? "#a5d8ff" : "#dee2e6");
+  return (
+    <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
+      <mesh position={[0, H / 2, 0]} castShadow receiveShadow><boxGeometry args={[W, H, D]} /><meshStandardMaterial color={wall} /></mesh>
+      <mesh position={[0, H + 0.03, 0]} castShadow><boxGeometry args={[W + 0.08, 0.06, D + 0.08]} /><meshStandardMaterial color="#6c757d" /></mesh>
+      <mesh position={[0, 0.2, D / 2 + 0.005]}><boxGeometry args={[Math.min(0.18, W * 0.3), 0.4, 0.02]} /><meshStandardMaterial color="#343a40" /></mesh>
+      <mesh position={[W * 0.28, 0.45, D / 2 + 0.005]}><boxGeometry args={[0.14, 0.1, 0.02]} /><meshStandardMaterial color="#74c0fc" /></mesh>
+      <mesh position={[-W * 0.28, 0.45, D / 2 + 0.005]}><boxGeometry args={[0.14, 0.1, 0.02]} /><meshStandardMaterial color="#74c0fc" /></mesh>
+      <Tag y={H + 0.3}>🚻 {name}</Tag>
+    </group>
+  );
+}
+
+/** โรงจอดมอเตอร์ไซค์: หลังคา + เสา + มอเตอร์ไซค์เรียงแถว */
+function Shed({ it }: { it: DecorItem }) {
+  const [x, z] = px(it.x, it.y);
+  const W = (it.w ?? 60) / 30, D = (it.d ?? 28) / 30;
+  const bikes = useMemo(() => {
+    const r = rng(11);
+    const out: Item[] = [];
+    const cols = Math.max(1, Math.floor((W - 0.1) / 0.14)), rows = Math.max(1, Math.floor((D - 0.1) / 0.3));
+    const cw = (W - 0.1) / cols, rd = (D - 0.1) / rows;
+    const pal = ["#e63946", "#1d3557", "#2a9d8f", "#212529", "#f1faee", "#ffb703", "#9d4edd", "#868e96"];
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+      if (r() > 0.88) continue;
+      const bx = -W / 2 + 0.05 + (i + 0.5) * cw, bz = -D / 2 + 0.05 + (j + 0.5) * rd;
+      out.push({ p: [bx, 0.07, bz], s: [0.06, 0.07, 0.2], c: pal[Math.floor(r() * pal.length)] });
+      out.push({ p: [bx, 0.125, bz + 0.02], s: [0.055, 0.03, 0.08], c: "#212529" });
+      out.push({ p: [bx, 0.03, bz - 0.08], s: [0.03, 0.06, 0.05], c: "#111111" });
+      out.push({ p: [bx, 0.03, bz + 0.08], s: [0.03, 0.06, 0.05], c: "#111111" });
+      out.push({ p: [bx, 0.13, bz - 0.07], s: [0.07, 0.015, 0.015], c: "#868e96" });
+    }
+    return out;
+  }, [W, D]);
+  return (
+    <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
+      <mesh position={[0, 0.015, 0]} receiveShadow><boxGeometry args={[W, 0.03, D]} /><meshStandardMaterial color="#868e96" /></mesh>
+      {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], k) => (
+        <mesh key={k} position={[sx * (W / 2 - 0.04), 0.23, sz * (D / 2 - 0.04)]}><cylinderGeometry args={[0.02, 0.02, 0.46, 6]} /><meshStandardMaterial color="#495057" /></mesh>
+      ))}
+      <mesh position={[0, 0.48, 0]} castShadow><boxGeometry args={[W + 0.1, 0.04, D + 0.1]} /><meshStandardMaterial color={it.color ?? "#f59f00"} /></mesh>
+      <Inst items={bikes}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>
+      <Tag y={0.8}>🏍 {it.name || "ที่จอดมอเตอร์ไซค์"}</Tag>
+    </group>
+  );
+}
+
+/** ประตูกั้น (บานเลื่อนปิดทางเดินรถ) */
+function Barrier({ it }: { it: DecorItem }) {
+  const [x, z] = px(it.x, it.y);
+  const W = (it.w ?? 26) / 30;
+  return (
+    <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
+      {[-1, 1].map((s) => (
+        <mesh key={s} position={[s * W / 2, 0.27, 0]} castShadow><boxGeometry args={[0.1, 0.54, 0.1]} /><meshStandardMaterial color="#f59f00" /></mesh>
+      ))}
+      <mesh position={[0, 0.28, 0]} castShadow><boxGeometry args={[W - 0.1, 0.32, 0.025]} /><meshStandardMaterial color="#343a40" /></mesh>
+      {[0.12, 0.44].map((y, k) => (
+        <mesh key={k} position={[0, y, 0]}><boxGeometry args={[W - 0.1, 0.04, 0.04]} /><meshStandardMaterial color={k ? "#e03131" : "#f8f9fa"} /></mesh>
+      ))}
+      <Tag y={0.75}>⛔ {it.name || "ประตูกั้น"}</Tag>
+    </group>
+  );
+}
+
+/** ทางเชื่อมระหว่างอาคาร (ชั้นที่ระบุ เช่น "2,3") */
+function Bridge({ it }: { it: DecorItem }) {
+  const [x, z] = px(it.x, it.y);
+  const W = (it.w ?? 30) / 30, D = (it.d ?? 20) / 30;
+  const levels = (it.levels ?? "2,3").split(",").map((s) => parseInt(s.trim())).filter((n) => n >= 1);
+  return (
+    <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
+      {levels.map((lv) => {
+        const y0 = (lv - 1) * FH;
+        return (
+          <group key={lv}>
+            <mesh position={[0, y0 + 0.04, 0]} castShadow receiveShadow><boxGeometry args={[W, 0.08, D]} /><meshStandardMaterial color="#ced4da" /></mesh>
+            {[-1, 1].map((s) => (
+              <mesh key={s} position={[s * (W / 2 - 0.02), y0 + 0.45, 0]}>
+                <boxGeometry args={[0.04, 0.74, D]} /><meshStandardMaterial color="#74c0fc" transparent opacity={0.55} />
+              </mesh>
+            ))}
+            <mesh position={[0, y0 + FH - 0.04, 0]} castShadow><boxGeometry args={[W + 0.06, 0.06, D]} /><meshStandardMaterial color="#c92a2a" /></mesh>
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+function Flag({ it }: { it: DecorItem }) {
+  const [x, z] = px(it.x, it.y);
   const flag = useRef<THREE.Group>(null);
   useFrame((s) => { if (flag.current) flag.current.rotation.y = Math.sin(s.clock.elapsedTime * 2) * 0.25; });
   const stripes: [string, number, number][] = [["#d32f2f", 0, 1], ["#ffffff", 1, 1], ["#1d3a8a", 2, 2], ["#ffffff", 4, 1], ["#d32f2f", 5, 1]];
@@ -412,7 +508,6 @@ export function Guard({ gate, robotRef }: { gate?: MapLocation; robotRef: React.
           </div>
         </Html>
       </group>
-      {/* ไม้กั้นทางเข้า — ยกขึ้นเมื่อหุ่นยนต์เข้าใกล้ */}
       <group ref={bar} position={[gate.pos[0] - 0.85, 0.42, gate.pos[1] - 0.5]}>
         <mesh position={[0, -0.2, 0]}><boxGeometry args={[0.08, 0.4, 0.08]} /><meshStandardMaterial color="#f59f00" /></mesh>
         {[0, 1, 2, 3].map((i) => (
@@ -429,23 +524,29 @@ export function Guard({ gate, robotRef }: { gate?: MapLocation; robotRef: React.
 /* ───────────── รวมฉากตกแต่ง ───────────── */
 
 export function Decor({
-  nodes, edges, gate, robotRef, indoor,
+  decor, gates, nodes, edges, gate, robotRef, indoor, onGround,
 }: {
-  nodes: MapNode[]; edges: MapEdge[]; gate?: MapLocation;
+  decor: DecorConfig; gates: GateDef[]; nodes: MapNode[]; edges: MapEdge[]; gate?: MapLocation;
   robotRef: React.RefObject<THREE.Group | null>; indoor: boolean;
+  onGround?: (x: number, z: number) => void;
 }) {
+  const of = (t: DecorItem["type"]) => decor.items.filter((i) => i.type === t);
   return (
     <>
-      <Ground />
+      <Ground onGround={onGround} />
       <Roads nodes={nodes} edges={edges} />
-      <Fence />
-      <SchoolGates />
-      <Pond />
+      <Fence gates={gates} />
+      <SchoolGates gates={gates} signs={of("sign")} />
       {!indoor && (
         <>
-          <Trees />
-          <Pavilions />
-          <Flagpole />
+          <Trees items={decor.items} />
+          <Pavilions items={decor.items} />
+          {of("flag").map((i) => <Flag key={i.id} it={i} />)}
+          {of("shrine").map((i) => <Shrine key={i.id} it={i} />)}
+          {of("toilet").map((i) => <ToiletBlock key={i.id} it={i} />)}
+          {of("shed").map((i) => <Shed key={i.id} it={i} />)}
+          {of("barrier").map((i) => <Barrier key={i.id} it={i} />)}
+          {of("bridge").map((i) => <Bridge key={i.id} it={i} />)}
         </>
       )}
       <Guard gate={gate} robotRef={robotRef} />
