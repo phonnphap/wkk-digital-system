@@ -4,7 +4,6 @@ import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-// Three.js ใช้ได้เฉพาะฝั่ง browser
 const SchoolMap3D = dynamic(() => import("./SchoolMap3D"), {
   ssr: false,
   loading: () => (
@@ -12,26 +11,45 @@ const SchoolMap3D = dynamic(() => import("./SchoolMap3D"), {
   ),
 });
 
-// ปรับให้ตรงกับระบบสิทธิ์ของโรงเรียน: ค่า role ที่ถือว่าเป็นแอดมิน
 const ADMIN_ROLES = ["admin", "superadmin", "super_admin"];
+const isAdminRole = (r: unknown) =>
+  typeof r === "string" && ADMIN_ROLES.includes(r.trim().toLowerCase());
 
-/** ตรวจ role จาก metadata ของผู้ใช้ ถ้าไม่มีให้ดูตาราง profiles.role
- *  (เป็นแค่การซ่อน/แสดงปุ่มตั้งค่า — ความปลอดภัยจริงต้องตั้ง RLS ที่ตาราง map_*) */
 function useIsAdmin() {
   const [admin, setAdmin] = useState(false);
+
   useEffect(() => {
-    (async () => {
+    const sb = createClient();
+    let alive = true;
+
+    const check = async () => {
       try {
-        const sb = createClient();
         const { data: { user } } = await sb.auth.getUser();
-        if (!user) return;
-        const meta = (user.app_metadata?.role ?? user.user_metadata?.role) as string | undefined;
-        if (meta && ADMIN_ROLES.includes(meta.toLowerCase())) { setAdmin(true); return; }
-        const { data } = await sb.from("profiles").select("role").eq("id", user.id).maybeSingle();
-        if (data?.role && ADMIN_ROLES.includes(String(data.role).toLowerCase())) setAdmin(true);
-      } catch { /* ไม่ใช่แอดมิน */ }
-    })();
+        if (!user) { if (alive) setAdmin(false); return; }
+
+        // 1) ตาราง users (ตามที่ใช้จริง) — ลองผูกด้วย id ก่อน
+        let { data, error } = await sb.from("users").select("role").eq("id", user.id).maybeSingle();
+
+        // 2) ถ้าไม่เจอ ลองผูกด้วย email (เผื่อตาราง users ไม่ได้ใช้ id เดียวกับ auth)
+        if (!data && user.email) {
+          const r = await sb.from("users").select("role").eq("email", user.email).maybeSingle();
+          data = r.data; error = r.error ?? error;
+        }
+
+        console.log("[admin-check]", { uid: user.id, email: user.email, data, error });
+
+        if (alive) setAdmin(isAdminRole(data?.role));
+      } catch (e) {
+        console.error("[admin-check] error", e);
+        if (alive) setAdmin(false);
+      }
+    };
+
+    check();
+    const { data: sub } = sb.auth.onAuthStateChange(() => { check(); });
+    return () => { alive = false; sub.subscription.unsubscribe(); };
   }, []);
+
   return admin;
 }
 
