@@ -1,12 +1,13 @@
 import * as THREE from "three";
 import {
   FH, MapEdge, MapLocation, MapNode, MapRoom, XZ,
-  corridorNorm, isLongX, stairsNorm,
+  corridorNorm, isLongX, localToWorld, stairsNorm, worldToLocal,
 } from "./schoolData";
 
 const dist = (a: XZ, b: XZ) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
-/** Dijkstra บนกราฟทางเดิน — จุดเริ่ม/จุดปลายจะถูกต่อเข้ากับโหนดที่ใกล้ที่สุดอัตโนมัติ */
+/** Dijkstra บนกราฟทางเดิน — จุดเริ่ม/จุดปลายจะถูกต่อเข้ากับโหนดที่ใกล้ที่สุดอัตโนมัติ
+ *  (ประตูทุกบานมีโหนดของตัวเอง จึงใช้เป็นจุดเข้า/ออกได้ทั้งหมด) */
 export function findPath(nodes: MapNode[], edges: MapEdge[], start: XZ, end: XZ): XZ[] {
   const pos = new Map<string, XZ>();
   nodes.forEach((n) => pos.set(n.id, [n.x, n.z]));
@@ -59,20 +60,18 @@ export function findPath(nodes: MapNode[], edges: MapEdge[], start: XZ, end: XZ)
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
-/** พิกัด world ของจุดสัดส่วน (0..1) ภายในอาคาร ที่ชั้น level */
+/** พิกัด world ของจุดสัดส่วน (0..1) ภายในอาคาร ที่ชั้น level (รวมการหมุนอาคาร) */
 export function toWorld(loc: MapLocation, n: XZ, level: number): THREE.Vector3 {
-  return new THREE.Vector3(
-    loc.pos[0] - loc.size[0] / 2 + n[0] * loc.size[0],
-    (level - 1) * FH + 0.12,
-    loc.pos[1] - loc.size[1] / 2 + n[1] * loc.size[1]
-  );
+  const [x, z] = localToWorld(loc, (n[0] - 0.5) * loc.size[0], (n[1] - 0.5) * loc.size[1]);
+  return new THREE.Vector3(x, (level - 1) * FH + 0.12, z);
 }
 
 /** เส้นทางในอาคาร: ทางเข้า → ทางเดินกลาง → (บันได) → หน้าห้อง */
 export function indoorRoute(loc: MapLocation, room: MapRoom): THREE.Vector3[] {
+  const [lx, lz] = worldToLocal(loc, loc.entrance[0], loc.entrance[1]);
   const entN: XZ = [
-    clamp((loc.entrance[0] - (loc.pos[0] - loc.size[0] / 2)) / loc.size[0], 0.02, 0.98),
-    clamp((loc.entrance[1] - (loc.pos[1] - loc.size[1] / 2)) / loc.size[1], 0.02, 0.98),
+    clamp(lx / loc.size[0] + 0.5, 0.02, 0.98),
+    clamp(lz / loc.size[1] + 0.5, 0.02, 0.98),
   ];
   const pts: THREE.Vector3[] = [
     new THREE.Vector3(loc.entrance[0], 0.12, loc.entrance[1]),

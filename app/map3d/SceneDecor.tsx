@@ -6,8 +6,9 @@ import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MapEdge, MapLocation, MapNode, px } from "./schoolData";
 import {
-  FENCE, FLAG_PX, GATE_GAP_CENTER, GATE_GAP_RADIUS, PAVILIONS_PX, POND, TREES_PX,
+  FENCE, FLAG_PX, GATES, PAVILIONS_PX, POND, TREES_PX,
 } from "./DecorData";
+import { SchoolGates } from "./SchoolGates";
 
 /* ───────────── helpers ───────────── */
 
@@ -119,8 +120,8 @@ export function Roads({ nodes, edges }: { nodes: MapNode[]; edges: MapEdge[] }) 
 export function Fence() {
   const parts = useMemo(() => {
     const bars: Item[] = [], rails: Item[] = [], pillars: Item[] = [];
-    const nearGap = (x: number, z: number) =>
-      Math.hypot(x - GATE_GAP_CENTER[0], z - GATE_GAP_CENTER[1]) < GATE_GAP_RADIUS;
+      const nearGap = (x: number, z: number) =>
+      GATES.some((g) => Math.hypot(x - g.x, z - g.z) < g.width / 2 + 0.25);
     for (let i = 0; i < FENCE.length; i++) {
       const a = FENCE[i], b = FENCE[(i + 1) % FENCE.length];
       const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -438,6 +439,7 @@ export function Decor({
       <Ground />
       <Roads nodes={nodes} edges={edges} />
       <Fence />
+      <SchoolGates />
       <Pond />
       {!indoor && (
         <>

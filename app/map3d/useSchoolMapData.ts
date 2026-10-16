@@ -1,77 +1,288 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
-  FALLBACK_EDGES, FALLBACK_LOCATIONS, FALLBACK_NODES, genRooms,
+  FALLBACK_EDGES, FALLBACK_GATE_EDGES, FALLBACK_GATE_NODES, FALLBACK_LOCATIONS, FALLBACK_NODES, genRooms,
   MapEdge, MapLocation, MapNode, MapRoom,
 } from "./schoolData";
 
-/** โหลดข้อมูลแผนที่จาก Supabase — ถ้าตารางยังไม่มี/ว่าง จะใช้ข้อมูลตั้งต้นจากแผนผังแทน */
+export type SaveResult = { ok: boolean; message: string };
+const ok = (message = "บันทึกแล้ว"): SaveResult => ({ ok: true, message });
+const fail = (e: any): SaveResult => ({ ok: false, message: e?.message ?? String(e) });
+const LOCAL = "แก้ไขในหน้านี้แล้ว (โหมดข้อมูลตั้งต้น — ยังไม่บันทึกลงฐานข้อมูล)";
+
+/** โหลดข้อมูลแผนที่จาก Supabase — ถ้าตารางยังไม่มี/ว่าง จะใช้ข้อมูลตั้งต้นจากแผนผังแทน
+ *  และมีฟังก์ชันสำหรับแอดมินแก้ชั้น/ห้อง/โต๊ะ/ชื่อห้อง */
 export function useSchoolMapData() {
   const [locs, setLocs] = useState<MapLocation[]>(FALLBACK_LOCATIONS);
   const [nodes, setNodes] = useState<MapNode[]>(FALLBACK_NODES);
   const [edges, setEdges] = useState<MapEdge[]>(FALLBACK_EDGES);
   const [dbRooms, setDbRooms] = useState<MapRoom[]>([]);
+  const [custom, setCustom] = useState<Record<string, MapRoom[]>>({});
   const [source, setSource] = useState<"fallback" | "supabase">("fallback");
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const supabase = createClient();
-        const [l, f, r, n, e] = await Promise.all([
-          supabase.from("map_locations").select("*"),
-          supabase.from("map_floors").select("id, location_id, level"),
-          supabase.from("map_rooms").select("*"),
-          supabase.from("map_nodes").select("*"),
-          supabase.from("map_edges").select("*"),
-        ]);
-        if (cancelled || l.error || n.error || !l.data?.length || !n.data?.length) return;
+  const load = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      const [l, f, r, n, e] = await Promise.all([
+        supabase.from("map_locations").select("*"),
+        supabase.from("map_floors").select("id, location_id, level"),
+        supabase.from("map_rooms").select("*"),
+        supabase.from("map_nodes").select("*"),
+        supabase.from("map_edges").select("*"),
+      ]);
+      if (l.error || n.error || !l.data?.length || !n.data?.length) return;
 
-        const maxLevel: Record<string, number> = {};
-        (f.data || []).forEach((x: any) => {
-          maxLevel[x.location_id] = Math.max(maxLevel[x.location_id] ?? 0, x.level);
-        });
-        const mappedLocs: MapLocation[] = l.data
-          .map((x: any) => ({
-            id: x.id, code: x.code, name: x.name, kind: x.kind,
-            pos: [x.pos_x, x.pos_z], size: [x.size_w, x.size_d],
-            color: x.color, floors: maxLevel[x.id] ?? x.floors_count,
-            entrance: [x.entrance_x, x.entrance_z], building_id: x.building_id,
-          } as MapLocation))
-          .sort((a: MapLocation, b: MapLocation) => Number(a.code) - Number(b.code));
+      const maxLevel: Record<string, number> = {};
+      (f.data || []).forEach((x: any) => {
+        maxLevel[x.location_id] = Math.max(maxLevel[x.location_id] ?? 0, x.level);
+      });
+      const mappedLocs: MapLocation[] = l.data
+        .map((x: any) => ({
+          id: x.id, code: x.code, name: x.name, kind: x.kind,
+          pos: [x.pos_x, x.pos_z], size: [x.size_w, x.size_d],
+          color: x.color, floors: maxLevel[x.id] ?? x.floors_count,
+          entrance: [x.entrance_x, x.entrance_z], building_id: x.building_id,
+          rot: Number(x.rot ?? 0),
+        } as MapLocation))
+        .sort((a: MapLocation, b: MapLocation) => Number(a.code) - Number(b.code));
 
-        const floorById = new Map<string, { level: number; location_id: string }>();
-        (f.data || []).forEach((x: any) => floorById.set(x.id, x));
-        const mappedRooms: MapRoom[] = (r.data || [])
-          .filter((x: any) => floorById.has(x.floor_id))
-          .map((x: any) => ({
-            id: x.id, code: x.code, name: x.name,
-            location_id: floorById.get(x.floor_id)!.location_id,
-            level: floorById.get(x.floor_id)!.level,
-            x: x.x, z: x.z, w: x.w, d: x.d, door: [x.door_x, x.door_z],
-            type: x.room_type ?? "classroom", desks: x.desk_count ?? 30,
-          } as MapRoom));
+      const floorById = new Map<string, { level: number; location_id: string }>();
+      (f.data || []).forEach((x: any) => floorById.set(x.id, x));
+      const mappedRooms: MapRoom[] = (r.data || [])
+        .filter((x: any) => floorById.has(x.floor_id))
+        .map((x: any) => ({
+          id: x.id, code: x.code, name: x.name,
+          location_id: floorById.get(x.floor_id)!.location_id,
+          level: floorById.get(x.floor_id)!.level,
+          x: x.x, z: x.z, w: x.w, d: x.d, door: [x.door_x, x.door_z],
+          type: x.room_type ?? "classroom", desks: x.desk_count ?? 30,
+        } as MapRoom));
 
-        setLocs(mappedLocs);
-        setNodes(n.data.map((x: any) => ({ id: x.code, x: x.pos_x, z: x.pos_z })));
-        setEdges((e.data || []).map((x: any) => ({ a: x.a, b: x.b })));
-        setDbRooms(mappedRooms);
-        setSource("supabase");
-      } catch (err) {
-        console.warn("[useSchoolMapData] ใช้ข้อมูลตั้งต้นแทน:", err);
-      }
-    })();
-    return () => { cancelled = true; };
+      // โหนด/เส้นทางของประตูรั้ว: ถ้า DB ยังไม่มี ให้เติมจากข้อมูลตั้งต้น
+      const dbNodes: MapNode[] = n.data.map((x: any) => ({ id: x.code, x: x.pos_x, z: x.pos_z }));
+      const have = new Set(dbNodes.map((x) => x.id));
+      const extraNodes = FALLBACK_GATE_NODES.filter((g) => !have.has(g.id));
+      const extraIds = new Set(extraNodes.map((x) => x.id));
+      const dbEdges: MapEdge[] = (e.data || []).map((x: any) => ({ a: x.a, b: x.b }));
+      const extraEdges = FALLBACK_GATE_EDGES.filter((x) => extraIds.has(x.a) || extraIds.has(x.b));
+
+      setLocs(mappedLocs);
+      setNodes([...dbNodes, ...extraNodes]);
+      setEdges([...dbEdges, ...extraEdges]);
+      setDbRooms(mappedRooms);
+      setCustom({});
+      setSource("supabase");
+    } catch (err) {
+      console.warn("[useSchoolMapData] ใช้ข้อมูลตั้งต้นแทน:", err);
+    }
   }, []);
 
-  // อาคารที่ยังไม่มีห้องในฐานข้อมูล → สร้างห้องตัวอย่างให้
+  useEffect(() => { load(); }, [load]);
+
+  // อาคารที่ยังไม่มีห้องในฐานข้อมูล → ใช้ห้องที่แอดมินแก้ในหน้านี้ หรือสร้างห้องตัวอย่างให้
   const rooms = useMemo(() => {
     const have = new Set(dbRooms.map((x) => x.location_id));
-    const gen = locs.filter((l) => !have.has(l.id)).flatMap(genRooms);
-    return [...dbRooms, ...gen];
-  }, [dbRooms, locs]);
+    const virtual = locs.filter((l) => !have.has(l.id)).flatMap((l) => custom[l.id] ?? genRooms(l));
+    return [...dbRooms, ...virtual];
+  }, [dbRooms, locs, custom]);
 
-  return { locs, rooms, nodes, edges, source };
+  const locsRef = useRef(locs); locsRef.current = locs;
+  const roomsRef = useRef(rooms); roomsRef.current = rooms;
+  const dbRoomsRef = useRef(dbRooms); dbRoomsRef.current = dbRooms;
+  const customRef = useRef(custom); customRef.current = custom;
+  const sourceRef = useRef(source); sourceRef.current = source;
+
+  /* ───────────── ฟังก์ชันสำหรับแอดมิน ───────────── */
+
+  const updateLocation = useCallback(async (id: string, patch: Partial<MapLocation>): Promise<SaveResult> => {
+    setLocs((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+    if (sourceRef.current !== "supabase") return ok(LOCAL);
+    const row: Record<string, any> = {};
+    if (patch.name !== undefined) row.name = patch.name;
+    if (patch.color !== undefined) row.color = patch.color;
+    if (patch.kind !== undefined) row.kind = patch.kind;
+    if (patch.rot !== undefined) row.rot = patch.rot;
+    if (patch.pos) { row.pos_x = patch.pos[0]; row.pos_z = patch.pos[1]; }
+    if (patch.size) { row.size_w = patch.size[0]; row.size_d = patch.size[1]; }
+    if (patch.entrance) { row.entrance_x = patch.entrance[0]; row.entrance_z = patch.entrance[1]; }
+    if (!Object.keys(row).length) return ok();
+    const { error } = await createClient().from("map_locations").update(row).eq("id", id);
+    return error ? fail(error) : ok();
+  }, []);
+
+  const setFloors = useCallback(async (id: string, count: number): Promise<SaveResult> => {
+    const n = Math.max(1, Math.min(8, Math.round(count)));
+    const loc = locsRef.current.find((l) => l.id === id);
+    if (!loc) return fail("ไม่พบอาคาร");
+    setLocs((prev) => prev.map((l) => (l.id === id ? { ...l, floors: n } : l)));
+    setCustom((prev) => {
+      const cur = prev[id];
+      if (!cur) return prev;
+      const maxL = Math.max(0, ...cur.map((r) => r.level));
+      const extra = genRooms({ ...loc, floors: n }).filter((r) => r.level > maxL);
+      return { ...prev, [id]: [...cur.filter((r) => r.level <= n), ...extra] };
+    });
+    if (sourceRef.current !== "supabase") return ok(LOCAL);
+    try {
+      const sb = createClient();
+      const { data: fl, error: e1 } = await sb.from("map_floors").select("id, level").eq("location_id", id);
+      if (e1) return fail(e1);
+      const have = new Map<number, string>((fl ?? []).map((f: any) => [f.level, f.id]));
+      const add: any[] = [];
+      for (let lv = 1; lv <= n; lv++) if (!have.has(lv)) add.push({ location_id: id, level: lv });
+      if (add.length) {
+        const { error } = await sb.from("map_floors").insert(add);
+        if (error) return fail(error);
+      }
+      const drop = (fl ?? []).filter((f: any) => f.level > n).map((f: any) => f.id);
+      if (drop.length) {
+        await sb.from("map_rooms").delete().in("floor_id", drop);
+        const { error } = await sb.from("map_floors").delete().in("id", drop);
+        if (error) return fail(error);
+      }
+      await sb.from("map_locations").update({ floors_count: n }).eq("id", id);
+      setDbRooms((prev) => prev.filter((r) => !(r.location_id === id && r.level > n)));
+      return ok(`ตั้งค่า ${n} ชั้นแล้ว`);
+    } catch (e) { return fail(e); }
+  }, []);
+
+  const updateRoom = useCallback(async (id: string, patch: Partial<MapRoom>): Promise<SaveResult> => {
+    if (dbRoomsRef.current.some((r) => r.id === id)) {
+      setDbRooms((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+      if (sourceRef.current !== "supabase") return ok(LOCAL);
+      const row: Record<string, any> = {};
+      if (patch.name !== undefined) row.name = patch.name;
+      if (patch.code !== undefined) row.code = patch.code;
+      if (patch.type !== undefined) row.room_type = patch.type;
+      if (patch.desks !== undefined) row.desk_count = patch.desks;
+      const { error } = await createClient().from("map_rooms").update(row).eq("id", id);
+      return error ? fail(error) : ok();
+    }
+    const room = roomsRef.current.find((r) => r.id === id);
+    if (!room) return fail("ไม่พบห้อง");
+    setCustom((prev) => {
+      const loc = locsRef.current.find((l) => l.id === room.location_id);
+      const base = prev[room.location_id] ?? (loc ? genRooms(loc) : []);
+      return { ...prev, [room.location_id]: base.map((r) => (r.id === id ? { ...r, ...patch } : r)) };
+    });
+    return ok("แก้ในหน้านี้แล้ว — กด “บันทึกทั้งอาคารลงฐานข้อมูล” เพื่อเก็บถาวร");
+  }, []);
+
+  const addRoom = useCallback(async (locId: string, level: number): Promise<SaveResult> => {
+    const loc = locsRef.current.find((l) => l.id === locId);
+    if (!loc) return fail("ไม่พบอาคาร");
+    const existing = roomsRef.current.filter((r) => r.location_id === locId && r.level === level);
+    const free = genRooms(loc).filter((r) => r.level === level).find((s) =>
+      !existing.some((e) =>
+        Math.abs(e.x + e.w / 2 - (s.x + s.w / 2)) < (e.w + s.w) / 2 - 0.005 &&
+        Math.abs(e.z + e.d / 2 - (s.z + s.d / 2)) < (e.d + s.d) / 2 - 0.005));
+    if (!free) return fail("ชั้นนี้ไม่มีที่ว่างสำหรับห้องใหม่");
+    const codes = new Set(existing.map((r) => r.code));
+    let num = existing.length + 1, code = "";
+    do { code = `${loc.code}-${level}${String(num++).padStart(2, "0")}`; } while (codes.has(code));
+    const base: MapRoom = { ...free, id: `new-${Date.now()}`, code, name: `ห้อง ${code}`, type: "classroom", desks: 30, placeholder: true };
+
+    const isDb = dbRoomsRef.current.some((r) => r.location_id === locId);
+    if (isDb && sourceRef.current === "supabase") {
+      try {
+        const sb = createClient();
+        let { data: fl } = await sb.from("map_floors").select("id").eq("location_id", locId).eq("level", level).maybeSingle();
+        if (!fl) {
+          const ins = await sb.from("map_floors").insert({ location_id: locId, level }).select("id").single();
+          if (ins.error) return fail(ins.error);
+          fl = ins.data;
+        }
+        const { data, error } = await sb.from("map_rooms").insert({
+          floor_id: fl!.id, code, name: base.name, x: base.x, z: base.z, w: base.w, d: base.d,
+          door_x: base.door[0], door_z: base.door[1], room_type: "classroom", desk_count: 30,
+        }).select("id").single();
+        if (error) return fail(error);
+        setDbRooms((prev) => [...prev, { ...base, id: data!.id, placeholder: undefined }]);
+        return ok(`เพิ่มห้อง ${code} แล้ว`);
+      } catch (e) { return fail(e); }
+    }
+    if (isDb) { setDbRooms((prev) => [...prev, base]); return ok(LOCAL); }
+    setCustom((prev) => ({ ...prev, [locId]: [...(prev[locId] ?? genRooms(loc)), base] }));
+    return ok(`เพิ่มห้อง ${code} แล้ว (ยังไม่บันทึกลงฐานข้อมูล)`);
+  }, []);
+
+  const deleteRoom = useCallback(async (id: string): Promise<SaveResult> => {
+    if (dbRoomsRef.current.some((r) => r.id === id)) {
+      setDbRooms((prev) => prev.filter((r) => r.id !== id));
+      if (sourceRef.current !== "supabase") return ok(LOCAL);
+      const { error } = await createClient().from("map_rooms").delete().eq("id", id);
+      return error ? fail(error) : ok("ลบห้องแล้ว");
+    }
+    const room = roomsRef.current.find((r) => r.id === id);
+    if (!room) return fail("ไม่พบห้อง");
+    setCustom((prev) => {
+      const loc = locsRef.current.find((l) => l.id === room.location_id);
+      const base = prev[room.location_id] ?? (loc ? genRooms(loc) : []);
+      return { ...prev, [room.location_id]: base.filter((r) => r.id !== id) };
+    });
+    return ok("ลบห้องแล้ว (ในหน้านี้)");
+  }, []);
+
+  /** บันทึกห้องตัวอย่าง/ห้องที่แก้ในหน้านี้ ของทั้งอาคาร ลง map_floors + map_rooms */
+  const saveGenerated = useCallback(async (locId: string): Promise<SaveResult> => {
+    if (sourceRef.current !== "supabase") return fail("ยังไม่ได้เชื่อมต่อ Supabase");
+    const loc = locsRef.current.find((l) => l.id === locId);
+    if (!loc) return fail("ไม่พบอาคาร");
+    const list = customRef.current[locId] ?? genRooms(loc);
+    try {
+      const sb = createClient();
+      const { data: fl, error: e1 } = await sb.from("map_floors").select("id, level").eq("location_id", locId);
+      if (e1) return fail(e1);
+      const floorIds = new Map<number, string>((fl ?? []).map((f: any) => [f.level, f.id]));
+      for (let lv = 1; lv <= loc.floors; lv++) {
+        if (floorIds.has(lv)) continue;
+        const ins = await sb.from("map_floors").insert({ location_id: locId, level: lv }).select("id").single();
+        if (ins.error) return fail(ins.error);
+        floorIds.set(lv, ins.data!.id);
+      }
+      const rows = list.filter((r) => floorIds.has(r.level)).map((r) => ({
+        floor_id: floorIds.get(r.level), code: r.code, name: r.name, x: r.x, z: r.z, w: r.w, d: r.d,
+        door_x: r.door[0], door_z: r.door[1], room_type: r.type ?? "classroom", desk_count: r.desks ?? 30,
+      }));
+      if (rows.length) {
+        const { error } = await sb.from("map_rooms").insert(rows);
+        if (error) return fail(error);
+      }
+      await load();
+      return ok(`บันทึก ${rows.length} ห้องลงฐานข้อมูลแล้ว`);
+    } catch (e) { return fail(e); }
+  }, [load]);
+
+  /** ปรับตำแหน่ง/ขนาด/การหมุน/ชนิดอาคารใน DB ให้ตรงกับผังตั้งต้นใหม่ + เติมโหนดประตู */
+  const syncDefaultLayout = useCallback(async (): Promise<SaveResult> => {
+    let count = 0;
+    for (const d of FALLBACK_LOCATIONS) {
+      const cur = locsRef.current.find((l) => l.code === d.code);
+      if (!cur) continue;
+      await updateLocation(cur.id, { pos: d.pos, size: d.size, rot: d.rot ?? 0, entrance: d.entrance, kind: d.kind });
+      count++;
+    }
+    if (sourceRef.current === "supabase") {
+      try {
+        const sb = createClient();
+        const { data: nd } = await sb.from("map_nodes").select("code");
+        const haveN = new Set((nd ?? []).map((x: any) => x.code));
+        const addN = FALLBACK_GATE_NODES.filter((g) => !haveN.has(g.id)).map((g) => ({ code: g.id, pos_x: g.x, pos_z: g.z }));
+        if (addN.length) await sb.from("map_nodes").insert(addN);
+        const { data: ed } = await sb.from("map_edges").select("a, b");
+        const key = (a: string, b: string) => [a, b].sort().join("|");
+        const haveE = new Set((ed ?? []).map((x: any) => key(x.a, x.b)));
+        const addE = FALLBACK_GATE_EDGES.filter((x) => !haveE.has(key(x.a, x.b))).map((x) => ({ a: x.a, b: x.b }));
+        if (addE.length) await sb.from("map_edges").insert(addE);
+      } catch (e) { return fail(e); }
+    }
+    return ok(`ปรับผัง ${count} สถานที่ + เส้นทางประตูแล้ว`);
+  }, [updateLocation]);
+
+  const api = { updateLocation, setFloors, updateRoom, addRoom, deleteRoom, saveGenerated, syncDefaultLayout, reload: load };
+  return { locs, rooms, nodes, edges, source, api };
 }
+
+export type MapApi = ReturnType<typeof useSchoolMapData>["api"];

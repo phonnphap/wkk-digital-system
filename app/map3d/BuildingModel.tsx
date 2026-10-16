@@ -3,11 +3,11 @@
 import * as THREE from "three";
 import { Edges, Html } from "@react-three/drei";
 import { useEffect, useMemo, useState } from "react";
-import { FH, MapLocation, MapRoom, isLongX, stairsNorm } from "./schoolData";
+import { FH, MapLocation, MapRoom, isLongX, rotRad, stairsNorm } from "./schoolData";
 import { Inst, Item, PinLabel } from "./SceneDecor";
 
 export const buildingHeight = (l: MapLocation) =>
-  l.kind === "gate" ? 1 : Math.max(l.floors, 1) * FH;
+  l.kind === "gate" ? 1 : l.kind === "dome" ? 1.5 : Math.max(l.floors, 1) * FH;
 
 const roofHeight = (l: MapLocation) => Math.min(1, Math.max(0.3, Math.min(l.size[0], l.size[1]) * 0.28));
 
@@ -19,8 +19,8 @@ function getWallTexture() {
   c.width = c.height = 128;
   const g = c.getContext("2d")!;
   g.fillStyle = "#f3ead8"; g.fillRect(0, 0, 128, 128);
-  g.fillStyle = "#cdbf9f"; g.fillRect(0, 118, 128, 10);          // ขอบพื้นแต่ละชั้น
-  g.fillStyle = "#ffffff"; g.fillRect(20, 24, 88, 72);          // กรอบหน้าต่าง
+  g.fillStyle = "#cdbf9f"; g.fillRect(0, 118, 128, 10);
+  g.fillStyle = "#ffffff"; g.fillRect(20, 24, 88, 72);
   g.fillStyle = "#7fb8e6"; g.fillRect(25, 29, 36, 62); g.fillRect(67, 29, 36, 62);
   g.fillStyle = "rgba(255,255,255,0.35)"; g.fillRect(25, 29, 12, 62); g.fillRect(67, 29, 12, 62);
   const t = new THREE.CanvasTexture(c);
@@ -49,16 +49,16 @@ function GableRoof({ w, d, color, rh }: { w: number; d: number; color: string; r
   );
 }
 
+type ModelProps = { loc: MapLocation; dim: boolean; selected: boolean; onPick: (id: string) => void };
+
 /* ───────────── อาคารมุมมองภายนอก ───────────── */
-export function BuildingModel({
-  loc, dim, selected, onPick,
-}: { loc: MapLocation; dim: boolean; selected: boolean; onPick: (id: string) => void }) {
+function BoxBuilding({ loc, dim, selected, onPick }: ModelProps) {
   const [hover, setHover] = useState(false);
   const [w, d] = loc.size;
   const floors = Math.max(loc.floors, 1);
   const h = buildingHeight(loc);
   const rh = roofHeight(loc);
-  const plain = loc.kind === "facility"; // โดม/โรงยิม — ผนังเรียบสีเดียว
+  const plain = loc.kind === "facility";
 
   const mats = useMemo(() => {
     const top = new THREE.MeshStandardMaterial({ color: "#cbbf9f" });
@@ -89,7 +89,7 @@ export function BuildingModel({
   }, [mats, dim, hover, selected]);
 
   return (
-    <group position={[loc.pos[0], 0, loc.pos[1]]}>
+    <group position={[loc.pos[0], 0, loc.pos[1]]} rotation={[0, -rotRad(loc), 0]}>
       <mesh position={[0, 0.03, 0]} receiveShadow>
         <boxGeometry args={[w + 0.1, 0.06, d + 0.1]} />
         <meshStandardMaterial color="#9ca3af" transparent={dim} opacity={dim ? 0.15 : 1} />
@@ -110,6 +110,104 @@ export function BuildingModel({
       {!dim && <PinLabel code={loc.code} y={h + rh + 0.5} onClick={() => onPick(loc.id)} />}
     </group>
   );
+}
+
+/* ───────────── โดมกีฬา: หลังคาโค้ง เสาเปิดข้าง พื้นเป็นสนาม ───────────── */
+function DomeModel({ loc, dim, selected, onPick }: ModelProps) {
+  const [hover, setHover] = useState(false);
+  const [w, d] = loc.size;
+  const long = w >= d;
+  const L = Math.max(w, d), W = Math.min(w, d);
+  const r = W / 2;
+  const colH = 0.5;                                  // ความสูงเสา
+  const rise = Math.max(0.5, Math.min(1.0, r * 0.9)); // ความสูงของส่วนโค้ง
+  const k = rise / r;
+  const hl = hover || selected;
+  const op = dim ? 0.18 : 1;
+  const accent = useMemo(() => new THREE.Color(loc.color), [loc.color]);
+  const court = useMemo(() => accent.clone().lerp(new THREE.Color("#ffffff"), 0.1).getStyle(), [accent]);
+  const roof = useMemo(() => accent.clone().lerp(new THREE.Color("#ffffff"), 0.55).getStyle(), [accent]);
+  const nCol = Math.max(3, Math.round(L / 1.1) + 1);
+  const xs = useMemo(() => Array.from({ length: nCol }, (_, i) => -L / 2 + (L * i) / (nCol - 1)), [nCol, L]);
+  const cw = L - 0.16, cd = W - 0.16; // ขนาดสนาม
+  const line = (x: number, z: number, sx: number, sz: number, key: string) => (
+    <mesh key={key} position={[x, 0.088, z]}>
+      <boxGeometry args={[sx, 0.006, sz]} /><meshStandardMaterial color="#ffffff" transparent={dim} opacity={op} />
+    </mesh>
+  );
+  return (
+    <group
+      position={[loc.pos[0], 0, loc.pos[1]]} rotation={[0, -rotRad(loc), 0]}
+      onClick={(e) => { e.stopPropagation(); onPick(loc.id); }}
+      onPointerOver={(e) => { e.stopPropagation(); setHover(true); document.body.style.cursor = "pointer"; }}
+      onPointerOut={() => { setHover(false); document.body.style.cursor = "auto"; }}
+    >
+      <group rotation={[0, long ? 0 : Math.PI / 2, 0]}>
+        {/* ฐานคอนกรีต + พื้นสนาม */}
+        <mesh position={[0, 0.03, 0]} receiveShadow>
+          <boxGeometry args={[L + 0.1, 0.06, W + 0.1]} />
+          <meshStandardMaterial color="#adb5bd" transparent={dim} opacity={op} />
+        </mesh>
+        <mesh position={[0, 0.07, 0]} receiveShadow>
+          <boxGeometry args={[cw, 0.02, cd]} />
+          <meshStandardMaterial color={court} transparent={dim} opacity={op} emissive={hl ? "#ffffff" : "#000000"} emissiveIntensity={hl ? 0.18 : 0} />
+        </mesh>
+        {/* เส้นสนาม */}
+        {line(0, -(cd / 2 - 0.05), cw - 0.1, 0.02, "t")}
+        {line(0, cd / 2 - 0.05, cw - 0.1, 0.02, "b")}
+        {line(-(cw / 2 - 0.05), 0, 0.02, cd - 0.1, "l")}
+        {line(cw / 2 - 0.05, 0, 0.02, cd - 0.1, "r")}
+        {line(0, 0, 0.02, cd - 0.1, "c")}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.089, 0]}>
+          <ringGeometry args={[cd * 0.16, cd * 0.16 + 0.02, 32]} />
+          <meshStandardMaterial color="#ffffff" transparent={dim} opacity={op} />
+        </mesh>
+        {/* ห่วงบาส/ประตูที่หัวท้ายสนาม */}
+        {!dim && [-1, 1].map((s) => (
+          <group key={s} position={[s * (cw / 2 - 0.08), 0, 0]}>
+            <mesh position={[0, 0.2, 0]}><cylinderGeometry args={[0.012, 0.012, 0.36, 6]} /><meshStandardMaterial color="#343a40" /></mesh>
+            <mesh position={[-s * 0.03, 0.36, 0]}><boxGeometry args={[0.012, 0.12, 0.18]} /><meshStandardMaterial color="#f8f9fa" /></mesh>
+          </group>
+        ))}
+
+        {!dim && (
+          <>
+            {/* เสาสองฝั่ง */}
+            {xs.flatMap((x) => [-1, 1].map((s) => (
+              <mesh key={`c${x}${s}`} position={[x, colH / 2, s * (r - 0.03)]} castShadow>
+                <cylinderGeometry args={[0.035, 0.035, colH, 8]} /><meshStandardMaterial color="#dee2e6" />
+              </mesh>
+            )))}
+            {/* หลังคาโค้งครึ่งทรงกระบอก + ซี่โครง */}
+            <group position={[0, colH, 0]} scale={[1, k, 1]}>
+              <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
+                <cylinderGeometry args={[r, r, L, 28, 1, true, 0, Math.PI]} />
+                <meshStandardMaterial color={roof} side={THREE.DoubleSide} roughness={0.5} metalness={0.15}
+                  emissive={hl ? "#ffffff" : "#000000"} emissiveIntensity={hl ? 0.15 : 0} />
+              </mesh>
+              {xs.map((x) => (
+                <mesh key={`r${x}`} position={[x, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
+                  <torusGeometry args={[r, 0.022 / Math.max(k, 0.5), 6, 28, Math.PI]} />
+                  <meshStandardMaterial color="#f1f3f5" />
+                </mesh>
+              ))}
+              {[-1, 1].map((s) => (
+                <mesh key={`e${s}`} position={[s * L / 2, 0, 0]} rotation={[0, s * Math.PI / 2, 0]}>
+                  <circleGeometry args={[r, 28, 0, Math.PI]} />
+                  <meshStandardMaterial color="#e7f5ff" transparent opacity={0.4} side={THREE.DoubleSide} />
+                </mesh>
+              ))}
+            </group>
+          </>
+        )}
+      </group>
+      {!dim && <PinLabel code={loc.code} y={colH + rise + 0.55} onClick={() => onPick(loc.id)} />}
+    </group>
+  );
+}
+
+export function BuildingModel(props: ModelProps) {
+  return props.loc.kind === "dome" ? <DomeModel {...props} /> : <BoxBuilding {...props} />;
 }
 
 /* ───────────── ห้องภายในอาคาร (มีโต๊ะ/กระดาน) ───────────── */
@@ -137,13 +235,12 @@ function RoomMesh({
 
   const layout = useMemo(() => {
     if (!deskCount) return null;
-    // ทิศของประตู → กระดานอยู่ผนังฝั่งตรงข้าม
     const dx = (room.door[0] - 0.5) * w - cx, dz = (room.door[1] - 0.5) * d - cz;
     const alongX = Math.abs(dx) > Math.abs(dz);
     const sgn = (alongX ? dx : dz) >= 0 ? 1 : -1;
     const iw = Math.max(rw - 0.1, 0.1), id = Math.max(rd - 0.1, 0.1);
-    const A = alongX ? id : iw;   // ความยาวขนานกระดาน
-    const D = alongX ? iw : id;   // ความลึกจากกระดานถึงประตู
+    const A = alongX ? id : iw;
+    const D = alongX ? iw : id;
     const boardZone = Math.min(0.14, D * 0.18);
     const usable = Math.max(D - boardZone - 0.04, 0.05);
     const cols = Math.max(1, Math.min(deskCount, Math.round(Math.sqrt((deskCount * A) / usable))));
@@ -212,7 +309,7 @@ export function IndoorBuilding({
   const st = stairsNorm(loc);
   const y = (floor - 1) * FH;
   return (
-    <group position={[loc.pos[0], 0, loc.pos[1]]}>
+    <group position={[loc.pos[0], 0, loc.pos[1]]} rotation={[0, -rotRad(loc), 0]}>
       {Array.from({ length: floor }, (_, i) => i + 1).map((l) => (
         <mesh key={l} position={[0, (l - 1) * FH + 0.04, 0]} receiveShadow>
           <boxGeometry args={[w, 0.08, d]} />

@@ -6,12 +6,15 @@ import * as THREE from "three";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSchoolMapData } from "./useSchoolMapData";
 import { findPath, indoorRoute } from "./pathfinding";
-import { FH, MapLocation, MapRoom, roomCenter } from "./schoolData";
+import { FH, MapLocation, MapRoom, XZ, roomCenter } from "./schoolData";
 import { BuildingModel, IndoorBuilding, TYPE_LABEL } from "./BuildingModel";
 import { Decor, Field, ParkingLot } from "./SceneDecor";
+import { GATES, layoutWarnings } from "./DecorData";
+import AdminPanel, { DEFAULT_SETTINGS, MapSettings } from "./AdminPanel";
 
-type Dest = { type: "loc" | "room"; id: string } | null;
+type Dest = { type: "loc" | "room" | "gate"; id: string } | null;
 type Goal = { pos: THREE.Vector3; target: THREE.Vector3 } | null;
+type StartPt = { id: string; label: string; entrance: XZ };
 
 const OVERVIEW: Goal = { pos: new THREE.Vector3(-2, 22, 18), target: new THREE.Vector3(-2, 0, 0.5) };
 
@@ -22,7 +25,9 @@ function focusGoal(loc: MapLocation, level: number): Goal {
   return { target: t, pos: new THREE.Vector3(loc.pos[0], y + s * 0.9 + 4, loc.pos[1] + s * 0.55 + 3) };
 }
 
-/* ───────────────────────── Robot / Camera ───────────────────────── */
+/* ───────────────────────── Robot (นักเรียน) / Camera ───────────────────────── */
+
+const SHIRT = "#ffffff", PANTS = "#1e2a4a", SKIN = "#f1c27d", TIE = "#dc2626";
 
 function Robot({
   route, running, groupRef, home, onDone, speed = 3.2,
@@ -33,8 +38,10 @@ function Robot({
   const idx = useRef(0);
   const finished = useRef(false);
   const body = useRef<THREE.Group>(null);
-  const legL = useRef<THREE.Mesh>(null);
-  const legR = useRef<THREE.Mesh>(null);
+  const legL = useRef<THREE.Group>(null);
+  const legR = useRef<THREE.Group>(null);
+  const armL = useRef<THREE.Group>(null);
+  const armR = useRef<THREE.Group>(null);
   const doneRef = useRef(onDone);
   doneRef.current = onDone;
 
@@ -76,19 +83,46 @@ function Robot({
     const swing = moving ? Math.sin(t * 9) * 0.6 : 0;
     if (legL.current) legL.current.rotation.x = swing;
     if (legR.current) legR.current.rotation.x = -swing;
+    if (armL.current) armL.current.rotation.x = -swing * 0.8;
+    if (armR.current) armR.current.rotation.x = swing * 0.8;
   });
+
+  const Leg = ({ x, r }: { x: number; r: React.RefObject<THREE.Group | null> }) => (
+    <group ref={r} position={[x, 0.6, 0]}>
+      <mesh position={[0, -0.17, 0]} castShadow><boxGeometry args={[0.2, 0.34, 0.22]} /><meshStandardMaterial color={PANTS} /></mesh>
+      <mesh position={[0, -0.41, 0]}><boxGeometry args={[0.16, 0.14, 0.18]} /><meshStandardMaterial color="#f8fafc" /></mesh>
+      <mesh position={[0, -0.52, 0.04]}><boxGeometry args={[0.19, 0.08, 0.3]} /><meshStandardMaterial color="#111827" /></mesh>
+    </group>
+  );
+  const Arm = ({ x, r }: { x: number; r: React.RefObject<THREE.Group | null> }) => (
+    <group ref={r} position={[x, 1.2, 0]}>
+      <mesh position={[0, -0.12, 0]}><boxGeometry args={[0.16, 0.26, 0.2]} /><meshStandardMaterial color={SHIRT} /></mesh>
+      <mesh position={[0, -0.34, 0]}><boxGeometry args={[0.11, 0.2, 0.13]} /><meshStandardMaterial color={SKIN} /></mesh>
+    </group>
+  );
 
   return (
     <group ref={groupRef} scale={0.55}>
       <group ref={body}>
-        <mesh position={[0, 0.9, 0]} castShadow><boxGeometry args={[0.6, 0.7, 0.4]} /><meshStandardMaterial color="#f43f5e" /></mesh>
+        {/* เสื้อนักเรียนสีขาว + ปกเสื้อ + เน็กไท + ป้ายชื่อ */}
+        <mesh position={[0, 0.9, 0]} castShadow><boxGeometry args={[0.6, 0.7, 0.4]} /><meshStandardMaterial color={SHIRT} /></mesh>
+        <mesh position={[-0.1, 1.24, 0.19]} rotation={[0, 0, 0.6]}><boxGeometry args={[0.16, 0.05, 0.06]} /><meshStandardMaterial color="#e2e8f0" /></mesh>
+        <mesh position={[0.1, 1.24, 0.19]} rotation={[0, 0, -0.6]}><boxGeometry args={[0.16, 0.05, 0.06]} /><meshStandardMaterial color="#e2e8f0" /></mesh>
+        <mesh position={[0, 1.0, 0.205]}><boxGeometry args={[0.09, 0.34, 0.02]} /><meshStandardMaterial color={TIE} /></mesh>
+        <mesh position={[0.18, 1.0, 0.205]}><boxGeometry args={[0.14, 0.08, 0.01]} /><meshStandardMaterial color="#2563eb" /></mesh>
+        {/* กางเกง/กระโปรงช่วงเอว */}
+        <mesh position={[0, 0.58, 0]}><boxGeometry args={[0.62, 0.12, 0.42]} /><meshStandardMaterial color={PANTS} /></mesh>
+        {/* กระเป๋านักเรียน */}
+        <mesh position={[0, 0.98, -0.3]} castShadow><boxGeometry args={[0.46, 0.56, 0.2]} /><meshStandardMaterial color="#1d4ed8" /></mesh>
+        <mesh position={[0, 1.2, -0.3]}><boxGeometry args={[0.48, 0.1, 0.22]} /><meshStandardMaterial color="#1e40af" /></mesh>
+        {/* หัวหุ่นยนต์ */}
         <mesh position={[0, 1.55, 0]} castShadow><sphereGeometry args={[0.32, 20, 20]} /><meshStandardMaterial color="#f8fafc" /></mesh>
         <mesh position={[-0.12, 1.6, 0.27]}><sphereGeometry args={[0.06, 10, 10]} /><meshBasicMaterial color="#0f172a" /></mesh>
         <mesh position={[0.12, 1.6, 0.27]}><sphereGeometry args={[0.06, 10, 10]} /><meshBasicMaterial color="#0f172a" /></mesh>
         <mesh position={[0, 1.95, 0]}><cylinderGeometry args={[0.02, 0.02, 0.2]} /><meshStandardMaterial color="#334155" /></mesh>
         <mesh position={[0, 2.08, 0]}><sphereGeometry args={[0.07, 10, 10]} /><meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={0.6} /></mesh>
-        <mesh ref={legL} position={[-0.16, 0.35, 0]}><boxGeometry args={[0.18, 0.5, 0.2]} /><meshStandardMaterial color="#334155" /></mesh>
-        <mesh ref={legR} position={[0.16, 0.35, 0]}><boxGeometry args={[0.18, 0.5, 0.2]} /><meshStandardMaterial color="#334155" /></mesh>
+        <Arm x={-0.38} r={armL} /><Arm x={0.38} r={armR} />
+        <Leg x={-0.16} r={legL} /><Leg x={0.16} r={legR} />
       </group>
     </group>
   );
@@ -119,16 +153,35 @@ function CameraRig({
   return null;
 }
 
+/* ───────────────────────── UI helpers ───────────────────────── */
+
+const glass = "bg-white/80 backdrop-blur-xl border border-white/70 shadow-[0_8px_30px_rgba(15,23,42,0.14)]";
+
+function Stat({ label, value, unit, tone }: { label: string; value: number | string; unit: string; tone: string }) {
+  return (
+    <div className={`${glass} rounded-2xl px-3.5 py-2 min-w-[7.2rem]`}>
+      <p className="text-[10px] font-bold text-slate-400">{label}</p>
+      <p className={`text-xl font-black leading-tight ${tone}`}>{value}<span className="text-[10px] font-bold text-slate-400 ml-1">{unit}</span></p>
+    </div>
+  );
+}
+
 /* ───────────────────────── Main component ───────────────────────── */
 
-export default function SchoolMap3D() {
-  const { locs, rooms, nodes, edges, source } = useSchoolMapData();
+export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) {
+  const { locs, rooms, nodes, edges, source, api } = useSchoolMapData();
   const locById = useMemo(() => new Map(locs.map((l) => [l.id, l])), [locs]);
   const roomById = useMemo(() => new Map(rooms.map((r) => [r.id, r])), [rooms]);
-  const gate = useMemo(() => locs.find((l) => l.kind === "gate") ?? locs[0], [locs]);
+  const guardHouse = useMemo(() => locs.find((l) => l.kind === "gate") ?? locs[0], [locs]);
 
-  const [fromId, setFromId] = useState("");
-  const fromLoc = locById.get(fromId) ?? gate;
+  // จุดเริ่มต้น: ประตูทุกบาน + สถานที่ทุกแห่ง
+  const startPoints = useMemo<StartPt[]>(() => [
+    ...GATES.map((g) => ({ id: `gate:${g.id}`, label: `🚪 ${g.name}`, entrance: [g.x, g.z] as XZ })),
+    ...locs.map((l) => ({ id: l.id, label: `${l.code}. ${l.name}`, entrance: l.entrance })),
+  ], [locs]);
+  const [fromId, setFromId] = useState("gate:main");
+  const fromPt = startPoints.find((p) => p.id === fromId) ?? startPoints[0];
+
   const [mode, setMode] = useState<"outdoor" | "indoor">("outdoor");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [floor, setFloor] = useState(1);
@@ -136,18 +189,32 @@ export default function SchoolMap3D() {
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [dest, setDest] = useState<Dest>(null);
   const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
   const [route, setRoute] = useState<THREE.Vector3[]>([]);
   const [running, setRunning] = useState(false);
   const [follow, setFollow] = useState(false);
   const [goal, setGoal] = useState<Goal>(OVERVIEW);
   const [msg, setMsg] = useState("เลือกสถานที่ปลายทางเพื่อเริ่มนำทาง");
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [settings, setSettings] = useState<MapSettings>(DEFAULT_SETTINGS);
+
+  useEffect(() => {
+    try { const s = localStorage.getItem("wkk-map-settings"); if (s) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(s) }); } catch { /* ignore */ }
+  }, []);
+  const changeSettings = (s: MapSettings) => {
+    setSettings(s);
+    try { localStorage.setItem("wkk-map-settings", JSON.stringify(s)); } catch { /* ignore */ }
+  };
+
+  const warnings = useMemo(() => layoutWarnings(locs), [locs]);
+  useEffect(() => { if (warnings.length) console.warn("[map3d] ตรวจผัง:", warnings); }, [warnings]);
 
   const robotRef = useRef<THREE.Group>(null);
   const controlsRef = useRef<any>(null);
   const stageRef = useRef<"outdoor" | "indoor" | null>(null);
   const pendingRef = useRef<Dest>(null);
 
-  const home = useMemo(() => new THREE.Vector3(gate?.entrance[0] ?? 0, 0.12, gate?.entrance[1] ?? 0), [gate]);
+  const home = useMemo(() => new THREE.Vector3(fromPt?.entrance[0] ?? 0, 0.12, fromPt?.entrance[1] ?? 0), [fromPt]);
   const activeLoc = activeId ? locById.get(activeId) : undefined;
   const selectedRoom = selectedRoomId ? roomById.get(selectedRoomId) : undefined;
 
@@ -170,6 +237,13 @@ export default function SchoolMap3D() {
   const finishOutdoor = useCallback((d: Dest) => {
     setRunning(false);
     if (!d) return;
+    if (d.type === "gate") {
+      const g = GATES.find((x) => x.id === d.id);
+      stageRef.current = null; setFollow(false);
+      setMsg(`ถึง${g?.name ?? "ประตู"}แล้ว`);
+      notifyParent("arrived", { gate: d.id });
+      return;
+    }
     const room = d.type === "room" ? roomById.get(d.id) : undefined;
     const loc = d.type === "room" ? (room ? locById.get(room.location_id) : undefined) : locById.get(d.id);
     if (!loc) return;
@@ -193,29 +267,37 @@ export default function SchoolMap3D() {
   }, [roomById, locById, enterIndoor]);
 
   const startOutdoorNav = useCallback((d: Dest) => {
-    if (!d) return;
-    const room = d.type === "room" ? roomById.get(d.id) : undefined;
-    const loc = d.type === "room" ? (room ? locById.get(room.location_id) : undefined) : locById.get(d.id);
-    if (!loc || !fromLoc) return;
+    if (!d || !fromPt) return;
+    let target: { id: string; entrance: XZ; name: string; code?: string } | null = null;
+    let room: MapRoom | undefined;
+    if (d.type === "gate") {
+      const g = GATES.find((x) => x.id === d.id);
+      if (g) target = { id: `gate:${g.id}`, entrance: [g.x, g.z], name: g.name };
+    } else {
+      room = d.type === "room" ? roomById.get(d.id) : undefined;
+      const loc = d.type === "room" ? (room ? locById.get(room.location_id) : undefined) : locById.get(d.id);
+      if (loc) target = { id: loc.id, entrance: loc.entrance, name: loc.name, code: loc.code };
+    }
+    if (!target) return;
     pendingRef.current = d;
     setSelectedId(null); setSelectedRoomId(null); setMode("outdoor"); setActiveId(null);
-    if (fromLoc.id === loc.id) {
+    if (fromPt.id === target.id) {
       stageRef.current = "outdoor";
-      setRoute([new THREE.Vector3(loc.entrance[0], 0.12, loc.entrance[1])]);
+      setRoute([new THREE.Vector3(target.entrance[0], 0.12, target.entrance[1])]);
       setTimeout(() => finishOutdoor(d), 0);
       return;
     }
-    const xz = findPath(nodes, edges, fromLoc.entrance, loc.entrance);
+    const xz = findPath(nodes, edges, fromPt.entrance, target.entrance);
     const pts: THREE.Vector3[] = [];
     xz.forEach(([x, z]) => {
       const v = new THREE.Vector3(x, 0.12, z);
       if (!pts.length || pts[pts.length - 1].distanceTo(v) > 0.01) pts.push(v);
     });
     stageRef.current = "outdoor";
-    setRoute(pts); setRunning(true); setFollow(true); setGoal(null);
-    setMsg(`กำลังนำทางไป ${room ? room.name + " · " : ""}${loc.name}`);
-    notifyParent("navigate-start", { to: loc.code, room: room?.code });
-  }, [fromLoc, locById, roomById, nodes, edges, finishOutdoor]);
+    setRoute(pts); setRunning(true); setFollow(settings.autoFollow); setGoal(null);
+    setMsg(`กำลังนำทางไป ${room ? room.name + " · " : ""}${target.name}`);
+    notifyParent("navigate-start", { to: target.code, room: room?.code });
+  }, [fromPt, locById, roomById, nodes, edges, finishOutdoor, settings.autoFollow]);
 
   const onRobotDone = useCallback(() => {
     if (stageRef.current === "outdoor") finishOutdoor(pendingRef.current);
@@ -268,6 +350,10 @@ export default function SchoolMap3D() {
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
     const items: { d: NonNullable<Dest>; label: string; sub: string }[] = [];
+    GATES.forEach((g) => {
+      if (!q || g.name.includes(q) || "ประตู".includes(q))
+        items.push({ d: { type: "gate", id: g.id }, label: `🚪 ${g.name}`, sub: "ประตูโรงเรียน (ทางเข้า/ออก)" });
+    });
     locs.forEach((l) => {
       if (!q || l.name.toLowerCase().includes(q) || l.code === q)
         items.push({ d: { type: "loc", id: l.id }, label: `${l.code}. ${l.name}`, sub: "สถานที่" });
@@ -282,7 +368,9 @@ export default function SchoolMap3D() {
   }, [query, locs, rooms, locById]);
 
   const destLabel = dest
-    ? dest.type === "loc" ? locById.get(dest.id)?.name : roomById.get(dest.id)?.name
+    ? dest.type === "loc" ? locById.get(dest.id)?.name
+      : dest.type === "gate" ? GATES.find((g) => g.id === dest.id)?.name
+      : roomById.get(dest.id)?.name
     : null;
   const selectedLoc = selectedId ? locById.get(selectedId) : undefined;
   const pickOutdoor = (id: string) => {
@@ -290,23 +378,32 @@ export default function SchoolMap3D() {
     setSelectedId(id); setGoal(focusGoal(locById.get(id)!, 1)); setFollow(false);
   };
 
+  const stats = useMemo(() => {
+    const cls = rooms.filter((r) => (r.type ?? "classroom") === "classroom");
+    return {
+      buildings: locs.filter((l) => l.kind === "building").length,
+      rooms: rooms.length,
+      desks: cls.reduce((s, r) => s + (r.desks ?? 30), 0),
+    };
+  }, [locs, rooms]);
+
   return (
     <div className="relative w-full h-full min-h-[480px] bg-sky-100 overflow-hidden font-sans">
-      <Canvas shadows camera={{ position: [-2, 22, 18], fov: 45 }} dpr={[1, 2]}
+      <Canvas shadows={settings.shadows} camera={{ position: [-2, 22, 18], fov: 45 }} dpr={settings.hiQuality ? [1, 2] : [1, 1]}
         onPointerMissed={() => { setSelectedId(null); setSelectedRoomId(null); }}>
         <color attach="background" args={["#cfe8ff"]} />
         <fog attach="fog" args={["#cfe8ff", 45, 100]} />
         <hemisphereLight args={["#ffffff", "#7a9a5a", 0.7]} />
         <ambientLight intensity={0.35} />
         <directionalLight
-          position={[12, 26, 14]} intensity={1.15} castShadow
+          position={[12, 26, 14]} intensity={1.15} castShadow={settings.shadows}
           shadow-mapSize={[2048, 2048]}
           shadow-camera-left={-26} shadow-camera-right={26}
           shadow-camera-top={26} shadow-camera-bottom={-26}
           shadow-camera-near={1} shadow-camera-far={90}
         />
 
-        <Decor nodes={nodes} edges={edges} gate={gate} robotRef={robotRef as any} indoor={mode === "indoor"} />
+        <Decor nodes={nodes} edges={edges} gate={guardHouse} robotRef={robotRef as any} indoor={mode === "indoor"} />
 
         {locs.map((l) => {
           if (mode === "indoor" && l.id === activeId) return null;
@@ -329,53 +426,68 @@ export default function SchoolMap3D() {
           <Line points={route.map((p) => [p.x, p.y + 0.06, p.z] as [number, number, number])}
             color="#f43f5e" lineWidth={4} dashed dashSize={0.3} gapSize={0.2} />
         )}
-        <Robot route={route} running={running} groupRef={robotRef as any} home={home} onDone={onRobotDone} />
+        <Robot route={route} running={running} groupRef={robotRef as any} home={home} onDone={onRobotDone} speed={settings.robotSpeed} />
         <OrbitControls ref={controlsRef} makeDefault maxPolarAngle={Math.PI / 2.1} minDistance={1.5} maxDistance={45}
           onStart={() => { setFollow(false); setGoal(null); }} />
         <CameraRig goal={goal} follow={follow} robotRef={robotRef as any} controlsRef={controlsRef} />
       </Canvas>
 
-      {/* ── แผงค้นหา / นำทาง ── */}
-      <div className="absolute top-3 left-3 w-[19rem] max-w-[calc(100%-1.5rem)] bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-slate-200 p-3 space-y-2">
-        <p className="text-sm font-black text-slate-800">🗺️ แผนผังโรงเรียนวัดเขียนเขต 3D</p>
-        <label className="block text-[11px] font-bold text-slate-400">จุดเริ่มต้น</label>
-        <select value={fromLoc?.id ?? ""} onChange={(e) => setFromId(e.target.value)}
-          className="w-full text-xs rounded-lg border border-slate-200 px-2 py-1.5">
-          {locs.map((l) => <option key={l.id} value={l.id}>{l.code}. {l.name}</option>)}
-        </select>
-        <label className="block text-[11px] font-bold text-slate-400">ปลายทาง (ค้นหาอาคาร / ห้อง)</label>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="เช่น อาคาร 3, ห้อง 3-101, สนาม…"
-          className="w-full text-xs rounded-lg border border-slate-200 px-2 py-1.5 outline-none focus:border-blue-400" />
-        <div className="max-h-44 overflow-y-auto divide-y divide-slate-50 rounded-lg border border-slate-100">
-          {results.length === 0 && <p className="text-xs text-slate-400 p-2">ไม่พบสถานที่</p>}
-          {results.map((r, i) => (
-            <button key={i} onClick={() => { setDest(r.d); setQuery(""); }}
-              className="w-full text-left px-2 py-1.5 hover:bg-blue-50">
-              <span className="block text-xs font-bold text-slate-700 truncate">{r.label}</span>
-              <span className="block text-[10px] text-slate-400 truncate">{r.sub}</span>
-            </button>
-          ))}
-        </div>
-        {destLabel && <p className="text-xs text-slate-600">🎯 ปลายทาง: <b>{destLabel}</b></p>}
-        <div className="flex gap-2">
-          <button disabled={!dest || running} onClick={() => goTo(dest)}
-            className="flex-1 text-xs font-extrabold rounded-xl bg-blue-600 text-white py-2 disabled:opacity-40">
-            🚶 เริ่มนำทาง
-          </button>
-          <button onClick={() => { setFollow((v) => !v); setGoal(null); }}
-            className={`text-xs font-bold rounded-xl px-3 border ${follow ? "bg-emerald-50 border-emerald-300 text-emerald-700" : "border-slate-200 text-slate-500"}`}>
-            ตามหุ่นยนต์
-          </button>
+      {/* ── หัวแผนที่ ── */}
+      <div className={`${glass} absolute top-3 left-3 rounded-2xl pl-2.5 pr-4 py-2 flex items-center gap-2.5`}>
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-sky-500 grid place-items-center text-lg">🏫</div>
+        <div>
+          <p className="text-sm font-black text-slate-800 leading-tight">โรงเรียนวัดเขียนเขต</p>
+          <p className="text-[10px] font-bold text-slate-400">แผนผัง 3 มิติ · {source === "supabase" ? "ข้อมูลจริง" : "ข้อมูลตั้งต้น"}</p>
         </div>
       </div>
 
-      {/* ── การ์ดอาคารที่เลือก (ภายนอก) ── */}
+      {/* ── สถิติ (มุมมองรวม) / แถบออกจากอาคาร (ภายใน) ── */}
+      {mode === "outdoor" ? (
+        <div className="hidden lg:flex absolute top-3 left-1/2 -translate-x-1/2 gap-2">
+          <Stat label="อาคารเรียน" value={stats.buildings} unit="หลัง" tone="text-blue-700" />
+          <Stat label="ห้องทั้งหมด" value={stats.rooms} unit="ห้อง" tone="text-indigo-700" />
+          <Stat label="โต๊ะนักเรียน" value={stats.desks} unit="ตัว" tone="text-emerald-600" />
+          <Stat label="ประตูเข้า-ออก" value={GATES.length} unit="บาน" tone="text-rose-600" />
+        </div>
+      ) : activeLoc && (
+        <div className={`${glass} absolute top-3 left-1/2 -translate-x-1/2 rounded-2xl flex items-center gap-3 px-3 py-2`}>
+          <button onClick={exitIndoor} className="text-xs font-extrabold text-rose-600">← ออกจากอาคาร</button>
+          <span className="text-xs font-black text-slate-700 hidden sm:inline">{activeLoc.name}</span>
+        </div>
+      )}
+
+      {/* ── ปุ่มมุมขวาบน ── */}
+      <div className="absolute top-3 right-3 flex gap-2">
+        <button onClick={() => { if (mode === "indoor") exitIndoor(); setGoal(OVERVIEW); setFollow(false); }}
+          className={`${glass} text-xs font-bold text-slate-700 rounded-xl px-3 py-2`}>มุมมองรวม</button>
+        <button onClick={() => { setFollow((v) => !v); setGoal(null); }}
+          className={`${glass} text-xs font-bold rounded-xl px-3 py-2 ${follow ? "text-emerald-700 !bg-emerald-50" : "text-slate-700"}`}>ตามนักเรียน</button>
+        {isAdmin && (
+          <button onClick={() => setShowAdmin((v) => !v)}
+            className={`text-xs font-extrabold rounded-xl px-3 py-2 shadow ${showAdmin ? "bg-slate-800 text-white" : "bg-blue-600 text-white"}`}>⚙ ตั้งค่า</button>
+        )}
+      </div>
+
+      {/* ── เลือกชั้น (ภายในอาคาร) ── */}
+      {mode === "indoor" && activeLoc && (
+        <div className={`${glass} absolute left-3 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 rounded-2xl p-1.5`}>
+          {Array.from({ length: Math.max(activeLoc.floors, 1) }, (_, i) => Math.max(activeLoc.floors, 1) - i).map((lv) => (
+            <button key={lv} onClick={() => { setFloor(lv); setSelectedRoomId(null); setGoal(focusGoal(activeLoc, lv)); setFollow(false); }}
+              className={`w-12 h-10 rounded-xl text-xs font-black ${floor === lv ? "bg-blue-600 text-white shadow" : "text-slate-600 hover:bg-white"}`}>
+              ชั้น {lv}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── การ์ดอาคารที่เลือก ── */}
       {selectedLoc && mode === "outdoor" && (
-        <div className="absolute bottom-16 left-3 w-[19rem] max-w-[calc(100%-1.5rem)] bg-white rounded-2xl shadow-xl border border-slate-200 p-3 space-y-2">
+        <div className={`${glass} absolute bottom-28 right-3 w-[19rem] max-w-[calc(100%-1.5rem)] rounded-2xl p-3 space-y-2`}>
           <p className="text-sm font-black text-slate-800">{selectedLoc.code}. {selectedLoc.name}</p>
           {selectedLoc.kind === "building" && (
             <p className="text-[11px] text-slate-500">{selectedLoc.floors} ชั้น · {rooms.filter((r) => r.location_id === selectedLoc.id).length} ห้อง</p>
           )}
+          {selectedLoc.kind === "dome" && <p className="text-[11px] text-slate-500">โดมกีฬา · พื้นสนามอเนกประสงค์</p>}
           <div className="flex gap-2">
             <button onClick={() => goTo({ type: "loc", id: selectedLoc.id })}
               className="flex-1 text-xs font-extrabold rounded-xl bg-blue-600 text-white py-2">🚶 นำทางไปที่นี่</button>
@@ -387,9 +499,9 @@ export default function SchoolMap3D() {
         </div>
       )}
 
-      {/* ── การ์ดห้องที่เลือก (ภายใน) ── */}
+      {/* ── การ์ดห้องที่เลือก ── */}
       {mode === "indoor" && activeLoc && selectedRoom && (
-        <div className="absolute bottom-16 left-3 w-[19rem] max-w-[calc(100%-1.5rem)] bg-white rounded-2xl shadow-xl border border-slate-200 p-3 space-y-2">
+        <div className={`${glass} absolute bottom-28 right-3 w-[19rem] max-w-[calc(100%-1.5rem)] rounded-2xl p-3 space-y-2`}>
           <p className="text-sm font-black text-slate-800">{selectedRoom.name} <span className="text-xs font-bold text-slate-400">ชั้น {selectedRoom.level}</span></p>
           <p className="text-[11px] text-slate-500">
             {TYPE_LABEL[selectedRoom.type ?? "classroom"] ?? "ห้อง"}
@@ -404,31 +516,46 @@ export default function SchoolMap3D() {
         </div>
       )}
 
-      {/* ── Indoor UI ── */}
-      {mode === "indoor" && activeLoc && (
-        <>
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-white/95 rounded-2xl shadow-xl border border-slate-200 px-3 py-2">
-            <button onClick={exitIndoor} className="text-xs font-extrabold text-rose-600">← ออกจากอาคาร</button>
-            <span className="text-xs font-black text-slate-700 hidden sm:inline">{activeLoc.name}</span>
-          </div>
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-2 bg-white/95 rounded-2xl shadow-xl border border-slate-200 p-2">
-            {Array.from({ length: Math.max(activeLoc.floors, 1) }, (_, i) => Math.max(activeLoc.floors, 1) - i).map((lv) => (
-              <button key={lv} onClick={() => { setFloor(lv); setSelectedRoomId(null); setGoal(focusGoal(activeLoc, lv)); setFollow(false); }}
-                className={`w-12 h-10 rounded-xl text-xs font-black border ${floor === lv ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:border-blue-300"}`}>
-                ชั้น {lv}
-              </button>
-            ))}
-          </div>
-        </>
+      {/* ── แผงตั้งค่าแอดมิน ── */}
+      {isAdmin && showAdmin && (
+        <AdminPanel locs={locs} rooms={rooms} source={source} warnings={warnings}
+          settings={settings} onSettings={changeSettings} api={api} onClose={() => setShowAdmin(false)} />
       )}
 
-      {/* ── Status ── */}
-      <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2 pointer-events-none">
-        <div className="pointer-events-auto text-xs font-bold bg-slate-900/80 text-white rounded-xl px-3 py-2">{msg}</div>
-        <div className="pointer-events-auto flex gap-2">
-          <button onClick={() => { if (mode === "indoor") exitIndoor(); setGoal(OVERVIEW); setFollow(false); }}
-            className="text-xs font-bold bg-white rounded-xl border border-slate-200 px-3 py-2 shadow">มุมมองรวม</button>
-          <span className="text-[10px] text-slate-400 self-end">{source === "supabase" ? "● Supabase" : "● ข้อมูลตั้งต้น"}</span>
+      {/* ── แถบนำทางด้านล่าง ── */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 w-[min(46rem,calc(100%-1.5rem))] space-y-2">
+        <div className="flex items-center gap-2 pl-1">
+          <span className="text-[11px] font-bold bg-slate-900/80 text-white rounded-xl px-3 py-1.5 truncate">{msg}</span>
+          {destLabel && (
+            <span className="text-[11px] font-bold bg-white/90 text-slate-700 rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 shrink-0">
+              🎯 {destLabel}
+              <button onClick={() => setDest(null)} className="text-slate-400" aria-label="ล้างปลายทาง">✕</button>
+            </span>
+          )}
+        </div>
+        <div className={`${glass} relative rounded-2xl p-2 flex flex-wrap sm:flex-nowrap items-center gap-2`}>
+          <select value={fromPt?.id ?? ""} onChange={(e) => { setFromId(e.target.value); setRoute([]); setRunning(false); }}
+            className="w-full sm:w-44 text-xs font-bold rounded-xl border border-slate-200 bg-white px-2 py-2" aria-label="จุดเริ่มต้น">
+            {startPoints.map((p) => <option key={p.id} value={p.id}>จาก: {p.label}</option>)}
+          </select>
+          <input value={query} onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => setFocused(true)} onBlur={() => setTimeout(() => setFocused(false), 150)}
+            placeholder="ไปที่… เช่น ประตูหลัก, อาคาร 3, ห้อง 3-101"
+            className="flex-1 min-w-[10rem] text-xs rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:border-blue-400" />
+          <button disabled={!dest || running} onClick={() => goTo(dest)}
+            className="text-xs font-extrabold rounded-xl bg-blue-600 text-white px-4 py-2 disabled:opacity-40">🚶 นำทาง</button>
+          {(focused || query) && (
+            <div className={`${glass} absolute bottom-full mb-2 left-2 right-2 max-h-60 overflow-y-auto rounded-2xl divide-y divide-slate-100`}>
+              {results.length === 0 && <p className="text-xs text-slate-400 p-3">ไม่พบสถานที่</p>}
+              {results.map((r, i) => (
+                <button key={i} onMouseDown={(e) => e.preventDefault()} onClick={() => { setDest(r.d); setQuery(""); }}
+                  className="w-full text-left px-3 py-2 hover:bg-blue-50/70">
+                  <span className="block text-xs font-bold text-slate-700 truncate">{r.label}</span>
+                  <span className="block text-[10px] text-slate-400 truncate">{r.sub}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
