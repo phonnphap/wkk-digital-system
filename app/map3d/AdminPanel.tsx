@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { LocKind, MapLocation, MapRoom, CorridorSide, StairsMode } from "./schoolData";
+import type { LocKind, MapLocation, MapRoom, CorridorSide, StairsMode, ToiletMode } from "./schoolData";
+import { TOILET_OPTIONS } from "./schoolData";
+import { TYPE_LABEL, AC_LABEL } from "./BuildingModel";
 import type { MapApi, SaveResult } from "./useSchoolMapData";
-import { TYPE_LABEL } from "./BuildingModel";
 
 export interface MapSettings {
   robotSpeed: number;   // ความเร็วหุ่นยนต์
@@ -39,14 +40,15 @@ function LocForm({ loc, api, run }: { loc: MapLocation; api: MapApi; run: (p: Pr
   const [z, setZ] = useState(+loc.pos[1].toFixed(2));
   const [w, setW] = useState(+loc.size[0].toFixed(2));
   const [d, setD] = useState(+loc.size[1].toFixed(2));
-  const [corridor, setCorridor] = useState<CorridorSide>(loc.corridor ?? "center");
+  const [corridor, setCorridor] = useState<CorridorSide>(loc.corridor === "b" ? "b" : "a");
+  const [toilet, setToilet] = useState<ToiletMode>(loc.toilet ?? "none");
   const [stairs, setStairs] = useState<StairsMode>(loc.stairs ?? "start");
   const [perFloor, setPerFloor] = useState(loc.perFloor ?? 0);
   const longX = w >= d;
   const save = async () => {
         const r = await run(api.updateLocation(loc.id, {
       name, kind, color, rot, pos: [x, z], size: [w, d],
-      corridor, stairs, perFloor: perFloor > 0 ? perFloor : undefined,
+      corridor, stairs, toilet, perFloor: perFloor > 0 ? perFloor : undefined,
     }));
     if (r.ok && kind === "building" && floors !== loc.floors) await run(api.setFloors(loc.id, floors));
   };
@@ -68,9 +70,8 @@ function LocForm({ loc, api, run }: { loc: MapLocation; api: MapApi; run: (p: Pr
           <div className="grid grid-cols-2 gap-2">
             <label className="block"><span className="block text-[10px] font-bold text-slate-400 mb-0.5">ทางเดิน</span>
               <select className={inp} value={corridor} onChange={(e) => setCorridor(e.target.value as CorridorSide)}>
-                <option value="center">กลางอาคาร (2 แถว)</option>
-                <option value="a">{longX ? "ริมด้านเหนือ" : "ริมด้านซ้าย"} (แถวเดียว)</option>
-                <option value="b">{longX ? "ริมด้านใต้" : "ริมด้านขวา"} (แถวเดียว)</option>
+                <option value="a">ซ้าย{longX ? " (ด้านเหนือ)" : ""}</option>
+                <option value="b">ขวา{longX ? " (ด้านใต้)" : ""}</option>
               </select></label>
             <label className="block"><span className="block text-[10px] font-bold text-slate-400 mb-0.5">บันได</span>
               <select className={inp} value={stairs} onChange={(e) => setStairs(e.target.value as StairsMode)}>
@@ -81,6 +82,10 @@ function LocForm({ loc, api, run }: { loc: MapLocation; api: MapApi; run: (p: Pr
           </div>
           <Num label="ห้องต่อแถว (0 = อัตโนมัติ)" value={perFloor} step={1} min={0}
             onChange={(v) => setPerFloor(Math.max(0, Math.min(20, Math.round(v))))} />
+                      <label className="block"><span className="block text-[10px] font-bold text-slate-400 mb-0.5">ห้องน้ำ (ถัดจากบันได ทุกชั้น)</span>
+            <select className={inp} value={toilet} onChange={(e) => setToilet(e.target.value as ToiletMode)}>
+              {(Object.keys(TOILET_OPTIONS) as ToiletMode[]).map((k) => <option key={k} value={k}>{TOILET_OPTIONS[k].label}</option>)}
+            </select></label>
           <button
             onClick={() => { if (confirm("ลบห้องทุกชั้นของอาคารนี้แล้วสร้างใหม่ตามผัง? (ชื่อ/ชนิดห้องที่แก้ไว้จะหาย)")) run(api.regenerateRooms(loc.id)); }}
             className={`${btn} w-full bg-amber-50 text-amber-700 border border-amber-200`}>สร้างห้องใหม่ตามผังนี้</button>
@@ -103,7 +108,9 @@ function RoomRow({ room, api, run }: { room: MapRoom; api: MapApi; run: (p: Prom
   const [code, setCode] = useState(room.code);
   const [type, setType] = useState(room.type ?? "classroom");
   const [desks, setDesks] = useState(room.desks ?? 30);
-  const dirty = name !== room.name || code !== room.code || type !== (room.type ?? "classroom") || desks !== (room.desks ?? 30);
+  const [ac, setAc] = useState(room.ac ?? "none");
+  const dirty = name !== room.name || code !== room.code || type !== (room.type ?? "classroom")
+    || desks !== (room.desks ?? 30) || ac !== (room.ac ?? "none");
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-2 space-y-1.5">
       <div className="grid grid-cols-[1fr_5rem] gap-1.5">
@@ -117,8 +124,11 @@ function RoomRow({ room, api, run }: { room: MapRoom; api: MapApi; run: (p: Prom
         <input type="number" min={0} max={60} className={inp} value={desks} disabled={type !== "classroom"}
           onChange={(e) => setDesks(Math.max(0, Math.min(60, parseInt(e.target.value) || 0)))} title="จำนวนโต๊ะ" />
       </div>
+      <select className={inp} value={ac} onChange={(e) => setAc(e.target.value)}>
+        {Object.entries(AC_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+      </select>
       <div className="flex gap-1.5">
-        <button disabled={!dirty} onClick={() => run(api.updateRoom(room.id, { name, code, type, desks: type === "classroom" ? desks : 0 }))}
+        <button disabled={!dirty} onClick={() => run(api.updateRoom(room.id, { name, code, type, desks: type === "classroom" ? desks : 0, ac }))}
           className={`${btn} flex-1 py-1.5 bg-blue-600 text-white disabled:opacity-30`}>บันทึกห้อง</button>
         <button onClick={() => { if (confirm(`ลบ ${room.name}?`)) run(api.deleteRoom(room.id)); }}
           className={`${btn} py-1.5 bg-rose-50 text-rose-600 border border-rose-200`}>ลบ</button>
@@ -175,7 +185,7 @@ export default function AdminPanel({
             <select className={inp} value={loc.id} onChange={(e) => setLocId(e.target.value)}>
               {locs.map((l) => <option key={l.id} value={l.id}>{l.code}. {l.name}</option>)}
             </select>
-            <LocForm key={`${loc.id}|${loc.pos}|${loc.size}|${loc.rot}|${loc.floors}|${loc.kind}|${loc.corridor}|${loc.stairs}|${loc.perFloor}`} loc={loc} api={api} run={run} />
+            <LocForm key={`${loc.id}|${loc.pos}|${loc.size}|${loc.rot}|${loc.floors}|${loc.kind}|${loc.corridor}|${loc.stairs}|${loc.perFloor}|${loc.toilet}`} loc={loc} api={api} run={run} />
           </>
         )}
 
@@ -199,7 +209,7 @@ export default function AdminPanel({
               </div>
             )}
             {list.length === 0 && <p className="text-xs text-slate-400">ชั้นนี้ยังไม่มีห้อง</p>}
-            {list.map((r) => <RoomRow key={`${r.id}|${r.name}|${r.code}|${r.type}|${r.desks}`} room={r} api={api} run={run} />)}
+            {list.map((r) => <RoomRow key={`${r.id}|${r.name}|${r.code}|${r.type}|${r.desks}|${r.ac}`} room={r} api={api} run={run} />)}
             <button onClick={() => run(api.addRoom(b.id, lv))} className={`${btn} w-full bg-indigo-50 text-indigo-700 border border-indigo-200`}>+ เพิ่มห้องในชั้น {lv}</button>
           </>
         ) : <p className="text-xs text-slate-400">ไม่มีอาคารเรียน</p>)}

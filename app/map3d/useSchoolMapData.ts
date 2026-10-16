@@ -45,7 +45,8 @@ export function useSchoolMapData() {
           color: x.color, floors: maxLevel[x.id] ?? x.floors_count,
           entrance: [x.entrance_x, x.entrance_z], building_id: x.building_id,
           rot: Number(x.rot ?? 0),
-          corridor: x.corridor_side ?? "center",
+          corridor: x.corridor_side === "b" ? "b" : "a",
+          toilet: x.toilet_mode ?? "none",
           stairs: x.stairs_mode ?? "start",
           perFloor: x.rooms_per_floor ?? undefined,
         } as MapLocation))
@@ -60,7 +61,7 @@ export function useSchoolMapData() {
           location_id: floorById.get(x.floor_id)!.location_id,
           level: floorById.get(x.floor_id)!.level,
           x: x.x, z: x.z, w: x.w, d: x.d, door: [x.door_x, x.door_z],
-          type: x.room_type ?? "classroom", desks: x.desk_count ?? 30,
+          type: x.room_type ?? "classroom", desks: x.desk_count ?? 30, ac: x.ac_type ?? "none",
         } as MapRoom));
 
       // โหนด/เส้นทางของประตูรั้ว: ถ้า DB ยังไม่มี ให้เติมจากข้อมูลตั้งต้น
@@ -109,6 +110,7 @@ export function useSchoolMapData() {
     if (patch.rot !== undefined) row.rot = patch.rot;
     if (patch.corridor !== undefined) row.corridor_side = patch.corridor;
     if (patch.stairs !== undefined) row.stairs_mode = patch.stairs;
+    if (patch.toilet !== undefined) row.toilet_mode = patch.toilet;
     if ("perFloor" in patch) row.rooms_per_floor = patch.perFloor ?? null;
     if (patch.pos) { row.pos_x = patch.pos[0]; row.pos_z = patch.pos[1]; }
     if (patch.size) { row.size_w = patch.size[0]; row.size_d = patch.size[1]; }
@@ -166,6 +168,7 @@ export function useSchoolMapData() {
       if (patch.code !== undefined) row.code = patch.code;
       if (patch.type !== undefined) row.room_type = patch.type;
       if (patch.desks !== undefined) row.desk_count = patch.desks;
+      if (patch.ac !== undefined) row.ac_type = patch.ac;
       const { error } = await createClient().from("map_rooms").update(row).eq("id", id);
       return error ? fail(error) : ok();
     }

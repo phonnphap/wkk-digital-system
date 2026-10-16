@@ -3,7 +3,7 @@
 import * as THREE from "three";
 import { Edges, Html } from "@react-three/drei";
 import { useEffect, useMemo, useState } from "react";
-import { FH, MapLocation, MapRoom, isLongX, rotRad, corridorV, stairsList, CORRIDOR_W } from "./schoolData";
+import { FH, MapLocation, MapRoom, isLongX, rotRad, corridorV, stairEnds, stairLen, longLen, CORRIDOR_W } from "./schoolData";
 import { Inst, Item, PinLabel } from "./SceneDecor";
 
 export const buildingHeight = (l: MapLocation) =>
@@ -213,14 +213,214 @@ export function BuildingModel(props: ModelProps) {
 /* ───────────── ห้องภายในอาคาร (มีโต๊ะ/กระดาน) ───────────── */
 
 const TYPE_COLOR: Record<string, string> = {
-  classroom: "#dbe4ff", office: "#fff3bf", library: "#d3f9d8", lab: "#e5dbff",
+  classroom: "#dbe4ff", office: "#fff3bf", library: "#d3f9d8", lab: "#e5dbff", computer: "#d0ebff",
+  nurse: "#ffe3e3", music_thai: "#ffe8cc", music_western: "#f3d9fa", canteen: "#fff9db",
   toilet: "#c5f6fa", hall: "#ffe8cc", other: "#e9ecef",
 };
 export const TYPE_LABEL: Record<string, string> = {
-  classroom: "ห้องเรียน", office: "ห้องสำนักงาน", library: "ห้องสมุด", lab: "ห้องปฏิบัติการ",
-  toilet: "ห้องน้ำ", hall: "หอประชุม", other: "ห้องอื่น ๆ",
+  classroom: "ห้องเรียน", office: "ห้องสำนักงาน", library: "ห้องสมุด", lab: "ห้อง Lab วิทยาศาสตร์",
+  computer: "ห้องคอมพิวเตอร์", nurse: "ห้องพยาบาล", music_thai: "ห้องดนตรีไทย", music_western: "ห้องดนตรีสากล",
+  canteen: "โรงอาหาร", toilet: "ห้องน้ำ", hall: "หอประชุม", other: "ห้องอื่น ๆ",
 };
+export const AC_LABEL: Record<string, string> = {
+  none: "ไม่มีแอร์/พัดลม", ac: "ห้องแอร์", fan: "ห้องพัดลม", both: "แอร์ + พัดลม",
+};
+type Fr = { A: number; D: number; alongX: boolean; sgn: number };
 
+function frameOf(room: MapRoom, w: number, d: number, cx: number, cz: number, rw: number, rd: number): Fr {
+  const dx = (room.door[0] - 0.5) * w - cx, dz = (room.door[1] - 0.5) * d - cz;
+  const alongX = Math.abs(dx) > Math.abs(dz);
+  const sgn = (alongX ? dx : dz) >= 0 ? 1 : -1;
+  const iw = Math.max(rw - 0.1, 0.1), id = Math.max(rd - 0.1, 0.1);
+  return { A: alongX ? id : iw, D: alongX ? iw : id, alongX, sgn };
+}
+
+const Y0 = 0.11;
+const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+
+/** a = ตำแหน่งตามความกว้างห้อง, t = ระยะจากผนังด้านในสุด (ฝั่งตรงข้ามประตู) */
+function buildFurniture(type: string, name: string, ac: string, fr: Fr): Item[] {
+  const { A, D, alongX, sgn } = fr;
+  const out: Item[] = [];
+  const box = (a: number, t: number, sa: number, st: number, h: number, c: string, y = Y0) => {
+    const dep = -sgn * (D / 2) + sgn * t;
+    const [x, z] = alongX ? [dep, a] : [a, dep];
+    out.push({ p: [x, y + h / 2, z], s: alongX ? [st, h, sa] : [sa, h, st], c });
+  };
+  const cols = (n: number) => Array.from({ length: n }, (_, i) => -A / 2 + ((i + 0.5) * A) / n);
+
+  switch (type) {
+    case "office": {
+      const n = clamp(Math.floor(A / 0.3), 1, 5), rows = D > 0.8 ? 2 : 1;
+      for (let r = 0; r < rows; r++) {
+        const t = rows === 1 ? D * 0.55 : D * (0.4 + r * 0.3);
+        cols(n).forEach((a) => {
+          box(a, t, 0.22, 0.12, 0.09, "#b08968");
+          box(a, t - 0.02, 0.1, 0.012, 0.07, "#212529", Y0 + 0.09);
+          box(a, t + 0.12, 0.08, 0.08, 0.07, "#495057");
+        });
+      }
+      box(0, 0.05, A * 0.6, 0.07, 0.26, "#adb5bd");
+      break;
+    }
+    case "library": {
+      const bc = ["#f03e3e", "#339af0", "#51cf66", "#fcc419", "#845ef7"];
+      box(0, 0.04, A * 0.92, 0.06, 0.3, "#8d6e63");
+      cols(6).forEach((a, k) => box(a, 0.075, A * 0.12, 0.012, 0.2, bc[k % 5], Y0 + 0.02));
+      [D * 0.4, D * 0.6].forEach((t) => {
+        box(0, t, A * 0.7, 0.05, 0.2, "#a1887f");
+        box(0, t, A * 0.66, 0.056, 0.05, "#e8590c", Y0 + 0.2);
+      });
+      [-1, 1].forEach((s) => {
+        box(s * A * 0.22, D * 0.85, 0.22, 0.1, 0.08, "#c08457");
+        box(s * A * 0.22, D * 0.85 + 0.1, 0.07, 0.07, 0.06, "#495057");
+      });
+      break;
+    }
+    case "lab": {
+      const nb = D > 0.9 ? 2 : 1;
+      const cc = ["#51cf66", "#ff922b", "#339af0", "#f06595"];
+      for (let r = 0; r < nb; r++) {
+        const t = nb === 1 ? D * 0.55 : D * (0.42 + r * 0.28);
+        box(0, t, A * 0.8, 0.1, 0.1, "#37474f");
+        box(-A * 0.3, t, 0.08, 0.06, 0.02, "#cfd8dc", Y0 + 0.1);
+        cc.forEach((c, k) => box(-A * 0.12 + k * A * 0.1, t, 0.025, 0.025, 0.05, c, Y0 + 0.1));
+        cols(4).forEach((a) => box(a, t + 0.11, 0.05, 0.05, 0.06, "#868e96"));
+      }
+      box(0, 0.06, A * 0.4, 0.08, 0.1, "#e9ecef");
+      box(A * 0.33, 0.04, 0.12, 0.07, 0.3, "#adb5bd");
+      break;
+    }
+    case "computer": {
+      const n = clamp(Math.floor(A / 0.24), 2, 8);
+      const rowsT = D > 1.3 ? [0.3, 0.5, 0.7] : D > 0.8 ? [0.38, 0.65] : [0.5];
+      rowsT.forEach((f) => cols(n).forEach((a) => {
+        const t = D * f;
+        box(a, t, 0.21, 0.1, 0.08, "#e9ecef");
+        box(a, t - 0.02, 0.1, 0.012, 0.08, "#212529", Y0 + 0.08);
+        box(a, t - 0.012, 0.085, 0.004, 0.065, "#4dabf7", Y0 + 0.085);
+        box(a, t + 0.035, 0.07, 0.025, 0.006, "#adb5bd", Y0 + 0.08);
+        box(a, t + 0.11, 0.07, 0.07, 0.06, "#364fc7");
+      }));
+      box(0, 0.07, 0.3, 0.08, 0.09, "#7f5539");
+      box(0, 0.012, A * 0.6, 0.012, 0.18, "#f8f9fa", Y0 + 0.1);
+      break;
+    }
+    case "nurse": {
+      const beds = A > 0.8 ? [-A * 0.25, A * 0.25] : [0];
+      const bl = Math.min(0.34, D * 0.5);
+      beds.forEach((a) => {
+        box(a, D * 0.35, 0.22, bl, 0.06, "#e9ecef");
+        box(a, D * 0.35, 0.2, bl * 0.95, 0.03, "#bac8ff", Y0 + 0.06);
+        box(a, D * 0.35 - bl * 0.38, 0.12, 0.06, 0.025, "#ffffff", Y0 + 0.09);
+      });
+      box(A * 0.33, 0.05, 0.16, 0.07, 0.3, "#f1f3f5");
+      box(A * 0.33, 0.088, 0.06, 0.004, 0.018, "#e03131", Y0 + 0.2);
+      box(A * 0.33, 0.088, 0.018, 0.004, 0.06, "#e03131", Y0 + 0.18);
+      box(-A * 0.3, D * 0.85, 0.2, 0.1, 0.09, "#c08457");
+      box(-A * 0.3, D * 0.85 + 0.1, 0.07, 0.07, 0.06, "#495057");
+      box(A * 0.3, D * 0.8, 0.06, 0.06, 0.03, "#495057");
+      break;
+    }
+    case "music_thai": {
+      box(0, D * 0.5, A * 0.92, D * 0.86, 0.008, "#c1121f");
+      [-1, 1].forEach((s) => {
+        box(s * A * 0.22, D * 0.3, 0.34, 0.09, 0.05, "#6d4c41", Y0 + 0.008);
+        box(s * A * 0.22, D * 0.3, 0.3, 0.075, 0.012, "#f2b705", Y0 + 0.058);
+      });
+      const ct = D * 0.58;
+      box(0, ct, 0.24, 0.24, 0.03, "#7f5539", Y0 + 0.008);
+      for (let k = 0; k < 8; k++) {
+        const ang = (k * Math.PI) / 4;
+        box(Math.cos(ang) * 0.09, ct + Math.sin(ang) * 0.09, 0.035, 0.035, 0.035, "#f2b705", Y0 + 0.04);
+      }
+      [-0.3, 0, 0.3].forEach((f) => {
+        box(f * A, 0.09, 0.06, 0.06, 0.07, "#9c6644", Y0 + 0.008);
+        box(f * A, 0.09, 0.05, 0.05, 0.01, "#f1d9b5", Y0 + 0.078);
+      });
+      cols(4).forEach((a) => box(a, D * 0.88, 0.07, 0.07, 0.025, "#e8590c", Y0 + 0.008));
+      break;
+    }
+    case "music_western": {
+      box(-A * 0.25, 0.08, 0.34, 0.14, 0.14, "#212529");
+      box(-A * 0.25, 0.16, 0.3, 0.04, 0.012, "#f8f9fa", Y0 + 0.14);
+      box(-A * 0.25, 0.27, 0.16, 0.07, 0.06, "#343a40");
+      const dx = A * 0.28, dt = D * 0.45;
+      box(dx, dt, 0.09, 0.09, 0.09, "#c92a2a");
+      box(dx - 0.1, dt + 0.05, 0.06, 0.06, 0.04, "#dee2e6", Y0 + 0.06);
+      [[0.1, -0.04], [-0.1, -0.06]].forEach(([ox, ot]) => {
+        box(dx + ox, dt + ot, 0.006, 0.006, 0.2, "#868e96");
+        box(dx + ox, dt + ot, 0.09, 0.09, 0.004, "#fcc419", Y0 + 0.2);
+      });
+      [-1, 1].forEach((s) => {
+        box(s * A * 0.2, D * 0.78, 0.22, 0.07, 0.04, "#212529", Y0 + 0.06);
+        box(s * A * 0.2, D * 0.78, 0.2, 0.05, 0.06, "#868e96");
+        box(s * A * 0.2, D * 0.78 + 0.01, 0.2, 0.03, 0.006, "#f8f9fa", Y0 + 0.1);
+        box(s * A * 0.2, D * 0.78 + 0.1, 0.07, 0.07, 0.06, "#495057");
+      });
+      [-0.35, 0, 0.35].forEach((f) => {
+        box(f * A, D * 0.62, 0.004, 0.004, 0.18, "#6c757d");
+        box(f * A, D * 0.62, 0.07, 0.01, 0.05, "#212529", Y0 + 0.18);
+      });
+      break;
+    }
+    case "canteen": {
+      const nc = clamp(Math.floor(A / 0.45), 1, 4), nr = clamp(Math.floor((D - 0.3) / 0.28), 1, 5);
+      for (let r = 0; r < nr; r++) {
+        const t = 0.3 + ((r + 0.5) * (D - 0.3)) / nr;
+        cols(nc).forEach((a) => {
+          box(a, t, 0.34, 0.1, 0.07, "#ffd8a8");
+          box(a, t - 0.085, 0.34, 0.035, 0.04, "#868e96");
+          box(a, t + 0.085, 0.34, 0.035, 0.04, "#868e96");
+        });
+      }
+      box(0, 0.06, A * 0.85, 0.09, 0.12, "#e67700");
+      box(0, 0.06, A * 0.85, 0.095, 0.02, "#fff3bf", Y0 + 0.12);
+      break;
+    }
+    case "hall": {
+      box(0, D * 0.1, A * 0.9, D * 0.2, 0.07, "#7f5539");
+      box(0, 0.012, A * 0.9, 0.012, 0.3, "#c92a2a", Y0 + 0.07);
+      const nr = clamp(Math.floor((D * 0.65) / 0.1), 2, 10), nc = clamp(Math.floor(A / 0.1), 3, 14);
+      for (let r = 0; r < nr; r++) cols(nc).forEach((a) => box(a, D * 0.3 + r * 0.1, 0.05, 0.05, 0.05, "#4263eb"));
+      break;
+    }
+    case "toilet": {
+      const male = name.includes("ชาย") && !name.includes("หญิง");
+      const n = clamp(Math.floor(A / 0.2), 2, 7), half = Math.ceil(n / 2);
+      const wall = name.includes("หญิง") ? "#faa2c1" : name.includes("ชาย") ? "#74c0fc" : "#adb5bd";
+      cols(n).forEach((a, i) => {
+        if (male && i >= half) box(a, 0.03, 0.05, 0.03, 0.12, "#ffffff", Y0 + 0.08); // โถปัสสาวะ
+        else { box(a, 0.06, 0.07, 0.1, 0.06, "#ffffff"); box(a, 0.02, 0.07, 0.03, 0.1, "#ffffff"); }
+      });
+      const cub = male ? half : n;
+      for (let k = 0; k <= cub; k++) box(-A / 2 + (k * A) / n, 0.2, 0.012, 0.36, 0.22, wall);
+      box(0, D * 0.85, A * 0.7, 0.07, 0.07, "#e9ecef");
+      [-1, 0, 1].forEach((s) => box(s * A * 0.22, D * 0.85, 0.06, 0.05, 0.01, "#4fc3f7", Y0 + 0.07));
+      break;
+    }
+  }
+
+  // แอร์ (ติดผนังด้านใน) / พัดลมเพดาน
+  if (ac === "ac" || ac === "both") {
+    const k = A > 0.9 ? 2 : 1;
+    for (let i = 0; i < k; i++) {
+      const a = k === 1 ? 0 : (i ? 1 : -1) * A * 0.25;
+      box(a, 0.03, 0.22, 0.05, 0.06, "#f8f9fa", Y0 + 0.3);
+      box(a, 0.056, 0.2, 0.004, 0.012, "#74c0fc", Y0 + 0.32);
+    }
+  }
+  if (ac === "fan" || ac === "both") {
+    const ts = D > 0.9 ? [0.35, 0.7] : [0.5];
+    const as = A > 0.9 ? [-A * 0.25, A * 0.25] : [0];
+    ts.forEach((f) => as.forEach((a) => {
+      box(a, D * f, 0.035, 0.035, 0.035, "#495057", Y0 + 0.33);
+      box(a, D * f, 0.3, 0.03, 0.006, "#ced4da", Y0 + 0.345);
+      box(a, D * f, 0.03, 0.3, 0.006, "#ced4da", Y0 + 0.345);
+    }));
+  }
+  return out;
+}
 function RoomMesh({
   loc, room, active, selected, onPick,
 }: { loc: MapLocation; room: MapRoom; active: boolean; selected: boolean; onPick: (r: MapRoom) => void }) {
@@ -232,6 +432,9 @@ function RoomMesh({
   const y = (room.level - 1) * FH;
   const type = room.type ?? "classroom";
   const deskCount = type === "classroom" ? room.desks ?? 30 : 0;
+  const ac = room.ac ?? "none";
+  const fr = useMemo(() => frameOf(room, w, d, cx, cz, rw, rd), [room, w, d, cx, cz, rw, rd]);
+  const extra = useMemo(() => buildFurniture(type, room.name, ac, fr), [type, room.name, ac, fr]);
 
   const layout = useMemo(() => {
     if (!deskCount) return null;
@@ -266,7 +469,10 @@ function RoomMesh({
     };
   }, [deskCount, room.door, w, d, cx, cz, rw, rd]);
 
-  const floorColor = active ? "#ffd43b" : selected ? "#ffa94d" : hover ? "#74c0fc" : TYPE_COLOR[type] ?? TYPE_COLOR.other;
+    const base = type === "toilet" && room.name.includes("หญิง") ? "#fcc2d7"
+    : type === "toilet" && room.name.includes("ชาย") ? "#a5d8ff"
+    : TYPE_COLOR[type] ?? TYPE_COLOR.other;
+  const floorColor = active ? "#ffd43b" : selected ? "#ffa94d" : hover ? "#74c0fc" : base;
   return (
     <group position={[cx, y, cz]}>
       <mesh
@@ -290,12 +496,46 @@ function RoomMesh({
           <mesh position={layout.board.p}><boxGeometry args={layout.board.s} /><meshStandardMaterial color="#f8f9fa" /></mesh>
         </>
       )}
+            {extra.length > 0 && (
+        <Inst items={extra}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>
+      )}
       <Html position={[0, 0.62, 0]} center distanceFactor={9} zIndexRange={[15, 0]}>
         <div className="px-1.5 py-0.5 rounded bg-white/90 text-[10px] font-bold text-slate-700 whitespace-nowrap shadow pointer-events-none">
-          {room.name}{deskCount ? ` · ${deskCount} โต๊ะ` : ""}
+          {room.name}{deskCount ? ` · ${deskCount} โต๊ะ` : ""}{ac !== "none" ? ` · ${AC_LABEL[ac]}` : ""}
         </div>
       </Html>
     </group>
+  );
+}
+
+function Stairs({ loc, end, y }: { loc: MapLocation; end: "s" | "e"; y: number }) {
+  const [w, d] = loc.size;
+  const longX = isLongX(loc);
+  const L = longLen(loc), len = stairLen(loc);
+  const cross = (longX ? d : w) - 0.04;
+  const n = 7, run = len / n;
+  const outer = end === "s" ? -1 : 1;
+  const inner = outer * (L / 2 - len);
+  const items = useMemo(() => {
+    const out: Item[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = inner + outer * (i + 0.5) * run;
+      const h = 0.08 + ((i + 1) / n) * 0.5;
+      const P = (cp: number, hh: number): [number, number, number] => (longX ? [a, y + hh / 2, cp] : [cp, y + hh / 2, a]);
+      const S = (sc: number, hh: number): [number, number, number] => (longX ? [run * 0.98, hh, sc] : [sc, hh, run * 0.98]);
+      out.push({ p: P(0, h), s: S(cross - 0.12, h), c: i % 2 ? "#dee2e6" : "#f8f9fa" });
+      [-1, 1].forEach((s) => out.push({ p: P(s * (cross / 2 - 0.03), h + 0.06), s: S(0.06, h + 0.06), c: "#fd7e14" }));
+    }
+    return out;
+  }, [inner, outer, run, y, cross, longX]);
+  const ac = inner + (outer * len) / 2;
+  return (
+    <>
+      <Inst items={items}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>
+      <Html position={longX ? [ac, y + 0.95, 0] : [0, y + 0.95, ac]} center distanceFactor={9}>
+        <div className="px-1.5 py-0.5 rounded bg-orange-500 text-white text-[10px] font-black pointer-events-none whitespace-nowrap">🪜 บันได ⬆</div>
+      </Html>
+    </>
   );
 }
 
@@ -306,7 +546,6 @@ export function IndoorBuilding({
   activeRoomId?: string; selectedRoomId?: string | null; onRoom: (r: MapRoom) => void;
 }) {
   const [w, d] = loc.size;
-  const stairs = stairsList(loc);
   const cv = corridorV(loc);
   const longX = isLongX(loc);
   const y = (floor - 1) * FH;
@@ -323,7 +562,6 @@ export function IndoorBuilding({
         <meshBasicMaterial transparent opacity={0.04} depthWrite={false} />
         <Edges color={loc.color} />
       </mesh>
-      {/* ทางเดิน */}
       <mesh position={longX ? [0, y + 0.085, (cv - 0.5) * d] : [(cv - 0.5) * w, y + 0.085, 0]} raycast={() => null}>
         <boxGeometry args={longX ? [w * 0.98, 0.01, d * CORRIDOR_W] : [w * CORRIDOR_W, 0.01, d * 0.98]} />
         <meshStandardMaterial color="#ffffff" />
@@ -331,17 +569,7 @@ export function IndoorBuilding({
       {rooms.filter((r) => r.level === floor).map((r) => (
         <RoomMesh key={r.id} loc={loc} room={r} active={r.id === activeRoomId} selected={r.id === selectedRoomId} onPick={onRoom} />
       ))}
-      {stairs.map((st, i) => (
-        <group key={i}>
-          <mesh position={[(st[0] - 0.5) * w, y + 0.25, (st[1] - 0.5) * d]}>
-            <boxGeometry args={[0.45, 0.35, 0.45]} />
-            <meshStandardMaterial color="#fd7e14" />
-          </mesh>
-          <Html position={[(st[0] - 0.5) * w, y + 0.7, (st[1] - 0.5) * d]} center distanceFactor={9}>
-            <div className="px-1 py-0.5 rounded bg-orange-500 text-white text-[9px] font-black pointer-events-none">บันได</div>
-          </Html>
-        </group>
-      ))}
+      {stairEnds(loc).map((e) => <Stairs key={e} loc={loc} end={e} y={y + 0.085} />)}
     </group>
   );
 }
