@@ -30,24 +30,20 @@ function Gate({ g }: { g: GateDef }) {
   );
 }
 
-/** ป้ายโรงเรียน — ตั้งนอกรั้ว ณ จุดที่ใกล้พิกัดที่กำหนด */
+/** ป้ายโรงเรียน — ป้ายสั้นไม่มีเสา ติดแนบรั้วด้านนอก */
 function SchoolSign({ it }: { it: DecorItem }) {
   const f = fenceFrame(it.x, it.y);
-  const W = (it.w ?? 66) / 30;
-  const x = f.x + f.out[0] * 1.0, z = f.z + f.out[1] * 1.0;
+  const W = (it.w ?? 42) / 30, H = 0.4;
+  const x = f.x + f.out[0] * 0.07, z = f.z + f.out[1] * 0.07;
   return (
     <group position={[x, 0, z]} rotation={[0, -f.ang, 0]}>
-      {[-1, 1].map((s) => (
-        <mesh key={s} position={[s * (W / 2 - 0.1), 0.45, 0]} castShadow><boxGeometry args={[0.08, 0.9, 0.08]} /><meshStandardMaterial color="#475569" /></mesh>
-      ))}
-      <mesh position={[0, 1.05, 0]} castShadow><boxGeometry args={[W, 0.9, 0.1]} /><meshStandardMaterial color="#1d4ed8" /></mesh>
-      <mesh><boxGeometry args={[0.01, 0.01, 0.01]} /><meshBasicMaterial visible={false} /></mesh>
-      <mesh position={[0, 1.05, 0]}><boxGeometry args={[W - 0.2, 0.74, 0.14]} /><meshStandardMaterial color="#f8fafc" /></mesh>
-      <mesh position={[0, 0.62, 0]}><boxGeometry args={[W, 0.06, 0.12]} /><meshStandardMaterial color="#e11d48" /></mesh>
-      <Html position={[0, 1.05, 0.12]} center distanceFactor={12} zIndexRange={[10, 0]}>
+      <mesh position={[0, 0.42, 0]} castShadow><boxGeometry args={[W, H, 0.05]} /><meshStandardMaterial color="#1d4ed8" /></mesh>
+      <mesh position={[0, 0.42, 0]}><boxGeometry args={[W - 0.08, H - 0.08, 0.07]} /><meshStandardMaterial color="#f8fafc" /></mesh>
+      <mesh position={[0, 0.25, 0]}><boxGeometry args={[W, 0.03, 0.08]} /><meshStandardMaterial color="#e11d48" /></mesh>
+      <Html position={[0, 0.43, 0.06]} center distanceFactor={12} zIndexRange={[10, 0]}>
         <div className="pointer-events-none text-center whitespace-nowrap">
-          <div className="text-[13px] font-black text-blue-900 leading-tight">{it.name || "โรงเรียนวัดเขียนเขต"}</div>
-          <div className="text-[9px] font-bold text-rose-600">ยินดีต้อนรับ</div>
+          <div className="text-[11px] font-black text-blue-900 leading-tight">{it.name || "โรงเรียนวัดเขียนเขต"}</div>
+          <div className="text-[8px] font-bold text-rose-600">ยินดีต้อนรับ</div>
         </div>
       </Html>
     </group>

@@ -7,7 +7,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FH, MapEdge, MapLocation, MapNode, px } from "./schoolData";
 import { DecorConfig, DecorItem, FENCE, GateDef } from "./DecorData";
 import { SchoolGates } from "./SchoolGates";
-import { Roads, OutsideRoads, Carport, BusBay, Kiosk } from "./Sceneextra";
+import { Roads, OutsideRoads, Carport, BusBay, Kiosk } from "./SceneExtra";
 
 /* ───────────── helpers ───────────── */
 

@@ -108,7 +108,7 @@ export const DEFAULT_DECOR: DecorConfig = {
     { id: "barrier-1", type: "barrier", x: 527, y: 277, w: 26, rot: 90, name: "ประตูกั้น" },
     { id: "bridge-43", type: "bridge", x: 358, y: 282, w: 30, d: 28, levels: "2,3", name: "ทางเชื่อมอาคาร 4-3" },
     { id: "bridge-53", type: "bridge", x: 498, y: 277, w: 30, d: 18, levels: "2,3", name: "ทางเชื่อมอาคาร 5-3" },
-    { id: "sign-1", type: "sign", x: 457, y: 590, w: 66, name: "โรงเรียนวัดเขียนเขต" },
+    { id: "sign-1", type: "sign", x: 457, y: 590, w: 42, name: "โรงเรียนวัดเขียนเขต" },
     // ── เพิ่มในเวอร์ชัน 2 ──
     { id: "carport-exec", type: "carport", x: 455, y: 310, w: 50, d: 22, rot: 90, name: "โรงจอดรถผู้บริหาร", color: "#7c3aed", since: 2 },
     { id: "carport-teacher", type: "carport", x: 690, y: 388, w: 100, d: 24, name: "โรงจอดรถครู", color: "#2563eb", since: 2 },
