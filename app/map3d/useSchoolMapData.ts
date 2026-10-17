@@ -3,17 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
-  FALLBACK_EDGES, FALLBACK_GATE_EDGES, FALLBACK_GATE_NODES, FALLBACK_LOCATIONS, FALLBACK_NODES, genRooms,
+  FALLBACK_EDGES, FALLBACK_GATE_EDGES, FALLBACK_GATE_NODES, FALLBACK_LOCATIONS, FALLBACK_NODES, genRooms, hasInterior,
   MapEdge, MapLocation, MapNode, MapRoom,
 } from "./schoolData";
+import { DEFAULT_DECOR, DecorConfig, sanitizeDecor } from "./DecorData";
 
 export type SaveResult = { ok: boolean; message: string };
 const ok = (message = "บันทึกแล้ว"): SaveResult => ({ ok: true, message });
 const fail = (e: any): SaveResult => ({ ok: false, message: e?.message ?? String(e) });
 const LOCAL = "แก้ไขในหน้านี้แล้ว (โหมดข้อมูลตั้งต้น — ยังไม่บันทึกลงฐานข้อมูล)";
 
-/** โหลดข้อมูลแผนที่จาก Supabase — ถ้าตารางยังไม่มี/ว่าง จะใช้ข้อมูลตั้งต้นจากแผนผังแทน
- *  และมีฟังก์ชันสำหรับแอดมินแก้ชั้น/ห้อง/โต๊ะ/ชื่อห้อง */
 export function useSchoolMapData() {
   const [locs, setLocs] = useState<MapLocation[]>(FALLBACK_LOCATIONS);
   const [nodes, setNodes] = useState<MapNode[]>(FALLBACK_NODES);
@@ -21,8 +20,17 @@ export function useSchoolMapData() {
   const [dbRooms, setDbRooms] = useState<MapRoom[]>([]);
   const [custom, setCustom] = useState<Record<string, MapRoom[]>>({});
   const [source, setSource] = useState<"fallback" | "supabase">("fallback");
+  const [decor, setDecor] = useState<DecorConfig>(DEFAULT_DECOR);
+
+  const loadDecor = useCallback(async () => {
+    try {
+      const { data, error } = await createClient().from("map_config").select("value").eq("key", "decor").maybeSingle();
+      if (!error && data?.value) setDecor(sanitizeDecor(data.value));
+    } catch { /* ใช้ค่าตั้งต้น */ }
+  }, []);
 
   const load = useCallback(async () => {
+    loadDecor();
     try {
       const supabase = createClient();
       const [l, f, r, n, e] = await Promise.all([
@@ -49,6 +57,7 @@ export function useSchoolMapData() {
           toilet: x.toilet_mode ?? "none",
           stairs: x.stairs_mode ?? "start",
           perFloor: x.rooms_per_floor ?? undefined,
+          stage: x.stage_mode ?? "none",
         } as MapLocation))
         .sort((a: MapLocation, b: MapLocation) => Number(a.code) - Number(b.code));
 
@@ -64,7 +73,6 @@ export function useSchoolMapData() {
           type: x.room_type ?? "classroom", desks: x.desk_count ?? 30, ac: x.ac_type ?? "none",
         } as MapRoom));
 
-      // โหนด/เส้นทางของประตูรั้ว: ถ้า DB ยังไม่มี ให้เติมจากข้อมูลตั้งต้น
       const dbNodes: MapNode[] = n.data.map((x: any) => ({ id: x.code, x: x.pos_x, z: x.pos_z }));
       const have = new Set(dbNodes.map((x) => x.id));
       const extraNodes = FALLBACK_GATE_NODES.filter((g) => !have.has(g.id));
@@ -72,6 +80,7 @@ export function useSchoolMapData() {
       const dbEdges: MapEdge[] = (e.data || []).map((x: any) => ({ a: x.a, b: x.b }));
       const extraEdges = FALLBACK_GATE_EDGES.filter((x) => extraIds.has(x.a) || extraIds.has(x.b));
 
+      locsRef.current = mappedLocs;
       setLocs(mappedLocs);
       setNodes([...dbNodes, ...extraNodes]);
       setEdges([...dbEdges, ...extraEdges]);
@@ -81,11 +90,10 @@ export function useSchoolMapData() {
     } catch (err) {
       console.warn("[useSchoolMapData] ใช้ข้อมูลตั้งต้นแทน:", err);
     }
-  }, []);
+  }, [loadDecor]);
 
   useEffect(() => { load(); }, [load]);
 
-  // อาคารที่ยังไม่มีห้องในฐานข้อมูล → ใช้ห้องที่แอดมินแก้ในหน้านี้ หรือสร้างห้องตัวอย่างให้
   const rooms = useMemo(() => {
     const have = new Set(dbRooms.map((x) => x.location_id));
     const virtual = locs.filter((l) => !have.has(l.id)).flatMap((l) => custom[l.id] ?? genRooms(l));
@@ -97,11 +105,14 @@ export function useSchoolMapData() {
   const dbRoomsRef = useRef(dbRooms); dbRoomsRef.current = dbRooms;
   const customRef = useRef(custom); customRef.current = custom;
   const sourceRef = useRef(source); sourceRef.current = source;
+  const decorRef = useRef(decor); decorRef.current = decor;
 
   /* ───────────── ฟังก์ชันสำหรับแอดมิน ───────────── */
 
   const updateLocation = useCallback(async (id: string, patch: Partial<MapLocation>): Promise<SaveResult> => {
-    setLocs((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+    // อัปเดต ref ทันที เพื่อให้ regenerateRooms ที่เรียกต่อกันเห็นค่าใหม่
+    locsRef.current = locsRef.current.map((l) => (l.id === id ? { ...l, ...patch } : l));
+    setLocs(locsRef.current);
     if (sourceRef.current !== "supabase") return ok(LOCAL);
     const row: Record<string, any> = {};
     if (patch.name !== undefined) row.name = patch.name;
@@ -111,6 +122,7 @@ export function useSchoolMapData() {
     if (patch.corridor !== undefined) row.corridor_side = patch.corridor;
     if (patch.stairs !== undefined) row.stairs_mode = patch.stairs;
     if (patch.toilet !== undefined) row.toilet_mode = patch.toilet;
+    if (patch.stage !== undefined) row.stage_mode = patch.stage;   // ต้องรัน SQL เพิ่มคอลัมน์ stage_mode ก่อน
     if ("perFloor" in patch) row.rooms_per_floor = patch.perFloor ?? null;
     if (patch.pos) { row.pos_x = patch.pos[0]; row.pos_z = patch.pos[1]; }
     if (patch.size) { row.size_w = patch.size[0]; row.size_d = patch.size[1]; }
@@ -127,7 +139,8 @@ export function useSchoolMapData() {
     const n = Math.max(1, Math.min(8, Math.round(count)));
     const loc = locsRef.current.find((l) => l.id === id);
     if (!loc) return fail("ไม่พบอาคาร");
-    setLocs((prev) => prev.map((l) => (l.id === id ? { ...l, floors: n } : l)));
+    locsRef.current = locsRef.current.map((l) => (l.id === id ? { ...l, floors: n } : l));
+    setLocs(locsRef.current);
     setCustom((prev) => {
       const cur = prev[id];
       if (!cur) return prev;
@@ -237,7 +250,6 @@ export function useSchoolMapData() {
     return ok("ลบห้องแล้ว (ในหน้านี้)");
   }, []);
 
-  /** บันทึกห้องตัวอย่าง/ห้องที่แก้ในหน้านี้ ของทั้งอาคาร ลง map_floors + map_rooms */
   const saveGenerated = useCallback(async (locId: string): Promise<SaveResult> => {
     if (sourceRef.current !== "supabase") return fail("ยังไม่ได้เชื่อมต่อ Supabase");
     const loc = locsRef.current.find((l) => l.id === locId);
@@ -257,6 +269,7 @@ export function useSchoolMapData() {
       const rows = list.filter((r) => floorIds.has(r.level)).map((r) => ({
         floor_id: floorIds.get(r.level), code: r.code, name: r.name, x: r.x, z: r.z, w: r.w, d: r.d,
         door_x: r.door[0], door_z: r.door[1], room_type: r.type ?? "classroom", desk_count: r.desks ?? 30,
+        ac_type: r.ac ?? "none",
       }));
       if (rows.length) {
         const { error } = await sb.from("map_rooms").insert(rows);
@@ -267,7 +280,6 @@ export function useSchoolMapData() {
     } catch (e) { return fail(e); }
   }, [load]);
 
-    /** ลบห้องของอาคารแล้วสร้างใหม่ตามผังปัจจุบัน (ทางเดิน/บันได/จำนวนห้องต่อแถว) */
   const regenerateRooms = useCallback(async (locId: string): Promise<SaveResult> => {
     const loc = locsRef.current.find((l) => l.id === locId);
     if (!loc) return fail("ไม่พบอาคาร");
@@ -285,11 +297,23 @@ export function useSchoolMapData() {
         if (error) return fail(error);
       }
       setDbRooms((prev) => prev.filter((r) => r.location_id !== locId));
+      dbRoomsRef.current = dbRoomsRef.current.filter((r) => r.location_id !== locId);
       return await saveGenerated(locId);
     } catch (e) { return fail(e); }
   }, [saveGenerated]);
 
-  /** ปรับตำแหน่ง/ขนาด/การหมุน/ชนิดอาคารใน DB ให้ตรงกับผังตั้งต้นใหม่ + เติมโหนดประตู */
+  /** สร้างห้องของทุกอาคารที่มีห้องภายในใหม่ตามผังปัจจุบัน (ใช้หลังเปลี่ยนขนาดบันได/ห้องน้ำ/ผังพิเศษ) */
+  const regenerateAll = useCallback(async (): Promise<SaveResult> => {
+    let n = 0;
+    for (const l of [...locsRef.current]) {
+      if (!hasInterior(l)) continue;
+      const r = await regenerateRooms(l.id);
+      if (!r.ok) return r;
+      n++;
+    }
+    return ok(`สร้างห้องใหม่ ${n} อาคารแล้ว`);
+  }, [regenerateRooms]);
+
   const syncDefaultLayout = useCallback(async (): Promise<SaveResult> => {
     let count = 0;
     for (const d of FALLBACK_LOCATIONS) {
@@ -315,8 +339,20 @@ export function useSchoolMapData() {
     return ok(`ปรับผัง ${count} สถานที่ + เส้นทางประตูแล้ว`);
   }, [updateLocation]);
 
-    const api = { updateLocation, setFloors, updateRoom, addRoom, deleteRoom, saveGenerated, regenerateRooms, syncDefaultLayout, reload: load };
-  return { locs, rooms, nodes, edges, source, api };
+  /* ───────────── ฉาก (ต้นไม้ ประตู ซุ้ม ห้องน้ำ ฯลฯ) ───────────── */
+  const saveDecor = useCallback(async (): Promise<SaveResult> => {
+    if (sourceRef.current !== "supabase") return ok(LOCAL);
+    const { error } = await createClient().from("map_config")
+      .upsert({ key: "decor", value: decorRef.current, updated_at: new Date().toISOString() });
+    return error ? fail(error) : ok("บันทึกฉากแล้ว");
+  }, []);
+  const resetDecor = useCallback(() => setDecor(DEFAULT_DECOR), []);
+
+  const api = {
+    updateLocation, setFloors, updateRoom, addRoom, deleteRoom, saveGenerated, regenerateRooms, regenerateAll,
+    syncDefaultLayout, setDecor, saveDecor, resetDecor, reload: load,
+  };
+  return { locs, rooms, nodes, edges, source, decor, api };
 }
 
 export type MapApi = ReturnType<typeof useSchoolMapData>["api"];

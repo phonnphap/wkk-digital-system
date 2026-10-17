@@ -6,10 +6,10 @@ import * as THREE from "three";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSchoolMapData } from "./useSchoolMapData";
 import { findPath, indoorRoute } from "./pathfinding";
-import { FH, MapLocation, MapRoom, XZ, roomCenter } from "./schoolData";
+import { FH, MapLocation, MapRoom, XZ, roomCenter, hasInterior } from "./schoolData";
 import { BuildingModel, IndoorBuilding, TYPE_LABEL } from "./BuildingModel";
 import { Decor, Field, ParkingLot } from "./SceneDecor";
-import { GATES, DEFAULT_DECOR, buildGates, layoutWarnings } from "./DecorData";
+import { buildGates, withGateNodes, layoutWarnings } from "./DecorData";
 import AdminPanel, { DEFAULT_SETTINGS, MapSettings } from "./AdminPanel";
 
 type Dest = { type: "loc" | "room" | "gate"; id: string } | null;
@@ -169,14 +169,16 @@ function Stat({ label, value, unit, tone }: { label: string; value: number | str
 /* ───────────────────────── Main component ───────────────────────── */
 
 export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) {
-  const { locs, rooms, nodes, edges, source, api } = useSchoolMapData();
+  const { locs, rooms, nodes, edges, source, decor, api } = useSchoolMapData();
+const gates = useMemo(() => buildGates(decor.gates), [decor.gates]);
+const nav = useMemo(() => withGateNodes(nodes, edges, gates), [nodes, edges, gates]);
   const locById = useMemo(() => new Map(locs.map((l) => [l.id, l])), [locs]);
   const roomById = useMemo(() => new Map(rooms.map((r) => [r.id, r])), [rooms]);
   const guardHouse = useMemo(() => locs.find((l) => l.kind === "gate") ?? locs[0], [locs]);
 
   // จุดเริ่มต้น: ประตูทุกบาน + สถานที่ทุกแห่ง
   const startPoints = useMemo<StartPt[]>(() => [
-    ...GATES.map((g) => ({ id: `gate:${g.id}`, label: `🚪 ${g.name}`, entrance: [g.x, g.z] as XZ })),
+    ...gates.map((g) => ({ id: `gate:${g.id}`, label: `🚪 ${g.name}`, entrance: [g.x, g.z] as XZ })),
     ...locs.map((l) => ({ id: l.id, label: `${l.code}. ${l.name}`, entrance: l.entrance })),
   ], [locs]);
   const [fromId, setFromId] = useState("gate:main");
@@ -195,6 +197,16 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
   const [follow, setFollow] = useState(false);
   const [goal, setGoal] = useState<Goal>(OVERVIEW);
   const [msg, setMsg] = useState("เลือกสถานที่ปลายทางเพื่อเริ่มนำทาง");
+  const [placingId, setPlacingId] = useState<string | null>(null);
+const onGround = useCallback((wx: number, wz: number) => {
+  if (!placingId) return;
+  const x = Math.round((wx * 30 + 480) * 10) / 10, y = Math.round((wz * 30 + 400) * 10) / 10;
+  api.setDecor((d) => ({
+    items: d.items.map((i) => (i.id === placingId ? { ...i, x, y } : i)),
+    gates: d.gates.map((g) => (g.id === placingId ? { ...g, x, y } : g)),
+  }));
+  setPlacingId(null);
+}, [placingId, api]);
   const [showAdmin, setShowAdmin] = useState(false);
   const [settings, setSettings] = useState<MapSettings>(DEFAULT_SETTINGS);
 
@@ -238,7 +250,7 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
     setRunning(false);
     if (!d) return;
     if (d.type === "gate") {
-      const g = GATES.find((x) => x.id === d.id);
+      const g = gates.find((x) => x.id === d.id);
       stageRef.current = null; setFollow(false);
       setMsg(`ถึง${g?.name ?? "ประตู"}แล้ว`);
       notifyParent("arrived", { gate: d.id });
@@ -271,7 +283,7 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
     let target: { id: string; entrance: XZ; name: string; code?: string } | null = null;
     let room: MapRoom | undefined;
     if (d.type === "gate") {
-      const g = GATES.find((x) => x.id === d.id);
+      const g = gates.find((x) => x.id === d.id);
       if (g) target = { id: `gate:${g.id}`, entrance: [g.x, g.z], name: g.name };
     } else {
       room = d.type === "room" ? roomById.get(d.id) : undefined;
@@ -350,7 +362,7 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
     const items: { d: NonNullable<Dest>; label: string; sub: string }[] = [];
-    GATES.forEach((g) => {
+    gates.forEach((g) => {
       if (!q || g.name.includes(q) || "ประตู".includes(q))
         items.push({ d: { type: "gate", id: g.id }, label: `🚪 ${g.name}`, sub: "ประตูโรงเรียน (ทางเข้า/ออก)" });
     });
@@ -369,7 +381,7 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
 
   const destLabel = dest
     ? dest.type === "loc" ? locById.get(dest.id)?.name
-      : dest.type === "gate" ? GATES.find((g) => g.id === dest.id)?.name
+      : dest.type === "gate" ? gates.find((g) => g.id === dest.id)?.name
       : roomById.get(dest.id)?.name
     : null;
   const selectedLoc = selectedId ? locById.get(selectedId) : undefined;
@@ -403,15 +415,8 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
           shadow-camera-near={1} shadow-camera-far={90}
         />
 
-        <Decor
-  decor={DEFAULT_DECOR}
-  gates={GATES}
-  nodes={nodes}
-  edges={edges}
-  gate={guardHouse}
-  robotRef={robotRef as any}
-  indoor={mode === "indoor"}
-/>
+        <Decor decor={decor} gates={gates} nodes={nav.nodes} edges={nav.edges} gate={guardHouse}
+  robotRef={robotRef as any} indoor={mode === "indoor"} onGround={placingId ? onGround : undefined} />
 
         {locs.map((l) => {
           if (mode === "indoor" && l.id === activeId) return null;
@@ -455,7 +460,7 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
           <Stat label="อาคารเรียน" value={stats.buildings} unit="หลัง" tone="text-blue-700" />
           <Stat label="ห้องทั้งหมด" value={stats.rooms} unit="ห้อง" tone="text-indigo-700" />
           <Stat label="โต๊ะนักเรียน" value={stats.desks} unit="ตัว" tone="text-emerald-600" />
-          <Stat label="ประตูเข้า-ออก" value={GATES.length} unit="บาน" tone="text-rose-600" />
+          <Stat label="ประตูเข้า-ออก" value={gates.length} unit="บาน" tone="text-rose-600" />
         </div>
       ) : activeLoc && (
         <div className={`${glass} absolute top-3 left-1/2 -translate-x-1/2 rounded-2xl flex items-center gap-3 px-3 py-2`}>
@@ -526,7 +531,7 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
 
       {/* ── แผงตั้งค่าแอดมิน ── */}
       {isAdmin && showAdmin && (
-        <AdminPanel locs={locs} rooms={rooms} source={source} warnings={warnings}
+        <AdminPanel decor={decor} placingId={placingId} onPlace={setPlacingId} locs={locs} rooms={rooms} source={source} warnings={warnings}
           settings={settings} onSettings={changeSettings} api={api} onClose={() => setShowAdmin(false)} />
       )}
 

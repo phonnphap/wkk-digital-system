@@ -3,7 +3,7 @@
 import * as THREE from "three";
 import { Edges, Html } from "@react-three/drei";
 import { useEffect, useMemo, useState } from "react";
-import { FH, MapLocation, MapRoom, isLongX, rotRad, corridorV, stairEnds, stairLen, longLen, CORRIDOR_W } from "./schoolData";
+import { FH, MapLocation, MapRoom, StairSpan, isLongX, rotRad, corridorV, stairSpans, longLen, CORRIDOR_W } from "./schoolData";
 import { Inst, Item, PinLabel } from "./SceneDecor";
 
 export const buildingHeight = (l: MapLocation) =>
@@ -130,6 +130,9 @@ function DomeModel({ loc, dim, selected, onPick }: ModelProps) {
   const nCol = Math.max(3, Math.round(L / 1.1) + 1);
   const xs = useMemo(() => Array.from({ length: nCol }, (_, i) => -L / 2 + (L * i) / (nCol - 1)), [nCol, L]);
   const cw = L - 0.16, cd = W - 0.16; // ขนาดสนาม
+  const stageSide = loc.stage ?? "none";
+const ss = stageSide === "none" ? 0 : (stageSide === "start") === long ? -1 : 1;
+const sl = Math.min(Math.max(L * 0.22, 0.5), 1.6);
   const line = (x: number, z: number, sx: number, sz: number, key: string) => (
     <mesh key={key} position={[x, 0.088, z]}>
       <boxGeometry args={[sx, 0.006, sz]} /><meshStandardMaterial color="#ffffff" transparent={dim} opacity={op} />
@@ -163,12 +166,22 @@ function DomeModel({ loc, dim, selected, onPick }: ModelProps) {
           <meshStandardMaterial color="#ffffff" transparent={dim} opacity={op} />
         </mesh>
         {/* ห่วงบาส/ประตูที่หัวท้ายสนาม */}
-        {!dim && [-1, 1].map((s) => (
+        {!dim && [-1, 1].filter((s) => s !== ss).map((s) => (
           <group key={s} position={[s * (cw / 2 - 0.08), 0, 0]}>
             <mesh position={[0, 0.2, 0]}><cylinderGeometry args={[0.012, 0.012, 0.36, 6]} /><meshStandardMaterial color="#343a40" /></mesh>
             <mesh position={[-s * 0.03, 0.36, 0]}><boxGeometry args={[0.012, 0.12, 0.18]} /><meshStandardMaterial color="#f8f9fa" /></mesh>
           </group>
         ))}
+        {!dim && ss !== 0 && (
+  <group position={[ss * (cw / 2 - sl / 2), 0, 0]}>
+    <mesh position={[0, 0.14, 0]} castShadow receiveShadow><boxGeometry args={[sl, 0.12, cd]} /><meshStandardMaterial color="#8d6e63" /></mesh>
+    <mesh position={[ss * (sl / 2 - 0.02), 0.42, 0]}><boxGeometry args={[0.04, 0.44, cd * 0.96]} /><meshStandardMaterial color={accent.clone().multiplyScalar(0.6).getStyle()} /></mesh>
+    {[-1, 1].map((z) => (
+      <mesh key={z} position={[ss * (sl / 2 - 0.08), 0.42, z * (cd / 2 - 0.1)]}><boxGeometry args={[0.05, 0.44, 0.16]} /><meshStandardMaterial color="#c92a2a" /></mesh>
+    ))}
+    <mesh position={[-ss * (sl / 2 + 0.05), 0.09, 0]}><boxGeometry args={[0.1, 0.06, Math.min(0.5, cd * 0.4)]} /><meshStandardMaterial color="#a1887f" /></mesh>
+  </group>
+)}
 
         {!dim && (
           <>
@@ -508,14 +521,14 @@ function RoomMesh({
   );
 }
 
-function Stairs({ loc, end, y }: { loc: MapLocation; end: "s" | "e"; y: number }) {
+function Stairs({ loc, span, y }: { loc: MapLocation; span: StairSpan; y: number }) {
   const [w, d] = loc.size;
   const longX = isLongX(loc);
-  const L = longLen(loc), len = stairLen(loc);
+  const len = span.len;
   const cross = (longX ? d : w) - 0.04;
   const n = 7, run = len / n;
-  const outer = end === "s" ? -1 : 1;
-  const inner = outer * (L / 2 - len);
+  const outer = span.dir;
+  const inner = span.c - (outer * len) / 2;
   const items = useMemo(() => {
     const out: Item[] = [];
     for (let i = 0; i < n; i++) {
@@ -528,11 +541,10 @@ function Stairs({ loc, end, y }: { loc: MapLocation; end: "s" | "e"; y: number }
     }
     return out;
   }, [inner, outer, run, y, cross, longX]);
-  const ac = inner + (outer * len) / 2;
   return (
     <>
       <Inst items={items}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>
-      <Html position={longX ? [ac, y + 0.95, 0] : [0, y + 0.95, ac]} center distanceFactor={9}>
+      <Html position={longX ? [span.c, y + 0.95, 0] : [0, y + 0.95, span.c]} center distanceFactor={9}>
         <div className="px-1.5 py-0.5 rounded bg-orange-500 text-white text-[10px] font-black pointer-events-none whitespace-nowrap">🪜 บันได ⬆</div>
       </Html>
     </>
@@ -569,7 +581,7 @@ export function IndoorBuilding({
       {rooms.filter((r) => r.level === floor).map((r) => (
         <RoomMesh key={r.id} loc={loc} room={r} active={r.id === activeRoomId} selected={r.id === selectedRoomId} onPick={onRoom} />
       ))}
-      {stairEnds(loc).map((e) => <Stairs key={e} loc={loc} end={e} y={y + 0.085} />)}
+      {stairSpans(loc).map((s, i) => <Stairs key={i} loc={loc} span={s} y={y + 0.085} />)}
     </group>
   );
 }

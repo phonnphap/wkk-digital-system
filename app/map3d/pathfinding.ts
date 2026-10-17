@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import {
   FH, MapEdge, MapLocation, MapNode, MapRoom, XZ,
-  corridorNorm, isLongX, localToWorld, stairsNorm, worldToLocal,
+  corridorNorm, isLongX, localToWorld, bestStair, worldToLocal,
 } from "./schoolData";
 
 const dist = (a: XZ, b: XZ) => Math.hypot(a[0] - b[0], a[1] - b[1]);
@@ -79,7 +79,7 @@ export function indoorRoute(loc: MapLocation, room: MapRoom): THREE.Vector3[] {
     toWorld(loc, corridorNorm(loc, entN), 1),
   ];
   if (room.level > 1) {
-    const st = stairsNorm(loc);
+    const st = bestStair(loc, entN, room.door);
     pts.push(toWorld(loc, st, 1), toWorld(loc, st, room.level));
   }
   pts.push(toWorld(loc, corridorNorm(loc, room.door), room.level), toWorld(loc, room.door, room.level));
