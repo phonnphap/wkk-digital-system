@@ -3,7 +3,7 @@
 import * as THREE from "three";
 import { Edges, Html } from "@react-three/drei";
 import { useEffect, useMemo, useState } from "react";
-import { FH, MapLocation, MapRoom, StairSpan, isLongX, rotRad, corridorV, stairSpans, longLen, CORRIDOR_W } from "./schoolData";
+import { FH, MapLocation, MapRoom, StairSpan, isLongX, rotRad, corridorV, stairSpans, stairsVisible, longLen, CORRIDOR_W } from "./schoolData";
 import { Inst, Item, PinLabel } from "./SceneDecor";
 
 export const buildingHeight = (l: MapLocation) =>
@@ -445,9 +445,24 @@ function RoomMesh({
   const y = (room.level - 1) * FH;
   const type = room.type ?? "classroom";
   const deskCount = type === "classroom" ? room.desks ?? 30 : 0;
+  const teachers = type === "classroom" ? Math.max(0, room.teacherDesks ?? 1) : 0;
   const ac = room.ac ?? "none";
   const fr = useMemo(() => frameOf(room, w, d, cx, cz, rw, rd), [room, w, d, cx, cz, rw, rd]);
   const extra = useMemo(() => buildFurniture(type, room.name, ac, fr), [type, room.name, ac, fr]);
+
+  // ประตู: p = ตำแหน่ง 0..1 ตามความยาวผนังด้านทางเดิน, w = ความกว้าง
+  const doorItems = useMemo<Item[]>(() => {
+    const list = room.doors && room.doors.length ? room.doors : [{ p: 0.5, w: 0.1 }];
+    const { A, D, alongX, sgn } = fr;
+    return list.map((dd) => {
+      const a = -A / 2 + clamp(dd.p, 0, 1) * A;
+      const dep = sgn * (D / 2 + 0.05);
+      const dw = Math.max(0.04, Math.min(dd.w, A));
+      const p: [number, number, number] = alongX ? [dep, Y0 + 0.13, a] : [a, Y0 + 0.13, dep];
+      const s: [number, number, number] = alongX ? [0.035, 0.26, dw] : [dw, 0.26, 0.035];
+      return { p, s, c: "#5c3b1e" };
+    });
+  }, [room.doors, fr]);
 
   const layout = useMemo(() => {
     if (!deskCount) return null;
@@ -473,16 +488,21 @@ function RoomMesh({
       const [lx, lz] = to(a, dep);
       desks.push({ p: [lx, 0.15, lz], s: size(dA, dD, 0.04) });
     }
-    const [tx, tz] = to(0, -sgn * (D / 2 - boardZone * 0.45));
+    const tw = Math.min(A * 0.25, 0.22, ((A * 0.6) / Math.max(teachers, 1)) * 0.8);
+    const teacherItems: Item[] = [];
+    for (let i = 0; i < teachers; i++) {
+      const a = teachers === 1 ? 0 : -A * 0.3 + (i * A * 0.6) / (teachers - 1);
+      const [tx, tz] = to(a, -sgn * (D / 2 - boardZone * 0.45));
+      teacherItems.push({ p: [tx, 0.16, tz], s: size(tw, 0.06, 0.05), c: "#7f5539" });
+    }
     const [bx, bz] = to(0, -sgn * (D / 2));
     return {
-      desks,
-      teacher: { p: [tx, 0.16, tz] as [number, number, number], s: size(Math.min(A * 0.25, 0.22), 0.06, 0.05) },
+      desks, teacherItems,
       board: { p: [bx, 0.3, bz] as [number, number, number], s: alongX ? ([0.012, 0.16, A * 0.6] as [number, number, number]) : ([A * 0.6, 0.16, 0.012] as [number, number, number]) },
     };
-  }, [deskCount, room.door, w, d, cx, cz, rw, rd]);
+  }, [deskCount, teachers, room.door, w, d, cx, cz, rw, rd]);
 
-    const base = type === "toilet" && room.name.includes("หญิง") ? "#fcc2d7"
+  const base = type === "toilet" && room.name.includes("หญิง") ? "#fcc2d7"
     : type === "toilet" && room.name.includes("ชาย") ? "#a5d8ff"
     : TYPE_COLOR[type] ?? TYPE_COLOR.other;
   const floorColor = active ? "#ffd43b" : selected ? "#ffa94d" : hover ? "#74c0fc" : base;
@@ -505,16 +525,17 @@ function RoomMesh({
       {layout && (
         <>
           <Inst items={layout.desks}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#c08457" /></Inst>
-          <mesh position={layout.teacher.p}><boxGeometry args={layout.teacher.s} /><meshStandardMaterial color="#7f5539" /></mesh>
+          <Inst items={layout.teacherItems}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>
           <mesh position={layout.board.p}><boxGeometry args={layout.board.s} /><meshStandardMaterial color="#f8f9fa" /></mesh>
         </>
       )}
-            {extra.length > 0 && (
+      {extra.length > 0 && (
         <Inst items={extra}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>
       )}
+      <Inst items={doorItems}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>
       <Html position={[0, 0.62, 0]} center distanceFactor={9} zIndexRange={[15, 0]}>
         <div className="px-1.5 py-0.5 rounded bg-white/90 text-[10px] font-bold text-slate-700 whitespace-nowrap shadow pointer-events-none">
-          {room.name}{deskCount ? ` · ${deskCount} โต๊ะ` : ""}{ac !== "none" ? ` · ${AC_LABEL[ac]}` : ""}
+          {room.name}{deskCount ? ` · ${deskCount} โต๊ะ` : ""}{room.students ? ` · ${room.students} คน` : ""}{ac !== "none" ? ` · ${AC_LABEL[ac]}` : ""}
         </div>
       </Html>
     </group>
@@ -581,7 +602,7 @@ export function IndoorBuilding({
       {rooms.filter((r) => r.level === floor).map((r) => (
         <RoomMesh key={r.id} loc={loc} room={r} active={r.id === activeRoomId} selected={r.id === selectedRoomId} onPick={onRoom} />
       ))}
-      {stairSpans(loc).map((s, i) => <Stairs key={i} loc={loc} span={s} y={y + 0.085} />)}
+      {stairsVisible(loc, floor) && stairSpans(loc).map((s, i) => <Stairs key={i} loc={loc} span={s} y={y + 0.085} />)}
     </group>
   );
 }

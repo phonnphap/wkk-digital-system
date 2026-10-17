@@ -27,7 +27,9 @@ export interface MapLocation {
   perFloor?: number;   // จำนวนห้องต่อแถว (building: 0 = อัตโนมัติ, facility: 0 = ไม่มีห้องภายใน)
   toilet?: ToiletMode;
   stage?: StageMode;   // โดมกีฬา: เวทีอยู่ปลายด้านไหน
+  floorRooms?: Record<string, number>; // จำนวนห้องต่อแถวแยกตามชั้น เช่น {"1":5,"2":6}
 }
+export interface DoorDef { p: number; w: number } // ตำแหน่งประตู 0..1 ตามความยาวผนัง, ความกว้าง (world)
 export interface MapRoom {
   id: string;
   location_id: string;
@@ -40,6 +42,9 @@ export interface MapRoom {
   type?: string;
   desks?: number;
   ac?: string;
+  teacherDesks?: number; // จำนวนโต๊ะครู
+  students?: number;     // จำนวนนักเรียน
+  doors?: DoorDef[];     // ประตูห้อง (ว่าง = 1 บานกลางผนัง)
 }
 export interface MapNode { id: string; x: number; z: number }
 export interface MapEdge { a: string; b: string }
@@ -95,6 +100,7 @@ export const FALLBACK_LOCATIONS: MapLocation[] = [
   L("16", "ร้านสวัสดิการโรงเรียน", "facility", 326, 578, 45, 28, BLUE, 1, 326, 561),
   L("17", "ป้อมยาม", "gate", 457, 579, 16, 16, "#f59f00", 1, 457, 579),
   L("18", "ลานจอดรถ", "parking", 655, 305, 190, 110, "#868e96", 0, 650, 372),
+  L("19", "ห้องปกครอง", "building", 433, 562, 28, 30, RED, 1, 433, 578),
 ];
 
 const N = (id: string, x: number, y: number): MapNode => {
@@ -147,50 +153,91 @@ export const corridorV = (loc: MapLocation): number => (loc.corridor === "b" ? 1
 export const stairEnds = (loc: MapLocation): ("s" | "e")[] =>
   loc.stairs === "both" ? ["s", "e"] : loc.stairs === "end" ? ["e"] : ["s"];
 
-/* ── ผังพิเศษรายอาคาร (ชั้นล่าง) ──
-   เรียงจากปลาย "start" (แกนยาวด้านค่าน้อย: ซ้าย/บน) ไปปลาย "end"
-   w = น้ำหนักความยาวห้อง (บันไดใช้ความยาวบันไดคงที่) ถ้าต้องการกลับด้านให้ .reverse() */
-interface SegDef { k: "stairs" | "room"; name?: string; type?: string; w: number }
+/* ── ผังพิเศษรายอาคาร ──
+   เรียงจากปลาย "start" (แกนยาวค่าน้อย: ซ้าย/บน) ไปปลาย "end"
+   w = น้ำหนักความยาว, len = ความยาวคงที่ (เมตร world), split = แบ่งเป็นกี่ห้องเท่า ๆ กัน,
+   merge = (บันได) ให้ห้องข้างเคียงกินพื้นที่บันไดในชั้นนี้, dir = ทิศที่ขั้นบันไดสูงขึ้น
+   ฟังก์ชันคืน null = ชั้นนั้นใช้ผังปกติ (ตามค่าตั้งของอาคาร) */
+interface SegDef {
+  k: "stairs" | "room"; name?: string; type?: string; w: number;
+  len?: number; split?: number; merge?: boolean; dir?: 1 | -1; doors?: DoorDef[]; desks?: number;
+}
 export interface SegPlaced extends SegDef { a: number; len: number }
-const SPECIAL_LAYOUTS: Record<string, SegDef[]> = {
-  "1": [
-    { k: "stairs", w: 0 },
-    { k: "room", name: "โรงอาหารใหญ่", type: "canteen", w: 2.4 },
-    { k: "stairs", w: 0 },
-    { k: "room", name: "ห้องกินข้าวครู", type: "canteen", w: 0.7 },
-    { k: "room", name: "ห้องเรียน", type: "classroom", w: 1.1 },
-    { k: "room", name: "ห้องพยาบาล", type: "nurse", w: 0.9 },
-    { k: "room", name: "ห้องภาษาอังกฤษ", type: "classroom", w: 1.1 },
-    { k: "room", name: "ห้องนาฏศิลป์", type: "other", w: 1.1 },
-    { k: "stairs", w: 0 },
-    { k: "room", name: "ห้องขายชุด นร.", type: "office", w: 0.8 },
-    { k: "room", name: "ห้องพักครู", type: "office", w: 1.4 },
-  ],
-};
-export const hasSpecialLayout = (loc: MapLocation) => loc.kind === "building" && !!SPECIAL_LAYOUTS[loc.code];
+const S = (extra: Partial<SegDef> = {}): SegDef => ({ k: "stairs", w: 0, ...extra });
+const R = (name: string, type: string, w: number, extra: Partial<SegDef> = {}): SegDef => ({ k: "room", name, type, w, ...extra });
+const THREE_DOORS: DoorDef[] = [{ p: 0.17, w: 0.12 }, { p: 0.5, w: 0.12 }, { p: 0.83, w: 0.12 }];
 
-export function specialLayout(loc: MapLocation): SegPlaced[] | null {
-  const def = loc.kind === "building" ? SPECIAL_LAYOUTS[loc.code] : undefined;
-  if (!def) return null;
+// อาคาร 1: ชั้นล่างผังพิเศษ / ชั้นบน = ห้องเรียน และห้องริมบันไดกินพื้นที่บันไดไปด้วย
+const B1: SegDef[] = [
+  S(),
+  R("โรงอาหารใหญ่", "canteen", 2.4, { doors: THREE_DOORS }),
+  S(),
+  R("ห้องกินข้าวครู", "canteen", 0.7),
+  R("ห้องเรียน", "classroom", 1.1),
+  R("ห้องพยาบาล", "nurse", 0.9),
+  R("ห้องภาษาอังกฤษ", "classroom", 1.1),
+  R("ห้องนาฏศิลป์", "other", 1.1),
+  S(),
+  R("ห้องขายชุด นร.", "office", 0.8),
+  R("ห้องพักครู", "office", 1.4),
+];
+const B1_UP: SegDef[] = B1.map((s): SegDef =>
+  s.k === "stairs" ? { ...s, merge: true }
+    : { k: "room", w: s.w, type: "classroom", name: "", split: Math.max(1, Math.round(s.w / 1.1)) });
+
+// อาคาร 9: ชั้น 1 ระเบียงตรงกลาง / ชั้น 2-4 ห้องพักครูตรงกลาง / ห้องน้ำตามชั้น (ปรับ/สลับได้ที่นี่)
+const b9 = (level: number): SegDef[] => {
+  const t = (name: string) => R(name, "toilet", 0, { len: 0.4 });
+  const startT = level === 2 ? [t("ห้องน้ำ นร.หญิง"), t("ห้องน้ำครู")] : [];
+  const endT = level === 3 ? [t("ห้องน้ำ นร.ชาย")] : [];
+  const center = level === 1 ? R("ระเบียง", "balcony", 1.2) : R("ห้องพักครู", "office", 1.2);
+  const c = () => R("", "classroom", 1);
+  return [S(), ...startT, c(), c(), center, c(), c(), ...endT, S({ dir: 1 })];
+};
+
+const SPECIAL: Record<string, (level: number) => SegDef[] | null> = {
+  "1": (lv) => (lv === 1 ? B1 : B1_UP),
+  // อาคาร 5 ชั้น 1: บันได / ห้องน้ำใต้บันได / ห้องเก็บของ / ห้องประชุมใหญ่ / ห้องประกอบอาหาร
+  "5": (lv) => (lv === 1 ? [
+    S(),
+    R("ห้องน้ำใต้บันได", "toilet", 0, { len: 0.45 }),
+    R("ห้องเก็บของ", "other", 0.6),
+    R("ห้องประชุมใหญ่", "hall", 2.6),
+    R("ห้องประกอบอาหาร", "canteen", 1.4),
+  ] : null),
+  "9": b9,
+  "19": (lv) => (lv === 1 ? [R("ห้องปกครอง", "office", 1)] : null),
+};
+const SPECIAL_MERGE = new Set(["1"]); // อาคารที่ชั้นบนไม่วาดบันไดแยก (ห้องกินพื้นที่)
+export const hasSpecialLayout = (loc: MapLocation) => loc.kind === "building" && !!SPECIAL[loc.code];
+export const stairsVisible = (loc: MapLocation, floor: number) =>
+  floor === 1 || !(loc.kind === "building" && SPECIAL_MERGE.has(loc.code));
+
+function placeSegs(loc: MapLocation, def: SegDef[]): SegPlaced[] {
   const Lg = longLen(loc), SL = stairLen(loc);
-  const nSt = def.filter((s) => s.k === "stairs").length;
-  const totalW = def.filter((s) => s.k === "room").reduce((a, s) => a + s.w, 0);
-  const free = Math.max(Lg - nSt * SL, 0.5);
+  const fixed = def.reduce((a, s) => a + (s.k === "stairs" ? SL : s.len ?? 0), 0);
+  const totalW = def.filter((s) => s.k === "room" && s.len === undefined).reduce((a, s) => a + s.w, 0) || 1;
+  const free = Math.max(Lg - fixed, 0.5);
   let a = 0;
   return def.map((s) => {
-    const len = s.k === "stairs" ? SL : (s.w / totalW) * free;
-    const out = { ...s, a, len };
+    const len = s.k === "stairs" ? SL : s.len ?? (s.w / totalW) * free;
+    const o = { ...s, a, len };
     a += len;
-    return out;
+    return o;
   });
 }
+export function specialLayout(loc: MapLocation, level = 1): SegPlaced[] | null {
+  const fn = loc.kind === "building" ? SPECIAL[loc.code] : undefined;
+  const def = fn?.(level);
+  return def ? placeSegs(loc, def) : null;
+}
 
-/** ช่วงบันได: c = กึ่งกลางตามแกนยาว (เมตร world จากจุดกึ่งกลางอาคาร), dir = ทิศที่ขั้นบันไดสูงขึ้น */
+/** ช่วงบันได: c = กึ่งกลางตามแกนยาว (เมตร world จากกึ่งกลางอาคาร), dir = ทิศที่ขั้นบันไดสูงขึ้น */
 export interface StairSpan { c: number; len: number; dir: 1 | -1 }
 export function stairSpans(loc: MapLocation): StairSpan[] {
   const Lg = longLen(loc), SL = stairLen(loc);
-  const sp = specialLayout(loc);
-  if (sp) return sp.filter((s) => s.k === "stairs").map((s) => ({ c: s.a + s.len / 2 - Lg / 2, len: s.len, dir: -1 as const }));
+  const sp = specialLayout(loc, 1);
+  if (sp) return sp.filter((s) => s.k === "stairs").map((s) => ({ c: s.a + s.len / 2 - Lg / 2, len: s.len, dir: s.dir ?? -1 }));
   return stairEnds(loc).map((e) =>
     e === "s" ? { c: -Lg / 2 + SL / 2, len: SL, dir: -1 as const } : { c: Lg / 2 - SL / 2, len: SL, dir: 1 as const });
 }
@@ -206,9 +253,11 @@ export const stairsNorm = (loc: MapLocation): XZ => stairsList(loc)[0];
 
 /** เลือกบันไดที่ทางรวม (ทางเข้า → บันได → ห้อง) สั้นที่สุด */
 export function bestStair(loc: MapLocation, from: XZ, to: XZ): XZ {
+  const list = stairsList(loc);
+  if (!list.length) return corridorNorm(loc, from);
   const k = isLongX(loc) ? 0 : 1;
   const cost = (s: XZ) => Math.abs(from[k] - s[k]) + Math.abs(s[k] - to[k]);
-  return stairsList(loc).reduce((b, s) => (cost(s) < cost(b) ? s : b));
+  return list.reduce((b, s) => (cost(s) < cost(b) ? s : b));
 }
 export const corridorNorm = (loc: MapLocation, p: XZ): XZ =>
   isLongX(loc) ? [p[0], corridorV(loc)] : [corridorV(loc), p[1]];
@@ -223,7 +272,7 @@ export function roomCenter(loc: MapLocation, room: MapRoom): [number, number, nu
 }
 
 function roomType(loc: MapLocation, level: number): string {
-  if (loc.code === "8") return "office";
+  if (loc.code === "8" || loc.code === "19") return "office";
   if (loc.code === "7" && level === 1) return "library";
   if (loc.code === "10") return "hall";
   return "classroom";
@@ -242,39 +291,15 @@ export function genRooms(loc: MapLocation): MapRoom[] {
   const pad = (n: number) => String(n).padStart(2, "0");
 
   const out: MapRoom[] = [];
-  const add = (level: number, tag: string, code: string, name: string, u0: number, len: number, type: string, desks: number) => {
+  const add = (level: number, tag: string, code: string, name: string, u0: number, len: number, type: string, desks: number, doors?: DoorDef[]) => {
     const [x, z] = conv(u0, v0);
     const [w, d] = longX ? [len, vLen] : [vLen, len];
     out.push({
       id: `gen-${loc.code}-${level}-${tag}`, location_id: loc.id, level, code, name,
       x, z, w, d, door: conv(u0 + len / 2, doorV), placeholder: true, type, desks, ac: "none",
+      teacherDesks: type === "classroom" ? 1 : 0, doors,
     });
   };
-
-  const sp = specialLayout(loc);
-  const floors = Math.max(loc.floors, 1);
-
-  // ── ผังพิเศษ (อาคาร 1 ฯลฯ)
-  if (sp) {
-    for (let level = 1; level <= floors; level++) {
-      let n = 1;
-      sp.forEach((s, i) => {
-        if (s.k === "stairs") return;
-        const u0 = s.a / Lg, len = s.len / Lg;
-        if (level === 1) {
-          const code = `${loc.code}-${level}${pad(n++)}`;
-          add(level, `S${i}`, code, s.name ?? `ห้อง ${code}`, u0, len, s.type ?? "classroom", (s.type ?? "classroom") === "classroom" ? 30 : 0);
-        } else {
-          const parts = Math.max(1, Math.round(s.w / 1.2));
-          for (let p = 0; p < parts; p++) {
-            const code = `${loc.code}-${level}${pad(n++)}`;
-            add(level, `S${i}-${p}`, code, `ห้อง ${code}`, u0 + (p * len) / parts, len / parts, "classroom", 30);
-          }
-        }
-      });
-    }
-    return out;
-  }
 
   // ── ผังปกติ: บันได → ห้องน้ำ (พื้นที่คงที่) → ห้องเรียนแบ่งเท่า ๆ กันเต็มพื้นที่ที่เหลือ
   const ends = stairEnds(loc);
@@ -286,14 +311,14 @@ export function genRooms(loc: MapLocation): MapRoom[] {
   const resS = ends.includes("s") ? SL + (perEnd.s.length ? TL : 0) : 0;
   const resE = ends.includes("e") ? SL + (perEnd.e.length ? TL : 0) : 0;
   const uStart = resS / Lg, uEnd = 1 - resE / Lg;
-
   const avail = (uEnd - uStart) * Lg;
-  const perRow = loc.perFloor && loc.perFloor > 0
+  const basePerRow = loc.perFloor && loc.perFloor > 0
     ? Math.round(loc.perFloor)
     : Math.max(2, Math.min(14, Math.round(avail / 1.2)));
-  const span = (uEnd - uStart) / perRow;
 
-  for (let level = 1; level <= floors; level++) {
+  const normalLevel = (level: number) => {
+    const perRow = Math.max(1, Math.min(20, Math.round(loc.floorRooms?.[String(level)] ?? basePerRow)));
+    const span = (uEnd - uStart) / perRow;
     for (let i = 0; i < perRow; i++) {
       const num = `${level}${pad(i + 1)}`;
       add(level, String(i + 1), `${loc.code}-${num}`, `ห้อง ${loc.code}-${num}`, uStart + i * span, span,
@@ -309,6 +334,42 @@ export function genRooms(loc: MapLocation): MapRoom[] {
         add(level, `T${tk}`, `${loc.code}-${level}T${tk}`, name, u0, each / Lg, "toilet", 0);
         tk++;
       });
+    });
+  };
+
+  const floors = Math.max(loc.floors, 1);
+  for (let level = 1; level <= floors; level++) {
+    const placed = specialLayout(loc, level);
+    if (!placed) { normalLevel(level); continue; }
+
+    // รวมบันไดที่ merge เข้ากับห้องข้างเคียง
+    type M = { a: number; len: number; s: SegPlaced };
+    const ms: M[] = [];
+    let pend: { a: number; len: number } | null = null;
+    placed.forEach((s) => {
+      if (s.k === "stairs") {
+        if (!s.merge) return;
+        if (ms.length) ms[ms.length - 1].len += s.len;
+        else pend = { a: s.a, len: s.len };
+        return;
+      }
+      const m: M = { a: s.a, len: s.len, s };
+      if (pend) { const pd = pend as { a: number; len: number }; m.a = pd.a; m.len += pd.len; pend = null; }
+      ms.push(m);
+    });
+
+    let n = 1, tk = 1;
+    ms.forEach((m, i) => {
+      const parts = Math.max(1, m.s.split ?? 1);
+      const type = m.s.type ?? "classroom";
+      for (let p = 0; p < parts; p++) {
+        const isT = type === "toilet";
+        const code = isT ? `${loc.code}-${level}T${tk++}` : `${loc.code}-${level}${pad(n++)}`;
+        const base = m.s.name || `ห้อง ${code}`;
+        const name = parts > 1 && m.s.name ? `${base} ${p + 1}` : base;
+        add(level, `S${i}-${p}`, code, name, (m.a + (p * m.len) / parts) / Lg, m.len / parts / Lg, type,
+          type === "classroom" ? m.s.desks ?? 30 : 0, parts === 1 ? m.s.doors : undefined);
+      }
     });
   }
   return out;

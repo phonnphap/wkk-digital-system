@@ -7,6 +7,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FH, MapEdge, MapLocation, MapNode, px } from "./schoolData";
 import { DecorConfig, DecorItem, FENCE, GateDef } from "./DecorData";
 import { SchoolGates } from "./SchoolGates";
+import { Roads, OutsideRoads, Carport, BusBay, Kiosk } from "./Sceneextra";
 
 /* ───────────── helpers ───────────── */
 
@@ -91,35 +92,15 @@ export function Ground({ onGround }: { onGround?: (x: number, z: number) => void
   const click = onGround ? (e: any) => { e.stopPropagation(); onGround(e.point.x, e.point.z); } : undefined;
   return (
     <>
-      {/* นอกโรงเรียน = สีดำ */}
+      {/* นอกโรงเรียน = สีขาว (ถนนนอกรั้วเป็นสีดำ วาดใน OutsideRoads) */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-2, -0.06, 0.5]} receiveShadow onClick={click}>
         <planeGeometry args={[120, 90]} />
-        <meshStandardMaterial color="#111418" />
+        <meshStandardMaterial color="#ffffff" />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]} receiveShadow onClick={click}>
         <shapeGeometry args={[shape]} />
         <meshStandardMaterial color="#8bc34a" />
       </mesh>
-    </>
-  );
-}
-
-export function Roads({ nodes, edges }: { nodes: MapNode[]; edges: MapEdge[] }) {
-  const pos = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
-  return (
-    <>
-      {edges.map((e, i) => {
-        const a = pos.get(e.a), b = pos.get(e.b);
-        if (!a || !b) return null;
-        const len = Math.hypot(b.x - a.x, b.z - a.z);
-        const ang = -Math.atan2(b.z - a.z, b.x - a.x);
-        return (
-          <mesh key={i} position={[(a.x + b.x) / 2, 0.01, (a.z + b.z) / 2]} rotation={[0, ang, 0]} receiveShadow>
-            <boxGeometry args={[len + 0.6, 0.02, 1.1]} />
-            <meshStandardMaterial color="#adb5bd" />
-          </mesh>
-        );
-      })}
     </>
   );
 }
@@ -535,6 +516,7 @@ export function Decor({
     <>
       <Ground onGround={onGround} />
       <Roads nodes={nodes} edges={edges} />
+      <OutsideRoads gates={gates} />
       <Fence gates={gates} />
       <SchoolGates gates={gates} signs={of("sign")} />
       {!indoor && (
@@ -547,6 +529,9 @@ export function Decor({
           {of("shed").map((i) => <Shed key={i.id} it={i} />)}
           {of("barrier").map((i) => <Barrier key={i.id} it={i} />)}
           {of("bridge").map((i) => <Bridge key={i.id} it={i} />)}
+          {of("carport").map((i) => <Carport key={i.id} it={i} />)}
+          {of("busbay").map((i) => <BusBay key={i.id} it={i} />)}
+          {of("kiosk").map((i) => <Kiosk key={i.id} it={i} />)}
         </>
       )}
       <Guard gate={gate} robotRef={robotRef} />

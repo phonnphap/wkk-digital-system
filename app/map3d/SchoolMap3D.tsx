@@ -200,13 +200,22 @@ const nav = useMemo(() => withGateNodes(nodes, edges, gates), [nodes, edges, gat
   const [placingId, setPlacingId] = useState<string | null>(null);
 const onGround = useCallback((wx: number, wz: number) => {
   if (!placingId) return;
+  const rx = Math.round(wx * 100) / 100, rz = Math.round(wz * 100) / 100;
+  if (placingId.startsWith("loc:")) {
+    const id = placingId.slice(4);
+    const l = locs.find((x) => x.id === id);
+    if (l) api.updateLocation(id, { pos: [rx, rz], entrance: [l.entrance[0] + (rx - l.pos[0]), l.entrance[1] + (rz - l.pos[1])] });
+    setPlacingId(null);
+    return;
+  }
   const x = Math.round((wx * 30 + 480) * 10) / 10, y = Math.round((wz * 30 + 400) * 10) / 10;
   api.setDecor((d) => ({
+    ...d,
     items: d.items.map((i) => (i.id === placingId ? { ...i, x, y } : i)),
     gates: d.gates.map((g) => (g.id === placingId ? { ...g, x, y } : g)),
   }));
   setPlacingId(null);
-}, [placingId, api]);
+}, [placingId, api, locs]);
   const [showAdmin, setShowAdmin] = useState(false);
   const [settings, setSettings] = useState<MapSettings>(DEFAULT_SETTINGS);
 

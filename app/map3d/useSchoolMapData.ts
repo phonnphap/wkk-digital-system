@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   FALLBACK_EDGES, FALLBACK_GATE_EDGES, FALLBACK_GATE_NODES, FALLBACK_LOCATIONS, FALLBACK_NODES, genRooms, hasInterior,
-  MapEdge, MapLocation, MapNode, MapRoom,
+  MapEdge, MapLocation, MapNode, MapRoom, LocKind, XZ,
 } from "./schoolData";
 import { DEFAULT_DECOR, DecorConfig, sanitizeDecor } from "./DecorData";
 
@@ -58,6 +58,7 @@ export function useSchoolMapData() {
           stairs: x.stairs_mode ?? "start",
           perFloor: x.rooms_per_floor ?? undefined,
           stage: x.stage_mode ?? "none",
+          floorRooms: x.floor_rooms ?? undefined,
         } as MapLocation))
         .sort((a: MapLocation, b: MapLocation) => Number(a.code) - Number(b.code));
 
@@ -71,6 +72,8 @@ export function useSchoolMapData() {
           level: floorById.get(x.floor_id)!.level,
           x: x.x, z: x.z, w: x.w, d: x.d, door: [x.door_x, x.door_z],
           type: x.room_type ?? "classroom", desks: x.desk_count ?? 30, ac: x.ac_type ?? "none",
+          teacherDesks: x.teacher_desks ?? 1, students: x.student_count ?? undefined,
+          doors: Array.isArray(x.doors) ? x.doors : undefined,
         } as MapRoom));
 
       const dbNodes: MapNode[] = n.data.map((x: any) => ({ id: x.code, x: x.pos_x, z: x.pos_z }));
@@ -124,6 +127,7 @@ export function useSchoolMapData() {
     if (patch.toilet !== undefined) row.toilet_mode = patch.toilet;
     if (patch.stage !== undefined) row.stage_mode = patch.stage;   // ต้องรัน SQL เพิ่มคอลัมน์ stage_mode ก่อน
     if ("perFloor" in patch) row.rooms_per_floor = patch.perFloor ?? null;
+    if (patch.floorRooms !== undefined) row.floor_rooms = patch.floorRooms;   // ต้องรัน migration2.sql
     if (patch.pos) { row.pos_x = patch.pos[0]; row.pos_z = patch.pos[1]; }
     if (patch.size) { row.size_w = patch.size[0]; row.size_d = patch.size[1]; }
     if (patch.entrance) { row.entrance_x = patch.entrance[0]; row.entrance_z = patch.entrance[1]; }
@@ -182,6 +186,14 @@ export function useSchoolMapData() {
       if (patch.type !== undefined) row.room_type = patch.type;
       if (patch.desks !== undefined) row.desk_count = patch.desks;
       if (patch.ac !== undefined) row.ac_type = patch.ac;
+      if (patch.x !== undefined) row.x = patch.x;
+      if (patch.z !== undefined) row.z = patch.z;
+      if (patch.w !== undefined) row.w = patch.w;
+      if (patch.d !== undefined) row.d = patch.d;
+      if (patch.door !== undefined) { row.door_x = patch.door[0]; row.door_z = patch.door[1]; }
+      if (patch.teacherDesks !== undefined) row.teacher_desks = patch.teacherDesks;
+      if (patch.students !== undefined) row.student_count = patch.students;
+      if (patch.doors !== undefined) row.doors = patch.doors;
       const { error } = await createClient().from("map_rooms").update(row).eq("id", id);
       return error ? fail(error) : ok();
     }
@@ -269,7 +281,7 @@ export function useSchoolMapData() {
       const rows = list.filter((r) => floorIds.has(r.level)).map((r) => ({
         floor_id: floorIds.get(r.level), code: r.code, name: r.name, x: r.x, z: r.z, w: r.w, d: r.d,
         door_x: r.door[0], door_z: r.door[1], room_type: r.type ?? "classroom", desk_count: r.desks ?? 30,
-        ac_type: r.ac ?? "none",
+        ac_type: r.ac ?? "none", teacher_desks: r.teacherDesks ?? 1, student_count: r.students ?? null, doors: r.doors ?? null,
       }));
       if (rows.length) {
         const { error } = await sb.from("map_rooms").insert(rows);
@@ -314,12 +326,75 @@ export function useSchoolMapData() {
     return ok(`สร้างห้องใหม่ ${n} อาคารแล้ว`);
   }, [regenerateRooms]);
 
+  /** เพิ่มสถานที่ใหม่ (บันทึกลง DB ถ้าเชื่อมต่ออยู่) */
+  const persistNewLocation = useCallback(async (nl: MapLocation): Promise<SaveResult> => {
+    if (sourceRef.current !== "supabase") {
+      locsRef.current = [...locsRef.current, nl].sort((a, b) => Number(a.code) - Number(b.code));
+      setLocs(locsRef.current);
+      return ok(LOCAL);
+    }
+    const { error } = await createClient().from("map_locations").insert({
+      code: nl.code, name: nl.name, kind: nl.kind, pos_x: nl.pos[0], pos_z: nl.pos[1],
+      size_w: nl.size[0], size_d: nl.size[1], color: nl.color, floors_count: nl.floors,
+      entrance_x: nl.entrance[0], entrance_z: nl.entrance[1], rot: nl.rot ?? 0,
+      corridor_side: nl.corridor ?? "a", stairs_mode: nl.stairs ?? "start", toilet_mode: nl.toilet ?? "none",
+    });
+    if (error) return fail(error);
+    await load();
+    return ok(`เพิ่ม ${nl.name} แล้ว`);
+  }, [load]);
+
+  const addLocation = useCallback(async (kind: LocKind): Promise<SaveResult> => {
+    const codes = locsRef.current.map((l) => Number(l.code)).filter((n) => !Number.isNaN(n));
+    const code = String((codes.length ? Math.max(...codes) : 0) + 1);
+    const sizes: Record<LocKind, XZ> = {
+      building: [2, 1.3], facility: [1.5, 1], dome: [3, 1.4], field: [2, 3], parking: [4, 2.5], gate: [0.6, 0.6],
+    };
+    const labels: Record<LocKind, string> = {
+      building: "อาคารเรียน", facility: "อาคาร", dome: "โดม", field: "สนาม", parking: "ลานจอดรถ", gate: "ป้อมยาม",
+    };
+    const size = sizes[kind];
+    const nl: MapLocation = {
+      id: `loc-${code}-${Date.now()}`, code, name: `${labels[kind]} ${code}`, kind,
+      pos: [0, 0], size, color: kind === "facility" ? "#2f9e44" : "#4263eb",
+      floors: kind === "building" || kind === "facility" || kind === "gate" || kind === "dome" ? 1 : 0,
+      entrance: [0, size[1] / 2 + 0.3], rot: 0, corridor: "a", stairs: "start", toilet: "none",
+    };
+    return persistNewLocation(nl);
+  }, [persistNewLocation]);
+
+  const deleteLocation = useCallback(async (id: string): Promise<SaveResult> => {
+    locsRef.current = locsRef.current.filter((l) => l.id !== id);
+    setLocs(locsRef.current);
+    setDbRooms((prev) => prev.filter((r) => r.location_id !== id));
+    setCustom((prev) => { const n = { ...prev }; delete n[id]; return n; });
+    if (sourceRef.current !== "supabase") return ok(LOCAL);
+    try {
+      const sb = createClient();
+      const { data: fl } = await sb.from("map_floors").select("id").eq("location_id", id);
+      const ids = (fl ?? []).map((f: any) => f.id);
+      if (ids.length) {
+        await sb.from("map_rooms").delete().in("floor_id", ids);
+        await sb.from("map_floors").delete().in("id", ids);
+      }
+      const { error } = await sb.from("map_locations").delete().eq("id", id);
+      return error ? fail(error) : ok("ลบสถานที่แล้ว");
+    } catch (e) { return fail(e); }
+  }, []);
+
   const syncDefaultLayout = useCallback(async (): Promise<SaveResult> => {
     let count = 0;
     for (const d of FALLBACK_LOCATIONS) {
       const cur = locsRef.current.find((l) => l.code === d.code);
       if (!cur) continue;
       await updateLocation(cur.id, { pos: d.pos, size: d.size, rot: d.rot ?? 0, entrance: d.entrance, kind: d.kind });
+      count++;
+    }
+    // เติมสถานที่ตั้งต้นที่ยังไม่มีใน DB (เช่น 19 ห้องปกครอง)
+    for (const d of FALLBACK_LOCATIONS) {
+      if (locsRef.current.some((l) => l.code === d.code)) continue;
+      const r = await persistNewLocation({ ...d, id: `loc-${d.code}-${Date.now()}` });
+      if (!r.ok) return r;
       count++;
     }
     if (sourceRef.current === "supabase") {
@@ -337,19 +412,21 @@ export function useSchoolMapData() {
       } catch (e) { return fail(e); }
     }
     return ok(`ปรับผัง ${count} สถานที่ + เส้นทางประตูแล้ว`);
-  }, [updateLocation]);
+  }, [updateLocation, persistNewLocation]);
 
   /* ───────────── ฉาก (ต้นไม้ ประตู ซุ้ม ห้องน้ำ ฯลฯ) ───────────── */
   const saveDecor = useCallback(async (): Promise<SaveResult> => {
     if (sourceRef.current !== "supabase") return ok(LOCAL);
-    const { error } = await createClient().from("map_config")
-      .upsert({ key: "decor", value: decorRef.current, updated_at: new Date().toISOString() });
-    return error ? fail(error) : ok("บันทึกฉากแล้ว");
+    const { data, error } = await createClient().from("map_config")
+      .upsert({ key: "decor", value: decorRef.current, updated_at: new Date().toISOString() }).select("key");
+    if (error) return fail(error);
+    if (!data?.length) return fail("บันทึกไม่เข้าฐานข้อมูล: ไม่มีสิทธิ์เขียน (RLS) หรือยังไม่ได้สร้างตาราง map_config");
+    return ok("บันทึกฉากแล้ว");
   }, []);
   const resetDecor = useCallback(() => setDecor(DEFAULT_DECOR), []);
 
   const api = {
-    updateLocation, setFloors, updateRoom, addRoom, deleteRoom, saveGenerated, regenerateRooms, regenerateAll,
+    updateLocation, addLocation, deleteLocation, setFloors, updateRoom, addRoom, deleteRoom, saveGenerated, regenerateRooms, regenerateAll,
     syncDefaultLayout, setDecor, saveDecor, resetDecor, reload: load,
   };
   return { locs, rooms, nodes, edges, source, decor, api };

@@ -43,10 +43,11 @@ export function fenceFrame(x: number, y: number) {
 }
 
 /* ───────────── ชนิดของตกแต่ง ───────────── */
-export type DecorType = "tree" | "pavilion" | "shrine" | "toilet" | "shed" | "barrier" | "flag" | "bridge" | "sign";
+export type DecorType = "tree" | "pavilion" | "shrine" | "toilet" | "shed" | "barrier" | "flag" | "bridge" | "sign" | "carport" | "busbay" | "kiosk";
 export const DECOR_LABEL: Record<DecorType, string> = {
   tree: "ต้นไม้", pavilion: "ศาลา/ซุ้มนั่งเล่น", shrine: "ซุ้มพระ", toilet: "ตึกห้องน้ำ (นอกอาคาร)",
   shed: "โรงจอดมอเตอร์ไซค์", barrier: "ประตูกั้น", flag: "เสาธง", bridge: "ทางเชื่อมระหว่างอาคาร", sign: "ป้ายโรงเรียน",
+  carport: "โรงจอดรถยนต์", busbay: "ช่องจอดรถตู้/รถรับส่ง", kiosk: "ซุ้มขายน้ำ",
 };
 export interface DecorItem {
   id: string; type: DecorType;
@@ -56,6 +57,8 @@ export interface DecorItem {
   w?: number; d?: number;    // ขนาดเป็น pixel
   color?: string; name?: string;
   levels?: string;           // ทางเชื่อม: ชั้นที่มี เช่น "2,3"
+  n?: number;                // ช่องจอด (busbay)
+  since?: number;            // เวอร์ชันที่เพิ่มรายการนี้ (ใช้เติมค่าตั้งต้นใหม่ให้ข้อมูลที่เคยบันทึกไว้)
 }
 export interface GateItem {
   id: string; name: string; x: number; y: number;
@@ -64,13 +67,16 @@ export interface GateItem {
   node: string;              // id โหนดเส้นทางของประตู
   link?: string;             // โหนดถนนที่ต่อเข้า (ว่าง = ใกล้สุด)
   main?: boolean;
+  since?: number;
 }
-export interface DecorConfig { items: DecorItem[]; gates: GateItem[] }
+export interface DecorConfig { items: DecorItem[]; gates: GateItem[]; version?: number }
 
 const trees = (list: [number, number, number][], h = 1): DecorItem[] =>
   list.map(([x, y, s], i) => ({ id: `tree-${x}-${y}-${i}`, type: "tree", x, y, s, h }));
 
+export const DECOR_VERSION = 2;
 export const DEFAULT_DECOR: DecorConfig = {
+  version: DECOR_VERSION,
   gates: [
     { id: "g1", name: "ประตู 1 ประตูหลังโรงเรียน", x: 104, y: 577, width: 1.8, color: "#f97316", node: "gW", link: "w3" },
     { id: "g2", name: "ประตู 2 ทางเข้าผู้บริหาร", x: 397, y: 594, width: 1.8, color: "#7c3aed", node: "g2n", link: "gate" },
@@ -103,14 +109,32 @@ export const DEFAULT_DECOR: DecorConfig = {
     { id: "bridge-43", type: "bridge", x: 358, y: 282, w: 30, d: 28, levels: "2,3", name: "ทางเชื่อมอาคาร 4-3" },
     { id: "bridge-53", type: "bridge", x: 498, y: 277, w: 30, d: 18, levels: "2,3", name: "ทางเชื่อมอาคาร 5-3" },
     { id: "sign-1", type: "sign", x: 457, y: 590, w: 66, name: "โรงเรียนวัดเขียนเขต" },
+    // ── เพิ่มในเวอร์ชัน 2 ──
+    { id: "carport-exec", type: "carport", x: 455, y: 310, w: 50, d: 22, rot: 90, name: "โรงจอดรถผู้บริหาร", color: "#7c3aed", since: 2 },
+    { id: "carport-teacher", type: "carport", x: 690, y: 388, w: 100, d: 24, name: "โรงจอดรถครู", color: "#2563eb", since: 2 },
+    { id: "busbay-1", type: "busbay", x: 410, y: 276, w: 78, d: 18, n: 3, name: "ที่จอดรถตู้/รถรับส่ง นร.", since: 2 },
+    { id: "kiosk-1", type: "kiosk", x: 350, y: 535, name: "ซุ้มขายน้ำ", color: "#0ea5e9", since: 2 },
+    { id: "barrier-2", type: "barrier", x: 505, y: 508, w: 36, name: "ประตูกั้น อนุบาล–อาคาร 4", since: 2 },
+    { id: "barrier-3", type: "barrier", x: 435, y: 503, w: 34, name: "ประตูกั้น ห้องปกครอง–โดม", since: 2 },
+    { id: "pav-lib", type: "pavilion", x: 362, y: 531, color: "#3b5bdb", since: 2 },
+    { id: "pav-coop", type: "pavilion", x: 322, y: 548, color: "#e5484d", since: 2 },
   ],
 };
 
 export function sanitizeDecor(v: any): DecorConfig {
-  const okItem = (i: any) => i && typeof i.x === "number" && typeof i.y === "number" && typeof i.type === "string";
-  const items = Array.isArray(v?.items) ? v.items.filter(okItem) : DEFAULT_DECOR.items;
-  const gates = Array.isArray(v?.gates) && v.gates.length ? v.gates.filter(okItem) : DEFAULT_DECOR.gates;
-  return { items, gates };
+  const okPos = (i: any) => i && typeof i.x === "number" && typeof i.y === "number";
+  const ver = typeof v?.version === "number" ? v.version : 1;
+  const items: DecorItem[] = Array.isArray(v?.items)
+    ? v.items.filter((i: any) => okPos(i) && typeof i.type === "string") : [...DEFAULT_DECOR.items];
+  // หมายเหตุ: ประตูไม่มีฟิลด์ type — เช็กด้วย node แทน (บั๊กเดิมทำให้ประตูหายหลังรีเฟรช)
+  const gates: GateItem[] = Array.isArray(v?.gates)
+    ? v.gates.filter((g: any) => okPos(g) && typeof g.node === "string") : [...DEFAULT_DECOR.gates];
+  if (ver < DECOR_VERSION) {
+    const hi = new Set(items.map((i) => i.id)), hg = new Set(gates.map((g) => g.id));
+    DEFAULT_DECOR.items.forEach((i) => { if ((i.since ?? 1) > ver && !hi.has(i.id)) items.push(i); });
+    DEFAULT_DECOR.gates.forEach((g) => { if ((g.since ?? 1) > ver && !hg.has(g.id)) gates.push(g); });
+  }
+  return { items, gates, version: DECOR_VERSION };
 }
 
 /* ───────────── ประตูรั้ว ───────────── */
@@ -140,6 +164,32 @@ export function withGateNodes(nodes: MapNode[], edges: MapEdge[], gates: GateDef
     if (link) outEdges.push({ a: g.node, b: link });
   });
   return { nodes: outNodes, edges: outEdges };
+}
+
+/* ───────────── ถนนนอกโรงเรียน (พื้นดำ ขอบเหลือง 2 เลน) ───────────── */
+export const ROAD_W = 1.6;
+export const OUTSIDE_ROADS_PX: [number, number][][] = [
+  [[45, 190], [50, 420], [55, 668], [335, 650], [454, 641], [661, 603], [852, 567], [955, 552], [955, 420], [945, 300]],
+];
+/** ช่วงถนนนอกรั้ว + ทางต่อจากประตูแต่ละบานไปยังถนน */
+export function outsideRoadSegs(gates: GateDef[]): { a: XZ; b: XZ }[] {
+  const segs: { a: XZ; b: XZ }[] = [];
+  OUTSIDE_ROADS_PX.forEach((pl) => {
+    for (let i = 0; i < pl.length - 1; i++) segs.push({ a: px(pl[i][0], pl[i][1]), b: px(pl[i + 1][0], pl[i + 1][1]) });
+  });
+  const roadSegs = [...segs];
+  gates.forEach((g) => {
+    let best: { d: number; q: XZ } = { d: Infinity, q: [g.x, g.z] };
+    roadSegs.forEach(({ a, b }) => {
+      const vx = b[0] - a[0], vz = b[1] - a[1];
+      const t = Math.min(1, Math.max(0, ((g.x - a[0]) * vx + (g.z - a[1]) * vz) / (vx * vx + vz * vz)));
+      const q: XZ = [a[0] + vx * t, a[1] + vz * t];
+      const d = Math.hypot(g.x - q[0], g.z - q[1]);
+      if (d < best.d) best = { d, q };
+    });
+    if (best.d > 0.2 && best.d < 8) segs.push({ a: [g.x, g.z], b: best.q });
+  });
+  return segs;
 }
 
 /** (เก็บไว้เพื่อความเข้ากันได้กับโค้ดเดิม) */
