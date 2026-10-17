@@ -74,12 +74,13 @@ export interface DecorConfig { items: DecorItem[]; gates: GateItem[]; version?: 
 const trees = (list: [number, number, number][], h = 1): DecorItem[] =>
   list.map(([x, y, s], i) => ({ id: `tree-${x}-${y}-${i}`, type: "tree", x, y, s, h }));
 
-export const DECOR_VERSION = 2;
+export const DECOR_VERSION = 3;
 export const DEFAULT_DECOR: DecorConfig = {
   version: DECOR_VERSION,
   gates: [
     { id: "g1", name: "ประตู 1 ประตูหลังโรงเรียน", x: 104, y: 577, width: 1.8, color: "#f97316", node: "gW", link: "w3" },
     { id: "g2", name: "ประตู 2 ทางเข้าผู้บริหาร", x: 397, y: 594, width: 1.8, color: "#7c3aed", node: "g2n", link: "gate" },
+    { id: "g5", name: "ประตูทางเข้าคนเดิน (ติดประตู 2)", x: 355, y: 596, width: 1.0, color: "#a78bfa", node: "g5n", link: "gate", since: 3 },
     { id: "g3", name: "ประตู 3 ทางเข้าลานจอดรถหลัก", x: 517, y: 579, width: 2.4, color: "#7c3aed", node: "g3n", link: "gate", main: true },
     { id: "g4", name: "ประตู 4 ประตูข้างลานจอดรถ", x: 897, y: 445, width: 2.2, color: "#be123c", node: "gE", link: "p1" },
   ],
@@ -111,7 +112,7 @@ export const DEFAULT_DECOR: DecorConfig = {
     { id: "sign-1", type: "sign", x: 457, y: 590, w: 42, name: "โรงเรียนวัดเขียนเขต" },
     // ── เพิ่มในเวอร์ชัน 2 ──
     { id: "carport-exec", type: "carport", x: 455, y: 310, w: 50, d: 22, rot: 90, name: "โรงจอดรถผู้บริหาร", color: "#7c3aed", since: 2 },
-    { id: "carport-teacher", type: "carport", x: 690, y: 388, w: 100, d: 24, name: "โรงจอดรถครู", color: "#2563eb", since: 2 },
+    { id: "carport-teacher", type: "carport", x: 680, y: 380, w: 100, d: 24, name: "โรงจอดรถครู", color: "#2563eb", since: 2 },
     { id: "busbay-1", type: "busbay", x: 410, y: 276, w: 78, d: 18, n: 3, name: "ที่จอดรถตู้/รถรับส่ง นร.", since: 2 },
     { id: "kiosk-1", type: "kiosk", x: 350, y: 535, name: "ซุ้มขายน้ำ", color: "#0ea5e9", since: 2 },
     { id: "barrier-2", type: "barrier", x: 505, y: 508, w: 36, name: "ประตูกั้น อนุบาล–อาคาร 4", since: 2 },
@@ -166,15 +167,35 @@ export function withGateNodes(nodes: MapNode[], edges: MapEdge[], gates: GateDef
   return { nodes: outNodes, edges: outEdges };
 }
 
-/* ───────────── ถนนนอกโรงเรียน (พื้นดำ ขอบเหลือง 2 เลน) ───────────── */
+/* ───────────── ถนน ─────────────
+   พิกัด px ของแผนผัง (ประมาณจากแผนผังจราจร)
+   - ถนนหลักรังสิต–นครนายก: สีน้ำเงิน 4 เลน (ฝั่งละ 2) อยู่ทางตะวันตกของวัด
+   - ถนนในซอย (ผ่านวัดเขียนเขต): สีดำ ขอบเหลือง 2 เลน
+   - ถนนเข้า-ออกลานจอดรถ (ในโรงเรียน): สีเหลือง */
 export const ROAD_W = 1.6;
-export const OUTSIDE_ROADS_PX: [number, number][][] = [
-  [[45, 190], [50, 420], [55, 668], [335, 650], [454, 641], [661, 603], [852, 567], [955, 552], [955, 420], [945, 300]],
+export const MAIN_ROAD = { x: -410, y0: -150, y1: 900, w: 4.0 };
+export const SOI_ROADS_PX: [number, number][][] = [
+  [[-410, 224], [-44, 212], [10, 628]],                                         // ทางเข้าซอย → ด้านตะวันออกของวัด
+  [[-286, 224], [-280, 672]],                                                    // ริมวัดด้านตะวันตก
+  [[-286, 428], [-200, 428], [-196, 668]],                                       // ซอยย่อยวัดหลังเล็ก
+  [[-410, 672], [-196, 668], [10, 660], [100, 662], [335, 650], [454, 641], [661, 603], [852, 567], [958, 520], [1010, 505]], // ทางออก ผ่านหน้าโรงเรียน
 ];
-/** ช่วงถนนนอกรั้ว + ทางต่อจากประตูแต่ละบานไปยังถนน */
+export const OUTSIDE_ROADS_PX = SOI_ROADS_PX;
+export const PARK_ROADS_PX: [number, number][][] = [
+  [[576, 420], [540, 432], [505, 500], [500, 560], [517, 579]],                  // ลานจอดรถ ↔ ประตู 3
+  [[564, 243], [747, 243], [790, 392], [576, 416], [564, 243]],                  // วนรอบลานจอดรถ
+  [[790, 392], [845, 415], [880, 440], [897, 445]],                              // ลานจอดรถ ↔ ประตู 4
+];
+export const ROAD_LABELS_PX: { x: number; y: number; text: string }[] = [
+  { x: -380, y: 200, text: "ทางเข้า" },
+  { x: -380, y: 695, text: "ทางออก" },
+  { x: -243, y: 330, text: "วัดเขียนเขต" },
+];
+
+/** ช่วงถนนซอยนอกรั้ว + ทางต่อจากประตูแต่ละบานไปยังถนน */
 export function outsideRoadSegs(gates: GateDef[]): { a: XZ; b: XZ }[] {
   const segs: { a: XZ; b: XZ }[] = [];
-  OUTSIDE_ROADS_PX.forEach((pl) => {
+  SOI_ROADS_PX.forEach((pl) => {
     for (let i = 0; i < pl.length - 1; i++) segs.push({ a: px(pl[i][0], pl[i][1]), b: px(pl[i + 1][0], pl[i + 1][1]) });
   });
   const roadSegs = [...segs];

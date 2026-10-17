@@ -7,7 +7,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FH, MapEdge, MapLocation, MapNode, px } from "./schoolData";
 import { DecorConfig, DecorItem, FENCE, GateDef } from "./DecorData";
 import { SchoolGates } from "./SchoolGates";
-import { Roads, OutsideRoads, Carport, BusBay, Kiosk } from "./SceneExtra";
+import { Roads, OutsideRoads, MainRoad, ParkRoads, Carport, BusBay, Kiosk } from "./SceneExtra";
 
 /* ───────────── helpers ───────────── */
 
@@ -108,32 +108,50 @@ export function Ground({ onGround }: { onGround?: (x: number, z: number) => void
 export function Fence({ gates }: { gates: GateDef[] }) {
   const parts = useMemo(() => {
     const bars: Item[] = [], rails: Item[] = [], pillars: Item[] = [];
-    const nearGap = (x: number, z: number) =>
-      gates.some((g) => Math.hypot(x - g.x, z - g.z) < g.width / 2 + 0.25);
     for (let i = 0; i < FENCE.length; i++) {
       const a = FENCE[i], b = FENCE[(i + 1) % FENCE.length];
-      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      const ang = -Math.atan2(b[1] - a[1], b[0] - a[0]);
-      const n = Math.max(1, Math.round(len / 1.4));
-      for (let k = 0; k < n; k++) {
-        const t0 = k / n, t1 = (k + 1) / n, tm = (t0 + t1) / 2;
-        const mx = a[0] + (b[0] - a[0]) * tm, mz = a[1] + (b[1] - a[1]) * tm;
-        if (nearGap(mx, mz)) continue;
-        const segLen = len / n;
-        rails.push({ p: [mx, 0.5, mz], s: [segLen, 1, 1], r: ang });
-        rails.push({ p: [mx, 0.2, mz], s: [segLen, 1, 1], r: ang });
-        const bn = Math.floor(segLen / 0.16);
-        for (let j = 1; j < bn; j++) {
-          const t = t0 + ((t1 - t0) * j) / bn;
-          bars.push({ p: [a[0] + (b[0] - a[0]) * t, 0.35, a[1] + (b[1] - a[1]) * t] });
+      const vx = b[0] - a[0], vz = b[1] - a[1];
+      const len = Math.hypot(vx, vz);
+      const ang = -Math.atan2(vz, vx);
+      // ช่องประตูบนรั้วช่วงนี้ — ตัดรั้วพอดีขอบเสาประตู ไม่เว้นช่องว่าง
+      const cuts: [number, number][] = [];
+      gates.forEach((g) => {
+        const t = ((g.x - a[0]) * vx + (g.z - a[1]) * vz) / (len * len);
+        const qx = a[0] + vx * t, qz = a[1] + vz * t;
+        if (t < -0.2 || t > 1.2 || Math.hypot(g.x - qx, g.z - qz) > 0.1) return;
+        const h = g.width / 2 / len;
+        cuts.push([t - h, t + h]);
+      });
+      cuts.sort((p, q) => p[0] - q[0]);
+      const keep: [number, number][] = [];
+      let cur = 0;
+      cuts.forEach(([c0, c1]) => {
+        if (c0 > cur) keep.push([cur, Math.min(c0, 1)]);
+        cur = Math.max(cur, c1);
+      });
+      if (cur < 1) keep.push([cur, 1]);
+      keep.forEach(([k0, k1]) => {
+        const L1 = len * (k1 - k0);
+        if (L1 < 0.02) return;
+        const n = Math.max(1, Math.round(L1 / 1.4));
+        for (let k = 0; k < n; k++) {
+          const t0 = k0 + ((k1 - k0) * k) / n, t1 = k0 + ((k1 - k0) * (k + 1)) / n, tm = (t0 + t1) / 2;
+          const mx = a[0] + vx * tm, mz = a[1] + vz * tm;
+          const segLen = L1 / n;
+          rails.push({ p: [mx, 0.5, mz], s: [segLen, 1, 1], r: ang });
+          rails.push({ p: [mx, 0.2, mz], s: [segLen, 1, 1], r: ang });
+          const bn = Math.floor(segLen / 0.16);
+          for (let j = 1; j < bn; j++) {
+            const t = t0 + ((t1 - t0) * j) / bn;
+            bars.push({ p: [a[0] + vx * t, 0.35, a[1] + vz * t] });
+          }
         }
-      }
-      const pn = Math.max(1, Math.round(len / 2.8));
-      for (let k = 0; k <= pn; k++) {
-        const t = k / pn;
-        const x = a[0] + (b[0] - a[0]) * t, z = a[1] + (b[1] - a[1]) * t;
-        if (!nearGap(x, z)) pillars.push({ p: [x, 0.36, z] });
-      }
+        const pn = Math.max(1, Math.round(L1 / 2.8));
+        for (let k = 0; k <= pn; k++) {
+          const t = k0 + ((k1 - k0) * k) / pn;
+          pillars.push({ p: [a[0] + vx * t, 0.36, a[1] + vz * t] });
+        }
+      });
     }
     return { bars, rails, pillars };
   }, [gates]);
@@ -517,6 +535,8 @@ export function Decor({
       <Ground onGround={onGround} />
       <Roads nodes={nodes} edges={edges} />
       <OutsideRoads gates={gates} />
+      <MainRoad />
+      <ParkRoads />
       <Fence gates={gates} />
       <SchoolGates gates={gates} signs={of("sign")} />
       {!indoor && (

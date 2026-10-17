@@ -6,7 +6,7 @@ import * as THREE from "three";
 import { Html } from "@react-three/drei";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { MapEdge, MapNode, px } from "./schoolData";
-import { DecorItem, GateDef, ROAD_W, outsideRoadSegs } from "./DecorData";
+import { DecorItem, GateDef, MAIN_ROAD, PARK_ROADS_PX, ROAD_LABELS_PX, ROAD_W, outsideRoadSegs } from "./DecorData";
 
 type Item = { p: [number, number, number]; s?: number | [number, number, number]; r?: number; c?: string };
 
@@ -104,6 +104,62 @@ export function OutsideRoads({ gates }: { gates: GateDef[] }) {
       <InstX items={base}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
       <InstX items={edge}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
       <InstX items={dash}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
+    </>
+  );
+}
+
+/* ───────────── ถนนหลักรังสิต–นครนายก (สีน้ำเงิน 4 เลน ฝั่งละ 2) + ป้ายชื่อ ───────────── */
+export function MainRoad() {
+  const [x] = px(MAIN_ROAD.x, 0);
+  const z0 = px(0, MAIN_ROAD.y0)[1], z1 = px(0, MAIN_ROAD.y1)[1];
+  const L = z1 - z0, zc = (z0 + z1) / 2, W = MAIN_ROAD.w;
+  const dashes = useMemo(() => {
+    const out: Item[] = [];
+    const n = Math.floor(L / 0.7);
+    for (let k = 0; k < n; k++) {
+      const z = z0 + (k + 0.5) * (L / n);
+      [-W / 4, W / 4].forEach((o) => out.push({ p: [x + o, 0.016, z], s: [0.05, 0.006, 0.35], c: "#ffffff" }));
+    }
+    out.push({ p: [x - 0.04, 0.016, zc], s: [0.04, 0.006, L], c: "#fbbf24" });
+    out.push({ p: [x + 0.04, 0.016, zc], s: [0.04, 0.006, L], c: "#fbbf24" });
+    [-1, 1].forEach((s) => out.push({ p: [x + s * (W / 2 - 0.06), 0.016, zc], s: [0.05, 0.006, L], c: "#ffffff" }));
+    return out;
+  }, [x, z0, L, zc, W]);
+  return (
+    <>
+      <mesh position={[x, 0.008, zc]} receiveShadow><boxGeometry args={[W, 0.014, L]} /><meshStandardMaterial color="#1e40af" /></mesh>
+      <InstX items={dashes}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
+      {[-12, 2, 14].map((z) => (
+        <group key={z} position={[x, 0, z]}><Tag y={0.5}>🛣 ถนนรังสิต–นครนายก (4 เลน)</Tag></group>
+      ))}
+      {ROAD_LABELS_PX.map((l) => {
+        const [lx, lz] = px(l.x, l.y);
+        return <group key={l.text} position={[lx, 0, lz]}><Tag y={0.4}>{l.text}</Tag></group>;
+      })}
+    </>
+  );
+}
+
+/* ───────────── ถนนเข้า-ออกลานจอดรถ (สีเหลือง) ───────────── */
+export function ParkRoads() {
+  const { base, top } = useMemo(() => {
+    const base: Item[] = [], top: Item[] = [];
+    PARK_ROADS_PX.forEach((pl) => {
+      for (let i = 0; i < pl.length - 1; i++) {
+        const [ax, az] = px(pl[i][0], pl[i][1]), [bx, bz] = px(pl[i + 1][0], pl[i + 1][1]);
+        const len = Math.hypot(bx - ax, bz - az);
+        const ang = -Math.atan2(bz - az, bx - ax);
+        const mid: [number, number] = [(ax + bx) / 2, (az + bz) / 2];
+        base.push({ p: [mid[0], 0.018, mid[1]], s: [len + 0.9, 0.012, 1.0], r: ang, c: "#f59f00" });
+        top.push({ p: [mid[0], 0.026, mid[1]], s: [len + 0.8, 0.012, 0.82], r: ang, c: "#fde047" });
+      }
+    });
+    return { base, top };
+  }, []);
+  return (
+    <>
+      <InstX items={base}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
+      <InstX items={top}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
     </>
   );
 }
