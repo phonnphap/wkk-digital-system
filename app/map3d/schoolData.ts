@@ -28,8 +28,11 @@ export interface MapLocation {
   toilet?: ToiletMode;
   stage?: StageMode;   // โดมกีฬา: เวทีอยู่ปลายด้านไหน
   floorRooms?: Record<string, number>; // จำนวนห้องต่อแถวแยกตามชั้น เช่น {"1":5,"2":6}
+  stairList?: StairDef[];              // บันไดกำหนดเอง (ว่าง = ใช้ค่าอัตโนมัติ/ผังพิเศษ)
 }
-export interface DoorDef { p: number; w: number } // ตำแหน่งประตู 0..1 ตามความยาวผนัง, ความกว้าง (world)
+export interface DoorDef { p: number; w: number }
+/** บันไดกำหนดเอง: a = จุดเริ่ม (เมตร จากปลาย start), len = ความยาว, w = สัดส่วนความกว้าง 0..1, dir = ทิศที่ขั้นสูงขึ้น, from/to = ชั้นที่เชื่อม (รวมชั้นปลายทาง) */
+export interface StairDef { a: number; len: number; w?: number; dir: 1 | -1; from: number; to: number } // ตำแหน่งประตู 0..1 ตามความยาวผนัง, ความกว้าง (world)
 export interface MapRoom {
   id: string;
   location_id: string;
@@ -233,9 +236,11 @@ export function specialLayout(loc: MapLocation, level = 1): SegPlaced[] | null {
 }
 
 /** ช่วงบันได: c = กึ่งกลางตามแกนยาว (เมตร world จากกึ่งกลางอาคาร), dir = ทิศที่ขั้นบันไดสูงขึ้น */
-export interface StairSpan { c: number; len: number; dir: 1 | -1 }
+export interface StairSpan { c: number; len: number; dir: 1 | -1; w?: number; from?: number; to?: number }
 export function stairSpans(loc: MapLocation): StairSpan[] {
   const Lg = longLen(loc), SL = stairLen(loc);
+  if (loc.stairList?.length)
+    return loc.stairList.map((s) => ({ c: s.a + s.len / 2 - Lg / 2, len: s.len, dir: s.dir, w: s.w, from: s.from, to: s.to }));
   const sp = specialLayout(loc, 1);
   if (sp) return sp.filter((s) => s.k === "stairs").map((s) => ({ c: s.a + s.len / 2 - Lg / 2, len: s.len, dir: s.dir ?? -1 }));
   return stairEnds(loc).map((e) =>
@@ -251,14 +256,20 @@ export function stairsList(loc: MapLocation): XZ[] {
 }
 export const stairsNorm = (loc: MapLocation): XZ => stairsList(loc)[0];
 
-/** เลือกบันไดที่ทางรวม (ทางเข้า → บันได → ห้อง) สั้นที่สุด */
-export function bestStair(loc: MapLocation, from: XZ, to: XZ): XZ {
+/** เลือกบันไดที่ทางรวม (ทางเข้า → บันได → ห้อง) สั้นที่สุด โดยต้องเชื่อมชั้น 1 ถึงชั้นของห้อง */
+export function bestStair(loc: MapLocation, from: XZ, to: XZ, level = 2): XZ {
   const list = stairsList(loc);
   if (!list.length) return corridorNorm(loc, from);
+  const spans = stairSpans(loc);
+  const ok = list.map((_, i) => i).filter((i) => (spans[i].from ?? 1) <= 1 && (spans[i].to ?? loc.floors) >= level);
+  const cand = (ok.length ? ok : list.map((_, i) => i)).map((i) => list[i]);
   const k = isLongX(loc) ? 0 : 1;
   const cost = (s: XZ) => Math.abs(from[k] - s[k]) + Math.abs(s[k] - to[k]);
-  return list.reduce((b, s) => (cost(s) < cost(b) ? s : b));
+  return cand.reduce((b, s) => (cost(s) < cost(b) ? s : b));
 }
+/** บันไดที่ต้องวาดในชั้นนี้ (ชั้น from..to) */
+export const stairsOn = (loc: MapLocation, floor: number) =>
+  stairSpans(loc).filter((s) => floor >= (s.from ?? 1) && floor <= (s.to ?? Math.max(loc.floors, 1)));
 export const corridorNorm = (loc: MapLocation, p: XZ): XZ =>
   isLongX(loc) ? [p[0], corridorV(loc)] : [corridorV(loc), p[1]];
 
@@ -316,8 +327,36 @@ export function genRooms(loc: MapLocation): MapRoom[] {
     ? Math.round(loc.perFloor)
     : Math.max(2, Math.min(14, Math.round(avail / 1.2)));
 
+  // บันไดกำหนดเอง: ห้องเรียนแบ่งลงในช่วงว่างระหว่างบันได (ไม่สร้างห้องน้ำอัตโนมัติ)
+  const custom = !!loc.stairList?.length;
+  const freeIv: [number, number][] = [];
+  if (custom) {
+    const bl = loc.stairList!.map((s) => [Math.max(0, s.a / Lg), Math.min(1, (s.a + s.len) / Lg)] as [number, number]).sort((x, y) => x[0] - y[0]);
+    let cur = 0;
+    bl.forEach(([b0, b1]) => { if (b0 > cur + 0.01) freeIv.push([cur, b0]); cur = Math.max(cur, b1); });
+    if (cur < 0.99) freeIv.push([cur, 1]);
+  }
   const normalLevel = (level: number) => {
     const perRow = Math.max(1, Math.min(20, Math.round(loc.floorRooms?.[String(level)] ?? basePerRow)));
+    if (custom && freeIv.length) {
+      const tot = freeIv.reduce((a, [x, y]) => a + (y - x), 0) || 1;
+      const raw = freeIv.map(([x, y]) => ((y - x) / tot) * perRow);
+      const cnt = raw.map(Math.floor);
+      let left = perRow - cnt.reduce((a, b) => a + b, 0);
+      raw.map((v, i) => [v - Math.floor(v), i] as [number, number]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { cnt[i]++; left--; } });
+      let n = 1;
+      freeIv.forEach(([x, y], k) => {
+        const c = cnt[k]; if (!c) return;
+        const sp = (y - x) / c;
+        for (let i = 0; i < c; i++) {
+          const num = `${level}${pad(n)}`;
+          add(level, String(n), `${loc.code}-${num}`, `ห้อง ${loc.code}-${num}`, x + i * sp, sp,
+            roomType(loc, level), roomType(loc, level) === "classroom" ? 30 : 0);
+          n++;
+        }
+      });
+      return;
+    }
     const span = (uEnd - uStart) / perRow;
     for (let i = 0; i < perRow; i++) {
       const num = `${level}${pad(i + 1)}`;

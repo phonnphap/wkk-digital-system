@@ -4,9 +4,10 @@
 // โรงจอดรถยนต์, ช่องจอดรถตู้/รถรับส่ง, ซุ้มขายน้ำ
 import * as THREE from "three";
 import { Html } from "@react-three/drei";
+import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
-import { MapEdge, MapNode, px } from "./schoolData";
-import { DecorItem, GateDef, MAIN_ROAD, PARK_ROADS_PX, ROAD_LABELS_PX, ROAD_W, outsideRoadSegs } from "./DecorData";
+import { MapEdge, MapNode, XZ, px } from "./schoolData";
+import { DecorItem, GateDef, RoadItem, RoadKind, outsideRoadSegs, sampleRoad } from "./DecorData";
 
 type Item = { p: [number, number, number]; s?: number | [number, number, number]; r?: number; c?: string };
 
@@ -71,95 +72,6 @@ export function Roads({ nodes, edges }: { nodes: MapNode[]; edges: MapEdge[] }) 
           </group>
         );
       })}
-    </>
-  );
-}
-
-/* ───────────── ถนนนอกโรงเรียน: ดำ + ขอบเหลือง + เส้นกลางประ (2 เลน) ───────────── */
-export function OutsideRoads({ gates }: { gates: GateDef[] }) {
-  const { base, edge, dash } = useMemo(() => {
-    const base: Item[] = [], edge: Item[] = [], dash: Item[] = [];
-    outsideRoadSegs(gates).forEach(({ a, b }) => {
-      const dx = b[0] - a[0], dz = b[1] - a[1];
-      const len = Math.hypot(dx, dz);
-      if (len < 0.01) return;
-      const ang = -Math.atan2(dz, dx);
-      const nx = -dz / len, nz = dx / len;
-      const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
-      base.push({ p: [mx, 0.004, mz], s: [len + ROAD_W * 0.5, 0.012, ROAD_W], r: ang, c: "#14171b" });
-      [-1, 1].forEach((s) => {
-        const o = s * (ROAD_W / 2 - 0.07);
-        edge.push({ p: [mx + nx * o, 0.012, mz + nz * o], s: [len + ROAD_W * 0.4, 0.008, 0.05], r: ang, c: "#fbbf24" });
-      });
-      const n = Math.floor(len / 0.6);
-      for (let k = 0; k < n; k++) {
-        const t = (k + 0.5) / n;
-        dash.push({ p: [a[0] + dx * t, 0.012, a[1] + dz * t], s: [0.3, 0.008, 0.04], r: ang, c: "#fbbf24" });
-      }
-    });
-    return { base, edge, dash };
-  }, [gates]);
-  return (
-    <>
-      <InstX items={base}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
-      <InstX items={edge}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
-      <InstX items={dash}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
-    </>
-  );
-}
-
-/* ───────────── ถนนหลักรังสิต–นครนายก (สีน้ำเงิน 4 เลน ฝั่งละ 2) + ป้ายชื่อ ───────────── */
-export function MainRoad() {
-  const [x] = px(MAIN_ROAD.x, 0);
-  const z0 = px(0, MAIN_ROAD.y0)[1], z1 = px(0, MAIN_ROAD.y1)[1];
-  const L = z1 - z0, zc = (z0 + z1) / 2, W = MAIN_ROAD.w;
-  const dashes = useMemo(() => {
-    const out: Item[] = [];
-    const n = Math.floor(L / 0.7);
-    for (let k = 0; k < n; k++) {
-      const z = z0 + (k + 0.5) * (L / n);
-      [-W / 4, W / 4].forEach((o) => out.push({ p: [x + o, 0.016, z], s: [0.05, 0.006, 0.35], c: "#ffffff" }));
-    }
-    out.push({ p: [x - 0.04, 0.016, zc], s: [0.04, 0.006, L], c: "#fbbf24" });
-    out.push({ p: [x + 0.04, 0.016, zc], s: [0.04, 0.006, L], c: "#fbbf24" });
-    [-1, 1].forEach((s) => out.push({ p: [x + s * (W / 2 - 0.06), 0.016, zc], s: [0.05, 0.006, L], c: "#ffffff" }));
-    return out;
-  }, [x, z0, L, zc, W]);
-  return (
-    <>
-      <mesh position={[x, 0.008, zc]} receiveShadow><boxGeometry args={[W, 0.014, L]} /><meshStandardMaterial color="#1e40af" /></mesh>
-      <InstX items={dashes}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
-      {[-12, 2, 14].map((z) => (
-        <group key={z} position={[x, 0, z]}><Tag y={0.5}>🛣 ถนนรังสิต–นครนายก (4 เลน)</Tag></group>
-      ))}
-      {ROAD_LABELS_PX.map((l) => {
-        const [lx, lz] = px(l.x, l.y);
-        return <group key={l.text} position={[lx, 0, lz]}><Tag y={0.4}>{l.text}</Tag></group>;
-      })}
-    </>
-  );
-}
-
-/* ───────────── ถนนเข้า-ออกลานจอดรถ (สีเหลือง) ───────────── */
-export function ParkRoads() {
-  const { base, top } = useMemo(() => {
-    const base: Item[] = [], top: Item[] = [];
-    PARK_ROADS_PX.forEach((pl) => {
-      for (let i = 0; i < pl.length - 1; i++) {
-        const [ax, az] = px(pl[i][0], pl[i][1]), [bx, bz] = px(pl[i + 1][0], pl[i + 1][1]);
-        const len = Math.hypot(bx - ax, bz - az);
-        const ang = -Math.atan2(bz - az, bx - ax);
-        const mid: [number, number] = [(ax + bx) / 2, (az + bz) / 2];
-        base.push({ p: [mid[0], 0.018, mid[1]], s: [len + 0.9, 0.012, 1.0], r: ang, c: "#f59f00" });
-        top.push({ p: [mid[0], 0.026, mid[1]], s: [len + 0.8, 0.012, 0.82], r: ang, c: "#fde047" });
-      }
-    });
-    return { base, top };
-  }, []);
-  return (
-    <>
-      <InstX items={base}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
-      <InstX items={top}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
     </>
   );
 }
@@ -239,6 +151,358 @@ export function Kiosk({ it }: { it: DecorItem }) {
         <mesh key={k} position={[cx, 0.4, 0.1]}><cylinderGeometry args={[0.025, 0.02, 0.07, 8]} /><meshStandardMaterial color={k % 2 ? "#ff922b" : "#51cf66"} /></mesh>
       ))}
       <Tag y={0.85}>🧃 {it.name || "ซุ้มขายน้ำ"}</Tag>
+    </group>
+  );
+}
+
+
+/* ───────────── ถนนทุกชนิดตามค่าที่ตั้ง (ซอย / หลัก / ลานจอดรถ / ฟุตบาทมีหลังคา) ───────────── */
+export function RoadsLayer({ roads, gates }: { roads: RoadItem[]; gates: GateDef[] }) {
+  const d = useMemo(() => {
+    const base: Item[] = [], line: Item[] = [], slab: Item[] = [], roof: Item[] = [], posts: Item[] = [];
+    const labels: { x: number; z: number; text: string }[] = [];
+
+    const emit = (kind: RoadKind, pl: XZ[], w: number, roofOn: boolean) => {
+      let dashNext = 0, postNext = 0;
+      for (let i = 0; i < pl.length - 1; i++) {
+        const a = pl[i], b = pl[i + 1];
+        const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz);
+        if (len < 0.005) continue;
+        const ang = -Math.atan2(dz, dx), nx = -dz / len, nz = dx / len;
+        const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
+        const ext = Math.min(w * 0.3, 0.5);
+        if (kind === "soi") {
+          base.push({ p: [mx, 0.004, mz], s: [len + ext, 0.012, w], r: ang, c: "#14171b" });
+          [-1, 1].forEach((sg) => {
+            const o = sg * (w / 2 - 0.07);
+            line.push({ p: [mx + nx * o, 0.012, mz + nz * o], s: [len + 0.06, 0.008, 0.05], r: ang, c: "#fbbf24" });
+          });
+          let pos = dashNext;
+          while (pos < len) { const t = pos / len; line.push({ p: [a[0] + dx * t, 0.012, a[1] + dz * t], s: [0.3, 0.008, 0.04], r: ang, c: "#fbbf24" }); pos += 0.6; }
+          dashNext = pos - len;
+        } else if (kind === "main") {
+          base.push({ p: [mx, 0.008, mz], s: [len + ext, 0.014, w], r: ang, c: "#1e40af" });
+          [-1, 1].forEach((sg) => {
+            const o = sg * (w / 2 - 0.06);
+            line.push({ p: [mx + nx * o, 0.016, mz + nz * o], s: [len + 0.06, 0.006, 0.05], r: ang, c: "#ffffff" });
+          });
+          [-0.04, 0.04].forEach((o) => line.push({ p: [mx + nx * o, 0.016, mz + nz * o], s: [len + 0.06, 0.006, 0.04], r: ang, c: "#fbbf24" }));
+          let pos = dashNext;
+          while (pos < len) {
+            const t = pos / len;
+            [-w / 4, w / 4].forEach((o) => line.push({ p: [a[0] + dx * t + nx * o, 0.016, a[1] + dz * t + nz * o], s: [0.35, 0.006, 0.05], r: ang, c: "#ffffff" }));
+            pos += 0.7;
+          }
+          dashNext = pos - len;
+        } else if (kind === "park") {
+          base.push({ p: [mx, 0.022, mz], s: [len + ext, 0.012, w], r: ang, c: "#f59f00" });
+          line.push({ p: [mx, 0.03, mz], s: [len + ext * 0.8, 0.012, w * 0.82], r: ang, c: "#fde047" });
+        } else if (kind === "walk") {
+          slab.push({ p: [mx, 0.035, mz], s: [len + ext, 0.07, w], r: ang, c: "#e5e7eb" });
+          if (roofOn) {
+            roof.push({ p: [mx, 0.78, mz], s: [len + ext, 0.05, w + 0.35], r: ang, c: "#2563eb" });
+            let pos = postNext;
+            while (pos < len) {
+              const t = pos / len;
+              [-1, 1].forEach((sg) => posts.push({ p: [a[0] + dx * t + nx * sg * (w / 2 - 0.04), 0.4, a[1] + dz * t + nz * sg * (w / 2 - 0.04)] }));
+              pos += 1.8;
+            }
+            postNext = pos - len;
+          }
+        }
+      }
+    };
+
+    roads.forEach((r) => {
+      if (r.kind === "route") return;
+      const pl = sampleRoad(r.pts, r.curve ?? 0);
+      if (pl.length < 2) return;
+      const w = r.w ?? (r.kind === "main" ? 4 : r.kind === "park" || r.kind === "walk" ? 1 : 1.6);
+      emit(r.kind, pl, w, !!r.roof);
+      if (r.label) {
+        const fr = r.kind === "main" ? [0.2, 0.5, 0.8] : [0.5];
+        fr.forEach((f) => { const p = pl[Math.min(pl.length - 1, Math.floor(pl.length * f))]; labels.push({ x: p[0], z: p[1], text: r.label! }); });
+      }
+    });
+
+    // ทางต่อจากประตู (ไม่รวมประตูคนเดิน) ไปยังถนนซอย
+    const soiCount = roads.filter((r) => r.kind === "soi").reduce((a, r) => a + Math.max(0, sampleRoad(r.pts, r.curve ?? 0).length - 1), 0);
+    outsideRoadSegs(roads, gates).slice(soiCount).forEach(({ a, b }) => emit("soi", [a, b], 1.6, false));
+    return { base, line, slab, roof, posts, labels };
+  }, [roads, gates]);
+  return (
+    <>
+      <InstX items={d.base}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
+      <InstX items={d.line}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
+      <InstX items={d.slab}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
+      <InstX items={d.roof}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
+      <InstX items={d.posts}><cylinderGeometry args={[0.025, 0.025, 0.8, 6]} /><meshStandardMaterial color="#9ca3af" /></InstX>
+      {d.labels.map((l, i) => <group key={i} position={[l.x, 0, l.z]}><Tag y={0.5}>{l.text}</Tag></group>)}
+    </>
+  );
+}
+
+/* ───────────── รถวิ่งตามเส้นทาง (ถนนน้ำเงิน → ประตู 3 → ลานจอดรถ → ประตู 4) ───────────── */
+const CAR_COLORS = ["#e63946", "#f1faee", "#457b9d", "#ffb703", "#2a9d8f", "#9d4edd", "#212529", "#fb923c"];
+export function Traffic({ roads, traffic }: { roads: RoadItem[]; traffic?: { cars: number; speed: number } }) {
+  const routes = useMemo(() => roads.filter((r) => r.kind === "route" && r.pts.length >= 2).map((r) => {
+    const pts = sampleRoad(r.pts, r.curve ?? 0);
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    return { pts, cum, total: cum[cum.length - 1] };
+  }).filter((r) => r.total > 1), [roads]);
+  const N = routes.length ? Math.max(0, Math.min(24, Math.round(traffic?.cars ?? 4))) : 0;
+  const speed = traffic?.speed ?? 2.4;
+  const refs = useRef<(THREE.Group | null)[]>([]);
+  const dist = useRef<number[]>([]);
+  useLayoutEffect(() => { dist.current = []; }, [routes, N]);
+  useFrame((_, dt) => {
+    for (let i = 0; i < N; i++) {
+      const r = routes[i % routes.length], g = refs.current[i];
+      if (!r || !g) continue;
+      const per = Math.ceil(N / routes.length), k = Math.floor(i / routes.length);
+      if (dist.current[i] === undefined) dist.current[i] = (k / per) * r.total;
+      dist.current[i] = (dist.current[i] + speed * Math.min(dt, 0.05)) % r.total;
+      const s = dist.current[i];
+      let lo = 0;
+      while (lo < r.cum.length - 2 && r.cum[lo + 1] < s) lo++;
+      const a = r.pts[lo], b = r.pts[lo + 1];
+      const seg = r.cum[lo + 1] - r.cum[lo] || 1, t = (s - r.cum[lo]) / seg;
+      g.visible = true;
+      g.position.set(a[0] + (b[0] - a[0]) * t, 0.02, a[1] + (b[1] - a[1]) * t);
+      g.rotation.y = Math.atan2(b[0] - a[0], b[1] - a[1]);
+    }
+  });
+  return (
+    <>
+      {Array.from({ length: N }, (_, i) => (
+        <group key={i} ref={(el) => { refs.current[i] = el; }} visible={false}>
+          <mesh position={[0, 0.1, 0]} castShadow><boxGeometry args={[0.3, 0.1, 0.62]} /><meshStandardMaterial color={CAR_COLORS[i % CAR_COLORS.length]} /></mesh>
+          <mesh position={[0, 0.19, -0.04]}><boxGeometry args={[0.26, 0.09, 0.3]} /><meshStandardMaterial color="#263238" /></mesh>
+          {[-1, 1].map((sx) => (
+            <mesh key={sx} position={[sx * 0.1, 0.11, 0.31]}><boxGeometry args={[0.07, 0.04, 0.02]} /><meshStandardMaterial color="#fde047" emissive="#fde047" emissiveIntensity={0.6} /></mesh>
+          ))}
+          {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], k) => (
+            <mesh key={k} position={[sx * 0.16, 0.04, sz * 0.2]}><boxGeometry args={[0.04, 0.08, 0.12]} /><meshStandardMaterial color="#111827" /></mesh>
+          ))}
+        </group>
+      ))}
+    </>
+  );
+}
+
+/* ───────────── วัด (โมเดล): อุโบสถหลังคาซ้อน / วิหารทรงปราสาทยอดทอง ───────────── */
+function Gable({ span, length, rise, color }: { span: number; length: number; rise: number; color: string }) {
+  const geo = useMemo(() => {
+    const hw = span / 2;
+    const sh = new THREE.Shape();
+    sh.moveTo(-hw, 0); sh.lineTo(hw, 0); sh.lineTo(0, rise); sh.closePath();
+    const g = new THREE.ExtrudeGeometry(sh, { depth: length, bevelEnabled: false });
+    g.translate(0, 0, -length / 2);
+    return g;
+  }, [span, length, rise]);
+  return <mesh geometry={geo} castShadow><meshStandardMaterial color={color} roughness={0.7} /></mesh>;
+}
+
+export function Temple({ it }: { it: DecorItem }) {
+  const [x, z] = px(it.x, it.y);
+  const sc = it.s ?? 1;
+  const gold = <meshStandardMaterial color="#fbbf24" metalness={0.4} roughness={0.35} />;
+  return (
+    <group position={[x, 0, z]} rotation={[0, rad(it), 0]} scale={sc}>
+      {it.kind === "prasat" ? (
+        <>
+          <mesh position={[0, 0.04, 0]} receiveShadow><boxGeometry args={[1.7, 0.08, 1.7]} /><meshStandardMaterial color="#e5e7eb" /></mesh>
+          <mesh position={[0, 0.12, 0]}><boxGeometry args={[1.4, 0.08, 1.4]} /><meshStandardMaterial color="#f3f4f6" /></mesh>
+          <mesh position={[0, 0.45, 0]} castShadow><boxGeometry args={[0.95, 0.58, 0.95]} /><meshStandardMaterial color="#f5deb3" /></mesh>
+          <mesh position={[0, 0.34, 0.48]}><boxGeometry args={[0.28, 0.36, 0.02]} /><meshStandardMaterial color="#7c4a1e" /></mesh>
+          {[[0.9, 0.35, "#e8590c"], [0.62, 0.3, "#f59f00"], [0.4, 0.3, "#e8590c"]].map(([r, h, c], k) => (
+            <mesh key={k} position={[0, 0.78 + k * 0.28, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+              <coneGeometry args={[r as number, h as number, 4]} /><meshStandardMaterial color={c as string} />
+            </mesh>
+          ))}
+          <mesh position={[0, 1.95, 0]}><coneGeometry args={[0.07, 0.9, 8]} />{gold}</mesh>
+          <mesh position={[0, 2.42, 0]}><sphereGeometry args={[0.05, 8, 8]} />{gold}</mesh>
+        </>
+      ) : (
+        <>
+          <mesh position={[0, 0.05, 0]} receiveShadow><boxGeometry args={[3.6, 0.1, 2.2]} /><meshStandardMaterial color="#e5e7eb" /></mesh>
+          <mesh position={[0, 0.04, 1.2]}><boxGeometry args={[1.2, 0.07, 0.25]} /><meshStandardMaterial color="#d1d5db" /></mesh>
+          <mesh position={[0, 0.4, 0]} castShadow><boxGeometry args={[2.6, 0.6, 1.3]} /><meshStandardMaterial color="#f8f9fa" /></mesh>
+          <mesh position={[0, 0.31, 0.66]}><boxGeometry args={[0.34, 0.42, 0.02]} /><meshStandardMaterial color="#7c4a1e" /></mesh>
+          {[-0.85, 0.85].map((wx) => (
+            <mesh key={wx} position={[wx, 0.42, 0.66]}><boxGeometry args={[0.22, 0.28, 0.02]} /><meshStandardMaterial color="#74c0fc" /></mesh>
+          ))}
+          <group position={[0, 0.7, 0]} rotation={[0, Math.PI / 2, 0]}><Gable span={1.9} length={3.1} rise={0.45} color="#e8590c" /></group>
+          <group position={[0, 0.98, 0]} rotation={[0, Math.PI / 2, 0]}><Gable span={1.25} length={2.2} rise={0.4} color="#c92a2a" /></group>
+          <group position={[0, 0.62, 0.95]}><Gable span={1.3} length={0.9} rise={0.35} color="#f59f00" /></group>
+          {[-0.5, -0.17, 0.17, 0.5].map((px_) => (
+            <mesh key={px_} position={[px_, 0.38, 1.05]}><cylinderGeometry args={[0.035, 0.035, 0.55, 8]} /><meshStandardMaterial color="#ffffff" /></mesh>
+          ))}
+          {[-1.55, 1.55].map((fx) => (
+            <mesh key={fx} position={[fx, 1.22, 0]}><coneGeometry args={[0.04, 0.2, 6]} />{gold}</mesh>
+          ))}
+        </>
+      )}
+      <Tag y={it.kind === "prasat" ? 2.7 : 1.7}>🛕 {it.name || "วัดเขียนเขต"}</Tag>
+    </group>
+  );
+}
+
+/* ───────────── ป้ายจราจร/บอกทาง (ขึ้นบรรทัดใหม่ด้วย |) ───────────── */
+export function RoadSign({ it }: { it: DecorItem }) {
+  const [x, z] = px(it.x, it.y);
+  const W = (it.w ?? 70) / 30;
+  const lines = (it.name || "").split("|");
+  const H = 0.22 + lines.length * 0.15;
+  return (
+    <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
+      {[-1, 1].map((sg) => (
+        <mesh key={sg} position={[sg * (W / 2 - 0.08), 0.5, 0]}><cylinderGeometry args={[0.022, 0.022, 1.0, 6]} /><meshStandardMaterial color="#6b7280" /></mesh>
+      ))}
+      <mesh position={[0, 1.0 + H / 2 - 0.1, -0.005]}><boxGeometry args={[W + 0.05, H + 0.05, 0.035]} /><meshStandardMaterial color="#ffffff" /></mesh>
+      <mesh position={[0, 1.0 + H / 2 - 0.1, 0]} castShadow><boxGeometry args={[W, H, 0.045]} /><meshStandardMaterial color={it.color ?? "#15803d"} /></mesh>
+      <Html position={[0, 1.0 + H / 2 - 0.1, 0.04]} center distanceFactor={11} zIndexRange={[10, 0]}>
+        <div className="pointer-events-none text-center text-white font-black leading-tight whitespace-nowrap text-[10px]">
+          {lines.map((l, i) => <div key={i} className={i === 0 ? "text-[12px]" : ""}>{l}</div>)}
+        </div>
+      </Html>
+    </group>
+  );
+}
+
+/* ───────────── ทางม้าลาย: w = ความยาวข้ามถนน, d = ความลึกริ้ว (ขนานทิศถนน), rot = ทิศถนน ───────────── */
+export function Zebra({ it }: { it: DecorItem }) {
+  const [x, z] = px(it.x, it.y);
+  const W = (it.w ?? 52) / 30, D = (it.d ?? 12) / 30;
+  const items = useMemo(() => {
+    const n = Math.max(2, Math.floor(W / 0.14));
+    return Array.from({ length: n }, (_, i): Item => ({ p: [0, 0.02, -W / 2 + (i + 0.5) * (W / n)], s: [D, 0.006, 0.07], c: "#ffffff" }));
+  }, [W, D]);
+  return (
+    <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
+      <InstX items={items}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
+    </group>
+  );
+}
+
+/* ───────────── รั้วสนามกีฬา (ตาข่าย) ───────────── */
+export function FieldFence({ it }: { it: DecorItem }) {
+  const [x, z] = px(it.x, it.y);
+  const W = (it.w ?? 69) / 30, D = (it.d ?? 104) / 30, H = 0.7 * (it.h ?? 1);
+  const posts = useMemo(() => {
+    const out: Item[] = [];
+    const side = (x0: number, z0: number, x1: number, z1: number) => {
+      const len = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(len / 1.1));
+      for (let i = 0; i < n; i++) out.push({ p: [x0 + ((x1 - x0) * i) / n, H / 2, z0 + ((z1 - z0) * i) / n], s: [1, H, 1] });
+    };
+    side(-W / 2, -D / 2, W / 2, -D / 2); side(W / 2, -D / 2, W / 2, D / 2);
+    side(W / 2, D / 2, -W / 2, D / 2); side(-W / 2, D / 2, -W / 2, -D / 2);
+    return out;
+  }, [W, D, H]);
+  const net = <meshStandardMaterial color="#94a3b8" transparent opacity={0.3} side={THREE.DoubleSide} depthWrite={false} />;
+  return (
+    <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
+      <InstX items={posts}><cylinderGeometry args={[0.02, 0.02, 1, 6]} /><meshStandardMaterial color="#475569" /></InstX>
+      {[-1, 1].map((s) => (
+        <group key={s}>
+          <mesh position={[0, H * 0.48, s * D / 2]}><boxGeometry args={[W, H * 0.92, 0.01]} />{net}</mesh>
+          <mesh position={[s * W / 2, H * 0.48, 0]}><boxGeometry args={[0.01, H * 0.92, D]} />{net}</mesh>
+          <mesh position={[0, H, s * D / 2]}><boxGeometry args={[W, 0.025, 0.025]} /><meshStandardMaterial color="#475569" /></mesh>
+          <mesh position={[s * W / 2, H, 0]}><boxGeometry args={[0.025, 0.025, D]} /><meshStandardMaterial color="#475569" /></mesh>
+        </group>
+      ))}
+      {it.name && <Tag y={H + 0.25}>{it.name}</Tag>}
+    </group>
+  );
+}
+
+/* ───────────── กลุ่มนักเรียน/ครู ทำกิจกรรม: walk | assemble | sit | play | exercise ───────────── */
+export function People({ it }: { it: DecorItem }) {
+  const [cx, cz] = px(it.x, it.y);
+  const W = (it.w ?? 60) / 30, D = (it.d ?? 40) / 30;
+  const n = Math.max(0, Math.min(120, Math.round(it.n ?? 10)));
+  const m = Math.max(0, Math.min(20, Math.round(it.m ?? 1)));
+  const kind = it.kind ?? "walk";
+  const total = n + m;
+  const legs = useRef<THREE.InstancedMesh>(null);
+  const body = useRef<THREE.InstancedMesh>(null);
+  const head = useRef<THREE.InstancedMesh>(null);
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+
+  const ppl = useMemo(() => {
+    const r = rng(Math.round(it.x * 7 + it.y * 13 + total * 31));
+    const cols = Math.max(1, Math.ceil(Math.sqrt((Math.max(n, 1) * W) / D))), rows = Math.max(1, Math.ceil(Math.max(n, 1) / cols));
+    const R = Math.min(W, D) * 0.42;
+    const tcols = ["#2563eb", "#db2777", "#059669", "#7c3aed"];
+    return Array.from({ length: total }, (_, i) => {
+      const teacher = i >= n;
+      const ti = i - n;
+      let gx = 0, gz = 0;
+      if (kind === "assemble" || kind === "exercise") {
+        if (!teacher) { gx = -W / 2 + ((i % cols) + 0.5) * (W / cols); gz = -D / 2 + (Math.floor(i / cols) + 0.5) * (D / rows); }
+        else { gx = -W / 2 + ((ti + 0.5) * W) / Math.max(m, 1); gz = -D / 2 - 0.25; }
+      } else if (kind === "sit") {
+        if (!teacher) { const a = (i / Math.max(n, 1)) * Math.PI * 2; gx = Math.cos(a) * R; gz = Math.sin(a) * R; }
+        else { gx = (ti - (m - 1) / 2) * 0.2; gz = 0; }
+      }
+      return {
+        teacher, gx, gz, ph: r() * 6.28, dx: r() - 0.5, dz: r() - 0.5, sp: 0.6 + r() * 0.8,
+        bx: (r() - 0.5) * W, bz: (r() - 0.5) * D, tc: tcols[i % tcols.length],
+      };
+    });
+  }, [it.x, it.y, n, m, total, kind, W, D]);
+
+  useLayoutEffect(() => {
+    const c = new THREE.Color();
+    ppl.forEach((p, i) => {
+      body.current?.setColorAt(i, c.set(p.teacher ? p.tc : "#ffffff"));
+      legs.current?.setColorAt(i, c.set(p.teacher ? "#374151" : "#1e2a4a"));
+      head.current?.setColorAt(i, c.set("#f1c27d"));
+    });
+    [legs, body, head].forEach((r) => { if (r.current?.instanceColor) r.current.instanceColor.needsUpdate = true; });
+  }, [ppl]);
+
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    if (!legs.current || !body.current || !head.current) return;
+    ppl.forEach((p, i) => {
+      let x = p.gx, z = p.gz, y = 0, h = 0;
+      const sit = kind === "sit" && !p.teacher;
+      if (kind === "walk") {
+        const a = t * p.sp * 0.5 + p.ph, c = Math.cos(a);
+        x = p.bx + p.dx * Math.sin(a) * W * 0.6; z = p.bz + p.dz * Math.sin(a) * D * 0.6;
+        h = Math.atan2(p.dx * c, p.dz * c); y = Math.abs(Math.sin(t * 6 + p.ph)) * 0.02;
+      } else if (kind === "play") {
+        const a = t * p.sp * 1.5 + p.ph;
+        x = p.bx * 0.4 + Math.cos(a) * W * 0.4; z = p.bz * 0.4 + Math.sin(a) * D * 0.4;
+        h = Math.atan2(-Math.sin(a) * W, Math.cos(a) * D); y = Math.abs(Math.sin(t * 9 + p.ph)) * 0.04;
+      } else if (kind === "exercise") {
+        y = p.teacher ? 0 : Math.abs(Math.sin(t * 4)) * 0.07;
+      } else if (kind === "sit") {
+        h = Math.atan2(-x, -z);
+      }
+      const lh = sit ? 0.08 : 0.2, bh = 0.26;
+      dummy.position.set(cx * 0 + x, y + lh / 2, z); dummy.rotation.set(0, h, 0); dummy.scale.set(0.16, lh, 0.12); dummy.updateMatrix(); legs.current!.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, y + lh + bh / 2, z); dummy.scale.set(0.22, bh, 0.13); dummy.updateMatrix(); body.current!.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, y + lh + bh + 0.07, z); dummy.scale.set(0.16, 0.16, 0.16); dummy.updateMatrix(); head.current!.setMatrixAt(i, dummy.matrix);
+    });
+    [legs, body, head].forEach((r) => { r.current!.instanceMatrix.needsUpdate = true; });
+  });
+
+  const cnt = Math.max(total, 1);
+  return (
+    <group position={[cx, 0, cz]} rotation={[0, rad(it), 0]}>
+      <instancedMesh key={`l${total}`} ref={legs} args={[undefined as any, undefined as any, cnt]} count={total} frustumCulled={false}>
+        <boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" />
+      </instancedMesh>
+      <instancedMesh key={`b${total}`} ref={body} args={[undefined as any, undefined as any, cnt]} count={total} frustumCulled={false} castShadow>
+        <boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" />
+      </instancedMesh>
+      <instancedMesh key={`h${total}`} ref={head} args={[undefined as any, undefined as any, cnt]} count={total} frustumCulled={false}>
+        <sphereGeometry args={[0.5, 10, 10]} /><meshStandardMaterial color="#ffffff" />
+      </instancedMesh>
+      {it.name && <Tag y={0.9}>{it.name} · นร. {n} · ครู {m}</Tag>}
     </group>
   );
 }

@@ -43,11 +43,12 @@ export function fenceFrame(x: number, y: number) {
 }
 
 /* ───────────── ชนิดของตกแต่ง ───────────── */
-export type DecorType = "tree" | "pavilion" | "shrine" | "toilet" | "shed" | "barrier" | "flag" | "bridge" | "sign" | "carport" | "busbay" | "kiosk";
+export type DecorType = "tree" | "pavilion" | "shrine" | "toilet" | "shed" | "barrier" | "flag" | "bridge" | "sign" | "carport" | "busbay" | "kiosk" | "temple" | "roadsign" | "zebra" | "fieldfence" | "people";
 export const DECOR_LABEL: Record<DecorType, string> = {
   tree: "ต้นไม้", pavilion: "ศาลา/ซุ้มนั่งเล่น", shrine: "ซุ้มพระ", toilet: "ตึกห้องน้ำ (นอกอาคาร)",
   shed: "โรงจอดมอเตอร์ไซค์", barrier: "ประตูกั้น", flag: "เสาธง", bridge: "ทางเชื่อมระหว่างอาคาร", sign: "ป้ายโรงเรียน",
   carport: "โรงจอดรถยนต์", busbay: "ช่องจอดรถตู้/รถรับส่ง", kiosk: "ซุ้มขายน้ำ",
+  temple: "วัด (โมเดล)", roadsign: "ป้ายจราจร/บอกทาง", zebra: "ทางม้าลาย", fieldfence: "รั้วสนามกีฬา", people: "กลุ่มนักเรียน/ครู",
 };
 export interface DecorItem {
   id: string; type: DecorType;
@@ -57,7 +58,9 @@ export interface DecorItem {
   w?: number; d?: number;    // ขนาดเป็น pixel
   color?: string; name?: string;
   levels?: string;           // ทางเชื่อม: ชั้นที่มี เช่น "2,3"
-  n?: number;                // ช่องจอด (busbay)
+  n?: number;                // busbay: จำนวนช่อง / people: จำนวนนักเรียน
+  m?: number;                // people: จำนวนครู
+  kind?: string;             // tree: round|pine|palm|bush|flower, people: walk|assemble|sit|play|exercise, temple: ubosot|prasat
   since?: number;            // เวอร์ชันที่เพิ่มรายการนี้ (ใช้เติมค่าตั้งต้นใหม่ให้ข้อมูลที่เคยบันทึกไว้)
 }
 export interface GateItem {
@@ -68,19 +71,76 @@ export interface GateItem {
   link?: string;             // โหนดถนนที่ต่อเข้า (ว่าง = ใกล้สุด)
   main?: boolean;
   since?: number;
+  h?: number;                          // ความสูงเสาประตู (world)
+  mode?: "double" | "single" | "slide"; // เปิด 2 บาน / 1 บาน / ประตูเลื่อน
+  closed?: boolean;                    // ปิดประตู
+  ped?: boolean;                       // ประตูคนเดิน (ไม่มีถนนต่อ)
 }
-export interface DecorConfig { items: DecorItem[]; gates: GateItem[]; version?: number }
+export type RoadKind = "main" | "soi" | "park" | "walk" | "route";
+export const ROAD_KIND_LABEL: Record<RoadKind, string> = {
+  main: "ถนนหลัก (น้ำเงิน 4 เลน)", soi: "ถนนซอย (ดำ ขอบเหลือง)", park: "ถนนลานจอดรถ (เหลือง)",
+  walk: "ฟุตบาท (มีหลังคา)", route: "เส้นทางรถวิ่ง (ไม่แสดงถนน)",
+};
+export interface RoadItem {
+  id: string; name: string; kind: RoadKind;
+  pts: [number, number][];   // px
+  curve?: number;            // ความโค้ง 0 = เส้นตรง, 1 = โค้งเรียบ
+  w?: number;                // ความกว้าง (world)
+  roof?: boolean;            // ฟุตบาท: มีหลังคา
+  label?: string;            // ป้ายชื่อถนน
+  since?: number;
+}
+export interface DecorConfig {
+  items: DecorItem[]; gates: GateItem[]; roads: RoadItem[];
+  traffic?: { cars: number; speed: number };
+  version?: number;
+}
 
 const trees = (list: [number, number, number][], h = 1): DecorItem[] =>
   list.map(([x, y, s], i) => ({ id: `tree-${x}-${y}-${i}`, type: "tree", x, y, s, h }));
 
-export const DECOR_VERSION = 3;
+type P = [number, number];
+const offsetPts = (pts: P[], d: number): P[] => pts.map((p, i) => {
+  const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+  const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+  return [Math.round(p[0] - (dy / L) * d), Math.round(p[1] + (dx / L) * d)] as P;
+});
+const RD = (id: string, name: string, kind: RoadKind, pts: P[], extra: Partial<RoadItem> = {}): RoadItem =>
+  ({ id, name, kind, pts, since: 4, ...extra });
+
+/** เส้นทางรถ: ถนนน้ำเงิน → ซอย → ประตู 3 → ลานจอดรถ → ประตู 4 → ออกซอย → ถนนน้ำเงิน (ขับชิดซ้าย) */
+const CAR_ROUTE: P[] = [
+  [-380, -120], [-380, 195], [-368, 208], [-300, 211], [-120, 205], [-44, 205], [-26, 260], [-5, 430], [22, 620],
+  [60, 648], [100, 650], [335, 638], [454, 629], [520, 622], [522, 600], [517, 579],
+  [500, 560], [505, 500], [540, 432], [576, 420], [790, 394], [845, 415], [880, 440], [897, 445],
+  [940, 480], [958, 530], [852, 579], [661, 615], [454, 653], [335, 662], [100, 674], [10, 672],
+  [-196, 680], [-380, 684], [-380, 720], [-380, 900],
+];
+export const DEFAULT_ROADS: RoadItem[] = [
+  RD("main", "ถนนรังสิต–นครนายก (4 เลน)", "main", [[-410, -150], [-410, 900]], { w: 4, label: "🛣 ถนนรังสิต–นครนายก (4 เลน)" }),
+  RD("soi-in", "ซอยทางเข้า", "soi", [[-410, 224], [-44, 212], [10, 628]], { w: 1.6 }),
+  RD("soi-w", "ซอยริมวัด", "soi", [[-286, 224], [-280, 672]], { w: 1.6 }),
+  RD("soi-w2", "ซอยย่อยวัด", "soi", [[-286, 428], [-200, 428], [-196, 668]], { w: 1.6 }),
+  RD("soi-out", "ซอยทางออก (หน้าโรงเรียน)", "soi",
+    [[-410, 672], [-196, 668], [10, 660], [100, 662], [335, 650], [454, 641], [661, 603], [852, 567], [958, 520], [1010, 505]], { w: 1.6 }),
+  RD("park-3", "ถนนเหลือง ลานจอดรถ ↔ ประตู 3", "park", [[576, 420], [540, 432], [505, 500], [500, 560], [517, 579]], { w: 1.0 }),
+  RD("park-loop", "ถนนเหลือง วนรอบลานจอดรถ", "park", [[564, 243], [747, 243], [790, 392], [576, 416], [564, 243]], { w: 1.0 }),
+  RD("park-4", "ถนนเหลือง ลานจอดรถ ↔ ประตู 4", "park", [[790, 392], [845, 415], [880, 440], [897, 445]], { w: 1.0 }),
+  RD("walk-1", "ฟุตบาทมีหลังคา (ฝั่งตรงข้ามโรงเรียน)", "walk",
+    offsetPts([[-196, 668], [10, 660], [100, 662], [335, 650], [454, 641], [661, 603], [852, 567], [958, 520]], 42), { w: 1.0, roof: true }),
+  RD("route-1", "เส้นทางรถ (เข้าประตู 3 → ออกประตู 4)", "route", CAR_ROUTE, { curve: 0.8 }),
+];
+
+export const DECOR_VERSION = 4;
 export const DEFAULT_DECOR: DecorConfig = {
   version: DECOR_VERSION,
+  roads: DEFAULT_ROADS,
+  traffic: { cars: 4, speed: 2.4 },
   gates: [
     { id: "g1", name: "ประตู 1 ประตูหลังโรงเรียน", x: 104, y: 577, width: 1.8, color: "#f97316", node: "gW", link: "w3" },
     { id: "g2", name: "ประตู 2 ทางเข้าผู้บริหาร", x: 397, y: 594, width: 1.8, color: "#7c3aed", node: "g2n", link: "gate" },
-    { id: "g5", name: "ประตูทางเข้าคนเดิน (ติดประตู 2)", x: 355, y: 596, width: 1.0, color: "#a78bfa", node: "g5n", link: "gate", since: 3 },
+    { id: "g5", name: "ประตูทางเข้าคนเดิน (ติดประตู 2)", x: 355, y: 596, width: 1.0, color: "#a78bfa", node: "g5n", link: "gate", ped: true, since: 3 },
+    { id: "g6", name: "ประตูทางเข้าคนเดิน (ข้างตึกอนุบาล)", x: 588, y: 563, width: 1.0, color: "#a78bfa", node: "g6n", link: "e1", ped: true, since: 4 },
     { id: "g3", name: "ประตู 3 ทางเข้าลานจอดรถหลัก", x: 517, y: 579, width: 2.4, color: "#7c3aed", node: "g3n", link: "gate", main: true },
     { id: "g4", name: "ประตู 4 ประตูข้างลานจอดรถ", x: 897, y: 445, width: 2.2, color: "#be123c", node: "gE", link: "p1" },
   ],
@@ -119,6 +179,24 @@ export const DEFAULT_DECOR: DecorConfig = {
     { id: "barrier-3", type: "barrier", x: 435, y: 503, w: 34, name: "ประตูกั้น ห้องปกครอง–โดม", since: 2 },
     { id: "pav-lib", type: "pavilion", x: 362, y: 531, color: "#3b5bdb", since: 2 },
     { id: "pav-coop", type: "pavilion", x: 322, y: 548, color: "#e5484d", since: 2 },
+    // ── เพิ่มในเวอร์ชัน 4 ──
+    { id: "temple-1", type: "temple", x: -158, y: 330, kind: "ubosot", s: 1, name: "วัดเขียนเขต (อุโบสถ)", since: 4 },
+    { id: "temple-2", type: "temple", x: -103, y: 518, kind: "prasat", s: 1, name: "วัดเขียนเขต (วิหาร)", since: 4 },
+    { id: "rs-in", type: "roadsign", x: -352, y: 196, w: 70, name: "ทางเข้า|โรงเรียนวัดเขียนเขต ➜", color: "#15803d", since: 4 },
+    { id: "rs-out", type: "roadsign", x: -352, y: 702, w: 80, name: "ทางออก|ไปถนนรังสิต–นครนายก ➜", color: "#15803d", since: 4 },
+    { id: "rs-g4", type: "roadsign", x: 968, y: 468, w: 120, name: "ทางออก|⬅ เลี้ยวซ้าย ไปคลอง 3|เลี้ยวขวา ไปรังสิต–นครนายก ➡", color: "#15803d", since: 4 },
+    { id: "zebra-1", type: "zebra", x: 355, y: 649, w: 52, d: 12, rot: -4, since: 4 },
+    { id: "fence-14", type: "fieldfence", x: 240, y: 462, w: 69, d: 104, h: 1, name: "รั้วสนาม 14", since: 4 },
+    { id: "bridge-83", type: "bridge", x: 421, y: 275, w: 30, d: 14, levels: "2", name: "ทางเชื่อมอาคาร 8-3", since: 4 },
+    { id: "ppl-walk", type: "people", x: 440, y: 545, w: 70, d: 30, n: 10, m: 1, kind: "walk", name: "นักเรียนเดิน", since: 4 },
+    { id: "ppl-play", type: "people", x: 240, y: 462, w: 55, d: 85, n: 8, m: 1, kind: "play", name: "เล่นสนามฟุตซอล", since: 4 },
+    { id: "pine-1", type: "tree", x: 640, y: 238, kind: "pine", s: 1, h: 1, since: 4 },
+    { id: "pine-2", type: "tree", x: 664, y: 234, kind: "pine", s: 1.1, h: 1, since: 4 },
+    { id: "palm-1", type: "tree", x: 580, y: 455, kind: "palm", s: 1, h: 1, since: 4 },
+    { id: "palm-2", type: "tree", x: 598, y: 448, kind: "palm", s: 1.1, h: 1, since: 4 },
+    { id: "flower-1", type: "tree", x: 545, y: 262, kind: "flower", s: 1, h: 1, since: 4 },
+    { id: "bush-1", type: "tree", x: 560, y: 330, kind: "bush", s: 1, h: 1, since: 4 },
+    { id: "bush-2", type: "tree", x: 560, y: 372, kind: "bush", s: 1, h: 1, since: 4 },
   ],
 };
 
@@ -127,26 +205,31 @@ export function sanitizeDecor(v: any): DecorConfig {
   const ver = typeof v?.version === "number" ? v.version : 1;
   const items: DecorItem[] = Array.isArray(v?.items)
     ? v.items.filter((i: any) => okPos(i) && typeof i.type === "string") : [...DEFAULT_DECOR.items];
-  // หมายเหตุ: ประตูไม่มีฟิลด์ type — เช็กด้วย node แทน (บั๊กเดิมทำให้ประตูหายหลังรีเฟรช)
-  const gates: GateItem[] = Array.isArray(v?.gates)
+  // ประตูไม่มีฟิลด์ type — เช็กด้วย node แทน
+  let gates: GateItem[] = Array.isArray(v?.gates)
     ? v.gates.filter((g: any) => okPos(g) && typeof g.node === "string") : [...DEFAULT_DECOR.gates];
+  const roads: RoadItem[] = Array.isArray(v?.roads)
+    ? v.roads.filter((r: any) => r && typeof r.kind === "string" && Array.isArray(r.pts)) : [];
   if (ver < DECOR_VERSION) {
-    const hi = new Set(items.map((i) => i.id)), hg = new Set(gates.map((g) => g.id));
+    const hi = new Set(items.map((i) => i.id)), hg = new Set(gates.map((g) => g.id)), hr = new Set(roads.map((r) => r.id));
     DEFAULT_DECOR.items.forEach((i) => { if ((i.since ?? 1) > ver && !hi.has(i.id)) items.push(i); });
     DEFAULT_DECOR.gates.forEach((g) => { if ((g.since ?? 1) > ver && !hg.has(g.id)) gates.push(g); });
+    DEFAULT_DECOR.roads.forEach((r) => { if ((r.since ?? 1) > ver && !hr.has(r.id)) roads.push(r); });
+    if (ver < 4) gates = gates.map((g) => (g.id === "g5" ? { ...g, ped: true } : g)); // ประตูคนเดินไม่มีถนนต่อ
   }
-  return { items, gates, version: DECOR_VERSION };
+  return { items, gates, roads, traffic: v?.traffic ?? DEFAULT_DECOR.traffic, version: DECOR_VERSION };
 }
 
 /* ───────────── ประตูรั้ว ───────────── */
 export interface GateDef {
   id: string; name: string; node: string; link?: string; main: boolean; width: number; color: string;
+  h?: number; mode: "double" | "single" | "slide"; closed: boolean; ped: boolean;
   x: number; z: number; ang: number; out: XZ;
 }
 export function buildGates(defs: GateItem[]): GateDef[] {
   return defs.map((g) => {
     const f = fenceFrame(g.x, g.y);
-    return { id: g.id, name: g.name, node: g.node, link: g.link, main: !!g.main, width: g.width, color: g.color, x: f.x, z: f.z, ang: f.ang, out: f.out };
+    return { id: g.id, name: g.name, node: g.node, link: g.link, main: !!g.main, width: g.width, color: g.color, h: g.h, mode: g.mode ?? "double", closed: !!g.closed, ped: !!g.ped, x: f.x, z: f.z, ang: f.ang, out: f.out };
   });
 }
 
@@ -167,43 +250,43 @@ export function withGateNodes(nodes: MapNode[], edges: MapEdge[], gates: GateDef
   return { nodes: outNodes, edges: outEdges };
 }
 
-/* ───────────── ถนน ─────────────
-   พิกัด px ของแผนผัง (ประมาณจากแผนผังจราจร)
-   - ถนนหลักรังสิต–นครนายก: สีน้ำเงิน 4 เลน (ฝั่งละ 2) อยู่ทางตะวันตกของวัด
-   - ถนนในซอย (ผ่านวัดเขียนเขต): สีดำ ขอบเหลือง 2 เลน
-   - ถนนเข้า-ออกลานจอดรถ (ในโรงเรียน): สีเหลือง */
+/* ───────────── ถนน (ตั้งค่าได้ใน DecorConfig.roads) ───────────── */
 export const ROAD_W = 1.6;
-export const MAIN_ROAD = { x: -410, y0: -150, y1: 900, w: 4.0 };
-export const SOI_ROADS_PX: [number, number][][] = [
-  [[-410, 224], [-44, 212], [10, 628]],                                         // ทางเข้าซอย → ด้านตะวันออกของวัด
-  [[-286, 224], [-280, 672]],                                                    // ริมวัดด้านตะวันตก
-  [[-286, 428], [-200, 428], [-196, 668]],                                       // ซอยย่อยวัดหลังเล็ก
-  [[-410, 672], [-196, 668], [10, 660], [100, 662], [335, 650], [454, 641], [661, 603], [852, 567], [958, 520], [1010, 505]], // ทางออก ผ่านหน้าโรงเรียน
-];
-export const OUTSIDE_ROADS_PX = SOI_ROADS_PX;
-export const PARK_ROADS_PX: [number, number][][] = [
-  [[576, 420], [540, 432], [505, 500], [500, 560], [517, 579]],                  // ลานจอดรถ ↔ ประตู 3
-  [[564, 243], [747, 243], [790, 392], [576, 416], [564, 243]],                  // วนรอบลานจอดรถ
-  [[790, 392], [845, 415], [880, 440], [897, 445]],                              // ลานจอดรถ ↔ ประตู 4
-];
-export const ROAD_LABELS_PX: { x: number; y: number; text: string }[] = [
-  { x: -380, y: 200, text: "ทางเข้า" },
-  { x: -380, y: 695, text: "ทางออก" },
-  { x: -243, y: 330, text: "วัดเขียนเขต" },
-];
 
-/** ช่วงถนนซอยนอกรั้ว + ทางต่อจากประตูแต่ละบานไปยังถนน */
-export function outsideRoadSegs(gates: GateDef[]): { a: XZ; b: XZ }[] {
+/** แปลงจุด px เป็นเส้นทาง world — curve > 0 = ปรับให้โค้งเรียบ (Hermite/Catmull-Rom) */
+export function sampleRoad(pts: [number, number][], curve = 0): XZ[] {
+  const P = pts.map(([x, y]) => px(x, y));
+  if (P.length < 3 || curve <= 0.01) return P;
+  const out: XZ[] = [];
+  for (let i = 0; i < P.length - 1; i++) {
+    const p0 = P[Math.max(0, i - 1)], p1 = P[i], p2 = P[i + 1], p3 = P[Math.min(P.length - 1, i + 2)];
+    const m1x = (p2[0] - p0[0]) * 0.5 * curve, m1z = (p2[1] - p0[1]) * 0.5 * curve;
+    const m2x = (p3[0] - p1[0]) * 0.5 * curve, m2z = (p3[1] - p1[1]) * 0.5 * curve;
+    const N = 10;
+    for (let k = 0; k < N; k++) {
+      const t = k / N, t2 = t * t, t3 = t2 * t;
+      const h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+      out.push([h00 * p1[0] + h10 * m1x + h01 * p2[0] + h11 * m2x, h00 * p1[1] + h10 * m1z + h01 * p2[1] + h11 * m2z]);
+    }
+  }
+  out.push(P[P.length - 1]);
+  return out;
+}
+
+/** ช่วงถนนซอยนอกรั้ว + ทางต่อจากประตู (ยกเว้นประตูคนเดิน) ไปยังถนนซอย */
+export function outsideRoadSegs(roads: RoadItem[], gates: GateDef[]): { a: XZ; b: XZ }[] {
   const segs: { a: XZ; b: XZ }[] = [];
-  SOI_ROADS_PX.forEach((pl) => {
-    for (let i = 0; i < pl.length - 1; i++) segs.push({ a: px(pl[i][0], pl[i][1]), b: px(pl[i + 1][0], pl[i + 1][1]) });
+  roads.filter((r) => r.kind === "soi").forEach((r) => {
+    const pl = sampleRoad(r.pts, r.curve ?? 0);
+    for (let i = 0; i < pl.length - 1; i++) segs.push({ a: pl[i], b: pl[i + 1] });
   });
   const roadSegs = [...segs];
-  gates.forEach((g) => {
+  gates.filter((g) => !g.ped).forEach((g) => {
     let best: { d: number; q: XZ } = { d: Infinity, q: [g.x, g.z] };
     roadSegs.forEach(({ a, b }) => {
       const vx = b[0] - a[0], vz = b[1] - a[1];
-      const t = Math.min(1, Math.max(0, ((g.x - a[0]) * vx + (g.z - a[1]) * vz) / (vx * vx + vz * vz)));
+      const L2 = vx * vx + vz * vz || 1;
+      const t = Math.min(1, Math.max(0, ((g.x - a[0]) * vx + (g.z - a[1]) * vz) / L2));
       const q: XZ = [a[0] + vx * t, a[1] + vz * t];
       const d = Math.hypot(g.x - q[0], g.z - q[1]);
       if (d < best.d) best = { d, q };

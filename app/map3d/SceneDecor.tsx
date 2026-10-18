@@ -7,7 +7,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FH, MapEdge, MapLocation, MapNode, px } from "./schoolData";
 import { DecorConfig, DecorItem, FENCE, GateDef } from "./DecorData";
 import { SchoolGates } from "./SchoolGates";
-import { Roads, OutsideRoads, MainRoad, ParkRoads, Carport, BusBay, Kiosk } from "./SceneExtra";
+import { Roads, RoadsLayer, Traffic, Temple, RoadSign, Zebra, FieldFence, People, Carport, BusBay, Kiosk } from "./SceneExtra";
 
 /* ───────────── helpers ───────────── */
 
@@ -167,24 +167,43 @@ export function Fence({ gates }: { gates: GateDef[] }) {
 /* ───────────── ต้นไม้ / ศาลา / เสาธง ───────────── */
 
 export function Trees({ items }: { items: DecorItem[] }) {
-  const { trunks, crowns } = useMemo(() => {
+  const d = useMemo(() => {
     const r = rng(7);
-    const trunks: Item[] = [], crowns: Item[] = [];
+    const trunks: Item[] = [], crowns: Item[] = [], cones: Item[] = [], fronds: Item[] = [];
     const greens = ["#2e7d32", "#388e3c", "#43a047", "#558b2f", "#33691e"];
+    const flowers = ["#f59f00", "#f06595", "#fcc419", "#e64980"];
     items.filter((t) => t.type === "tree").forEach((t) => {
       const [wx, wz] = px(t.x, t.y);
+      const kind = t.kind ?? "round";
       const sc = (t.s ?? 1) * (0.85 + r() * 0.3);
       const h = t.h ?? 1;
       const k = 0.9 + r() * 0.25;
-      trunks.push({ p: [wx, 0.2 * sc * h, wz], s: [sc, sc * h, sc] });
-      crowns.push({ p: [wx, 0.4 * sc * h + 0.22 * sc, wz], s: sc * k, c: greens[Math.floor(r() * greens.length)] });
+      const green = greens[Math.floor(r() * greens.length)];
+      if (kind === "pine") {
+        trunks.push({ p: [wx, 0.15 * sc * h, wz], s: [sc * 0.8, sc * h * 0.75, sc * 0.8] });
+        cones.push({ p: [wx, 0.32 * sc * h, wz], s: [sc * 1.15, sc * h * 0.9, sc * 1.15], c: "#2f6b3a" });
+        cones.push({ p: [wx, 0.58 * sc * h, wz], s: [sc * 0.85, sc * h * 0.85, sc * 0.85], c: "#3a7d44" });
+        cones.push({ p: [wx, 0.8 * sc * h, wz], s: [sc * 0.55, sc * h * 0.7, sc * 0.55], c: "#47914f" });
+      } else if (kind === "palm") {
+        const th = 2.4 * sc * h;                       // ลำต้น (เดิมสูง 0.4)
+        trunks.push({ p: [wx, th * 0.2, wz], s: [sc * 0.8, sc * h * 2.4, sc * 0.8] });
+        for (let f = 0; f < 7; f++)
+          fronds.push({ p: [wx, th * 0.4 + 0.03, wz], s: [sc, sc, sc], r: (f * Math.PI * 2) / 7 + r() * 0.3, c: green });
+      } else if (kind === "bush") {
+        crowns.push({ p: [wx, 0.09 * sc, wz], s: sc * 0.55 * k, c: green });
+      } else {
+        trunks.push({ p: [wx, 0.2 * sc * h, wz], s: [sc, sc * h, sc] });
+        crowns.push({ p: [wx, 0.4 * sc * h + 0.22 * sc, wz], s: sc * k, c: kind === "flower" ? flowers[Math.floor(r() * flowers.length)] : green });
+      }
     });
-    return { trunks, crowns };
+    return { trunks, crowns, cones, fronds };
   }, [items]);
   return (
     <>
-      <Inst items={trunks}><cylinderGeometry args={[0.035, 0.05, 0.4, 6]} /><meshStandardMaterial color="#6d4c41" /></Inst>
-      <Inst items={crowns} cast><icosahedronGeometry args={[0.3, 1]} /><meshStandardMaterial color="#ffffff" flatShading /></Inst>
+      <Inst items={d.trunks}><cylinderGeometry args={[0.035, 0.05, 0.4, 6]} /><meshStandardMaterial color="#6d4c41" /></Inst>
+      <Inst items={d.crowns} cast><icosahedronGeometry args={[0.3, 1]} /><meshStandardMaterial color="#ffffff" flatShading /></Inst>
+      <Inst items={d.cones} cast><coneGeometry args={[0.26, 0.5, 8]} /><meshStandardMaterial color="#ffffff" flatShading /></Inst>
+      <Inst items={d.fronds}><boxGeometry args={[0.55, 0.015, 0.1]} /><meshStandardMaterial color="#ffffff" /></Inst>
     </>
   );
 }
@@ -534,9 +553,7 @@ export function Decor({
     <>
       <Ground onGround={onGround} />
       <Roads nodes={nodes} edges={edges} />
-      <OutsideRoads gates={gates} />
-      <MainRoad />
-      <ParkRoads />
+      <RoadsLayer roads={decor.roads ?? []} gates={gates} />
       <Fence gates={gates} />
       <SchoolGates gates={gates} signs={of("sign")} />
       {!indoor && (
@@ -552,6 +569,12 @@ export function Decor({
           {of("carport").map((i) => <Carport key={i.id} it={i} />)}
           {of("busbay").map((i) => <BusBay key={i.id} it={i} />)}
           {of("kiosk").map((i) => <Kiosk key={i.id} it={i} />)}
+          {of("temple").map((i) => <Temple key={i.id} it={i} />)}
+          {of("roadsign").map((i) => <RoadSign key={i.id} it={i} />)}
+          {of("zebra").map((i) => <Zebra key={i.id} it={i} />)}
+          {of("fieldfence").map((i) => <FieldFence key={i.id} it={i} />)}
+          {of("people").map((i) => <People key={i.id} it={i} />)}
+          <Traffic roads={decor.roads ?? []} traffic={decor.traffic} />
         </>
       )}
       <Guard gate={gate} robotRef={robotRef} />

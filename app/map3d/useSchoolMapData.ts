@@ -59,6 +59,7 @@ export function useSchoolMapData() {
           perFloor: x.rooms_per_floor ?? undefined,
           stage: x.stage_mode ?? "none",
           floorRooms: x.floor_rooms ?? undefined,
+          stairList: Array.isArray(x.stair_list) && x.stair_list.length ? x.stair_list : undefined,
         } as MapLocation))
         .sort((a: MapLocation, b: MapLocation) => Number(a.code) - Number(b.code));
 
@@ -128,6 +129,7 @@ export function useSchoolMapData() {
     if (patch.stage !== undefined) row.stage_mode = patch.stage;   // ต้องรัน SQL เพิ่มคอลัมน์ stage_mode ก่อน
     if ("perFloor" in patch) row.rooms_per_floor = patch.perFloor ?? null;
     if (patch.floorRooms !== undefined) row.floor_rooms = patch.floorRooms;   // ต้องรัน migration2.sql
+    if (patch.stairList !== undefined) row.stair_list = patch.stairList.length ? patch.stairList : null;   // ต้องรัน migration4.sql
     if (patch.pos) { row.pos_x = patch.pos[0]; row.pos_z = patch.pos[1]; }
     if (patch.size) { row.size_w = patch.size[0]; row.size_d = patch.size[1]; }
     if (patch.entrance) { row.entrance_x = patch.entrance[0]; row.entrance_z = patch.entrance[1]; }
