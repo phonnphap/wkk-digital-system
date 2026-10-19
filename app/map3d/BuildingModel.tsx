@@ -3,13 +3,17 @@
 import * as THREE from "three";
 import { Edges, Html } from "@react-three/drei";
 import { useEffect, useMemo, useState } from "react";
-import { FH, MapLocation, MapRoom, StairSpan, isLongX, rotRad, corridorV, stairSpans, stairsVisible, longLen, CORRIDOR_W } from "./schoolData";
+import {
+  FH, floorH, MapLocation, MapRoom, StairSpan, isLongX, rotRad, corridorV, stairsOn, stairsVisible, CORRIDOR_W,
+} from "./schoolData";
 import { Inst, Item, PinLabel } from "./SceneDecor";
+import { FURN } from "./Furniture";
 
+/** ความสูงภายนอก: ตึก = ชั้น × ความสูงต่อชั้น (ตั้งค่าได้), โดม = 1.5 × ตัวคูณ */
 export const buildingHeight = (l: MapLocation) =>
-  l.kind === "gate" ? 1 : l.kind === "dome" ? 1.5 : Math.max(l.floors, 1) * FH;
+  l.kind === "gate" ? 1 : l.kind === "dome" ? 1.5 * (l.height ?? 1) : Math.max(l.floors, 1) * floorH(l);
 
-const roofHeight = (l: MapLocation) => Math.min(1, Math.max(0.3, Math.min(l.size[0], l.size[1]) * 0.28));
+const roofHeight = (l: MapLocation) => Math.min(1, Math.max(0.3, Math.min(l.size[0], l.size[1]) * 0.28)) * Math.min(1.6, Math.max(0.6, l.height ?? 1));
 
 /* ── พื้นผิวผนังพร้อมหน้าต่าง (วาดด้วย canvas ไม่ต้องใช้ไฟล์รูป) ── */
 let wallTex: THREE.CanvasTexture | null = null;
@@ -96,7 +100,7 @@ function BoxBuilding({ loc, dim, selected, onPick }: ModelProps) {
       </mesh>
       <mesh
         position={[0, h / 2, 0]} material={mats} castShadow receiveShadow
-        onClick={(e) => { e.stopPropagation(); onPick(loc.id); }}
+        onClick={(e) => { if (e.delta > 4) return; e.stopPropagation(); onPick(loc.id); }}
         onPointerOver={(e) => { e.stopPropagation(); setHover(true); document.body.style.cursor = "pointer"; }}
         onPointerOut={() => { setHover(false); document.body.style.cursor = "auto"; }}
       >
@@ -112,15 +116,16 @@ function BoxBuilding({ loc, dim, selected, onPick }: ModelProps) {
   );
 }
 
-/* ───────────── โดมกีฬา: หลังคาโค้ง เสาเปิดข้าง พื้นเป็นสนาม ───────────── */
+/* ───────────── โดมกีฬา: หลังคาโค้ง เสาเปิดข้าง พื้นเป็นสนาม (มีเวทีเลือกฝั่งได้) ───────────── */
 function DomeModel({ loc, dim, selected, onPick }: ModelProps) {
   const [hover, setHover] = useState(false);
   const [w, d] = loc.size;
   const long = w >= d;
   const L = Math.max(w, d), W = Math.min(w, d);
   const r = W / 2;
-  const colH = 0.5;                                  // ความสูงเสา
-  const rise = Math.max(0.5, Math.min(1.0, r * 0.9)); // ความสูงของส่วนโค้ง
+  const hsc = loc.height ?? 1;
+  const colH = 0.5 * hsc;
+  const rise = Math.max(0.5, Math.min(1.0, r * 0.9)) * hsc;
   const k = rise / r;
   const hl = hover || selected;
   const op = dim ? 0.18 : 1;
@@ -129,10 +134,10 @@ function DomeModel({ loc, dim, selected, onPick }: ModelProps) {
   const roof = useMemo(() => accent.clone().lerp(new THREE.Color("#ffffff"), 0.55).getStyle(), [accent]);
   const nCol = Math.max(3, Math.round(L / 1.1) + 1);
   const xs = useMemo(() => Array.from({ length: nCol }, (_, i) => -L / 2 + (L * i) / (nCol - 1)), [nCol, L]);
-  const cw = L - 0.16, cd = W - 0.16; // ขนาดสนาม
+  const cw = L - 0.16, cd = W - 0.16;
   const stageSide = loc.stage ?? "none";
-const ss = stageSide === "none" ? 0 : (stageSide === "start") === long ? -1 : 1;
-const sl = Math.min(Math.max(L * 0.22, 0.5), 1.6);
+  const ss = stageSide === "none" ? 0 : (stageSide === "start") === long ? -1 : 1;
+  const sl = Math.min(Math.max(L * 0.22, 0.5), 1.6);
   const line = (x: number, z: number, sx: number, sz: number, key: string) => (
     <mesh key={key} position={[x, 0.088, z]}>
       <boxGeometry args={[sx, 0.006, sz]} /><meshStandardMaterial color="#ffffff" transparent={dim} opacity={op} />
@@ -141,12 +146,11 @@ const sl = Math.min(Math.max(L * 0.22, 0.5), 1.6);
   return (
     <group
       position={[loc.pos[0], 0, loc.pos[1]]} rotation={[0, -rotRad(loc), 0]}
-      onClick={(e) => { e.stopPropagation(); onPick(loc.id); }}
+      onClick={(e) => { if (e.delta > 4) return; e.stopPropagation(); onPick(loc.id); }}
       onPointerOver={(e) => { e.stopPropagation(); setHover(true); document.body.style.cursor = "pointer"; }}
       onPointerOut={() => { setHover(false); document.body.style.cursor = "auto"; }}
     >
       <group rotation={[0, long ? 0 : Math.PI / 2, 0]}>
-        {/* ฐานคอนกรีต + พื้นสนาม */}
         <mesh position={[0, 0.03, 0]} receiveShadow>
           <boxGeometry args={[L + 0.1, 0.06, W + 0.1]} />
           <meshStandardMaterial color="#adb5bd" transparent={dim} opacity={op} />
@@ -155,7 +159,6 @@ const sl = Math.min(Math.max(L * 0.22, 0.5), 1.6);
           <boxGeometry args={[cw, 0.02, cd]} />
           <meshStandardMaterial color={court} transparent={dim} opacity={op} emissive={hl ? "#ffffff" : "#000000"} emissiveIntensity={hl ? 0.18 : 0} />
         </mesh>
-        {/* เส้นสนาม */}
         {line(0, -(cd / 2 - 0.05), cw - 0.1, 0.02, "t")}
         {line(0, cd / 2 - 0.05, cw - 0.1, 0.02, "b")}
         {line(-(cw / 2 - 0.05), 0, 0.02, cd - 0.1, "l")}
@@ -165,33 +168,31 @@ const sl = Math.min(Math.max(L * 0.22, 0.5), 1.6);
           <ringGeometry args={[cd * 0.16, cd * 0.16 + 0.02, 32]} />
           <meshStandardMaterial color="#ffffff" transparent={dim} opacity={op} />
         </mesh>
-        {/* ห่วงบาส/ประตูที่หัวท้ายสนาม */}
         {!dim && [-1, 1].filter((s) => s !== ss).map((s) => (
           <group key={s} position={[s * (cw / 2 - 0.08), 0, 0]}>
             <mesh position={[0, 0.2, 0]}><cylinderGeometry args={[0.012, 0.012, 0.36, 6]} /><meshStandardMaterial color="#343a40" /></mesh>
             <mesh position={[-s * 0.03, 0.36, 0]}><boxGeometry args={[0.012, 0.12, 0.18]} /><meshStandardMaterial color="#f8f9fa" /></mesh>
           </group>
         ))}
+
         {!dim && ss !== 0 && (
-  <group position={[ss * (cw / 2 - sl / 2), 0, 0]}>
-    <mesh position={[0, 0.14, 0]} castShadow receiveShadow><boxGeometry args={[sl, 0.12, cd]} /><meshStandardMaterial color="#8d6e63" /></mesh>
-    <mesh position={[ss * (sl / 2 - 0.02), 0.42, 0]}><boxGeometry args={[0.04, 0.44, cd * 0.96]} /><meshStandardMaterial color={accent.clone().multiplyScalar(0.6).getStyle()} /></mesh>
-    {[-1, 1].map((z) => (
-      <mesh key={z} position={[ss * (sl / 2 - 0.08), 0.42, z * (cd / 2 - 0.1)]}><boxGeometry args={[0.05, 0.44, 0.16]} /><meshStandardMaterial color="#c92a2a" /></mesh>
-    ))}
-    <mesh position={[-ss * (sl / 2 + 0.05), 0.09, 0]}><boxGeometry args={[0.1, 0.06, Math.min(0.5, cd * 0.4)]} /><meshStandardMaterial color="#a1887f" /></mesh>
-  </group>
-)}
+          <group position={[ss * (cw / 2 - sl / 2), 0, 0]}>
+            <mesh position={[0, 0.14, 0]} castShadow receiveShadow><boxGeometry args={[sl, 0.12, cd]} /><meshStandardMaterial color="#8d6e63" /></mesh>
+            <mesh position={[ss * (sl / 2 - 0.02), 0.42, 0]}><boxGeometry args={[0.04, 0.44, cd * 0.96]} /><meshStandardMaterial color={accent.clone().multiplyScalar(0.6).getStyle()} /></mesh>
+            {[-1, 1].map((z) => (
+              <mesh key={z} position={[ss * (sl / 2 - 0.08), 0.42, z * (cd / 2 - 0.1)]}><boxGeometry args={[0.05, 0.44, 0.16]} /><meshStandardMaterial color="#c92a2a" /></mesh>
+            ))}
+            <mesh position={[-ss * (sl / 2 + 0.05), 0.09, 0]}><boxGeometry args={[0.1, 0.06, Math.min(0.5, cd * 0.4)]} /><meshStandardMaterial color="#a1887f" /></mesh>
+          </group>
+        )}
 
         {!dim && (
           <>
-            {/* เสาสองฝั่ง */}
             {xs.flatMap((x) => [-1, 1].map((s) => (
               <mesh key={`c${x}${s}`} position={[x, colH / 2, s * (r - 0.03)]} castShadow>
                 <cylinderGeometry args={[0.035, 0.035, colH, 8]} /><meshStandardMaterial color="#dee2e6" />
               </mesh>
             )))}
-            {/* หลังคาโค้งครึ่งทรงกระบอก + ซี่โครง */}
             <group position={[0, colH, 0]} scale={[1, k, 1]}>
               <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
                 <cylinderGeometry args={[r, r, L, 28, 1, true, 0, Math.PI]} />
@@ -228,12 +229,12 @@ export function BuildingModel(props: ModelProps) {
 const TYPE_COLOR: Record<string, string> = {
   classroom: "#dbe4ff", office: "#fff3bf", library: "#d3f9d8", lab: "#e5dbff", computer: "#d0ebff",
   nurse: "#ffe3e3", music_thai: "#ffe8cc", music_western: "#f3d9fa", canteen: "#fff9db",
-  toilet: "#c5f6fa", hall: "#ffe8cc", other: "#e9ecef",
+  toilet: "#c5f6fa", hall: "#ffe8cc", balcony: "#f1f3f5", other: "#e9ecef",
 };
 export const TYPE_LABEL: Record<string, string> = {
   classroom: "ห้องเรียน", office: "ห้องสำนักงาน", library: "ห้องสมุด", lab: "ห้อง Lab วิทยาศาสตร์",
   computer: "ห้องคอมพิวเตอร์", nurse: "ห้องพยาบาล", music_thai: "ห้องดนตรีไทย", music_western: "ห้องดนตรีสากล",
-  canteen: "โรงอาหาร", toilet: "ห้องน้ำ", hall: "หอประชุม", other: "ห้องอื่น ๆ",
+  canteen: "โรงอาหาร", toilet: "ห้องน้ำ", hall: "หอประชุม", balcony: "ระเบียง", other: "ห้องอื่น ๆ",
 };
 export const AC_LABEL: Record<string, string> = {
   none: "ไม่มีแอร์/พัดลม", ac: "ห้องแอร์", fan: "ห้องพัดลม", both: "แอร์ + พัดลม",
@@ -403,7 +404,7 @@ function buildFurniture(type: string, name: string, ac: string, fr: Fr): Item[] 
       const n = clamp(Math.floor(A / 0.2), 2, 7), half = Math.ceil(n / 2);
       const wall = name.includes("หญิง") ? "#faa2c1" : name.includes("ชาย") ? "#74c0fc" : "#adb5bd";
       cols(n).forEach((a, i) => {
-        if (male && i >= half) box(a, 0.03, 0.05, 0.03, 0.12, "#ffffff", Y0 + 0.08); // โถปัสสาวะ
+        if (male && i >= half) box(a, 0.03, 0.05, 0.03, 0.12, "#ffffff", Y0 + 0.08);
         else { box(a, 0.06, 0.07, 0.1, 0.06, "#ffffff"); box(a, 0.02, 0.07, 0.03, 0.1, "#ffffff"); }
       });
       const cub = male ? half : n;
@@ -414,7 +415,6 @@ function buildFurniture(type: string, name: string, ac: string, fr: Fr): Item[] 
     }
   }
 
-  // แอร์ (ติดผนังด้านใน) / พัดลมเพดาน
   if (ac === "ac" || ac === "both") {
     const k = A > 0.9 ? 2 : 1;
     for (let i = 0; i < k; i++) {
@@ -434,21 +434,53 @@ function buildFurniture(type: string, name: string, ac: string, fr: Fr): Item[] 
   }
   return out;
 }
+
 function RoomMesh({
-  loc, room, active, selected, onPick,
-}: { loc: MapLocation; room: MapRoom; active: boolean; selected: boolean; onPick: (r: MapRoom) => void }) {
+  loc, room, active, selected, onPick, placing, onPlaceLocal,
+}: {
+  loc: MapLocation; room: MapRoom; active: boolean; selected: boolean; onPick: (r: MapRoom) => void;
+  placing?: boolean; onPlaceLocal?: (roomId: string, x: number, z: number) => void;
+}) {
   const [hover, setHover] = useState(false);
   const [w, d] = loc.size;
   const rw = room.w * w, rd = room.d * d;
   const cx = (room.x + room.w / 2 - 0.5) * w;
   const cz = (room.z + room.d / 2 - 0.5) * d;
-  const y = (room.level - 1) * FH;
+  const y = (room.level - 1) * floorH(loc);
   const type = room.type ?? "classroom";
   const deskCount = type === "classroom" ? room.desks ?? 30 : 0;
   const teachers = type === "classroom" ? Math.max(0, room.teacherDesks ?? 1) : 0;
   const ac = room.ac ?? "none";
   const fr = useMemo(() => frameOf(room, w, d, cx, cz, rw, rd), [room, w, d, cx, cz, rw, rd]);
   const extra = useMemo(() => buildFurniture(type, room.name, ac, fr), [type, room.name, ac, fr]);
+
+  // ของตกแต่งที่วางเอง (โหมดสร้างห้อง)
+  const furn = useMemo<Item[]>(() => {
+    const out: Item[] = [];
+    (room.furniture ?? []).forEach((f) => {
+      const def = FURN[f.kind];
+      if (!def) return;
+      const th = ((f.rot ?? 0) * Math.PI) / 180, c = Math.cos(th), sn = Math.sin(th), sc = f.s ?? 1;
+      def.parts.forEach((p) => {
+        const ox = (p.dx * c + p.dz * sn) * sc, oz = (-p.dx * sn + p.dz * c) * sc;
+        out.push({ p: [f.x + ox, Y0 + p.dy * sc, f.z + oz], s: [p.sx * sc, p.sy * sc, p.sz * sc], r: th, c: p.c });
+      });
+    });
+    return out;
+  }, [room.furniture]);
+
+  // ราวระเบียง
+  const rails = useMemo<Item[]>(() => {
+    if (type !== "balcony") return [];
+    const out: Item[] = [];
+    [0.07, 0.14].forEach((hh) => {
+      out.push({ p: [0, Y0 + hh, rd / 2 - 0.02], s: [rw, 0.012, 0.012], c: "#6b7280" });
+      out.push({ p: [0, Y0 + hh, -rd / 2 + 0.02], s: [rw, 0.012, 0.012], c: "#6b7280" });
+      out.push({ p: [rw / 2 - 0.02, Y0 + hh, 0], s: [0.012, 0.012, rd], c: "#6b7280" });
+      out.push({ p: [-rw / 2 + 0.02, Y0 + hh, 0], s: [0.012, 0.012, rd], c: "#6b7280" });
+    });
+    return out;
+  }, [type, rw, rd]);
 
   // ประตู: p = ตำแหน่ง 0..1 ตามความยาวผนังด้านทางเดิน, w = ความกว้าง
   const doorItems = useMemo<Item[]>(() => {
@@ -507,10 +539,19 @@ function RoomMesh({
     : TYPE_COLOR[type] ?? TYPE_COLOR.other;
   const floorColor = active ? "#ffd43b" : selected ? "#ffa94d" : hover ? "#74c0fc" : base;
   return (
-    <group position={[cx, y, cz]}>
+    <group position={[cx, y, cz]} rotation={[0, ((room.rot ?? 0) * Math.PI) / 180, 0]}>
       <mesh
         position={[0, 0.09, 0]}
-        onClick={(e) => { e.stopPropagation(); onPick(room); }}
+        onClick={(e) => {
+          if (e.delta > 4) return;
+          e.stopPropagation();
+          if (placing && onPlaceLocal) {
+            const p = e.object.worldToLocal(e.point.clone());
+            onPlaceLocal(room.id, p.x, p.z);
+            return;
+          }
+          onPick(room);
+        }}
         onPointerOver={(e) => { e.stopPropagation(); setHover(true); document.body.style.cursor = "pointer"; }}
         onPointerOut={() => { setHover(false); document.body.style.cursor = "auto"; }}
       >
@@ -532,6 +573,8 @@ function RoomMesh({
       {extra.length > 0 && (
         <Inst items={extra}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>
       )}
+      {furn.length > 0 && <Inst items={furn}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>}
+      {rails.length > 0 && <Inst items={rails}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>}
       <Inst items={doorItems}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>
       <Html position={[0, 0.62, 0]} center distanceFactor={9} zIndexRange={[15, 0]}>
         <div className="px-1.5 py-0.5 rounded bg-white/90 text-[10px] font-bold text-slate-700 whitespace-nowrap shadow pointer-events-none">
@@ -546,7 +589,10 @@ function Stairs({ loc, span, y }: { loc: MapLocation; span: StairSpan; y: number
   const [w, d] = loc.size;
   const longX = isLongX(loc);
   const len = span.len;
-  const cross = (longX ? d : w) - 0.04;
+  const full = (longX ? d : w) - 0.04;
+  const cross = full * (span.w ?? 1);
+  const cOff = (loc.corridor === "b" ? 1 : -1) * (full - cross) / 2;   // ชิดฝั่งทางเดิน
+  const k = floorH(loc) / FH;
   const n = 7, run = len / n;
   const outer = span.dir;
   const inner = span.c - (outer * len) / 2;
@@ -554,44 +600,48 @@ function Stairs({ loc, span, y }: { loc: MapLocation; span: StairSpan; y: number
     const out: Item[] = [];
     for (let i = 0; i < n; i++) {
       const a = inner + outer * (i + 0.5) * run;
-      const h = 0.08 + ((i + 1) / n) * 0.5;
-      const P = (cp: number, hh: number): [number, number, number] => (longX ? [a, y + hh / 2, cp] : [cp, y + hh / 2, a]);
+      const h = (0.08 + ((i + 1) / n) * 0.5) * k;
+      const P = (cp: number, hh: number): [number, number, number] => (longX ? [a, y + hh / 2, cp + cOff] : [cp + cOff, y + hh / 2, a]);
       const S = (sc: number, hh: number): [number, number, number] => (longX ? [run * 0.98, hh, sc] : [sc, hh, run * 0.98]);
-      out.push({ p: P(0, h), s: S(cross - 0.12, h), c: i % 2 ? "#dee2e6" : "#f8f9fa" });
-      [-1, 1].forEach((s) => out.push({ p: P(s * (cross / 2 - 0.03), h + 0.06), s: S(0.06, h + 0.06), c: "#fd7e14" }));
+      out.push({ p: P(0, h), s: S(Math.max(cross - 0.12, 0.04), h), c: i % 2 ? "#dee2e6" : "#f8f9fa" });
+      if (cross > 0.3) [-1, 1].forEach((s) => out.push({ p: P(s * (cross / 2 - 0.03), h + 0.06), s: S(0.06, h + 0.06), c: "#fd7e14" }));
     }
     return out;
-  }, [inner, outer, run, y, cross, longX]);
+  }, [inner, outer, run, y, cross, cOff, longX, k]);
   return (
     <>
       <Inst items={items}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>
-      <Html position={longX ? [span.c, y + 0.95, 0] : [0, y + 0.95, span.c]} center distanceFactor={9}>
-        <div className="px-1.5 py-0.5 rounded bg-orange-500 text-white text-[10px] font-black pointer-events-none whitespace-nowrap">🪜 บันได ⬆</div>
+      <Html position={longX ? [span.c, y + 0.95 * k, cOff] : [cOff, y + 0.95 * k, span.c]} center distanceFactor={9}>
+        <div className="px-1.5 py-0.5 rounded bg-orange-500 text-white text-[10px] font-black pointer-events-none whitespace-nowrap">
+          🪜 บันได {span.from ?? 1}→{span.to ?? Math.max(loc.floors, 1)}
+        </div>
       </Html>
     </>
   );
 }
 
 export function IndoorBuilding({
-  loc, rooms, floor, activeRoomId, selectedRoomId, onRoom,
+  loc, rooms, floor, activeRoomId, selectedRoomId, onRoom, placingFurn, onPlaceLocal,
 }: {
   loc: MapLocation; rooms: MapRoom[]; floor: number;
   activeRoomId?: string; selectedRoomId?: string | null; onRoom: (r: MapRoom) => void;
+  placingFurn?: boolean; onPlaceLocal?: (roomId: string, x: number, z: number) => void;
 }) {
   const [w, d] = loc.size;
   const cv = corridorV(loc);
   const longX = isLongX(loc);
-  const y = (floor - 1) * FH;
+  const fh = floorH(loc);
+  const y = (floor - 1) * fh;
   return (
     <group position={[loc.pos[0], 0, loc.pos[1]]} rotation={[0, -rotRad(loc), 0]}>
       {Array.from({ length: floor }, (_, i) => i + 1).map((l) => (
-        <mesh key={l} position={[0, (l - 1) * FH + 0.04, 0]} receiveShadow>
+        <mesh key={l} position={[0, (l - 1) * fh + 0.04, 0]} receiveShadow>
           <boxGeometry args={[w, 0.08, d]} />
           <meshStandardMaterial color={l === floor ? "#f1f3f5" : "#868e96"} transparent opacity={l === floor ? 1 : 0.35} />
         </mesh>
       ))}
-      <mesh position={[0, y + FH / 2, 0]} raycast={() => null}>
-        <boxGeometry args={[w, FH, d]} />
+      <mesh position={[0, y + fh / 2, 0]} raycast={() => null}>
+        <boxGeometry args={[w, fh, d]} />
         <meshBasicMaterial transparent opacity={0.04} depthWrite={false} />
         <Edges color={loc.color} />
       </mesh>
@@ -600,9 +650,10 @@ export function IndoorBuilding({
         <meshStandardMaterial color="#ffffff" />
       </mesh>
       {rooms.filter((r) => r.level === floor).map((r) => (
-        <RoomMesh key={r.id} loc={loc} room={r} active={r.id === activeRoomId} selected={r.id === selectedRoomId} onPick={onRoom} />
+        <RoomMesh key={r.id} loc={loc} room={r} active={r.id === activeRoomId} selected={r.id === selectedRoomId}
+          onPick={onRoom} placing={placingFurn} onPlaceLocal={onPlaceLocal} />
       ))}
-      {stairsVisible(loc, floor) && stairSpans(loc).map((s, i) => <Stairs key={i} loc={loc} span={s} y={y + 0.085} />)}
+      {stairsVisible(loc, floor) && stairsOn(loc, floor).map((s, i) => <Stairs key={i} loc={loc} span={s} y={y + 0.085} />)}
     </group>
   );
 }

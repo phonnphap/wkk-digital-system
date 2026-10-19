@@ -13,6 +13,13 @@ import InsightsTool from "@/components/insights/InsightsTool";
 import ReportsHubTool from "@/components/reports/ReportsHubTool";
 
 const supabase = createClient();
+// สถานะที่ถือว่า "ไม่มาเรียน" (สาย = มา) แก้ตามต้องการได้ เช่นเอา "excused" ออกถ้าไปกิจกรรมยังให้คะแนนได้
+const NOT_PRESENT_STATUSES = ["absent", "leave", "excused"];
+
+function localToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 type Subject = {
   id: string;
@@ -24,7 +31,9 @@ type Subject = {
   score_group_code: string | null;
   score_group_weight_percent?: number | null;
   grading_mode: "numeric" | "pass_fail";          // ★ เพิ่ม
-  pass_threshold_percent: number;  
+  pass_threshold_percent: number;
+  is_archived?: boolean;              // ★ เพิ่ม
+  archived_semester?: number | null;  // ★ เพิ่ม
 };
 type Classroom = { id: string; room_name?: string; grade_group?: string };
 type SectionRow = {
@@ -276,6 +285,7 @@ function StudentCard({
   score,
   selectMode,
   selected,
+  absent,
   onClick,
 }: {
   student: Student;
@@ -283,6 +293,7 @@ function StudentCard({
   score: number;
   selectMode: boolean;
   selected: boolean;
+  absent?: boolean;  
   onClick: () => void;
 }) {
   const gradient = avatarGradient(index);
@@ -291,9 +302,15 @@ function StudentCard({
   const badgeIcon = score > 0 ? "⭐" : score < 0 ? "⚠️" : "•";
   return (
     <button
-      onClick={onClick}
-      className={`relative rounded-2xl border-2 bg-white pt-7 pb-4 px-3 text-center transition-all hover:shadow-lg hover:-translate-y-1 ${
-        selected ? "border-fuchsia-400 ring-4 ring-fuchsia-100 bg-fuchsia-50/40" : "border-slate-100 shadow-sm"
+      onClick={absent ? undefined : onClick}
+      disabled={absent}
+      title={absent ? "นักเรียนไม่มาเรียนวันนี้ ให้คะแนนไม่ได้" : undefined}
+      className={`relative rounded-2xl border-2 pt-7 pb-4 px-3 text-center transition-all ${
+        absent
+          ? "bg-slate-200 border-slate-300 grayscale opacity-60 cursor-not-allowed"
+          : `bg-white hover:shadow-lg hover:-translate-y-1 ${
+              selected ? "border-fuchsia-400 ring-4 ring-fuchsia-100 bg-fuchsia-50/40" : "border-slate-100 shadow-sm"
+            }`
       }`}
     >
       <div
@@ -325,7 +342,12 @@ function StudentCard({
   <p className="text-slate-900 font-black text-2xl mt-0.5 truncate">{student.first_name} {student.last_name}</p>
   {student.nick_name && <p className="text-slate-500 text-[18px] font-bold mt-0.5">({student.nick_name})</p>}
   <p className="text-fuchsia-500 text-2xl font-black">เลขที่ {student.seat_number}</p>
-</button>
+{absent && (
+        <p className="mt-1 inline-block px-2 py-0.5 rounded-full bg-slate-400 text-white text-m font-black">
+          ไม่มาวันนี้
+        </p>
+      )}
+    </button>
   );
 }
 
@@ -1898,12 +1920,13 @@ function TotalScoreTab({ students, studentScores }: { students: Student[]; stude
 /* ---------------- แท็บ ตั้งค่ารายวิชา (จากเมนูมุมซ้ายล่างของแบนเนอร์) ---------------- */
 
 function SubjectSettingsTab({
-  subject, classroom, section, readOnly, onSubjectSaved, onSectionSaved,
+  subject, classroom, section, readOnly, canToggleArchive, onSubjectSaved, onSectionSaved,
 }: {
   subject: Subject | null;
   classroom: Classroom | null;
   section: SectionRow;
   readOnly?: boolean;
+  canToggleArchive?: boolean;
   onSubjectSaved: (updated: Partial<Subject>) => void;
   onSectionSaved: (updated: Partial<SectionRow>) => void;
 }) {
@@ -2090,6 +2113,27 @@ function handleAutoCreditToggle(checked: boolean) {
     setCreditHours(String(computeCreditFromHours(Number(hoursPerYear))));
   }
 }
+const isArchived = !!subject?.is_archived;
+const [archiving, setArchiving] = useState(false);
+
+async function toggleArchive(next: boolean) {
+  if (!subject || !canToggleArchive) return;
+  const sem = (subject as any).default_semester ?? selectedSemester;
+  const msg = next
+    ? `เก็บวิชานี้เข้าคลัง (ภาคเรียนที่ ${sem}) ใช่ไหม?\nทุกห้องที่สอนวิชานี้จะกลายเป็นดูอย่างเดียว`
+    : "นำวิชานี้ออกจากคลัง และกลับมาแก้ไขได้ตามปกติใช่ไหม?";
+  if (!window.confirm(msg)) return;
+
+  setArchiving(true);
+  setError(null);
+  const patch = next
+    ? { is_archived: true, archived_semester: sem, archived_at: new Date().toISOString() }
+    : { is_archived: false, archived_semester: null, archived_at: null };
+  const { error: err } = await supabase.from("subjects").update(patch).eq("id", subject.id);
+  setArchiving(false);
+  if (err) { setError(err.message ?? "เก็บเข้าคลังไม่สำเร็จ"); return; }
+  onSubjectSaved(patch as any);
+}
 async function removeFromGroup() {
   if (!subject) return;
   if (!window.confirm("นำวิชานี้ออกจากกลุ่มรวมคะแนนหรือไม่?")) return;
@@ -2231,7 +2275,28 @@ async function removeFromGroup() {
       </button>
     ))}
   </div>
-
+    {(scorePeriodMode === "semester" || isArchived) && (
+  <div className={`rounded-xl border-2 border-dashed p-3 ${isArchived ? "border-slate-300 bg-slate-100" : "border-amber-200 bg-amber-50/50"}`}>
+    <p className="text-m font-black text-slate-600 mb-1">📦 คลังวิชาที่สอนจบแล้ว</p>
+    <p className="text-[18px] text-slate-600 font-bold mb-2">
+      {isArchived
+        ? `วิชานี้เก็บเข้าคลังแล้ว (ภาคเรียนที่ ${subject?.archived_semester ?? "-"}) ทุกห้องดูข้อมูลได้แต่แก้ไขไม่ได้`
+        : "เมื่อสอนจบแล้ว เก็บเข้าคลังได้ ทุกห้องของวิชานี้จะย้ายไปอยู่ส่วน \"สอนจบแล้ว\" ในหน้ารวมวิชา และเปลี่ยนเป็นดูอย่างเดียว"}
+    </p>
+    {canToggleArchive && (
+      <button
+        type="button"
+        onClick={() => toggleArchive(!isArchived)}
+        disabled={archiving}
+        className={`px-4 py-2 rounded-xl font-black text-m text-white disabled:opacity-50 ${
+          isArchived ? "bg-emerald-500 hover:bg-emerald-600" : "bg-amber-500 hover:bg-amber-600"
+        }`}
+      >
+        {archiving ? "กำลังบันทึก..." : isArchived ? "↩️ นำออกจากคลัง" : "📦 เก็บเข้าคลัง"}
+      </button>
+    )}
+  </div>
+)}
   {/* ★ เพิ่ม: เลือกเทอมเมื่อเป็นมัธยม */}
   {scorePeriodMode === "semester" && (
     <div className="flex gap-2 mt-2">
@@ -2681,6 +2746,49 @@ export default function SmartClassRosterPage() {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [timetableEntryId, setTimetableEntryId] = useState("");
   const [homeroomMap, setHomeroomMap] = useState<Record<string, { status: "present" | "absent" | "late" | "leave" }>>({});
+  const [absentIds, setAbsentIds] = useState<Set<string>>(new Set());
+
+useEffect(() => {
+  if (!section?.id) return;
+  let cancelled = false;
+  (async () => {
+    const today = localToday();
+    try {
+      const pr = await fetch(`/api/timetable/periods?subject_section_id=${section.id}&attendance_date=${today}`);
+      const pj = await pr.json();
+      const list: Period[] = pj.periods ?? [];
+
+      const perPeriod = await Promise.all(
+        list.map(async p => {
+          const r = await fetch(`/api/subject-attendance?timetable_entry_id=${p.timetable_entry_id}&attendance_date=${today}`);
+          const j = await r.json();
+          return (j.records ?? []) as { student_id: string; status: string }[];
+        })
+      );
+
+      const checked = perPeriod.filter(rs => rs.length > 0); // เฉพาะคาบที่เช็กชื่อแล้ว
+      const result = new Set<string>();
+      if (checked.length > 0) {
+        students.forEach(s => {
+          const allNotPresent = checked.every(rs => {
+            const rec = rs.find(r => r.student_id === s.id);
+            return !!rec && NOT_PRESENT_STATUSES.includes(rec.status);
+          });
+          if (allNotPresent) result.add(s.id);
+        });
+      }
+      if (!cancelled) setAbsentIds(result);
+    } catch {
+      if (!cancelled) setAbsentIds(new Set());
+    }
+  })();
+  return () => { cancelled = true; };
+}, [section?.id, students, tab, bannerMenu]); // โหลดใหม่ทุกครั้งที่สลับแท็บ จึงเห็นผลหลังบันทึกเช็กชื่อ
+
+const presentStudents = useMemo(
+  () => students.filter(s => !absentIds.has(s.id)),
+  [students, absentIds]
+);
 
   // --- ตัวจับเวลาลอย: เปิด/ปิดจากหน้าเพจหลัก ให้ใช้งานได้ต่อเนื่องแม้สลับแท็บ/เมนูอื่น ---
   const [timerOpen, setTimerOpen] = useState(false);
@@ -2699,6 +2807,8 @@ export default function SmartClassRosterPage() {
   const [academicYearId, setAcademicYearId] = useState<string | null>(null);
   const [homeroomTeacherName, setHomeroomTeacherName] = useState("");
   const [subjectTeacherName, setSubjectTeacherName] = useState("");
+  const isArchived = !!subject?.is_archived;
+const readOnly = isAdmin || isArchived; // แอดมิน หรือวิชาถูกเก็บเข้าคลัง = ดูอย่างเดียว
 
   useEffect(() => {
     (async () => {
@@ -2752,7 +2862,7 @@ setSection(sec as SectionRow);
 
 const [{ data: subj }, { data: room }] = await Promise.all([
   supabase.from("subjects")
-  .select("id, subject_code, name_th, subject_type, credit_hours, hours_per_year, score_group_code, score_group_weight_percent, grading_mode, pass_threshold_percent, score_period_mode, default_semester, grade_rounding_mode")
+  .select("id, subject_code, name_th, subject_type, credit_hours, hours_per_year, score_group_code, score_group_weight_percent, grading_mode, pass_threshold_percent, score_period_mode, default_semester, grade_rounding_mode, is_archived, archived_semester")
   .eq("id", subjectId).maybeSingle(),
         sec?.classroom_id
           ? supabase.from("classrooms").select("id, room_name, grade_group").eq("id", sec.classroom_id).maybeSingle()
@@ -2863,19 +2973,19 @@ const [{ data: subj }, { data: room }] = await Promise.all([
     });
   }
   function toggleSelectAll() {
-    setSelectedIds(prev => (prev.size === students.length ? new Set() : new Set(students.map(s => s.id))));
-  }
-  function handleCardClick(student: Student) {
-    if (selectMode) {
-      toggleStudentSelected(student.id);
-    } else {
-      setScoreTargets([student]);
-    }
-  }
-  function openScoreForSelected() {
-    const chosen = students.filter(s => selectedIds.has(s.id));
-    if (chosen.length > 0) setScoreTargets(chosen);
-  }
+  setSelectedIds(prev =>
+    prev.size === presentStudents.length ? new Set() : new Set(presentStudents.map(s => s.id))
+  );
+}
+function handleCardClick(student: Student) {
+  if (isArchived || absentIds.has(student.id)) return;
+  if (selectMode) toggleStudentSelected(student.id);
+  else setScoreTargets([student]);
+}
+function openScoreForSelected() {
+  const chosen = presentStudents.filter(s => selectedIds.has(s.id));
+  if (chosen.length > 0) setScoreTargets(chosen);
+}
 
   // --- เมนูมุมซ้ายล่างของแบนเนอร์ ---
   function handleBannerMenuClick(key: BannerMenuKey) {
@@ -2886,6 +2996,8 @@ const [{ data: subj }, { data: room }] = await Promise.all([
     if (!scoreTargets || !section?.id) return;
     const points = preset ? preset.points : (customPoints ?? 0);
     if (points === 0) return;
+    const validTargets = scoreTargets.filter(s => !absentIds.has(s.id));
+if (validTargets.length === 0) { setScoreTargets(null); return; }
 
     // เสียงไฟล์จริงตามเครื่องหมายคะแนน (บวก/ลบ) จาก public/sounds/
     playPointSound(points);
@@ -2906,7 +3018,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
       }
     }
 
-    const rows = scoreTargets.map(s => ({
+    const rows = validTargets.map(s => ({
       student_id: s.id,
       subject_section_id: section.id,
       preset_id: presetId,
@@ -2922,7 +3034,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
 
     setStudentScores(prev => {
       const next = { ...prev };
-      scoreTargets.forEach(s => { next[s.id] = (next[s.id] ?? 0) + points; });
+      validTargets.forEach(s => { next[s.id] = (next[s.id] ?? 0) + points; });
       return next;
     });
     setScoreTargets(null);
@@ -3019,6 +3131,11 @@ const [{ data: subj }, { data: room }] = await Promise.all([
 <p className="text-white text-xlfont-black mt-1 leading-snug">
   {subject.subject_code} · {classroom?.grade_group} {classroom?.room_name} · 👥 {students.length} คน
 </p>
+{isArchived && (
+  <p className="mt-2 inline-block px-4 py-1.5 rounded-full bg-white/90 text-slate-600 font-black text-base">
+    📦 เก็บเข้าคลังแล้ว (ภาคเรียนที่ {subject.archived_semester ?? "-"}) · ดูข้อมูลได้อย่างเดียว
+  </p>
+)}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-between mt-4">
@@ -3058,13 +3175,15 @@ const [{ data: subj }, { data: room }] = await Promise.all([
         : "max-w-4xl"
       }`}>
 {bannerMenu === "assignments" && section && (
-  <AssignmentsTool
-    sectionId={section.id}
-    subjectId={subjectId}
-    students={students}
-    currentUserId={currentUserId}
-    academicYearId={academicYearId}   // ★ เพิ่ม
-  />
+  <fieldset disabled={isArchived} className="min-w-0 border-0 p-0 m-0">
+    <AssignmentsTool
+      sectionId={section.id}
+      subjectId={subjectId}
+      students={students}
+      currentUserId={currentUserId}
+      academicYearId={academicYearId}
+    />
+  </fieldset>
 )}
         {bannerMenu === "insights" && classroom && (
           <InsightsTool
@@ -3083,7 +3202,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
     classroomLabel={`${classroom?.grade_group ?? ""} ${classroom?.room_name ?? ""}`}
     students={students}
     currentUserId={currentUserId}
-    readOnly={isAdmin}
+    readOnly={readOnly}
     formativeMaxScore={(section as any).formative_max_score}
     midtermMaxScore={(section as any).midterm_max_score}
     finalMaxScore={(section as any).final_max_score}
@@ -3101,7 +3220,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
             onCreateNew={() => { setBannerMenu(null); setTab("attendance"); }}
             onOpenSettings={() => setBannerMenu("settings")}
             onOpenDate={(date) => { setSelectedDate(date); setBannerMenu(null); setTab("attendance"); }}
-            readOnly={isAdmin} 
+            readOnly={readOnly}
           />
         )}
         {bannerMenu === "totalScore" && section && (
@@ -3115,7 +3234,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
             homeroomTeacherName={homeroomTeacherName}
             subjectTeacherName={subjectTeacherName}
             currentUserId={currentUserId}
-            readOnly={isAdmin}
+            readOnly={readOnly}
             gradingMode={subject.grading_mode}
     passThresholdPercent={subject.pass_threshold_percent}
     gradingStructure={(section as any).grading_structure}   
@@ -3129,13 +3248,14 @@ const [{ data: subj }, { data: room }] = await Promise.all([
         )}
         {bannerMenu === "settings" && section && subject && (
   <SubjectSettingsTab
-    subject={subject}
-    classroom={classroom}
-    section={section}
-    readOnly={isAdmin}
-    onSubjectSaved={(updated) => setSubject(prev => prev ? { ...prev, ...updated } : prev)}
-    onSectionSaved={(updated) => setSection(prev => prev ? { ...prev, ...updated } : prev)}
-  />
+  subject={subject}
+  classroom={classroom}
+  section={section}
+  readOnly={readOnly}
+  canToggleArchive={!isAdmin}
+  onSubjectSaved={(updated) => setSubject(prev => prev ? { ...prev, ...updated } : prev)}
+  onSectionSaved={(updated) => setSection(prev => prev ? { ...prev, ...updated } : prev)}
+/>
 )}
         {!bannerMenu && !isAdmin && tab === "roster" && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 w-full">
@@ -3144,7 +3264,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
               <div className="flex items-center gap-2 flex-wrap">
                 {selectMode && (
                   <button onClick={toggleSelectAll} className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-m transition-colors">
-                    {selectedIds.size === students.length ? "ยกเลิกเลือกทั้งหมด" : "เลือกทั้งหมด"}
+                    {selectedIds.size === presentStudents.length ? "ยกเลิกเลือกทั้งหมด" : "เลือกทั้งหมด"}
                   </button>
                 )}
                 {selectMode && selectedIds.size > 0 && (
@@ -3152,6 +3272,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
                     ⭐ ให้คะแนนที่เลือก ({selectedIds.size})
                   </button>
                 )}
+                {!isArchived && (
                 <button
                   onClick={toggleSelectMode}
                   className={`px-3 py-1.5 rounded-lg font-black text-m shadow-sm transition-colors ${
@@ -3160,6 +3281,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
                 >
                   {selectMode ? "✓ กำลังเลือกการ์ด" : "เลือกการ์ดนักเรียน"}
                 </button>
+                )}
               </div>
             </div>
 
@@ -3178,6 +3300,7 @@ const [{ data: subj }, { data: room }] = await Promise.all([
                     score={studentScores[s.id] ?? 0}
                     selectMode={selectMode}
                     selected={selectedIds.has(s.id)}
+                    absent={absentIds.has(s.id)} 
                     onClick={() => handleCardClick(s)}
                   />
                 ))}
@@ -3187,40 +3310,23 @@ const [{ data: subj }, { data: room }] = await Promise.all([
         )}
 
         {!bannerMenu && !isAdmin && tab === "attendance" && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
-            <div className="px-4 pt-4 flex items-center gap-2 flex-wrap">
-              <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
-                className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-base font-bold focus:border-emerald-400 focus:outline-none" />
-              {periods.length > 1 && (
-                <select value={timetableEntryId} onChange={e => setTimetableEntryId(e.target.value)}
-                  className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-base font-bold focus:border-emerald-400 focus:outline-none">
-                  {periods.map(p => (
-                    <option key={p.timetable_entry_id} value={p.timetable_entry_id}>
-                      คาบ {p.slot_number} · {p.start_time?.slice(0,5)}-{p.end_time?.slice(0,5)}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-            {periods.length === 0 ? (
-  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-center text-slate-600">
-    <p className="text-3xl mb-2">🗓️</p>
-    <p className="font-bold text-base">วันนี้ไม่มีคาบเรียนวิชานี้ตามตารางสอน</p>
-    <p className="text-m mt-2 text-slate-600">
-      ถ้าต้องการเรียนชดเชย/สลับคาบมาวันนี้ ให้ไปเปิดหน้าของ<b>วันที่มีคาบเดิม</b> แล้วกด "🔄 สลับคาบวันเรียน" เลือกวันที่ใหม่เป็นวันนี้
-    </p>
+  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+    <AttendanceTool
+      sectionId={section.id}
+      classroomId={section.classroom_id}
+      date={selectedDate}
+      students={students}
+      currentUserId={currentUserId}
+      referenceLabel="โฮมรูม"
+      readOnly={isArchived}
+      onDateSwapped={(fromDate, toDate) => setSelectedDate(toDate)}
+    />
   </div>
-) : (
-  <AttendanceTool
-    timetableEntryId={timetableEntryId} date={selectedDate} students={students} currentUserId={currentUserId}
-    referenceMap={homeroomMap} referenceLabel="โฮมรูม"
-    onDateSwapped={(fromDate, toDate) => setSelectedDate(toDate)}
-  />
-)}
-          </div>
-        )}
+)}            
         {!bannerMenu && !isAdmin && tab === "random" && (
-          <RandomPickerTab students={students} mode={randomMode} onOpenScore={s => setScoreTargets([s])} scoreModalOpen={!!scoreTargets} />
+          <RandomPickerTab students={presentStudents} mode={randomMode}
+  onOpenScore={isArchived ? undefined : s => setScoreTargets([s])}
+  scoreModalOpen={!!scoreTargets} />
         )}
         {!bannerMenu && !isAdmin && tab === "tools" && (
           <ToolsTab students={students} onOpenTimer={() => setTimerOpen(true)} />

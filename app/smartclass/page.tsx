@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 
 const supabase = createClient();
 
-type Subject = { id: string; subject_code: string; name_th: string };
+type Subject = { id: string; subject_code: string; name_th: string; is_archived?: boolean; archived_semester?: number | null };
 type SectionRow = { id: string; subject_id: string; classroom_id: string; teacher_id: string; co_teacher_id?: string };
 type Classroom = { id: string; room_name?: string; grade_group?: string };
 
@@ -152,7 +152,7 @@ if (roomIds.length > 0) {
         const subjectIds = [...new Set(rows.map(r => r.subject_id))];
         if (subjectIds.length > 0) {
           const { data: subs } = await supabase
-            .from("subjects").select("id, subject_code, name_th").in("id", subjectIds).order("subject_code");
+            .from("subjects").select("id, subject_code, name_th, is_archived, archived_semester").in("id", subjectIds).order("subject_code");
           setSubjects((subs ?? []) as Subject[]);
         }
       }
@@ -176,6 +176,8 @@ if (roomIds.length > 0) {
     const q = search.trim();
     return groupedSubjects.filter(g => g.subject.name_th.includes(q) || g.subject.subject_code.includes(q));
   }, [groupedSubjects, search]);
+  const activeSubjects = useMemo(() => filteredSubjects.filter(g => !g.subject.is_archived), [filteredSubjects]);
+  const archivedSubjects = useMemo(() => filteredSubjects.filter(g => g.subject.is_archived), [filteredSubjects]);
 
   /* ----- มุมมองแอดมิน: จัดกลุ่มชั้นเรียนตามสายชั้น ----- */
   const classroomsWithLevel = useMemo(() => {
@@ -238,7 +240,7 @@ if (roomIds.length > 0) {
   <p className="text-white text-lg font-black mt-1 ml-[56px] leading-snug font-['TH_Sarabun_New',_sans-serif]">
   {isAdmin
     ? `แสดงทุกชั้นเรียน (สิทธิ์แอดมิน/ผู้บริหาร) · ${filteredClassrooms.length} ห้อง`
-    : `วิชาที่คุณสอน · ${filteredSubjects.length} วิชา`}
+    : `วิชาที่คุณสอน · ${activeSubjects.length} วิชา${archivedSubjects.length ? ` · สอนจบแล้ว ${archivedSubjects.length} วิชา` : ""}`}
 </p>
 
 <input value={search} onChange={e => setSearch(e.target.value)}
@@ -311,42 +313,76 @@ if (roomIds.length > 0) {
             </div>
           )
         ) : filteredSubjects.length === 0 ? (
-          <div className="text-center py-20 text-slate-400 bg-white rounded-2xl border-2 border-slate-100">
-  <p className="text-4xl mb-3">📚</p>
-  <p className="font-black text-slate-500">{search ? "ไม่พบวิชาตามที่ค้นหา" : "คุณยังไม่มีวิชาที่สอน"}</p>
-</div>
-        ) : (
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
-  {filteredSubjects.map((g, i) => {
-    const gradient = SUBJECT_GRADIENTS[i % SUBJECT_GRADIENTS.length];
-    return (
-      <button
-  key={g.subject.id}
-  onClick={() => router.push(`/smartclass/${g.subject.id}`)}
-  className="text-left rounded-2xl border-2 border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
->
-  <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
-    <span className="text-sm font-black bg-white text-slate-900 px-2.5 py-1 rounded-full tracking-wide shadow-sm">
-      SUBJECT
-    </span>
-    <span className="text-white text-lg leading-none font-black">⠿</span>
+  <div className="text-center py-20 text-slate-400 bg-white rounded-2xl border-2 border-slate-100">
+    <p className="text-4xl mb-3">📚</p>
+    <p className="font-black text-slate-500">{search ? "ไม่พบวิชาตามที่ค้นหา" : "คุณยังไม่มีวิชาที่สอน"}</p>
   </div>
-    <div className="p-4">
-    <p className="font-black text-xl text-slate-900 leading-tight truncate">
-      {g.subject.name_th}
-    </p>
-    <p className="text-slate-400 text-sm font-bold mt-0.5">{g.subject.subject_code}</p>
-    <div className="mt-3 flex justify-center">
-      <span className="text-sm font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
-        🏫 {g.roomCount} ห้อง
-      </span>
-    </div>
+) : (
+  <div className="space-y-8">
+    {activeSubjects.length > 0 && (
+      <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
+        {activeSubjects.map((g, i) => {
+          const gradient = SUBJECT_GRADIENTS[i % SUBJECT_GRADIENTS.length];
+          return (
+            <button
+              key={g.subject.id}
+              onClick={() => router.push(`/smartclass/${g.subject.id}`)}
+              className="text-left rounded-2xl border-2 border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
+            >
+              <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
+                <span className="text-sm font-black bg-white text-slate-900 px-2.5 py-1 rounded-full tracking-wide shadow-sm">SUBJECT</span>
+                <span className="text-white text-lg leading-none font-black">⠿</span>
+              </div>
+              <div className="p-4">
+                <p className="font-black text-xl text-slate-900 leading-tight truncate">{g.subject.name_th}</p>
+                <p className="text-slate-400 text-sm font-bold mt-0.5">{g.subject.subject_code}</p>
+                <div className="mt-3 flex justify-center">
+                  <span className="text-sm font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
+                    🏫 {g.roomCount} ห้อง
+                  </span>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    )}
+
+    {archivedSubjects.length > 0 && (
+      <div>
+        <h2 className="text-sm font-black text-slate-600 mb-2 flex items-center gap-2">
+          <span className="w-1.5 h-4 rounded-full bg-slate-400 inline-block" />
+          📦 คลังวิชาที่สอนจบแล้ว
+          <span className="text-slate-300 font-black">({archivedSubjects.length})</span>
+        </h2>
+        <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
+          {archivedSubjects.map(g => (
+            <button
+              key={g.subject.id}
+              onClick={() => router.push(`/smartclass/${g.subject.id}`)}
+              className="text-left rounded-2xl border-2 border-slate-200 bg-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden"
+            >
+              <div className="h-14 bg-gradient-to-r from-slate-400 to-slate-300 px-4 flex items-center justify-between">
+                <span className="text-sm font-black bg-white text-slate-500 px-2.5 py-1 rounded-full tracking-wide shadow-sm">ARCHIVED</span>
+                <span className="text-white text-lg leading-none font-black">📦</span>
+              </div>
+              <div className="p-4">
+                <p className="font-black text-xl text-slate-500 leading-tight truncate">{g.subject.name_th}</p>
+                <p className="text-slate-400 text-sm font-bold mt-0.5">{g.subject.subject_code}</p>
+                <div className="mt-3 flex flex-col items-center gap-1.5">
+                  <span className="text-sm font-black bg-slate-200 border-2 border-slate-300 px-3 py-1.5 rounded-lg text-slate-600 inline-flex items-center gap-1.5">
+                    📦 เก็บเข้าคลัง เทอม {g.subject.archived_semester ?? "-"}
+                  </span>
+                  <span className="text-xs font-bold text-slate-400">🏫 {g.roomCount} ห้อง · ดูอย่างเดียว</span>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    )}
   </div>
-</button>
-    );
-  })}
-</div>
-        )}
+)}
       </main>
     </div>
   );

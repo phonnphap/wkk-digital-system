@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import {
-  FH, MapEdge, MapLocation, MapNode, MapRoom, XZ,
+  FH, floorH, MapEdge, MapLocation, MapNode, MapRoom, XZ,
   corridorNorm, isLongX, localToWorld, bestStair, worldToLocal,
 } from "./schoolData";
 
@@ -63,7 +63,7 @@ const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 /** พิกัด world ของจุดสัดส่วน (0..1) ภายในอาคาร ที่ชั้น level (รวมการหมุนอาคาร) */
 export function toWorld(loc: MapLocation, n: XZ, level: number): THREE.Vector3 {
   const [x, z] = localToWorld(loc, (n[0] - 0.5) * loc.size[0], (n[1] - 0.5) * loc.size[1]);
-  return new THREE.Vector3(x, (level - 1) * FH + 0.12, z);
+  return new THREE.Vector3(x, (level - 1) * floorH(loc) + 0.12, z);
 }
 
 /** เส้นทางในอาคาร: ทางเข้า → ทางเดินกลาง → (บันได) → หน้าห้อง */
@@ -79,7 +79,7 @@ export function indoorRoute(loc: MapLocation, room: MapRoom): THREE.Vector3[] {
     toWorld(loc, corridorNorm(loc, entN), 1),
   ];
   if (room.level > 1) {
-    const st = bestStair(loc, entN, room.door);
+    const st = bestStair(loc, entN, room.door, room.level);
     pts.push(toWorld(loc, st, 1), toWorld(loc, st, room.level));
   }
   pts.push(toWorld(loc, corridorNorm(loc, room.door), room.level), toWorld(loc, room.door, room.level));

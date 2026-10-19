@@ -1,7 +1,7 @@
 "use client";
 
 import { Html } from "@react-three/drei";
-import { DecorItem, GateDef, fenceFrame } from "./DecorData";
+import { DecorItem, GateDef, PickFn, fenceFrame, pickState } from "./DecorData";
 
 /** ประตูรั้ว: เสา 2 ต้น + บาน (เปิด 2 บาน / 1 บาน / เลื่อน, ปิดหรือเปิด, ความสูงตั้งค่าได้) */
 function Gate({ g }: { g: GateDef }) {
@@ -73,11 +73,19 @@ function SchoolSign({ it }: { it: DecorItem }) {
   );
 }
 
-export function SchoolGates({ gates, signs }: { gates: GateDef[]; signs: DecorItem[] }) {
+export function SchoolGates({ gates, signs, onPick }: { gates: GateDef[]; signs: DecorItem[]; onPick?: PickFn }) {
   return (
     <>
-      {gates.map((g) => <Gate key={g.id} g={g} />)}
-      {signs.map((s) => <SchoolSign key={s.id} it={s} />)}
+      {gates.map((g) => (
+        <group key={g.id} onClick={(e) => { if (e.delta > 4 || pickState.placing) return; e.stopPropagation(); onPick?.(g.x, g.z, g.name, { kind: "gate", id: g.id }); }}>
+          <Gate g={g} />
+        </group>
+      ))}
+      {signs.map((s) => (
+        <group key={s.id} onClick={(e) => { if (e.delta > 4 || pickState.placing) return; e.stopPropagation(); const f = fenceFrame(s.x, s.y); onPick?.(f.x, f.z, s.name || "ป้ายโรงเรียน", { kind: "item", id: s.id }); }}>
+          <SchoolSign it={s} />
+        </group>
+      ))}
     </>
   );
 }

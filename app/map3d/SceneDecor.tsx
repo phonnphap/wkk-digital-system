@@ -5,9 +5,10 @@ import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FH, MapEdge, MapLocation, MapNode, px } from "./schoolData";
-import { DecorConfig, DecorItem, FENCE, GateDef } from "./DecorData";
+import { DECOR_LABEL, DecorConfig, DecorItem, FENCE, GateDef, PickFn, pickState } from "./DecorData";
 import { SchoolGates } from "./SchoolGates";
-import { Roads, RoadsLayer, Traffic, Temple, RoadSign, Zebra, FieldFence, People, Carport, BusBay, Kiosk } from "./SceneExtra";
+import { Traffic, Temple, RoadSign, Zebra, FieldFence, People, Carport, BusBay, Kiosk } from "./SceneExtra";
+import { Roads, RoadsLayer } from "./SceneRoads";
 
 /* ───────────── helpers ───────────── */
 
@@ -18,7 +19,7 @@ export type Item = {
   c?: string;
 };
 
-export function Inst({ items, children, cast = false }: { items: Item[]; children: React.ReactNode; cast?: boolean }) {
+export function Inst({ items, children, cast = false, onClick }: { items: Item[]; children: React.ReactNode; cast?: boolean; onClick?: (e: any) => void }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   useLayoutEffect(() => {
     const m = ref.current;
@@ -46,6 +47,7 @@ export function Inst({ items, children, cast = false }: { items: Item[]; childre
       args={[undefined as any, undefined as any, Math.max(items.length, 1)]}
       castShadow={cast}
       frustumCulled={false}
+      onClick={onClick}
     >
       {children}
     </instancedMesh>
@@ -89,7 +91,7 @@ export function Ground({ onGround }: { onGround?: (x: number, z: number) => void
     s.closePath();
     return s;
   }, []);
-  const click = onGround ? (e: any) => { e.stopPropagation(); onGround(e.point.x, e.point.z); } : undefined;
+  const click = onGround ? (e: any) => { if (e.delta > 4) return; e.stopPropagation(); onGround(e.point.x, e.point.z); } : undefined;
   return (
     <>
       {/* นอกโรงเรียน = สีขาว (ถนนนอกรั้วเป็นสีดำ วาดใน OutsideRoads) */}
@@ -166,10 +168,11 @@ export function Fence({ gates }: { gates: GateDef[] }) {
 
 /* ───────────── ต้นไม้ / ศาลา / เสาธง ───────────── */
 
-export function Trees({ items }: { items: DecorItem[] }) {
+export function Trees({ items, onPick }: { items: DecorItem[]; onPick?: PickFn }) {
   const d = useMemo(() => {
     const r = rng(7);
     const trunks: Item[] = [], crowns: Item[] = [], cones: Item[] = [], fronds: Item[] = [];
+    const ids = { t: [] as string[], c: [] as string[], k: [] as string[], f: [] as string[] };
     const greens = ["#2e7d32", "#388e3c", "#43a047", "#558b2f", "#33691e"];
     const flowers = ["#f59f00", "#f06595", "#fcc419", "#e64980"];
     items.filter((t) => t.type === "tree").forEach((t) => {
@@ -179,42 +182,55 @@ export function Trees({ items }: { items: DecorItem[] }) {
       const h = t.h ?? 1;
       const k = 0.9 + r() * 0.25;
       const green = greens[Math.floor(r() * greens.length)];
+      const T = (it: Item) => { trunks.push(it); ids.t.push(t.id); };
+      const C = (it: Item) => { crowns.push(it); ids.c.push(t.id); };
+      const K = (it: Item) => { cones.push(it); ids.k.push(t.id); };
+      const F = (it: Item) => { fronds.push(it); ids.f.push(t.id); };
       if (kind === "pine") {
-        trunks.push({ p: [wx, 0.15 * sc * h, wz], s: [sc * 0.8, sc * h * 0.75, sc * 0.8] });
-        cones.push({ p: [wx, 0.32 * sc * h, wz], s: [sc * 1.15, sc * h * 0.9, sc * 1.15], c: "#2f6b3a" });
-        cones.push({ p: [wx, 0.58 * sc * h, wz], s: [sc * 0.85, sc * h * 0.85, sc * 0.85], c: "#3a7d44" });
-        cones.push({ p: [wx, 0.8 * sc * h, wz], s: [sc * 0.55, sc * h * 0.7, sc * 0.55], c: "#47914f" });
+        T({ p: [wx, 0.15 * sc * h, wz], s: [sc * 0.8, sc * h * 0.75, sc * 0.8] });
+        K({ p: [wx, 0.32 * sc * h, wz], s: [sc * 1.15, sc * h * 0.9, sc * 1.15], c: "#2f6b3a" });
+        K({ p: [wx, 0.58 * sc * h, wz], s: [sc * 0.85, sc * h * 0.85, sc * 0.85], c: "#3a7d44" });
+        K({ p: [wx, 0.8 * sc * h, wz], s: [sc * 0.55, sc * h * 0.7, sc * 0.55], c: "#47914f" });
       } else if (kind === "palm") {
-        const th = 2.4 * sc * h;                       // ลำต้น (เดิมสูง 0.4)
-        trunks.push({ p: [wx, th * 0.2, wz], s: [sc * 0.8, sc * h * 2.4, sc * 0.8] });
-        for (let f = 0; f < 7; f++)
-          fronds.push({ p: [wx, th * 0.4 + 0.03, wz], s: [sc, sc, sc], r: (f * Math.PI * 2) / 7 + r() * 0.3, c: green });
+        const th = 2.4 * sc * h;
+        T({ p: [wx, th * 0.2, wz], s: [sc * 0.8, sc * h * 2.4, sc * 0.8] });
+        for (let f = 0; f < 7; f++) F({ p: [wx, th * 0.4 + 0.03, wz], s: [sc, sc, sc], r: (f * Math.PI * 2) / 7 + r() * 0.3, c: green });
       } else if (kind === "bush") {
-        crowns.push({ p: [wx, 0.09 * sc, wz], s: sc * 0.55 * k, c: green });
+        C({ p: [wx, 0.09 * sc, wz], s: sc * 0.55 * k, c: green });
       } else {
-        trunks.push({ p: [wx, 0.2 * sc * h, wz], s: [sc, sc * h, sc] });
-        crowns.push({ p: [wx, 0.4 * sc * h + 0.22 * sc, wz], s: sc * k, c: kind === "flower" ? flowers[Math.floor(r() * flowers.length)] : green });
+        T({ p: [wx, 0.2 * sc * h, wz], s: [sc, sc * h, sc] });
+        C({ p: [wx, 0.4 * sc * h + 0.22 * sc, wz], s: sc * k, c: kind === "flower" ? flowers[Math.floor(r() * flowers.length)] : green });
       }
     });
-    return { trunks, crowns, cones, fronds };
+    return { trunks, crowns, cones, fronds, ids };
   }, [items]);
+  const click = (ids: string[]) => (e: any) => {
+    if (e.delta > 4 || pickState.placing) return;
+    const id = ids[e.instanceId ?? -1];
+    const it = items.find((x) => x.id === id);
+    if (!it) return;
+    e.stopPropagation();
+    const [wx, wz] = px(it.x, it.y);
+    onPick?.(wx, wz, "ต้นไม้", { kind: "item", id });
+  };
   return (
     <>
-      <Inst items={d.trunks}><cylinderGeometry args={[0.035, 0.05, 0.4, 6]} /><meshStandardMaterial color="#6d4c41" /></Inst>
-      <Inst items={d.crowns} cast><icosahedronGeometry args={[0.3, 1]} /><meshStandardMaterial color="#ffffff" flatShading /></Inst>
-      <Inst items={d.cones} cast><coneGeometry args={[0.26, 0.5, 8]} /><meshStandardMaterial color="#ffffff" flatShading /></Inst>
-      <Inst items={d.fronds}><boxGeometry args={[0.55, 0.015, 0.1]} /><meshStandardMaterial color="#ffffff" /></Inst>
+      <Inst items={d.trunks} onClick={click(d.ids.t)}><cylinderGeometry args={[0.035, 0.05, 0.4, 6]} /><meshStandardMaterial color="#6d4c41" /></Inst>
+      <Inst items={d.crowns} cast onClick={click(d.ids.c)}><icosahedronGeometry args={[0.3, 1]} /><meshStandardMaterial color="#ffffff" flatShading /></Inst>
+      <Inst items={d.cones} cast onClick={click(d.ids.k)}><coneGeometry args={[0.26, 0.5, 8]} /><meshStandardMaterial color="#ffffff" flatShading /></Inst>
+      <Inst items={d.fronds} onClick={click(d.ids.f)}><boxGeometry args={[0.55, 0.015, 0.1]} /><meshStandardMaterial color="#ffffff" /></Inst>
     </>
   );
 }
 
-export function Pavilions({ items }: { items: DecorItem[] }) {
+export function Pavilions({ items, onPick }: { items: DecorItem[]; onPick?: PickFn }) {
   return (
     <>
       {items.filter((p) => p.type === "pavilion").map((p) => {
         const [wx, wz] = px(p.x, p.y);
         return (
-          <group key={p.id} position={[wx, 0, wz]} rotation={[0, rad(p), 0]}>
+          <group key={p.id} position={[wx, 0, wz]} rotation={[0, rad(p), 0]} scale={[1, p.hs ?? 1, 1]}
+            onClick={(e) => { if (e.delta > 4 || pickState.placing) return; e.stopPropagation(); onPick?.(wx, wz, p.name || "ศาลา/ซุ้มนั่งเล่น", { kind: "item", id: p.id }); }}>
             <mesh position={[0, 0.02, 0]} receiveShadow><boxGeometry args={[0.72, 0.04, 0.72]} /><meshStandardMaterial color="#dee2e6" /></mesh>
             {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], k) => (
               <mesh key={k} position={[sx * 0.29, 0.28, sz * 0.29]}><cylinderGeometry args={[0.025, 0.025, 0.52, 6]} /><meshStandardMaterial color="#f8f9fa" /></mesh>
@@ -260,9 +276,19 @@ function ToiletBlock({ it }: { it: DecorItem }) {
     <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
       <mesh position={[0, H / 2, 0]} castShadow receiveShadow><boxGeometry args={[W, H, D]} /><meshStandardMaterial color={wall} /></mesh>
       <mesh position={[0, H + 0.03, 0]} castShadow><boxGeometry args={[W + 0.08, 0.06, D + 0.08]} /><meshStandardMaterial color="#6c757d" /></mesh>
-      <mesh position={[0, 0.2, D / 2 + 0.005]}><boxGeometry args={[Math.min(0.18, W * 0.3), 0.4, 0.02]} /><meshStandardMaterial color="#343a40" /></mesh>
-      <mesh position={[W * 0.28, 0.45, D / 2 + 0.005]}><boxGeometry args={[0.14, 0.1, 0.02]} /><meshStandardMaterial color="#74c0fc" /></mesh>
-      <mesh position={[-W * 0.28, 0.45, D / 2 + 0.005]}><boxGeometry args={[0.14, 0.1, 0.02]} /><meshStandardMaterial color="#74c0fc" /></mesh>
+      {(() => {
+        const side = it.kind ?? "front";
+        const rotY = side === "back" ? Math.PI : side === "right" ? Math.PI / 2 : side === "left" ? -Math.PI / 2 : 0;
+        const lr = side === "left" || side === "right";
+        const off = (lr ? W : D) / 2 + 0.005, span = lr ? D : W;
+        return (
+          <group rotation={[0, rotY, 0]}>
+            <mesh position={[0, 0.2, off]}><boxGeometry args={[Math.min(0.18, span * 0.3), 0.4, 0.02]} /><meshStandardMaterial color="#343a40" /></mesh>
+            <mesh position={[span * 0.28, 0.45, off]}><boxGeometry args={[0.14, 0.1, 0.02]} /><meshStandardMaterial color="#74c0fc" /></mesh>
+            <mesh position={[-span * 0.28, 0.45, off]}><boxGeometry args={[0.14, 0.1, 0.02]} /><meshStandardMaterial color="#74c0fc" /></mesh>
+          </group>
+        );
+      })()}
       <Tag y={H + 0.3}>🚻 {name}</Tag>
     </group>
   );
@@ -542,38 +568,48 @@ export function Guard({ gate, robotRef }: { gate?: MapLocation; robotRef: React.
 /* ───────────── รวมฉากตกแต่ง ───────────── */
 
 export function Decor({
-  decor, gates, nodes, edges, gate, robotRef, indoor, onGround,
+  decor, gates, nodes, edges, gate, robotRef, indoor, onGround, onPick,
 }: {
   decor: DecorConfig; gates: GateDef[]; nodes: MapNode[]; edges: MapEdge[]; gate?: MapLocation;
   robotRef: React.RefObject<THREE.Group | null>; indoor: boolean;
-  onGround?: (x: number, z: number) => void;
+  onGround?: (x: number, z: number) => void; onPick?: PickFn;
 }) {
   const of = (t: DecorItem["type"]) => decor.items.filter((i) => i.type === t);
+  // ห่อวัตถุ: คลิกแล้วเลื่อนกล้อง/เปิดตั้งค่า + ตัวคูณความสูง (hs)
+  const wrap = (i: DecorItem, node: React.ReactNode, useHs = true) => {
+    const [wx, wz] = px(i.x, i.y);
+    return (
+      <group key={i.id} scale={[1, useHs ? i.hs ?? 1 : 1, 1]}
+        onClick={(e) => { if (e.delta > 4 || pickState.placing) return; e.stopPropagation(); onPick?.(wx, wz, i.name || DECOR_LABEL[i.type], { kind: "item", id: i.id }); }}>
+        {node}
+      </group>
+    );
+  };
   return (
     <>
       <Ground onGround={onGround} />
-      <Roads nodes={nodes} edges={edges} />
-      <RoadsLayer roads={decor.roads ?? []} gates={gates} />
+      <Roads nodes={nodes} edges={edges} style={decor.grayRoad} onPick={onPick} />
+      <RoadsLayer roads={decor.roads ?? []} gates={gates} gray={decor.grayRoad} onPick={onPick} />
       <Fence gates={gates} />
-      <SchoolGates gates={gates} signs={of("sign")} />
+      <SchoolGates gates={gates} signs={of("sign")} onPick={onPick} />
       {!indoor && (
         <>
-          <Trees items={decor.items} />
-          <Pavilions items={decor.items} />
-          {of("flag").map((i) => <Flag key={i.id} it={i} />)}
-          {of("shrine").map((i) => <Shrine key={i.id} it={i} />)}
-          {of("toilet").map((i) => <ToiletBlock key={i.id} it={i} />)}
-          {of("shed").map((i) => <Shed key={i.id} it={i} />)}
-          {of("barrier").map((i) => <Barrier key={i.id} it={i} />)}
-          {of("bridge").map((i) => <Bridge key={i.id} it={i} />)}
-          {of("carport").map((i) => <Carport key={i.id} it={i} />)}
-          {of("busbay").map((i) => <BusBay key={i.id} it={i} />)}
-          {of("kiosk").map((i) => <Kiosk key={i.id} it={i} />)}
-          {of("temple").map((i) => <Temple key={i.id} it={i} />)}
-          {of("roadsign").map((i) => <RoadSign key={i.id} it={i} />)}
-          {of("zebra").map((i) => <Zebra key={i.id} it={i} />)}
-          {of("fieldfence").map((i) => <FieldFence key={i.id} it={i} />)}
-          {of("people").map((i) => <People key={i.id} it={i} />)}
+          <Trees items={decor.items} onPick={onPick} />
+          <Pavilions items={decor.items} onPick={onPick} />
+          {of("flag").map((i) => wrap(i, <Flag it={i} />, false))}
+          {of("shrine").map((i) => wrap(i, <Shrine it={i} />))}
+          {of("toilet").map((i) => wrap(i, <ToiletBlock it={i} />))}
+          {of("shed").map((i) => wrap(i, <Shed it={i} />))}
+          {of("barrier").map((i) => wrap(i, <Barrier it={i} />))}
+          {of("bridge").map((i) => wrap(i, <Bridge it={i} />, false))}
+          {of("carport").map((i) => wrap(i, <Carport it={i} />))}
+          {of("busbay").map((i) => wrap(i, <BusBay it={i} />))}
+          {of("kiosk").map((i) => wrap(i, <Kiosk it={i} />))}
+          {of("temple").map((i) => wrap(i, <Temple it={i} />, false))}
+          {of("roadsign").map((i) => wrap(i, <RoadSign it={i} />, false))}
+          {of("zebra").map((i) => wrap(i, <Zebra it={i} />, false))}
+          {of("fieldfence").map((i) => wrap(i, <FieldFence it={i} />, false))}
+          {of("people").map((i) => wrap(i, <People it={i} roads={decor.roads} />, false))}
           <Traffic roads={decor.roads ?? []} traffic={decor.traffic} />
         </>
       )}

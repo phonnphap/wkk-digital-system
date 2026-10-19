@@ -6,12 +6,12 @@ import * as THREE from "three";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
-import { MapEdge, MapNode, XZ, px } from "./schoolData";
-import { DecorItem, GateDef, RoadItem, RoadKind, outsideRoadSegs, sampleRoad } from "./DecorData";
+import { XZ, px } from "./schoolData";
+import { DecorItem, RoadItem, sampleRoad } from "./DecorData";
 
-type Item = { p: [number, number, number]; s?: number | [number, number, number]; r?: number; c?: string };
+export type Item = { p: [number, number, number]; s?: number | [number, number, number]; r?: number; c?: string };
 
-function InstX({ items, children }: { items: Item[]; children: React.ReactNode }) {
+export function InstX({ items, children, onClick }: { items: Item[]; children: React.ReactNode; onClick?: (e: any) => void }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   useLayoutEffect(() => {
     const m = ref.current;
@@ -32,7 +32,7 @@ function InstX({ items, children }: { items: Item[]; children: React.ReactNode }
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
   }, [items]);
   return (
-    <instancedMesh key={items.length} ref={ref} args={[undefined as any, undefined as any, Math.max(items.length, 1)]} frustumCulled={false}>
+    <instancedMesh key={items.length} ref={ref} args={[undefined as any, undefined as any, Math.max(items.length, 1)]} frustumCulled={false} onClick={onClick}>
       {children}
     </instancedMesh>
   );
@@ -48,33 +48,11 @@ function rng(seed: number) {
 }
 const rad = (it: { rot?: number }) => -((it.rot ?? 0) * Math.PI) / 180;
 
-const Tag = ({ y, children }: { y: number; children: React.ReactNode }) => (
+export const Tag = ({ y, children }: { y: number; children: React.ReactNode }) => (
   <Html position={[0, y, 0]} center distanceFactor={12} zIndexRange={[10, 0]}>
     <div className="pointer-events-none px-1.5 py-0.5 rounded bg-white/90 text-[9px] font-black text-slate-700 shadow whitespace-nowrap">{children}</div>
   </Html>
 );
-
-/* ───────────── ถนนในโรงเรียน: เทา + เส้นขอบขาว ───────────── */
-export function Roads({ nodes, edges }: { nodes: MapNode[]; edges: MapEdge[] }) {
-  const pos = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
-  return (
-    <>
-      {edges.map((e, i) => {
-        const a = pos.get(e.a), b = pos.get(e.b);
-        if (!a || !b) return null;
-        const len = Math.hypot(b.x - a.x, b.z - a.z);
-        const ang = -Math.atan2(b.z - a.z, b.x - a.x);
-        const mid: [number, number, number] = [(a.x + b.x) / 2, 0.01, (a.z + b.z) / 2];
-        return (
-          <group key={i} position={mid} rotation={[0, ang, 0]}>
-            <mesh position={[0, -0.002, 0]} receiveShadow><boxGeometry args={[len + 0.62, 0.016, 1.2]} /><meshStandardMaterial color="#ffffff" /></mesh>
-            <mesh position={[0, 0.004, 0]} receiveShadow><boxGeometry args={[len + 0.5, 0.02, 1.02]} /><meshStandardMaterial color="#9ca3af" /></mesh>
-          </group>
-        );
-      })}
-    </>
-  );
-}
 
 /* ───────────── โรงจอดรถยนต์ (ผู้บริหาร / ครู) ───────────── */
 export function Carport({ it }: { it: DecorItem }) {
@@ -155,92 +133,6 @@ export function Kiosk({ it }: { it: DecorItem }) {
   );
 }
 
-
-/* ───────────── ถนนทุกชนิดตามค่าที่ตั้ง (ซอย / หลัก / ลานจอดรถ / ฟุตบาทมีหลังคา) ───────────── */
-export function RoadsLayer({ roads, gates }: { roads: RoadItem[]; gates: GateDef[] }) {
-  const d = useMemo(() => {
-    const base: Item[] = [], line: Item[] = [], slab: Item[] = [], roof: Item[] = [], posts: Item[] = [];
-    const labels: { x: number; z: number; text: string }[] = [];
-
-    const emit = (kind: RoadKind, pl: XZ[], w: number, roofOn: boolean) => {
-      let dashNext = 0, postNext = 0;
-      for (let i = 0; i < pl.length - 1; i++) {
-        const a = pl[i], b = pl[i + 1];
-        const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz);
-        if (len < 0.005) continue;
-        const ang = -Math.atan2(dz, dx), nx = -dz / len, nz = dx / len;
-        const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
-        const ext = Math.min(w * 0.3, 0.5);
-        if (kind === "soi") {
-          base.push({ p: [mx, 0.004, mz], s: [len + ext, 0.012, w], r: ang, c: "#14171b" });
-          [-1, 1].forEach((sg) => {
-            const o = sg * (w / 2 - 0.07);
-            line.push({ p: [mx + nx * o, 0.012, mz + nz * o], s: [len + 0.06, 0.008, 0.05], r: ang, c: "#fbbf24" });
-          });
-          let pos = dashNext;
-          while (pos < len) { const t = pos / len; line.push({ p: [a[0] + dx * t, 0.012, a[1] + dz * t], s: [0.3, 0.008, 0.04], r: ang, c: "#fbbf24" }); pos += 0.6; }
-          dashNext = pos - len;
-        } else if (kind === "main") {
-          base.push({ p: [mx, 0.008, mz], s: [len + ext, 0.014, w], r: ang, c: "#1e40af" });
-          [-1, 1].forEach((sg) => {
-            const o = sg * (w / 2 - 0.06);
-            line.push({ p: [mx + nx * o, 0.016, mz + nz * o], s: [len + 0.06, 0.006, 0.05], r: ang, c: "#ffffff" });
-          });
-          [-0.04, 0.04].forEach((o) => line.push({ p: [mx + nx * o, 0.016, mz + nz * o], s: [len + 0.06, 0.006, 0.04], r: ang, c: "#fbbf24" }));
-          let pos = dashNext;
-          while (pos < len) {
-            const t = pos / len;
-            [-w / 4, w / 4].forEach((o) => line.push({ p: [a[0] + dx * t + nx * o, 0.016, a[1] + dz * t + nz * o], s: [0.35, 0.006, 0.05], r: ang, c: "#ffffff" }));
-            pos += 0.7;
-          }
-          dashNext = pos - len;
-        } else if (kind === "park") {
-          base.push({ p: [mx, 0.022, mz], s: [len + ext, 0.012, w], r: ang, c: "#f59f00" });
-          line.push({ p: [mx, 0.03, mz], s: [len + ext * 0.8, 0.012, w * 0.82], r: ang, c: "#fde047" });
-        } else if (kind === "walk") {
-          slab.push({ p: [mx, 0.035, mz], s: [len + ext, 0.07, w], r: ang, c: "#e5e7eb" });
-          if (roofOn) {
-            roof.push({ p: [mx, 0.78, mz], s: [len + ext, 0.05, w + 0.35], r: ang, c: "#2563eb" });
-            let pos = postNext;
-            while (pos < len) {
-              const t = pos / len;
-              [-1, 1].forEach((sg) => posts.push({ p: [a[0] + dx * t + nx * sg * (w / 2 - 0.04), 0.4, a[1] + dz * t + nz * sg * (w / 2 - 0.04)] }));
-              pos += 1.8;
-            }
-            postNext = pos - len;
-          }
-        }
-      }
-    };
-
-    roads.forEach((r) => {
-      if (r.kind === "route") return;
-      const pl = sampleRoad(r.pts, r.curve ?? 0);
-      if (pl.length < 2) return;
-      const w = r.w ?? (r.kind === "main" ? 4 : r.kind === "park" || r.kind === "walk" ? 1 : 1.6);
-      emit(r.kind, pl, w, !!r.roof);
-      if (r.label) {
-        const fr = r.kind === "main" ? [0.2, 0.5, 0.8] : [0.5];
-        fr.forEach((f) => { const p = pl[Math.min(pl.length - 1, Math.floor(pl.length * f))]; labels.push({ x: p[0], z: p[1], text: r.label! }); });
-      }
-    });
-
-    // ทางต่อจากประตู (ไม่รวมประตูคนเดิน) ไปยังถนนซอย
-    const soiCount = roads.filter((r) => r.kind === "soi").reduce((a, r) => a + Math.max(0, sampleRoad(r.pts, r.curve ?? 0).length - 1), 0);
-    outsideRoadSegs(roads, gates).slice(soiCount).forEach(({ a, b }) => emit("soi", [a, b], 1.6, false));
-    return { base, line, slab, roof, posts, labels };
-  }, [roads, gates]);
-  return (
-    <>
-      <InstX items={d.base}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
-      <InstX items={d.line}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
-      <InstX items={d.slab}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
-      <InstX items={d.roof}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
-      <InstX items={d.posts}><cylinderGeometry args={[0.025, 0.025, 0.8, 6]} /><meshStandardMaterial color="#9ca3af" /></InstX>
-      {d.labels.map((l, i) => <group key={i} position={[l.x, 0, l.z]}><Tag y={0.5}>{l.text}</Tag></group>)}
-    </>
-  );
-}
 
 /* ───────────── รถวิ่งตามเส้นทาง (ถนนน้ำเงิน → ประตู 3 → ลานจอดรถ → ประตู 4) ───────────── */
 const CAR_COLORS = ["#e63946", "#f1faee", "#457b9d", "#ffb703", "#2a9d8f", "#9d4edd", "#212529", "#fb923c"];
@@ -417,8 +309,8 @@ export function FieldFence({ it }: { it: DecorItem }) {
   );
 }
 
-/* ───────────── กลุ่มนักเรียน/ครู ทำกิจกรรม: walk | assemble | sit | play | exercise ───────────── */
-export function People({ it }: { it: DecorItem }) {
+/* ───────────── กลุ่มนักเรียน/ครู ทำกิจกรรม: walk | assemble | sit | play | exercise | follow (เดินตามถนน/ฟุตบาท) ───────────── */
+export function People({ it, roads }: { it: DecorItem; roads?: RoadItem[] }) {
   const [cx, cz] = px(it.x, it.y);
   const W = (it.w ?? 60) / 30, D = (it.d ?? 40) / 30;
   const n = Math.max(0, Math.min(120, Math.round(it.n ?? 10)));
@@ -429,6 +321,17 @@ export function People({ it }: { it: DecorItem }) {
   const body = useRef<THREE.InstancedMesh>(null);
   const head = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
+
+  // เส้นทางสำหรับ kind = follow
+  const path = useMemo(() => {
+    if (kind !== "follow") return null;
+    const r = roads?.find((x) => x.id === it.road);
+    if (!r || r.pts.length < 2) return null;
+    const pts = sampleRoad(r.pts, r.curve ?? 0);
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    return { pts, cum, total: cum[cum.length - 1] };
+  }, [kind, roads, it.road]);
 
   const ppl = useMemo(() => {
     const r = rng(Math.round(it.x * 7 + it.y * 13 + total * 31));
@@ -449,6 +352,7 @@ export function People({ it }: { it: DecorItem }) {
       return {
         teacher, gx, gz, ph: r() * 6.28, dx: r() - 0.5, dz: r() - 0.5, sp: 0.6 + r() * 0.8,
         bx: (r() - 0.5) * W, bz: (r() - 0.5) * D, tc: tcols[i % tcols.length],
+        s0: (i / Math.max(total, 1)) * 1, lat: (r() - 0.5) * 0.35,
       };
     });
   }, [it.x, it.y, n, m, total, kind, W, D]);
@@ -469,7 +373,18 @@ export function People({ it }: { it: DecorItem }) {
     ppl.forEach((p, i) => {
       let x = p.gx, z = p.gz, y = 0, h = 0;
       const sit = kind === "sit" && !p.teacher;
-      if (kind === "walk") {
+      if (kind === "follow") {
+        if (path) {
+          const s = ((t * 0.45 * p.sp * (p.teacher ? 0.8 : 1) + p.s0 * path.total) % path.total + path.total) % path.total;
+          let lo = 0;
+          while (lo < path.cum.length - 2 && path.cum[lo + 1] < s) lo++;
+          const a = path.pts[lo], b = path.pts[lo + 1];
+          const seg = path.cum[lo + 1] - path.cum[lo] || 1, f = (s - path.cum[lo]) / seg;
+          const dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz) || 1;
+          x = a[0] + dx * f - (dz / L) * p.lat; z = a[1] + dz * f + (dx / L) * p.lat;
+          h = Math.atan2(dx, dz); y = 0.07 + Math.abs(Math.sin(t * 6 + p.ph)) * 0.02;
+        }
+      } else if (kind === "walk") {
         const a = t * p.sp * 0.5 + p.ph, c = Math.cos(a);
         x = p.bx + p.dx * Math.sin(a) * W * 0.6; z = p.bz + p.dz * Math.sin(a) * D * 0.6;
         h = Math.atan2(p.dx * c, p.dz * c); y = Math.abs(Math.sin(t * 6 + p.ph)) * 0.02;
@@ -483,7 +398,7 @@ export function People({ it }: { it: DecorItem }) {
         h = Math.atan2(-x, -z);
       }
       const lh = sit ? 0.08 : 0.2, bh = 0.26;
-      dummy.position.set(cx * 0 + x, y + lh / 2, z); dummy.rotation.set(0, h, 0); dummy.scale.set(0.16, lh, 0.12); dummy.updateMatrix(); legs.current!.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, y + lh / 2, z); dummy.rotation.set(0, h, 0); dummy.scale.set(0.16, lh, 0.12); dummy.updateMatrix(); legs.current!.setMatrixAt(i, dummy.matrix);
       dummy.position.set(x, y + lh + bh / 2, z); dummy.scale.set(0.22, bh, 0.13); dummy.updateMatrix(); body.current!.setMatrixAt(i, dummy.matrix);
       dummy.position.set(x, y + lh + bh + 0.07, z); dummy.scale.set(0.16, 0.16, 0.16); dummy.updateMatrix(); head.current!.setMatrixAt(i, dummy.matrix);
     });
@@ -491,8 +406,9 @@ export function People({ it }: { it: DecorItem }) {
   });
 
   const cnt = Math.max(total, 1);
+  const absolute = kind === "follow";   // เดินตามถนน: พิกัดเป็นโลกจริง ไม่ผูกกับตำแหน่งกลุ่ม
   return (
-    <group position={[cx, 0, cz]} rotation={[0, rad(it), 0]}>
+    <group position={absolute ? [0, 0, 0] : [cx, 0, cz]} rotation={absolute ? [0, 0, 0] : [0, rad(it), 0]}>
       <instancedMesh key={`l${total}`} ref={legs} args={[undefined as any, undefined as any, cnt]} count={total} frustumCulled={false}>
         <boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" />
       </instancedMesh>
@@ -502,7 +418,7 @@ export function People({ it }: { it: DecorItem }) {
       <instancedMesh key={`h${total}`} ref={head} args={[undefined as any, undefined as any, cnt]} count={total} frustumCulled={false}>
         <sphereGeometry args={[0.5, 10, 10]} /><meshStandardMaterial color="#ffffff" />
       </instancedMesh>
-      {it.name && <Tag y={0.9}>{it.name} · นร. {n} · ครู {m}</Tag>}
+      {it.name && !absolute && <Tag y={0.9}>{it.name} · นร. {n} · ครู {m}</Tag>}
     </group>
   );
 }

@@ -108,14 +108,14 @@ type TimeSlot   = { id: string; slot_number: number; start_time: string; end_tim
 type Subject = { id: string; subject_code: string; name_th: string; subject_group?: string; periods_per_week?: number };
 type Teacher = {
   id: string; title?: string; first_name?: string; last_name?: string; full_name?: string; position?: string;
-  role?: string; grade_level?: string; department_id?: string; extra_roles?: string[]; can_arrange_schedule?: boolean;
+  role?: string; grade_level?: string; department_id?: string; extra_roles?: string[]; can_arrange_schedule?: boolean; is_active?: boolean;
 };
 type UserProfile = {
   id: string; title?: string; first_name?: string; last_name?: string; full_name?: string;
   email: string; role: string; position?: string; grade_level?: string;
-  extra_roles?: string[]; department_id?: string; can_arrange_schedule?: boolean;
+  extra_roles?: string[]; department_id?: string; can_arrange_schedule?: boolean; is_active?: boolean;
 };
-type Classroom  = { id: string; room_number: number; room_name?: string; grade_group?: string; academic_year_id?: string; schedule_type?: string; homeroom_teacher_id?: string; homeroom_teacher_2_id?: string };
+type Classroom  = { id: string; room_number: number; room_name?: string; grade_group?: string; academic_year_id?: string; schedule_type?: string; homeroom_teacher_id?: string; homeroom_teacher_2_id?: string; split_by_semester?: boolean };
 type TimetableEntry = {
   id: string; classroom_id: string; subject_id: string; teacher_id: string;
   teacher_id_2?: string; day_of_week: number; time_slot_id: string; academic_year_id: string;
@@ -369,8 +369,8 @@ function getClassroomGradeLabel(c: { room_name?: string }): string {
 }
 
 // ★ ใหม่: ห้อง ม.1–ม.6 เท่านั้นที่ต้องแยกเทอม 1/2 · อ./ป. แสดงรวมทุกเทอมเสมอ
-function isSecondaryClassroom(c: { room_name?: string }): boolean {
-  return getClassroomGradeLabel(c).startsWith("ม.");
+function isSecondaryClassroom(c: { room_name?: string; split_by_semester?: boolean }): boolean {
+  return getClassroomGradeLabel(c).startsWith("ม.") || !!c.split_by_semester;
 }
 
 // ★ ใหม่: ห้องนี้ (ผูกกับ academic_year_id หนึ่งแถว) อยู่เทอมไหน — ไม่ระบุ = เทอม 1
@@ -431,8 +431,9 @@ function scheduleTypeForGradeLabel(label: string): string {
   }
   return "primary";
 }
-function GradeHeadPermissionModal({ teachers, onClose, onToggle }: {
+function GradeHeadPermissionModal({ teachers, onClose, onToggle, gradeLevelName }: {
   teachers: Teacher[]; onClose: () => void; onToggle: (teacherId: string, value: boolean) => Promise<void>;
+  gradeLevelName: (v?: string | null) => string;
 }) {
   const gradeHeads = teachers.filter(t => t.extra_roles?.includes("grade_head"));
   return (
@@ -448,7 +449,7 @@ function GradeHeadPermissionModal({ teachers, onClose, onToggle }: {
             <div key={t.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200">
               <div>
                 <p className="font-bold text-slate-800 text-sm">{displayName(t)}</p>
-                <p className="text-xs text-slate-400">สาย {t.grade_level ?? "—"}</p>
+                <p className="text-xs text-slate-400">สาย {gradeLevelName(t.grade_level)}</p>
               </div>
               <button onClick={() => onToggle(t.id, !t.can_arrange_schedule)}
                 className={`w-12 h-7 rounded-full transition-all relative ${t.can_arrange_schedule ? "bg-emerald-500" : "bg-slate-300"}`}>
@@ -458,6 +459,61 @@ function GradeHeadPermissionModal({ teachers, onClose, onToggle }: {
           ))}
         </div>
         <div className="px-5 pb-5"><button onClick={onClose} className="w-full py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">ปิด</button></div>
+      </div>
+    </div>
+  );
+}
+function SemesterSplitModal({ rooms, onClose, onConfirm }: {
+  rooms: Classroom[]; onClose: () => void; onConfirm: (ids: string[]) => Promise<void>;
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const candidates = rooms.filter(r => !isSecondaryClassroom(r)); // อ./ป. ที่ยังไม่แยก
+  const grades = ALL_GRADE_LABELS.filter(g => !g.startsWith("ม."));
+
+  const toggle = (id: string) => setSelected(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  const toggleGrade = (g: string) => {
+    const ids = candidates.filter(r => getClassroomGradeLabel(r) === g).map(r => r.id);
+    const all = ids.every(id => selected.includes(id));
+    setSelected(p => all ? p.filter(x => !ids.includes(x)) : [...new Set([...p, ...ids])]);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="bg-sky-600 px-6 py-4">
+          <h3 className="text-lg font-black text-white">🔀 แยกตารางเทอม 1/2 (อ./ป.)</h3>
+          <p className="text-sm text-white/70">ระบบจะสร้างห้องเทอม 2 และคัดลอกคาบจากเทอม 1 ให้ — เทอม 1 ไม่ถูกแก้</p>
+        </div>
+        <div className="p-5 space-y-3 overflow-y-auto flex-1">
+          {grades.map(g => {
+            const rs = candidates.filter(r => getClassroomGradeLabel(r) === g)
+              .sort((a, b) => (a.room_number ?? 0) - (b.room_number ?? 0));
+            if (rs.length === 0) return null;
+            return (
+              <div key={g} className="bg-slate-50 border-2 border-slate-200 rounded-xl p-3">
+                <button onClick={() => toggleGrade(g)} className="text-xs font-black text-sky-600 mb-2">{g} · เลือกทั้งชั้น</button>
+                <div className="flex flex-wrap gap-2">
+                  {rs.map(r => (
+                    <button key={r.id} onClick={() => toggle(r.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black border-2 ${selected.includes(r.id) ? "bg-sky-600 border-sky-600 text-white" : "bg-white border-slate-200 text-slate-600"}`}>
+                      {r.room_name ?? `ห้อง ${r.room_number}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {candidates.length === 0 && <p className="text-center text-slate-400 py-6 text-sm">ไม่มีห้อง อ./ป. ที่ยังไม่แยกเทอม</p>}
+        </div>
+        <div className="px-5 pb-5 pt-3 border-t border-slate-100 flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">ยกเลิก</button>
+          <button disabled={selected.length === 0 || saving}
+            onClick={async () => { setSaving(true); await onConfirm(selected); setSaving(false); onClose(); }}
+            className="flex-[2] py-2.5 rounded-xl bg-sky-600 text-white font-black text-sm disabled:opacity-50">
+            {saving ? "⏳ กำลังสร้าง..." : `✅ แยกเทอม ${selected.length} ห้อง`}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -897,20 +953,21 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
   const extraRoles = currentUser.extra_roles ?? [];
   const isHomeroomOnly = !isAdminRole(currentUser.role)
     && !extraRoles.includes("dept_head") && !extraRoles.includes("grade_head");
-
+const isSelectable = (t: Teacher) =>
+  t.is_active !== false || t.id === entry?.teacher_id || t.id === entry?.teacher_id_2;
   // ★ ครูคนที่ 1 (ผู้สอนหลัก): ครูทั่วไป/ครูประจำชั้น ล็อกเป็นตัวเองเสมอ
   // dept_head/grade_head เลือกได้เฉพาะในหมวด/สายเดียวกัน, admin เลือกได้ทั้งหมด
   const selectableTeachers = (() => {
     if (canEditDirect && extraRoles.includes("dept_head")) {
-      return teachers.filter(t => t.department_id === currentUser.department_id);
+      return teachers.filter(isSelectable).filter(t => t.department_id === currentUser.department_id);
     }
     if (canEditDirect && extraRoles.includes("grade_head")) {
-      return teachers.filter(t => t.grade_level === currentUser.grade_level);
+      return teachers.filter(isSelectable).filter(t => t.grade_level === currentUser.grade_level);
     }
     if (isHomeroomOnly) {
-      return teachers.filter(t => t.id === currentUser.id);
+      return teachers.filter(isSelectable).filter(t => t.id === currentUser.id);
     }
-    return teachers; // admin เห็นทั้งหมด
+    return teachers.filter(isSelectable); // admin เห็นทั้งหมด
   })();
 
   const [subjectGroup, setSubjectGroup] = useState("");
@@ -922,7 +979,7 @@ function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicY
   const [loading,     setLoading]      = useState(false);
 
   // ★ ครูคนที่ 2 (ผู้ร่วมสอน): เปิดให้ครูทุกระดับเลือกได้จากรายชื่อครูทั้งหมด (ยกเว้นคนที่เลือกเป็นครู 1 แล้ว)
-  const selectableTeacher2Options = teachers.filter(t => t.id !== teacherId1);
+  const selectableTeacher2Options = teachers.filter(t => t.id !== teacherId1 && isSelectable(t));
   const dc = DAY_COLORS[day - 1];
 
   function getRoomGradeLevel() {
@@ -1467,12 +1524,13 @@ function SubjectRequestsPanel({ requests, canApprove, onApprove, onReject }: {
   );
 }
 
-function GradeScheduleManager({ currentUser, isAdmin, teachers, classrooms, subjects, timeSlots, entries, academicYearId, onSaveEntry, onDeleteEntry }: {
+function GradeScheduleManager({ currentUser, isAdmin, teachers, classrooms, subjects, timeSlots, entries, academicYearId, onSaveEntry, onDeleteEntry, gradeLevelName }: {
   currentUser: UserProfile; isAdmin: boolean; teachers: Teacher[]; classrooms: Classroom[];
   subjects: Subject[]; timeSlots: TimeSlot[]; entries: TimetableEntry[]; academicYearId: string;
-  onSaveEntry: (d: any) => Promise<void>; onDeleteEntry: (id: string) => Promise<void>;
+  onSaveEntry: (d: any) => Promise<void>; onDeleteEntry: (id: string) => Promise<void>; gradeLevelName: (gradeLevel: string) => string;
 }) {
-  const allGradeLevels = [...new Set(teachers.map(t => t.grade_level).filter(Boolean))] as string[];
+  const allGradeLevels = ([...new Set(teachers.map(t => t.grade_level).filter(Boolean))] as string[])
+    .sort((a, b) => gradeLevelName(a).localeCompare(gradeLevelName(b), "th", { numeric: true }));
   const [gradeFilter, setGradeFilter] = useState(isAdmin ? (allGradeLevels[0] ?? "") : (currentUser.grade_level ?? ""));
   const [selectedTeacherId, setSelectedTeacherId] = useState("");
   const [cellModal, setCellModal] = useState<{ day: number; slot: TimeSlot; entry?: TimetableEntry } | null>(null);
@@ -1490,12 +1548,12 @@ function GradeScheduleManager({ currentUser, isAdmin, teachers, classrooms, subj
         {isAdmin && (
           <select value={gradeFilter} onChange={e => { setGradeFilter(e.target.value); setSelectedTeacherId(""); }}
             className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold">
-            {allGradeLevels.map(g => <option key={g} value={g}>{g}</option>)}
+            {allGradeLevels.map(g => <option key={g} value={g}>{gradeLevelName(g)}</option>)}
           </select>
         )}
         <select value={selectedTeacherId} onChange={e => setSelectedTeacherId(e.target.value)}
           className="bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold flex-1 min-w-[200px]">
-          <option value="">— เลือกครูในสาย {gradeFilter} —</option>
+          <option value="">— เลือกครูในสาย {gradeLevelName(gradeFilter)} —</option>
           {gradeTeachers.map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
         </select>
       </div>
@@ -1772,7 +1830,7 @@ function TimetableGrid({ classroom, entries, timeSlots, allTimeSlots, subjects, 
     <span className="block text-[9px] font-bold opacity-60">{(subject as any).subject_code}</span>
   )}
 </p>
-<p className="text-[11px] font-bold opacity-80 leading-tight">{displayName(teacher1)}</p>
+<p className="text-[11px] font-bold opacity-80 leading-tight">{displayName(teacher1)}{teacher1?.is_active === false && <span className="text-[9px] font-black bg-red-500 text-white px-1.5 py-0.5 rounded">⚠️ ครูย้ายออก</span>}</p>
                             {teacher2 && <p className="text-[11px] font-bold opacity-80 leading-tight mt-0.5">{displayName(teacher2)}</p>}
                             {isMyClass && <span className="text-[9px] font-black bg-blue-500 text-white px-1.5 py-0.5 rounded mt-1 inline-block">ฉัน</span>}
                           </div>
@@ -2225,7 +2283,7 @@ export default function SchedulePage() {
   const [clubPeriods, setClubPeriods] = useState<ClubPeriod[]>([]);
 const [clubs, setClubs] = useState<Club[]>([]);
 const [showClubAdmin, setShowClubAdmin] = useState(false);
-
+const activeTeachers = teachers.filter(t => t.is_active !== false);
 const loadClubs = useCallback(async () => {
   if (!selectedYear) return;
   const selRow = academicYearsRaw.find(y => y.id === selectedYear);
@@ -2258,6 +2316,88 @@ const loadLockedPeriods = useCallback(async () => {
   setLockedPeriods(data ?? []);
 }, [selectedYear, academicYearsRaw]);
 const [showAutoArrange, setShowAutoArrange] = useState(false);
+const [gradeLevelNames, setGradeLevelNames] = useState<Record<string, string>>({});
+
+useEffect(() => {
+  (async () => {
+    // ⚠️ สมมติว่าตารางชื่อ grade_levels — ถ้าของคุณชื่ออื่น ให้เปลี่ยนตรงนี้
+    const { data, error } = await supabase.from("grade_levels").select("*");
+    if (error) { console.warn("[grade_levels] โหลดชื่อสายชั้นไม่ได้:", error.message); return; }
+    const map: Record<string, string> = {};
+    (data ?? []).forEach((r: any) => {
+      map[r.id] = r.name ?? r.name_th ?? r.grade_name ?? r.label ?? String(r.id);
+    });
+    setGradeLevelNames(map);
+  })();
+}, []);
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const gradeLevelName = (v?: string | null): string => {
+  if (!v) return "—";
+  return gradeLevelNames[v] ?? (UUID_RE.test(v) ? "สาย (ไม่พบชื่อ)" : v);
+};
+const [showSplitModal, setShowSplitModal] = useState(false);
+
+async function enableSemesterSplit(roomIds: string[]) {
+  const failed: string[] = [];
+  for (const id of roomIds) {
+    const room = allClassrooms.find(c => c.id === id);
+    if (!room) continue;
+    try {
+      const curYear = academicYearsRaw.find(y => y.id === room.academic_year_id);
+      if (!curYear) throw new Error("ไม่พบปีการศึกษาของห้อง");
+      const otherSem = (curYear.semester ?? 1) === 1 ? 2 : 1;
+      const otherYear = academicYearsRaw.find(y => y.year_name === curYear.year_name && (y.semester ?? 1) === otherSem);
+      if (!otherYear) throw new Error(`ยังไม่มีปีการศึกษา ${curYear.year_name} เทอม ${otherSem} ในระบบ`);
+
+      // ห้องเทอมอีกฝั่ง (ถ้ามีอยู่แล้วใช้ตัวเดิม ไม่สร้างซ้ำ)
+      let otherRoomId = allClassrooms.find(c =>
+        c.id !== room.id && c.academic_year_id === otherYear.id &&
+        c.grade_group === room.grade_group && (c.room_name ?? "").trim() === (room.room_name ?? "").trim()
+      )?.id;
+
+      if (!otherRoomId) {
+        const { data: ins, error } = await (supabase.from("classrooms") as any).insert([{
+          room_number: room.room_number, room_name: room.room_name, grade_group: room.grade_group,
+          schedule_type: room.schedule_type, homeroom_teacher_id: room.homeroom_teacher_id ?? null,
+          homeroom_teacher_2_id: room.homeroom_teacher_2_id ?? null,
+          academic_year_id: otherYear.id, split_by_semester: true,
+        }]).select("id").single();
+        if (error) throw error;
+        otherRoomId = ins.id as string;
+      } else {
+        await (supabase.from("classrooms") as any).update({ split_by_semester: true }).eq("id", otherRoomId);
+      }
+      await (supabase.from("classrooms") as any).update({ split_by_semester: true }).eq("id", room.id);
+
+      // คัดลอกคาบ → ห้องอีกเทอม (ทำเฉพาะถ้าห้องปลายทางยังว่าง กันซ้ำ)
+      const { count } = await supabase.from("timetable_entries")
+        .select("id", { count: "exact", head: true }).eq("classroom_id", otherRoomId);
+      if (!count) {
+        const src = await fetchAllRows<TimetableEntry>(
+          supabase.from("timetable_entries").select("*").eq("classroom_id", room.id));
+        const rows = src.map(e => ({
+          classroom_id: otherRoomId, subject_id: e.subject_id, teacher_id: e.teacher_id,
+          teacher_id_2: e.teacher_id_2 ?? null, day_of_week: e.day_of_week,
+          time_slot_id: e.time_slot_id, academic_year_id: otherYear.id,
+        }));
+        for (let i = 0; i < rows.length; i += 500) {
+          const { error } = await (supabase.from("timetable_entries") as any).insert(rows.slice(i, i + 500));
+          if (error) throw error;
+        }
+      }
+    } catch (err: any) {
+      console.error("[enableSemesterSplit]", err);
+      failed.push(`${room.room_name}: ${err?.message ?? "ผิดพลาด"}`);
+    }
+  }
+  const { data } = await supabase.from("classrooms").select("*").order("grade_group").order("room_number");
+  setAllClassrooms((data ?? []) as Classroom[]);
+  await loadEntries();
+  alert(failed.length
+    ? `⚠️ แยกเทอมไม่สำเร็จบางห้อง:\n${failed.join("\n")}`
+    : "✅ แยกเทอมเรียบร้อย — เปลี่ยนไปดู 'เทอม 2' แล้วแก้ครู/วิชาได้เลย (เทอม 1 ไม่เปลี่ยน)\nแนะนำกด 🔄 ซิงค์ Smart Class หลังแก้เทอม 2 เสร็จ");
+}
 
 async function handleAutoArrangeConfirm(
   jobs: { classroom: Classroom; subjectId: string; teacherId: string; teacherId2?: string; assignments: { day_of_week: number; time_slot: TimeSlot }[] }[]
@@ -2322,7 +2462,7 @@ supabase.from("users")
   .order("first_name"),
         // ★ FIX: ดึงห้องทั้งหมด ไม่ filter
         supabase.from("classrooms")
-          .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type,homeroom_teacher_id,homeroom_teacher_2_id")
+          .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type,homeroom_teacher_id,homeroom_teacher_2_id,split_by_semester")
           .order("grade_group").order("room_number"),
       ]);
 
@@ -2545,7 +2685,7 @@ useEffect(() => {
   async function applyScheduleType(type: string) {
     await (supabase.from("classrooms") as any).update({ schedule_type: type }).eq("id", selectedRoom);
     const { data } = await supabase.from("classrooms")
-      .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type,homeroom_teacher_id,homeroom_teacher_2_id").order("grade_group").order("room_number");
+      .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type,homeroom_teacher_id,homeroom_teacher_2_id,split_by_semester").order("grade_group").order("room_number");
     const allRooms = (data ?? []) as Classroom[];
     setAllClassrooms(allRooms);
         const selRow  = academicYearsRaw.find(y => y.id === selectedYear);
@@ -3128,6 +3268,102 @@ async function desyncSubjectSection({
     if (ga !== gb) return ga - gb;
     return (a.room_name ?? "").localeCompare(b.room_name ?? "", "th", { numeric: true });
   });
+  // ── ตารางของฉันแยกตามเทอม ─────────────────────────────────────────────
+const uid = user.id;
+const selYearRow  = academicYearsRaw.find(y => y.id === selectedYear);
+const sameYearIds = selYearRow
+  ? academicYearsRaw.filter(y => y.year_name === selYearRow.year_name).map(y => y.id)
+  : [selectedYear];
+const hasSemester2 = !!selYearRow && academicYearsRaw.some(
+  y => y.year_name === selYearRow.year_name && (y.semester ?? 1) === 2
+);
+
+function roomsOfSemester(sem: number): Classroom[] {
+  const matched = allClassrooms.filter(r => sameYearIds.includes(r.academic_year_id ?? ""));
+  return filterRoomsBySemester(matched.length > 0 ? matched : allClassrooms, sem, academicYearsRaw);
+}
+function myEntriesOfSemester(sem: number): TimetableEntry[] {
+  const ids = new Set(roomsOfSemester(sem).map(r => r.id));
+  return entries.filter(e => ids.has(e.classroom_id) && (e.teacher_id === uid || e.teacher_id_2 === uid));
+}
+
+const mySlotStart: Record<string, string> = {};
+timeSlots.forEach(s => { mySlotStart[s.id] = (s.start_time ?? "").slice(0, 5); });
+
+function mySignature(sem: number): string[] {
+  const roomById = new Map(roomsOfSemester(sem).map(r => [r.id, r]));
+  return myEntriesOfSemester(sem).map(e => {
+    const r = roomById.get(e.classroom_id);
+    return [
+      r?.grade_group ?? "", (r?.room_name ?? "").trim(), e.day_of_week,
+      mySlotStart[e.time_slot_id] ?? e.time_slot_id, e.subject_id, e.teacher_id, e.teacher_id_2 ?? "",
+    ].join("|");
+  }).sort();
+}
+
+// เทอม 2 ต้องมีข้อมูลห้องที่แยกเทอมอยู่จริง ไม่งั้นจะเข้าใจผิดว่าครูไม่มีคาบ
+const sem2SplitRoomIds = new Set(roomsOfSemester(2).filter(isSecondaryClassroom).map(r => r.id));
+const sem2HasData = entries.some(e => sem2SplitRoomIds.has(e.classroom_id));
+
+const mySemesterChanged = hasSemester2 && sem2HasData &&
+  JSON.stringify(mySignature(1)) !== JSON.stringify(mySignature(2));
+const mySemesterViews: number[] = mySemesterChanged ? [2, 1] : [selectedSemester]; // เทอม 2 อยู่บนสุด
+const topSemester = mySemesterViews[0];
+const topEntries  = myEntriesOfSemester(topSemester);
+
+const myClubBlocksAll = clubs
+  .filter(c => c.teacher_id === uid)
+  .map(c => {
+    const period = clubPeriods.find(cp => cp.grade_label === c.grade_label);
+    return period ? { dayOfWeek: period.day_of_week, slotLabel: period.slot_label, club: c } : null;
+  })
+  .filter((b): b is { dayOfWeek: number; slotLabel: string; club: Club } => !!b);
+
+function renderMySemesterTimetable(sem: number) {
+  const semEntries = myEntriesOfSemester(sem);
+  const semRooms   = roomsOfSemester(sem);
+
+  const tables = (["kindergarten", "primary", "junior", "senior"] as const).map(type => {
+    const roomIds       = semRooms.filter(c => (c.schedule_type ?? "primary") === type).map(r => r.id);
+    const entriesOfType = semEntries.filter(e => roomIds.includes(e.classroom_id));
+    const clubBlocks    = myClubBlocksAll.filter(b => scheduleTypeForGradeLabel(b.club.grade_label) === type);
+    if (entriesOfType.length === 0 && clubBlocks.length === 0) return null;
+
+    const slots = buildRoomSlots(type, timeSlots);
+    const label = SCHEDULE_TEMPLATES.find(t => t.key === type)?.label ?? type;
+    return (
+      <div key={type}>
+        <p className="text-xs font-black text-slate-400 uppercase mb-2">{label}</p>
+        <PersonalTimetableGrid
+          myEntries={entriesOfType} myClubBlocks={clubBlocks} timeSlots={slots}
+          allTimeSlots={timeSlots} subjects={subjects} teachers={teachers}
+          classrooms={semRooms} userId={uid}
+        />
+      </div>
+    );
+  }).filter(Boolean);
+
+  return (
+    <section key={sem} className={mySemesterChanged ? "rounded-2xl border-2 border-slate-200 bg-white/60 p-4" : ""}>
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <h3 className="font-black text-slate-800 text-base">📘 ตารางสอน เทอม {sem}</h3>
+        {mySemesterChanged && sem === 2 && (
+          <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-amber-100 text-amber-700 border border-amber-300">🔄 มีการเปลี่ยนแปลง</span>
+        )}
+        {mySemesterChanged && sem === 1 && (
+          <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-slate-100 text-slate-500 border border-slate-300">ตารางเดิม</span>
+        )}
+        <span className="text-xs text-slate-400 font-bold">{semEntries.length} คาบ/สัปดาห์</span>
+      </div>
+      {tables.length === 0 ? (
+        <div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">
+          <p className="text-3xl mb-2">📅</p>
+          <p className="font-bold text-sm">ไม่มีคาบสอนในเทอมนี้</p>
+        </div>
+      ) : <div className="space-y-5">{tables}</div>}
+    </section>
+  );
+}
   const homeroomClassroom = classrooms.find(c => c.homeroom_teacher_id === user.id || c.homeroom_teacher_2_id === user.id) ?? null;
   const pendingCount      = changeRequests.filter(r => r.status === "pending").length;
   const pendingSubjectCount = subjectRequests.filter(r => r.status === "pending").length;
@@ -3237,7 +3473,7 @@ const totalScheduledPeriods = entries.length;
   return (
     <div className="min-h-screen bg-slate-50 print:bg-white">
       {showGradeHeadPermission && (
-  <GradeHeadPermissionModal teachers={teachers} onClose={() => setShowGradeHeadPermission(false)} onToggle={toggleGradeHeadPermission} />
+  <GradeHeadPermissionModal teachers={teachers} gradeLevelName={gradeLevelName} onClose={() => setShowGradeHeadPermission(false)} onToggle={toggleGradeHeadPermission} />
 )}
       {showSettings && selectedClassroom && (
         <ScheduleSettingsModal onClose={() => setShowSettings(false)} onApply={applyScheduleType} />
@@ -3245,7 +3481,7 @@ const totalScheduledPeriods = entries.length;
 
       {selectedDayDetail !== null && (
   <DayDetailModal
-    day={selectedDayDetail} entries={myEntries} timeSlots={timeSlots}
+    day={selectedDayDetail} entries={topEntries} timeSlots={timeSlots}
     subjects={subjects} teachers={teachers} classrooms={classrooms} userId={user.id}
     onClose={() => setSelectedDayDetail(null)}
   />
@@ -3294,6 +3530,9 @@ const totalScheduledPeriods = entries.length;
     onSubmit={async (d) => { await handleAddSubjectRequest(d); setShowAddSubjectRequest(false); }}
   />
 )}
+{showSplitModal && (
+  <SemesterSplitModal rooms={classrooms} onClose={() => setShowSplitModal(false)} onConfirm={enableSemesterSplit} />
+)}
 
       {/* Top bar */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3 print:hidden">
@@ -3341,6 +3580,12 @@ const totalScheduledPeriods = entries.length;
   <button onClick={() => setShowGradeHeadPermission(true)}
     className="px-3 py-2 rounded-xl border-2 border-indigo-200 bg-indigo-50 text-indigo-700 font-black text-sm hover:bg-indigo-100">
     🔑 สิทธิ์ หน.สาย
+  </button>
+)}
+{isAdmin && (
+  <button onClick={() => setShowSplitModal(true)}
+    className="px-3 py-2 rounded-xl border-2 border-sky-200 bg-sky-50 text-sky-700 font-black text-sm hover:bg-sky-100">
+    🔀 แยกเทอม อ./ป.
   </button>
 )}
               {isAdmin && (
@@ -3537,6 +3782,7 @@ const totalScheduledPeriods = entries.length;
     subjects={subjects}
     timeSlots={timeSlots}
     entries={entries}
+    gradeLevelName={gradeLevelName}
     academicYearId={selectedYear}
     onSaveEntry={handleSaveDirect}
     onDeleteEntry={handleDeleteEntry}
@@ -3545,68 +3791,39 @@ const totalScheduledPeriods = entries.length;
 
           {/* ── ของฉัน ── */}
           {viewMode === "teacher" && (
-            <div>
-              <div className="mb-4">
-                <h2 className="text-xl font-black text-slate-800">ตารางสอนของฉัน</h2>
-                <p className="text-slate-400 text-sm">{fullName(user)} · {myEntries.length} คาบ/สัปดาห์</p>
-                {homeroomClassroom && <p className="text-blue-600 text-sm font-bold mt-1">⭐ ครูประจำชั้น: {homeroomClassroom.grade_group} {homeroomClassroom.room_name}</p>}
-              </div>
-              <div className="grid grid-cols-5 gap-3 mb-5">
-  {DAYS.map((day, i) => {
-    const count = myEntries.filter(e => e.day_of_week === i + 1).length;
-    const dc = DAY_COLORS[i];
-    return (
-      <button key={day} onClick={() => setSelectedDayDetail(i + 1)}
-        className={`${dc.bg} border-2 ${dc.border} rounded-2xl p-3 text-center hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer`}>
-        <p className={`text-xs font-black ${dc.text}`}>{day}</p>
-        <p className={`text-2xl font-black ${dc.text}`}>{count}</p>
-        <p className="text-slate-400 text-[10px] font-bold">คาบ</p>
-      </button>
-    );
-  })}
-</div>
-              {myEntries.length > 0 || clubs.some(c => c.teacher_id === user.id) ? (
-  <div className="mb-5 space-y-6">
-    {(["kindergarten", "primary", "junior", "senior"] as const).map(type => {
-      const roomsOfType = myClassrooms.filter(c => (c.schedule_type ?? "primary") === type);
-      const myClubBlocksAll = clubs
-        .filter(c => c.teacher_id === user.id)
-        .map(c => {
-          const period = clubPeriods.find(cp => cp.grade_label === c.grade_label);
-          return period ? { dayOfWeek: period.day_of_week, slotLabel: period.slot_label, club: c } : null;
-        })
-        .filter((b): b is { dayOfWeek: number; slotLabel: string; club: Club } => !!b);
-      const myClubBlocksOfType = myClubBlocksAll.filter(b => scheduleTypeForGradeLabel(b.club.grade_label) === type);
+  <div>
+    <div className="mb-4">
+      <h2 className="text-xl font-black text-slate-800">ตารางสอนของฉัน</h2>
+      <p className="text-slate-400 text-sm">
+        {fullName(user)} · {topEntries.length} คาบ/สัปดาห์
+        {mySemesterChanged && <span className="ml-1">(นับตามเทอม {topSemester})</span>}
+      </p>
+      {homeroomClassroom && <p className="text-blue-600 text-sm font-bold mt-1">⭐ ครูประจำชั้น: {homeroomClassroom.grade_group} {homeroomClassroom.room_name}</p>}
+      {mySemesterChanged && (
+        <p className="text-amber-600 text-xs font-bold mt-1">🔄 ตารางเทอม 2 ของคุณมีการเปลี่ยนแปลงจากเทอม 1 — แสดงเทอม 2 ไว้ด้านบน เทอม 1 ไว้ด้านล่าง</p>
+      )}
+    </div>
 
-      if (roomsOfType.length === 0 && myClubBlocksOfType.length === 0) return null;
+    <div className="grid grid-cols-5 gap-3 mb-5">
+      {DAYS.map((day, i) => {
+        const count = topEntries.filter(e => e.day_of_week === i + 1).length;
+        const dc = DAY_COLORS[i];
+        return (
+          <button key={day} onClick={() => setSelectedDayDetail(i + 1)}
+            className={`${dc.bg} border-2 ${dc.border} rounded-2xl p-3 text-center hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer`}>
+            <p className={`text-xs font-black ${dc.text}`}>{day}</p>
+            <p className={`text-2xl font-black ${dc.text}`}>{count}</p>
+            <p className="text-slate-400 text-[10px] font-bold">คาบ</p>
+          </button>
+        );
+      })}
+    </div>
 
-      const roomIds = roomsOfType.map(r => r.id);
-      const entriesOfType = myEntries.filter(e => roomIds.includes(e.classroom_id));
-      if (entriesOfType.length === 0 && myClubBlocksOfType.length === 0) return null;
-
-      const slots = buildRoomSlots(type, timeSlots);
-      const label = SCHEDULE_TEMPLATES.find(t => t.key === type)?.label ?? type;
-
-      return (
-        <div key={type}>
-          <h3 className="font-black text-slate-700 text-sm mb-3">📅 ตารางคาบสอนของฉัน · {label}</h3>
-          <PersonalTimetableGrid
-  myEntries={entriesOfType} myClubBlocks={myClubBlocksOfType} timeSlots={slots}
-  allTimeSlots={timeSlots}
-  subjects={subjects} teachers={teachers} classrooms={classrooms} userId={user.id}
-/>
-        </div>
-      );
-    })}
+    <div className="mb-5 space-y-6">
+      {mySemesterViews.map(sem => renderMySemesterTimetable(sem))}
+    </div>
   </div>
-) : (
-                <div className="text-center py-16 text-slate-400 bg-white rounded-2xl border border-slate-200 mb-5">
-                  <p className="text-4xl mb-3">📅</p>
-                  <p className="font-bold">ยังไม่มีตารางสอน</p>
-                </div>
-              )}
-            </div>
-          )}
+          )}    
 
           {/* ── คำขอ ── */}
           {viewMode === "requests" && (
@@ -3721,7 +3938,7 @@ const totalScheduledPeriods = entries.length;
                             if (confirm(`ห้องนี้ไม่มีคาบสอนผูกอยู่เลย ลบ record ที่ซ้ำนี้ทิ้ง?`)) {
                               await supabase.from("classrooms").delete().eq("id", room.id);
                               const { data } = await supabase.from("classrooms")
-                                .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type,homeroom_teacher_id,homeroom_teacher_2_id")
+                                .select("id,room_number,room_name,grade_group,academic_year_id,schedule_type,homeroom_teacher_id,homeroom_teacher_2_id,split_by_semester")
                                 .order("grade_group").order("room_number");
                               setAllClassrooms((data ?? []) as Classroom[]);
                             }
@@ -3773,7 +3990,7 @@ const totalScheduledPeriods = entries.length;
                       <div key={e.id} className="px-5 py-3 flex items-center justify-between gap-3">
                         <div>
                           <p className="font-bold text-slate-800 text-sm">{(subject as any)?.name_th ?? "—"}</p>
-                          <p className="text-slate-500 text-xs">{displayName(teacher1)}{teacher2 ? ` + ${displayName(teacher2)}` : ""}</p>
+                          <p className="text-slate-500 text-xs">{displayName(teacher1)}{teacher1?.is_active === false && <span className="text-[9px] font-black bg-red-500 text-white px-1.5 py-0.5 rounded">⚠️ ครูย้ายออก</span>} {teacher2 ? ` + ${displayName(teacher2)}` : ""}</p>
                         </div>
                         <button
                           onClick={async () => { if (confirm("ลบรายการนี้?")) { await supabase.from("timetable_entries").delete().eq("id", e.id); await Promise.all([loadEntries(), loadAllEntriesForCheck()]); } }}
