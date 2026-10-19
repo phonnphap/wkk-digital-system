@@ -9,9 +9,9 @@ import {
   LeaveType, LeaveStatus, LeaveRequest,
   LEAVE_TYPE_CONFIG, LEAVE_STATUS_CONFIG,
   getCurrentFiscalYear, isInFiscalYear,
-} from "../../lib/leave-config";
+} from "@/lib/leave-config";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { notifyTeams } from "../../lib/notify-teams";
+import { notifyTeams } from "@/lib/notify-teams";
 
 const supabase = createClient();
 const HR_EMAIL    = "hr@khienkhet.ac.th";

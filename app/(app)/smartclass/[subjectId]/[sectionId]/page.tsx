@@ -2853,12 +2853,12 @@ const readOnly = isAdmin || isArchived; // แอดมิน หรือวิ
 
     const { data: users } = await supabase
       .from("users")
-      .select("id, prefix, first_name, last_name")
+      .select("id, title, first_name, last_name")
       .in("id", allIds);
 
     const nameOf = (id: string) => {
       const u = (users ?? []).find((x: any) => x.id === id);
-      return u ? `${u.prefix ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() : "";
+      return u ? `${u.title ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() : "";
     };
 
     // คั่นด้วยขึ้นบรรทัดใหม่ เพื่อให้ InfoBox แสดงทีละคน

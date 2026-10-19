@@ -54,12 +54,12 @@ export async function GET(req: NextRequest) {
   const allIds = Array.from(new Set([...homeroomIds, ...subjectIds]));
 
   const { data: users } = allIds.length
-    ? await admin.from("users").select("id, prefix, first_name, last_name").in("id", allIds)
+    ? await admin.from("users").select("id, title, first_name, last_name").in("id", allIds)
     : { data: [] as any[] };
 
   const nameOf = (id: string) => {
     const u = (users ?? []).find((x: any) => x.id === id);
-    return u ? `${u.prefix ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() : null;
+    return u ? `${u.title ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() : null;
   };
 
   return NextResponse.json({

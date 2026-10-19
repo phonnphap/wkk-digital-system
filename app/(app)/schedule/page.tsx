@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { format } from "date-fns";
 import { th } from "date-fns/locale";
-import { notifyTeams } from "../../lib/notify-teams";
+import { notifyTeams } from "@/lib/notify-teams";
 
 
 const supabase = createClient();
