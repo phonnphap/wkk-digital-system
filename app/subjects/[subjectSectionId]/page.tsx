@@ -409,9 +409,13 @@ useEffect(() => {
           </div>
         )}
         <AttendanceTool
-          timetableEntryId={timetableEntryId} date={selectedDate} students={students} currentUserId={currentUserId}
-          referenceMap={homeroomMap} referenceLabel="โฮมรูม"
-        />
+  sectionId={section.id}
+  classroomId={section.classroom_id}
+  date={selectedDate}
+  students={students}
+  currentUserId={currentUserId}
+  referenceLabel="โฮมรูม"
+/>
       </>
     )}
   </div>
