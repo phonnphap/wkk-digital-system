@@ -891,25 +891,7 @@ useEffect(() => {
 }, [supabase, myProfileId, myRole, myGradeLevel]);
 
 return (
-  <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
-
-    {/* Top bar */}
-    <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3 flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white font-extrabold text-base shadow-sm">พ</div>
-        <div>
-          <h2 className="text-sm font-black text-slate-900 leading-tight">โรงเรียนวัดเขียนเขต</h2>
-          <span className="text-xs text-slate-400">ระบบบริหารจัดการ</span>
-        </div>
-      </div>
-      <button
-        onClick={handleLogout}
-        className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-rose-600 hover:bg-rose-50 border border-rose-100 transition-all"
-      >
-        <LogOut className="w-4 h-4" />
-        <span>ออกจากระบบ</span>
-      </button>
-    </div>
+  <div className="min-h-full bg-slate-50 text-slate-800 font-sans antialiased">
 
     {/* Main content */}
     <main className="w-full p-4 md:p-8 lg:p-10 space-y-8">
