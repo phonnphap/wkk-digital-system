@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LocKind, MapLocation, MapRoom, CorridorSide, StairsMode, ToiletMode, StageMode, DoorDef, StairDef, FurnItem } from "./schoolData";
 import { TOILET_OPTIONS, CORRIDOR_W, hasInterior, hasSpecialLayout, stairSpans } from "./schoolData";
-import { FURN, FURN_KINDS } from "./furniture";
+import { FURN, FURN_KINDS } from "./Furniture";
 import { TYPE_LABEL, AC_LABEL } from "./BuildingModel";
 import type { MapApi, SaveResult } from "./useSchoolMapData";
 import { DECOR_LABEL, ROAD_KIND_LABEL } from "./DecorData";
