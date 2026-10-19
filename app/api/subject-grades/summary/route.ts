@@ -110,8 +110,11 @@ export async function GET(req: NextRequest) {
     if (cErr) throw cErr;
     if (gErr) throw gErr;
     if (ecErr) throw ecErr;
+    const visibleAssignments = isStudentCaller
+  ? (assignments ?? []).filter((a: any) => a.status !== "draft")
+  : assignments;
 
-    const assignmentIds = (assignments ?? []).map((a: any) => a.id);
+const assignmentIds = (visibleAssignments ?? []).map((a: any) => a.id);
 
     const [
       { data: submissions, error: sErr },

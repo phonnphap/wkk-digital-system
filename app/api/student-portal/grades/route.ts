@@ -1,6 +1,6 @@
-// path จริง: แก้ตามตำแหน่งไฟล์เดิมของคุณ
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getStudentSession } from "@/lib/studentAuth";
 
 export async function GET(req: NextRequest) {
@@ -35,31 +35,46 @@ export async function GET(req: NextRequest) {
   }
 
   const { data: section } = await supabase
-  .from("subject_sections")
-  .select("id, grading_mode, midterm_max_score, final_max_score, show_assignment_scores, grading_structure, formative_max_score")
-  .eq("id", sectionId)
-  .eq("classroom_id", student.classroom_id)
-  .maybeSingle();
+    .from("subject_sections")
+    .select("id, grading_mode, midterm_max_score, final_max_score, show_assignment_scores, grading_structure, formative_max_score")
+    .eq("id", sectionId)
+    .eq("classroom_id", student.classroom_id)
+    .maybeSingle();
 
-if (!section) {
-  return NextResponse.json({ error: "ไม่พบวิชาของนักเรียนคนนี้" }, { status: 404 });
-}
+  if (!section) {
+    return NextResponse.json({ error: "ไม่พบวิชาของนักเรียนคนนี้" }, { status: 404 });
+  }
 
-const showScores = section.show_assignment_scores ?? true;
+  const showScores = section.show_assignment_scores ?? true;
 
-const { data: allAssignments } = await supabase
-  .from("assignments")
-  .select("id, title, max_score, allow_weight, weight_percent, status, due_date, sort_order")
-  .eq("subject_section_id", section.id)
-  .neq("status", "draft")
-  .order("sort_order", { ascending: true });   // ★ ล็อกลำดับให้ตรงกับฝั่งครู
+  // ★ FIX: ตรวจสิทธิ์ผ่านแล้ว (student_id ตรง session + วิชาอยู่ห้องเดียวกัน)
+  // ใช้ service-role เพราะตารางด้านล่างมี RLS เฉพาะ role "authenticated" ซึ่ง นร. ไม่มี
+  const db = createAdminClient();
 
-  // ★ ดึงคะแนนที่นักเรียนคนนี้ได้ในแต่ละชิ้นงาน (ไม่กรอง score is not null แล้ว เพื่อให้รู้ว่าชิ้นไหนยังไม่มีคะแนน)
-  const { data: rows, error } = await supabase
+  const { data: allAssignments } = await db
+    .from("assignments")
+    .select("id, title, max_score, allow_weight, weight_percent, status, due_date, sort_order, created_at")
+    .eq("subject_section_id", section.id)
+    .neq("status", "draft")
+    .order("sort_order", { ascending: true }); // ลำดับคอลัมน์ตรงกับตารางครู
+
+  // ★ ลำดับตามหน้า "งานของฉัน" (due_date asc เหมือน /assignments) ไว้ให้ frontend เรียงงานที่ยังไม่ส่ง
+  const myOrderMap: Record<string, number> = {};
+  [...(allAssignments ?? [])]
+    .sort((a: any, b: any) => {
+  const at = a.created_at ? new Date(a.created_at).getTime() : Infinity;
+  const bt = b.created_at ? new Date(b.created_at).getTime() : Infinity;
+  return at - bt;
+})
+    .forEach((a: any, i: number) => {
+      myOrderMap[a.id] = i;
+    });
+
+  const { data: rows, error } = await db
     .from("assignment_submissions")
     .select(
       `
-      score, status, submitted_at, is_late,
+      score, status, content, submitted_at, is_late,
       assignment:assignments!inner (
         id, title, max_score, allow_weight, weight_percent, status, subject_section_id, due_date
       )
@@ -70,6 +85,7 @@ const { data: allAssignments } = await supabase
     .neq("assignment.status", "draft");
 
   if (error) {
+    console.error("[student-portal/grades] query error:", error);
     return NextResponse.json({ error: "ดึงข้อมูลคะแนนไม่สำเร็จ" }, { status: 500 });
   }
 
@@ -78,7 +94,6 @@ const { data: allAssignments } = await supabase
     submissionByAssignmentId[r.assignment.id] = r;
   });
 
-  // ---- สูตรเดียวกับ GradeOverviewTool เวอร์ชันล่าสุด: บวกตรงๆ ไม่ยืด/หด ----
   function isWeighted(a: any): boolean {
     return !!(a.allow_weight && a.weight_percent !== null && a.weight_percent !== undefined && (a.max_score ?? 0) > 0);
   }
@@ -91,7 +106,6 @@ const { data: allAssignments } = await supabase
     return isWeighted(a) ? (a.weight_percent ?? 0) : (a.max_score ?? 0);
   }
 
-  // ★ "เก็บ" = ผลรวมคะแนนชิ้นงานทุกชิ้นบวกกันตรงๆ (ไม่ยืด/หด) + กลางภาค
   const assignmentTotal = (allAssignments ?? []).reduce(
     (sum: number, a: any) => sum + getAssignmentWeightedScore(a, submissionByAssignmentId[a.id]?.score),
     0
@@ -103,18 +117,15 @@ const { data: allAssignments } = await supabase
 
   const midtermMaxScore = section.midterm_max_score ?? 0;
   const finalMaxScore = section.final_max_score ?? 30;
-  const useMidterm = true; // โครงสร้างคะแนนเหลือแบบเดียว (เก็บ+กลางภาค+ปลายภาค) เหมือนฝั่ง GradeOverviewTool
 
-  // ★ คะแนนพิเศษ (score_events)
-  const { data: scoreEventRows } = await supabase
+  const { data: scoreEventRows } = await db
     .from("score_events")
     .select("points")
     .eq("subject_section_id", section.id)
     .eq("student_id", studentId);
   const specialTotal = (scoreEventRows ?? []).reduce((sum: number, e: any) => sum + (e.points ?? 0), 0);
 
-  // ★ คะแนนกลางภาค/ปลายภาค
-  const { data: examScoreRows } = await supabase
+  const { data: examScoreRows } = await db
     .from("subject_exam_scores")
     .select("exam_type, score, raw_score, raw_max_score")
     .eq("subject_section_id", section.id)
@@ -143,44 +154,50 @@ const { data: allAssignments } = await supabase
     finalMaxScore
   );
 
-  // ★ "เก็บ" รวมกลางภาคแล้ว: earned/max ไม่ยืด/หด ใช้ตัวเลขจริงเสมอ
-  const formativeEarned = assignmentTotal + (useMidterm ? midtermScore : 0);
-  const formativeMax = totalMaxScore + (useMidterm ? midtermMaxScore : 0);
+  const formativeEarned = assignmentTotal + midtermScore;
+  const formativeMax = totalMaxScore + midtermMaxScore;
 
-  // ★ "รวม" = เก็บ + คะแนนพิเศษ + ปลายภาค (คะแนนพิเศษไม่มี "เต็ม" จึงไม่บวกเข้าตัวหาร)
+  // "รวม" = เก็บ(รวมกลางภาค) + คะแนนพิเศษ + ปลายภาค — ตรงกับช่อง "รวม" ของครู
   const displayTotal = formativeEarned + specialTotal + finalScore;
   const displayMax = formativeMax + finalMaxScore;
   const percentage = displayMax > 0 ? (displayTotal / displayMax) * 100 : 0;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
 
-  // ★ รายละเอียดรายชิ้นงาน (คงไว้เพื่อ backward-compat กับหน้าที่อาจ render รายชิ้นอยู่)
+  // ★ ทุกชิ้นงานขึ้นเป็นคอลัมน์ (ตามลำดับครู) แม้ยังไม่ส่ง
   const grades = (allAssignments ?? []).map((a: any) => {
-  const sub = submissionByAssignmentId[a.id];
-  const isSubmitted = !!sub; // มีแถวใน assignment_submissions แล้ว = ส่งแล้ว
-  const pct = a.max_score > 0 && sub?.score != null ? (sub.score / a.max_score) * 100 : 0;
-  const isLate =
+    const sub = submissionByAssignmentId[a.id];
+    const isGraded = sub?.score !== null && sub?.score !== undefined;
+    const isSubmitted = !!sub && (!!sub.submitted_at || !!sub.content || sub.status !== "pending_review" || isGraded);
+    const pct = a.max_score > 0 && isGraded ? (sub.score / a.max_score) * 100 : 0;
+    const isLate =
       sub?.is_late !== null && sub?.is_late !== undefined
         ? sub.is_late
         : !!(a.due_date && sub?.submitted_at && new Date(sub.submitted_at) > new Date(a.due_date));
 
     return {
-    assignment_id: a.id,
-    title: a.title,
-    is_submitted: isSubmitted,          // ★ เพิ่ม ให้ frontend ใช้แสดง ส่งงานแล้ว/ยังไม่ส่งงาน
-    score: showScores ? (sub?.score ?? null) : null,  // ★ ซ่อนคะแนนตามตั้งค่าจริง
-    max_score: a.max_score,
-    weight_percent: a.weight_percent,
-    percentage: showScores ? Math.round(pct * 100) / 100 : null,
-    is_late: sub ? isLate : null,
-  };
-});
+      assignment_id: a.id,
+      title: a.title,
+      sort_order: a.sort_order,
+      my_assignments_order: myOrderMap[a.id] ?? 0, // ★ ใช้เรียงงานที่ยังไม่ส่ง/ยังไม่มีคะแนน
+      due_date: a.due_date,
+      is_submitted: isSubmitted,
+      is_graded: isGraded,
+      // showScores=true → ส่งคะแนนจริง / false → ส่งแค่สถานะ (frontend โชว์ ✓ หรือ ✗)
+      score: showScores ? (sub?.score ?? null) : null,
+      max_score: a.max_score,
+      weight_percent: a.weight_percent,
+      percentage: showScores ? r2(pct) : null,
+      is_late: sub ? isLate : null,
+    };
+  });
 
-  const { data: criteria } = await supabase
+  const { data: criteria } = await db
     .from("grade_criteria")
     .select("max_percent, min_percent, grade")
     .eq("subject_section_id", section.id)
     .order("min_percent", { ascending: false });
 
-  const roundedPercentage = Math.round(percentage * 100) / 100;
+  const roundedPercentage = r2(percentage);
   let grade: string | null = null;
   for (const c of criteria ?? []) {
     if (roundedPercentage >= c.min_percent && roundedPercentage <= c.max_percent) {
@@ -191,11 +208,20 @@ const { data: allAssignments } = await supabase
 
   return NextResponse.json({
     grades,
+    show_assignment_scores: showScores,
     summary: {
-      weighted_score: roundedPercentage, // เก็บชื่อ field เดิมไว้เพื่อ backward-compat แต่ค่าตรงกับตัวหลักแล้ว
-      weight_graded: Math.round(displayMax * 100) / 100,
-      display_total: Math.round(displayTotal * 100) / 100,
-      display_max: Math.round(displayMax * 100) / 100,
+      weighted_score: roundedPercentage,
+      weight_graded: r2(displayMax),
+      // ★ ค่าหัวตารางตรงกับครู
+      formative_earned: r2(formativeEarned),   // เก็บ (รวมกลางภาค)
+      formative_max: r2(formativeMax),
+      midterm_score: r2(midtermScore),
+      midterm_max: r2(midtermMaxScore),
+      final_score: r2(finalScore),
+      final_max: r2(finalMaxScore),
+      special_total: r2(specialTotal),
+      display_total: r2(displayTotal),         // รวม
+      display_max: r2(displayMax),
       grade,
     },
   });

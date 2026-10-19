@@ -777,13 +777,8 @@ async function handleUpdateAssignmentWeight(assignmentId: string, weightPercent:
         };
         orderedAssignments.forEach(a => {
   const sub = r.subMap[a.id];
-  const info = getLateInfo(a, sub);
-  const onTimeTag = !info.hasData ? "" : info.isLate ? ` (ส่งช้า${info.isManual ? "" : ` ${info.daysLate} วัน`})` : " (ตรงเวลา)";
-  const weightedTag = isWeighted(a) && sub?.score !== null && sub?.score !== undefined
-    ? ` [คะแนนจริง ${fmtScore(getAssignmentWeightedScore(a, sub.score))}/${a.weight_percent}]`
-    : "";
   row[a.title] = sub?.score !== null && sub?.score !== undefined
-    ? `${sub.score}${onTimeTag}${weightedTag}`
+    ? Number(getAssignmentWeightedScore(a, sub.score).toFixed(2))   // ★ คะแนนที่แปลงตามน้ำหนักแล้ว
     : (sub ? "ส่งแล้ว-ยังไม่ให้คะแนน" : "ไม่ส่งงาน");
 });
         presets.forEach(p => { row[p.label] = r.presetTotals[p.id] ?? 0; });
@@ -1042,7 +1037,7 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
           onSave={saveCriteria}
         />
       )}
-      {!loading && !error && (
+      {!loading && !error && !currentStudentId && (
       <SummaryStats rows={rows} totalMaxScore={totalMaxScore} assignmentsCount={assignments.length} />
     )}
 
@@ -1481,12 +1476,11 @@ function GradeTable({
                     >
                       {readOnly ? (
                         maskAssignmentScores ? (
-                          // ★ ตั้งค่าปิด "แสดงคะแนนชิ้นงานทั้งหมด" ไว้: นักเรียนเห็นแค่สถานะส่ง ไม่เห็นตัวเลขคะแนน
-                          !sub ? (
-                            <span className="inline-block px-2 py-1 rounded-full text-[14px] font-black bg-red-50 text-red-600">ไม่ส่งงาน</span>
-                          ) : (
-                            <span className="inline-block px-2 py-1 rounded-full text-[14px] font-black bg-emerald-50 text-emerald-600">✅ ส่งงานแล้ว</span>
-                          )
+  !sub ? (
+    <span className="inline-block px-2 py-1 rounded-full text-lg font-black bg-red-50 text-red-600">✗</span>
+  ) : (
+    <span className="inline-block px-2 py-1 rounded-full text-lg font-black bg-emerald-50 text-emerald-600">✓</span>
+  )
                         ) : !sub ? (
                           <span className="inline-block px-2 py-1 rounded-full text-[14px] font-black bg-red-50 text-red-600">ไม่ส่งงาน</span>
                         ) : sub.score === null ? (
@@ -2440,7 +2434,9 @@ function StudentReportModal({
         <div className="rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white p-4 flex items-center justify-between mb-5">
   <div>
     <p className="text-sm font-bold opacity-90">คะแนนรวมทั้งหมด</p>
-    <p className="text-2xl font-black">{row.grandTotal} คะแนน</p>
+    <p className="text-2xl font-black">
+  {fmtScore(row.displayTotal)} / {fmtScore(row.displayMax)} คะแนน
+</p>
   </div>
   <div className="text-right">
     <p className="text-sm font-bold opacity-90">{gradingMode === "pass_fail" ? "สถานะ" : "เกรด"}</p>   {/* ★ */}
@@ -2491,7 +2487,7 @@ function StudentReportModal({
           <div className="mt-2 flex items-center justify-between text-xs font-black text-slate-500">
   <span>
     ส่งงานแล้ว {row.submittedCount} / {assignments.length} ชิ้น
-    {!maskAssignmentScores && ` · รวม ${row.assignmentTotal} / ${assignments.reduce((a, b) => a + (b.max_score ?? 0), 0)} คะแนน`}
+    {!maskAssignmentScores && ` · รวม {fmtScore(row.assignmentTotal)} / {fmtScore(assignments.reduce((s, a) => s + getAssignmentMaxContribution(a), 0))} คะแนน`}
   </span>
             <span>
   {row.onTimeRate === null
@@ -2547,7 +2543,7 @@ function InfoBox({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
       <p className="text-[14px] font-black text-slate-400">{label}</p>
-      <p className="text-m font-black text-slate-700 mt-0.5 truncate">{value}</p>
+      <p className="text-m font-black text-slate-700 mt-0.5 whitespace-pre-line break-words">{value}</p>
     </div>
   );
 }

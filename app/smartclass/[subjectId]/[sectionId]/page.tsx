@@ -2811,41 +2811,61 @@ const presentStudents = useMemo(
 const readOnly = isAdmin || isArchived; // แอดมิน หรือวิชาถูกเก็บเข้าคลัง = ดูอย่างเดียว
 
   useEffect(() => {
-    (async () => {
-      if (!section) return;
-      const { data: sectionFull } = await supabase
-        .from("subject_sections")
-        .select("academic_year_id, teacher_id")
-        .eq("id", section.id)
-        .maybeSingle();
+  (async () => {
+    if (!section) return;
 
-      if (sectionFull?.academic_year_id) {
-  setAcademicYearId(sectionFull.academic_year_id); // ★ เพิ่มบรรทัดนี้
-  const { data: year } = await supabase
-    .from("academic_years")
-    .select("year_name, semester")
-    .eq("id", sectionFull.academic_year_id)
-    .maybeSingle();
-  if (year) setAcademicYearLabel(`${year.year_name} ภาคเรียนที่ ${year.semester}`);
-}
-      if (sectionFull?.teacher_id) {
-        const { data: t } = await supabase
-          .from("users").select("full_name, first_name, last_name")
-          .eq("id", sectionFull.teacher_id).maybeSingle();
-        if (t) setSubjectTeacherName(t.full_name || `${t.first_name} ${t.last_name}`);
-      }
-      if (classroom) {
-        const { data: room } = await supabase
-          .from("classrooms").select("homeroom_teacher_id").eq("id", classroom.id).maybeSingle();
-        if (room?.homeroom_teacher_id) {
-          const { data: t } = await supabase
-            .from("users").select("full_name, first_name, last_name")
-            .eq("id", room.homeroom_teacher_id).maybeSingle();
-          if (t) setHomeroomTeacherName(t.full_name || `${t.first_name} ${t.last_name}`);
-        }
-      }
-    })();
-  }, [section, classroom]);
+    const { data: sectionFull } = await supabase
+      .from("subject_sections")
+      .select("academic_year_id, teacher_id, co_teacher_id")
+      .eq("id", section.id)
+      .maybeSingle();
+
+    if (sectionFull?.academic_year_id) {
+      setAcademicYearId(sectionFull.academic_year_id);
+      const { data: year } = await supabase
+        .from("academic_years")
+        .select("year_name, semester")
+        .eq("id", sectionFull.academic_year_id)
+        .maybeSingle();
+      if (year) setAcademicYearLabel(`${year.year_name} ภาคเรียนที่ ${year.semester}`);
+    }
+
+    // ดึงครูครั้งเดียว: ครูผู้สอน 2 คน + ครูประจำชั้น 2 คน
+    let homeroomIds: string[] = [];
+    if (classroom) {
+      const { data: room } = await supabase
+        .from("classrooms")
+        .select("homeroom_teacher_id, homeroom_teacher_2_id")
+        .eq("id", classroom.id)
+        .maybeSingle();
+      homeroomIds = [room?.homeroom_teacher_id, room?.homeroom_teacher_2_id]
+        .filter((v): v is string => !!v);
+    }
+    const subjectIds = [sectionFull?.teacher_id, sectionFull?.co_teacher_id]
+      .filter((v): v is string => !!v);
+
+    const allIds = Array.from(new Set([...homeroomIds, ...subjectIds]));
+    if (allIds.length === 0) {
+      setHomeroomTeacherName("");
+      setSubjectTeacherName("");
+      return;
+    }
+
+    const { data: users } = await supabase
+      .from("users")
+      .select("id, prefix, first_name, last_name")
+      .in("id", allIds);
+
+    const nameOf = (id: string) => {
+      const u = (users ?? []).find((x: any) => x.id === id);
+      return u ? `${u.prefix ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() : "";
+    };
+
+    // คั่นด้วยขึ้นบรรทัดใหม่ เพื่อให้ InfoBox แสดงทีละคน
+    setHomeroomTeacherName(homeroomIds.map(nameOf).filter(Boolean).join("\n"));
+    setSubjectTeacherName(subjectIds.map(nameOf).filter(Boolean).join("\n"));
+  })();
+}, [section, classroom]);
 
   useEffect(() => {
     (async () => {

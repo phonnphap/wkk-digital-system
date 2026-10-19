@@ -256,6 +256,27 @@ formative_max_score: matched?.formative_max_score ?? 70,
 midterm_max_score: matched?.midterm_max_score ?? 0,
 final_max_score: matched?.final_max_score ?? 30,
 });
+try {
+  const tRes = await fetch(
+    `/api/student-portal/subject-teachers?student_id=${studentId}&subject_section_id=${sectionId}`
+  );
+  if (tRes.ok) {
+    const t = await tRes.json();
+    setSubjectInfo(prev =>
+      prev
+        ? {
+            ...prev,
+            homeroom_teacher_name: t.homeroom_teachers?.length
+              ? t.homeroom_teachers.join("\n")
+              : prev.homeroom_teacher_name,
+            subject_teacher_name: t.subject_teachers?.length
+              ? t.subject_teachers.join("\n")
+              : prev.subject_teacher_name,
+          }
+        : prev
+    );
+  }
+} catch {}
 
     // ★ เก็บข้อมูลตัวนักเรียนไว้ใช้ส่งต่อให้ GradeOverviewTool (ข้อ 2.2)
     // ★ เพิ่ม birth_date/gender เพื่อให้คำนวณคำนำหน้าอัตโนมัติได้ทั้งหน้านี้และใน GradeOverviewTool
@@ -318,8 +339,6 @@ useEffect(() => {
     router.push("/login");
   };
 
-  const pendingAssignments = assignments.filter((a) => a.submissions.length === 0);
-
   // ★ เรียงงานในแท็บ "งานของฉัน" ตามลำดับที่มอบหมาย (เก่า -> ใหม่ ตามวันกำหนดส่ง)
 // งานที่ไม่มีกำหนดส่งจะถูกจัดไว้ท้ายสุด
 const sortedAssignments = [...assignments].sort((a, b) => {
@@ -327,6 +346,7 @@ const sortedAssignments = [...assignments].sort((a, b) => {
   const bt = b.created_at ? new Date(b.created_at).getTime() : Infinity;
   return at - bt;
 });
+ const pendingAssignments = sortedAssignments.filter((a) => a.submissions.length === 0);
   // ★ คำนวณสรุปการเช็คชื่อ (จำนวนขาด/ลา/สาย และ % การมาเรียน) ในแท็บเช็คชื่อ
   const attSummary = attendance?.summary ?? null;
   const attExcused = attSummary ? attSummary.excused ?? attSummary.leave ?? 0 : 0;

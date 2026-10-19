@@ -1,15 +1,22 @@
-// app/api/student-subject-comments/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getCaller } from "@/lib/auth/getCaller";
 
-// GET /api/student-subject-comments?subject_section_id=xxx&student_id=xxx
 export async function GET(req: NextRequest) {
   try {
+    const caller = await getCaller();
+    if (!caller) {
+      return NextResponse.json({ error: "ไม่พบ session กรุณาเข้าสู่ระบบใหม่" }, { status: 401 });
+    }
     const { searchParams } = new URL(req.url);
     const subject_section_id = searchParams.get("subject_section_id");
     const student_id = searchParams.get("student_id");
     if (!subject_section_id || !student_id) {
       return NextResponse.json({ error: "ต้องระบุ subject_section_id และ student_id" }, { status: 400 });
+    }
+    // นักเรียนอ่านได้เฉพาะของตัวเอง
+    if (caller.kind === "student" && caller.studentId !== student_id) {
+      return NextResponse.json({ error: "ไม่มีสิทธิ์เข้าถึงข้อมูลนี้" }, { status: 403 });
     }
     const admin = createAdminClient();
     const { data, error } = await admin
@@ -26,15 +33,15 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/student-subject-comments — upsert คอมเมนต์ (1 แถวต่อ นร. ต่อวิชา)
 export async function POST(req: NextRequest) {
   try {
+    const caller = await getCaller();
+    if (!caller || caller.kind !== "staff") {
+      return NextResponse.json({ error: "ไม่มีสิทธิ์ทำรายการนี้" }, { status: 403 });
+    }
     const body = await req.json();
     const { subject_section_id, student_id, comment, updated_by } = body as {
-      subject_section_id: string;
-      student_id: string;
-      comment: string;
-      updated_by?: string | null;
+      subject_section_id: string; student_id: string; comment: string; updated_by?: string | null;
     };
     if (!subject_section_id || !student_id) {
       return NextResponse.json({ error: "ข้อมูลไม่ครบ" }, { status: 400 });
