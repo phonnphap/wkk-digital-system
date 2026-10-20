@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
         .order("sort_order", { ascending: true }),
       admin
         .from("subject_sections")
-        .select("grading_structure, formative_max_score, midterm_max_score, final_max_score")
+        .select("grading_structure, formative_max_score, midterm_max_score, final_max_score, show_assignment_scores")
         .eq("id", subject_section_id)
         .maybeSingle(),
       admin
@@ -172,6 +172,7 @@ const assignmentIds = (visibleAssignments ?? []).map((a: any) => a.id);
       },
       rawMidtermMaxScore: midtermConfig?.raw_max_score ?? null,
       rawFinalMaxScore: finalConfig?.raw_max_score ?? null,
+      show_assignment_scores: sectionGradingConfig?.show_assignment_scores ?? true,
     });
   } catch (err: any) {
     console.error("[GET /api/subject-grades/summary] error:", err);

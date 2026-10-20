@@ -311,6 +311,7 @@ export default function GradeOverviewTool({
   );
   const [rawMidtermMax, setRawMidtermMax] = useState<number | null>(null);
 const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
+const [serverShowScores, setServerShowScores] = useState<boolean | null>(null);
 
   // ★ Toast state
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -352,6 +353,7 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
       setExamScores(json.examScores ?? []);
       setRawMidtermMax(json.rawMidtermMaxScore ?? null);   // ★ เพิ่ม
       setRawFinalMax(json.rawFinalMaxScore ?? null);       // ★ เพิ่ม
+      setServerShowScores(json.show_assignment_scores ?? null);
 
       try {
         const attJson = await attRes.json();
@@ -534,7 +536,7 @@ const visibleRows = useMemo(() => {
 const effectiveReadOnly = readOnly || !!currentStudentId;
 // ★ มาสก์คะแนนรายชิ้นงาน "เฉพาะตอนที่เป็นมุมมองนักเรียน" เท่านั้น (currentStudentId มีค่า)
 // ครู/แอดมิน (readOnly ธรรมดา ไม่มี currentStudentId) จะไม่ถูกมาสก์ ยังเห็นคะแนนทุกชิ้นเสมอ
-const maskAssignmentScores = !!currentStudentId && !showAssignmentScores;
+const maskAssignmentScores = !!currentStudentId && !(serverShowScores ?? showAssignmentScores);
 
   async function handleAdjustPreset(studentId: string, presetId: string, currentValue: number, newValue: number) {
     if (readOnly) return;
@@ -1474,12 +1476,12 @@ function GradeTable({
                     >
                       {readOnly ? (
                         maskAssignmentScores ? (
-  !sub ? (
-    <span className="inline-block px-2 py-1 rounded-full text-lg font-black bg-red-50 text-red-600">✗</span>
+  sub && (sub.submitted_at || (sub.score !== null && sub.score !== undefined)) ? (
+    <span className="inline-block px-3 py-1 rounded-full text-xl font-black bg-emerald-50 text-emerald-600">✓</span>
   ) : (
-    <span className="inline-block px-2 py-1 rounded-full text-lg font-black bg-emerald-50 text-emerald-600">✓</span>
+    <span className="inline-block px-3 py-1 rounded-full text-xl font-black bg-red-50 text-red-500">✗</span>
   )
-                        ) : !sub ? (
+) : !sub ? (
                           <span className="inline-block px-2 py-1 rounded-full text-[14px] font-black bg-red-50 text-red-600">ไม่ส่งงาน</span>
                         ) : sub.score === null ? (
                           <span className="inline-block px-2 py-1 rounded-full text-[14px] font-black bg-amber-50 text-amber-600">รอตรวจ</span>
@@ -2461,19 +2463,28 @@ function StudentReportModal({
               {assignments.map((a, i) => {
   const sub = row.subMap[a.id];
   const info = getLateInfo(a, sub);
+  const hasScore = sub?.score !== null && sub?.score !== undefined;
+  const submitted = !!sub && (!!sub.submitted_at || hasScore);
+  const weighted = hasScore && isWeighted(a) ? getAssignmentWeightedScore(a, sub!.score) : null;
   return (
     <div key={a.id} className={`flex items-center justify-between px-3 py-2 text-sm ${i % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
       <span className="font-bold text-slate-600 truncate pr-2">{a.title}</span>
       {maskAssignmentScores ? (
-        // ★ ปิดแสดงคะแนน: โชว์แค่สถานะส่งงาน
-        <span className={`font-black whitespace-nowrap ${sub ? "text-emerald-600" : "text-red-500"}`}>
-          {sub ? "✅ ส่งงานแล้ว" : "ไม่ส่งงาน"}
+        <span className={`font-black text-lg ${submitted ? "text-emerald-600" : "text-red-500"}`}>
+          {submitted ? "✓" : "✗"}
         </span>
       ) : (
-        <span className="font-black text-slate-700 whitespace-nowrap flex items-center gap-1.5">
-          {sub?.score ?? (sub ? "รอตรวจ" : "ไม่ส่งงาน")} / {a.max_score}
-          {info.hasData && info.isLate && (
-            <span className="text-red-500">⏰{info.isManual ? "" : ` สาย ${info.daysLate}วัน`}</span>
+        <span className="font-black text-slate-700 whitespace-nowrap flex flex-col items-end">
+          <span className="flex items-center gap-1.5">
+            {hasScore ? sub!.score : sub ? "รอตรวจ" : "ไม่ส่งงาน"} / {a.max_score}
+            {info.hasData && info.isLate && (
+              <span className="text-red-500">⏰{info.isManual ? "" : ` สาย ${info.daysLate}วัน`}</span>
+            )}
+          </span>
+          {weighted !== null && (
+            <span className="text-[12px] font-black text-violet-500">
+              = {fmtScore(weighted)} / {a.weight_percent} คะแนนจริง
+            </span>
           )}
         </span>
       )}
