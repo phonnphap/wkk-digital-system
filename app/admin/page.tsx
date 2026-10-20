@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from 'next/navigation';
 import { createClient } from "@/lib/supabase/client";
+import AdminGuard from "@/components/auth/AdminGuard";
 
 const supabase = createClient();
 
@@ -60,7 +61,7 @@ function IconCheck({ className = "" }: { className?: string }) {
   );
 }
 
-export default function AdminFaceRegisterPage() {
+function AdminFaceRegisterPageInner() {
   const [faceapi, setFaceapi] = useState<any>(null);
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -448,5 +449,13 @@ export default function AdminFaceRegisterPage() {
         }
       `}</style>
     </div>
+  );
+}
+
+export default function AdminFaceRegisterPage() {
+  return (
+    <AdminGuard>
+      <AdminFaceRegisterPageInner />
+    </AdminGuard>
   );
 }

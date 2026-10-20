@@ -9,6 +9,7 @@ import {
   Users, BarChart3, CalendarOff, ArrowRight, ArrowLeft, ShieldAlert,
   type LucideIcon,
 } from "lucide-react";
+import AdminGuard from "@/components/auth/AdminGuard";
 
 const supabase = createClient();
 
@@ -82,7 +83,7 @@ function SettingCard({ item }: { item: SettingItem }) {
   );
 }
 
-export default function AdminSettingsPage() {
+function AdminSettingsPageInner() {
   const router = useRouter();
   // null = กำลังตรวจสิทธิ์, true = ผ่าน, false = ไม่มีสิทธิ์
   const [allowed, setAllowed] = useState<boolean | null>(null);
@@ -171,5 +172,13 @@ export default function AdminSettingsPage() {
         ))}
       </div>
     </div>
+  );
+}
+
+export default function AdminSettingsPage() {
+  return (
+    <AdminGuard>
+      <AdminSettingsPageInner />
+    </AdminGuard>
   );
 }
