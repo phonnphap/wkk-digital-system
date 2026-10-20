@@ -240,7 +240,7 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
   const stageRef = useRef<"outdoor" | "indoor" | null>(null);
   const pendingRef = useRef<Dest>(null);
 
-  const home = useMemo(() => new THREE.Vector3(fromPt?.entrance[0] ?? 0, 0.12, fromPt?.entrance[1] ?? 0), [fromPt]);
+  const home = useMemo(() => new THREE.Vector3(fromPt?.entrance?.[0] ?? 0, 0.12, fromPt?.entrance?.[1] ?? 0), [fromPt]);
   const activeLoc = activeId ? locById.get(activeId) : undefined;
   const selectedRoom = selectedRoomId ? roomById.get(selectedRoomId) : undefined;
 

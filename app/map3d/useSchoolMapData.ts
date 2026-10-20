@@ -122,8 +122,11 @@ export function useSchoolMapData() {
 
   const updateLocation = useCallback(async (id: string, patch: Partial<MapLocation>): Promise<SaveResult> => {
     // อัปเดต ref ทันที เพื่อให้ regenerateRooms ที่เรียกต่อกันเห็นค่าใหม่
-    locsRef.current = locsRef.current.map((l) => (l.id === id ? { ...l, ...patch } : l));
-    setLocs(locsRef.current);
+    // ไม่ให้ค่า undefined ทับของเดิม (perFloor ยกเว้น เพราะ undefined = ล้างค่า)
+const merged: Record<string, any> = {};
+for (const [k, v] of Object.entries(patch)) if (v !== undefined || k === "perFloor") merged[k] = v;
+locsRef.current = locsRef.current.map((l) => (l.id === id ? { ...l, ...merged } : l));
+setLocs(locsRef.current);
     if (sourceRef.current !== "supabase") return ok(LOCAL);
     const row: Record<string, any> = {};
     if (patch.name !== undefined) row.name = patch.name;
