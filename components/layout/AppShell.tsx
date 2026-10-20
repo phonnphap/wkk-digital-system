@@ -214,6 +214,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             >
               {(displayName.replace(/^(ผอ\.|รอง|Admin|คุณครู|คุณ)\s*/, "")[0] || "?").toUpperCase()}
             </div>
+            <button
+              onClick={handleLogout}
+              title="ออกจากระบบ"
+              className="flex items-center gap-1.5 rounded-xl border border-rose-100 px-3 py-2 text-sm font-bold text-rose-600 hover:bg-rose-50 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden md:inline">ออกจากระบบ</span>
+            </button>
           </div>
         </header>
         <main className="flex-1 overflow-y-auto">{children}</main>

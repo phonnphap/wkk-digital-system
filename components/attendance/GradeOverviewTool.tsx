@@ -330,9 +330,7 @@ const [rawFinalMax, setRawFinalMax] = useState<number | null>(null);
       // ★ มุมมองนักเรียน (currentStudentId มีค่า) ต้องยิง endpoint ฝั่งนักเรียนแทน
       // เพราะนักเรียน login ด้วย custom session ไม่ใช่ Supabase Auth ยิง endpoint ของครูตรงๆ
       // จะโดน RLS บล็อกเงียบๆ (ดูคอมเมนต์เดิมในไฟล์ assignments API)
-      const gradeUrl = currentStudentId
-        ? `/api/student-portal/subject-grades/summary?subject_section_id=${sectionId}&student_id=${currentStudentId}`
-        : `/api/subject-grades/summary?subject_section_id=${sectionId}`;
+      const gradeUrl = `/api/subject-grades/summary?subject_section_id=${sectionId}`;
       const attUrl = currentStudentId
         ? `/api/student-portal/subject-attendance/summary?subject_section_id=${sectionId}&student_id=${currentStudentId}`
         : `/api/subject-attendance/summary?subject_section_id=${sectionId}`;
@@ -2486,9 +2484,12 @@ function StudentReportModal({
           )}
           <div className="mt-2 flex items-center justify-between text-xs font-black text-slate-500">
   <span>
-    ส่งงานแล้ว {row.submittedCount} / {assignments.length} ชิ้น
-    {!maskAssignmentScores && ` · รวม {fmtScore(row.assignmentTotal)} / {fmtScore(assignments.reduce((s, a) => s + getAssignmentMaxContribution(a), 0))} คะแนน`}
-  </span>
+  ส่งงานแล้ว {row.submittedCount} / {assignments.length} ชิ้น
+  {!maskAssignmentScores &&
+    ` · รวม ${fmtScore(row.assignmentTotal)} / ${fmtScore(
+      assignments.reduce((s, a) => s + getAssignmentMaxContribution(a), 0)
+    )} คะแนน`}
+</span>
             <span>
   {row.onTimeRate === null
     ? "ไม่มีข้อมูลส่งตรงเวลา"
