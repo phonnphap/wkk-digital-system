@@ -251,6 +251,15 @@ function frameOf(room: MapRoom, w: number, d: number, cx: number, cz: number, rw
 
 const Y0 = 0.11;
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+/** โหมด "วางบันได": AdminPanel ตั้ง cb แล้วคลิกพื้นชั้นในตัวอาคารจะส่งพิกัดในผังอาคารกลับมา */
+export const stairPlace: { cb: ((lx: number, lz: number) => void) | null } = { cb: null };
+const OPP: Record<string, string> = { px: "nx", nx: "px", pz: "nz", nz: "pz" };
+function frameFromSide(side: string, rw: number, rd: number): Fr {
+  const alongX = side === "px" || side === "nx";
+  const sgn = side === "px" || side === "pz" ? 1 : -1;
+  const iw = Math.max(rw - 0.1, 0.1), id = Math.max(rd - 0.1, 0.1);
+  return { A: alongX ? id : iw, D: alongX ? iw : id, alongX, sgn };
+}
 
 /** a = ตำแหน่งตามความกว้างห้อง, t = ระยะจากผนังด้านในสุด (ฝั่งตรงข้ามประตู) */
 function buildFurniture(type: string, name: string, ac: string, fr: Fr): Item[] {
@@ -451,7 +460,8 @@ function RoomMesh({
   const deskCount = type === "classroom" ? room.desks ?? 30 : 0;
   const teachers = type === "classroom" ? Math.max(0, room.teacherDesks ?? 1) : 0;
   const ac = room.ac ?? "none";
-  const fr = useMemo(() => frameOf(room, w, d, cx, cz, rw, rd), [room, w, d, cx, cz, rw, rd]);
+  const fr = useMemo(() => (room.doorSide ? frameFromSide(room.doorSide, rw, rd) : frameOf(room, w, d, cx, cz, rw, rd)), [room, w, d, cx, cz, rw, rd]);
+  const bfr = useMemo(() => (room.boardSide ? frameFromSide(OPP[room.boardSide], rw, rd) : fr), [room.boardSide, fr, rw, rd]);
   const extra = useMemo(() => buildFurniture(type, room.name, ac, fr), [type, room.name, ac, fr]);
 
   // ของตกแต่งที่วางเอง (โหมดสร้างห้อง)
@@ -498,12 +508,7 @@ function RoomMesh({
 
   const layout = useMemo(() => {
     if (!deskCount) return null;
-    const dx = (room.door[0] - 0.5) * w - cx, dz = (room.door[1] - 0.5) * d - cz;
-    const alongX = Math.abs(dx) > Math.abs(dz);
-    const sgn = (alongX ? dx : dz) >= 0 ? 1 : -1;
-    const iw = Math.max(rw - 0.1, 0.1), id = Math.max(rd - 0.1, 0.1);
-    const A = alongX ? id : iw;
-    const D = alongX ? iw : id;
+    const { A, D, alongX, sgn } = bfr;
     const boardZone = Math.min(0.14, D * 0.18);
     const usable = Math.max(D - boardZone - 0.04, 0.05);
     const cols = Math.max(1, Math.min(deskCount, Math.round(Math.sqrt((deskCount * A) / usable))));
@@ -532,7 +537,7 @@ function RoomMesh({
       desks, teacherItems,
       board: { p: [bx, 0.3, bz] as [number, number, number], s: alongX ? ([0.012, 0.16, A * 0.6] as [number, number, number]) : ([A * 0.6, 0.16, 0.012] as [number, number, number]) },
     };
-  }, [deskCount, teachers, room.door, w, d, cx, cz, rw, rd]);
+  }, [deskCount, teachers, bfr]);
 
   const base = type === "toilet" && room.name.includes("หญิง") ? "#fcc2d7"
     : type === "toilet" && room.name.includes("ชาย") ? "#a5d8ff"
@@ -545,6 +550,11 @@ function RoomMesh({
         onClick={(e) => {
           if (e.delta > 4) return;
           e.stopPropagation();
+                    if (stairPlace.cb) {
+            const p = e.object.parent!.parent!.worldToLocal(e.point.clone());   // พิกัดในผังอาคาร
+            const cb = stairPlace.cb; stairPlace.cb = null; cb(p.x, p.z);
+            return;
+          }
           if (placing && onPlaceLocal) {
             const p = e.object.worldToLocal(e.point.clone());
             onPlaceLocal(room.id, p.x, p.z);
@@ -593,21 +603,33 @@ function Stairs({ loc, span, y }: { loc: MapLocation; span: StairSpan; y: number
   const cross = full * (span.w ?? 1);
   const cOff = (loc.corridor === "b" ? 1 : -1) * (full - cross) / 2;   // ชิดฝั่งทางเดิน
   const k = floorH(loc) / FH;
-  const n = 7, run = len / n;
-  const outer = span.dir;
-  const inner = span.c - (outer * len) / 2;
+  const n = 7;
+  const across = Math.abs(span.dir) === 2;   // ±2 = ขั้นเรียงขวางทางเดิน
   const items = useMemo(() => {
     const out: Item[] = [];
-    for (let i = 0; i < n; i++) {
-      const a = inner + outer * (i + 0.5) * run;
-      const h = (0.08 + ((i + 1) / n) * 0.5) * k;
-      const P = (cp: number, hh: number): [number, number, number] => (longX ? [a, y + hh / 2, cp + cOff] : [cp + cOff, y + hh / 2, a]);
-      const S = (sc: number, hh: number): [number, number, number] => (longX ? [run * 0.98, hh, sc] : [sc, hh, run * 0.98]);
-      out.push({ p: P(0, h), s: S(Math.max(cross - 0.12, 0.04), h), c: i % 2 ? "#dee2e6" : "#f8f9fa" });
-      if (cross > 0.3) [-1, 1].forEach((s) => out.push({ p: P(s * (cross / 2 - 0.03), h + 0.06), s: S(0.06, h + 0.06), c: "#fd7e14" }));
+    if (!across) {
+      const run = len / n, outer = span.dir as 1 | -1, inner = span.c - (outer * len) / 2;
+      for (let i = 0; i < n; i++) {
+        const a = inner + outer * (i + 0.5) * run;
+        const h = (0.08 + ((i + 1) / n) * 0.5) * k;
+        const P = (cp: number, hh: number): [number, number, number] => (longX ? [a, y + hh / 2, cp + cOff] : [cp + cOff, y + hh / 2, a]);
+        const S = (sc: number, hh: number): [number, number, number] => (longX ? [run * 0.98, hh, sc] : [sc, hh, run * 0.98]);
+        out.push({ p: P(0, h), s: S(Math.max(cross - 0.12, 0.04), h), c: i % 2 ? "#dee2e6" : "#f8f9fa" });
+        if (cross > 0.3) [-1, 1].forEach((s) => out.push({ p: P(s * (cross / 2 - 0.03), h + 0.06), s: S(0.06, h + 0.06), c: "#fd7e14" }));
+      }
+    } else {
+      const sg = span.dir > 0 ? 1 : -1, runC = cross / n, al = Math.max(len - 0.04, 0.04);
+      for (let i = 0; i < n; i++) {
+        const cp = cOff - sg * (cross / 2) + sg * (i + 0.5) * runC;
+        const h = (0.08 + ((i + 1) / n) * 0.5) * k;
+        const P = (ap: number, hh: number): [number, number, number] => (longX ? [ap, y + hh / 2, cp] : [cp, y + hh / 2, ap]);
+        const S = (sa: number, hh: number): [number, number, number] => (longX ? [sa, hh, runC * 0.98] : [runC * 0.98, hh, sa]);
+        out.push({ p: P(span.c, h), s: S(Math.max(al - 0.1, 0.04), h), c: i % 2 ? "#dee2e6" : "#f8f9fa" });
+        if (len > 0.3) [-1, 1].forEach((s) => out.push({ p: P(span.c + s * (len / 2 - 0.03), h + 0.06), s: S(0.06, h + 0.06), c: "#fd7e14" }));
+      }
     }
     return out;
-  }, [inner, outer, run, y, cross, cOff, longX, k]);
+  }, [span.c, span.dir, len, y, cross, cOff, longX, k, across]);
   return (
     <>
       <Inst items={items}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>
@@ -635,7 +657,13 @@ export function IndoorBuilding({
   return (
     <group position={[loc.pos[0], 0, loc.pos[1]]} rotation={[0, -rotRad(loc), 0]}>
       {Array.from({ length: floor }, (_, i) => i + 1).map((l) => (
-        <mesh key={l} position={[0, (l - 1) * fh + 0.04, 0]} receiveShadow>
+          <mesh key={l} position={[0, (l - 1) * fh + 0.04, 0]} receiveShadow
+          onClick={l === floor ? (e) => {
+            if (e.delta > 4 || !stairPlace.cb) return;
+            e.stopPropagation();
+            const p = e.object.worldToLocal(e.point.clone());   // พิกัดในผังอาคาร (กึ่งกลางอาคาร = 0)
+            const cb = stairPlace.cb; stairPlace.cb = null; cb(p.x, p.z);
+          } : undefined}>
           <boxGeometry args={[w, 0.08, d]} />
           <meshStandardMaterial color={l === floor ? "#f1f3f5" : "#868e96"} transparent opacity={l === floor ? 1 : 0.35} />
         </mesh>

@@ -61,6 +61,7 @@ export function useSchoolMapData() {
           floorRooms: x.floor_rooms ?? undefined,
           stairList: Array.isArray(x.stair_list) && x.stair_list.length ? x.stair_list : undefined,
           height: x.height_scale ?? undefined,
+          parking: x.parking_cfg ?? undefined,
         } as MapLocation))
         .sort((a: MapLocation, b: MapLocation) => Number(a.code) - Number(b.code));
 
@@ -77,6 +78,7 @@ export function useSchoolMapData() {
           teacherDesks: x.teacher_desks ?? 1, students: x.student_count ?? undefined,
           doors: Array.isArray(x.doors) ? x.doors : undefined,
           rot: x.rot_deg ?? 0, furniture: Array.isArray(x.furniture) ? x.furniture : undefined,
+          doorSide: x.door_side ?? undefined, boardSide: x.board_side ?? undefined,
         } as MapRoom));
 
       const dbNodes: MapNode[] = n.data.map((x: any) => ({ id: x.code, x: x.pos_x, z: x.pos_z }));
@@ -112,6 +114,9 @@ export function useSchoolMapData() {
   const customRef = useRef(custom); customRef.current = custom;
   const sourceRef = useRef(source); sourceRef.current = source;
   const decorRef = useRef(decor); decorRef.current = decor;
+  const nodesRef = useRef(nodes); nodesRef.current = nodes;
+  const edgesRef = useRef(edges); edgesRef.current = edges;
+  const getGraph = useCallback(() => ({ nodes: nodesRef.current, edges: edgesRef.current }), []);
 
   /* ───────────── ฟังก์ชันสำหรับแอดมิน ───────────── */
 
@@ -133,6 +138,7 @@ export function useSchoolMapData() {
     if (patch.floorRooms !== undefined) row.floor_rooms = patch.floorRooms;   // ต้องรัน migration2.sql
     if (patch.height !== undefined) row.height_scale = patch.height;   // ต้องรัน migration5.sql
     if (patch.stairList !== undefined) row.stair_list = patch.stairList.length ? patch.stairList : null;   // ต้องรัน migration4.sql
+    if (patch.parking !== undefined) row.parking_cfg = patch.parking;   // ต้องรัน migration6.sql
     if (patch.pos) { row.pos_x = patch.pos[0]; row.pos_z = patch.pos[1]; }
     if (patch.size) { row.size_w = patch.size[0]; row.size_d = patch.size[1]; }
     if (patch.entrance) { row.entrance_x = patch.entrance[0]; row.entrance_z = patch.entrance[1]; }
@@ -201,6 +207,8 @@ export function useSchoolMapData() {
       if (patch.doors !== undefined) row.doors = patch.doors;
       if (patch.rot !== undefined) row.rot_deg = patch.rot;
       if (patch.furniture !== undefined) row.furniture = patch.furniture;
+      if ("doorSide" in patch) row.door_side = patch.doorSide ?? null;
+      if ("boardSide" in patch) row.board_side = patch.boardSide ?? null;
       const { error } = await createClient().from("map_rooms").update(row).eq("id", id);
       return error ? fail(error) : ok();
     }
@@ -289,6 +297,7 @@ export function useSchoolMapData() {
         floor_id: floorIds.get(r.level), code: r.code, name: r.name, x: r.x, z: r.z, w: r.w, d: r.d,
         door_x: r.door[0], door_z: r.door[1], room_type: r.type ?? "classroom", desk_count: r.desks ?? 30,
         ac_type: r.ac ?? "none", teacher_desks: r.teacherDesks ?? 1, student_count: r.students ?? null, doors: r.doors ?? null, rot_deg: r.rot ?? 0, furniture: r.furniture ?? null,
+        door_side: r.doorSide ?? null, board_side: r.boardSide ?? null,
       }));
       if (rows.length) {
         const { error } = await sb.from("map_rooms").insert(rows);
@@ -450,7 +459,7 @@ export function useSchoolMapData() {
 
   const api = {
     updateLocation, addLocation, deleteLocation, setFloors, updateRoom, addRoom, deleteRoom, saveGenerated, regenerateRooms, regenerateAll,
-    syncDefaultLayout, setDecor, saveDecor, resetDecor, previewLocation, previewRoom, reload: load,
+    syncDefaultLayout, setDecor, saveDecor, resetDecor, previewLocation, previewRoom, reload: load, getGraph,
   };
   return { locs, rooms, nodes, edges, source, decor, api };
 }

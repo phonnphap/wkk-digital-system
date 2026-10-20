@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { LocKind, MapLocation, MapRoom, CorridorSide, StairsMode, ToiletMode, StageMode, DoorDef, StairDef, FurnItem } from "./schoolData";
-import { TOILET_OPTIONS, CORRIDOR_W, hasInterior, hasSpecialLayout, stairSpans } from "./schoolData";
+import type { LocKind, MapLocation, MapRoom, CorridorSide, StairsMode, ToiletMode, StageMode, DoorDef, StairDef, FurnItem, RoomSide, ParkRow, ParkCfg } from "./schoolData";
+import { TOILET_OPTIONS, CORRIDOR_W, hasInterior, hasSpecialLayout, stairSpans, defaultParkRows, localToWorld } from "./schoolData";
 import { FURN, FURN_KINDS } from "./Furniture";
-import { TYPE_LABEL, AC_LABEL } from "./BuildingModel";
+import { TYPE_LABEL, AC_LABEL, stairPlace } from "./BuildingModel";
 import type { MapApi, SaveResult } from "./useSchoolMapData";
-import { DECOR_LABEL, ROAD_KIND_LABEL } from "./DecorData";
+import { DECOR_LABEL, ROAD_KIND_LABEL, grayFromGraph } from "./DecorData";
 import type { DecorConfig, DecorItem, DecorType, GateItem, RoadItem, RoadKind } from "./DecorData";
 
 export type AdminFocus = { kind: "item" | "gate" | "road" | "loc" | "room" | "gray"; id: string; n: number } | null;
@@ -27,6 +27,9 @@ const btn = "text-xs font-extrabold rounded-xl px-3 py-2";
 const lbl = "block text-[10px] font-bold text-slate-400 mb-0.5";
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
+const r1 = (v: number) => Math.round(v * 10) / 10;
+const OPP: Record<RoomSide, RoomSide> = { px: "nx", nx: "px", pz: "nz", nz: "pz" };
+const SIDE_LABEL: Record<RoomSide, string> = { nx: "ซ้าย", px: "ขวา", nz: "บน (เหนือ)", pz: "ล่าง (ใต้)" };
 
 type Run = (p: Promise<SaveResult>) => Promise<SaveResult>;
 type Place = { placingId: string | null; onPlace: (id: string | null) => void };
@@ -70,7 +73,9 @@ function LocForm({ loc, api, run, placingId, onPlace }: { loc: MapLocation; api:
   const [fr, setFr] = useState<Record<string, number>>({ ...(loc.floorRooms ?? {}) });
   const [sl, setSl] = useState<StairDef[] | null>(loc.stairList?.length ? loc.stairList.map((x) => ({ ...x })) : null);
   const [height, setHeight] = useState(loc.height ?? 1);
-  const [autoRegen, setAutoRegen] = useState(true);
+  const [autoRegen, setAutoRegen] = useState(false);   // ค่าเริ่มต้น: ไม่สร้างห้องใหม่เอง ห้องคงเดิม
+  const [pk, setPk] = useState<ParkCfg | null>(loc.parking ?? null);
+  useEffect(() => () => { stairPlace.cb = null; }, []);
   const longX = w >= d;
 
   // ── ดูตัวอย่างทันที: แก้แล้วเห็นบนแผนที่เลย (ยังไม่บันทึกจนกว่าจะกด "บันทึกอาคาร") ──
@@ -81,17 +86,24 @@ function LocForm({ loc, api, run, placingId, onPlace }: { loc: MapLocation; api:
     const o = orig.current;
     if (Math.abs(loc.pos[0] - x) > 0.004 && Math.abs(loc.pos[0] - o.pos[0]) > 0.004) { orig.current = { ...o, pos: [loc.pos[0], loc.pos[1]], entrance: loc.entrance }; setX(r2(loc.pos[0])); setZ(r2(loc.pos[1])); }
   }, [loc.pos[0], loc.pos[1]]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
+    useEffect(() => {
     if (first.current) { first.current = false; return; }
     const o = orig.current;
     dirty.current = name !== o.name || color !== o.color || rot !== (o.rot ?? 0) || Math.abs(x - o.pos[0]) > 0.004 || Math.abs(z - o.pos[1]) > 0.004
-      || Math.abs(w - o.size[0]) > 0.004 || Math.abs(d - o.size[1]) > 0.004 || stage !== (o.stage ?? "none") || height !== (o.height ?? 1);
-    api.previewLocation(loc.id, { name, color, rot, pos: [x, z], size: [w, d], stage: kind === "dome" ? stage : undefined, height });
-  }, [name, color, rot, x, z, w, d, stage, height]); // eslint-disable-line react-hooks/exhaustive-deps
+      || Math.abs(w - o.size[0]) > 0.004 || Math.abs(d - o.size[1]) > 0.004 || stage !== (o.stage ?? "none") || height !== (o.height ?? 1)
+      || stairs !== (o.stairs ?? "start") || corridor !== (o.corridor === "b" ? "b" : "a")
+      || JSON.stringify(sl ?? null) !== JSON.stringify(o.stairList?.length ? o.stairList : null)
+      || JSON.stringify(pk ?? null) !== JSON.stringify(o.parking ?? null);
+    api.previewLocation(loc.id, {
+      name, color, rot, pos: [x, z], size: [w, d], stage: kind === "dome" ? stage : undefined, height,
+      stairs, corridor, stairList: sl ?? undefined, parking: kind === "parking" ? pk : undefined,
+    });
+  }, [name, color, rot, x, z, w, d, stage, height, stairs, corridor, sl, pk]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => {   // ปิดฟอร์มโดยไม่บันทึก → คืนค่าเดิม
     if (!dirty.current) return;
     const o = orig.current;
-    api.previewLocation(o.id, { name: o.name, color: o.color, rot: o.rot, pos: o.pos, size: o.size, stage: o.stage, height: o.height });
+    api.previewLocation(o.id, { name: o.name, color: o.color, rot: o.rot, pos: o.pos, size: o.size, stage: o.stage, height: o.height,
+      stairs: o.stairs, corridor: o.corridor, stairList: o.stairList, parking: o.parking });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const interior = kind === "building" || kind === "facility";
   const special = hasSpecialLayout({ ...loc, kind });
@@ -101,15 +113,23 @@ function LocForm({ loc, api, run, placingId, onPlace }: { loc: MapLocation; api:
     for (let lv = 1; lv <= floors; lv++) if ((fr[lv] ?? 0) > 0) o[String(lv)] = Math.round(fr[lv]);
     return o;
   };
+    const placeStair = (i: number) => (pid: string | null) => {
+    onPlace(pid);
+    stairPlace.cb = pid ? (lx, lz) => {
+      const Lg = Math.max(w, d), c = longX ? lx : lz;
+      setSl((l) => (l ?? []).map((s, k) => (k === i ? { ...s, a: r2(clamp(c + Lg / 2 - s.len / 2, 0, Math.max(Lg - s.len, 0))) } : s)));
+      onPlace(null);
+    } : null;
+  };
 
-  const save = async () => {
+    const save = async () => {
     const o = orig.current;
     const newFr = cleanFr();
     const frChanged = JSON.stringify(newFr) !== JSON.stringify(loc.floorRooms ?? {});
     const posChanged = Math.abs(x - o.pos[0]) > 0.005 || Math.abs(z - o.pos[1]) > 0.005;
-    const slChanged = JSON.stringify(sl ?? []) !== JSON.stringify(loc.stairList ?? []);
+    const slChanged = JSON.stringify(sl ?? []) !== JSON.stringify(o.stairList ?? []);
     const layoutChanged = interior && (
-      corridor !== (loc.corridor === "b" ? "b" : "a") || stairs !== (loc.stairs ?? "start") ||
+      corridor !== (o.corridor === "b" ? "b" : "a") || stairs !== (o.stairs ?? "start") ||
       toilet !== (loc.toilet ?? "none") || (perFloor > 0 ? perFloor : 0) !== (loc.perFloor ?? 0) ||
       floors !== loc.floors || Math.abs(w - o.size[0]) > 0.005 || Math.abs(d - o.size[1]) > 0.005 || frChanged || slChanged
     );
@@ -119,11 +139,12 @@ function LocForm({ loc, api, run, placingId, onPlace }: { loc: MapLocation; api:
       stage: kind === "dome" ? stage : undefined, height,
       floorRooms: interior && frChanged ? newFr : undefined,
       stairList: interior && slChanged ? (sl ?? []) : undefined,
-      // ย้ายตำแหน่ง → ย้ายจุดทางเข้าตามไปด้วย
+      parking: kind === "parking" ? pk : undefined,
       entrance: posChanged ? [o.entrance[0] + (x - o.pos[0]), o.entrance[1] + (z - o.pos[1])] : undefined,
     }));
     if (r.ok) {
-      orig.current = { ...o, name, kind, color, rot, pos: [x, z], size: [w, d], stage, height,
+      orig.current = { ...o, name, kind, color, rot, pos: [x, z], size: [w, d], stage, height, stairs, corridor,
+        stairList: sl ?? undefined, parking: pk,
         entrance: posChanged ? [o.entrance[0] + (x - o.pos[0]), o.entrance[1] + (z - o.pos[1])] : o.entrance };
       dirty.current = false;
     }
@@ -151,6 +172,60 @@ function LocForm({ loc, api, run, placingId, onPlace }: { loc: MapLocation; api:
             <option value="end">เวทีอยู่ปลาย{longX ? "ขวา" : "ล่าง"}</option>
           </select></label>
       )}
+            {kind === "parking" && (
+        <div className="rounded-xl border border-slate-200 p-2 space-y-1.5">
+          <p className="text-[11px] font-black text-slate-600">แถวจอดรถ {pk ? `(${pk.rows.length} แถว)` : "(อัตโนมัติ)"}</p>
+          {!pk ? (
+            <button onClick={() => setPk({ rows: defaultParkRows({ size: [w, d] }) })}
+              className={`${btn} py-1 w-full bg-indigo-50 text-indigo-700 border border-indigo-200`}>✎ กำหนดแถวเอง (คัดลอกจากค่าปัจจุบัน)</button>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-1.5">
+                <Num label="กว้างช่อง (ม.)" value={pk.stallW ?? 0.5} step={0.02} min={0.15} onChange={(v) => setPk((c) => c && { ...c, stallW: Math.max(0.15, v) })} />
+                <Num label="ลึกช่อง (ม.)" value={pk.stallL ?? 0.78} step={0.02} min={0.2} onChange={(v) => setPk((c) => c && { ...c, stallL: Math.max(0.2, v) })} />
+              </div>
+              {pk.rows.map((row, i) => {
+                const up = (p: Partial<ParkRow>) => setPk((c) => c && { ...c, rows: c.rows.map((x2, k) => (k === i ? { ...x2, ...p } : x2)) });
+                return (
+                  <div key={i} className="rounded-lg bg-slate-50 p-1.5 space-y-1">
+                    <div className="grid grid-cols-4 gap-1">
+                      <Num label="แถวที่ (z)" value={row.z} step={0.05} onChange={(v) => up({ z: v })} />
+                      <Num label="เลื่อน x" value={row.x ?? 0} step={0.05} onChange={(v) => up({ x: v })} />
+                      <Num label="ช่อง" value={row.n} step={1} min={0} onChange={(v) => up({ n: clamp(Math.round(v), 0, 80) })} />
+                      <Num label="มีรถ 0–1" value={row.fill ?? 0.62} step={0.05} min={0} onChange={(v) => up({ fill: clamp(v, 0, 1) })} />
+                    </div>
+                    <div className="grid grid-cols-[1fr_3.5rem_1fr] gap-1 items-end">
+                      <label className="block"><span className={lbl}>แบบจอด</span>
+                        <select className={inp} value={row.mode} onChange={(e) => up({ mode: e.target.value as ParkRow["mode"] })}>
+                          <option value="straight">จอดตรง</option>
+                          <option value="slant">จอดเอียง</option>
+                          <option value="parallel">จอดขนาน</option>
+                        </select></label>
+                      {row.mode === "slant" ? <Num label="องศา" value={row.ang ?? 45} step={5} min={5} onChange={(v) => up({ ang: clamp(v, 5, 80) })} /> : <span />}
+                      {row.mode === "slant" ? (
+                        <label className="block"><span className={lbl}>เอียงไปทาง</span>
+                          <select className={inp} value={row.dir ?? 1} onChange={(e) => up({ dir: parseInt(e.target.value) as 1 | -1 })}>
+                            <option value={1}>ลงขวา (\)</option>
+                            <option value={-1}>ลงซ้าย (/)</option>
+                          </select></label>
+                      ) : <span />}
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => setPk((c) => c && { ...c, rows: [...c.rows, { ...row, z: r2(row.z + 0.8) }] })} className={`${btn} py-1 flex-1 bg-slate-100 text-slate-600`}>ทำซ้ำแถว</button>
+                      <button onClick={() => setPk((c) => c && { ...c, rows: c.rows.filter((_, k) => k !== i) })} className={`${btn} py-1 bg-rose-50 text-rose-600`}>ลบแถว</button>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="flex gap-1.5">
+                <button onClick={() => setPk((c) => c && { ...c, rows: [...c.rows, { z: 0, n: 8, mode: "straight", fill: 0.62 }] })}
+                  className={`${btn} py-1 flex-1 bg-indigo-50 text-indigo-700 border border-indigo-200`}>+ เพิ่มแถว</button>
+                <button onClick={() => setPk(null)} className={`${btn} py-1 bg-slate-100 text-slate-600`}>กลับเป็นอัตโนมัติ</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {(kind === "building" || kind === "facility" || kind === "dome" || kind === "gate") && (
         <Num label="ความสูง (ตัวคูณ — ตึก: ความสูงต่อชั้น, โดม: ความสูงหลังคา, 1 = ปกติ)" value={height} step={0.1} min={0.3}
@@ -173,6 +248,7 @@ function LocForm({ loc, api, run, placingId, onPlace }: { loc: MapLocation; api:
               </select></label>
             <label className="block"><span className={lbl}>บันได</span>
               <select className={inp} value={stairs} onChange={(e) => setStairs(e.target.value as StairsMode)}>
+                <option value="none">ไม่มีบันได</option>
                 <option value="start">1 อัน ปลาย{longX ? "ซ้าย" : "บน"}</option>
                 <option value="end">1 อัน ปลาย{longX ? "ขวา" : "ล่าง"}</option>
                 <option value="both">2 อัน ทั้งสองปลาย</option>
@@ -210,13 +286,16 @@ function LocForm({ loc, api, run, placingId, onPlace }: { loc: MapLocation; api:
                       </div>
                       <div className="grid grid-cols-[1fr_3.5rem_3.5rem] gap-1.5 items-end">
                         <label className="block"><span className={lbl}>ทิศที่ขั้นสูงขึ้น</span>
-                          <select className={inp} value={st.dir} onChange={(e) => up({ dir: parseInt(e.target.value) as 1 | -1 })}>
+                          <select className={inp} value={st.dir} onChange={(e) => up({ dir: parseInt(e.target.value) as StairDef["dir"] })}>
                             <option value={-1}>ไปทาง{longX ? "ซ้าย" : "บน"}</option>
                             <option value={1}>ไปทาง{longX ? "ขวา" : "ล่าง"}</option>
+                            <option value={-2}>ไปทาง{longX ? "บน (เหนือ)" : "ซ้าย"}</option>
+                            <option value={2}>ไปทาง{longX ? "ล่าง (ใต้)" : "ขวา"}</option>
                           </select></label>
                         <Num label="จากชั้น" value={st.from} step={1} min={1} onChange={(v) => up({ from: clamp(Math.round(v), 1, 8) })} />
                         <Num label="ถึงชั้น" value={st.to} step={1} min={1} onChange={(v) => up({ to: clamp(Math.round(v), 1, 8) })} />
                       </div>
+                      <PlaceBtn id={`stair:${loc.id}:${i}`} placingId={placingId} onPlace={placeStair(i)} />
                       <div className="flex gap-1.5">
                         <button onClick={() => up({ w: CORRIDOR_W })} className={`${btn} py-1 flex-1 bg-sky-50 text-sky-700 border border-sky-200`}>ขนาดเท่าทางเดิน</button>
                         <button onClick={() => up({ w: 1 })} className={`${btn} py-1 flex-1 bg-slate-100 text-slate-600`}>เต็มความลึก</button>
@@ -282,6 +361,8 @@ function RoomRow({ room, loc, api, run, placingId, onPlace, autoOpen }: { room: 
   const [cStart, setCStart] = useState(r2((longX ? room.z : room.x) * CT));
   const [cDep, setCDep] = useState(r2((longX ? room.d : room.w) * CT));
   const [rotDeg, setRotDeg] = useState(room.rot ?? 0);
+  const [doorSide, setDoorSide] = useState<RoomSide | "">(room.doorSide ?? "");
+  const [boardSide, setBoardSide] = useState<RoomSide | "">(room.boardSide ?? "");
   const [doors, setDoors] = useState<DoorDef[]>(room.doors?.length ? room.doors : [{ p: 0.5, w: 0.1 }]);
   const [furn, setFurn] = useState<FurnItem[]>(room.furniture ?? []);
   const [newKind, setNewKind] = useState(FURN_KINDS[0]);
@@ -296,14 +377,19 @@ function RoomRow({ room, loc, api, run, placingId, onPlace, autoOpen }: { room: 
     const crossOld = longX ? room0.current.door[1] : room0.current.door[0];
     const dCross = clamp(crossOld, Math.min(fc0, fc0 + fcl), Math.max(fc0, fc0 + fcl));
     const dAlong = fa0 + fal / 2;
-    return { x, z: zz, w, d: dd, door: (longX ? [dAlong, dCross] : [dCross, dAlong]) as [number, number], rot: rotDeg };
+    let door = (longX ? [dAlong, dCross] : [dCross, dAlong]) as [number, number];
+    if (doorSide) {   // เลือกผนังประตูเอง → ย้ายจุดประตูไปกลางผนังนั้น
+      const mx = x + w / 2, mz = zz + dd / 2;
+      door = doorSide === "px" ? [x + w, mz] : doorSide === "nx" ? [x, mz] : doorSide === "pz" ? [mx, zz + dd] : [mx, zz];
+    }
+    return { x, z: zz, w, d: dd, door, rot: rotDeg, doorSide: doorSide || undefined, boardSide: boardSide || undefined };
   };
 
   useEffect(() => {   // ดูตัวอย่างทันที
     if (first.current) { first.current = false; return; }
     dirty.current = true;
     api.previewRoom(room.id, { ...geo(), furniture: furn, doors });
-  }, [aStart, aLen, cStart, cDep, rotDeg, furn, doors]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [aStart, aLen, cStart, cDep, rotDeg, furn, doors, doorSide, boardSide]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {   // วางของด้วยการคลิกบนแผนที่ → ซิงก์กลับมาที่ฟอร์ม
     if (JSON.stringify(room.furniture ?? []) !== JSON.stringify(furn)) setFurn(room.furniture ?? []);
   }, [room.furniture]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -313,6 +399,7 @@ function RoomRow({ room, loc, api, run, placingId, onPlace, autoOpen }: { room: 
     api.previewRoom(o.id, { x: o.x, z: o.z, w: o.w, d: o.d, door: o.door, rot: o.rot, furniture: o.furniture, doors: o.doors });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  
   const save = async () => {
     const g = geo();
     const patch: Partial<MapRoom> = {
@@ -326,6 +413,14 @@ function RoomRow({ room, loc, api, run, placingId, onPlace, autoOpen }: { room: 
   const setDoor = (i: number, p: Partial<DoorDef>) => setDoors((l) => l.map((d, k) => (k === i ? { ...d, ...p } : d)));
   const upF = (i: number, p: Partial<FurnItem>) => setFurn((l) => l.map((f, k) => (k === i ? { ...f, ...p } : f)));
 
+    const corridorSide: RoomSide = longX ? (loc.corridor === "b" ? "pz" : "nz") : (loc.corridor === "b" ? "px" : "nx");
+  const autoSide = (): RoomSide => {
+    const o = room0.current, W = loc.size[0], D = loc.size[1];
+    const dx = (o.door[0] - 0.5) * W - (o.x + o.w / 2 - 0.5) * W, dz = (o.door[1] - 0.5) * D - (o.z + o.d / 2 - 0.5) * D;
+    return Math.abs(dx) > Math.abs(dz) ? (dx >= 0 ? "px" : "nx") : (dz >= 0 ? "pz" : "nz");
+  };
+  const effDoor: RoomSide = doorSide || autoSide();
+  const effBoard: RoomSide = boardSide || OPP[effDoor];
   return (
     <div className={`rounded-xl border bg-white p-2 space-y-1.5 ${autoOpen ? "border-blue-400 ring-2 ring-blue-200" : "border-slate-200"}`}>
       <div className="grid grid-cols-[1fr_5rem] gap-1.5">
@@ -357,6 +452,25 @@ function RoomRow({ room, loc, api, run, placingId, onPlace, autoOpen }: { room: 
             <Num label="ยาว (ตามแนวอาคาร)" value={aLen} step={0.05} min={0.1} onChange={(v) => setALen(Math.max(0.1, v))} />
             <Num label="เริ่มที่ (ลึก)" value={cStart} step={0.05} onChange={setCStart} />
             <Num label="ลึก" value={cDep} step={0.05} min={0.1} onChange={(v) => setCDep(Math.max(0.1, v))} />
+          </div>
+                    <div className="rounded-lg border border-slate-200 p-1.5 space-y-1.5">
+            <p className="text-[11px] font-black text-slate-600">ทิศของห้อง (ตามแกนตัวอาคาร)</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              <label className="block"><span className={lbl}>ผนังที่มีประตู</span>
+                <select className={inp} value={doorSide} onChange={(e) => setDoorSide(e.target.value as RoomSide | "")}>
+                  <option value="">อัตโนมัติ (เดิม)</option>
+                  {(Object.keys(SIDE_LABEL) as RoomSide[]).map((s) => <option key={s} value={s}>{SIDE_LABEL[s]}{s === corridorSide ? " ← ฝั่งทางเดิน" : ""}</option>)}
+                </select></label>
+              <label className="block"><span className={lbl}>ผนังที่ติดกระดาน</span>
+                <select className={inp} value={boardSide} onChange={(e) => setBoardSide(e.target.value as RoomSide | "")}>
+                  <option value="">ตรงข้ามประตู</option>
+                  {(Object.keys(SIDE_LABEL) as RoomSide[]).map((s) => <option key={s} value={s}>{SIDE_LABEL[s]}</option>)}
+                </select></label>
+            </div>
+            <div className="flex gap-1.5">
+              <button onClick={() => setDoorSide(corridorSide)} className={`${btn} py-1 flex-1 bg-sky-50 text-sky-700 border border-sky-200`}>ประตู → ฝั่งทางเดิน</button>
+              <button onClick={() => setBoardSide(OPP[effBoard])} className={`${btn} py-1 flex-1 bg-amber-50 text-amber-700 border border-amber-200`}>⇄ กลับด้านกระดาน</button>
+            </div>
           </div>
           <Num label="หมุนห้อง (องศา)" value={rotDeg} step={5} onChange={setRotDeg} />
 
@@ -416,12 +530,13 @@ function RoomRow({ room, loc, api, run, placingId, onPlace, autoOpen }: { room: 
 
 type Field = "rot" | "s" | "h" | "hs" | "w" | "d" | "n" | "m" | "kind" | "road" | "color" | "name" | "levels";
 const FIELDS: Record<DecorType, Field[]> = {
-  tree: ["kind", "s", "h"], pavilion: ["color", "rot", "hs"], shrine: ["name", "rot", "hs"],
+  tree: ["kind", "s", "h"], pavilion: ["color", "rot", "hs", "w", "d"], shrine: ["name", "rot", "hs"],
   toilet: ["name", "kind", "w", "d", "rot", "color", "hs"], shed: ["name", "w", "d", "rot", "color", "hs"],
   barrier: ["name", "w", "rot", "hs"], flag: [], bridge: ["name", "w", "d", "rot", "levels"], sign: ["name", "w", "s"],
   carport: ["name", "w", "d", "rot", "color", "hs"], busbay: ["name", "w", "d", "rot", "n", "hs"], kiosk: ["name", "rot", "color", "hs"],
   temple: ["name", "kind", "s", "rot"], roadsign: ["name", "w", "rot", "color"], zebra: ["w", "d", "rot"],
   fieldfence: ["name", "w", "d", "rot", "h"], people: ["name", "kind", "road", "w", "d", "rot", "n", "m"],
+  polyfence: ["name", "h", "color"],
 };
 const KIND_OPTIONS: Partial<Record<DecorType, [string, string][]>> = {
   tree: [["round", "ทรงกลม"], ["pine", "สน (ทรงกรวย)"], ["palm", "มะพร้าว/ปาล์ม"], ["bush", "พุ่มไม้เตี้ย"], ["flower", "ไม้ดอก (ราชพฤกษ์)"]],
@@ -439,14 +554,70 @@ const NEW_DEFAULTS: Record<DecorType, Partial<DecorItem>> = {
   temple: { name: "วัด", kind: "ubosot", s: 1 }, roadsign: { name: "ป้าย|บรรทัดที่ 2", w: 70, color: "#15803d" },
   zebra: { w: 52, d: 12 }, fieldfence: { name: "รั้วสนาม", w: 60, d: 90, h: 1 },
   people: { name: "นักเรียน", w: 60, d: 40, n: 10, m: 1, kind: "walk" },
+  polyfence: { name: "รั้วอนุบาล", h: 1, fstyle: "bar", closed: false, color: "#212529", pts: [[0, 0], [60, 0], [60, 40]], gaps: [] },
 };
+function FenceExtra({ it, patch, locs }: { it: DecorItem; patch: (p: Partial<DecorItem>) => void; locs: MapLocation[] }) {
+  const [lid, setLid] = useState(locs.find((l) => l.code === "6")?.id ?? locs[0]?.id ?? "");
+  const [margin, setMargin] = useState(0.5);
+  const pts = it.pts ?? [], gaps = it.gaps ?? [];
+  const around = () => {
+    const l = locs.find((x) => x.id === lid);
+    if (!l) return;
+    const [w, d] = l.size, m = margin;
+    const cs = ([[-w / 2 - m, -d / 2 - m], [w / 2 + m, -d / 2 - m], [w / 2 + m, d / 2 + m], [-w / 2 - m, d / 2 + m]] as [number, number][]).map(([x, z]) => localToWorld(l, x, z));
+    const P = cs.map(([x, z]) => [x * 30 + 480, z * 30 + 400] as [number, number]);
+    const [ox, oy] = P[0];
+    patch({ x: r1(ox), y: r1(oy), pts: P.map(([x, y]) => [r1(x - ox), r1(y - oy)] as [number, number]), closed: true });
+  };
+  return (
+    <div className="rounded-lg border border-slate-200 p-1.5 space-y-1.5">
+      <label className="block"><span className={lbl}>แบบรั้ว</span>
+        <select className={inp} value={it.fstyle ?? "bar"} onChange={(e) => patch({ fstyle: e.target.value as DecorItem["fstyle"] })}>
+          <option value="bar">เหล็กดัด (ซี่ตั้ง)</option>
+          <option value="mesh">ตาข่าย/กระจกใส</option>
+          <option value="wall">กำแพงทึบ</option>
+        </select></label>
+      <label className="flex items-center justify-between text-[11px] font-bold text-slate-600">วนปิดรอบ
+        <input type="checkbox" checked={!!it.closed} onChange={(e) => patch({ closed: e.target.checked })} className="w-4 h-4 accent-blue-600" /></label>
+      <div className="grid grid-cols-[1fr_4rem] gap-1.5 items-end">
+        <label className="block"><span className={lbl}>สร้างรั้วล้อมอาคาร</span>
+          <select className={inp} value={lid} onChange={(e) => setLid(e.target.value)}>
+            {locs.map((l) => <option key={l.id} value={l.id}>{l.code}. {l.name}</option>)}
+          </select></label>
+        <Num label="ห่าง (ม.)" value={margin} step={0.1} onChange={setMargin} />
+      </div>
+      <button onClick={around} className={`${btn} py-1 w-full bg-emerald-600 text-white`}>▭ สร้างรั้วล้อมอาคารนี้</button>
+      <p className="text-[11px] font-black text-slate-600">จุดรั้ว ({pts.length}) — px เทียบกับ X,Y ด้านบน</p>
+      {pts.map((p, i) => (
+        <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-1 items-end">
+          <Num label={`จุด ${i + 1} X`} value={p[0]} onChange={(v) => patch({ pts: pts.map((q, k) => (k === i ? [v, q[1]] : q)) as [number, number][] })} />
+          <Num label="Y" value={p[1]} onChange={(v) => patch({ pts: pts.map((q, k) => (k === i ? [q[0], v] : q)) as [number, number][] })} />
+          <button disabled={pts.length <= 2} onClick={() => patch({ pts: pts.filter((_, k) => k !== i) })} className={`${btn} px-2 py-1.5 bg-rose-50 text-rose-600 disabled:opacity-30`}>✕</button>
+        </div>
+      ))}
+      <button onClick={() => { const l = pts[pts.length - 1] ?? [0, 0]; patch({ pts: [...pts, [l[0] + 20, l[1]]] }); }}
+        className={`${btn} py-1 w-full bg-indigo-50 text-indigo-700 border border-indigo-200`}>+ เพิ่มจุด</button>
+      <p className="text-[11px] font-black text-slate-600">ช่องเปิด/ประตูในรั้ว ({gaps.length})</p>
+      {gaps.map((g, i) => (
+        <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-1 items-end">
+          <Num label="ตำแหน่ง 0–1" value={g.t} step={0.05} onChange={(v) => patch({ gaps: gaps.map((q, k) => (k === i ? { ...q, t: clamp(v, 0, 1) } : q)) })} />
+          <Num label="กว้าง (ม.)" value={g.w} step={0.1} min={0.2} onChange={(v) => patch({ gaps: gaps.map((q, k) => (k === i ? { ...q, w: Math.max(0.2, v) } : q)) })} />
+          <button onClick={() => patch({ gaps: gaps.filter((_, k) => k !== i) })} className={`${btn} px-2 py-1.5 bg-rose-50 text-rose-600`}>✕</button>
+        </div>
+      ))}
+      <button onClick={() => patch({ gaps: [...gaps, { t: 0.5, w: 1 }] })} className={`${btn} py-1 w-full bg-indigo-50 text-indigo-700 border border-indigo-200`}>+ เพิ่มช่องเปิด</button>
+    </div>
+  );
+}
 
-function ItemRow({ it, patch, del, placingId, onPlace, roads, highlight }: {
-  it: DecorItem; patch: (p: Partial<DecorItem>) => void; del: () => void; roads?: RoadItem[]; highlight?: boolean;
+function ItemRow({ it, patch, del, placingId, onPlace, roads, highlight, locs }: {
+  it: DecorItem; patch: (p: Partial<DecorItem>) => void; del: () => void; roads?: RoadItem[]; highlight?: boolean; locs?: MapLocation[];
 } & Place) {
   const f = FIELDS[it.type];
-  const n = (k: "rot" | "s" | "h" | "hs" | "w" | "d" | "n" | "m", label: string, step = 1) =>
-    f.includes(k) && <Num key={k} label={label} value={it[k] ?? (k === "s" || k === "h" || k === "hs" || k === "m" ? 1 : k === "n" ? 3 : 0)} step={step} onChange={(v) => patch({ [k]: v })} />;
+    const n = (k: "rot" | "s" | "h" | "hs" | "w" | "d" | "n" | "m", label: string, step = 1) =>
+    f.includes(k) && <Num key={k} label={label}
+      value={it[k] ?? (k === "s" || k === "h" || k === "hs" || k === "m" ? 1 : k === "n" ? 3 : it.type === "pavilion" && (k === "w" || k === "d") ? 21.6 : 0)}
+      step={step} onChange={(v) => patch({ [k]: v })} />;
   const kinds = KIND_OPTIONS[it.type];
   return (
     <div className={`rounded-xl border bg-white p-2 space-y-1.5 ${highlight ? "border-blue-400 ring-2 ring-blue-200" : "border-slate-200"}`}>
@@ -482,6 +653,11 @@ function ItemRow({ it, patch, del, placingId, onPlace, roads, highlight }: {
       {f.includes("levels") && (
         <input className={inp} value={it.levels ?? ""} onChange={(e) => patch({ levels: e.target.value })} placeholder="ชั้นที่มีทางเชื่อม เช่น 2,3" />
       )}
+      {it.type === "barrier" && (
+        <label className="flex items-center justify-between text-[11px] font-bold text-slate-600">เปิดประตูกั้น
+          <input type="checkbox" checked={!!it.open} onChange={(e) => patch({ open: e.target.checked })} className="w-4 h-4 accent-blue-600" /></label>
+      )}
+      {it.type === "polyfence" && <FenceExtra it={it} patch={patch} locs={locs ?? []} />}
       {f.includes("color") && (
         <label className="flex items-center justify-between text-[10px] font-bold text-slate-400">สี
           <input type="color" className="w-16 h-6 rounded border border-slate-200" value={it.color ?? "#e5484d"} onChange={(e) => patch({ color: e.target.value })} />
@@ -532,21 +708,33 @@ function GateRow({ g, patch, del, placingId, onPlace }: {
   );
 }
 
-function RoadRow({ r, patch, del, placingId, onPlace }: {
-  r: RoadItem; patch: (p: Partial<RoadItem>) => void; del: () => void;
+function RoadRow({ r, patch, del, restore, placingId, onPlace }: {
+  r: RoadItem; patch: (p: Partial<RoadItem>) => void; del: () => void; restore?: () => void;
 } & Place) {
   const setPt = (i: number, k: 0 | 1, v: number) => patch({ pts: r.pts.map((p, j) => (j === i ? (k === 0 ? [v, p[1]] : [p[0], v]) : p) as [number, number]) });
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-2 space-y-1.5">
       <div className="flex items-center justify-between gap-1">
         <input className={`${inp} font-bold`} value={r.name} onChange={(e) => patch({ name: e.target.value })} />
-        <button onClick={del} className={`${btn} py-1 bg-rose-50 text-rose-600 border border-rose-200`}>ลบ</button>
+        <div className="flex gap-1 shrink-0">
+          {r.off && <button onClick={() => patch({ off: false })} className={`${btn} py-1 bg-emerald-50 text-emerald-700 border border-emerald-200`}>เปิดใช้</button>}
+          {restore && <button onClick={restore} className={`${btn} py-1 bg-sky-50 text-sky-700 border border-sky-200`}>คืนเส้นเดิม</button>}
+          {!r.off && <button onClick={del} className={`${btn} py-1 bg-rose-50 text-rose-600 border border-rose-200`}>ลบ</button>}
+        </div>
       </div>
       <select className={inp} value={r.kind} onChange={(e) => patch({ kind: e.target.value as RoadKind })}>
         {(Object.keys(ROAD_KIND_LABEL) as RoadKind[]).map((k) => <option key={k} value={k}>{ROAD_KIND_LABEL[k]}</option>)}
       </select>
       <div className="grid grid-cols-2 gap-1.5">
-        {r.kind !== "route" && <Num label="ความกว้าง (world)" value={r.w ?? (r.kind === "main" ? 4 : r.kind === "soi" ? 1.6 : 1)} step={0.1} min={0.3} onChange={(v) => patch({ w: Math.max(0.3, v) })} />}
+        {r.kind !== "route" && (
+  <Num
+    label="ความกว้าง"
+    value={r.w ?? (r.kind === "main" ? 4 : r.kind === "soi" ? 1.6 : r.kind === "gray" ? 1.02 : 1)}
+    step={0.1}
+    min={0.3}
+    onChange={(v) => patch({ w: Math.max(0.3, v) })}
+  />
+)}
         <label className="block"><span className={lbl}>ความโค้ง ({(r.curve ?? 0).toFixed(2)})</span>
           <input type="range" min={0} max={1.5} step={0.05} value={r.curve ?? 0} onChange={(e) => patch({ curve: parseFloat(e.target.value) })} className="w-full" /></label>
       </div>
@@ -576,7 +764,7 @@ function RoadRow({ r, patch, del, placingId, onPlace }: {
   );
 }
 
-function DecorEditor({ decor, api, run, placingId, onPlace, focus }: { decor: DecorConfig; api: MapApi; run: Run; focus: AdminFocus } & Place) {
+function DecorEditor({ decor, api, run, placingId, onPlace, focus, locs }: { decor: DecorConfig; api: MapApi; run: Run; focus: AdminFocus; locs: MapLocation[] } & Place) {
   const [cat, setCat] = useState<DecorType | "gate" | "road">("gate");
   const [fid, setFid] = useState<string | null>(null);
   useEffect(() => {   // กดวัตถุบนแผนที่ → เปิดหมวดนั้นและแสดงเฉพาะชิ้นนั้น
@@ -592,21 +780,31 @@ function DecorEditor({ decor, api, run, placingId, onPlace, focus }: { decor: De
   const items = decor.items.filter((i) => i.type === cat && (!fid || i.id === fid));
   const patchItem = (id: string, p: Partial<DecorItem>) =>
     api.setDecor((d) => ({ ...d, items: d.items.map((i) => (i.id === id ? { ...i, ...p } : i)) }));
+    const patchRoad = (id: string, p: Partial<RoadItem>) =>
+    api.setDecor((d) => ({ ...d, roads: (d.roads ?? []).map((x) => (x.id === id ? { ...x, ...p } : x)) }));
   const patchGate = (id: string, p: Partial<GateItem>) =>
-    api.setDecor((d) => ({ ...d, gates: d.gates.map((g) => (g.id === id ? { ...g, ...p } : g)) }));
+  api.setDecor((d) => ({ ...d, gates: d.gates.map((g) => (g.id === id ? { ...g, ...p } : g)) }));
+    const removeRoad = (id: string) => api.setDecor((d) => ({ ...d, roads: (d.roads ?? []).filter((x) => x.id !== id) }));
   const add = () => {
-    const id = `${cat}-${Date.now()}`;
-    if (cat === "road") {
-      api.setDecor((d) => ({ ...d, roads: [...(d.roads ?? []), { id, name: "ถนนใหม่", kind: "soi", pts: [[480, 400], [560, 400]], w: 1.6, curve: 0 }] }));
-      return;
-    }
-    if (cat === "gate") {
-      api.setDecor((d) => ({ ...d, gates: [...d.gates, { id, name: "ประตูใหม่", x: 480, y: 400, width: 1.8, color: "#be123c", node: `n-${id}` }] }));
-    } else {
-      api.setDecor((d) => ({ ...d, items: [...d.items, { id, type: cat, x: 480, y: 400, ...NEW_DEFAULTS[cat] }] }));
-    }
-    onPlace(id);
-  };
+  const id = `${cat}-${Date.now()}`;
+  if (cat === "road") {
+    api.setDecor((d) => ({
+      ...d,
+      roads: [...(d.roads ?? []), { id, name: "ถนนใหม่", kind: "soi", pts: [[480, 400], [560, 400]], w: 1.6, curve: 0 }],
+    }));
+  } else if (cat === "gate") {
+    api.setDecor((d) => ({
+      ...d,
+      gates: [...d.gates, { id, name: "ประตูใหม่", x: 480, y: 400, width: 1.8, color: "#be123c", node: `n-${id}` }],
+    }));
+  } else {
+    api.setDecor((d) => ({
+      ...d,
+      items: [...d.items, { id, type: cat, x: 480, y: 400, ...NEW_DEFAULTS[cat] }],
+    }));
+  }
+  onPlace(id);
+};
   return (
     <>
       <p className="text-[11px] text-slate-500">แก้ค่าแล้วเห็นผลทันที กด “📍 วาง” แล้วคลิกบนพื้นแผนที่เพื่อย้าย จากนั้นกด “บันทึกฉาก”</p>
@@ -636,18 +834,22 @@ function DecorEditor({ decor, api, run, placingId, onPlace, focus }: { decor: De
         </div>
       )}
       {cat === "road" && (
-        <div className="rounded-xl border border-slate-200 bg-white p-2 grid grid-cols-2 gap-1.5">
-          <Num label="จำนวนรถที่วิ่ง" value={decor.traffic?.cars ?? 4} step={1} min={0}
-            onChange={(v) => api.setDecor((d) => ({ ...d, traffic: { cars: clamp(Math.round(v), 0, 24), speed: d.traffic?.speed ?? 2.4 } }))} />
-          <Num label="ความเร็วรถ" value={decor.traffic?.speed ?? 2.4} step={0.2} min={0.2}
-            onChange={(v) => api.setDecor((d) => ({ ...d, traffic: { cars: d.traffic?.cars ?? 4, speed: clamp(v, 0.2, 10) } }))} />
-        </div>
+        <button onClick={() => {
+          const g = api.getGraph();
+          const add = grayFromGraph(g.nodes, g.edges, decor.gates, decor.roads ?? []);
+          if (!add.length) { alert("ไม่มีถนนเทาเดิมที่ยังไม่ได้แปลง"); return; }
+          if (confirm(`แปลงถนนเทาเดิม ${add.length} เส้นเป็นเส้นที่แก้ไข/ลบได้?\n(กด “บันทึกฉาก” เพื่อเก็บถาวร)`))
+            api.setDecor((d) => ({ ...d, roads: [...(d.roads ?? []), ...add] }));
+        }} className={`${btn} py-1 w-full bg-amber-50 text-amber-700 border border-amber-200`}>⇄ แปลงถนนเทาเดิมทุกเส้นให้แก้ไข/เพิ่ม/ลบได้</button>
       )}
-      {cat === "road"
+        {cat === "road"
         ? (decor.roads ?? []).filter((r) => !fid || fid === "__gray" || r.id === fid).map((r) => (
-          <RoadRow key={r.id} r={r} patch={(p) => api.setDecor((d) => ({ ...d, roads: (d.roads ?? []).map((x) => (x.id === r.id ? { ...x, ...p } : x)) }))}
-            placingId={placingId} onPlace={onPlace}
-            del={() => { if (confirm(`ลบ ${r.name}?`)) api.setDecor((d) => ({ ...d, roads: (d.roads ?? []).filter((x) => x.id !== r.id) })); }} />
+          <RoadRow key={r.id} r={r} patch={(p) => patchRoad(r.id, p)} placingId={placingId} onPlace={onPlace}
+            del={() => {
+              if (r.replaces) { if (confirm(`ลบ ${r.name}? (ซ่อนเส้นเดิมจากแผนที่และเส้นทางนำทาง)`)) patchRoad(r.id, { off: true }); }
+              else if (confirm(`ลบ ${r.name}?`)) removeRoad(r.id);
+            }}
+            restore={r.replaces ? () => { if (confirm("คืนเป็นถนนเดิม (ลบเส้นที่แก้ไว้)?")) removeRoad(r.id); } : undefined} />
         ))
         : cat === "gate"
         ? decor.gates.filter((g) => !fid || g.id === fid).map((g) => (
@@ -655,7 +857,7 @@ function DecorEditor({ decor, api, run, placingId, onPlace, focus }: { decor: De
             del={() => { if (confirm(`ลบ ${g.name}?`)) api.setDecor((d) => ({ ...d, gates: d.gates.filter((x) => x.id !== g.id) })); }} />
         ))
         : items.map((it) => (
-          <ItemRow key={it.id} it={it} patch={(p) => patchItem(it.id, p)} placingId={placingId} onPlace={onPlace} roads={decor.roads} highlight={fid === it.id}
+          <ItemRow key={it.id} it={it} patch={(p) => patchItem(it.id, p)} placingId={placingId} onPlace={onPlace} roads={decor.roads} highlight={fid === it.id} locs={locs}
             del={() => api.setDecor((d) => ({ ...d, items: d.items.filter((x) => x.id !== it.id) }))} />
         ))}
       {cat !== "gate" && cat !== "road" && items.length === 0 && <p className="text-xs text-slate-400">ยังไม่มีรายการ</p>}
@@ -685,6 +887,7 @@ export default function AdminPanel({
   const run: Run = async (p) => {
     const r = await p; setToast(r); setTimeout(() => setToast(null), 5000); return r;
   };
+    useEffect(() => { if (!placingId?.startsWith("stair:")) stairPlace.cb = null; }, [placingId]);
 
   const [locId, setLocId] = useState(locs[0]?.id ?? "");
   const loc = locs.find((l) => l.id === locId) ?? locs[0];
@@ -742,7 +945,7 @@ export default function AdminPanel({
                   {locs.map((l) => <option key={l.id} value={l.id}>{l.code}. {l.name}</option>)}
                 </select>
                 <LocForm
-                  key={`${loc.id}|${loc.floors}|${loc.kind}|${loc.corridor}|${loc.stairs}|${loc.perFloor}|${loc.toilet}|${JSON.stringify(loc.floorRooms)}|${JSON.stringify(loc.stairList)}`}
+                  key={`${loc.id}|${loc.floors}|${loc.kind}|${loc.toilet}|${loc.perFloor}|${JSON.stringify(loc.floorRooms)}`}
                   loc={loc} api={api} run={run} placingId={placingId} onPlace={onPlace} />
               </>
             )}
@@ -777,7 +980,7 @@ export default function AdminPanel({
           </>
         ) : <p className="text-xs text-slate-400">ไม่มีอาคารเรียน</p>)}
 
-        {tab === "dec" && <DecorEditor decor={decor} api={api} run={run} placingId={placingId} onPlace={onPlace} focus={focus ?? null} />}
+        {tab === "dec" && <DecorEditor decor={decor} api={api} run={run} placingId={placingId} onPlace={onPlace} focus={focus ?? null} locs={locs} />}
 
         {tab === "set" && (
           <>

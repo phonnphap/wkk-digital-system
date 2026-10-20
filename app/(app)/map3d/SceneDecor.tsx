@@ -4,8 +4,8 @@ import * as THREE from "three";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { FH, MapEdge, MapLocation, MapNode, px } from "./schoolData";
-import { DECOR_LABEL, DecorConfig, DecorItem, FENCE, GateDef, PickFn, pickState } from "./DecorData";
+import { FH, MapEdge, MapLocation, MapNode, px, defaultParkRows, PARK_STALL_L, PARK_STALL_W } from "./schoolData";
+import { DECOR_LABEL, DecorConfig, DecorItem, FENCE, GateDef, PickFn, pickState, edgeKey, replacedEdgeKeys } from "./DecorData";
 import { SchoolGates } from "./SchoolGates";
 import { Traffic, Temple, RoadSign, Zebra, FieldFence, People, Carport, BusBay, Kiosk } from "./SceneExtra";
 import { Roads, RoadsLayer } from "./SceneRoads";
@@ -229,7 +229,7 @@ export function Pavilions({ items, onPick }: { items: DecorItem[]; onPick?: Pick
       {items.filter((p) => p.type === "pavilion").map((p) => {
         const [wx, wz] = px(p.x, p.y);
         return (
-          <group key={p.id} position={[wx, 0, wz]} rotation={[0, rad(p), 0]} scale={[1, p.hs ?? 1, 1]}
+          <group key={p.id} position={[wx, 0, wz]} rotation={[0, rad(p), 0]} scale={[p.w ? p.w / 21.6 : 1, p.hs ?? 1, p.d ? p.d / 21.6 : 1]}
             onClick={(e) => { if (e.delta > 4 || pickState.placing) return; e.stopPropagation(); onPick?.(wx, wz, p.name || "ศาลา/ซุ้มนั่งเล่น", { kind: "item", id: p.id }); }}>
             <mesh position={[0, 0.02, 0]} receiveShadow><boxGeometry args={[0.72, 0.04, 0.72]} /><meshStandardMaterial color="#dee2e6" /></mesh>
             {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], k) => (
@@ -332,16 +332,22 @@ function Shed({ it }: { it: DecorItem }) {
 function Barrier({ it }: { it: DecorItem }) {
   const [x, z] = px(it.x, it.y);
   const W = (it.w ?? 26) / 30;
+  const leaf = useRef<THREE.Group>(null);
+  useFrame((_, dt) => {
+    if (leaf.current) leaf.current.position.x = THREE.MathUtils.lerp(leaf.current.position.x, it.open ? W * 1.05 : 0, 1 - Math.pow(0.001, dt));
+  });
   return (
     <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
       {[-1, 1].map((s) => (
         <mesh key={s} position={[s * W / 2, 0.27, 0]} castShadow><boxGeometry args={[0.1, 0.54, 0.1]} /><meshStandardMaterial color="#f59f00" /></mesh>
       ))}
-      <mesh position={[0, 0.28, 0]} castShadow><boxGeometry args={[W - 0.1, 0.32, 0.025]} /><meshStandardMaterial color="#343a40" /></mesh>
-      {[0.12, 0.44].map((y, k) => (
-        <mesh key={k} position={[0, y, 0]}><boxGeometry args={[W - 0.1, 0.04, 0.04]} /><meshStandardMaterial color={k ? "#e03131" : "#f8f9fa"} /></mesh>
-      ))}
-      <Tag y={0.75}>⛔ {it.name || "ประตูกั้น"}</Tag>
+      <group ref={leaf}>
+        <mesh position={[0, 0.28, 0]} castShadow><boxGeometry args={[W - 0.1, 0.32, 0.025]} /><meshStandardMaterial color="#343a40" /></mesh>
+        {[0.12, 0.44].map((y, k) => (
+          <mesh key={k} position={[0, y, 0]}><boxGeometry args={[W - 0.1, 0.04, 0.04]} /><meshStandardMaterial color={k ? "#e03131" : "#f8f9fa"} /></mesh>
+        ))}
+      </group>
+      <Tag y={0.75}>{it.open ? "✅" : "⛔"} {it.name || "ประตูกั้น"}</Tag>
     </group>
   );
 }
@@ -396,26 +402,33 @@ function Flag({ it }: { it: DecorItem }) {
 
 export function ParkingLot({ loc, dim, onPick }: { loc: MapLocation; dim: boolean; onPick: (id: string) => void }) {
   const [w, d] = loc.size;
+    const cfg = loc.parking;
   const data = useMemo(() => {
-    const r = rng(42);
-    const stallW = 0.5, stallL = 0.78;
-    const cols = Math.max(1, Math.floor((w - 0.4) / stallW));
-    const x0 = -(cols * stallW) / 2;
-    const rowZ = [-1.4, -0.6, 0.6, 1.4].filter((z) => Math.abs(z) + stallL / 2 < d / 2);
+    const sw0 = cfg?.stallW ?? PARK_STALL_W, sl0 = cfg?.stallL ?? PARK_STALL_L;
+    const rows = cfg?.rows ?? defaultParkRows({ size: [w, d] });
     const lines: Item[] = [], bodies: Item[] = [], cabins: Item[] = [];
     const palette = ["#e63946", "#f1faee", "#457b9d", "#1d3557", "#ffb703", "#2a9d8f", "#868e96", "#212529", "#ffffff", "#9d4edd"];
-    rowZ.forEach((z) => {
-      for (let k = 0; k <= cols; k++) lines.push({ p: [x0 + k * stallW, 0.032, z], s: [0.02, 0.004, stallL] });
-      for (let k = 0; k < cols; k++) {
-        if (r() > 0.62) continue;
-        const x = x0 + (k + 0.5) * stallW;
+    rows.forEach((row, ri) => {
+      const r = rng(42 + ri * 7);
+      const par = row.mode === "parallel";
+      const sw = par ? sl0 : sw0, sl = par ? sw0 : sl0;           // ความกว้างตามแถว / ความลึกของช่อง
+      const th = row.mode === "slant" ? (((row.ang ?? 45) * Math.PI) / 180) * (row.dir ?? 1) : 0;
+      const pitch = row.mode === "slant" ? sw / Math.max(Math.cos(th), 0.3) : sw;
+      const n = Math.max(0, Math.round(row.n));
+      const x0 = (row.x ?? 0) - (n * pitch) / 2;
+      const fill = row.fill ?? 0.62;
+      for (let k = 0; k <= n; k++) lines.push({ p: [x0 + k * pitch, 0.032, row.z], s: [0.02, 0.004, sl], r: th });
+      for (let k = 0; k < n; k++) {
+        if (r() > fill) continue;
+        const x = x0 + (k + 0.5) * pitch;
         const c = palette[Math.floor(r() * palette.length)];
-        bodies.push({ p: [x, 0.1, z], s: [0.3, 0.1, 0.58], c });
-        cabins.push({ p: [x, 0.19, z], s: [0.26, 0.09, 0.3], c: "#263238" });
+        const rr = par ? Math.PI / 2 : th;
+        bodies.push({ p: [x, 0.1, row.z], s: [0.3, 0.1, 0.58], r: rr, c });
+        cabins.push({ p: [x, 0.19, row.z], s: [0.26, 0.09, 0.3], r: rr, c: "#263238" });
       }
     });
     return { lines, bodies, cabins };
-  }, [w, d]);
+  }, [w, d, cfg]);
   return (
     <group position={[loc.pos[0], 0, loc.pos[1]]} onClick={(e) => { e.stopPropagation(); onPick(loc.id); }}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.025, 0]} receiveShadow>
@@ -501,6 +514,10 @@ export function Field({ loc, dim, onPick }: { loc: MapLocation; dim: boolean; on
   );
 }
 
+// ไม้กั้น: 1 = ฝั่งใต้ของป้อม (ใหม่), -1 = ฝั่งเหนือ (ค่าเดิม) · ถ้าอยากกลับซ้าย-ขวาแทน ให้เปลี่ยน BAR_X เป็น 0.85 แล้วกลับทิศไม้ใน mesh ด้านล่าง
+const BAR_SIDE = 1;
+const BAR_X = -0.85;
+
 /* ───────────── รปภ. + ไม้กั้น ───────────── */
 
 export function Guard({ gate, robotRef }: { gate?: MapLocation; robotRef: React.RefObject<THREE.Group | null> }) {
@@ -552,7 +569,7 @@ export function Guard({ gate, robotRef }: { gate?: MapLocation; robotRef: React.
           </div>
         </Html>
       </group>
-      <group ref={bar} position={[gate.pos[0] - 0.85, 0.42, gate.pos[1] - 0.5]}>
+      <group ref={bar} position={[gate.pos[0] + BAR_X, 0.42, gate.pos[1] + BAR_SIDE * 0.5]}>
         <mesh position={[0, -0.2, 0]}><boxGeometry args={[0.08, 0.4, 0.08]} /><meshStandardMaterial color="#f59f00" /></mesh>
         {[0, 1, 2, 3].map((i) => (
           <mesh key={i} position={[0.2 + i * 0.4, 0, 0]}>
@@ -561,6 +578,63 @@ export function Guard({ gate, robotRef }: { gate?: MapLocation; robotRef: React.
           </mesh>
         ))}
       </group>
+    </>
+  );
+}
+
+export function PolyFence({ it }: { it: DecorItem }) {
+  const d = useMemo(() => {
+    const base = (it.pts ?? []).map(([dx, dy]) => px(it.x + dx, it.y + dy));
+    const pts = it.closed && base.length > 2 ? [...base, base[0]] : base;
+    const style = it.fstyle ?? "bar";
+    const H = 0.62 * (it.h ?? 1);
+    const col = it.color ?? "#212529";
+    const solid: Item[] = [], glass: Item[] = [];
+    const lens = pts.slice(1).map((b, i) => Math.hypot(b[0] - pts[i][0], b[1] - pts[i][1]));
+    const total = lens.reduce((a, b) => a + b, 0);
+    const gaps = (it.gaps ?? []).map((g) => [g.t * total - g.w / 2, g.t * total + g.w / 2] as [number, number]);
+    let S = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const len = lens[i];
+      if (len < 0.01) continue;
+      const ux = (b[0] - a[0]) / len, uz = (b[1] - a[1]) / len, ang = -Math.atan2(b[1] - a[1], b[0] - a[0]);
+      let keep: [number, number][] = [[0, len]];
+      gaps.forEach(([g0, g1]) => {
+        const l0 = g0 - S, l1 = g1 - S;
+        if (l1 <= 0 || l0 >= len) return;
+        keep = keep.flatMap(([k0, k1]) => {
+          if (l1 <= k0 || l0 >= k1) return [[k0, k1] as [number, number]];
+          const r: [number, number][] = [];
+          if (l0 > k0) r.push([k0, l0]);
+          if (l1 < k1) r.push([l1, k1]);
+          return r;
+        });
+      });
+      keep.forEach(([k0, k1]) => {
+        const L1 = k1 - k0;
+        if (L1 < 0.03) return;
+        const at = (t: number): [number, number] => [a[0] + ux * t, a[1] + uz * t];
+        const [mx, mz] = at((k0 + k1) / 2);
+        if (style === "wall") solid.push({ p: [mx, H / 2, mz], s: [L1, H, 0.07], r: ang, c: col });
+        else if (style === "mesh") glass.push({ p: [mx, H / 2, mz], s: [L1, H, 0.012], r: ang, c: col });
+        else {
+          solid.push({ p: [mx, H * 0.85, mz], s: [L1, 0.035, 0.035], r: ang, c: col });
+          solid.push({ p: [mx, H * 0.25, mz], s: [L1, 0.035, 0.035], r: ang, c: col });
+          const bn = Math.floor(L1 / 0.16);
+          for (let j = 1; j < bn; j++) { const [bx, bz] = at(k0 + (L1 * j) / bn); solid.push({ p: [bx, H * 0.425, bz], s: [0.025, H * 0.85, 0.025], c: col }); }
+        }
+        const pn = Math.max(1, Math.round(L1 / 2.8));
+        for (let k = 0; k <= pn; k++) { const [qx, qz] = at(k0 + (L1 * k) / pn); solid.push({ p: [qx, H * 0.55, qz], s: [0.08, H * 1.1, 0.08], c: "#adb5bd" }); }
+      });
+      S += len;
+    }
+    return { solid, glass };
+  }, [it]);
+  return (
+    <>
+      <Inst items={d.solid} cast><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></Inst>
+      <Inst items={d.glass}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" transparent opacity={0.4} /></Inst>
     </>
   );
 }
@@ -574,6 +648,8 @@ export function Decor({
   robotRef: React.RefObject<THREE.Group | null>; indoor: boolean;
   onGround?: (x: number, z: number) => void; onPick?: PickFn;
 }) {
+  const skip = useMemo(() => replacedEdgeKeys(decor.roads ?? []), [decor.roads]);
+  const visEdges = useMemo(() => edges.filter((e) => !skip.has(edgeKey(e.a, e.b))), [edges, skip]);
   const of = (t: DecorItem["type"]) => decor.items.filter((i) => i.type === t);
   // ห่อวัตถุ: คลิกแล้วเลื่อนกล้อง/เปิดตั้งค่า + ตัวคูณความสูง (hs)
   const wrap = (i: DecorItem, node: React.ReactNode, useHs = true) => {
@@ -588,7 +664,7 @@ export function Decor({
   return (
     <>
       <Ground onGround={onGround} />
-      <Roads nodes={nodes} edges={edges} style={decor.grayRoad} onPick={onPick} />
+      <Roads nodes={nodes} edges={visEdges} style={decor.grayRoad} onPick={onPick} />
       <RoadsLayer roads={decor.roads ?? []} gates={gates} gray={decor.grayRoad} onPick={onPick} />
       <Fence gates={gates} />
       <SchoolGates gates={gates} signs={of("sign")} onPick={onPick} />
@@ -610,6 +686,7 @@ export function Decor({
           {of("zebra").map((i) => wrap(i, <Zebra it={i} />, false))}
           {of("fieldfence").map((i) => wrap(i, <FieldFence it={i} />, false))}
           {of("people").map((i) => wrap(i, <People it={i} roads={decor.roads} />, false))}
+          {of("polyfence").map((i) => wrap(i, <PolyFence it={i} />, false))}
           <Traffic roads={decor.roads ?? []} traffic={decor.traffic} />
         </>
       )}

@@ -96,7 +96,7 @@ export function RoadsLayer({ roads, gates, gray, onPick }: { roads: RoadItem[]; 
     };
 
     roads.forEach((r) => {
-      if (r.kind === "route") return;
+      if (r.kind === "route" || r.off) return;
       const pl = sampleRoad(r.pts, r.curve ?? 0);
       if (pl.length < 2) return;
       cur = r.id;

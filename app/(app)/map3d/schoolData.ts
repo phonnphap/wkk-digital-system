@@ -6,7 +6,9 @@ export const FH = 1.2; // ความสูงต่อชั้น (หน่�
 export type LocKind = "building" | "facility" | "field" | "parking" | "gate" | "dome";
 export type XZ = [number, number];
 export type CorridorSide = "a" | "b";
-export type StairsMode = "start" | "end" | "both";
+export type StairsMode = "none" | "start" | "end" | "both";
+/** ผนังของห้อง ตามแกนตัวอาคาร: px = ขวา, nx = ซ้าย, pz = ล่าง(ใต้), nz = บน(เหนือ) */
+export type RoomSide = "px" | "nx" | "pz" | "nz";
 export type ToiletMode = "none" | "m" | "f" | "mf" | "t" | "tmf";
 export type StageMode = "none" | "start" | "end";
 
@@ -27,6 +29,7 @@ export interface MapLocation {
   perFloor?: number;   // จำนวนห้องต่อแถว (building: 0 = อัตโนมัติ, facility: 0 = ไม่มีห้องภายใน)
   toilet?: ToiletMode;
   stage?: StageMode;   // โดมกีฬา: เวทีอยู่ปลายด้านไหน
+  parking?: ParkCfg | null;            // ลานจอดรถ: ตั้งแถว/ช่อง/แบบจอดเอง (ว่าง = อัตโนมัติ)
   floorRooms?: Record<string, number>; // จำนวนห้องต่อแถวแยกตามชั้น เช่น {"1":5,"2":6}
   stairList?: StairDef[];              // บันไดกำหนดเอง (ว่าง = ใช้ค่าอัตโนมัติ/ผังพิเศษ)
   height?: number;                     // ตัวคูณความสูง (1 = ปกติ) ใช้กับความสูงต่อชั้น / โดม
@@ -35,7 +38,7 @@ export interface DoorDef { p: number; w: number }
 /** ของตกแต่งในห้อง: x,z = เมตร จากกึ่งกลางห้อง (ก่อนหมุนห้อง), rot = องศา, s = ขนาด */
 export interface FurnItem { id: string; kind: string; x: number; z: number; rot?: number; s?: number }
 /** บันไดกำหนดเอง: a = จุดเริ่ม (เมตร จากปลาย start), len = ความยาว, w = สัดส่วนความกว้าง 0..1, dir = ทิศที่ขั้นสูงขึ้น, from/to = ชั้นที่เชื่อม (รวมชั้นปลายทาง) */
-export interface StairDef { a: number; len: number; w?: number; dir: 1 | -1; from: number; to: number } // ตำแหน่งประตู 0..1 ตามความยาวผนัง, ความกว้าง (world)
+export interface StairDef { a: number; len: number; w?: number; dir: -2 | -1 | 1 | 2; from: number; to: number }
 export interface MapRoom {
   id: string;
   location_id: string;
@@ -48,6 +51,8 @@ export interface MapRoom {
   type?: string;
   desks?: number;
   ac?: string;
+  doorSide?: RoomSide;   // ผนังที่มีประตู (ว่าง = อัตโนมัติจากตำแหน่ง door)
+  boardSide?: RoomSide;  // ผนังที่ติดกระดาน (ว่าง = ตรงข้ามประตู)
   teacherDesks?: number; // จำนวนโต๊ะครู
   students?: number;     // จำนวนนักเรียน
   doors?: DoorDef[];     // ประตูห้อง (ว่าง = 1 บานกลางผนัง)
@@ -56,6 +61,22 @@ export interface MapRoom {
 }
 export interface MapNode { id: string; x: number; z: number }
 export interface MapEdge { a: string; b: string }
+/** ลานจอดรถ: 1 แถว = ช่องจอดเรียงตามแกน X ที่ตำแหน่ง z */
+export interface ParkRow {
+  z: number; x?: number;            // ตำแหน่งกึ่งกลางแถว (เมตร world จากกึ่งกลางลาน)
+  n: number;                        // จำนวนช่อง
+  mode: "straight" | "slant" | "parallel"; // จอดตรง / จอดเอียง / จอดขนาน
+  ang?: number; dir?: 1 | -1;       // เอียงกี่องศา, 1 = เอียง "\\"  -1 = เอียง "/"
+  fill?: number;                    // สัดส่วนช่องที่มีรถ 0..1
+}
+export interface ParkCfg { rows: ParkRow[]; stallW?: number; stallL?: number }
+export const PARK_STALL_W = 0.5, PARK_STALL_L = 0.78;
+export function defaultParkRows(loc: { size: XZ }): ParkRow[] {
+  const [w, d] = loc.size;
+  const n = Math.max(1, Math.floor((w - 0.4) / PARK_STALL_W));
+  return [-1.4, -0.6, 0.6, 1.4].filter((z) => Math.abs(z) + PARK_STALL_L / 2 < d / 2)
+    .map((z) => ({ z, n, mode: "straight" as const, fill: 0.62 }));
+}
 
 /** สถานที่ที่มีห้องภายในให้เข้าไปดู: อาคารเรียน หรืออาคารทั่วไปที่ตั้ง "ห้องต่อแถว" > 0 */
 export const hasInterior = (l: { kind: LocKind; perFloor?: number }) =>
@@ -162,7 +183,7 @@ export const toiletLen = (l: MapLocation) => Math.min(0.6, Math.max(0.32, longLe
 export const corridorV = (loc: MapLocation): number => (loc.corridor === "b" ? 1 - CORRIDOR_W / 2 : CORRIDOR_W / 2);
 
 export const stairEnds = (loc: MapLocation): ("s" | "e")[] =>
-  loc.stairs === "both" ? ["s", "e"] : loc.stairs === "end" ? ["e"] : ["s"];
+  loc.stairs === "none" ? [] : loc.stairs === "both" ? ["s", "e"] : loc.stairs === "end" ? ["e"] : ["s"];
 
 /* ── ผังพิเศษรายอาคาร ──
    เรียงจากปลาย "start" (แกนยาวค่าน้อย: ซ้าย/บน) ไปปลาย "end"
@@ -172,7 +193,7 @@ export const stairEnds = (loc: MapLocation): ("s" | "e")[] =>
 interface SegDef {
   k: "stairs" | "room"; name?: string; type?: string; w: number;
   len?: number; split?: number; merge?: boolean; dir?: 1 | -1; doors?: DoorDef[]; desks?: number;
-  ext?: number; // เมตร: ห้องต่อออกมานอกอาคารฝั่งทางเดิน (เช่น ระเบียง)
+  ext?: number; // เมตร: สร้าง "ระเบียง" แยกอีกห้อง เฉพาะแถบนอกอาคารฝั่งทางเดิน (ห้องนี้ยังเป็นห้องปกติ)
 }
 export interface SegPlaced extends SegDef { a: number; len: number }
 const S = (extra: Partial<SegDef> = {}): SegDef => ({ k: "stairs", w: 0, ...extra });
@@ -202,7 +223,7 @@ const b9 = (level: number): SegDef[] => {
   const t = (name: string) => R(name, "toilet", 0, { len: 0.4 });
   const startT = level === 2 ? [t("ห้องน้ำ นร.หญิง"), t("ห้องน้ำครู")] : [];
   const endT = level === 3 ? [t("ห้องน้ำ นร.ชาย")] : [];
-  const center = level === 1 ? R("ระเบียง", "balcony", 1.2, { ext: 0.9 }) : R("ห้องพักครู", "office", 1.2);
+  const center = level === 1 ? R("", "classroom", 1, { ext: 0.9 }) : R("ห้องพักครู", "office", 1.2);
   const c = () => R("", "classroom", 1);
   return [S(), ...startT, c(), c(), center, c(), c(), ...endT, S({ dir: 1 })];
 };
@@ -226,6 +247,7 @@ export const stairsVisible = (loc: MapLocation, floor: number) =>
   floor === 1 || !(loc.kind === "building" && SPECIAL_MERGE.has(loc.code));
 
 function placeSegs(loc: MapLocation, def: SegDef[]): SegPlaced[] {
+  if (loc.stairs === "none") def = def.filter((s) => s.k !== "stairs");   // ไม่มีบันได: ตัดช่องบันไดของผังพิเศษ
   const Lg = longLen(loc), SL = stairLen(loc);
   const fixed = def.reduce((a, s) => a + (s.k === "stairs" ? SL : s.len ?? 0), 0);
   const totalW = def.filter((s) => s.k === "room" && s.len === undefined).reduce((a, s) => a + s.w, 0) || 1;
@@ -245,7 +267,7 @@ export function specialLayout(loc: MapLocation, level = 1): SegPlaced[] | null {
 }
 
 /** ช่วงบันได: c = กึ่งกลางตามแกนยาว (เมตร world จากกึ่งกลางอาคาร), dir = ทิศที่ขั้นบันไดสูงขึ้น */
-export interface StairSpan { c: number; len: number; dir: 1 | -1; w?: number; from?: number; to?: number }
+export interface StairSpan { c: number; len: number; dir: -2 | -1 | 1 | 2; w?: number; from?: number; to?: number }
 export function stairSpans(loc: MapLocation): StairSpan[] {
   const Lg = longLen(loc), SL = stairLen(loc);
   if (loc.stairList?.length)
@@ -263,7 +285,7 @@ export function stairsList(loc: MapLocation): XZ[] {
     return (isLongX(loc) ? [u, v] : [v, u]) as XZ;
   });
 }
-export const stairsNorm = (loc: MapLocation): XZ => stairsList(loc)[0];
+export const stairsNorm = (loc: MapLocation): XZ => stairsList(loc)[0] ?? corridorNorm(loc, [0.5, 0.5]);
 
 /** เลือกบันไดที่ทางรวม (ทางเข้า → บันได → ห้อง) สั้นที่สุด โดยต้องเชื่อมชั้น 1 ถึงชั้นของห้อง */
 export function bestStair(loc: MapLocation, from: XZ, to: XZ, level = 2): XZ {
@@ -312,13 +334,13 @@ export function genRooms(loc: MapLocation): MapRoom[] {
 
   const out: MapRoom[] = [];
   const add = (level: number, tag: string, code: string, name: string, u0: number, len: number, type: string, desks: number, doors?: DoorDef[], ext = 0) => {
-    const crossLen = longX ? loc.size[1] : loc.size[0];
-    const e = ext > 0 ? ext / crossLen : 0;
-    // ext > 0: ห้องคลุมถึงทางเดินและต่อออกไปนอกอาคาร (ระเบียง)
-    const cs = e > 0 ? (sideB ? 0 : -e) : v0, cl = e > 0 ? 1 + e : vLen;
-    const dv = e > 0 ? (sideB ? cs + cl - 0.01 : cs + 0.01) : doorV;
-    const [x, z] = conv(u0, cs);
-    const [w, d] = longX ? [len, cl] : [cl, len];
+  const crossLen = longX ? loc.size[1] : loc.size[0];
+  const e = ext > 0 ? ext / crossLen : 0;
+    // ext > 0: ระเบียงเฉพาะแถบนอกอาคารฝั่งทางเดิน (ไม่กินพื้นที่ห้อง ไม่คลุมทางเดิน)
+  const cs = e > 0 ? (sideB ? 1 : -e) : v0, cl = e > 0 ? e : vLen;
+  const dv = e > 0 ? (sideB ? cs + 0.01 : cs + cl - 0.01) : doorV;
+  const [x, z] = conv(u0, cs);
+  const [w, d] = longX ? [len, cl] : [cl, len];
     out.push({
       id: `gen-${loc.code}-${level}-${tag}`, location_id: loc.id, level, code, name,
       x, z, w, d, door: conv(u0 + len / 2, dv), placeholder: true, type, desks, ac: "none",
@@ -331,10 +353,11 @@ export function genRooms(loc: MapLocation): MapRoom[] {
   const names = TOILET_OPTIONS[loc.toilet ?? "none"].rooms;
   const SL = stairLen(loc), TL = toiletLen(loc);
   const perEnd: Record<"s" | "e", string[]> = { s: [], e: [] };
-  if (ends.length === 2 && names.length === 2) { perEnd[ends[0]] = [names[0]]; perEnd[ends[1]] = [names[1]]; }
-  else names.forEach((n) => perEnd[ends[0]].push(n));
-  const resS = ends.includes("s") ? SL + (perEnd.s.length ? TL : 0) : 0;
-  const resE = ends.includes("e") ? SL + (perEnd.e.length ? TL : 0) : 0;
+  const tEnds: ("s" | "e")[] = ends.length ? ends : ["s"];   // ไม่มีบันได: ห้องน้ำอยู่ปลายซ้าย/บน
+  if (tEnds.length === 2 && names.length === 2) { perEnd[tEnds[0]] = [names[0]]; perEnd[tEnds[1]] = [names[1]]; }
+  else names.forEach((n) => perEnd[tEnds[0]].push(n));
+  const resS = (ends.includes("s") ? SL : 0) + (perEnd.s.length ? TL : 0);
+  const resE = (ends.includes("e") ? SL : 0) + (perEnd.e.length ? TL : 0);
   const uStart = resS / Lg, uEnd = 1 - resE / Lg;
   const avail = (uEnd - uStart) * Lg;
   const basePerRow = loc.perFloor && loc.perFloor > 0
@@ -382,7 +405,7 @@ export function genRooms(loc: MapLocation): MapRoom[] {
       const list = perEnd[e], k = list.length;
       list.forEach((name, i) => {
         const each = TL / k;
-        const off = SL + i * each;
+        const off = (ends.includes(e) ? SL : 0) + i * each;
         const u0 = e === "s" ? off / Lg : 1 - (off + each) / Lg;
         add(level, `T${tk}`, `${loc.code}-${level}T${tk}`, name, u0, each / Lg, "toilet", 0);
         tk++;
@@ -421,8 +444,9 @@ export function genRooms(loc: MapLocation): MapRoom[] {
         const base = m.s.name || `ห้อง ${code}`;
         const name = parts > 1 && m.s.name ? `${base} ${p + 1}` : base;
         add(level, `S${i}-${p}`, code, name, (m.a + (p * m.len) / parts) / Lg, m.len / parts / Lg, type,
-          type === "classroom" ? m.s.desks ?? 30 : 0, parts === 1 ? m.s.doors : undefined, m.s.ext ?? 0);
+          type === "classroom" ? m.s.desks ?? 30 : 0, parts === 1 ? m.s.doors : undefined);
       }
+      if (m.s.ext) add(level, `B${i}`, `${loc.code}-${level}B${i}`, "ระเบียง", m.a / Lg, m.len / Lg, "balcony", 0, undefined, m.s.ext);
     });
   }
   return out;

@@ -43,11 +43,11 @@ export function fenceFrame(x: number, y: number) {
 }
 
 /* ───────────── ชนิดของตกแต่ง ───────────── */
-export type DecorType = "tree" | "pavilion" | "shrine" | "toilet" | "shed" | "barrier" | "flag" | "bridge" | "sign" | "carport" | "busbay" | "kiosk" | "temple" | "roadsign" | "zebra" | "fieldfence" | "people";
+export type DecorType = "tree" | "pavilion" | "shrine" | "toilet" | "shed" | "barrier" | "flag" | "bridge" | "sign" | "carport" | "busbay" | "kiosk" | "temple" | "roadsign" | "zebra" | "fieldfence" | "people" | "polyfence";
 export const DECOR_LABEL: Record<DecorType, string> = {
   tree: "ต้นไม้", pavilion: "ศาลา/ซุ้มนั่งเล่น", shrine: "ซุ้มพระ", toilet: "ตึกห้องน้ำ (นอกอาคาร)",
   shed: "โรงจอดมอเตอร์ไซค์", barrier: "ประตูกั้น", flag: "เสาธง", bridge: "ทางเชื่อมระหว่างอาคาร", sign: "ป้ายโรงเรียน",
-  carport: "โรงจอดรถยนต์", busbay: "ช่องจอดรถตู้/รถรับส่ง", kiosk: "ซุ้มขายน้ำ",
+  carport: "โรงจอดรถยนต์", busbay: "ช่องจอดรถตู้/รถรับส่ง", kiosk: "ซุ้มขายน้ำ", polyfence: "รั้วหลายจุด (รั้วตึกอนุบาล/รั้วอาคาร)",
   temple: "วัด (โมเดล)", roadsign: "ป้ายจราจร/บอกทาง", zebra: "ทางม้าลาย", fieldfence: "รั้วสนามกีฬา", people: "กลุ่มนักเรียน/ครู",
 };
 export interface DecorItem {
@@ -63,6 +63,11 @@ export interface DecorItem {
   n?: number;                // busbay: จำนวนช่อง / people: จำนวนนักเรียน
   m?: number;                // people: จำนวนครู
   kind?: string;             // tree: round|pine|palm|bush|flower, people: walk|assemble|sit|play|exercise, temple: ubosot|prasat
+  open?: boolean;            // barrier: เปิดประตูกั้น
+  pts?: [number, number][];  // polyfence: จุดรั้ว (px เทียบกับ x,y ของชิ้นนี้)
+  closed?: boolean;          // polyfence: วนปิดรอบ
+  fstyle?: "bar" | "mesh" | "wall"; // polyfence: เหล็กดัด / ตาข่าย / กำแพง
+  gaps?: { t: number; w: number }[]; // polyfence: ช่องเปิด (t = 0..1 ตามความยาวรั้ว, w = กว้าง world)
   since?: number;            // เวอร์ชันที่เพิ่มรายการนี้ (ใช้เติมค่าตั้งต้นใหม่ให้ข้อมูลที่เคยบันทึกไว้)
 }
 export interface GateItem {
@@ -94,6 +99,8 @@ export interface RoadItem {
   w?: number;                // ความกว้าง (world)
   roof?: boolean;            // ฟุตบาท: มีหลังคา
   label?: string;            // ป้ายชื่อถนน
+  replaces?: string;         // gray: เส้นนี้แทนเส้นเดิมใน nodes/edges (คีย์ "a|b")
+  off?: boolean;             // ปิดใช้งาน (ลบเส้นเดิมที่แปลงแล้ว)
   since?: number;
 }
 export interface DecorConfig {
@@ -140,7 +147,7 @@ export const DEFAULT_ROADS: RoadItem[] = [
   RD("route-1", "เส้นทางรถ (เข้าประตู 3 → ออกประตู 4)", "route", CAR_ROUTE, { curve: 0.8 }),
 ];
 
-export const DECOR_VERSION = 5;
+export const DECOR_VERSION = 6;
 export const DEFAULT_DECOR: DecorConfig = {
   version: DECOR_VERSION,
   roads: DEFAULT_ROADS,
@@ -208,6 +215,7 @@ export const DEFAULT_DECOR: DecorConfig = {
     { id: "flower-1", type: "tree", x: 545, y: 262, kind: "flower", s: 1, h: 1, since: 4 },
     { id: "bush-1", type: "tree", x: 560, y: 330, kind: "bush", s: 1, h: 1, since: 4 },
     { id: "bush-2", type: "tree", x: 560, y: 372, kind: "bush", s: 1, h: 1, since: 4 },
+    { id: "shrine-mhomya", type: "shrine", x: 116, y: 548, name: "ศาลหม่อมย่าเขียนฯ", since: 6 },
   ],
 };
 
@@ -308,10 +316,33 @@ export function outsideRoadSegs(roads: RoadItem[], gates: GateDef[]): { a: XZ; b
   return segs;
 }
 
+export const edgeKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+export const replacedEdgeKeys = (roads: RoadItem[]) => new Set(roads.filter((r) => r.replaces).map((r) => r.replaces!));
+
+/** แปลงเส้นถนนเทาเดิม (nodes/edges) เป็นถนนเทาที่แก้/ลบได้ (ข้ามเส้นที่ต่อกับโหนดประตู) */
+export function grayFromGraph(nodes: MapNode[], edges: MapEdge[], gates: GateItem[], roads: RoadItem[]): RoadItem[] {
+  const gateNodes = new Set(gates.map((g) => g.node));
+  const have = replacedEdgeKeys(roads);
+  const pos = new Map(nodes.map((n) => [n.id, n]));
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  const out: RoadItem[] = [];
+  edges.forEach((e) => {
+    if (gateNodes.has(e.a) || gateNodes.has(e.b) || e.a.startsWith("rd:") || e.b.startsWith("rd:")) return;
+    const k = edgeKey(e.a, e.b);
+    if (have.has(k)) return;
+    const a = pos.get(e.a), b = pos.get(e.b);
+    if (!a || !b) return;
+    const P = (n: MapNode): [number, number] => [r1(n.x * 30 + 480), r1(n.z * 30 + 400)];
+    out.push({ id: `gray-${e.a}-${e.b}`, name: `ถนนเทา ${e.a} – ${e.b}`, kind: "gray", pts: [P(a), P(b)], replaces: k });
+  });
+  return out;
+}
+
 /** เพิ่มโหนด/เส้นทางจากถนนเทาและฟุตบาทที่ตั้งค่าไว้ เพื่อให้หุ่นนำทางเดินผ่านได้ (ต่อปลายเข้ากับโหนดเดิมที่ใกล้ที่สุด) */
 export function withRoadNodes(nodes: MapNode[], edges: MapEdge[], roads: RoadItem[]) {
-  const ns = [...nodes], es = [...edges];
-  roads.filter((r) => r.kind === "gray" || r.kind === "walk").forEach((r) => {
+  const skip = replacedEdgeKeys(roads);   // เส้นเดิมที่ถูกแปลง/ลบ ตัดออกจากกราฟนำทาง
+  const ns = [...nodes], es = edges.filter((e) => !skip.has(edgeKey(e.a, e.b)));
+  roads.filter((r) => (r.kind === "gray" || r.kind === "walk") && !r.off).forEach((r) => {
     const ids = r.pts.map((_, i) => `rd:${r.id}:${i}`);
     r.pts.forEach((p, i) => {
       const [x, z] = px(p[0], p[1]);
