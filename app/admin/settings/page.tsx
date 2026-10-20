@@ -55,7 +55,7 @@ const SETTING_GROUPS: SettingGroup[] = [
       },
       {
         key: "por5_all",
-        name: "ปพ.5 ทุกห้อง",
+        name: "ปพ.5 / วผ.4 ทุกห้อง",
         desc: "เลือกห้อง/วิชา ดูคะแนนรวม การมาเรียน ข้อมูลเชิงลึก และใบเกรด/แบบวัดผล 4 ของทุกห้อง",
         icon: FileText,
         color: "bg-cyan-600",
