@@ -7,9 +7,9 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import InsightsTool from "@/components/insights/InsightsTool";
 import Vp4Report from "@/components/insights/Vp4Report";
-import { getViewableClassrooms } from "@/lib/classrooms/getViewableClassrooms";
 
 const supabase = createClient();
+const ADMIN_ROLES = ["admin", "executive", "director", "deputy_director"];
 
 type Classroom = {
   classroom_id: string; room_name: string;
@@ -88,6 +88,8 @@ export default function Por5SummaryPage() {
   const [notInTimetable, setNotInTimetable] = useState<string[]>([]);
   const [gradeHeadName, setGradeHeadName] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [yearName, setYearName] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const level = selectedClassroom ? detectLevel(selectedClassroom.room_name) : "primary";
   // ประถมมีแต่ใบเกรด; มัธยมเลือก ใบเกรด/แบบวัดผล 4 (มิดเทอม) ได้
@@ -143,11 +145,25 @@ export default function Por5SummaryPage() {
   useEffect(() => {
     (async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser();
+      let admin = false;
       if (authUser) {
-        const { data: profile } = await supabase.from("users").select("id").eq("auth_id", authUser.id).maybeSingle();
-        if (profile) setCurrentUserId(profile.id);
+        const { data: profile } = await supabase.from("users").select("id, role").eq("auth_id", authUser.id).maybeSingle();
+        if (profile) {
+          setCurrentUserId(profile.id);
+          admin = !!profile.role && ADMIN_ROLES.includes(profile.role);
+        }
       }
-      const { classrooms: base } = await getViewableClassrooms(supabase);
+      setIsAdmin(admin);
+
+      // แอดมิน/ผู้บริหาร: เห็นทุกห้อง · ครู: เห็นเฉพาะห้องของตัวเอง
+      let base: { classroom_id: string; room_name: string }[];
+      if (admin) {
+        const { data: all } = await supabase.from("classrooms").select("id, room_name");
+        base = (all ?? []).map((r: any) => ({ classroom_id: r.id, room_name: r.room_name ?? "" }));
+      } else {
+        const { data } = await supabase.rpc("get_my_classrooms");
+        base = (data ?? []) as { classroom_id: string; room_name: string }[];
+      }
       const ids = base.map(r => r.classroom_id);
 
       const [{ data: roomRows }, { data: yearRows }] = await Promise.all([
@@ -167,14 +183,26 @@ export default function Por5SummaryPage() {
       const cur: any = (yearRows ?? []).find((y: any) => y.is_current);
       const initSem = ((cur?.semester ?? 1) === 2 ? 2 : 1) as 1 | 2;
       setSemester(initSem);
+      const initYear: string = cur?.year_name ?? "";
+      setYearName(initYear);
 
-      const visible = rows.filter(c => !isSplitRoom(c) || c.semester === initSem);
+      const visible = rows.filter(c =>
+        (!initYear || !c.year_name || c.year_name === initYear) &&
+        (!isSplitRoom(c) || c.semester === initSem));
       if (visible.length === 1) setSelectedClassroom(visible[0]);
       setLoading(false);
     })();
   }, []);
 
-  const visibleClassrooms = classrooms.filter(c => !isSplitRoom(c) || c.semester === semester);
+  const visibleClassrooms = classrooms
+    .filter(c => (!yearName || !c.year_name || c.year_name === yearName) && (!isSplitRoom(c) || c.semester === semester))
+    .sort((a, b) => a.room_name.localeCompare(b.room_name, "th", { numeric: true }));
+  const yearOptions = Array.from(new Set(classrooms.map(c => c.year_name).filter(Boolean))) as string[];
+  const levelGroups = [
+    { key: "kindergarten", label: "อนุบาล", test: (n: string) => n.startsWith("อ") },
+    { key: "primary", label: "ประถมศึกษา", test: (n: string) => n.startsWith("ป") },
+    { key: "secondary", label: "มัธยมศึกษา", test: (n: string) => n.startsWith("ม") },
+  ];
 
   function changeSemester(next: 1 | 2) {
     if (next === semester) return;
@@ -516,14 +544,38 @@ export default function Por5SummaryPage() {
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
-            {visibleClassrooms.map(c => (
-              <button key={c.classroom_id} onClick={() => setSelectedClassroom(c)}
-                className="text-left rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-lg transition">
-                <p className="font-bold text-slate-800">ห้อง {c.room_name}</p>
-              </button>
-            ))}
-          </div>
+          {isAdmin && yearOptions.length > 1 && (
+            <select value={yearName} onChange={e => setYearName(e.target.value)}
+              className="ml-2 mt-4 border-2 border-slate-200 rounded-xl px-3 py-1.5 text-xs font-black">
+              {yearOptions.sort().reverse().map(y => <option key={y} value={y}>ปีการศึกษา {y}</option>)}
+            </select>
+          )}
+          {isAdmin && (
+            <p className="mt-3 text-xs font-bold text-indigo-600">🔑 สิทธิ์ผู้ดูแล — เห็นทุกห้องทั้งโรงเรียน ({visibleClassrooms.length} ห้อง)</p>
+          )}
+          {(() => {
+            const used = new Set<string>();
+            const sections = levelGroups.map(g => {
+              const rooms = visibleClassrooms.filter(c => g.test(c.room_name));
+              rooms.forEach(r => used.add(r.classroom_id));
+              return { ...g, rooms };
+            });
+            const others = visibleClassrooms.filter(c => !used.has(c.classroom_id));
+            if (others.length) sections.push({ key: "other", label: "อื่นๆ", test: () => true, rooms: others });
+            return sections.filter(g => g.rooms.length > 0).map(g => (
+              <div key={g.key} className="mt-5">
+                <h2 className="text-sm font-black text-slate-600 mb-2">{g.label} <span className="text-slate-300">({g.rooms.length})</span></h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                  {g.rooms.map(c => (
+                    <button key={c.classroom_id} onClick={() => setSelectedClassroom(c)}
+                      className="text-left rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-lg transition">
+                      <p className="font-bold text-slate-800">ห้อง {c.room_name}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ));
+          })()}
         </>
       ) : (
         <>
