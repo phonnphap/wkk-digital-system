@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
-  Users, BarChart3, CalendarOff, ArrowRight, ArrowLeft, ShieldAlert,
+  Users, BarChart3, CalendarOff, ArrowRight, ArrowLeft, ShieldAlert, FileText,
   type LucideIcon,
 } from "lucide-react";
 import AdminGuard from "@/components/auth/AdminGuard";
@@ -52,6 +52,14 @@ const SETTING_GROUPS: SettingGroup[] = [
         icon: BarChart3,
         color: "bg-purple-600",
         path: "/admin/attendance-overview",
+      },
+      {
+        key: "por5_all",
+        name: "ปพ.5 ทุกห้อง",
+        desc: "เลือกห้อง/วิชา ดูคะแนนรวม การมาเรียน ข้อมูลเชิงลึก และใบเกรด/แบบวัดผล 4 ของทุกห้อง",
+        icon: FileText,
+        color: "bg-cyan-600",
+        path: "/homeroom/por5",
       },
       {
         key: "holidays",

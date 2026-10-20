@@ -1,10 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-
-const supabase = createClient();
 
 type Student = {
   id: string; prefix?: string; first_name: string; last_name: string;
@@ -39,7 +35,6 @@ type SectionInfo = {
 };
 type GradeCell = { grandTotal: number; percentage: number; grade: string; totalMax: number };
 type AttendCell = { present: number; total: number };
-
 type AdvisorInfo = { prefix?: string; first_name: string; last_name: string };
 
 type ReportRow =
@@ -68,25 +63,21 @@ function buildReportRows(sections: SectionInfo[], groupNames: Record<string, str
   return rows;
 }
 
-// ★ ลำดับการเรียงวิชา: พื้นฐานก่อน (เรียงตามอักษรย่อ ท/ค/ว/ส/พ/ศ/ง/อ) แล้วเพิ่มเติม (เรียงอักษรย่อแบบเดียวกัน) แล้วจึงกิจกรรม
+// ลำดับวิชา: พื้นฐาน (ท/ค/ว/ส/พ/ศ/ง/อ) -> เพิ่มเติม -> กิจกรรม
 const SUBJECT_LETTER_ORDER = ["ท", "ค", "ว", "ส", "พ", "ศ", "ง", "อ"];
-
 function subjectTypeRank(sec: SectionInfo): number {
-  if (isActivitySubject(sec.subject_code)) return 2; // กิจกรรมอยู่ท้ายสุด
-  return sec.subject_type === "basic" ? 0 : 1; // พื้นฐาน -> เพิ่มเติม
+  if (isActivitySubject(sec.subject_code)) return 2;
+  return sec.subject_type === "basic" ? 0 : 1;
 }
-
 function subjectLetterRank(code: string): number {
-  const letter = (code ?? "").charAt(0);
-  const idx = SUBJECT_LETTER_ORDER.indexOf(letter);
+  const idx = SUBJECT_LETTER_ORDER.indexOf((code ?? "").charAt(0));
   return idx === -1 ? SUBJECT_LETTER_ORDER.length : idx;
 }
-
 function compareSections(a: SectionInfo, b: SectionInfo): number {
-  const rankDiff = subjectTypeRank(a) - subjectTypeRank(b);
-  if (rankDiff !== 0) return rankDiff;
-  const letterDiff = subjectLetterRank(a.subject_code) - subjectLetterRank(b.subject_code);
-  if (letterDiff !== 0) return letterDiff;
+  const r = subjectTypeRank(a) - subjectTypeRank(b);
+  if (r !== 0) return r;
+  const l = subjectLetterRank(a.subject_code) - subjectLetterRank(b.subject_code);
+  if (l !== 0) return l;
   return (a.subject_code ?? "").localeCompare(b.subject_code ?? "");
 }
 
@@ -102,8 +93,7 @@ function groupCombinedScore(
     const w = (m.score_group_weight_percent ?? 0) / totalWeight;
     return sum + w * cells[i]!.grandTotal;
   }, 0);
-  const roundingMode = members[0]?.gradeRoundingMode ?? "truncate";
-  return applyRounding(combined, roundingMode);
+  return applyRounding(combined, members[0]?.gradeRoundingMode ?? "truncate");
 }
 
 function formatFullName(a?: AdvisorInfo): string {
@@ -121,7 +111,6 @@ function characteristicLabel(level: string): string {
   return map[level] ?? "-";
 }
 
-// ★ ตรวจสอบว่าเป็นภาคเรียนที่ 1 หรือไม่ (รองรับค่าที่อาจเป็น "1", "ภาคเรียนที่ 1", "เทอม 1" ฯลฯ)
 function isFirstSemester(semester?: string): boolean {
   if (!semester) return false;
   const s = semester.trim();
@@ -129,157 +118,121 @@ function isFirstSemester(semester?: string): boolean {
   return /1/.test(s) && !/2/.test(s);
 }
 
-// ★ ความกว้างเส้นใต้ลงชื่อ — ใช้ค่าคงที่เดียวกันทุกช่อง (ไม่คำนวณจากความยาวชื่อ) เพื่อให้ยาวเท่ากันเสมอ ทั้งบนจอและตอนพิมพ์
-const SIGNATURE_LINE_WIDTH_PX = 260;
-
-// ★ ประมาณความกว้างของข้อความไทย/อังกฤษ (ใช้เป็นค่า fallback เท่านั้น)
-function estimateTextWidthPx(text: string, pxPerChar = 13, basePadding = 24): number {
-  const len = (text ?? "").length;
-  return len * pxPerChar + basePadding;
+function formatThaiDate(iso?: string): string {
+  const d = iso ? new Date(iso) : new Date();
+  return d.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
 }
 
-// ★ ช่องกรอกข้อมูลด้านบน (ชื่อ / เลขประจำตัว / ห้อง / เลขที่) — label ตามด้วยข้อความที่จัดกึ่งกลาง (ไม่มีเส้นใต้)
+const SIGNATURE_LINE_WIDTH_PX = 260;
+function estimateTextWidthPx(text: string, pxPerChar = 13, basePadding = 24): number {
+  return (text ?? "").length * pxPerChar + basePadding;
+}
+
 function InfoField({ label, value, grow = 1 }: { label: string; value: string; grow?: number }) {
   return (
     <div className="flex items-baseline" style={{ flexGrow: grow, flexBasis: 0, minWidth: "fit-content" }}>
       <span className="whitespace-nowrap">{label}</span>
-      <span className="flex-1 text-center mx-2 px-1 whitespace-nowrap overflow-hidden text-ellipsis">
-        {value}
-      </span>
+      <span className="flex-1 text-center mx-2 px-1 whitespace-nowrap overflow-hidden text-ellipsis">{value}</span>
     </div>
   );
 }
 
-// ★ บรรทัดลงชื่อ — "ลงชื่อ" ชิดซ้ายตรงกันทุกช่อง เส้นใต้กับชื่อในวงเล็บอยู่ในคอลัมน์เดียวกัน
-//    ทำให้ชื่อในวงเล็บอยู่กึ่งกลางเส้นใต้พอดี ไม่ว่าความยาวของคำว่า "ลงชื่อ" หรือ role จะเป็นเท่าใด
-function SignatureField({ role, nameLabel, lineWidthPx: fixedLineWidthPx }: { role: string; nameLabel?: string; lineWidthPx?: number }) {
-  const lineWidthPx = fixedLineWidthPx ?? SIGNATURE_LINE_WIDTH_PX;
+function SignatureField({ role, nameLabel, lineWidthPx }: { role: string; nameLabel?: string; lineWidthPx?: number }) {
+  const w = lineWidthPx ?? SIGNATURE_LINE_WIDTH_PX;
   return (
     <div className="inline-flex items-baseline text-left signature-field">
       <span className="whitespace-nowrap">ลงชื่อ</span>
-      <div className="flex flex-col items-center mx-1" style={{ width: `${lineWidthPx}px` }}>
+      <div className="flex flex-col items-center mx-1" style={{ width: `${w}px` }}>
         <span className="border-b-2 border-dotted border-gray-400 w-full text-center">&nbsp;</span>
-        <span className="text-center whitespace-nowrap">
-          {nameLabel ? `(${nameLabel})` : "\u00A0"}
-        </span>
+        <span className="text-center whitespace-nowrap">{nameLabel ? `(${nameLabel})` : "\u00A0"}</span>
       </div>
       <span className="whitespace-nowrap">{role}</span>
     </div>
   );
 }
 
+// กล่อง "เวลาเรียน" ของแบบวัดผล 4 (pct = null แปลว่าไม่มีข้อมูล ไม่ติ๊กอะไร)
+function AttendanceBox({ pct }: { pct: number | null }) {
+  const level = pct === null ? -1 : pct >= 80 ? 0 : pct >= 60 ? 1 : 2;
+  const items = [
+    "ร้อยละ 80 ขึ้นไป (มีสิทธิ์สอบ)",
+    "อยู่ระหว่างร้อยละ 60-79 (ไม่มีสิทธิ์สอบ)",
+    "ต่ำกว่าร้อยละ 60 (ไม่มีสิทธิ์สอบ)",
+  ];
+  return (
+    <div className="border p-3 text-xl inline-block">
+      <p className="font-black mb-1">เวลาเรียน</p>
+      {items.map((t, i) => (
+        <p key={i}>{i === level ? "☑" : "☐"} {t}</p>
+      ))}
+    </div>
+  );
+}
+
+const TH = "border px-2 py-1 font-black";
+const TD = "border px-2 py-1";
+
 export default function Vp4Report({
   classroomLevel,
   classroomLabel,
   academicYear,
   semester,
+  docKind = "final",
   schoolName, districtName, provinceName,
   directorName,
+  gradeHeadName = "",
   advisorNames,
   students,
   sections: sectionsProp,
   gradeMatrix,
   attendMatrix,
   groupNames = {},
+  scoreDate,
   onBack,
 }: {
   classroomLevel: "primary" | "secondary";
   classroomLabel: string;
   academicYear: string;
   semester?: string;
+  docKind?: "final" | "midterm";   // midterm = แบบวัดผล 4 (มัธยมเท่านั้น)
   schoolName: string; districtName: string; provinceName: string;
   directorName: string;
+  gradeHeadName?: string;
   advisorNames: AdvisorInfo[];
   students: Student[];
   sections: SectionInfo[];
   gradeMatrix: Record<string, Record<string, GradeCell>>;
   attendMatrix: Record<string, Record<string, AttendCell>>;
   groupNames?: Record<string, string>;
+  scoreDate?: string;               // วันที่ของคะแนน (ใช้ในหมายเหตุแบบวัดผล 4)
   onBack: () => void;
 }) {
-  // ★ ส21101 (สังคมศึกษาฯ) ไม่มีในตารางสอน ป.1 แล้ว จึงต้องไม่แสดงในใบเกรด/ปพ นี้
   const EXCLUDED_SUBJECT_CODES = ["ส21101"];
   const sections = sectionsProp.filter(sec => !EXCLUDED_SUBJECT_CODES.includes(sec.subject_code));
 
-  const router = useRouter();
-  // ★ ประถมศึกษา ภาคเรียนที่ 1: ยังไม่มีผลการเรียน/เกรดเฉลี่ยสรุป ให้แสดงคะแนนเต็มและคะแนนที่ได้แทน
-  const isPrimarySemester1 = classroomLevel === "primary" && isFirstSemester(semester);
+  const isPrimary = classroomLevel === "primary";
+  const sem1 = isFirstSemester(semester);
+  const mode: "midterm" | "primary1" | "primary2" | "secondary" =
+    !isPrimary && docKind === "midterm" ? "midterm" : isPrimary ? (sem1 ? "primary1" : "primary2") : "secondary";
+  const showRemark = mode !== "primary2";
+
+  const COL_WIDTHS: Record<typeof mode, string[]> = {
+    midterm:   ["8%", "32%", "11%", "9%", "12%", "12%", "16%"],
+    primary1:  ["7%", "26%", "9%", "7%", "8%", "9%", "11%", "13%", "10%"],
+    primary2:  ["8%", "28%", "10%", "8%", "10%", "10%", "13%", "13%"],
+    secondary: ["7%", "24%", "9%", "7%", "7%", "7%", "6%", "10%", "12%", "11%"],
+  };
+
   const [overallScores, setOverallScores] = useState<Record<string, { characteristic: string; readThinkWrite: string }>>({});
-  // ★ null = ดูทั้งห้อง, มีค่า = ดูเฉพาะนักเรียนคนนั้น
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
-  // ★ ครูที่ปรึกษาที่ดึงสดจากตาราง classrooms -> users (title, first_name, last_name)
-  const [fetchedAdvisors, setFetchedAdvisors] = useState<AdvisorInfo[] | null>(null);
 
   useEffect(() => {
-    (async () => {
-      const results: Record<string, { characteristic: string; readThinkWrite: string }> = {};
-      students.forEach(s => { results[s.id] = { characteristic: "-", readThinkWrite: "-" }; });
-      setOverallScores(results);
-    })();
+    const results: Record<string, { characteristic: string; readThinkWrite: string }> = {};
+    students.forEach(s => { results[s.id] = { characteristic: "-", readThinkWrite: "-" }; });
+    setOverallScores(results);
   }, [classroomLevel, students]);
 
-  // ★ ดึงครูที่ปรึกษา (homeroom_teacher_id, homeroom_teacher_2_id) จาก classrooms
-  //    โดยอ้างอิงจาก room_name (เช่น "ป.1/6") แล้ว join ไปที่ users เพื่อเอา title + first_name + last_name
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      if (!classroomLabel) {
-        setFetchedAdvisors(null);
-        return;
-      }
-
-      const { data: classroom, error: classroomError } = await supabase
-        .from("classrooms")
-        .select("id, room_name, homeroom_teacher_id, homeroom_teacher_2_id")
-        .eq("room_name", classroomLabel)
-        .maybeSingle();
-
-      if (cancelled) return;
-
-      if (classroomError || !classroom) {
-        setFetchedAdvisors(null);
-        return;
-      }
-
-      const teacherIds = [classroom.homeroom_teacher_id, classroom.homeroom_teacher_2_id].filter(
-        (id): id is string => Boolean(id)
-      );
-
-      if (teacherIds.length === 0) {
-        setFetchedAdvisors([]);
-        return;
-      }
-
-      const { data: teachers, error: teachersError } = await supabase
-        .from("users")
-        .select("id, title, first_name, last_name")
-        .in("id", teacherIds);
-
-      if (cancelled) return;
-
-      if (teachersError || !teachers) {
-        setFetchedAdvisors(null);
-        return;
-      }
-
-      // เรียงลำดับให้ตรงกับ ครูที่ปรึกษาคนที่ 1 (homeroom_teacher_id) และคนที่ 2 (homeroom_teacher_2_id)
-      const ordered: AdvisorInfo[] = teacherIds.map(id => {
-        const t = teachers.find((u: any) => u.id === id);
-        return t
-          ? { prefix: t.title ?? "", first_name: t.first_name ?? "", last_name: t.last_name ?? "" }
-          : { prefix: "", first_name: "", last_name: "" };
-      });
-
-      setFetchedAdvisors(ordered);
-    })();
-
-    return () => { cancelled = true; };
-  }, [classroomLabel]);
-
-  // ★ ถ้าดึงจาก classrooms/users สำเร็จและมีข้อมูล ให้ใช้ค่านี้แทน prop ที่ส่งเข้ามา
-  const resolvedAdvisors: AdvisorInfo[] =
-    fetchedAdvisors && fetchedAdvisors.length > 0 ? fetchedAdvisors : advisorNames;
+  const advisors = advisorNames;
 
   function subjectTypeLabel(sec: SectionInfo): string {
     if (isActivitySubject(sec.subject_code)) return "กิจกรรม";
@@ -288,41 +241,31 @@ export default function Vp4Report({
     return "-";
   }
 
-  // ★ เรียงวิชา: พื้นฐาน (ท/ค/ว/ส/พ/ศ/ง/อ) -> เพิ่มเติม (ท/ค/ว/ส/พ/ศ/ง/อ) -> กิจกรรม
   const sortedSections = [...sections].sort(compareSections);
   const reportRows = buildReportRows(sortedSections, groupNames);
+  // แบบวัดผล 4: แยกทีละวิชา ไม่รวมกลุ่ม ไม่มีกิจกรรม
+  const midtermSections = sortedSections.filter(s => !isActivitySubject(s.subject_code));
 
-  // ★ นักเรียนที่จะแสดง: ทั้งห้อง หรือ เฉพาะคนที่เลือก (เรียงตามเลขที่เดิม)
-  const visibleStudents = selectedStudentId
-    ? students.filter(s => s.id === selectedStudentId)
-    : students;
+  const visibleStudents = selectedStudentId ? students.filter(s => s.id === selectedStudentId) : students;
 
   function creditSummary(studentId: string) {
-    let basicPlanned = 0, basicEarned = 0;
-    let addPlanned = 0, addEarned = 0;
+    let basicPlanned = 0, basicEarned = 0, addPlanned = 0, addEarned = 0;
     sections.forEach(sec => {
       if (isActivitySubject(sec.subject_code)) return;
       const credit = sec.credit_hours ?? 0;
       const cell = gradeMatrix[studentId]?.[sec.id];
       const passed = cell ? parseFloat(cell.grade) > 0 : false;
-      if (sec.subject_type === "basic") {
-        basicPlanned += credit;
-        if (passed) basicEarned += credit;
-      } else {
-        addPlanned += credit;
-        if (passed) addEarned += credit;
-      }
+      if (sec.subject_type === "basic") { basicPlanned += credit; if (passed) basicEarned += credit; }
+      else { addPlanned += credit; if (passed) addEarned += credit; }
     });
     return {
       basicPlanned, basicEarned, addPlanned, addEarned,
-      totalPlanned: basicPlanned + addPlanned,
-      totalEarned: basicEarned + addEarned,
+      totalPlanned: basicPlanned + addPlanned, totalEarned: basicEarned + addEarned,
     };
   }
 
   function calcGpaAndAvgPercent(studentId: string) {
-    let weightedGradeSum = 0, creditSum = 0;
-    let totalPercentSum = 0, subjectCount = 0;
+    let weightedGradeSum = 0, creditSum = 0, totalPercentSum = 0, subjectCount = 0;
     sections.forEach(sec => {
       if (isActivitySubject(sec.subject_code)) return;
       const cell = gradeMatrix[studentId]?.[sec.id];
@@ -338,7 +281,6 @@ export default function Vp4Report({
     return { gpa: gpa.toFixed(2), avgPercent: avgPercent.toFixed(2), gpaRaw: gpa };
   }
 
-  // ★ ลำดับที่ยังเทียบกับ "ทั้งห้อง" เสมอ ไม่ผูกกับโหมดดูทีละคน
   const classroomRanking = (() => {
     const withGpa = students.map(s => ({ id: s.id, gpa: calcGpaAndAvgPercent(s.id).gpaRaw }));
     const sorted = [...withGpa].sort((a, b) => b.gpa - a.gpa);
@@ -351,25 +293,31 @@ export default function Vp4Report({
     return rankMap;
   })();
 
-  function attendancePercentFor(studentId: string) {
+  function attendancePercentFor(studentId: string): number | null {
     let present = 0, total = 0;
     sections.forEach(sec => {
       const c = attendMatrix[studentId]?.[sec.id];
       if (c) { present += c.present; total += c.total; }
     });
-    return total > 0 ? (present / total) * 100 : 0;
+    return total > 0 ? (present / total) * 100 : null;
   }
 
   function overallActivityResult(studentId: string): "ผ" | "มผ" {
     const activities = sections.filter(s => isActivitySubject(s.subject_code));
     if (activities.length === 0) return "ผ";
-    const anyFail = activities.some(sec => activityResult(attendMatrix[studentId]?.[sec.id]) === "มผ");
-    return anyFail ? "มผ" : "ผ";
+    return activities.some(sec => activityResult(attendMatrix[studentId]?.[sec.id]) === "มผ") ? "มผ" : "ผ";
   }
+
+  // ความกว้างเส้นลายเซ็น (เท่ากันทุกช่อง)
+  const advisorCombinedName = `${formatFullName(advisors[0])}${advisors[1] ? " / " + formatFullName(advisors[1]) : ""}`;
+  const signatureLineWidthPx = Math.max(
+    SIGNATURE_LINE_WIDTH_PX,
+    ...[formatFullName(advisors[0]), formatFullName(advisors[1]), advisorCombinedName, directorName, gradeHeadName]
+      .map(n => estimateTextWidthPx(n ?? ""))
+  );
 
   return (
     <div className="font-['TH_Sarabun_New',_sans-serif]">
-      {/* ★ รวมแถวปุ่มพิมพ์ + ปุ่มเลือกนักเรียนไว้บรรทัดเดียวกัน ลดพื้นที่ว่างด้านบน */}
       <div className="flex items-start justify-between gap-3 mb-2 print:hidden">
         <div className="flex items-center gap-1 flex-wrap">
           <button onClick={() => setSelectedStudentId(null)}
@@ -396,136 +344,180 @@ export default function Vp4Report({
         const credits = creditSummary(s.id);
         const roomRank = classroomRanking[s.id] ?? "-";
         const roomParts = parseRoomName(classroomLabel);
+        const gradeLabel = `${isPrimary ? "ประถมศึกษาปีที่" : "มัธยมศึกษาปีที่"} ${roomParts.grade}`;
 
         return (
-          <div key={s.id} className="vp4-page bg-white p-8 mb-6 print:mb-0 print:break-after-page border border-slate-100 print:border-0 text-xl">
+          <div key={s.id} className="vp4-page relative bg-white p-8 mb-6 print:mb-0 print:break-after-page border border-slate-100 print:border-0 text-xl">
+            {mode === "midterm" && (
+              <span className="absolute right-6 top-6 border-2 border-blue-700 text-blue-700 text-base font-black px-3 py-1 rounded">
+                แบบวัดผล 4
+              </span>
+            )}
+
             <div className="text-center mb-2">
               <img src="/school-logo.png" alt="ตราโรงเรียน" className="h-24 w-24 mx-auto mb-1 object-contain" />
-              <p className="font-bold text-2xl">แบบรายงานประจำตัวนักเรียน</p>
+              <p className="font-bold text-2xl">
+                {mode === "midterm" ? "แบบรายงานคะแนนระหว่างเรียนและเวลาเรียนประจำตัวนักเรียน" : "แบบรายงานประจำตัวนักเรียน"}
+              </p>
               <p className="text-2xl">{schoolName} อำเภอ{districtName} จังหวัด{provinceName}</p>
             </div>
 
             <div className="text-center text-xl mb-3">
-              {classroomLevel === "primary" ? (
-                <span>ชั้นประถมศึกษาปีที่ {roomParts.grade} ปีการศึกษา {academicYear}</span>
-              ) : (
-                <span>ชั้นมัธยมศึกษาปีที่ {roomParts.grade} ปีการศึกษา {academicYear}</span>
-              )}
+              {mode === "midterm"
+                ? <span>ชั้นมัธยมศึกษาปีที่ {roomParts.grade} ภาคเรียนที่ {semester ?? "-"} ปีการศึกษา {academicYear}</span>
+                : <span>ชั้น{gradeLabel} ปีการศึกษา {academicYear}</span>}
             </div>
 
-            {/* ★ ชื่อ / เลขประจำตัว / ห้อง / เลขที่ — ไม่มีเส้นใต้ */}
             <div className="flex flex-wrap items-baseline gap-4 text-xl mb-3 w-full print:mb-1">
               <InfoField label="ชื่อ" value={`${s.prefix ?? ""}${s.first_name} ${s.last_name}`} grow={3} />
               <InfoField label="เลขประจำตัว" value={s.student_code ?? "-"} grow={2} />
-              <InfoField label="ห้อง" value={String(classroomLevel === "primary" ? roomParts.room : classroomLabel)} grow={1} />
+              <InfoField label="ห้อง" value={roomParts.room} grow={1} />
               <InfoField label="เลขที่" value={String(s.seat_number)} grow={1} />
             </div>
 
             <table className="w-full border-collapse text-xl vp4-table table-fixed">
               <colgroup>
-                <col style={{ width: "7%" }} />
-                <col style={{ width: "26%" }} />
-                <col style={{ width: "9%" }} />
-                <col style={{ width: "7%" }} />
-                <col style={{ width: "8%" }} />
-                <col style={{ width: "9%" }} />
-                <col style={{ width: "11%" }} />
-                <col style={{ width: "13%" }} />
-                <col style={{ width: "10%" }} />
+                {COL_WIDTHS[mode].map((w, i) => <col key={i} style={{ width: w }} />)}
               </colgroup>
               <thead>
-                <tr className="border">
-                  <th className="border px-2 py-1 font-black" rowSpan={2}>รหัสวิชา</th>
-                  <th className="border px-2 py-1 font-black" rowSpan={2}>รายวิชา</th>
-                  <th className="border px-2 py-1 font-black" rowSpan={2}>ประเภท</th>
-                  <th className="border px-2 py-1 font-black" rowSpan={2}>{classroomLevel === "primary" ? "ชั่วโมง" : "หน่วยกิต"}</th>
-                  <th className="border px-2 py-1 font-black" colSpan={2}>การประเมินผลสัมฤทธิ์</th>
-                  <th className="border px-2 py-1 font-black" rowSpan={2}>คุณลักษณะ</th>
-                  <th className="border px-2 py-1 font-black" rowSpan={2}>อ่านคิด<br/>วิเคราะห์เขียน</th>
-                  <th className="border px-2 py-1 font-black" rowSpan={2}>หมายเหตุ</th>
-                </tr>
-                <tr className="border text-xl text-slate-500">
-                  <th className="border px-2 py-1 font-black">{isPrimarySemester1 ? "คะแนนเต็ม" : "คะแนน"}</th>
-                  <th className="border px-2 py-1 font-black">{isPrimarySemester1 ? "คะแนนที่ได้" : "ผลการเรียน"}</th>
-                </tr>
+                {mode === "midterm" ? (
+                  <>
+                    <tr className="border">
+                      <th className={TH} rowSpan={2}>รหัสวิชา</th>
+                      <th className={TH} rowSpan={2}>รายวิชา</th>
+                      <th className={TH} rowSpan={2}>ประเภท</th>
+                      <th className={TH} rowSpan={2}>หน่วยกิต</th>
+                      <th className={TH} colSpan={2}>คะแนนระหว่างเรียน</th>
+                      <th className={TH} rowSpan={2}>หมายเหตุ</th>
+                    </tr>
+                    <tr className="border text-slate-500">
+                      <th className={TH}>คะแนนเต็ม</th>
+                      <th className={TH}>คะแนนที่ได้</th>
+                    </tr>
+                  </>
+                ) : mode === "secondary" ? (
+                  <>
+                    <tr className="border">
+                      <th className={TH} rowSpan={2}>รหัสวิชา</th>
+                      <th className={TH} rowSpan={2}>รายวิชา</th>
+                      <th className={TH} rowSpan={2}>ประเภท</th>
+                      <th className={TH} rowSpan={2}>หน่วยกิต</th>
+                      <th className={TH} colSpan={3}>การประเมินผลสัมฤทธิ์</th>
+                      <th className={TH} rowSpan={2}>คุณลักษณะ</th>
+                      <th className={TH} rowSpan={2}>อ่านคิด<br />วิเคราะห์เขียน</th>
+                      <th className={TH} rowSpan={2}>หมายเหตุ</th>
+                    </tr>
+                    <tr className="border text-slate-500">
+                      <th className={TH}>คะแนน</th>
+                      <th className={TH}>สอบปกติ</th>
+                      <th className={TH}>แก้ตัว</th>
+                    </tr>
+                  </>
+                ) : (
+                  <>
+                    <tr className="border">
+                      <th className={TH} rowSpan={2}>รหัสวิชา</th>
+                      <th className={TH} rowSpan={2}>รายวิชา</th>
+                      <th className={TH} rowSpan={2}>ประเภท</th>
+                      <th className={TH} rowSpan={2}>ชั่วโมง</th>
+                      <th className={TH} colSpan={2}>การประเมินผลสัมฤทธิ์</th>
+                      <th className={TH} rowSpan={2}>{mode === "primary2" ? "คุณลักษณะอันพึงประสงค์" : "คุณลักษณะ"}</th>
+                      <th className={TH} rowSpan={2}>อ่านคิด<br />วิเคราะห์เขียน</th>
+                      {showRemark && <th className={TH} rowSpan={2}>หมายเหตุ</th>}
+                    </tr>
+                    <tr className="border text-slate-500">
+                      <th className={TH}>{mode === "primary1" ? "คะแนนเต็ม" : "คะแนนที่ได้"}</th>
+                      <th className={TH}>{mode === "primary1" ? "คะแนนที่ได้" : "ผลการเรียน"}</th>
+                    </tr>
+                  </>
+                )}
               </thead>
               <tbody>
-                {reportRows.map(row => {
-                  if (row.kind === "group") {
-                    const combined = groupCombinedScore(gradeMatrix, s.id, row.members);
-                    const unitSum = row.members.reduce((sum, m) => {
-                      const v = classroomLevel === "primary" ? m.hours_per_year : m.credit_hours;
-                      return sum + (v ?? 0);
-                    }, 0);
-                    const groupFullScore = row.members.reduce((sum, m) => {
-                      return sum + (gradeMatrix[s.id]?.[m.id]?.totalMax ?? 0);
-                    }, 0);
+                {mode === "midterm" ? (
+                  midtermSections.map((sec, idx) => {
+                    const cell = gradeMatrix[s.id]?.[sec.id];
                     return (
-                      <tr key={row.groupCode} className="border">
-                        <td className="border px-2 py-1 text-center">{row.code}</td>
-                        <td className="border px-2 py-1 break-words">{row.name}</td>
-                        <td className="border px-2 py-1 text-center">พื้นฐาน</td>
-                        <td className="border px-2 py-1 text-center">{unitSum || "-"}</td>
-                        <td className="border px-2 py-1 text-center font-black text-black">
-                          {isPrimarySemester1 ? (groupFullScore || "-") : (combined ?? "-")}
-                        </td>
-                        <td className="border px-2 py-1 text-center font-black text-black">
-                          {isPrimarySemester1 ? (combined ?? "-") : "-"}
-                        </td>
-                        <td className="border px-2 py-1 text-center">{overall?.characteristic ?? "-"}</td>
-                        <td className="border px-2 py-1 text-center">{overall?.readThinkWrite ?? "-"}</td>
-                        <td className="border px-2 py-1"></td>
+                      <tr key={sec.id} className="border">
+                        <td className={`${TD} text-center`}>{sec.subject_code}</td>
+                        <td className={`${TD} break-words`}>{sec.subject_name}</td>
+                        <td className={`${TD} text-center`}>{subjectTypeLabel(sec)}</td>
+                        <td className={`${TD} text-center`}>{sec.credit_hours ?? "-"}</td>
+                        <td className={`${TD} text-center font-black text-black`}>{cell?.totalMax ?? "-"}</td>
+                        <td className={`${TD} text-center font-black text-black`}>{cell?.grandTotal ?? "-"}</td>
+                        {idx === 0 && (
+                          <td className={`${TD} align-top text-center text-red-600 text-base`} rowSpan={midtermSections.length}>
+                            *คะแนนที่ได้เป็นคะแนน ณ วันที่ {formatThaiDate(scoreDate)}
+                          </td>
+                        )}
                       </tr>
                     );
-                  }
+                  })
+                ) : (
+                  reportRows.map(row => {
+                    if (row.kind === "group") {
+                      const combined = groupCombinedScore(gradeMatrix, s.id, row.members);
+                      const unitSum = row.members.reduce((sum, m) => sum + ((isPrimary ? m.hours_per_year : m.credit_hours) ?? 0), 0);
+                      const groupFullScore = row.members.reduce((sum, m) => sum + (gradeMatrix[s.id]?.[m.id]?.totalMax ?? 0), 0);
+                      return (
+                        <tr key={row.groupCode} className="border">
+                          <td className={`${TD} text-center`}>{row.code}</td>
+                          <td className={`${TD} break-words`}>{row.name}</td>
+                          <td className={`${TD} text-center`}>พื้นฐาน</td>
+                          <td className={`${TD} text-center`}>{unitSum || "-"}</td>
+                          <td className={`${TD} text-center font-black text-black`}>
+                            {mode === "primary1" ? (groupFullScore || "-") : (combined ?? "-")}
+                          </td>
+                          <td className={`${TD} text-center font-black text-black`}>
+                            {mode === "primary1" ? (combined ?? "-") : "-"}
+                          </td>
+                          {mode === "secondary" && <td className={TD}></td>}
+                          <td className={`${TD} text-center`}>{overall?.characteristic ?? "-"}</td>
+                          <td className={`${TD} text-center`}>{overall?.readThinkWrite ?? "-"}</td>
+                          {showRemark && <td className={TD}></td>}
+                        </tr>
+                      );
+                    }
 
-                  const sec = row.section;
-                  const cell = gradeMatrix[s.id]?.[sec.id];
-                  const isActivity = isActivitySubject(sec.subject_code);
-                  const unitValue = classroomLevel === "primary" ? sec.hours_per_year : sec.credit_hours;
-                  return (
-                    <tr key={sec.id} className="border">
-                      <td className="border px-2 py-1 text-center">{sec.subject_code}</td>
-                      <td className="border px-2 py-1 break-words">{sec.subject_name}</td>
-                      <td className="border px-2 py-1 text-center">{subjectTypeLabel(sec)}</td>
-                      <td className="border px-2 py-1 text-center">{isActivity ? "-" : (unitValue ?? "-")}</td>
-                      <td className="border px-2 py-1 text-center font-black text-black">
-                        {isActivity
-                          ? "-"
-                          : isPrimarySemester1
-                            ? (cell?.totalMax ?? "-")
-                            : (cell?.percentage != null ? Math.round(cell.percentage) : "-")}
-                      </td>
-                      <td className="border px-2 py-1 text-center font-black text-black">
-                        {isActivity
-                          ? activityResult(attendMatrix[s.id]?.[sec.id])
-                          : isPrimarySemester1
-                            ? (cell?.grandTotal ?? "-")
-                            : (cell?.grade ?? "-")}
-                      </td>
-                      <td className="border px-2 py-1 text-center">{overall?.characteristic ?? "-"}</td>
-                      <td className="border px-2 py-1 text-center">{overall?.readThinkWrite ?? "-"}</td>
-                      <td className="border px-2 py-1"></td>
-                    </tr>
-                  );
-                })}
+                    const sec = row.section;
+                    const cell = gradeMatrix[s.id]?.[sec.id];
+                    const isActivity = isActivitySubject(sec.subject_code);
+                    const unitValue = isPrimary ? sec.hours_per_year : sec.credit_hours;
+                    return (
+                      <tr key={sec.id} className="border">
+                        <td className={`${TD} text-center`}>{sec.subject_code}</td>
+                        <td className={`${TD} break-words`}>{sec.subject_name}</td>
+                        <td className={`${TD} text-center`}>{subjectTypeLabel(sec)}</td>
+                        <td className={`${TD} text-center`}>{isActivity ? "-" : (unitValue ?? "-")}</td>
+                        <td className={`${TD} text-center font-black text-black`}>
+                          {isActivity ? "-" : mode === "primary1" ? (cell?.totalMax ?? "-") : (cell?.percentage != null ? Math.round(cell.percentage) : "-")}
+                        </td>
+                        <td className={`${TD} text-center font-black text-black`}>
+                          {isActivity ? activityResult(attendMatrix[s.id]?.[sec.id]) : mode === "primary1" ? (cell?.grandTotal ?? "-") : (cell?.grade ?? "-")}
+                        </td>
+                        {mode === "secondary" && <td className={TD}></td>}
+                        <td className={`${TD} text-center`}>{overall?.characteristic ?? "-"}</td>
+                        <td className={`${TD} text-center`}>{overall?.readThinkWrite ?? "-"}</td>
+                        {showRemark && <td className={TD}></td>}
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
 
-            {classroomLevel === "primary" ? (
-              isPrimarySemester1 ? null : (
-                // ★ คะแนนเฉลี่ยขึ้นบรรทัดใหม่ (เดิมอยู่บรรทัดเดียวกัน)
-                <div className="flex flex-col gap-1 text-xl mt-3">
-                  <span>ระดับผลการเรียนเฉลี่ย {gpa}</span>
-                  <span>คะแนนเฉลี่ยร้อยละ {avgPercent}</span>
-                </div>
-              )
-            ) : (
+            {/* ส่วนสรุปใต้ตาราง */}
+            {mode === "primary2" && (
+              <div className="flex flex-col gap-1 text-xl mt-3">
+                <span>ระดับผลการเรียนเฉลี่ย {gpa}</span>
+                <span>คะแนนรวมเฉลี่ยร้อยละ {avgPercent}</span>
+              </div>
+            )}
+            {mode === "secondary" && (
               <div className="mt-4 flex flex-col sm:flex-row gap-6 text-xl">
                 <table className="border-collapse text-xl flex-1 vp4-table">
                   <thead>
                     <tr>
-                      <th className="border p-1 text-left font-black" colSpan={1}>สรุปผลการประเมิน</th>
+                      <th className="border p-1 text-left font-black">สรุปผลการประเมิน</th>
                       <th className="border p-1 font-black">ที่เรียน</th>
                       <th className="border p-1 font-black">ที่ได้</th>
                     </tr>
@@ -535,10 +527,7 @@ export default function Vp4Report({
                     <tr><td className="border p-1">จำนวนหน่วยกิต/น้ำหนักวิชาเพิ่มเติม</td><td className="border p-1 text-center">{credits.addPlanned.toFixed(1)}</td><td className="border p-1 text-center">{credits.addEarned.toFixed(1)}</td></tr>
                     <tr><td className="border p-1 font-bold">รวมจำนวนหน่วยกิต/น้ำหนัก</td><td className="border p-1 text-center font-bold">{credits.totalPlanned.toFixed(1)}</td><td className="border p-1 text-center font-bold">{credits.totalEarned.toFixed(1)}</td></tr>
                     <tr><td className="border p-1" colSpan={2}>ระดับผลการเรียนเฉลี่ย (GPA)</td><td className="border p-1 text-center">{gpa}</td></tr>
-                    <tr>
-                      <td className="border p-1" colSpan={2}>ลำดับที่ในห้องเรียน/ในชั้นเรียน</td>
-                      <td className="border p-1 text-center">{roomRank}/-</td>
-                    </tr>
+                    <tr><td className="border p-1" colSpan={2}>ลำดับที่ในห้องเรียน/ในชั้นเรียน</td><td className="border p-1 text-center">{roomRank}/-</td></tr>
                     <tr><td className="border p-1" colSpan={2}>ผลการประเมินคุณลักษณะอันพึงประสงค์</td><td className="border p-1 text-center">{characteristicLabel(overall?.characteristic ?? "-")}</td></tr>
                     <tr><td className="border p-1" colSpan={2}>ผลการประเมินการอ่าน คิดวิเคราะห์ และเขียน</td><td className="border p-1 text-center">{characteristicLabel(overall?.readThinkWrite ?? "-")}</td></tr>
                     <tr><td className="border p-1" colSpan={2}>ผลการประเมินกิจกรรมพัฒนาผู้เรียน</td><td className="border p-1 text-center">{overallActivityResult(s.id)} = {overallActivityResult(s.id) === "ผ" ? "ผ่าน" : "ไม่ผ่าน"}</td></tr>
@@ -547,76 +536,63 @@ export default function Vp4Report({
               </div>
             )}
 
-            {/* ★ เว้นช่องว่างก่อนลงชื่อครูที่ปรึกษา (4 บรรทัด) */}
-            <div className="h-8 print:h-6"></div>
             <div className="h-8 print:h-6"></div>
             <div className="h-8 print:h-6"></div>
             <div className="h-8 print:h-6"></div>
 
-            {/* ★ ลายเซ็นครูที่ปรึกษา (และผู้ปกครอง สำหรับมัธยม) — "ลงชื่อ" ชิดซ้ายตรงกันทุกช่อง เส้นใต้ยาวเท่ากันทั้ง 4 ช่อง มีช่องว่างตรงกลางก่อน "ลงชื่อ" ถัดไป */}
-            {(() => {
-              // ★ คำนวณความกว้างเส้นใต้ลายเซ็นให้เท่ากันทั้ง 4 ช่อง โดยใช้ความกว้างของชื่อที่ยาวที่สุดเป็นเกณฑ์
-              const advisorCombinedName =
-                classroomLevel === "primary"
-                  ? null
-                  : `${formatFullName(resolvedAdvisors[0])}${resolvedAdvisors[1] ? " / " + formatFullName(resolvedAdvisors[1]) : ""}`;
-              const allSignatureNames = classroomLevel === "primary"
-                ? [formatFullName(resolvedAdvisors[0]), formatFullName(resolvedAdvisors[1]), directorName, ""]
-                : [advisorCombinedName ?? "", directorName, ""];
-              const signatureLineWidthPx = Math.max(
-                SIGNATURE_LINE_WIDTH_PX,
-                ...allSignatureNames.map(n => estimateTextWidthPx(n ?? ""))
-              );
-
-              return (
-                <>
-                  <div className={`grid ${classroomLevel === "primary" ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"} signature-grid text-xl`}>
-                    {classroomLevel === "primary" ? (
-                      <>
-                        <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(resolvedAdvisors[0])} lineWidthPx={signatureLineWidthPx} />
-                        <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(resolvedAdvisors[1])} lineWidthPx={signatureLineWidthPx} />
-                      </>
-                    ) : (
-                      <div className="sm:col-span-2">
-                        <SignatureField
-                          role="ครูที่ปรึกษา"
-                          nameLabel={advisorCombinedName ?? undefined}
-                          lineWidthPx={signatureLineWidthPx}
-                        />
-                      </div>
-                    )}
+            {/* ลายเซ็น */}
+            {mode === "midterm" ? (
+              <>
+                <div className="grid grid-cols-2 signature-grid text-xl">
+                  <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
+                  <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[1])} lineWidthPx={signatureLineWidthPx} />
+                </div>
+                <div className="h-8 print:h-6"></div>
+                <div className="grid grid-cols-2 signature-grid text-xl items-start">
+                  <div><AttendanceBox pct={attendPct} /></div>
+                  <div className="flex flex-col gap-8 print:gap-4">
+                    <SignatureField role="หัวหน้าสายชั้น" nameLabel={gradeHeadName || undefined} lineWidthPx={signatureLineWidthPx} />
+                    <SignatureField role="ผู้อำนวยการโรงเรียน" nameLabel={directorName} lineWidthPx={signatureLineWidthPx} />
                   </div>
-
-                  {/* ★ เว้นก่อนลายเซ็นผู้อำนวยการ (3 บรรทัด) */}
-                  <div className="h-8 print:h-6"></div>
-                  <div className="h-8 print:h-6"></div>
-                  <div className="h-8 print:h-6"></div>
-
-                  {/* ★ ลงชื่อ ผอ. และผู้ปกครอง ย้ายไปด้านขวา (ตรงตำแหน่งครูคนที่ 2) เรียงซ้อนกันตามแนวตั้ง */}
-                  <div className="grid grid-cols-2 signature-grid text-xl">
-                    <div></div>
-                    <div className="flex flex-col gap-8 print:gap-4">
-                      <SignatureField
-                        role={classroomLevel === "primary" ? "ผู้อำนวยการโรงเรียน" : "ผู้บริหารสถานศึกษา"}
-                        nameLabel={directorName}
-                        lineWidthPx={signatureLineWidthPx}
-                      />
-                      {/* ★ เว้นเพิ่มอีก 1 บรรทัดก่อนลงชื่อผู้ปกครอง */}
-                      <div className="h-8 print:h-6"></div>
-                      <SignatureField role="ผู้ปกครอง" lineWidthPx={signatureLineWidthPx} />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className={`grid ${isPrimary ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"} signature-grid text-xl`}>
+                  {isPrimary ? (
+                    <>
+                      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
+                      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[1])} lineWidthPx={signatureLineWidthPx} />
+                    </>
+                  ) : (
+                    <div className="sm:col-span-2">
+                      <SignatureField role="ครูที่ปรึกษา" nameLabel={advisorCombinedName} lineWidthPx={signatureLineWidthPx} />
                     </div>
+                  )}
+                </div>
+                <div className="h-8 print:h-6"></div>
+                <div className="h-8 print:h-6"></div>
+                <div className="h-8 print:h-6"></div>
+                <div className="grid grid-cols-2 signature-grid text-xl">
+                  <div></div>
+                  <div className="flex flex-col gap-8 print:gap-4">
+                    <SignatureField
+                      role={isPrimary ? "ผู้อำนวยการโรงเรียน" : "ผู้บริหารสถานศึกษา"}
+                      nameLabel={directorName}
+                      lineWidthPx={signatureLineWidthPx}
+                    />
+                    <div className="h-8 print:h-6"></div>
+                    <SignatureField role="ผู้ปกครอง" lineWidthPx={signatureLineWidthPx} />
                   </div>
-                </>
-              );
-            })()}
+                </div>
+              </>
+            )}
           </div>
         );
       })}
 
       <style jsx global>{`
-        .signature-grid {
-          gap: 7rem;
-        }
+        .signature-grid { gap: 7rem; }
         @media print {
           @page { size: A4; margin: 8mm; }
           .vp4-page {
@@ -632,7 +608,6 @@ export default function Vp4Report({
           .vp4-page .mb-2 { margin-bottom: 2px !important; }
           .vp4-page .mt-3 { margin-top: 4px !important; }
           .vp4-page .mt-4 { margin-top: 6px !important; }
-          .vp4-page .mt-8 { margin-top: 8px !important; }
           .vp4-page .h-8 { height: 10px !important; }
           .vp4-page .gap-6 { gap: 10px !important; }
           .vp4-page .signature-grid { gap: 60px !important; }

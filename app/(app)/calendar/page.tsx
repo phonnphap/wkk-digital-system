@@ -80,6 +80,25 @@ const TH_MONTHS = ["มกราคม","กุมภาพันธ์","มี
 const TH_DAYS_SHORT = ["อา","จ","อ","พ","พฤ","ศ","ส"];
 const TH_DAYS_FULL  = ["อาทิตย์","จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์"];
 
+// คอลัมน์สำหรับแสดงในปฏิทิน (เบา)
+const LIST_COLUMNS = [
+  "id","title","schedule","categories","location",
+  "start_date","end_date","start_time","end_time","is_all_day",
+  "status","created_by","color_override","edit_requested",
+  "target_roles","is_public","created_at",
+  "creator:users!created_by(first_name,last_name)",
+].join(",");
+
+// คอลัมน์ครบสำหรับ modal (ดึงตอนคลิกเท่านั้น)
+const FULL_COLUMNS = [
+  "id","title","description","schedule","categories","location",
+  "start_date","end_date","start_time","end_time","is_all_day",
+  "status","created_by","approved_by","approved_at","reject_reason",
+  "edit_requested","edit_request_note","is_public","target_roles",
+  "color_override","attachment_urls","attachment_mimes","created_at",
+  "creator:users!created_by(first_name,last_name)",
+].join(",");
+
 // ══════════════════════════════════════════════════════
 // Helpers
 // ══════════════════════════════════════════════════════
@@ -1072,23 +1091,19 @@ export default function CalendarPage() {
     init();
   },[]);
 
-  const loadEvents=useCallback(async()=>{
-    const from=ymd(new Date(curDate.getFullYear(),curDate.getMonth()-1,1));
-    const to  =ymd(new Date(curDate.getFullYear(),curDate.getMonth()+2,0));
-    if (isApprover){
-      const {data}=await (supabase.from("calendar_events") as any)
-        .select("*, creator:users!created_by(first_name,last_name)")
-        .or(`status.eq.pending,and(end_date.gte.${from},start_date.lte.${to})`)
-        .order("start_date",{ascending:true});
-      setEvents((data||[]) as CalEvent[]);
-    } else {
-      const {data}=await (supabase.from("calendar_events") as any)
-        .select("*, creator:users!created_by(first_name,last_name)")
-        .gte("end_date",from).lte("start_date",to)
-        .order("start_date",{ascending:true});
-      setEvents((data||[]) as CalEvent[]);
-    }
-  },[curDate,isApprover]);
+  const loadEvents = useCallback(async () => {
+  const from = ymd(new Date(curDate.getFullYear(), curDate.getMonth() - 1, 1));
+  const to   = ymd(new Date(curDate.getFullYear(), curDate.getMonth() + 2, 0));
+
+  let q = (supabase.from("calendar_events") as any).select(LIST_COLUMNS);
+
+  q = isApprover
+    ? q.or(`status.eq.pending,and(end_date.gte.${from},start_date.lte.${to})`)
+    : q.gte("end_date", from).lte("start_date", to);
+
+  const { data } = await q.order("start_date", { ascending: true });
+  setEvents((data || []) as CalEvent[]);
+}, [curDate, isApprover]);
 
   useEffect(()=>{if (!loading&&user) loadEvents();},[loading,user,loadEvents]);
 
@@ -1128,10 +1143,14 @@ export default function CalendarPage() {
    const displayEvents = useMemo(() => [...filteredEvents, ...holidayEvents], [filteredEvents, holidayEvents]);
 
   // ★ กันไม่ให้คลิกอีเวนต์วันหยุด (system) เปิด modal แก้ไข
-  function handleEventClick(ev: CalEvent) {
-    if (ev.id.startsWith("holiday-")) return;
-    setModalEv(ev);
-  }
+  async function openEvent(ev: CalEvent) {
+  if (ev.id.startsWith("holiday-")) return;
+  const { data } = await (supabase.from("calendar_events") as any)
+    .select(FULL_COLUMNS)
+    .eq("id", ev.id)
+    .maybeSingle();
+  setModalEv((data ?? ev) as CalEvent); // ต้อง await ก่อนเปิด เพราะ modal ใช้ useState ค่าเริ่มต้น
+}
 
   function navigate(dir:1|-1){
     const d=new Date(curDate);
@@ -1255,7 +1274,7 @@ export default function CalendarPage() {
                   const d=toDate(ev.start_date);
                   const color=ev.color_override??getCatColor(ev.categories);
                   return (
-                    <div key={ev.id} onClick={()=>setModalEv(ev)}
+                    <div key={ev.id} onClick={() => openEvent(ev)}
                       className="flex gap-2 items-start cursor-pointer hover:bg-slate-50 rounded-lg p-1.5 transition-colors">
                       <div className="text-center w-8 shrink-0">
                         <div className="text-base font-bold leading-none text-slate-700">{d.getDate()}</div>
@@ -1286,7 +1305,7 @@ export default function CalendarPage() {
                   const light=getCatLight(ev.categories);
                   const text=getCatText(ev.categories);
                   return (
-                    <div key={ev.id} onClick={()=>setModalEv(ev)}
+                    <div key={ev.id} onClick={() => openEvent(ev)}
                       style={{borderLeft:`3px solid ${color}`,background:light}}
                       className="rounded-r-xl px-3 py-2 cursor-pointer hover:brightness-95 transition-all max-w-xs">
                       <p className="text-xs font-bold truncate" style={{color:text}}>{ev.title}</p>
@@ -1300,10 +1319,10 @@ export default function CalendarPage() {
           )}
 
           <div className="flex-1">
-  {view==="month"&&<MonthView year={curDate.getFullYear()} month={curDate.getMonth()} events={displayEvents} today={todayStr} onDayClick={d=>{setSelected(d);setCurDate(toDate(d));setView("day");}} onEventClick={handleEventClick}/>}
-  {view==="week" &&<WeekView currentDate={curDate} events={displayEvents} today={todayStr} onEventClick={handleEventClick} onDayClick={d=>{setSelected(d);setCurDate(toDate(d));setView("day");}}/>}
-  {view==="day"  &&<DayView currentDate={curDate} events={displayEvents} today={todayStr} onEventClick={handleEventClick}/>}
-  {view==="agenda"&&<AgendaView events={displayEvents} onEventClick={handleEventClick}/>}
+  {view==="month"&&<MonthView year={curDate.getFullYear()} month={curDate.getMonth()} events={displayEvents} today={todayStr} onDayClick={d=>{setSelected(d);setCurDate(toDate(d));setView("day");}} onEventClick={openEvent}/>}
+  {view==="week" &&<WeekView currentDate={curDate} events={displayEvents} today={todayStr} onEventClick={openEvent} onDayClick={d=>{setSelected(d);setCurDate(toDate(d));setView("day");}}/>}
+  {view==="day"  &&<DayView currentDate={curDate} events={displayEvents} today={todayStr} onEventClick={openEvent}/>}
+  {view==="agenda"&&<AgendaView events={displayEvents} onEventClick={openEvent}/>}
 </div>
         </main>
       </div>

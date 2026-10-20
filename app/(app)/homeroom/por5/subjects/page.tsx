@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { BookOpen, ArrowRight } from "lucide-react";
+import { getViewableClassrooms } from "@/lib/classrooms/getViewableClassrooms";
 
 const supabase = createClient();
 
@@ -28,8 +29,7 @@ export default function Por5SubjectsPage() {
 
   useEffect(() => {
     (async () => {
-      const { data: classroomData } = await supabase.rpc("get_my_classrooms");
-      const myClassrooms = (classroomData ?? []) as Classroom[];
+      const { classrooms: myClassrooms } = await getViewableClassrooms(supabase);
       setClassrooms(myClassrooms);
 
       if (myClassrooms.length === 0) {
