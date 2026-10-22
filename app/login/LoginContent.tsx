@@ -15,6 +15,11 @@ export default function LoginContent() {
   const params   = useSearchParams()   // ✅ อยู่ใน Suspense แล้ว ปลอดภัย
   const supabase = createClient()
 
+  // ★ จุดที่ 1: เพิ่มใต้ const supabase (กัน open redirect)
+const rawNext = params.get('next')
+const nextPath =
+  rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/dashboard'
+
   useEffect(() => {
     setMounted(true)
     const errorParam = params.get('error')
@@ -38,13 +43,13 @@ export default function LoginContent() {
       setLoading(null)
     } else {
       toast.success('เข้าสู่ระบบสำเร็จ กำลังนำเข้าสู่ระบบ...')
-      router.push('/dashboard')
+      router.push(nextPath)          // เดิมคือ '/dashboard'
     }
   }
 
   const handleSSO = async (provider: 'azure') => {
     setLoading('microsoft')
-    const redirectTo = `${window.location.origin}/api/auth/callback`
+    const redirectTo = `${window.location.origin}/api/auth/callback?next=${encodeURIComponent(nextPath)}`
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider,

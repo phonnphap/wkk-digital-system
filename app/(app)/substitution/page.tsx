@@ -233,6 +233,19 @@ async function notifyTeams(targetEmail: string | null | undefined, message: stri
   }
 }
 
+// ★ แจ้งการ์ด Teams ให้ครูที่ถูกจัดสอนแทน (ผ่าน leave-server) — ต้องมี leave_request_id
+async function pushSubstituted(leaveId: string) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await fetch("/api/leave-notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ leaveId, event: "substituted" }),
+    });
+  } catch (e) { console.warn("[pushSubstituted]", e); }
+}
+
 // ── สายชั้น / ครูประจำชั้น helpers ────────────────────────
 function extractGradeOnly(gradeGroup?: string | null): string {
   if (!gradeGroup) return "";
@@ -1185,13 +1198,8 @@ const candidates = candidatesAll.filter(t => !conflictMapForEntry[t.id]);
     setSaving(false);
     if (error) { alert("❌ "+error.message); return; }
 
-    // ★ แจ้งเตือน Teams ให้ครูที่ถูกจัดสอนแทนทุกคน (ไม่ซ้ำคน)
-    const uniqueSubTeacherIds = [...new Set(records.map(r => r.substitute_teacher_id))];
-    uniqueSubTeacherIds.forEach(id => {
-      const t = teachers.find(x => x.id === id);
-      const countForThisTeacher = records.filter(r => r.substitute_teacher_id === id).length;
-      notifyTeams(t?.email, `📋 คุณถูกจัดให้สอนแทน ${fullName(absentTeacher)} จำนวน ${countForThisTeacher} คาบ กรุณาตรวจสอบตารางในระบบ`);
-    });
+        // ★ การ์ด Teams พร้อมปุ่มรับทราบ (แทนข้อความเดิม กันครูได้ 2 ข้อความ)
+    await pushSubstituted(leaveRequest.id);
 
     onSave();
   };
@@ -1965,11 +1973,13 @@ const handleSubDeletePermanent = async (id: string) => {
     setSaving(true);
     const { error } = await supabase.from("substitution_records").update({
       substitute_teacher_id: newTeacherId,
+      acknowledged_at: null,                // ★ เพิ่ม
       assigned_by: currentUser.id,
       note: `${record.note ?? ""}${record.note ? " " : ""}(แก้ไขครูสอนแทนโดยแอดมิน)`,
     }).eq("id", record.id);
     setSaving(false);
     if (error) { alert("❌ "+error.message); return; }
+    if (record.leave_request_id) await pushSubstituted(record.leave_request_id);   // ★ เพิ่ม
     onSave();
   };
 

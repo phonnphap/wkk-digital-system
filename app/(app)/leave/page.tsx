@@ -11,7 +11,6 @@ import {
   getCurrentFiscalYear, isInFiscalYear,
 } from "@/lib/leave-config";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { notifyTeams } from "@/lib/notify-teams";
 
 const supabase = createClient();
 const HR_EMAIL    = "hr@khienkhet.ac.th";
@@ -136,6 +135,18 @@ function computeSlotHours(slot: any): number {
   const [eh, em] = slot.end_time.split(":").map(Number);
   const diffMin = (eh * 60 + em) - (sh * 60 + sm);
   return diffMin > 0 ? Math.round((diffMin / 60) * 100) / 100 : 1;
+}
+// ★ เทอม 2 = 15 ต.ค. เป็นต้นไป ถึง มี.ค. · นอกนั้นเทอม 1
+function semesterForDate(dateStr: string): 1 | 2 {
+  if (!dateStr) return 1;
+  const [, m, d] = dateStr.split("-").map(Number);
+  if (m >= 11 || m <= 3 || (m === 10 && d >= 15)) return 2;
+  return 1;
+}
+// ★ ห้องที่แยกเทอมแล้วเท่านั้นที่กรองตามเทอม · ห้องที่ไม่แยก (อ./ป.) ใช้ตลอด
+function filterEntriesForDate(entries: any[], dateStr: string): any[] {
+  const sem = semesterForDate(dateStr);
+  return entries.filter(e => !e.room_split || e.room_semester === sem);
 }
 
 function extractGradeOnly(gradeGroup?: string | null): string {
@@ -437,12 +448,36 @@ function enrichEntries(rawEntries: any[], classroomsMap: Record<string, any>, su
       is_break: slot?.is_break ?? false,
       room_name: room?.room_name ?? null,
       grade_group: room?.grade_group ?? null,
+      room_semester: room?._semester ?? 1,
+      room_split: !!room?._split,
       homeroom_teacher_id: room?.homeroom_teacher_id ?? null,
       schedule_type: room?.schedule_type ?? null,   // ★ เพิ่มบรรทัดนี้
       subject_name: subject?.name_th ?? null,
       subject_code: subject?.subject_code ?? null,
     };
   });
+}
+async function pushLeaveTeams(leaveId: string, event: "submitted" | "edited" | "cancelled") {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await fetch("/api/leave-notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ leaveId, event }),
+    });
+  } catch (e) { console.warn("[pushLeaveTeams]", e); }
+}
+async function pushApprovalTeams(leaveId: string, event: "approved" | "rejected", slot: 1 | 2 | 3, reason?: string) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await fetch("/api/leave-notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ leaveId, event, slot, reason }),
+    });
+  } catch (e) { console.warn("[pushApprovalTeams]", e); }
 }
 
 /** แจ้งเตือนครูที่ถูกจัดสอนแทน + หัวหน้าสายชั้นของผู้ยื่นลา (ลิงก์กับระบบลา) */
@@ -477,12 +512,7 @@ async function notifySwapAssignments(requester: UserProfile, assignments: SwapAs
           </div></div>`,
       }),
     }).catch(e => console.warn("[notifySwapAssignments] substitute email failed:", e));
-  // ★ แจ้งเตือนผ่าน Teams เพิ่มเติม
-  notifyTeams({
-    title: "📋 มีการจัดครูสอนแทนใหม่",
-    message: `${fullName(requester)} ยื่นใบลา และจัดครูสอนแทนแล้ว ${assignments.length} คาบ`,
-    facts: { วันที่แจ้ง: toThaiDate(new Date().toISOString()) },
-  });
+  
 }
 
   const gradeHeads = allTeachers.filter(t => (t.extra_roles ?? []).includes("grade_head") && t.grade_level === requester.grade_level);
@@ -1335,16 +1365,42 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
     </div>
   );
 }
+async function generateApprovedPdfFor(leaveId: string) {
+  const { data: req } = await supabase.from("leave_requests").select("*").eq("id", leaveId).maybeSingle();
+  if (!req || req.status !== "approved") return;
+  const { data: reqUser } = await supabase.from("users")
+    .select("id,title,first_name,last_name,position,phone,signature_url").eq("id", req.user_id).maybeSingle();
+
+  const leaveData = {
+    fullName: fullName(reqUser), position: reqUser?.position,
+    leaveType: req.leave_type, leaveTypeName: LEAVE_TYPE_CONFIG[req.leave_type as LeaveType]?.label ?? "",
+    otherLeaveName: req.other_leave_name, startDate: req.start_date, endDate: req.end_date,
+    days: req.days_count, halfDay: req.half_day, reason: req.reason,
+    phone: reqUser?.phone, contactInfo: req.contact_info,
+  };
+  const approverSigs = [
+    { name:"นางสาวพรรษา แก้วใหญ่", position:"ครู ตรวจสอบสถิติการลา", signature_url:req.approver_1_signature, approved_at:req.approver_1_approved_at },
+    { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล", signature_url:req.approver_2_signature, approved_at:req.approver_2_approved_at },
+    { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต", signature_url:req.approver_3_signature, approved_at:req.approver_3_approved_at },
+  ];
+  const [stats, docUrl] = await Promise.all([
+    loadLeaveStats(req.user_id, req.id, req.start_date),
+    resolveAttachmentUrl(req.document_path, req.document_url),
+  ]);
+  const html = buildLeaveHTML(leaveData, reqUser?.signature_url || "", approverSigs, docUrl ?? undefined, stats);
+  await uploadApprovedLeavePDF(html, { first_name: reqUser?.first_name, last_name: reqUser?.last_name }, req.start_date);
+}
 
 // ══════════════════════════════════════════════════════════
 // ── SpecificSwapModal — แลกคาบแบบเจาะจง ──────────────────
 // ══════════════════════════════════════════════════════════
-function SpecificSwapModal({ user, dates, timetableEntries, allTeachers, academicYearId, existingAssignments, onAdd, onClose }: {
+function SpecificSwapModal({ user, dates, timetableEntries: allEntriesRaw, allTeachers, academicYearId, existingAssignments, onAdd, onClose }: {
   user: UserProfile; dates: string[]; timetableEntries: any[]; allTeachers: UserProfile[]; academicYearId: string | null;
   existingAssignments: SwapAssignment[];
   onAdd: (a: SwapAssignment) => void; onClose: () => void;
 }) {
   const [selectedDate, setSelectedDate] = useState(dates[0] ?? "");
+  const timetableEntries = useMemo(() => filterEntriesForDate(allEntriesRaw, selectedDate), [allEntriesRaw, selectedDate]);
   const [selectedEntry, setSelectedEntry] = useState<any>(null);
   const [pickedTeacherId, setPickedTeacherId] = useState("");
   const [onLeaveIds, setOnLeaveIds] = useState<Set<string>>(new Set());
@@ -1568,7 +1624,8 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
 
       for (const date of selectedDates) {
         const dow = dowOf(date);
-        const myEntries = timetableEntries
+        const dayEntries = filterEntriesForDate(timetableEntries, date);
+        const myEntries = dayEntries
           .filter(e => (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break);
 
         const onLeave = onLeaveByDate[date] ?? new Set<string>();
@@ -1599,7 +1656,7 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
           const usedNow = usedThisRun[key] ?? new Set<string>();
           const preUsed = new Set([...usedNow, ...alreadyPicked]);
 
-          const pool = getSortedSubstituteCandidates(entry, date, dow, timetableEntries, allTeachers, user.id, onLeave, preUsed, user, runFormCounts, cIndex);
+          const pool = getSortedSubstituteCandidates(entry, date, dow, dayEntries, allTeachers, user.id, onLeave, preUsed, user, runFormCounts, cIndex);
           const chosenItem = pickCandidate(pool);
 
           if (chosenItem) {
@@ -1622,6 +1679,7 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
     const entry = timetableEntries.find(e => e.id === row.timetable_entry_id);
     if (!entry) return;
     const dow = dowOf(row.substitute_date);
+    const dateEntries = filterEntriesForDate(timetableEntries, row.substitute_date);
 
     const usedElsewhere = new Set<string>();
     preview.forEach((p, i) => { if (i !== idx && p.substitute_date === row.substitute_date && p.slot_number === row.slot_number && p.substitute_teacher_id) usedElsewhere.add(p.substitute_teacher_id); });
@@ -1634,9 +1692,9 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
     const onLeave = onLeaveByDateState[row.substitute_date] ?? new Set<string>();
     const excludeSelf = new Set(usedElsewhere); if (row.substitute_teacher_id) excludeSelf.add(row.substitute_teacher_id);
 
-    let pool = getSortedSubstituteCandidates(entry, row.substitute_date, dow, timetableEntries, allTeachers, user.id, onLeave, excludeSelf, user, runFormCounts, conflictIndex);
+    let pool = getSortedSubstituteCandidates(entry, row.substitute_date, dow, dateEntries, allTeachers, user.id, onLeave, excludeSelf, user, runFormCounts, conflictIndex);
     if (pool.length === 0) {
-      pool = getSortedSubstituteCandidates(entry, row.substitute_date, dow, timetableEntries, allTeachers, user.id, onLeave, usedElsewhere, user, runFormCounts, conflictIndex);
+      pool = getSortedSubstituteCandidates(entry, row.substitute_date, dow, dateEntries, allTeachers, user.id, onLeave, usedElsewhere, user, runFormCounts, conflictIndex);
     }
     const pick = pickCandidate(pool);
     if (!pick) { alert("⚠️ ไม่พบครูว่างในคาบนี้"); return; }
@@ -1651,7 +1709,7 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
   function statsFor(teacherId: string, date: string, slotNumber: number | null | undefined) {
     if (!teacherId) return null;
     const dow = dowOf(date);
-    const taught = computeTaughtPeriodsForDay(teacherId, dow, timetableEntries);
+    const taught = computeTaughtPeriodsForDay(teacherId, dow, filterEntriesForDate(timetableEntries, date));
     const dbList = conflictIndex[`${teacherId}|${date}`] ?? [];
     const formCount = preview.filter(p => p.substitute_teacher_id === teacherId && p.substitute_date === date).length;
     const conflict = slotNumber != null ? (dbList.find(x => x.slotNumber === slotNumber) ?? null) : null;
@@ -1718,18 +1776,20 @@ function AutoSwapModal({ user, dates, timetableEntries, allTeachers, academicYea
                       </div>
                     );
                   }
-                  const entry = timetableEntries.find(e => e.id === p.timetable_entry_id) ?? null;
-                  const busyIds = new Set(
-                    timetableEntries.filter(e => e.day_of_week === dowOf(p.substitute_date) && e.slot_number === p.slot_number)
-                      .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
-                  );
+
+                  const rowEntries = filterEntriesForDate(timetableEntries, p.substitute_date);   // ★ เพิ่ม
+const entry = timetableEntries.find(e => e.id === p.timetable_entry_id) ?? null;  // เดิม ใช้ full ได้
+const busyIds = new Set(
+  rowEntries.filter(e => e.day_of_week === dowOf(p.substitute_date) && e.slot_number === p.slot_number)
+    .flatMap(e => [e.teacher_id, e.teacher_id_2].filter(Boolean))
+);
                   const onLeaveForRow = onLeaveByDateState[p.substitute_date] ?? new Set<string>();
                   const optionsRaw = allTeachers
                     .filter(t => t.id !== user.id && !busyIds.has(t.id) && isSelectableTeacherLv(t) && !onLeaveForRow.has(t.id))
                     // ★ ตัดครูที่สอนแทนคนอื่นอยู่แล้วในคาบเวลาเดียวกันนี้ออกจากตัวเลือกไปเลย
                     .filter(t => !statsFor(t.id, p.substitute_date, p.slot_number)?.conflict);
                   // ★ เรียง: ครูประจำชั้น -> สายชั้นคาบนี้ -> วิชาเดียวกัน -> สายชั้นผู้ลา -> ที่เหลือ
-                  const options = sortCandidatesByPriority(optionsRaw, entry, user, timetableEntries);
+                  const options = sortCandidatesByPriority(optionsRaw, entry, user, rowEntries);
                   const stats = statsFor(p.substitute_teacher_id, p.substitute_date, p.slot_number);
                   const conflictTeacherName = stats?.conflict ? displayName(allTeachers.find(x => x.id === stats.conflict!.absentTeacherId)) : null;
                   const loadMapForRow = Object.fromEntries(options.map(t => {
@@ -2368,36 +2428,44 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
   useEffect(()=>{loadRequests();},[loadRequests]);
 
   const loadTimetableData = useCallback(async () => {
-  if (timetableLoadedRef.current) return; // เคยโหลดแล้ว ไม่ยิงซ้ำ
+  if (timetableLoadedRef.current) return;
   setLoadingTimetable(true);
   try {
-    // ★ หา academic_year ปัจจุบันก่อน (จำเป็นต้องรู้ก่อนถึงจะ filter timetable_entries ได้แม่นยำ)
-    const { data: ay } = await supabase.from("academic_years").select("id").eq("is_current", true).maybeSingle();
-    const ayId = (ay as any)?.id ?? null;
-    setCurrentAcademicYearId(ayId);
+    const { data: yearsAll } = await supabase.from("academic_years").select("id,year_name,semester,is_current");
+    const years = (yearsAll || []) as any[];
+    const cur = years.find(y => y.is_current) ?? null;
+    const yearIds = cur ? years.filter(y => y.year_name === cur.year_name).map(y => y.id) : [];
+    const yearMap = Object.fromEntries(years.map(y => [y.id, y]));
+    setCurrentAcademicYearId(cur?.id ?? null);
 
-    // ★ ยิง 4 query พร้อมกันแทนที่จะรอทีละอัน (waterfall) — ลดเวลารวมลงมาก
     let entriesQuery = supabase.from("timetable_entries")
       .select("id,academic_year_id,classroom_id,subject_id,teacher_id,day_of_week,time_slot_id,teacher_id_2,created_at");
-    if (ayId) entriesQuery = entriesQuery.eq("academic_year_id", ayId);
+    if (yearIds.length) entriesQuery = entriesQuery.in("academic_year_id", yearIds);
 
     const [entriesRes, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
       entriesQuery,
-      supabase.from("time_slots")
-        .select("id,slot_number,start_time,end_time,slot_label,is_break,schedule_type")
-        .order("slot_number", { ascending: true }),
-      supabase.from("classrooms").select("id,room_name,grade_group,schedule_type,homeroom_teacher_id"),
+      supabase.from("time_slots").select("id,slot_number,start_time,end_time,slot_label,is_break,schedule_type").order("slot_number", { ascending: true }),
+      supabase.from("classrooms").select("id,room_number,room_name,grade_group,schedule_type,homeroom_teacher_id,academic_year_id,split_by_semester"),
       supabase.from("subjects").select("id,subject_code,name_th"),
     ]);
 
     const slots = slotsRes.data || [];
     setAllTimeSlots(slots);
 
-    const classroomsMap = Object.fromEntries((classroomsRes.data || []).map((c: any) => [c.id, c]));
+    const rooms = (classroomsRes.data || []) as any[];
+    const classroomsMap = Object.fromEntries(rooms.map(c => {
+      const sem = yearMap[c.academic_year_id]?.semester ?? 1;
+      const hasSibling = rooms.some(o =>
+        o.id !== c.id && o.grade_group === c.grade_group &&
+        (o.room_name ?? "").trim() === (c.room_name ?? "").trim() &&
+        (yearMap[o.academic_year_id]?.semester ?? 1) !== sem &&
+        yearMap[o.academic_year_id]?.year_name === yearMap[c.academic_year_id]?.year_name
+      );
+      return [c.id, { ...c, _semester: sem, _split: !!c.split_by_semester || hasSibling }];
+    }));
     const subjectsMap = Object.fromEntries((subjectsRes.data || []).map((s: any) => [s.id, s]));
 
-    const enriched = enrichEntries(entriesRes.data || [], classroomsMap, subjectsMap, slots);
-    setTimetableEntries(enriched);
+    setTimetableEntries(enrichEntries(entriesRes.data || [], classroomsMap, subjectsMap, slots));
     timetableLoadedRef.current = true;
   } catch (err) {
     console.error("[loadTimetableData] error:", err);
@@ -2450,8 +2518,10 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
   else await notifySwapAssignments(user, substitute_assignments, allTeachers);
 }
       }
+    } 
+        if (leaveId && leavePayload.status === "pending") {
+      await pushLeaveTeams(leaveId, editRequest?.id ? "edited" : "submitted");
     }
-
     alert(editRequest?.id ? "✅ แก้ไขคำขอลาเรียบร้อย" : "✅ ส่งคำขอลาสำเร็จ");
     setShowForm(false); setEditRequest(null);
     await loadRequests();
@@ -2460,6 +2530,8 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
 
   async function deleteRequest(id:string){
     if(!confirm("ยืนยันการลบคำขอลานี้?"))return;
+    const target = requests.find(r => r.id === id);
+    if (target && target.status !== "draft") await pushLeaveTeams(id, "cancelled");
     await supabase.from("substitution_records").delete().eq("leave_request_id", id); // ✅ ลบ assignment ที่ผูกไว้ด้วย
     await supabase.from("leave_requests").delete().eq("id",id);
     await loadRequests();
@@ -3174,6 +3246,13 @@ useEffect(() => {
 
     const {error}=await (supabase.from("leave_requests") as any).update(updates).eq("id",id);
 if(error){alert("❌ บันทึกไม่สำเร็จ: "+error.message);return;}
+await pushApprovalTeams(id, action, slotNum, reason); 
+    // แจ้ง Teams ต้องมีสถานะล่าสุดแล้ว (ใช้ endpoint ภายในที่ยอมรับ approved/rejected)
+    await fetch("/api/leave-notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}` },
+      body: JSON.stringify({ leaveId: id, event: action, slot: slotNum, reason }),
+    }).catch(console.warn);
 
 // ✅ รีเฟรชข้อมูล — ถ้าเคยโหลดข้อมูลทั้งหมดแล้ว (กดแท็บอื่นมาก่อน) ให้โหลดใหม่ทั้งหมด
 // ถ้ายังไม่เคยโหลด ก็แค่รีเฟรชรายการรออนุมัติพอ
@@ -3579,6 +3658,13 @@ export default function LeavePage(){
       setLoading(false);
     })();
   },[]);
+  useEffect(() => {
+  if (!user || !APPROVER_EMAILS.includes(user.email)) return;
+  const id = new URLSearchParams(window.location.search).get("finalize");
+  if (!id) return;
+  window.history.replaceState(null, "", "/leave");   // ล้างพารามิเตอร์ กันรีเฟรชแล้วอัปโหลดซ้ำ
+  generateApprovedPdfFor(id).catch(e => console.warn("[finalize pdf]", e));
+}, [user]);
 
   if(loading)return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-blue-500 font-black text-lg animate-pulse">กำลังโหลดระบบ...</div></div>;
   if(!user)return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-red-500 font-black">❌ กรุณาเข้าสู่ระบบก่อน</div></div>;
