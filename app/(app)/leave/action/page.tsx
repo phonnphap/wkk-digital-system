@@ -1,10 +1,10 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-export default function LeaveActionPage() {
+function ActionContent() {
   const sp = useSearchParams();
   const id = sp.get("id")!, slot = Number(sp.get("slot")), action = sp.get("action") as "approved" | "rejected";
   const [reason, setReason] = useState(""); const [busy, setBusy] = useState(false);
@@ -22,10 +22,10 @@ export default function LeaveActionPage() {
     });
     const j = await res.json();
     setMsg({ ok: j.ok, text: j.ok ? (action === "approved" ? "✅ อนุมัติเรียบร้อย แจ้งใน Teams แล้ว" : "❌ บันทึกการไม่อนุมัติแล้ว") : j.error });
-    setBusy(false);
-        if (j.ok && j.fullyApproved) {
+    if (j.ok && j.fullyApproved) {
       setTimeout(() => { window.location.href = `/leave?finalize=${id}`; }, 1500);
     }
+    setBusy(false);
   }
 
   return (
@@ -45,4 +45,8 @@ export default function LeaveActionPage() {
       </div>
     </div>
   );
+}
+
+export default function LeaveActionPage() {
+  return <Suspense fallback={null}><ActionContent /></Suspense>;
 }

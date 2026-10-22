@@ -63,6 +63,33 @@ type FlatColumn =
 
 type AdvisorInfo = { prefix?: string; first_name: string; last_name: string };
 const EMPTY_ADVISORS: AdvisorInfo[] = [{ first_name: "", last_name: "" }, { first_name: "", last_name: "" }];
+function hasGradeHeadRole(roles: any): boolean {
+  if (!roles) return false;
+  try { return JSON.stringify(roles).includes("grade_head"); } catch { return false; }
+}
+
+// หา หน.สาย = user ที่ extra_roles มี "grade_head" และ grade_level ตรงกับครูประจำชั้นของห้องนี้
+async function fetchGradeHead(classroomId: string): Promise<string> {
+  const { data: room } = await supabase
+    .from("classrooms")
+    .select("homeroom_teacher_id, homeroom_teacher_2_id")
+    .eq("id", classroomId)
+    .maybeSingle();
+  const ids = [room?.homeroom_teacher_id, room?.homeroom_teacher_2_id].filter((v): v is string => !!v);
+  if (ids.length === 0) return "";
+
+  const { data: homeroom } = await supabase.from("users").select("id, grade_level").in("id", ids);
+  const levels = Array.from(new Set((homeroom ?? []).map((t: any) => t.grade_level).filter((v: any) => v != null)));
+  if (levels.length === 0) return "";
+
+  const { data: candidates } = await supabase
+    .from("users")
+    .select("title, first_name, last_name, grade_level, extra_roles")
+    .in("grade_level", levels);
+  const head: any = (candidates ?? []).find((u: any) => hasGradeHeadRole(u.extra_roles));
+  if (!head) return "";
+  return `${head.title ?? ""}${head.first_name ?? ""} ${head.last_name ?? ""}`.trim();
+}
 
 export default function Por5SummaryPage() {
   const router = useRouter();
@@ -249,7 +276,12 @@ export default function Por5SummaryPage() {
           setGradeMatrix(p.gradeMatrix ?? {});
           setAttendMatrix(p.attendMatrix ?? {});
           if (p.advisors) setAdvisors(p.advisors);
-          if (p.gradeHeadName != null) setGradeHeadName(p.gradeHeadName);
+          // ถ้า snapshot เก่าไม่มีชื่อ (ล็อกไว้ก่อนมีระบบนี้) ให้ดึงสดมาเติม
+const savedHead: string = p.gradeHeadName || "";
+setGradeHeadName(savedHead);
+if (!savedHead) {
+  fetchGradeHead(room.classroom_id).then(n => { if (!cancelled && n) setGradeHeadName(n); });
+}
           setSnapshotInfo({ lockedAt: snap.locked_at });
           setLoadingData(false);
           return;
@@ -265,6 +297,10 @@ export default function Por5SummaryPage() {
       const studentRows = (studentsData ?? []) as Student[];
       if (cancelled) return;
       setStudents(studentRows);
+
+      // ★ ใหม่: ดึงชื่อ หน.สายอัตโนมัติ
+      setGradeHeadName("");
+      fetchGradeHead(room.classroom_id).then(n => { if (!cancelled) setGradeHeadName(n); });
 
       // ครูที่ปรึกษา (ตาราง users ใช้คอลัมน์ title ไม่ใช่ prefix)
       const { data: classroomRow } = await supabase

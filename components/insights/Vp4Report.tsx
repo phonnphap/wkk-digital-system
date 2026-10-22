@@ -226,6 +226,26 @@ export default function Vp4Report({
   const [overallScores, setOverallScores] = useState<Record<string, { characteristic: string; readThinkWrite: string }>>({});
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
+  // ===== เพิ่มใหม่: วันที่คะแนนของแบบวัดผล 4 =====
+const scoreDateKey = `vp4-scoredate-${academicYear}-${semester ?? ""}`;
+const [scoreDateLocal, setScoreDateLocal] = useState<string>(
+  scoreDate ?? new Date().toISOString().slice(0, 10)
+);
+
+// จำค่าที่ตั้งไว้ในเครื่อง (ถ้าไม่ได้ส่ง scoreDate มาจากหน้าแม่)
+useEffect(() => {
+  if (scoreDate) { setScoreDateLocal(scoreDate); return; }
+  try {
+    const saved = localStorage.getItem(scoreDateKey);
+    if (saved) setScoreDateLocal(saved);
+  } catch {}
+}, [scoreDate, scoreDateKey]);
+
+function handleScoreDateChange(v: string) {
+  setScoreDateLocal(v);
+  try { localStorage.setItem(scoreDateKey, v); } catch {}
+}
+
   useEffect(() => {
     const results: Record<string, { characteristic: string; readThinkWrite: string }> = {};
     students.forEach(s => { results[s.id] = { characteristic: "-", readThinkWrite: "-" }; });
@@ -317,7 +337,7 @@ export default function Vp4Report({
   );
 
   return (
-    <div className="font-['TH_Sarabun_New',_sans-serif]">
+    <div className="vp4-root font-['TH_Sarabun_New',_sans-serif]">
       <div className="flex items-start justify-between gap-3 mb-2 print:hidden">
         <div className="flex items-center gap-1 flex-wrap">
           <button onClick={() => setSelectedStudentId(null)}
@@ -349,10 +369,16 @@ export default function Vp4Report({
         return (
           <div key={s.id} className="vp4-page relative bg-white p-8 mb-6 print:mb-0 print:break-after-page border border-slate-100 print:border-0 text-xl">
             {mode === "midterm" && (
-              <span className="absolute right-6 top-6 border-2 border-blue-700 text-blue-700 text-base font-black px-3 py-1 rounded">
-                แบบวัดผล 4
-              </span>
-            )}
+  <label className="flex items-center gap-2 text-base font-black">
+    วันที่คะแนน
+    <input
+      type="date"
+      value={scoreDateLocal}
+      onChange={e => setScoreDateLocal(e.target.value)}
+      className="border rounded-lg px-2 py-1"
+    />
+  </label>
+)}
 
             <div className="text-center mb-2">
               <img src="/school-logo.png" alt="ตราโรงเรียน" className="h-24 w-24 mx-auto mb-1 object-contain" />
@@ -446,7 +472,7 @@ export default function Vp4Report({
                         <td className={`${TD} text-center font-black text-black`}>{cell?.grandTotal ?? "-"}</td>
                         {idx === 0 && (
                           <td className={`${TD} align-top text-center text-red-600 text-base`} rowSpan={midtermSections.length}>
-                            *คะแนนที่ได้เป็นคะแนน ณ วันที่ {formatThaiDate(scoreDate)}
+                            *คะแนนที่ได้เป็นคะแนน ณ วันที่ {formatThaiDate(scoreDateLocal)}
                           </td>
                         )}
                       </tr>
@@ -592,30 +618,54 @@ export default function Vp4Report({
       })}
 
       <style jsx global>{`
-        .signature-grid { gap: 7rem; }
-        @media print {
-          @page { size: A4; margin: 8mm; }
-          .vp4-page {
-            page-break-after: always;
-            page-break-inside: avoid;
-            font-size: 14px;
-            padding: 4mm !important;
-            margin-bottom: 0 !important;
-          }
-          .vp4-page:last-child { page-break-after: auto; }
-          .vp4-page img { height: 60px !important; width: 60px !important; margin-bottom: 2px !important; }
-          .vp4-page .mb-3 { margin-bottom: 4px !important; }
-          .vp4-page .mb-2 { margin-bottom: 2px !important; }
-          .vp4-page .mt-3 { margin-top: 4px !important; }
-          .vp4-page .mt-4 { margin-top: 6px !important; }
-          .vp4-page .h-8 { height: 10px !important; }
-          .vp4-page .gap-6 { gap: 10px !important; }
-          .vp4-page .signature-grid { gap: 60px !important; }
-          .vp4-table { table-layout: fixed; width: 100%; }
-          .vp4-table th, .vp4-table td { font-size: 13px; padding: 2px 4px; line-height: 1.25; }
-          .vp4-table th { font-weight: 900; }
-        }
-      `}</style>
+  .signature-grid { gap: 7rem; }
+  @media print {
+    @page { size: A4 portrait; margin: 8mm; }
+
+    html, body {
+      background: #fff !important;
+      height: auto !important;
+      overflow: visible !important;
+    }
+
+    /* ซ่อนทุกอย่าง (sidebar/header ของระบบ) แล้วโชว์เฉพาะใบเกรด */
+    body * { visibility: hidden !important; }
+    .vp4-root, .vp4-root * { visibility: visible !important; }
+    .vp4-root {
+      position: absolute !important;
+      left: 0; top: 0;
+      width: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    .vp4-page {
+      page-break-after: always;
+      break-after: page;
+      page-break-inside: avoid;
+      break-inside: avoid;
+      font-size: 14px;
+      padding: 4mm !important;
+      margin: 0 !important;
+      width: 100% !important;
+      max-width: none !important;
+      box-shadow: none !important;
+      border: 0 !important;
+    }
+    .vp4-page:last-child { page-break-after: auto; break-after: auto; }
+    .vp4-page img { height: 60px !important; width: 60px !important; margin-bottom: 2px !important; }
+    .vp4-page .mb-3 { margin-bottom: 4px !important; }
+    .vp4-page .mb-2 { margin-bottom: 2px !important; }
+    .vp4-page .mt-3 { margin-top: 4px !important; }
+    .vp4-page .mt-4 { margin-top: 6px !important; }
+    .vp4-page .h-8 { height: 10px !important; }
+    .vp4-page .gap-6 { gap: 10px !important; }
+    .vp4-page .signature-grid { gap: 60px !important; }
+    .vp4-table { table-layout: fixed; width: 100%; }
+    .vp4-table th, .vp4-table td { font-size: 13px; padding: 2px 4px; line-height: 1.25; }
+    .vp4-table th { font-weight: 900; }
+  }
+`}</style>
     </div>
   );
 }
