@@ -2528,14 +2528,24 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
   }
   
 
-  async function deleteRequest(id:string){
-    if(!confirm("ยืนยันการลบคำขอลานี้?"))return;
-    const target = requests.find(r => r.id === id);
-    if (target && target.status !== "draft") await pushLeaveTeams(id, "cancelled");
-    await supabase.from("substitution_records").delete().eq("leave_request_id", id); // ✅ ลบ assignment ที่ผูกไว้ด้วย
-    await supabase.from("leave_requests").delete().eq("id",id);
-    await loadRequests();
-  }
+  async function deleteRequest(id: string) {
+  const target = requests.find(r => r.id === id);
+  if (!target) return;
+  const isDraft = target.status === "draft";
+  if (!confirm(isDraft
+    ? "ยืนยันการลบร่างนี้?"
+    : "ยืนยันการยกเลิกใบลานี้? ใบลาจะถูกลบออกจากระบบทันทีและกู้คืนไม่ได้")) return;
+
+  // 1) ใบที่ส่งแล้ว: แจ้ง Teams ก่อน (ต้อง await ให้เสร็จก่อนลบ ไม่งั้น server หาใบลาไม่เจอ)
+  if (!isDraft) await pushLeaveTeams(id, "cancelled");
+
+  // 2) ลบรายการสอนแทนที่ผูกไว้ แล้วลบใบลา
+  await supabase.from("substitution_records").delete().eq("leave_request_id", id);
+  const { error } = await supabase.from("leave_requests").delete().eq("id", id);
+  if (error) { alert("❌ ลบไม่สำเร็จ: " + error.message); return; }
+
+  await loadRequests();
+}
 
   if(showForm||editRequest) return (
     <LeaveForm

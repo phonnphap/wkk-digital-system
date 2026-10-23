@@ -9,7 +9,7 @@ import { findPath, indoorRoute } from "./pathfinding";
 import { MapLocation, MapRoom, XZ, floorH, hasInterior, roomCenter } from "./schoolData";
 import { BuildingModel, IndoorBuilding, TYPE_LABEL } from "./BuildingModel";
 import { Decor, Field, ParkingLot } from "./SceneDecor";
-import { PickFn, buildGates, layoutWarnings, pickState, withGateNodes, withRoadNodes } from "./DecorData";
+import { PickFn, buildGates, layoutWarnings, navFromRoads, pickState, withGateNodes, withRoadNodes } from "./DecorData";
 import AdminPanel, { AdminFocus, DEFAULT_SETTINGS, MapSettings } from "./AdminPanel";
 
 type Dest = { type: "loc" | "room" | "gate"; id: string } | null;
@@ -192,10 +192,20 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
   const guardHouse = useMemo(() => locs.find((l) => l.kind === "gate") ?? locs[0], [locs]);
   const gates = useMemo(() => buildGates(decor.gates), [decor.gates]);
   // เส้นทางเดิน: ถนนเทา/ฟุตบาทที่ตั้งค่า + ประตูทุกบาน
+  // decor.noLegacy = ลบถนนเทาเดิมถาวร → ไม่ใช้ nodes/edges เดิมเลย ใช้เฉพาะถนนที่แอดมินสร้างเอง
   const nav = useMemo(() => {
+    if (decor.noLegacy) {
+      const g = navFromRoads(decor.roads ?? [], gates);
+      return withGateNodes(g.nodes, g.edges, gates);
+    }
     const r = withRoadNodes(nodes, edges, decor.roads ?? []);
     return withGateNodes(r.nodes, r.edges, gates);
-  }, [nodes, edges, decor.roads, gates]);
+  }, [nodes, edges, decor.roads, decor.noLegacy, gates]);
+  // กราฟที่ใช้ "วาด": โหมดลบถนนเดิม = วาดเฉพาะเส้นของถนนที่สร้างเอง (ไม่วาดเส้นต่อประตู/เส้นต่อเชื่อมที่ระบบสร้าง)
+  const drawGraph = useMemo(
+    () => (decor.noLegacy ? withRoadNodes([], [], decor.roads ?? []) : nav),
+    [decor.noLegacy, decor.roads, nav],
+  );
 
   // จุดเริ่มต้น: ประตูทุกบาน + สถานที่ทุกแห่ง (เริ่มต้นที่ประตู 2)
   const startPoints = useMemo<StartPt[]>(() => [
@@ -497,7 +507,7 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
           shadow-camera-near={1} shadow-camera-far={90}
         />
 
-        <Decor decor={decor} gates={gates} nodes={nav.nodes} edges={nav.edges} gate={guardHouse}
+        <Decor decor={decor} gates={gates} nodes={drawGraph.nodes} edges={drawGraph.edges} gate={guardHouse}
           robotRef={robotRef as any} indoor={mode === "indoor"} onGround={onGround} onPick={onDecorPick} />
 
         {locs.map((l) => {

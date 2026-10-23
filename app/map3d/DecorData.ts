@@ -108,6 +108,8 @@ export interface DecorConfig {
   traffic?: { cars: number; speed: number };
   grayRoad?: GrayRoad;       // ถนนเทาในโรงเรียนที่มีอยู่เดิม (สีและความกว้าง)
   version?: number;
+  /** true = ไม่ใช้ถนนเทา/เส้นทางเดิมจาก nodes/edges เลย (ทั้งการวาดและนำทาง) — ใช้เฉพาะถนนเทา/ฟุตบาทที่แอดมินสร้างเอง */
+  noLegacy?: boolean;
 }
 
 const trees = (list: [number, number, number][], h = 1): DecorItem[] =>
@@ -237,7 +239,7 @@ export function sanitizeDecor(v: any): DecorConfig {
     if (ver < 4) gates = gates.map((g) => (g.id === "g5" ? { ...g, ped: true } : g)); // ประตูคนเดินไม่มีถนนต่อ
     if (ver < 5) gates = gates.map((g) => (g.id === "g5" ? { ...g, link: "rd:walk-in:4" } : g));
   }
-  return { items, gates, roads, traffic: v?.traffic ?? DEFAULT_DECOR.traffic, grayRoad: v?.grayRoad ?? DEFAULT_DECOR.grayRoad, version: DECOR_VERSION };
+  return { items, gates, roads, traffic: v?.traffic ?? DEFAULT_DECOR.traffic, grayRoad: v?.grayRoad ?? DEFAULT_DECOR.grayRoad, version: DECOR_VERSION, noLegacy: !!v?.noLegacy };
 }
 
 /* ───────────── ประตูรั้ว ───────────── */
@@ -357,6 +359,83 @@ export function withRoadNodes(nodes: MapNode[], edges: MapEdge[], roads: RoadIte
     });
   });
   return { nodes: ns, edges: es };
+}
+
+/* ───────────── กราฟนำทางล้วนจากถนนที่แอดมินสร้างเอง (ใช้เมื่อ decor.noLegacy) ───────────── */
+const SNAP_TOL = 1.6;   // world — ปลายเส้นที่อยู่ห่างเส้นอื่นไม่เกินนี้ จะถูกต่อเข้าเส้นนั้น
+
+function segCross(a: XZ, b: XZ, c: XZ, d: XZ): XZ | null {
+  const r: XZ = [b[0] - a[0], b[1] - a[1]], s: XZ = [d[0] - c[0], d[1] - c[1]];
+  const den = r[0] * s[1] - r[1] * s[0];
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((c[0] - a[0]) * s[1] - (c[1] - a[1]) * s[0]) / den;
+  const u = ((c[0] - a[0]) * r[1] - (c[1] - a[1]) * r[0]) / den;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return [a[0] + t * r[0], a[1] + t * r[1]];
+}
+function nearestOnSeg(p: XZ, a: XZ, b: XZ): { q: XZ; d: number } {
+  const vx = b[0] - a[0], vz = b[1] - a[1];
+  const L2 = vx * vx + vz * vz || 1;
+  const t = Math.min(1, Math.max(0, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vz) / L2));
+  const q: XZ = [a[0] + vx * t, a[1] + vz * t];
+  return { q, d: Math.hypot(p[0] - q[0], p[1] - q[1]) };
+}
+
+/**
+ * สร้างกราฟนำทางจากถนนเทา/ฟุตบาทที่ตั้งค่าไว้อย่างเดียว (ไม่ใช้ nodes/edges เดิม)
+ *  - เส้นที่ตัดกัน → สร้างจุดแยกที่จุดตัด
+ *  - ปลายเส้นที่แตะ/ใกล้เส้นอื่น (ตัวอักษร T) → ต่อเข้ากับจุดที่ใกล้ที่สุดบนเส้นนั้น
+ *  - ประตูทุกบาน → ต่อเข้ากับจุดที่ใกล้ที่สุดบนถนน
+ */
+export function navFromRoads(roads: RoadItem[], gates: GateDef[] = []) {
+  const nodes: MapNode[] = [], edges: MapEdge[] = [];
+  const segs: { a: string; b: string; A: XZ; B: XZ; rid: string }[] = [];
+  const ends: { rid: string; id: string; p: XZ }[] = [];
+  roads.filter((r) => (r.kind === "gray" || r.kind === "walk") && !r.off && r.pts.length >= 2).forEach((r) => {
+    const P = r.pts.map(([x, y]) => px(x, y));
+    const ids = r.pts.map((_, i) => `rd:${r.id}:${i}`);
+    P.forEach((p, i) => {
+      nodes.push({ id: ids[i], x: p[0], z: p[1] });
+      if (i > 0) { edges.push({ a: ids[i - 1], b: ids[i] }); segs.push({ a: ids[i - 1], b: ids[i], A: P[i - 1], B: P[i], rid: r.id }); }
+    });
+    ends.push({ rid: r.id, id: ids[0], p: P[0] }, { rid: r.id, id: ids[ids.length - 1], p: P[P.length - 1] });
+  });
+  let jn = 0;
+  const junction = (p: XZ, links: string[]) => {
+    const id = `rj:${jn++}`;
+    nodes.push({ id, x: p[0], z: p[1] });
+    links.forEach((l) => edges.push({ a: id, b: l }));
+    return id;
+  };
+  // 1) เส้นต่างสายที่ตัดกัน
+  for (let i = 0; i < segs.length; i++) for (let j = i + 1; j < segs.length; j++) {
+    const s = segs[i], t = segs[j];
+    if (s.rid === t.rid) continue;
+    const q = segCross(s.A, s.B, t.A, t.B);
+    if (q) junction(q, [s.a, s.b, t.a, t.b]);
+  }
+  // 2) ปลายเส้น → เส้นอื่นที่ใกล้ที่สุด
+  ends.forEach((e) => {
+    let best: { d: number; q: XZ; s: (typeof segs)[number] } | null = null;
+    segs.forEach((s) => {
+      if (s.rid === e.rid) return;
+      const { q, d } = nearestOnSeg(e.p, s.A, s.B);
+      if (!best || d < best.d) best = { d, q, s };
+    });
+    const b = best as { d: number; q: XZ; s: (typeof segs)[number] } | null;
+    if (b && b.d <= SNAP_TOL) junction(b.q, [b.s.a, b.s.b, e.id]);
+  });
+  // 3) ประตู → จุดที่ใกล้ที่สุดบนถนน (ไกลเกิน 12 หน่วยไม่ต่อ)
+  gates.forEach((g) => {
+    let best: { d: number; q: XZ; s: (typeof segs)[number] } | null = null;
+    segs.forEach((s) => {
+      const { q, d } = nearestOnSeg([g.x, g.z], s.A, s.B);
+      if (!best || d < best.d) best = { d, q, s };
+    });
+    const b = best as { d: number; q: XZ; s: (typeof segs)[number] } | null;
+    if (b && b.d <= 12) junction(b.q, [b.s.a, b.s.b]);
+  });
+  return { nodes, edges };
 }
 
 /** (เก็บไว้เพื่อความเข้ากันได้กับโค้ดเดิม) */

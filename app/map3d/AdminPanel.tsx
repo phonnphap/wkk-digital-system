@@ -842,6 +842,15 @@ function DecorEditor({ decor, api, run, placingId, onPlace, focus, locs }: { dec
             api.setDecor((d) => ({ ...d, roads: [...(d.roads ?? []), ...add] }));
         }} className={`${btn} py-1 w-full bg-amber-50 text-amber-700 border border-amber-200`}>⇄ แปลงถนนเทาเดิมทุกเส้นให้แก้ไข/เพิ่ม/ลบได้</button>
       )}
+      {cat === "road" && (decor.noLegacy ? (
+  <button onClick={() => api.setDecor((d) => ({ ...d, noLegacy: false }))}
+    className={`${btn} py-1 w-full bg-slate-100 text-slate-600`}>↩ เปิดใช้ถนนเทาเดิมอีกครั้ง</button>
+) : (
+  <button onClick={() => {
+    if (!confirm("ลบถนนเทาเดิมทั้งหมดถาวร? (รวมเส้นตรงประตู/สนามบาส และเส้นที่แปลงมาแล้วทุกเส้น)\nถนนที่คุณสร้างเองจะยังอยู่ — ต้องกด “💾 บันทึกฉาก” จึงจะบันทึกถาวร")) return;
+    api.setDecor((d) => ({ ...d, noLegacy: true, roads: (d.roads ?? []).filter((r) => !r.replaces) }));
+  }} className={`${btn} py-1 w-full bg-rose-50 text-rose-600 border border-rose-200`}>🗑 ลบถนนเทาเดิมทั้งหมดถาวร</button>
+))}
         {cat === "road"
         ? (decor.roads ?? []).filter((r) => !fid || fid === "__gray" || r.id === fid).map((r) => (
           <RoadRow key={r.id} r={r} patch={(p) => patchRoad(r.id, p)} placingId={placingId} onPlace={onPlace}

@@ -523,7 +523,6 @@ const BAR_X = -0.85;
 export function Guard({ gate, robotRef }: { gate?: MapLocation; robotRef: React.RefObject<THREE.Group | null> }) {
   const arm = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
-  const bar = useRef<THREE.Group>(null);
   const nearRef = useRef(false);
   const [near, setNear] = useState(false);
   const base = useMemo(
@@ -539,7 +538,6 @@ export function Guard({ gate, robotRef }: { gate?: MapLocation; robotRef: React.
     const t = s.clock.elapsedTime;
     if (arm.current) arm.current.rotation.z = THREE.MathUtils.lerp(arm.current.rotation.z, n ? Math.PI * 0.85 + Math.sin(t * 9) * 0.3 : 0.08, k);
     if (body.current) body.current.position.y = Math.sin(t * 1.6) * 0.01;
-    if (bar.current) bar.current.rotation.z = THREE.MathUtils.lerp(bar.current.rotation.z, n ? Math.PI / 2.1 : 0, k);
   });
   if (!gate) return null;
   const skin = "#f1c27d";
@@ -568,15 +566,6 @@ export function Guard({ gate, robotRef }: { gate?: MapLocation; robotRef: React.
             <div className="px-1.5 py-0.5 rounded bg-slate-800 text-white text-[9px] font-black">รปภ.</div>
           </div>
         </Html>
-      </group>
-      <group ref={bar} position={[gate.pos[0] + BAR_X, 0.42, gate.pos[1] + BAR_SIDE * 0.5]}>
-        <mesh position={[0, -0.2, 0]}><boxGeometry args={[0.08, 0.4, 0.08]} /><meshStandardMaterial color="#f59f00" /></mesh>
-        {[0, 1, 2, 3].map((i) => (
-          <mesh key={i} position={[0.2 + i * 0.4, 0, 0]}>
-            <boxGeometry args={[0.4, 0.05, 0.05]} />
-            <meshStandardMaterial color={i % 2 ? "#ffffff" : "#e03131"} />
-          </mesh>
-        ))}
       </group>
     </>
   );
