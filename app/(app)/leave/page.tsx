@@ -468,6 +468,16 @@ async function pushLeaveTeams(leaveId: string, event: "submitted" | "edited" | "
     });
   } catch (e) { console.warn("[pushLeaveTeams]", e); }
 }
+async function deleteLeaveViaServer(leaveId: string): Promise<{ ok: boolean; error?: string }> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return { ok: false, error: "ยังไม่ได้ล็อกอิน" };
+  const res = await fetch("/api/leave-delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ leaveId }),
+  });
+  return res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+}
 async function pushApprovalTeams(leaveId: string, event: "approved" | "rejected", slot: 1 | 2 | 3, reason?: string) {
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -2531,19 +2541,11 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
   async function deleteRequest(id: string) {
   const target = requests.find(r => r.id === id);
   if (!target) return;
-  const isDraft = target.status === "draft";
-  if (!confirm(isDraft
+  if (!confirm(target.status === "draft"
     ? "ยืนยันการลบร่างนี้?"
     : "ยืนยันการยกเลิกใบลานี้? ใบลาจะถูกลบออกจากระบบทันทีและกู้คืนไม่ได้")) return;
-
-  // 1) ใบที่ส่งแล้ว: แจ้ง Teams ก่อน (ต้อง await ให้เสร็จก่อนลบ ไม่งั้น server หาใบลาไม่เจอ)
-  if (!isDraft) await pushLeaveTeams(id, "cancelled");
-
-  // 2) ลบรายการสอนแทนที่ผูกไว้ แล้วลบใบลา
-  await supabase.from("substitution_records").delete().eq("leave_request_id", id);
-  const { error } = await supabase.from("leave_requests").delete().eq("id", id);
-  if (error) { alert("❌ ลบไม่สำเร็จ: " + error.message); return; }
-
+  const r = await deleteLeaveViaServer(id);
+  if (!r.ok) { alert("❌ ลบไม่สำเร็จ: " + r.error); return; }
   await loadRequests();
 }
 
@@ -3062,6 +3064,18 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
   const [viewModal,  setViewModal]  = useState<any|null>(null);
   const [rejectModal,setRejectModal]= useState<{id:string;slot:1|2|3}|null>(null);
   const [gradeLevelsMap, setGradeLevelsMap] = useState<Record<string,string>>({});
+  const isSuperAdmin = user.email?.toLowerCase() === ADMIN_EMAIL;
+
+async function adminDeleteLeave(id: string) {
+  if (!confirm("⚠️ ลบใบลานี้ถาวร?\nรวมรายการสอนแทนที่ผูกไว้ ข้อมูลกู้คืนไม่ได้")) return;
+  const r = await deleteLeaveViaServer(id);
+  if (!r.ok) { alert("❌ ลบไม่สำเร็จ: " + r.error); return; }
+  setViewModal(null);
+  if (searchQuery.trim()) setSearchResults(prev => (prev ?? []).filter(x => x.id !== id));
+  if (fullDataLoadedRef.current) { fullDataLoadedRef.current = false; await ensureFullDataLoaded(filterFY); }
+  else await loadPendingPage(pendingPage);
+  if (tab === "history") await loadHistoryPage(historyPage);
+}
 
   const [usersMap, setUsersMap] = useState<Record<string, UserMapEntry>>({});
 const usersMapLoadedRef = useRef(false);
@@ -3363,9 +3377,12 @@ const allGrades = ["all", ...uniqueGrades];
                   <button onClick={()=>setViewModal(r)} className="text-xs font-bold text-blue-600 px-2 py-1 rounded-lg border border-blue-200 hover:bg-blue-50 mt-1">👁️ ดู</button>
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                  <StatusBadge status={r.status}/>
-                  <button onClick={()=>printFullLeave(r,user,"")} className="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50">🖨️ พิมพ์</button>
-                </div>
+  <StatusBadge status={r.status}/>
+  <button onClick={()=>printFullLeave(r,user,"")} className="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50">🖨️ พิมพ์</button>
+  {isSuperAdmin && (
+    <button onClick={()=>adminDeleteLeave(r.id)} className="text-xs font-bold text-red-600 px-2 py-1 rounded-lg border border-red-300 bg-red-50 hover:bg-red-100">🗑️ ลบ</button>
+  )}
+</div>
               </div>
             );
           })}
@@ -3421,9 +3438,12 @@ const allGrades = ["all", ...uniqueGrades];
     <span className="text-[11px] font-bold text-slate-400">🕐 ยื่นเมื่อ {toThaiDateTime((r as any).created_at)}</span>
   </div>
   <div className="flex items-center justify-end gap-2 mt-1">
-    <span className={`font-black text-sm ${c.text}`}>{r.days_count} วัน</span>
-    <button onClick={()=>printFullLeave(r,user,"")} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-white border border-slate-300 font-bold">🖨️ พิมพ์</button>
-  </div>
+  <span className={`font-black text-sm ${c.text}`}>{r.days_count} วัน</span>
+  <button onClick={()=>printFullLeave(r,user,"")} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-white border border-slate-300 font-bold">🖨️ พิมพ์</button>
+  {isSuperAdmin && (
+    <button onClick={()=>adminDeleteLeave(r.id)} className="text-xs font-bold text-red-600 px-2 py-1 rounded-lg border border-red-300 bg-red-50 hover:bg-red-100">🗑️ ลบ</button>
+  )}
+</div>
 </div>
                     <div className="p-5">
                       <p className="font-black text-slate-800 text-base">{fullName((r as any).user)}</p>
@@ -3494,7 +3514,10 @@ const allGrades = ["all", ...uniqueGrades];
                       <div className="flex flex-col items-end gap-2">
   <span className="text-[11px] font-bold text-slate-400">🕐 ยื่นเมื่อ {toThaiDateTime((r as any).created_at)}</span>
   <StatusBadge status={r.status}/>
-  <button onClick={()=>printFullLeave(r,user,"")} className="text-xs font-bold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-50">🖨️ พิมพ์</button>
+    <button onClick={()=>printFullLeave(r,user,"")} className="...">🖨️ พิมพ์</button>
+  {isSuperAdmin && (
+    <button onClick={()=>adminDeleteLeave(r.id)} className="text-xs font-bold text-red-600 px-2 py-1 rounded-lg border border-red-300 bg-red-50 hover:bg-red-100">🗑️ ลบ</button>
+  )}
 </div>
                     </div>
                   );})}
