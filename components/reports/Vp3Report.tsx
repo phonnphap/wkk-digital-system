@@ -325,8 +325,8 @@ export default function Vp3Report({
           .filter(r => r.student_id === s.id)
           .forEach(r => { counts[r.status]++; });
 
-        const present = counts.present + counts.late;
-        const absent = total - present;
+        const present = counts.present + counts.late + counts.excused;
+const absent = total - present;
         const percent = total > 0 ? (present / total) * 100 : 0;
         const belowFlags = presentThresholds.map(t => percent < t);
 

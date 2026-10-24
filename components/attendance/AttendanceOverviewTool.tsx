@@ -96,7 +96,7 @@ export default function AttendanceOverviewTool({
     return students.map(s => {
       const counts: Record<Status, number> = { present: 0, absent: 0, late: 0, leave: 0, excused: 0 };
       records.filter(r => r.student_id === s.id).forEach(r => { counts[r.status]++; });
-      const totalPresent = counts.present + counts.late;
+      const totalPresent = counts.present + counts.late + counts.excused;
       return { student: s, counts, totalPresent };
     });
   }, [students, records]);

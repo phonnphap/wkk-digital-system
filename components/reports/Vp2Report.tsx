@@ -149,6 +149,7 @@ export default function Vp2Report({
   unitMaxScore = 70,
   midtermMaxScore = 0,
   gradeRoundingMode = "truncate", 
+  showSpecialScores = true, 
   subjectTeacherNameFallback,
   onBack,
 }: {
@@ -164,6 +165,7 @@ export default function Vp2Report({
   unitMaxScore?: number;
   midtermMaxScore?: number;
   gradeRoundingMode?: "up" | "truncate";
+  showSpecialScores?: boolean; 
   subjectTeacherNameFallback?: string;
   onBack: () => void;
 }) {
@@ -347,9 +349,11 @@ if (allHeadsErr) {
       (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
       0
     );
-    const specialTotal = scoreEvents
-      .filter(ev => ev.student_id === s.id)
-      .reduce((sum, ev) => sum + ev.points, 0);
+        const specialTotal = showSpecialScores
+      ? scoreEvents
+          .filter(ev => ev.student_id === s.id && presets.some(p => p.id === ev.preset_id))
+          .reduce((sum, ev) => sum + ev.points, 0)
+      : 0;
 
     // ★ คะแนนดิบรวม ตรงกับช่อง "รวม" ในหน้าคะแนนรวม
     const rawUnit = assignmentTotal + specialTotal;
@@ -363,7 +367,7 @@ const total = applyRounding(scaledUnit + (midterm ?? 0), gradeRoundingMode);
 map[s.id] = { unit: scaledUnit, midterm, total };
   });
   return map;
-}, [students, submissions, assignments, examScores, scoreEvents, gradeRoundingMode]);
+}, [students, submissions, assignments, examScores, scoreEvents, presets, showSpecialScores, gradeRoundingMode]);
 
 // ★ ตรวจระดับชั้นจากป้ายห้องเรียนจริง (classroomLabel เช่น "ประถมศึกษา ป.1/1" หรือ "มัธยมศึกษา ม.3/1")
 function getGradeLevelWord(classroomLabel?: string): string {

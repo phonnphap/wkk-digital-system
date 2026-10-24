@@ -169,6 +169,7 @@ export default function Vp7Report({
   midtermMaxScore = 0,
   finalMaxScore = 30,
   gradeRoundingMode = "truncate",
+  showSpecialScores = true, 
   subjectTeacherNameFallback,
   rtwItems = [],
   charItems = [],
@@ -188,6 +189,7 @@ export default function Vp7Report({
   midtermMaxScore?: number;
   finalMaxScore?: number;       // ★ เพิ่ม: วผ.7 มีคอลัมน์ "ปลายภาค" แยกจาก วผ.2
   gradeRoundingMode?: "up" | "truncate";
+  showSpecialScores?: boolean; 
   subjectTeacherNameFallback?: string;
   rtwItems?: AssessItem[];          // ข้อประเมิน อ่าน คิด เขียน
   charItems?: AssessItem[];         // ข้อประเมิน คุณลักษณะอันพึงประสงค์
@@ -375,9 +377,11 @@ export default function Vp7Report({
         (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
         0
       );
-      const specialTotal = scoreEvents
-        .filter(ev => ev.student_id === s.id)
-        .reduce((sum, ev) => sum + ev.points, 0);
+          const specialTotal = showSpecialScores
+      ? scoreEvents
+          .filter(ev => ev.student_id === s.id && presets.some(p => p.id === ev.preset_id))
+          .reduce((sum, ev) => sum + ev.points, 0)
+      : 0;
       const unitRaw = assignmentTotal + specialTotal;
 
       const midtermRaw = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm")?.score ?? null;
@@ -423,7 +427,7 @@ export default function Vp7Report({
       };
     });
     return map;
-  }, [students, submissions, assignments, examScores, scoreEvents, criteria, grandMaxScore, gradeRoundingMode]);
+  }, [students, submissions, assignments, examScores, scoreEvents, presets, showSpecialScores, criteria, grandMaxScore, gradeRoundingMode]);
 
   function getGradeLevelWord(classroomLabel?: string): string {
     if (!classroomLabel) return "มัธยมศึกษา";

@@ -48,7 +48,7 @@ export default function ScoreSheetAssessmentTool({
   students, currentUserId, readOnly, onBack,
   midtermMaxScore = 0,
   finalMaxScore = 30,
-  gradeRoundingMode = "truncate",
+  gradeRoundingMode = "truncate",showSpecialScores = true,
 }: {
   sectionId: string;
   assessmentType: AssessmentType;
@@ -64,6 +64,7 @@ export default function ScoreSheetAssessmentTool({
 midtermMaxScore?: number;
   finalMaxScore?: number;
   gradeRoundingMode?: "up" | "truncate";
+  showSpecialScores?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -124,6 +125,7 @@ midtermMaxScore?: number;
         const submissions: any[] = json.submissions ?? [];
         const examScores: any[] = json.examScores ?? [];
         const scoreEvents: any[] = json.scoreEvents ?? [];
+                const presets: any[] = json.presets ?? [];
         const criteria: Criterion[] = json.criteria ?? [];
 
         const isW = (a: any) => !!(a.allow_weight && a.weight_percent != null && (a.max_score ?? 0) > 0);
@@ -145,7 +147,11 @@ students.forEach(s => {
       const sub = submissions.find(x => x.student_id === s.id && x.assignment_id === a.id);
       return sum + scoreOf(a, sub?.score);
     }, 0) +
-    scoreEvents.filter(ev => ev.student_id === s.id).reduce((sum, ev) => sum + ev.points, 0);
+    (showSpecialScores
+      ? scoreEvents
+          .filter(ev => ev.student_id === s.id && presets.some(p => p.id === ev.preset_id))
+          .reduce((sum, ev) => sum + ev.points, 0)
+      : 0);
   const mid = examScores.find(e => e.student_id === s.id && e.exam_type === "midterm")?.score ?? 0;
   const fin = examScores.find(e => e.student_id === s.id && e.exam_type === "final")?.score ?? 0;
 
@@ -162,7 +168,7 @@ setGradeMap(gm);
         console.warn("โหลดเกรดไม่สำเร็จ:", e);
       }
     })();
-  }, [sectionId, students, midtermMaxScore, finalMaxScore, gradeRoundingMode]);
+    }, [sectionId, students, midtermMaxScore, finalMaxScore, gradeRoundingMode, showSpecialScores]);
 
   function setScore(studentId: string, itemKey: string, value: number) {
     if (readOnly) return;

@@ -362,9 +362,9 @@ const [serverShowScores, setServerShowScores] = useState<boolean | null>(null);
           const map: Record<string, { present: number; total: number }> = {};
           students.forEach(s => { map[s.id] = { present: 0, total: totalDates.length }; });
           (attJson.records ?? []).forEach((r: any) => {
-            if (!map[r.student_id]) map[r.student_id] = { present: 0, total: totalDates.length };
-            if (r.status === "present" || r.status === "late") map[r.student_id].present += 1;
-          });
+  if (!map[r.student_id]) map[r.student_id] = { present: 0, total: totalDates.length };
+  if (r.status === "present" || r.status === "late" || r.status === "excused") map[r.student_id].present += 1;
+});
           setAttendanceMap(map);
         }
        try {

@@ -3254,7 +3254,8 @@ if (validTargets.length === 0) { setScoreTargets(null); return; }
     formativeMaxScore={(section as any).formative_max_score}
     midtermMaxScore={(section as any).midterm_max_score}
     finalMaxScore={(section as any).final_max_score}
-    gradeRoundingMode={(subject as any).grade_rounding_mode ?? "truncate"}
+        gradeRoundingMode={(subject as any).grade_rounding_mode === "round_up" ? "up" : "truncate"}
+    showSpecialScores={section.show_special_scores ?? true}
     subjectTeacherName={subjectTeacherName}
   />
 )}
