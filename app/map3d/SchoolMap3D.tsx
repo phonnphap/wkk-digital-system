@@ -9,7 +9,7 @@ import { findPath, indoorRoute } from "./pathfinding";
 import { MapLocation, MapRoom, XZ, floorH, hasInterior, roomCenter } from "./schoolData";
 import { BuildingModel, IndoorBuilding, TYPE_LABEL } from "./BuildingModel";
 import { Decor, Field, ParkingLot } from "./SceneDecor";
-import { PickFn, buildGates, layoutWarnings, navFromRoads, pickState, withGateNodes, withRoadNodes } from "./DecorData";
+import { PickFn, attachToGraph, buildGates, layoutWarnings, navFromRoads, pickState, withGateNodes, withRoadNodes } from "./DecorData";
 import AdminPanel, { AdminFocus, DEFAULT_SETTINGS, MapSettings } from "./AdminPanel";
 
 type Dest = { type: "loc" | "room" | "gate"; id: string } | null;
@@ -330,7 +330,8 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
       setTimeout(() => finishOutdoor(d), 0);
       return;
     }
-    const xz = findPath(nav.nodes, nav.edges, fromPt.entrance, target.entrance);
+    const g2 = attachToGraph(nav.nodes, nav.edges, [fromPt.entrance, target.entrance]);
+    const xz = findPath(g2.nodes, g2.edges, fromPt.entrance, target.entrance);
     const pts: THREE.Vector3[] = [];
     xz.forEach(([x, z]) => {
       const v = new THREE.Vector3(x, 0.12, z);
@@ -394,11 +395,11 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
     const q = query.trim().toLowerCase();
     const items: { d: NonNullable<Dest>; label: string; sub: string }[] = [];
     gates.forEach((g) => {
-      if (!q || g.name.includes(q) || "ประตู".includes(q))
+      if (!q || g.name.toLowerCase().includes(q) || "ประตู".includes(q))
         items.push({ d: { type: "gate", id: g.id }, label: `🚪 ${g.name}`, sub: "ประตูโรงเรียน (ทางเข้า/ออก)" });
     });
     locs.forEach((l) => {
-      if (!q || l.name.toLowerCase().includes(q) || l.code === q)
+      if (!q || l.name.toLowerCase().includes(q) || l.code.toLowerCase().includes(q) || `${l.code}. ${l.name}`.toLowerCase().includes(q))
         items.push({ d: { type: "loc", id: l.id }, label: `${l.code}. ${l.name}`, sub: "สถานที่" });
     });
     if (q) rooms.forEach((r) => {
@@ -407,7 +408,7 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
         items.push({ d: { type: "room", id: r.id }, label: r.name, sub: `${l?.name ?? ""} · ชั้น ${r.level}` });
       }
     });
-    return items.slice(0, 8);
+    return q ? items.slice(0, 40) : items;   // ไม่พิมพ์อะไร = แสดงทุกอาคาร/ประตู (เลื่อนดูได้)
   }, [query, locs, rooms, locById, gates]);
 
   const destLabel = dest
@@ -650,7 +651,7 @@ export default function SchoolMap3D({ isAdmin = false }: { isAdmin?: boolean }) 
           <button disabled={!dest || running} onClick={() => goTo(dest)}
             className="text-xs font-extrabold rounded-xl bg-blue-600 text-white px-4 py-2 disabled:opacity-40">🚶 นำทาง</button>
           {(focused || query) && (
-            <div className={`${glass} absolute bottom-full mb-2 left-2 right-2 max-h-60 overflow-y-auto rounded-2xl divide-y divide-slate-100`}>
+            <div className={`${glass} absolute bottom-full mb-2 left-2 right-2 max-h-72 overflow-y-auto rounded-2xl divide-y divide-slate-100`}>
               {results.length === 0 && <p className="text-xs text-slate-400 p-3">ไม่พบสถานที่</p>}
               {results.map((r, i) => (
                 <button key={i} onMouseDown={(e) => e.preventDefault()} onClick={() => { setDest(r.d); setQuery(""); }}

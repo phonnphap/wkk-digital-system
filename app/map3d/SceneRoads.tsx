@@ -79,6 +79,10 @@ export function RoadsLayer({ roads, gates, gray, onPick }: { roads: RoadItem[]; 
         } else if (kind === "gray") {
           B({ p: [mx, 0.006, mz], s: [len + ext, 0.014, w + 0.16], r: ang, c: ec });
           Ln({ p: [mx, 0.014, mz], s: [len + ext, 0.014, w], r: ang, c: gc });
+        } else if (kind === "nav") {
+          let pos = dashNext;
+          while (pos < len) { const t = pos / len; Ln({ p: [a[0] + dx * t, 0.05, a[1] + dz * t], s: [0.16, 0.01, 0.06], r: ang, c: "#60a5fa" }); pos += 0.3; }
+          dashNext = pos - len;
         } else if (kind === "walk") {
           Sl({ p: [mx, 0.035, mz], s: [len + ext, 0.07, w], r: ang, c: "#e5e7eb" });
           if (roofOn) {

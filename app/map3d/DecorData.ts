@@ -90,7 +90,7 @@ export interface GateItem {
   closed?: boolean;                    // ปิดประตู
   ped?: boolean;                       // ประตูคนเดิน (ไม่มีถนนต่อ)
 }
-export type RoadKind = "main" | "soi" | "park" | "walk" | "route" | "gray";
+export type RoadKind = "main" | "soi" | "park" | "walk" | "route" | "gray" | "nav";
 /** กำลังโหมด "วางตำแหน่ง" — วัตถุไม่ต้องดักคลิก ปล่อยให้ถึงพื้นเพื่อวาง */
 export const pickState = { placing: false };
 export type PickFn = (x: number, z: number, label: string, ref?: { kind: "item" | "gate" | "road" | "loc" | "room" | "gray"; id: string }) => void;
@@ -98,6 +98,7 @@ export interface GrayRoad { w: number; color: string; edge: string }
 export const ROAD_KIND_LABEL: Record<RoadKind, string> = {
   main: "ถนนหลัก (น้ำเงิน 4 เลน)", soi: "ถนนซอย (ดำ ขอบเหลือง)", park: "ถนนลานจอดรถ (เหลือง)",
   walk: "ฟุตบาท (มีหลังคา)", route: "เส้นทางรถวิ่ง (ไม่แสดงถนน)", gray: "ถนนในโรงเรียน (เทา ขอบขาว)",
+  nav: "เส้นนำทาง (วาดเองเฉพาะให้หุ่นเดิน)",
 };
 export interface RoadItem {
   id: string; name: string; kind: RoadKind;
@@ -351,7 +352,7 @@ export function grayFromGraph(nodes: MapNode[], edges: MapEdge[], gates: GateIte
 export function withRoadNodes(nodes: MapNode[], edges: MapEdge[], roads: RoadItem[]) {
   const skip = replacedEdgeKeys(roads);   // เส้นเดิมที่ถูกแปลง/ลบ ตัดออกจากกราฟนำทาง
   const ns = [...nodes], es = edges.filter((e) => !skip.has(edgeKey(e.a, e.b)));
-  roads.filter((r) => (r.kind === "gray" || r.kind === "walk") && !r.off).forEach((r) => {
+  roads.filter((r) => (r.kind === "gray" || r.kind === "walk" || r.kind === "nav") && !r.off).forEach((r) => {
     const ids = r.pts.map((_, i) => `rd:${r.id}:${i}`);
     r.pts.forEach((p, i) => {
       const [x, z] = px(p[0], p[1]);
@@ -398,7 +399,7 @@ export function navFromRoads(roads: RoadItem[], gates: GateDef[] = []) {
   const nodes: MapNode[] = [], edges: MapEdge[] = [];
   const segs: { a: string; b: string; A: XZ; B: XZ; rid: string }[] = [];
   const ends: { rid: string; id: string; p: XZ }[] = [];
-  roads.filter((r) => (r.kind === "gray" || r.kind === "walk") && !r.off && r.pts.length >= 2).forEach((r) => {
+  roads.filter((r) => (r.kind === "gray" || r.kind === "walk" || r.kind === "nav") && !r.off && r.pts.length >= 2).forEach((r) => {
     const P = r.pts.map(([x, y]) => px(x, y));
     const ids = r.pts.map((_, i) => `rd:${r.id}:${i}`);
     P.forEach((p, i) => {
@@ -485,4 +486,33 @@ export function layoutWarnings(locs: MapLocation[]): string[] {
     }
   }
   return out;
+}
+
+
+/**
+ * ต่อจุดเริ่ม/ปลายทางเข้ากับ "จุดที่ใกล้ที่สุดบนเส้นทาง" (ไม่ใช่แค่โหนดมุมเส้น)
+ * → หุ่นยนต์เดินจากอาคารเข้าถนนที่ใกล้ที่สุดแล้วค่อยเดินตามถนน ไม่ตัดข้ามสนามหญ้าไปโหนดไกลๆ
+ * คืนกราฟใหม่ (ไม่แก้ของเดิม) ที่มีโหนด sp:0, sp:1, ... ตรงตำแหน่งที่ต่อ
+ */
+export function attachToGraph(nodes: MapNode[], edges: MapEdge[], pts: XZ[]) {
+  const ns = [...nodes], es = [...edges];
+  const pos = new Map(nodes.map((n) => [n.id, [n.x, n.z] as XZ]));
+  pts.forEach((p, k) => {
+    let best: { a: string; b: string; q: XZ; d: number } | null = null;
+    for (const e of edges) {
+      const A = pos.get(e.a), B = pos.get(e.b);
+      if (!A || !B) continue;
+      const vx = B[0] - A[0], vz = B[1] - A[1], L2 = vx * vx + vz * vz;
+      if (L2 < 1e-9) continue;
+      const t = Math.min(1, Math.max(0, ((p[0] - A[0]) * vx + (p[1] - A[1]) * vz) / L2));
+      const q: XZ = [A[0] + vx * t, A[1] + vz * t];
+      const dd = Math.hypot(p[0] - q[0], p[1] - q[1]);
+      if (!best || dd < best.d) best = { a: e.a, b: e.b, q, d: dd };
+    }
+    if (!best) return;
+    const id = `sp:${k}`;
+    ns.push({ id, x: best.q[0], z: best.q[1] });
+    es.push({ a: id, b: best.a }, { a: id, b: best.b });
+  });
+  return { nodes: ns, edges: es };
 }
