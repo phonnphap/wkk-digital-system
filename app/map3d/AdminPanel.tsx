@@ -528,12 +528,12 @@ function RoomRow({ room, loc, api, run, placingId, onPlace, autoOpen }: { room: 
 
 /* ───────────── แท็บ ฉาก/ประตู ───────────── */
 
-type Field = "rot" | "s" | "h" | "hs" | "w" | "d" | "n" | "m" | "kind" | "road" | "color" | "name" | "levels";
+type Field = "rot" | "s" | "h" | "hs" | "w" | "d" | "n" | "m" | "rows" | "ang" | "fill" | "kind" | "road" | "color" | "name" | "levels";
 const FIELDS: Record<DecorType, Field[]> = {
   tree: ["kind", "s", "h"], pavilion: ["color", "rot", "hs", "w", "d"], shrine: ["name", "rot", "hs"],
   toilet: ["name", "kind", "w", "d", "rot", "color", "hs"], shed: ["name", "w", "d", "rot", "color", "hs"],
   barrier: ["name", "w", "rot", "hs"], flag: [], bridge: ["name", "w", "d", "rot", "levels"], sign: ["name", "w", "s"],
-  carport: ["name", "w", "d", "rot", "color", "hs"], busbay: ["name", "w", "d", "rot", "n", "hs"], kiosk: ["name", "w", "d", "rot", "color", "hs"],
+  carport: ["name", "w", "d", "rot", "color", "hs"], busbay: ["name", "w", "d", "rot", "n", "rows", "kind", "ang", "fill", "hs"], kiosk: ["name", "w", "d", "rot", "color", "hs"],
   temple: ["name", "kind", "s", "rot"], roadsign: ["name", "w", "rot", "color"], zebra: ["w", "d", "rot"],
   fieldfence: ["name", "w", "d", "rot", "h"], people: ["name", "kind", "road", "w", "d", "rot", "n", "m"],
   polyfence: ["name", "h", "color"],
@@ -542,14 +542,15 @@ const KIND_OPTIONS: Partial<Record<DecorType, [string, string][]>> = {
   tree: [["round", "ทรงกลม"], ["pine", "สน (ทรงกรวย)"], ["palm", "มะพร้าว/ปาล์ม"], ["bush", "พุ่มไม้เตี้ย"], ["flower", "ไม้ดอก (ราชพฤกษ์)"]],
   people: [["walk", "เดินในโรงเรียน"], ["assemble", "เข้าแถว"], ["sit", "นั่งทำกิจกรรม (วงกลม)"], ["play", "วิ่งเล่น"], ["exercise", "ออกกำลังกาย"], ["follow", "เดินตามถนน/ฟุตบาท"]],
   temple: [["ubosot", "อุโบสถ (หลังคาซ้อน)"], ["prasat", "วิหารทรงปราสาท"]],
+  busbay: [["perp", "จอดตรง (หัวชนขอบ)"], ["slant", "จอดเฉียง"], ["parallel", "จอดขนาน"]],
   toilet: [["front", "ประตูหันด้านหน้า"], ["back", "ประตูหันด้านหลัง"], ["left", "ประตูหันด้านซ้าย"], ["right", "ประตูหันด้านขวา"]],
 };
 const NEW_DEFAULTS: Record<DecorType, Partial<DecorItem>> = {
   tree: { s: 1, h: 1, kind: "round" }, pavilion: { color: "#e5484d" }, shrine: { name: "ซุ้มพระ" },
   toilet: { name: "ห้องน้ำ", w: 36, d: 24, kind: "front" }, shed: { name: "ที่จอดมอเตอร์ไซค์", w: 60, d: 28, color: "#f59f00" },
-  barrier: { name: "ประตูกั้น", w: 26, rot: 90 }, flag: {}, bridge: { name: "ทางเชื่อม", w: 30, d: 24, levels: "2,3" },
+  barrier: { name: "ประตูกั้น", w: 26, rot: 90, gmode: "slide", gside: "r", gleaves: 1, auto: true }, flag: {}, bridge: { name: "ทางเชื่อม", w: 30, d: 24, levels: "2,3" },
   sign: { name: "โรงเรียนวัดเขียนเขต", w: 42, s: 1 },
-  carport: { name: "โรงจอดรถ", w: 90, d: 26, color: "#2563eb" }, busbay: { name: "ที่จอดรถตู้/รถรับส่ง", w: 78, d: 18, n: 3 },
+  carport: { name: "โรงจอดรถ", w: 90, d: 26, color: "#2563eb" }, busbay: { name: "ที่จอดรถตู้/รถรับส่ง", w: 78, d: 18, n: 3, rows: 1, kind: "perp", ang: 45, fill: 0.85 },
   kiosk: { name: "ซุ้มขายน้ำ", color: "#0ea5e9", w: 24, d: 18 },
   temple: { name: "วัด", kind: "ubosot", s: 1 }, roadsign: { name: "ป้าย|บรรทัดที่ 2", w: 70, color: "#15803d" },
   zebra: { w: 52, d: 12 }, fieldfence: { name: "รั้วสนาม", w: 60, d: 90, h: 1 },
@@ -614,9 +615,9 @@ function ItemRow({ it, patch, del, placingId, onPlace, roads, highlight, locs }:
   it: DecorItem; patch: (p: Partial<DecorItem>) => void; del: () => void; roads?: RoadItem[]; highlight?: boolean; locs?: MapLocation[];
 } & Place) {
   const f = FIELDS[it.type];
-    const n = (k: "rot" | "s" | "h" | "hs" | "w" | "d" | "n" | "m", label: string, step = 1) =>
+    const n = (k: "rot" | "s" | "h" | "hs" | "w" | "d" | "n" | "m" | "rows" | "ang" | "fill", label: string, step = 1) =>
     f.includes(k) && <Num key={k} label={label}
-      value={it[k] ?? (k === "s" || k === "h" || k === "hs" || k === "m" ? 1 : k === "n" ? 3 : it.type === "pavilion" && (k === "w" || k === "d") ? 21.6 : 0)}
+      value={it[k] ?? (k === "s" || k === "h" || k === "hs" || k === "m" || k === "rows" ? 1 : k === "n" ? 3 : k === "ang" ? 45 : k === "fill" ? 0.85 : it.type === "pavilion" && (k === "w" || k === "d") ? 21.6 : 0)}
       step={step} onChange={(v) => patch({ [k]: v })} />;
   const kinds = KIND_OPTIONS[it.type];
   return (
@@ -633,7 +634,7 @@ function ItemRow({ it, patch, del, placingId, onPlace, roads, highlight, locs }:
         <Num label="Y (px)" value={it.y} onChange={(v) => patch({ y: v })} />
         {n("s", it.type === "sign" ? "ขนาดตัวอักษร" : "ขนาด", 0.05)}{n("h", "ความสูง (ตัวคูณ)", 0.1)}{n("hs", "ความสูง (ตัวคูณ)", 0.1)}
         {n("w", "กว้าง (px)")}{n("d", "ลึก (px)")}
-        {n("n", it.type === "people" ? "จำนวน นร." : "จำนวนช่อง")}{n("m", "จำนวนครู")}{n("rot", "หมุน (องศา)", 0.5)}
+        {n("n", it.type === "people" ? "จำนวน นร." : "จำนวนช่อง")}{n("m", "จำนวนครู")}{n("rows", "จำนวนแถว")}{it.kind === "slant" && n("ang", "มุมเฉียง (องศา)", 5)}{n("fill", "สัดส่วนช่องที่มีรถ (0–1)", 0.05)}{n("rot", "หมุน (องศา)", 0.5)}
       </div>
       {f.includes("kind") && kinds && (
         <select className={inp} value={it.kind ?? kinds[0][0]} onChange={(e) => patch({ kind: e.target.value })}>
@@ -654,8 +655,30 @@ function ItemRow({ it, patch, del, placingId, onPlace, roads, highlight, locs }:
         <input className={inp} value={it.levels ?? ""} onChange={(e) => patch({ levels: e.target.value })} placeholder="ชั้นที่มีทางเชื่อม เช่น 2,3" />
       )}
       {it.type === "barrier" && (
-        <label className="flex items-center justify-between text-[11px] font-bold text-slate-600">เปิดประตูกั้น
-          <input type="checkbox" checked={!!it.open} onChange={(e) => patch({ open: e.target.checked })} className="w-4 h-4 accent-blue-600" /></label>
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-2 gap-1.5">
+            <label className="block"><span className={lbl}>แบบเปิด</span>
+              <select className={inp} value={it.gmode ?? "slide"} onChange={(e) => patch({ gmode: e.target.value as "slide" | "swing" })}>
+                <option value="slide">เลื่อน</option><option value="swing">สวิง (เปิด-ปิดบานพับ)</option>
+              </select></label>
+            {(it.gmode ?? "slide") === "swing" && (
+              <label className="block"><span className={lbl}>จำนวนบาน</span>
+                <select className={inp} value={it.gleaves === 2 ? 2 : 1} onChange={(e) => patch({ gleaves: e.target.value === "2" ? 2 : 1 })}>
+                  <option value="1">1 บาน</option><option value="2">2 บาน</option>
+                </select></label>
+            )}
+            {!((it.gmode ?? "slide") === "swing" && it.gleaves === 2) && (
+              <label className="block"><span className={lbl}>{(it.gmode ?? "slide") === "slide" ? "เลื่อนไปทาง" : "บานพับอยู่ฝั่ง"}</span>
+                <select className={inp} value={it.gside ?? "r"} onChange={(e) => patch({ gside: e.target.value as "l" | "r" })}>
+                  <option value="l">ซ้าย</option><option value="r">ขวา</option>
+                </select></label>
+            )}
+          </div>
+          <label className="flex items-center justify-between text-[11px] font-bold text-slate-600">เปิดเองเมื่อหุ่นยนต์/รถผ่าน
+            <input type="checkbox" checked={it.auto !== false} onChange={(e) => patch({ auto: e.target.checked })} className="w-4 h-4 accent-blue-600" /></label>
+          <label className="flex items-center justify-between text-[11px] font-bold text-slate-600">เปิดค้างไว้
+            <input type="checkbox" checked={!!it.open} onChange={(e) => patch({ open: e.target.checked })} className="w-4 h-4 accent-blue-600" /></label>
+        </div>
       )}
       {it.type === "polyfence" && <FenceExtra it={it} patch={patch} locs={locs ?? []} />}
       {f.includes("color") && (

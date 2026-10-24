@@ -1785,9 +1785,15 @@ if (tchErr) {
 }
 
     // ★ ตารางสอน — ใช้วิธี resolve เดียวกับหน้าใบลาเป๊ะ (schedule template + virtual slot id)
-    let entriesQuery = supabase.from("timetable_entries")
+    const { data: yearsFull } = await supabase.from("academic_years")
+  .select("id,year_name,semester,is_current,start_date,end_date");
+const curRow = (yearsFull ?? []).find((y: any) => y.id === ayId);
+const sameYearIds = (yearsFull ?? [])
+  .filter((y: any) => y.year_name === curRow?.year_name).map((y: any) => y.id);
+
+let entriesQuery = supabase.from("timetable_entries")
   .select("id,classroom_id,subject_id,teacher_id,teacher_id_2,day_of_week,time_slot_id,academic_year_id");
-if (ayId) entriesQuery = entriesQuery.eq("academic_year_id", ayId);
+if (sameYearIds.length) entriesQuery = entriesQuery.in("academic_year_id", sameYearIds);
 
 const [entriesData, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
   fetchAllRows(entriesQuery),   // ★ FIX: ดึงให้ครบทุกแถว ไม่ตัดที่ 1000
@@ -1854,6 +1860,24 @@ const [entriesData, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
   
 
   useEffect(() => { if (!loading && user) loadData(); }, [loading, user, loadData]);
+
+  function semesterOfDate(date: string, years: any[], yearName: string): number {
+  const hit = years.find(y => y.year_name === yearName && y.start_date && y.end_date
+    && date >= y.start_date && date <= y.end_date);
+  return hit?.semester ?? 1;
+}
+
+function entriesForDate(date: string, all: TimetableEntry[], rooms: Record<string, any>, years: any[], yearName: string) {
+  const sem = semesterOfDate(date, years, yearName);
+  return all.filter(e => {
+    const room = rooms[e.classroom_id];
+    if (!room) return true;
+    const isSecondary = /^ม\./.test(extractGradeOnly(room.grade_group)) || room.split_by_semester;
+    if (!isSecondary) return true; // อ./ป. ที่ไม่แยกเทอม ใช้ได้ทั้งปี
+    const yr = years.find(y => y.id === room.academic_year_id);
+    return (yr?.semester ?? 1) === sem;
+  });
+}
 
   // ── Swap actions ─────────────────────────────────────────
   const handleSwapRespond = async (id: string, accept: boolean) => {

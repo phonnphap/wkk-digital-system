@@ -4,10 +4,10 @@ import * as THREE from "three";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { FH, MapEdge, MapLocation, MapNode, px, defaultParkRows, PARK_STALL_L, PARK_STALL_W } from "./schoolData";
+import { FH, MapEdge, MapLocation, MapNode, px, rotRad, defaultParkRows, PARK_STALL_L, PARK_STALL_W } from "./schoolData";
 import { DECOR_LABEL, DecorConfig, DecorItem, FENCE, GateDef, PickFn, pickState, edgeKey, replacedEdgeKeys } from "./DecorData";
 import { SchoolGates } from "./SchoolGates";
-import { Traffic, Temple, RoadSign, Zebra, FieldFence, People, Carport, BusBay, Kiosk } from "./SceneExtra";
+import { Traffic, Temple, RoadSign, Zebra, FieldFence, People, Carport, BusBay, Kiosk, trafficPos } from "./SceneExtra";
 import { Roads, RoadsLayer } from "./SceneRoads";
 
 /* ───────────── helpers ───────────── */
@@ -328,26 +328,84 @@ function Shed({ it }: { it: DecorItem }) {
   );
 }
 
-/** ประตูกั้น (บานเลื่อนปิดทางเดินรถ) */
-function Barrier({ it }: { it: DecorItem }) {
+/** บานประตูอะลูมิเนียม: จุดหมุน/ขอบยึดอยู่ที่ x=0, บานยื่นไปทางทิศ dir (+1/-1) */
+function AluLeaf({ lw, dir, h = 0.5 }: { lw: number; dir: 1 | -1; h?: number }) {
+  const n = Math.max(2, Math.round(lw / 0.07));
+  const alu = "#c9ced6", dark = "#8b95a3";
+  return (
+    <group>
+      {[0.03, h].map((y, k) => (
+        <mesh key={k} position={[dir * lw / 2, y, 0]} castShadow><boxGeometry args={[lw, 0.045, 0.05]} /><meshStandardMaterial color={alu} metalness={0.7} roughness={0.3} /></mesh>
+      ))}
+      <mesh position={[dir * lw / 2, h / 2 + 0.015, 0]}><boxGeometry args={[lw, 0.03, 0.04]} /><meshStandardMaterial color={alu} metalness={0.7} roughness={0.3} /></mesh>
+      {[0, lw].map((x, k) => (
+        <mesh key={k} position={[dir * x, h / 2 + 0.015, 0]}><boxGeometry args={[0.04, h + 0.03, 0.05]} /><meshStandardMaterial color={alu} metalness={0.7} roughness={0.3} /></mesh>
+      ))}
+      {Array.from({ length: n }, (_, i) => (
+        <mesh key={i} position={[dir * ((i + 0.5) * lw) / n, h / 2 + 0.015, 0]}><boxGeometry args={[0.018, h - 0.04, 0.02]} /><meshStandardMaterial color={dark} metalness={0.6} roughness={0.35} /></mesh>
+      ))}
+    </group>
+  );
+}
+
+/** ประตูกั้นอะลูมิเนียม: เลื่อน (เลือกฝั่ง) หรือ สวิง 1/2 บาน · เปิดเองเมื่อหุ่นยนต์/รถเข้าใกล้ (auto) */
+function Barrier({ it, robotRef }: { it: DecorItem; robotRef?: React.RefObject<THREE.Group | null> }) {
   const [x, z] = px(it.x, it.y);
-  const W = (it.w ?? 26) / 30;
-  const leaf = useRef<THREE.Group>(null);
+  const W = Math.max(0.4, (it.w ?? 26) / 30);
+  const mode = it.gmode ?? "slide";
+  const leaves = it.gleaves === 2 ? 2 : 1;
+  const sd: 1 | -1 = it.gside === "r" ? 1 : -1;      // ฝั่งที่เลื่อน/ฝั่งบานพับ
+  const prog = useRef(0);
+  const slide = useRef<THREE.Group>(null);
+  const l1 = useRef<THREE.Group>(null);
+  const l2 = useRef<THREE.Group>(null);
+  const [lbl, setLbl] = useState(false);
   useFrame((_, dt) => {
-    if (leaf.current) leaf.current.position.x = THREE.MathUtils.lerp(leaf.current.position.x, it.open ? W * 1.05 : 0, 1 - Math.pow(0.001, dt));
+    let near = false;
+    const R = W / 2 + 1.1;
+    const r = robotRef?.current;
+    if (r && Math.hypot(r.position.x - x, r.position.z - z) < R) near = true;
+    if (!near) for (const c of trafficPos) if (c && Math.hypot(c[0] - x, c[1] - z) < R) { near = true; break; }
+    const want = it.open || (it.auto !== false && near) ? 1 : 0;
+    prog.current = THREE.MathUtils.lerp(prog.current, want, 1 - Math.pow(0.005, dt));
+    const p = prog.current;
+    if ((p > 0.5) !== lbl) setLbl(p > 0.5);
+    if (mode === "slide") {
+      if (slide.current) slide.current.position.x = sd * p * (W * 1.02);
+    } else if (leaves === 1) {
+      if (l1.current) l1.current.rotation.y = sd * p * (Math.PI * 0.55);
+    } else {
+      if (l1.current) l1.current.rotation.y = -p * (Math.PI * 0.55);   // บานซ้าย
+      if (l2.current) l2.current.rotation.y = p * (Math.PI * 0.55);    // บานขวา
+    }
   });
+  const post = (px_: number, k: number) => (
+    <mesh key={k} position={[px_, 0.3, 0]} castShadow><boxGeometry args={[0.09, 0.6, 0.09]} /><meshStandardMaterial color="#6b7280" metalness={0.5} roughness={0.4} /></mesh>
+  );
+  const inner = W - 0.09;
   return (
     <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
-      {[-1, 1].map((s) => (
-        <mesh key={s} position={[s * W / 2, 0.27, 0]} castShadow><boxGeometry args={[0.1, 0.54, 0.1]} /><meshStandardMaterial color="#f59f00" /></mesh>
-      ))}
-      <group ref={leaf}>
-        <mesh position={[0, 0.28, 0]} castShadow><boxGeometry args={[W - 0.1, 0.32, 0.025]} /><meshStandardMaterial color="#343a40" /></mesh>
-        {[0.12, 0.44].map((y, k) => (
-          <mesh key={k} position={[0, y, 0]}><boxGeometry args={[W - 0.1, 0.04, 0.04]} /><meshStandardMaterial color={k ? "#e03131" : "#f8f9fa"} /></mesh>
-        ))}
-      </group>
-      <Tag y={0.75}>{it.open ? "✅" : "⛔"} {it.name || "ประตูกั้น"}</Tag>
+      {post(-W / 2, 0)}{post(W / 2, 1)}
+      {mode === "slide" ? (
+        <>
+          {/* ราง */}
+          <mesh position={[sd * W * 0.46, 0.012, 0]}><boxGeometry args={[W * 0.98 + 0.01, 0.02, 0.06]} /><meshStandardMaterial color="#9ca3af" metalness={0.6} roughness={0.4} /></mesh>
+          {/* บานเลื่อนเริ่มต้นปิดอยู่ ครอบช่องกลาง เลื่อนออกด้านข้างตามฝั่งที่เลือก */}
+          <group ref={slide} position={[0, 0, sd * 0.07]}>
+            <group position={[-sd * (inner / 2) , 0.02, 0]}><AluLeaf lw={inner} dir={sd} /></group>
+          </group>
+        </>
+      ) : leaves === 1 ? (
+        <group ref={l1} position={[sd * (W / 2 - 0.045), 0.02, 0]}>
+          <AluLeaf lw={inner} dir={(-sd) as 1 | -1} />
+        </group>
+      ) : (
+        <>
+          <group ref={l1} position={[-(W / 2 - 0.045), 0.02, 0]}><AluLeaf lw={inner / 2} dir={1} /></group>
+          <group ref={l2} position={[W / 2 - 0.045, 0.02, 0]}><AluLeaf lw={inner / 2} dir={-1} /></group>
+        </>
+      )}
+      <Tag y={0.8}>{lbl || it.open ? "✅" : "⛔"} {it.name || "ประตูกั้น"}</Tag>
     </group>
   );
 }
@@ -430,7 +488,7 @@ export function ParkingLot({ loc, dim, onPick }: { loc: MapLocation; dim: boolea
     return { lines, bodies, cabins };
   }, [w, d, cfg]);
   return (
-    <group position={[loc.pos[0], 0, loc.pos[1]]} onClick={(e) => { e.stopPropagation(); onPick(loc.id); }}>
+    <group position={[loc.pos[0], 0, loc.pos[1]]} rotation={[0, -rotRad(loc), 0]} onClick={(e) => { e.stopPropagation(); onPick(loc.id); }}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.025, 0]} receiveShadow>
         <planeGeometry args={[w, d]} />
         <meshStandardMaterial color="#495057" transparent={dim} opacity={dim ? 0.3 : 1} />
@@ -662,7 +720,7 @@ export function Decor({
           {of("shrine").map((i) => wrap(i, <Shrine it={i} />))}
           {of("toilet").map((i) => wrap(i, <ToiletBlock it={i} />))}
           {of("shed").map((i) => wrap(i, <Shed it={i} />))}
-          {of("barrier").map((i) => wrap(i, <Barrier it={i} />))}
+          {of("barrier").map((i) => wrap(i, <Barrier it={i} robotRef={robotRef} />))}
           {of("bridge").map((i) => wrap(i, <Bridge it={i} />, false))}
           {of("carport").map((i) => wrap(i, <Carport it={i} />))}
           {of("busbay").map((i) => wrap(i, <BusBay it={i} />))}

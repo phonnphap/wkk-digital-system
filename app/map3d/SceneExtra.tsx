@@ -86,28 +86,50 @@ export function Carport({ it }: { it: DecorItem }) {
   );
 }
 
-/* ───────────── ช่องจอดรถตู้ / รถรับส่งนักเรียน (แถวยาว n ช่อง) ───────────── */
+/* ───────────── ช่องจอดรถตู้ / รถรับส่งนักเรียน (รถตู้ทั้งหมด) ─────────────
+   ปรับได้แบบลานจอดรถ: n = จำนวนช่องต่อแถว, rows = จำนวนแถว, kind = perp(จอดตรง) | slant(จอดเฉียง) | parallel(จอดขนาน),
+   ang = มุมเฉียง (องศา), dir = ทิศเฉียง (1/-1), fill = สัดส่วนช่องที่มีรถ (0–1), w = ความกว้างทั้งแถว, d = ความลึกช่องจอด, rot = หมุน */
+const VAN_COLORS = ["#f8f9fa", "#fbbf24", "#f8f9fa", "#e5e7eb", "#2563eb", "#f8f9fa", "#16a34a", "#fbbf24"];
 export function BusBay({ it }: { it: DecorItem }) {
   const [x, z] = px(it.x, it.y);
-  const n = Math.max(1, Math.round(it.n ?? 3));
-  const W = (it.w ?? 78) / 30, D = (it.d ?? 18) / 30;
-  const slot = W / n;
+  const n = Math.max(1, Math.min(40, Math.round(it.n ?? 3)));
+  const R = Math.max(1, Math.min(6, Math.round(it.rows ?? 1)));
+  const W = Math.max(0.3, (it.w ?? 78) / 30), D = Math.max(0.2, (it.d ?? 18) / 30);
+  const kind = it.kind === "slant" || it.kind === "parallel" ? it.kind : "perp";
+  const fill = Math.min(1, Math.max(0, it.fill ?? 0.85));
+  const th = kind === "slant" ? (((it.ang ?? 45) * Math.PI) / 180) * (it.dir === -1 ? -1 : 1) : 0;
+  const sw = W / n;
   const items = useMemo(() => {
-    const out: Item[] = [];
-    for (let k = 0; k <= n; k++) out.push({ p: [-W / 2 + k * slot, 0.03, 0], s: [0.02, 0.008, D], c: "#f8f9fa" });
-    for (let i = 0; i < n; i++) {
-      const cx = -W / 2 + (i + 0.5) * slot;
-      const bus = i % 2 === 0;
-      out.push({ p: [cx, bus ? 0.16 : 0.13, 0], s: [slot * (bus ? 0.72 : 0.64), bus ? 0.2 : 0.16, D * 0.82], c: bus ? "#fbbf24" : "#f8f9fa" });
-      out.push({ p: [cx, bus ? 0.2 : 0.17, 0], s: [slot * (bus ? 0.74 : 0.66), 0.06, D * 0.6], c: "#263238" });
+    const out: { l: Item[]; b: Item[]; w: Item[]; r: Item[] } = { l: [], b: [], w: [], r: [] };
+    const rg = rng(Math.round(it.x * 3 + it.y * 5 + n * 11 + R * 17));
+    for (let ri = 0; ri < R; ri++) {
+      const zc = (ri - (R - 1) / 2) * D;
+      for (let k = 0; k <= n; k++) out.l.push({ p: [-W / 2 + k * sw, 0.034, zc], s: [0.02, 0.004, D], r: th, c: "#f8f9fa" });
+      for (let k = 0; k < n; k++) {
+        if (rg() > fill) continue;
+        const cx = -W / 2 + (k + 0.5) * sw;
+        const c = VAN_COLORS[Math.floor(rg() * VAN_COLORS.length)];
+        const par = kind === "parallel";
+        const vl = par ? Math.min(sw * 0.9, 0.78) : Math.min(D * 0.9, 0.78);
+        const vw = par ? Math.min(D * 0.72, 0.3) : Math.min(sw * 0.72, 0.3);
+        const rr = par ? Math.PI / 2 : th;
+        // ตัวรถตู้: ตัวถังสูง หลังคาสูง กระจกรอบคัน (หัวรถหันไปทาง +z ของรถ)
+        out.b.push({ p: [cx, 0.13, zc], s: [vw, 0.17, vl], r: rr, c });
+        out.r.push({ p: [cx, 0.225, zc], s: [vw * 0.96, 0.02, vl * 0.92], r: rr, c: "#f1f5f9" });
+        out.w.push({ p: [cx, 0.17, zc], s: [vw * 1.02, 0.05, vl * 0.62], r: rr, c: "#263238" });
+        out.w.push({ p: [cx + Math.sin(rr) * vl * 0.5, 0.14, zc + Math.cos(rr) * vl * 0.5], s: [Math.abs(Math.cos(rr)) * vw * 0.8 + Math.abs(Math.sin(rr)) * 0.01, 0.07, Math.abs(Math.sin(rr)) * vw * 0.8 + Math.abs(Math.cos(rr)) * 0.01], r: 0, c: "#263238" });
+      }
     }
     return out;
-  }, [n, W, D, slot]);
+  }, [n, R, W, D, kind, th, fill, sw, it.x, it.y]);
   return (
     <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
-      <mesh position={[0, 0.02, 0]} receiveShadow><boxGeometry args={[W, 0.03, D]} /><meshStandardMaterial color="#495057" /></mesh>
-      <InstX items={items}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
-      <Tag y={0.5}>🚌 {it.name || "รถตู้/รถรับส่ง นร."}</Tag>
+      <mesh position={[0, 0.02, 0]} receiveShadow><boxGeometry args={[W, 0.03, D * R]} /><meshStandardMaterial color="#495057" /></mesh>
+      <InstX items={items.l}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
+      <InstX items={items.b}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
+      <InstX items={items.r}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
+      <InstX items={items.w}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#ffffff" /></InstX>
+      <Tag y={0.6}>🚐 {it.name || "รถตู้/รถรับส่ง นร."}</Tag>
     </group>
   );
 }
@@ -140,6 +162,8 @@ export function Kiosk({ it }: { it: DecorItem }) {
 
 
 /* ───────────── รถวิ่งตามเส้นทาง (ถนนน้ำเงิน → ประตู 3 → ลานจอดรถ → ประตู 4) ───────────── */
+/** ตำแหน่งรถที่วิ่งอยู่ (world x,z) — ให้ประตูกั้นอ่านเพื่อเปิดอัตโนมัติ */
+export const trafficPos: [number, number][] = [];
 const CAR_COLORS = ["#e63946", "#f1faee", "#457b9d", "#ffb703", "#2a9d8f", "#9d4edd", "#212529", "#fb923c"];
 export function Traffic({ roads, traffic }: { roads: RoadItem[]; traffic?: { cars: number; speed: number } }) {
   const routes = useMemo(() => roads.filter((r) => r.kind === "route" && r.pts.length >= 2).map((r) => {
@@ -152,7 +176,7 @@ export function Traffic({ roads, traffic }: { roads: RoadItem[]; traffic?: { car
   const speed = traffic?.speed ?? 2.4;
   const refs = useRef<(THREE.Group | null)[]>([]);
   const dist = useRef<number[]>([]);
-  useLayoutEffect(() => { dist.current = []; }, [routes, N]);
+  useLayoutEffect(() => { dist.current = []; trafficPos.length = 0; return () => { trafficPos.length = 0; }; }, [routes, N]);
   useFrame((_, dt) => {
     for (let i = 0; i < N; i++) {
       const r = routes[i % routes.length], g = refs.current[i];
@@ -166,6 +190,7 @@ export function Traffic({ roads, traffic }: { roads: RoadItem[]; traffic?: { car
       const a = r.pts[lo], b = r.pts[lo + 1];
       const seg = r.cum[lo + 1] - r.cum[lo] || 1, t = (s - r.cum[lo]) / seg;
       g.visible = true;
+      trafficPos[i] = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
       g.position.set(a[0] + (b[0] - a[0]) * t, 0.02, a[1] + (b[1] - a[1]) * t);
       g.rotation.y = Math.atan2(b[0] - a[0], b[1] - a[1]);
     }
@@ -274,7 +299,7 @@ export function Zebra({ it }: { it: DecorItem }) {
   const W = (it.w ?? 52) / 30, D = (it.d ?? 12) / 30;
   const items = useMemo(() => {
     const n = Math.max(2, Math.floor(W / 0.14));
-    return Array.from({ length: n }, (_, i): Item => ({ p: [0, 0.02, -W / 2 + (i + 0.5) * (W / n)], s: [D, 0.006, 0.07], c: "#ffffff" }));
+    return Array.from({ length: n }, (_, i): Item => ({ p: [0, 0.05, -W / 2 + (i + 0.5) * (W / n)], s: [D, 0.008, 0.07], c: "#ffffff" }));
   }, [W, D]);
   return (
     <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>

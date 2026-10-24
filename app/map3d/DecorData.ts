@@ -63,7 +63,14 @@ export interface DecorItem {
   n?: number;                // busbay: จำนวนช่อง / people: จำนวนนักเรียน
   m?: number;                // people: จำนวนครู
   kind?: string;             // tree: round|pine|palm|bush|flower, people: walk|assemble|sit|play|exercise, temple: ubosot|prasat
-  open?: boolean;            // barrier: เปิดประตูกั้น
+  open?: boolean;            // barrier: บังคับเปิดค้าง
+  gmode?: "slide" | "swing"; // barrier: เลื่อน / สวิง
+  gleaves?: 1 | 2;           // barrier (สวิง): 1 หรือ 2 บาน
+  gside?: "l" | "r";         // barrier: ฝั่งที่เลื่อนไป / ฝั่งบานพับ (บาน 1 บาน)
+  rows?: number;             // busbay: จำนวนแถว
+  ang?: number; dir?: 1 | -1; // busbay (kind=slant): มุมเฉียง/ทิศ
+  fill?: number;             // busbay: สัดส่วนช่องที่มีรถ 0–1
+  auto?: boolean;            // barrier: เปิดเองเมื่อหุ่นยนต์/รถผ่าน (ค่าเริ่มต้น = เปิด)
   pts?: [number, number][];  // polyfence: จุดรั้ว (px เทียบกับ x,y ของชิ้นนี้)
   closed?: boolean;          // polyfence: วนปิดรอบ
   fstyle?: "bar" | "mesh" | "wall"; // polyfence: เหล็กดัด / ตาข่าย / กำแพง

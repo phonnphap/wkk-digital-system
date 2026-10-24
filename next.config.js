@@ -1,9 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // ✅ บอก Next.js ให้ใช้ webpack แทน Turbopack ชัดเจน
-  experimental: {
-
-  },
+  experimental: {},
   images: {
     remotePatterns: [
       {
@@ -11,6 +8,22 @@ const nextConfig = {
         hostname: '*.supabase.co',
       },
     ],
+  },
+
+  // อนุญาตให้เว็บ Wix ของโรงเรียนฝังหน้าแผนที่ได้
+  async headers() {
+    return [
+      {
+        source: '/map3d',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value:
+              "frame-ancestors 'self' https://www.khienkhet.ac.th https://khienkhet.ac.th https://*.wix.com https://*.wixsite.com https://*.wixstudio.com https://*.editorx.io",
+          },
+        ],
+      },
+    ];
   },
 }
 
