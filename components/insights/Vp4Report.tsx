@@ -578,7 +578,7 @@ function handleScoreDateChange(v: string) {
                   <div><AttendanceBox pct={attendPct} /></div>
                   <div className="flex flex-col gap-8 print:gap-4">
                     <SignatureField role="หัวหน้าสายชั้น" nameLabel={gradeHeadName || undefined} lineWidthPx={signatureLineWidthPx} />
-                    <SignatureField role="ผู้อำนวยการโรงเรียน" nameLabel={directorName} lineWidthPx={signatureLineWidthPx} />
+                    <SignatureField role="ผู้อำนวยการโรงเรียนวัดเขียนเขต" nameLabel={directorName} lineWidthPx={signatureLineWidthPx} />
                   </div>
                 </div>
               </>
@@ -608,7 +608,7 @@ function handleScoreDateChange(v: string) {
                       lineWidthPx={signatureLineWidthPx}
                     />
                     <div className="h-8 print:h-6"></div>
-                    <SignatureField role="ผู้ปกครอง" lineWidthPx={signatureLineWidthPx} />
+                    <SignatureField role="ผู้ปกครอง" nameLabel="(...........................................................)" lineWidthPx={signatureLineWidthPx} />
                   </div>
                 </div>
               </>

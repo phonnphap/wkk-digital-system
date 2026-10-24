@@ -1640,6 +1640,8 @@ export default function SubstitutionPage() {
   const [showManualAssign, setShowManualAssign] = useState(false);
   const [filterDate, setFilterDate] = useState("");
   const [filterTeacher, setFilterTeacher] = useState("");
+  const [yearsFull, setYearsFull] = useState<any[]>([]);
+  const [classroomsMap, setClassroomsMap] = useState<Record<string, any>>({});
   const [subSortOrder, setSubSortOrder] = useState<"desc" | "asc">("desc"); // ★ ใหม่-เก่า (default) / เก่า-ใหม่
   const [selectedSubIds, setSelectedSubIds] = useState<Set<string>>(new Set()); // ★ รายการที่ติ๊กเลือกไว้พิมพ์
   const [swapInitialReason, setSwapInitialReason] = useState<string | undefined>(undefined);
@@ -1649,7 +1651,7 @@ export default function SubstitutionPage() {
   const [swapRepayRefId, setSwapRepayRefId] = useState<string | undefined>(undefined);
   const [editingSub, setEditingSub] = useState<SubRecord|null>(null);
   const [adminSwapFilterStatus, setAdminSwapFilterStatus] = useState<"all"|"pending"|"accepted"|"rejected"|"cancelled">("all");
-const [adminSwapFilterTeacher, setAdminSwapFilterTeacher] = useState("");
+  const [adminSwapFilterTeacher, setAdminSwapFilterTeacher] = useState("");
   const isAdmin = useMemo(() => ADMIN_ROLES.includes(user?.role ?? ""), [user]);
   // ★ ขยายสิทธิ์ "จัดสอนแทน" ให้หัวหน้าสายชั้น/หัวหน้าหมวด ไม่ใช่แค่แอดมิน
   //   ต้องมีคอลัมน์ users.extra_roles (text[]) เก็บค่าเช่น 'grade_head', 'dept_head'
@@ -1660,58 +1662,54 @@ const [adminSwapFilterTeacher, setAdminSwapFilterTeacher] = useState("");
     return roles.includes("grade_head") || roles.includes("dept_head");
   }, [user, isAdmin]);
   const isFullAdmin = useMemo(() => ["admin", "director", "deputy_director"].includes(user?.role ?? ""), [user]);
-const isGradeHeadUser = useMemo(() => {
-  if (!user) return false;
-  if (user.role === "grade_head") return true;
-  return (user.extra_roles ?? []).includes("grade_head");
-}, [user]);
-// ★ true เฉพาะ "หัวหน้าสายชั้น" ที่ไม่ใช่แอดมิน/ผอ./รองผอ. — ใช้จำกัดให้เห็นแค่สายชั้นตัวเอง
-const restrictToOwnGrade = useMemo(() => isGradeHeadUser && !isFullAdmin, [isGradeHeadUser, isFullAdmin]);
-
-// ★ ต้องประกาศตัวนี้ก่อน เพราะตัวถัดไปเรียกใช้
-const teacherGradeLevelMap = useMemo(
-  () => Object.fromEntries(teachers.map(t => [t.id, t.grade_level ?? null])),
-  [teachers]
-);
-
-// ★ ใบลาที่เห็นได้ — หัวหน้าสายชั้นเห็นเฉพาะครูสายชั้นตัวเอง
-const visibleLeaveRequests = useMemo(() => {
-  if (!restrictToOwnGrade || !user?.grade_level) return leaveRequests;
-  return leaveRequests.filter(lr => teacherGradeLevelMap[lr.user_id] === user.grade_level);
-}, [leaveRequests, restrictToOwnGrade, user, teacherGradeLevelMap]);
-
-// ★ รายการสอนแทนที่เห็นได้ — หัวหน้าสายชั้นเห็นเฉพาะที่เกี่ยวข้องกับสายชั้นตัวเอง
-const visibleSubRecords = useMemo(() => {
-  if (!restrictToOwnGrade || !user?.grade_level) return subRecords;
-  return subRecords.filter(r =>
-    (!!r.absent_teacher_id && teacherGradeLevelMap[r.absent_teacher_id] === user.grade_level) ||
-    (!!r.substitute_teacher_id && teacherGradeLevelMap[r.substitute_teacher_id] === user.grade_level)
+  const isGradeHeadUser = useMemo(() => {
+    if (!user) return false;
+    if (user.role === "grade_head") return true;
+    return (user.extra_roles ?? []).includes("grade_head");
+  }, [user]);
+  // ★ true เฉพาะ "หัวหน้าสายชั้น" ที่ไม่ใช่แอดมิน/ผอ./รองผอ. — ใช้จำกัดให้เห็นแค่สายชั้นตัวเอง
+  const restrictToOwnGrade = useMemo(() => isGradeHeadUser && !isFullAdmin, [isGradeHeadUser, isFullAdmin]);
+  // ★ ต้องประกาศตัวนี้ก่อน เพราะตัวถัดไปเรียกใช้
+  const teacherGradeLevelMap = useMemo(
+    () => Object.fromEntries(teachers.map(t => [t.id, t.grade_level ?? null])),
+    [teachers]
   );
-}, [subRecords, restrictToOwnGrade, user, teacherGradeLevelMap]);
+  // ★ ใบลาที่เห็นได้ — หัวหน้าสายชั้นเห็นเฉพาะครูสายชั้นตัวเอง
+  const visibleLeaveRequests = useMemo(() => {
+    if (!restrictToOwnGrade || !user?.grade_level) return leaveRequests;
+    return leaveRequests.filter(lr => teacherGradeLevelMap[lr.user_id] === user.grade_level);
+  }, [leaveRequests, restrictToOwnGrade, user, teacherGradeLevelMap]);
+  // ★ รายการสอนแทนที่เห็นได้ — หัวหน้าสายชั้นเห็นเฉพาะที่เกี่ยวข้องกับสายชั้นตัวเอง
+  const visibleSubRecords = useMemo(() => {
+    if (!restrictToOwnGrade || !user?.grade_level) return subRecords;
+    return subRecords.filter(r =>
+      (!!r.absent_teacher_id && teacherGradeLevelMap[r.absent_teacher_id] === user.grade_level) ||
+      (!!r.substitute_teacher_id && teacherGradeLevelMap[r.substitute_teacher_id] === user.grade_level)
+    );
+  }, [subRecords, restrictToOwnGrade, user, teacherGradeLevelMap]);
   // ★ รายชื่อครูที่เลือกได้ในโหมด "จัดอัตโนมัติ" — admin เลือกได้ทุกคน, หัวหน้าสายเลือกได้แค่สายชั้นตัวเอง
-const manualAssignTeachers = useMemo(() => {
-  if (!user) return [];
-  const base = teachers.filter(isSelectableTeacher);
-  if (isAdmin) return base;
-  const roles = user.extra_roles ?? [];
-  if (roles.includes("grade_head") && user.grade_level) {
-    return base.filter(t => t.grade_level === user.grade_level);
-  }
-  return [];
-}, [teachers, user, isAdmin]);
-
-const canManualAssign = isAdmin || (user?.extra_roles ?? []).includes("grade_head");
-const isSpecificAdmin = useMemo(() => user?.email === "admin@khienkhet.ac.th", [user]);
-const canEditSwap = useCallback((r: SwapRequest) => {
-  if (isSpecificAdmin && r.status !== "cancelled") return true;
-  return r.requester_id === user?.id && r.status === "pending";
-}, [isSpecificAdmin, user]);
-// ★ เช็คว่า record นี้เป็น "คำขอแลกคาบคืน" (repay) เองหรือไม่
-// ใช้กันไม่ให้ปุ่ม "🔄 แลกคาบคืน" โผล่ซ้ำบนการ์ดของคำขอแลกคืนเอง (จะวนซ้ำไม่รู้จบ)
-// ★ FIX: เช็คทั้งรหัสอ้างอิง [ref:...] แบบใหม่ (แม่นยำ) และข้อความ "ขอแลกคาบคืนให้" แบบเดิม (รองรับข้อมูลเก่า)
-const isRepaySwapRequest = useCallback((r: SwapRequest) => {
-  return !!r.reason?.includes("[ref:") || !!r.reason?.includes("ขอแลกคาบคืนให้");
-}, []);
+  const manualAssignTeachers = useMemo(() => {
+    if (!user) return [];
+      const base = teachers.filter(isSelectableTeacher);
+    if (isAdmin) return base;
+      const roles = user.extra_roles ?? [];
+    if (roles.includes("grade_head") && user.grade_level) {
+      return base.filter(t => t.grade_level === user.grade_level);
+    }
+    return [];
+  }, [teachers, user, isAdmin]);
+  const canManualAssign = isAdmin || (user?.extra_roles ?? []).includes("grade_head");
+  const isSpecificAdmin = useMemo(() => user?.email === "admin@khienkhet.ac.th", [user]);
+  const canEditSwap = useCallback((r: SwapRequest) => {
+    if (isSpecificAdmin && r.status !== "cancelled") return true;
+    return r.requester_id === user?.id && r.status === "pending";
+  }, [isSpecificAdmin, user]);
+  // ★ เช็คว่า record นี้เป็น "คำขอแลกคาบคืน" (repay) เองหรือไม่
+  // ใช้กันไม่ให้ปุ่ม "🔄 แลกคาบคืน" โผล่ซ้ำบนการ์ดของคำขอแลกคืนเอง (จะวนซ้ำไม่รู้จบ)
+  // ★ FIX: เช็คทั้งรหัสอ้างอิง [ref:...] แบบใหม่ (แม่นยำ) และข้อความ "ขอแลกคาบคืนให้" แบบเดิม (รองรับข้อมูลเก่า)
+  const isRepaySwapRequest = useCallback((r: SwapRequest) => {
+    return !!r.reason?.includes("[ref:") || !!r.reason?.includes("ขอแลกคาบคืนให้");
+  }, []);
 // ★ เช็คว่าเคยขอ "แลกคาบคืน" สำหรับรายการสอนแทนนี้ไปแล้วหรือยัง (ยัง pending/accepted อยู่)
 // ★ FIX (root cause ปุ่มไม่หาย): เดิมเทียบแค่ข้อความวันที่+ชื่อคาบ ซึ่งไม่เสถียรถ้า slot_label
 // ของรายการเปลี่ยน/ resolve ไม่ได้ภายหลัง ⇒ เช็คด้วยรหัสอ้างอิง [ref:sub:<id>] ที่ผูกกับ record.id ตรงๆ ก่อน (แม่นยำ 100%)
@@ -1785,7 +1783,7 @@ if (tchErr) {
 }
 
     // ★ ตารางสอน — ใช้วิธี resolve เดียวกับหน้าใบลาเป๊ะ (schedule template + virtual slot id)
-    const { data: yearsFull } = await supabase.from("academic_years")
+    const { data: yearsFullData } = await supabase.from("academic_years")
   .select("id,year_name,semester,is_current,start_date,end_date");
 const curRow = (yearsFull ?? []).find((y: any) => y.id === ayId);
 const sameYearIds = (yearsFull ?? [])
@@ -1800,7 +1798,7 @@ const [entriesData, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
   supabase.from("time_slots")
     .select("id,slot_number,start_time,end_time,slot_label,is_break,schedule_type")
     .order("slot_number", { ascending: true }),
-  supabase.from("classrooms").select("id,room_name,grade_group,schedule_type,homeroom_teacher_id"),
+  supabase.from("classrooms").select("id,room_name,grade_group,schedule_type,homeroom_teacher_id,academic_year_id,split_by_semester"),
   supabase.from("subjects").select("id,subject_code,name_th"),
 ]);
 
