@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import Vp71SecondaryReportView from "./Vp71SecondaryReportView";
 
 const supabase = createClient();
 
@@ -122,6 +123,9 @@ export default function Vp71Tool({
   midtermMaxScore = 0,
   finalMaxScore = 0,
   formativeMaxScore = 0,
+  level = "primary",      
+  classroomLabel,         
+  semester, 
 }: {
   subjectId: string;
   academicYearId?: string | null;
@@ -136,6 +140,9 @@ export default function Vp71Tool({
   midtermMaxScore?: number;
   finalMaxScore?: number;
   formativeMaxScore?: number;
+  level?: "primary" | "secondary";   
+  classroomLabel?: string;           
+  semester?: number;  
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -468,7 +475,15 @@ if (active) setIndicatorBank(
           onUnlinkAssignment={handleUnlinkAssignment}
           onDeleteAssignment={handleDeleteLinkedAssignment}
         />
-      ) : (
+      ) : level === "secondary" ? (
+  <Vp71SecondaryReportView
+    subjectCode={subjectCode} subjectTitle={subjectTitle}
+    sectionId={sectionId} students={students} units={units}
+    isBasicSubject={isBasicSubject}
+    midtermMaxScore={midtermMaxScore} finalMaxScore={finalMaxScore} formativeMaxScore={formativeMaxScore}
+    classroomLabel={classroomLabel} semester={semester}
+  />
+) : (
         <ReportView
           subjectId={subjectId}
           subjectCode={subjectCode}

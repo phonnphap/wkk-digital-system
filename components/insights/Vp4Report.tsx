@@ -608,7 +608,7 @@ function handleScoreDateChange(v: string) {
                       lineWidthPx={signatureLineWidthPx}
                     />
                     <div className="h-8 print:h-6"></div>
-                    <SignatureField role="ผู้ปกครอง" nameLabel="(...........................................................)" lineWidthPx={signatureLineWidthPx} />
+                    <SignatureField role="ผู้ปกครอง" nameLabel="........................................." lineWidthPx={signatureLineWidthPx} />
                   </div>
                 </div>
               </>

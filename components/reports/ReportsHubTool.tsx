@@ -104,6 +104,8 @@ export default function ReportsHubTool({
         formativeMaxScore={formativeMaxScore}   
   midtermMaxScore={midtermMaxScore}       
   finalMaxScore={finalMaxScore} 
+  level={classroomLabel?.trim().startsWith("ม") ? "secondary" : "primary"}
+classroomLabel={classroomLabel}
       />
     );
   }
