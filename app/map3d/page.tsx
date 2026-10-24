@@ -55,9 +55,26 @@ function useIsAdmin() {
 
 export default function Map3DPage() {
   const isAdmin = useIsAdmin();
+  const [inFrame, setInFrame] = useState(false);
+
+  useEffect(() => {
+    setInFrame(window.self !== window.top);
+  }, []);
+
   return (
-    <div className="w-screen h-screen">
+    <div className="relative w-screen h-screen">
       <SchoolMap3D isAdmin={isAdmin} />
+
+      {inFrame && (
+        <a
+          href="/map3d"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute top-3 right-3 z-50 rounded-lg bg-white/90 px-3 py-2 text-sm font-medium text-slate-800 shadow hover:bg-white"
+        >
+          ⤢ เปิดเต็มจอ
+        </a>
+      )}
     </div>
   );
 }
