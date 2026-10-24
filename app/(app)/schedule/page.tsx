@@ -2730,7 +2730,55 @@ useEffect(() => {
       }
     }
   }
+// หาห้อง "เทอม 1" ที่เป็นคู่ของห้องเทอม 2 (ปีเดียวกัน ชั้น+ชื่อห้องเดียวกัน)
+function findPrevSemesterClassroom(room: Classroom): Classroom | null {
+  const yr = academicYearsRaw.find(y => y.id === room.academic_year_id);
+  if (!yr || (yr.semester ?? 1) !== 2) return null;
+  const sem1Year = academicYearsRaw.find(y => y.year_name === yr.year_name && (y.semester ?? 1) === 1);
+  if (!sem1Year) return null;
+  return allClassrooms.find(c =>
+    c.academic_year_id === sem1Year.id &&
+    c.grade_group === room.grade_group &&
+    (c.room_name ?? "").trim() === (room.room_name ?? "").trim()
+  ) ?? null;
+}
 
+// ถ้ารหัสวิชาเดิมแต่ครูเปลี่ยน → ผูก section เทอม 2 เข้ากับเทอม 1 และให้ครูเดิมเป็น viewer
+// คืน true ถ้ามีการผูกจริง
+async function linkPreviousSemester(p: {
+  sectionId: string; subjectId: string; classroomId: string; newTeacherIds: string[];
+}): Promise<boolean> {
+  const room = allClassrooms.find(c => c.id === p.classroomId);
+  if (!room) return false;
+  const prevRoom = findPrevSemesterClassroom(room);
+  if (!prevRoom) return false;
+
+  const code = subjects.find(s => s.id === p.subjectId)?.subject_code;
+  const sameCodeIds = subjects.filter(s => s.subject_code === code).map(s => s.id);
+  if (sameCodeIds.length === 0) return false;
+
+  const { data: prevRows } = await supabase.from("subject_sections")
+    .select("id, teacher_id, co_teacher_id")
+    .eq("classroom_id", prevRoom.id).in("subject_id", sameCodeIds).limit(1);
+  const prev = prevRows?.[0];
+  if (!prev) return false; // รหัสวิชาใหม่ในเทอม 2 → section เปล่า ไม่ต้องดึงอะไร
+
+  const oldTeachers = [prev.teacher_id, prev.co_teacher_id].filter(Boolean) as string[];
+  const arrived  = p.newTeacherIds.filter(t => !oldTeachers.includes(t));
+  const departed = oldTeachers.filter(t => !p.newTeacherIds.includes(t));
+  if (arrived.length === 0) return false; // ไม่มีครูใหม่เข้ามา ไม่ต้องดึงคะแนน
+
+  await (supabase.from("subject_sections") as any)
+    .update({ previous_section_id: prev.id }).eq("id", p.sectionId);
+
+  if (departed.length > 0) {
+    await (supabase.from("section_teacher_access") as any).upsert(
+      departed.map(tid => ({ section_id: p.sectionId, teacher_id: tid, access_level: "viewer" })),
+      { onConflict: "section_id,teacher_id" }
+    );
+  }
+  return true;
+}
   // ══════════════════════════════════════════════════════════════════════════
 // ✅ syncSubjectSection — ทำให้ subject_sections ตรงกับ timetable_entries เสมอ
 // เรียกทุกครั้งหลัง insert/update timetable_entries สำเร็จ
@@ -2740,50 +2788,55 @@ async function syncSubjectSection({
 }: {
   subjectId: string; classroomId: string; academicYearId: string;
   teacherId: string; teacherId2?: string | null; createdBy: string;
-}) {
+}): Promise<{ carriedOver: boolean }> {
+  let carriedOver = false;
   try {
+    const room = allClassrooms.find(c => c.id === classroomId);
+    const semester = room ? getSemesterForClassroom(room, academicYearsRaw) : 1;
+    const wantedTeachers = [teacherId, teacherId2].filter(Boolean) as string[];
+
     const { data: existing } = await supabase
       .from("subject_sections")
-      .select("id, teacher_id, co_teacher_id, is_active")
-      .eq("subject_id", subjectId)
-      .eq("classroom_id", classroomId)
-      .eq("academic_year_id", academicYearId)
-      .maybeSingle();
+      .select("id, teacher_id, co_teacher_id, is_active, previous_section_id")
+      .eq("subject_id", subjectId).eq("classroom_id", classroomId)
+      .eq("academic_year_id", academicYearId).maybeSingle();
 
     if (!existing) {
-      // ยังไม่มี section เลย → สร้างใหม่
       const joinCode = Math.random().toString(36).slice(2, 8);
-      const { error } = await (supabase.from("subject_sections") as any).insert([{
+      const { data: inserted, error } = await (supabase.from("subject_sections") as any).insert([{
         subject_id: subjectId, classroom_id: classroomId, academic_year_id: academicYearId,
         teacher_id: teacherId, co_teacher_id: teacherId2 || null,
-        join_code: joinCode, is_active: true, created_by: createdBy,
-      }]);
-      if (error) console.error("[syncSubjectSection] insert error:", error);
-      return;
+        join_code: joinCode, is_active: true, created_by: createdBy, semester,
+      }]).select("id").single();
+      if (error) { console.error("[syncSubjectSection] insert error:", error); return { carriedOver }; }
+      if (semester === 2) {
+        carriedOver = await linkPreviousSemester({ sectionId: inserted.id, subjectId, classroomId, newTeacherIds: wantedTeachers });
+      }
+      return { carriedOver };
     }
 
-    // มี section อยู่แล้ว → เช็คว่าครูตรงไหม ถ้าไม่ตรงให้เติม/อัปเดต
     const currentTeachers = [existing.teacher_id, existing.co_teacher_id].filter(Boolean);
-    const wantedTeachers = [teacherId, teacherId2].filter(Boolean) as string[];
     const missing = wantedTeachers.filter(t => !currentTeachers.includes(t));
-
     const patch: any = {};
-    if (!existing.is_active) patch.is_active = true; // เผื่อเคยถูกปิดไปแล้วมีคนกลับมาสอนใหม่
-
+    if (!existing.is_active) patch.is_active = true;
     if (missing.length > 0) {
       if (!existing.teacher_id) patch.teacher_id = missing[0];
       else if (!existing.co_teacher_id) patch.co_teacher_id = missing.find(m => m !== existing.teacher_id) ?? missing[0];
-      // ถ้าเต็มทั้ง 2 ช่องแล้วแต่ยังมีคนขาด (ครูคนที่ 3) — log ไว้เตือนแอดมิน ไม่ auto-overwrite
       else console.warn("[syncSubjectSection] มีครูเกิน 2 คนสำหรับ", { subjectId, classroomId }, "ครูที่ขาด:", missing);
     }
-
     if (Object.keys(patch).length > 0) {
       const { error } = await (supabase.from("subject_sections") as any).update(patch).eq("id", existing.id);
       if (error) console.error("[syncSubjectSection] update error:", error);
     }
+
+    // เทอม 2 ที่ยังไม่เคยผูกกับเทอม 1 (เช่น แก้ครูทีหลัง) → ลองผูกตอนนี้
+    if (semester === 2 && !existing.previous_section_id) {
+      carriedOver = await linkPreviousSemester({ sectionId: existing.id, subjectId, classroomId, newTeacherIds: wantedTeachers });
+    }
   } catch (err) {
     console.error("[syncSubjectSection] unexpected error:", err);
   }
+  return { carriedOver };
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -2838,13 +2891,13 @@ async function desyncSubjectSection({
   // เฉพาะแอดมินเท่านั้นที่กดได้
   // ══════════════════════════════════════════════════════════════════════════
   const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<{ created: number; updated: number; closed: number } | null>(null);
+  const [syncResult, setSyncResult] = useState<{ created: number; updated: number; closed: number; carried: number } | null>(null);
 
   async function syncAllSections() {
     if (!user) return;
     setSyncing(true);
     setSyncResult(null);
-    let created = 0, updated = 0, closed = 0;
+    let created = 0, updated = 0, closed = 0, carried = 0;
 
     try {
       // ดึง timetable_entries ทั้งหมดทุกปีการศึกษา
@@ -2877,19 +2930,20 @@ async function desyncSubjectSection({
           console.warn("[syncAllSections] มีครูเกิน 2 คนสำหรับคู่นี้ ข้ามไป ต้องจัดการเอง:", g);
           continue;
         }
-        const existing = sections.find(s =>
+                const existing = sections.find(s =>
           s.subject_id === g.subjectId && s.classroom_id === g.classroomId && s.academic_year_id === g.academicYearId
         );
         const before = existing ? JSON.stringify([existing.teacher_id, existing.co_teacher_id, existing.is_active]) : null;
 
-        await syncSubjectSection({
+        const res = await syncSubjectSection({
           subjectId: g.subjectId, classroomId: g.classroomId, academicYearId: g.academicYearId,
           teacherId: g.teacherIds[0], teacherId2: g.teacherIds[1] ?? null, createdBy: user.id,
         });
+        if (res.carriedOver) carried++;
 
-        if (!existing) created++;
-        else {
-          // เช็คว่ามีการเปลี่ยนแปลงจริงไหม (sync อาจไม่ทำอะไรถ้าตรงอยู่แล้ว)
+        if (!existing) {
+          created++;
+        } else {
           const { data: after } = await supabase
             .from("subject_sections").select("teacher_id, co_teacher_id, is_active")
             .eq("id", existing.id).maybeSingle();
@@ -2921,7 +2975,7 @@ async function desyncSubjectSection({
         }
       }
 
-      setSyncResult({ created, updated, closed });
+      setSyncResult({ created, updated, closed, carried });
     } catch (err: any) {
       console.error("[syncAllSections] error:", err);
       alert("❌ ซิงค์ไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
@@ -3512,6 +3566,7 @@ const totalScheduledPeriods = entries.length;
       <div className="p-5 space-y-2 text-sm">
         <p>🆕 สร้างใหม่: <b>{syncResult.created}</b> รายการ</p>
         <p>♻️ อัปเดต: <b>{syncResult.updated}</b> รายการ</p>
+        <p>🔗 ดึงคะแนนเทอม 1 ให้ครูใหม่ (รหัสวิชาเดิม): <b>{syncResult.carried}</b> รายการ</p>
         <p>🔒 ปิด (ไม่มีคนสอนแล้ว): <b>{syncResult.closed}</b> รายการ</p>
       </div>
       <div className="px-5 pb-5">

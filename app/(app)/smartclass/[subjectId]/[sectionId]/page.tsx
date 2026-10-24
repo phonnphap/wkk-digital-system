@@ -63,9 +63,9 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
 const BANNER_MENU: { key: BannerMenuKey; label: string; icon: string }[] = [
   { key: "settings", label: "ตั้งค่ารายวิชา", icon: "⚙️" },
   { key: "reports", label: "เอกสาร/รายงาน", icon: "📁" },
-    { key: "assignments", label: "มอบหมายงาน", icon: "📌" },
-    { key: "totalScore", label: "คะแนนรวม", icon: "⭐" },
-      { key: "attendanceInfo", label: "ข้อมูลเช็กชื่อ", icon: "🗓️" },
+  { key: "assignments", label: "มอบหมายงาน", icon: "📌" },
+  { key: "totalScore", label: "คะแนนรวม", icon: "⭐" },
+  { key: "attendanceInfo", label: "ข้อมูลเช็กชื่อ", icon: "🗓️" },
   { key: "insights", label: "ข้อมูลเชิงลึก", icon: "📊" },
 ];
 
@@ -2741,6 +2741,9 @@ export default function SmartClassRosterPage() {
   const [bannerMenu, setBannerMenu] = useState<BannerMenuKey | null>(null);
   const [currentUserId, setCurrentUserId] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isViewer, setIsViewer] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [previousSectionId, setPreviousSectionId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   type Period = { timetable_entry_id: string; slot_number?: number; start_time?: string; end_time?: string };
   const [periods, setPeriods] = useState<Period[]>([]);
@@ -2808,7 +2811,7 @@ const presentStudents = useMemo(
   const [homeroomTeacherName, setHomeroomTeacherName] = useState("");
   const [subjectTeacherName, setSubjectTeacherName] = useState("");
   const isArchived = !!subject?.is_archived;
-const readOnly = isAdmin || isArchived; // แอดมิน หรือวิชาถูกเก็บเข้าคลัง = ดูอย่างเดียว
+const readOnly = isAdmin || isArchived || isViewer;   // viewer = ดูอย่างเดียวในภาพรวม
 
   useEffect(() => {
   (async () => {
@@ -2938,6 +2941,22 @@ const [{ data: subj }, { data: room }] = await Promise.all([
       }
     })();
   }, []);
+
+  useEffect(() => {
+  (async () => {
+    if (!sectionId || !currentUserId) return;
+    const { data: sec } = await supabase.from("subject_sections")
+      .select("teacher_id, co_teacher_id, previous_section_id").eq("id", sectionId).maybeSingle();
+    setPreviousSectionId(sec?.previous_section_id ?? null);
+    const owner = sec?.teacher_id === currentUserId || sec?.co_teacher_id === currentUserId;
+    setIsOwner(owner);
+    if (!owner) {
+      const { data: acc } = await supabase.from("section_teacher_access")
+        .select("id").eq("section_id", sectionId).eq("teacher_id", currentUserId).maybeSingle();
+      setIsViewer(!!acc);
+    }
+  })();
+}, [sectionId, currentUserId]);
 
   // แอดมิน/ผู้บริหาร ไม่มีแท็บล่าง เลยต้อง default ไปที่ "ข้อมูลเช็กชื่อ" เสมอ
   useEffect(() => {
@@ -3156,6 +3175,15 @@ if (validTargets.length === 0) { setScoreTargets(null); return; }
     📦 เก็บเข้าคลังแล้ว (ภาคเรียนที่ {subject.archived_semester ?? "-"}) · ดูข้อมูลได้อย่างเดียว
   </p>
 )}
+{isViewer && (
+  <p className="mt-2 inline-block px-4 py-1.5 rounded-full bg-white/90 text-slate-600 font-black text-base">
+    👁️ คุณเคยสอนวิชานี้ในเทอม 1 · ดูอย่างเดียว
+    {previousSectionId && (
+      <button onClick={() => router.push(`/smartclass/${subjectId}/${previousSectionId}`)}
+        className="ml-2 underline text-fuchsia-600">ไปห้องเทอม 1 ที่แก้ไขได้</button>
+    )}
+  </p>
+)}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-between mt-4">
@@ -3338,7 +3366,7 @@ if (validTargets.length === 0) { setScoreTargets(null); return; }
       students={students}
       currentUserId={currentUserId}
       referenceLabel="โฮมรูม"
-      readOnly={isArchived}
+      readOnly={isArchived || isViewer}
       onDateSwapped={(fromDate, toDate) => setSelectedDate(toDate)}
     />
   </div>

@@ -3,14 +3,17 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 const supabase = createClient();
 
 type Subject = { id: string; subject_code: string; name_th: string };
 type Classroom = { id: string; room_name?: string; grade_group?: string };
-type SectionRow = { id: string; classroom_id: string; teacher_id: string; co_teacher_id?: string; join_code: string };
+type SectionRow = {
+  id: string; classroom_id: string; teacher_id: string; co_teacher_id?: string; join_code: string;
+  semester?: number | null; previous_section_id?: string | null; viewOnly?: boolean;
+};
 
 const ROOM_NUMBER_GRADIENTS: Record<string, string> = {
   "1": "from-yellow-400 to-amber-300",
@@ -32,6 +35,8 @@ function getRoomGradient(roomName?: string) {
 export default function SmartClassRoomsPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
+  const semester = Number(searchParams.get("semester") ?? "1");
   const subjectId = params?.subjectId as string;
 
   const [loading, setLoading] = useState(true);
@@ -57,19 +62,32 @@ export default function SmartClassRoomsPage() {
         .from("subjects").select("id, subject_code, name_th").eq("id", subjectId).maybeSingle();
       setSubject(subj as Subject);
 
-      let query = supabase
-        .from("subject_sections")
-        .select("id, classroom_id, teacher_id, co_teacher_id, join_code")
-        .eq("subject_id", subjectId)
-        .eq("is_active", true);
+      // แทน query เดิมตั้งแต่ let query = ... ถึง const rows = ...
+const SEC_COLS = "id, classroom_id, teacher_id, co_teacher_id, join_code, semester, previous_section_id";
+let rows: SectionRow[] = [];
 
-      if (!admin) {
-        query = query.or(`teacher_id.eq.${profile.id},co_teacher_id.eq.${profile.id}`);
-      }
-
-      const { data: secRows } = await query;
-      const rows = (secRows ?? []) as SectionRow[];
-      setSections(rows);
+if (admin) {
+  const { data } = await supabase.from("subject_sections").select(SEC_COLS)
+    .eq("subject_id", subjectId).eq("is_active", true);
+  rows = (data ?? []) as SectionRow[];
+} else {
+  const { data: own } = await supabase.from("subject_sections").select(SEC_COLS)
+    .eq("subject_id", subjectId).eq("is_active", true)
+    .or(`teacher_id.eq.${profile.id},co_teacher_id.eq.${profile.id}`);
+  const { data: acc } = await supabase.from("section_teacher_access")
+    .select("section_id").eq("teacher_id", profile.id);
+  const viewIds = (acc ?? []).map((a: any) => a.section_id);
+  let viewRows: SectionRow[] = [];
+  if (viewIds.length > 0) {
+    const { data } = await supabase.from("subject_sections").select(SEC_COLS)
+      .eq("subject_id", subjectId).eq("is_active", true).in("id", viewIds);
+    viewRows = ((data ?? []) as SectionRow[]).map(r => ({ ...r, viewOnly: true }));
+  }
+  rows = [...(own ?? []) as SectionRow[], ...viewRows.filter(v => !(own ?? []).some((o: any) => o.id === v.id))];
+}
+// กรองตามเทอมที่เลือกมาจากหน้ารายการ (แอดมินเห็นทั้งหมด)
+if (!admin) rows = rows.filter(r => (r.semester ?? 1) === semester);
+setSections(rows);
 
       const classroomIds = [...new Set(rows.map(r => r.classroom_id))];
       if (classroomIds.length > 0) {
@@ -88,7 +106,7 @@ export default function SmartClassRoomsPage() {
 
       setLoading(false);
     })();
-  }, [subjectId]);
+   }, [subjectId, semester]);
 
   const classroomOf = (id: string) => classrooms.find(c => c.id === id);
 

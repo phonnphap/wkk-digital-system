@@ -9,7 +9,10 @@ import { createClient } from "@/lib/supabase/client";
 const supabase = createClient();
 
 type Subject = { id: string; subject_code: string; name_th: string; is_archived?: boolean; archived_semester?: number | null };
-type SectionRow = { id: string; subject_id: string; classroom_id: string; teacher_id: string; co_teacher_id?: string };
+type SectionRow = {
+  id: string; subject_id: string; classroom_id: string; teacher_id: string; co_teacher_id?: string;
+  semester?: number | null; previous_section_id?: string | null; viewOnly?: boolean;
+};
 type Classroom = { id: string; room_name?: string; grade_group?: string };
 
 const SUBJECT_GRADIENTS = [
@@ -92,6 +95,7 @@ export default function SmartClassSubjectsPage() {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [search, setSearch] = useState("");
+  const [semester, setSemester] = useState<number>(1);
 
   // ---- ข้อมูลสำหรับครู (มุมมองเดิม: รายวิชา) ----
   const [sections, setSections] = useState<SectionRow[]>([]);
@@ -140,14 +144,26 @@ if (roomIds.length > 0) {
 }
 } else {
         // ครูรายวิชา: เห็นเฉพาะวิชาที่ตัวเองสอน (มุมมองเดิม)
-        const { data: secRows } = await supabase
-          .from("subject_sections")
-          .select("id, subject_id, classroom_id, teacher_id, co_teacher_id")
-          .eq("is_active", true)
-          .or(`teacher_id.eq.${profile.id},co_teacher_id.eq.${profile.id}`);
+        const SEC_COLS = "id, subject_id, classroom_id, teacher_id, co_teacher_id, semester, previous_section_id";
+const { data: secRows } = await supabase.from("subject_sections").select(SEC_COLS)
+  .eq("is_active", true)
+  .or(`teacher_id.eq.${profile.id},co_teacher_id.eq.${profile.id}`);
 
-        const rows = (secRows ?? []) as SectionRow[];
-        setSections(rows);
+// section ที่ได้สิทธิ์ดูอย่างเดียว (ครูเดิมที่ถูกเปลี่ยนตัวในเทอม 2)
+const { data: accessRows } = await supabase.from("section_teacher_access")
+  .select("section_id").eq("teacher_id", profile.id);
+let viewRows: SectionRow[] = [];
+const viewIds = (accessRows ?? []).map((a: any) => a.section_id);
+if (viewIds.length > 0) {
+  const { data } = await supabase.from("subject_sections").select(SEC_COLS)
+    .in("id", viewIds).eq("is_active", true);
+  viewRows = ((data ?? []) as SectionRow[]).map(r => ({ ...r, viewOnly: true }));
+}
+
+const own = ((secRows ?? []) as SectionRow[]).filter(r => !viewRows.some(v => v.id === r.id));
+const rows = [...own, ...viewRows];
+setSections(rows);
+if (rows.some(r => r.semester === 2)) setSemester(2); // เปิดเทอมล่าสุดก่อน
 
         const subjectIds = [...new Set(rows.map(r => r.subject_id))];
         if (subjectIds.length > 0) {
@@ -163,13 +179,20 @@ if (roomIds.length > 0) {
 
   /* ----- มุมมองครู: จัดกลุ่มวิชา ----- */
   const groupedSubjects = useMemo(() => {
-    const map = new Map<string, { subject: Subject; roomCount: number }>();
-    subjects.forEach(s => {
-      const roomCount = new Set(sections.filter(sec => sec.subject_id === s.id).map(sec => sec.classroom_id)).size;
-      map.set(s.id, { subject: s, roomCount });
-    });
-    return Array.from(map.values());
-  }, [subjects, sections]);
+  const semSections = sections.filter(sec => (sec.semester ?? 1) === semester);
+  return subjects
+    .map(s => {
+      const secs = semSections.filter(sec => sec.subject_id === s.id);
+      if (secs.length === 0) return null;
+      return {
+        subject: s,
+        roomCount: new Set(secs.map(x => x.classroom_id)).size,
+        viewOnly: secs.every(x => x.viewOnly),
+        inherited: secs.some(x => x.previous_section_id),
+      };
+    })
+    .filter(Boolean) as { subject: Subject; roomCount: number; viewOnly: boolean; inherited: boolean }[];
+}, [subjects, sections, semester]);
 
   const filteredSubjects = useMemo(() => {
     if (!search.trim()) return groupedSubjects;
@@ -247,6 +270,16 @@ if (roomIds.length > 0) {
   placeholder={isAdmin ? "🔍 ค้นหาชื่อห้อง/สายชั้น..." : "🔍 ค้นหาชื่อ/รหัสวิชา..."}
   className="mt-2 ml-[60px] bg-white/90 border-2 border-white/40 rounded-lg px-3 py-1 text-sm font-bold text-slate-700 placeholder:text-slate-400 focus:border-white focus:outline-none w-full max-w-[1320px] font-['TH_Sarabun_New',_sans-serif]" />
 
+  {!isAdmin && (
+  <div className="flex gap-1 mt-2 ml-[60px]">
+    {[1, 2].map(s => (
+      <button key={s} onClick={() => setSemester(s)}
+        className={`px-3 py-1.5 rounded-lg text-xs font-black ${semester === s ? "bg-white text-fuchsia-600" : "bg-white/20 text-white hover:bg-white/30"}`}>
+        เทอม {s}
+      </button>
+    ))}
+  </div>
+)}
   {isAdmin && (
     <div className="flex items-center gap-2 mt-3 ml-[56px] overflow-x-auto pb-1">
       <button onClick={() => setLevelFilter("all")}
@@ -315,7 +348,11 @@ if (roomIds.length > 0) {
         ) : filteredSubjects.length === 0 ? (
   <div className="text-center py-20 text-slate-400 bg-white rounded-2xl border-2 border-slate-100">
     <p className="text-4xl mb-3">📚</p>
-    <p className="font-black text-slate-500">{search ? "ไม่พบวิชาตามที่ค้นหา" : "คุณยังไม่มีวิชาที่สอน"}</p>
+    <p className="font-black text-slate-500">
+  {search ? "ไม่พบวิชาตามที่ค้นหา"
+    : semester === 2 ? "เทอม 2 ยังไม่มีวิชา (รอแอดมินกด 🔄 ซิงค์ Smart Class จากตารางสอนเทอม 2)"
+    : "คุณยังไม่มีวิชาที่สอน"}
+</p>
   </div>
 ) : (
   <div className="space-y-8">
@@ -326,7 +363,7 @@ if (roomIds.length > 0) {
           return (
             <button
               key={g.subject.id}
-              onClick={() => router.push(`/smartclass/${g.subject.id}`)}
+              onClick={() => router.push(`/smartclass/${g.subject.id}?semester=${semester}`)}
               className="text-left rounded-2xl border-2 border-slate-100 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all overflow-hidden"
             >
               <div className={`h-14 bg-gradient-to-r ${gradient} px-4 flex items-center justify-between`}>
@@ -336,6 +373,8 @@ if (roomIds.length > 0) {
               <div className="p-4">
                 <p className="font-black text-xl text-slate-900 leading-tight truncate">{g.subject.name_th}</p>
                 <p className="text-slate-400 text-sm font-bold mt-0.5">{g.subject.subject_code}</p>
+                {g.inherited && <span className="text-[11px] font-black text-sky-600">🔗 สืบคะแนนจากเทอม 1</span>}
+                {g.viewOnly && <span className="text-[11px] font-black text-slate-500">👁️ ดูอย่างเดียว</span>}
                 <div className="mt-3 flex justify-center">
                   <span className="text-sm font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
                     🏫 {g.roomCount} ห้อง
@@ -359,7 +398,7 @@ if (roomIds.length > 0) {
           {archivedSubjects.map(g => (
             <button
               key={g.subject.id}
-              onClick={() => router.push(`/smartclass/${g.subject.id}`)}
+              onClick={() => router.push(`/smartclass/${g.subject.id}?semester=${semester}`)}
               className="text-left rounded-2xl border-2 border-slate-200 bg-slate-100 shadow-sm hover:shadow-md transition-all overflow-hidden"
             >
               <div className="h-14 bg-gradient-to-r from-slate-400 to-slate-300 px-4 flex items-center justify-between">

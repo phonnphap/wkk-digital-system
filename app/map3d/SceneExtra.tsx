@@ -116,18 +116,23 @@ export function BusBay({ it }: { it: DecorItem }) {
 export function Kiosk({ it }: { it: DecorItem }) {
   const [x, z] = px(it.x, it.y);
   const col = it.color ?? "#0ea5e9";
+  // ขนาดมาตรฐาน 24 × 16.5 px (= 0.8 × 0.55 หน่วยโลก) · ค่าไม่ถูกต้อง/ติดลบ → ใช้ค่ามาตรฐาน
+  const okv = (v: number | undefined, d: number) => (typeof v === "number" && isFinite(v) && v > 2 ? v : d);
+  const sx = okv(it.w, 24) / 24, sz = okv(it.d, 16.5) / 16.5;
   return (
     <group position={[x, 0, z]} rotation={[0, rad(it), 0]}>
-      <mesh position={[0, 0.02, 0]} receiveShadow><boxGeometry args={[0.8, 0.04, 0.55]} /><meshStandardMaterial color="#dee2e6" /></mesh>
-      <mesh position={[0, 0.18, 0.1]} castShadow><boxGeometry args={[0.6, 0.28, 0.22]} /><meshStandardMaterial color="#f8f9fa" /></mesh>
-      <mesh position={[0, 0.34, 0.1]}><boxGeometry args={[0.64, 0.03, 0.26]} /><meshStandardMaterial color={col} /></mesh>
-      {[-1, 1].map((s) => (
-        <mesh key={s} position={[s * 0.3, 0.3, -0.12]}><cylinderGeometry args={[0.015, 0.015, 0.56, 6]} /><meshStandardMaterial color="#adb5bd" /></mesh>
-      ))}
-      <mesh position={[0, 0.6, -0.02]} rotation={[0.18, 0, 0]} castShadow><boxGeometry args={[0.78, 0.03, 0.5]} /><meshStandardMaterial color={col} /></mesh>
-      {[-0.2, -0.07, 0.07, 0.2].map((cx, k) => (
-        <mesh key={k} position={[cx, 0.4, 0.1]}><cylinderGeometry args={[0.025, 0.02, 0.07, 8]} /><meshStandardMaterial color={k % 2 ? "#ff922b" : "#51cf66"} /></mesh>
-      ))}
+      <group scale={[sx, 1, sz]}>
+        <mesh position={[0, 0.02, 0]} receiveShadow><boxGeometry args={[0.8, 0.04, 0.55]} /><meshStandardMaterial color="#dee2e6" /></mesh>
+        <mesh position={[0, 0.18, 0.1]} castShadow><boxGeometry args={[0.6, 0.28, 0.22]} /><meshStandardMaterial color="#f8f9fa" /></mesh>
+        <mesh position={[0, 0.34, 0.1]}><boxGeometry args={[0.64, 0.03, 0.26]} /><meshStandardMaterial color={col} /></mesh>
+        {[-1, 1].map((s) => (
+          <mesh key={s} position={[s * 0.3, 0.3, -0.12]}><cylinderGeometry args={[0.015, 0.015, 0.56, 6]} /><meshStandardMaterial color="#adb5bd" /></mesh>
+        ))}
+        <mesh position={[0, 0.6, -0.02]} rotation={[0.18, 0, 0]} castShadow><boxGeometry args={[0.78, 0.03, 0.5]} /><meshStandardMaterial color={col} /></mesh>
+        {[-0.2, -0.07, 0.07, 0.2].map((cx, k) => (
+          <mesh key={k} position={[cx, 0.4, 0.1]}><cylinderGeometry args={[0.025, 0.02, 0.07, 8]} /><meshStandardMaterial color={k % 2 ? "#ff922b" : "#51cf66"} /></mesh>
+        ))}
+      </group>
       <Tag y={0.85}>🧃 {it.name || "ซุ้มขายน้ำ"}</Tag>
     </group>
   );
