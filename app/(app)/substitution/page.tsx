@@ -1441,7 +1441,7 @@ const entriesOn = (date: string) => entriesForDate(date, entries, rooms, years, 
     const dow = dowOf(date);
     const map: Record<string, number> = {};
     for (const t of candidates) {
-      map[t.id] = computeTotalLoadForDay(t.id, dow, date, entries, subRecords) + sessionExtraLoad(t.id, date);
+      map[t.id] = computeTotalLoadForDay(t.id, dow, date, entriesOn(date), subRecords) + sessionExtraLoad(t.id, date);
     }
     return map;
   }
@@ -1754,6 +1754,67 @@ function EditSubModal({ record, allEntries, teachers, swapRequests, subRecords, 
             className="px-5 py-2.5 rounded-xl bg-[#DB2777] hover:bg-[#9D174D] text-white text-sm font-bold disabled:opacity-50">
             {saving ? "กำลังบันทึก..." : "💾 บันทึกการแก้ไข"}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// ── EditSwapDateModal — เฉพาะ admin@khienkhet.ac.th แก้วันที่/ลบได้ทุกสถานะ
+// ══════════════════════════════════════════════════════════
+function EditSwapDateModal({ record, onSave, onDelete, onClose }: {
+  record: SwapRequest;
+  onSave: (id: string, newDate: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [date, setDate] = useState(record.swap_date);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleSave = async () => {
+    if (!date) { alert("กรุณาเลือกวันที่"); return; }
+    setSaving(true);
+    await onSave(record.id, date);
+    setSaving(false);
+  };
+  const handleDelete = async () => {
+    setDeleting(true);
+    await onDelete(record.id);
+    setDeleting(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between">
+          <h3 className="font-bold text-slate-800 text-base">✏️ แก้ไขคำขอแลกคาบ (แอดมิน)</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#FCE7F3] flex items-center justify-center text-slate-500">✕</button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div className="bg-[#FDF2F8] rounded-xl px-4 py-3 text-sm space-y-1">
+            <p><span className="text-slate-400">ผู้ขอ:</span> <span className="font-bold text-slate-800">{fullName(record.requester)}</span></p>
+            <p><span className="text-slate-400">ขอแลกกับ:</span> <span className="font-bold text-[#DB2777]">{fullName(record.target_teacher)}</span></p>
+            <p><span className="text-slate-400">สถานะ:</span> <span className={`text-xs font-bold px-2 py-0.5 rounded-lg border ${STATUS_SWAP[record.status]?.cls}`}>{STATUS_SWAP[record.status]?.label}</span></p>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">วันที่แลกคาบ *</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              className="w-full border-2 border-[#F9A8D4] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#DB2777] focus:outline-none" />
+          </div>
+          <p className="text-xs text-slate-400">💡 แก้ไขเฉพาะวันที่เท่านั้น ไม่กระทบสถานะหรือคาบที่เลือกไว้เดิม</p>
+        </div>
+        <div className="px-6 py-4 border-t border-[#FCE7F3] flex items-center justify-between gap-2 bg-[#FDF2F8] rounded-b-2xl">
+          <button onClick={handleDelete} disabled={deleting}
+            className="px-4 py-2.5 rounded-xl bg-red-100 hover:bg-red-200 text-red-700 text-sm font-bold border border-red-300 disabled:opacity-50">
+            {deleting ? "กำลังลบ..." : "🗑️ ลบรายการนี้"}
+          </button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#FBCFE8] text-slate-600 text-sm font-medium">ยกเลิก</button>
+            <button onClick={handleSave} disabled={saving || date === record.swap_date}
+              className="px-5 py-2.5 rounded-xl bg-[#DB2777] hover:bg-[#9D174D] text-white text-sm font-bold disabled:opacity-50">
+              {saving ? "กำลังบันทึก..." : "💾 บันทึก"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -2073,68 +2134,6 @@ const handleSubDeletePermanent = async (id: string) => {
   await loadData();
 };
 
-// ══════════════════════════════════════════════════════════
-// ── EditSwapDateModal — เฉพาะ admin@khienkhet.ac.th แก้วันที่/ลบได้ทุกสถานะ
-// ══════════════════════════════════════════════════════════
-function EditSwapDateModal({ record, onSave, onDelete, onClose }: {
-  record: SwapRequest;
-  onSave: (id: string, newDate: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-  onClose: () => void;
-}) {
-  const [date, setDate] = useState(record.swap_date);
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
-  const handleSave = async () => {
-    if (!date) { alert("กรุณาเลือกวันที่"); return; }
-    setSaving(true);
-    await onSave(record.id, date);
-    setSaving(false);
-  };
-  const handleDelete = async () => {
-    setDeleting(true);
-    await onDelete(record.id);
-    setDeleting(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between">
-          <h3 className="font-bold text-slate-800 text-base">✏️ แก้ไขคำขอแลกคาบ (แอดมิน)</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#FCE7F3] flex items-center justify-center text-slate-500">✕</button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          <div className="bg-[#FDF2F8] rounded-xl px-4 py-3 text-sm space-y-1">
-            <p><span className="text-slate-400">ผู้ขอ:</span> <span className="font-bold text-slate-800">{fullName(record.requester)}</span></p>
-            <p><span className="text-slate-400">ขอแลกกับ:</span> <span className="font-bold text-[#DB2777]">{fullName(record.target_teacher)}</span></p>
-            <p><span className="text-slate-400">สถานะ:</span> <span className={`text-xs font-bold px-2 py-0.5 rounded-lg border ${STATUS_SWAP[record.status]?.cls}`}>{STATUS_SWAP[record.status]?.label}</span></p>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">วันที่แลกคาบ *</label>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)}
-              className="w-full border-2 border-[#F9A8D4] rounded-xl px-3 py-2.5 text-sm bg-white focus:border-[#DB2777] focus:outline-none" />
-          </div>
-          <p className="text-xs text-slate-400">💡 แก้ไขเฉพาะวันที่เท่านั้น ไม่กระทบสถานะหรือคาบที่เลือกไว้เดิม</p>
-        </div>
-        <div className="px-6 py-4 border-t border-[#FCE7F3] flex items-center justify-between gap-2 bg-[#FDF2F8] rounded-b-2xl">
-          <button onClick={handleDelete} disabled={deleting}
-            className="px-4 py-2.5 rounded-xl bg-red-100 hover:bg-red-200 text-red-700 text-sm font-bold border border-red-300 disabled:opacity-50">
-            {deleting ? "กำลังลบ..." : "🗑️ ลบรายการนี้"}
-          </button>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#FBCFE8] text-slate-600 text-sm font-medium">ยกเลิก</button>
-            <button onClick={handleSave} disabled={saving || date === record.swap_date}
-              className="px-5 py-2.5 rounded-xl bg-[#DB2777] hover:bg-[#9D174D] text-white text-sm font-bold disabled:opacity-50">
-              {saving ? "กำลังบันทึก..." : "💾 บันทึก"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 // วางไว้ก่อน mySwaps
 const enrichedSwapRequests = useMemo(() =>
   swapRequests.map(r => ({
