@@ -63,7 +63,7 @@ export default function ScoreSheetAssessmentTool({
   onBack: () => void;
 midtermMaxScore?: number;
   finalMaxScore?: number;
-  gradeRoundingMode?: "up" | "truncate";
+  gradeRoundingMode?: "round_up" | "truncate";
   showSpecialScores?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
@@ -125,7 +125,7 @@ midtermMaxScore?: number;
         const submissions: any[] = json.submissions ?? [];
         const examScores: any[] = json.examScores ?? [];
         const scoreEvents: any[] = json.scoreEvents ?? [];
-                const presets: any[] = json.presets ?? [];
+        const presets: any[] = json.presets ?? [];
         const criteria: Criterion[] = json.criteria ?? [];
 
         const isW = (a: any) => !!(a.allow_weight && a.weight_percent != null && (a.max_score ?? 0) > 0);
@@ -147,7 +147,7 @@ students.forEach(s => {
       const sub = submissions.find(x => x.student_id === s.id && x.assignment_id === a.id);
       return sum + scoreOf(a, sub?.score);
     }, 0) +
-    (showSpecialScores
+        (showSpecialScores
       ? scoreEvents
           .filter(ev => ev.student_id === s.id && presets.some(p => p.id === ev.preset_id))
           .reduce((sum, ev) => sum + ev.points, 0)
@@ -157,7 +157,7 @@ students.forEach(s => {
 
   const totalRaw = Math.round((unit + mid + fin) * 100) / 100;
   const total = totalRaw % 1 !== 0
-    ? (gradeRoundingMode === "up" ? Math.ceil(totalRaw) : Math.floor(totalRaw))
+      ? (gradeRoundingMode === "round_up" ? Math.ceil(totalRaw) : Math.floor(totalRaw))
     : totalRaw;
 
   const pct = grandMax > 0 ? (total / grandMax) * 100 : 0;

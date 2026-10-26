@@ -49,8 +49,8 @@ function getAssignmentWeightedScore(a: Assignment, raw: number | null | undefine
 function fmtScore(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
-function applyRounding(n: number, mode: "up" | "truncate"): number {
-  return mode === "up" ? Math.ceil(n) : Math.floor(n);
+function applyRounding(n: number, mode: "round_up" | "truncate"): number {
+  return mode === "round_up" ? Math.ceil(n) : Math.floor(n);
 }
 // ★ หาเกรดจากเปอร์เซ็นต์ ตามเกณฑ์ที่ตั้งไว้ในหน้า "ตั้งค่าคำนวณเกรด" ของวิชานี้ (เหมือน GradeOverviewTool)
 function getGradeFromCriteria(percentage: number, criteria: Criterion[]): string {
@@ -188,7 +188,7 @@ export default function Vp7Report({
   formativeMaxScore?: number;   // ★ คะแนนเต็ม "หน่วยการเรียน" ที่ตั้งไว้ในรายวิชา (เดิมชื่อ unitMaxScore ใน Vp2Report)
   midtermMaxScore?: number;
   finalMaxScore?: number;       // ★ เพิ่ม: วผ.7 มีคอลัมน์ "ปลายภาค" แยกจาก วผ.2
-  gradeRoundingMode?: "up" | "truncate";
+  gradeRoundingMode?: "round_up" | "truncate";
   showSpecialScores?: boolean; 
   subjectTeacherNameFallback?: string;
   rtwItems?: AssessItem[];          // ข้อประเมิน อ่าน คิด เขียน
@@ -377,7 +377,7 @@ export default function Vp7Report({
         (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
         0
       );
-          const specialTotal = showSpecialScores
+              const specialTotal = showSpecialScores
       ? scoreEvents
           .filter(ev => ev.student_id === s.id && presets.some(p => p.id === ev.preset_id))
           .reduce((sum, ev) => sum + ev.points, 0)

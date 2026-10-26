@@ -50,8 +50,8 @@ function getAssignmentWeightedScore(a: Assignment, raw: number | null | undefine
 function fmtScore(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
-function applyRounding(n: number, mode: "up" | "truncate"): number {
-  return mode === "up" ? Math.ceil(n) : Math.floor(n);
+function applyRounding(n: number, mode: "round_up" | "truncate"): number {
+  return mode === "round_up" ? Math.ceil(n) : Math.floor(n);
 }
 
 // ★ คำนวณอายุ ณ วันนี้ (ปี)
@@ -149,7 +149,7 @@ export default function Vp2Report({
   unitMaxScore = 70,
   midtermMaxScore = 0,
   gradeRoundingMode = "truncate", 
-  showSpecialScores = true, 
+  showSpecialScores = true,
   subjectTeacherNameFallback,
   onBack,
 }: {
@@ -164,7 +164,7 @@ export default function Vp2Report({
   readOnly?: boolean;
   unitMaxScore?: number;
   midtermMaxScore?: number;
-  gradeRoundingMode?: "up" | "truncate";
+  gradeRoundingMode?: "round_up" | "truncate";
   showSpecialScores?: boolean; 
   subjectTeacherNameFallback?: string;
   onBack: () => void;
@@ -349,7 +349,7 @@ if (allHeadsErr) {
       (sum, a) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score),
       0
     );
-        const specialTotal = showSpecialScores
+    const specialTotal = showSpecialScores
       ? scoreEvents
           .filter(ev => ev.student_id === s.id && presets.some(p => p.id === ev.preset_id))
           .reduce((sum, ev) => sum + ev.points, 0)

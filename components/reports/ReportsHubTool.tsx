@@ -49,7 +49,7 @@ export default function ReportsHubTool({
   formativeMaxScore?: number;   // ★ เพิ่ม
   midtermMaxScore?: number;     // ★ เพิ่ม
   finalMaxScore?: number; 
-  gradeRoundingMode?: "up" | "truncate"; 
+  gradeRoundingMode?: "round_up" | "truncate";
   subjectTeacherName?: string;
   showSpecialScores?: boolean;
 }) {

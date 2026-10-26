@@ -77,6 +77,7 @@ function AdminFaceRegisterPageInner() {
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [appendMode, setAppendMode] = useState(false);
 
   const [activeScanAngle, setActiveScanAngle] = useState<"front" | "left" | "right" | null>(null);
   const [descriptorFront, setDescriptorFront] = useState<Float32Array | null>(null);
@@ -234,7 +235,7 @@ function AdminFaceRegisterPageInner() {
 
   // บันทึกเฉพาะข้อมูลใบหน้าลงตาราง users เดิม — ไม่แตะต้องคอลัมน์บทบาท/สิทธิ์
   // เพราะบทบาทของบุคลากรถูกกำหนดไว้แล้วในระบบส่วนอื่น
-  const handleSaveAllData = async () => {
+      const handleSaveAllData = async () => {
     if (!selectedTeacher) return;
     if (anglesCaptured === 0) {
       alert("กรุณาสแกนใบหน้าอย่างน้อย 1 มุมก่อนบันทึก");
@@ -243,13 +244,36 @@ function AdminFaceRegisterPageInner() {
     setIsSaving(true);
     setStatus("กำลังบันทึกข้อมูลใบหน้าเข้าฐานข้อมูล...");
     try {
-      const faceFeaturesPayload = {
+      // ดึงข้อมูลเดิมล่าสุดจาก DB
+      const { data: current, error: fetchErr } = await supabase
+        .from('users')
+        .select('face_features')
+        .eq('id', selectedTeacher.id)
+        .maybeSingle();
+      if (fetchErr) throw fetchErr;
+
+      let existing: Record<string, number[] | null> = {};
+      const raw = (current as any)?.face_features;
+      if (raw) {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) existing = parsed;
+        else if (Array.isArray(parsed) && parsed.length === 128) existing = { front: parsed };
+      }
+
+      const newSet = {
         front: descriptorFront ? Array.from(descriptorFront) : null,
         left: descriptorLeft ? Array.from(descriptorLeft) : null,
-        right: descriptorRight ? Array.from(descriptorRight) : null
+        right: descriptorRight ? Array.from(descriptorRight) : null,
       };
 
-      // อัปเดตแถวผู้ใช้เดิมในตาราง users โดยตรงด้วย id ที่เลือกไว้ — ไม่มีการสร้างบัญชีใหม่
+      const faceFeaturesPayload: Record<string, number[] | null> = { ...existing };
+      const stamp = Date.now();
+      (['front', 'left', 'right'] as const).forEach(k => {
+        if (!newSet[k]) return;
+        if (appendMode) faceFeaturesPayload[`${k}_${stamp}`] = newSet[k]; // เพิ่มชุดใหม่ เก็บของเก่าไว้
+        else faceFeaturesPayload[k] = newSet[k];                          // ทับเฉพาะมุมที่ถ่ายใหม่
+      });
+
       const { data: updatedRows, error } = await supabase
         .from('users')
         .update({ face_features: faceFeaturesPayload })
@@ -265,18 +289,13 @@ function AdminFaceRegisterPageInner() {
         );
       }
 
-      if (anglesCaptured < 3) {
-        setStatus(`บันทึกสำเร็จ แต่ถ่ายใบหน้าได้ ${anglesCaptured}/3 มุม (ยังไม่ครบ)`);
-        alert(`บันทึกสำเร็จ\nแต่ถ่ายใบหน้าได้เพียง ${anglesCaptured}/3 มุม\nแนะนำให้ถ่ายให้ครบ 3 มุม`);
-      } else {
-        setStatus("บันทึกข้อมูลใบหน้าครบ 3 มุมสำเร็จ!");
-        alert("จัดเก็บพิกัดใบหน้าครบ 3 มุมเรียบร้อย");
-      }
-      if (anglesCaptured === 3) {
-        setDescriptorFront(null);
-        setDescriptorLeft(null);
-        setDescriptorRight(null);
-      }
+      setStatus(`บันทึกสำเร็จ (${anglesCaptured} มุม${appendMode ? ' เพิ่มเป็นชุดใหม่' : ''})`);
+      alert(`บันทึกสำเร็จ ${anglesCaptured} มุม${appendMode ? '\nเพิ่มเป็นชุดใหม่ โดยเก็บข้อมูลเดิมไว้' : ''}`);
+
+      setDescriptorFront(null);
+      setDescriptorLeft(null);
+      setDescriptorRight(null);
+      setAppendMode(false);
     } catch (err: any) {
       setStatus("ข้อผิดพลาด: " + err.message);
     } finally {
@@ -328,9 +347,11 @@ function AdminFaceRegisterPageInner() {
             <label className="block text-xs font-semibold text-[#6E6E73] mb-1">รายชื่อบุคลากรที่ต้องการลงทะเบียนใบหน้า</label>
             <select
               onChange={(e) => {
-                setSelectedTeacher(teachers.find(t => t.id === e.target.value) || null);
-                stopVideo();
-              }}
+  setSelectedTeacher(teachers.find(t => t.id === e.target.value) || null);
+  setDescriptorFront(null); setDescriptorLeft(null); setDescriptorRight(null);
+  setAppendMode(false);
+  stopVideo();
+}}
               className={inputCls}
             >
               <option value="">-- เลือกครูผู้ลงทะเบียน --</option>
@@ -425,6 +446,16 @@ function AdminFaceRegisterPageInner() {
               {status}
             </div>
           </div>
+          {selectedTeacher?.face_features && (
+  <label className="flex items-start gap-3 mb-3 p-3 rounded-xl bg-[#0A84FF]/8 border border-[#0A84FF]/20 cursor-pointer">
+    <input type="checkbox" checked={appendMode}
+      onChange={e => setAppendMode(e.target.checked)}
+      className="w-4 h-4 mt-0.5 accent-[#0A84FF]" />
+    <span className="text-[13px] text-[#0A84FF] font-medium leading-snug">
+      เพิ่มเป็นชุดใหม่ (เช่น เปลี่ยนทรงผม) โดยเก็บข้อมูลเดิมไว้ด้วย
+    </span>
+  </label>
+)}
 
           <div className="mt-5 pt-4 border-t border-black/[0.05]">
             <button

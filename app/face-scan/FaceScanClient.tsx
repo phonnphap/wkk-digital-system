@@ -155,7 +155,10 @@ export default function FaceScanPage() {
   const [isConfirming, setIsConfirming] = useState(false);
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const isDetectingRef = useRef(false);
-
+  const descriptorsByUserRef = useRef<Record<string, Float32Array[]>>({});
+  const currentUserIdRef = useRef<string | null>(null);
+  const faceMatcherRef = useRef<any>(null);
+  const userNamesRef = useRef<Record<string, string>>({});
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [officialLeaveOk, setOfficialLeaveOk] = useState<boolean | null>(null);
   const [checkingLeave, setCheckingLeave] = useState(false);
@@ -170,6 +173,24 @@ export default function FaceScanPage() {
   const [blinkHint, setBlinkHint] = useState(false); // true เมื่อตรวจพบว่าเริ่มหลับตาแล้ว (ใช้โชว์ฟีดแบ็ก)
 
   const canOffsiteScan = allowOffsiteScan && officialLeaveOk === true;
+    const SELF_THRESHOLD = 0.58;
+
+  function evaluateMatch(descriptor: Float32Array) {
+    const fa = faceApiRef.current;
+    const uid = currentUserIdRef.current;
+    const matcher = faceMatcherRef.current;
+    const mine = uid ? descriptorsByUserRef.current[uid] : null;
+    if (!fa || !uid || !mine || mine.length === 0 || !matcher) return null;
+
+    const selfDist = Math.min(...mine.map(d => fa.euclideanDistance(d, descriptor)));
+    const best = matcher.findBestMatch(descriptor);
+    const otherIsMuchCloser = best.label !== uid && best.distance < selfDist - 0.05;
+
+    return {
+      ok: selfDist < SELF_THRESHOLD && !otherIsMuchCloser,
+      similarity: ((1 - selfDist) * 100).toFixed(1),
+    };
+  }
 
   // ── 1. นาฬิกา + GPS ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -213,6 +234,7 @@ export default function FaceScanPage() {
 
         if (foundUser) {
           setCurrentUserId((foundUser as any).id);
+          currentUserIdRef.current = (foundUser as any).id;   // ← เพิ่มบรรทัดนี้
           await refreshStats((foundUser as any).id);
         }
       } catch (err) {
@@ -320,12 +342,19 @@ export default function FaceScanPage() {
             } catch { return null; }
           })
           .filter((d): d is any => d !== null);
+        const byUser: Record<string, Float32Array[]> = {};
+        descriptors.forEach((d: any) => { byUser[d.label] = d.descriptors; });
+        descriptorsByUserRef.current = byUser;
+        userNamesRef.current = nameMap;
 
         if (descriptors.length === 0) {
           setFaceMatcher(null);
+          faceMatcherRef.current = null;
           setStatus("ระบบพร้อม (ยังไม่พบข้อมูลใบหน้าในระบบ)");
         } else {
-          setFaceMatcher(new fa.FaceMatcher(descriptors, 0.55));
+          const matcher = new fa.FaceMatcher(descriptors, 0.6);
+          setFaceMatcher(matcher);
+          faceMatcherRef.current = matcher;
           setStatus("ระบบพร้อมสแกนใบหน้า");
         }
         setModelsReady(true);
@@ -458,35 +487,38 @@ export default function FaceScanPage() {
   };
 
   // ── 6. Loop ตรวจจับ + จับคู่ใบหน้า ───────────────────────────────────────
-  const detectFaceLoop = () => {
+    const detectFaceLoop = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     intervalRef.current = setInterval(async () => {
       if (isDetectingRef.current) return;
-      if (!videoRef.current || !streamRef.current || !faceMatcher || !faceApiRef.current) return;
+      if (!videoRef.current || !streamRef.current || !faceMatcherRef.current || !faceApiRef.current) return;
 
       isDetectingRef.current = true;
       const fa = faceApiRef.current;
 
       try {
-        // ลดขนาดภาพที่ใช้ตรวจจับ (inputSize) จาก 224 เหลือ 160 เพื่อให้ประมวลผลไวขึ้นมาก
-        // โดยเฉพาะบนมือถือ — คุณภาพ descriptor ยังเพียงพอเพราะตอนนี้เทียบกับข้อมูล
-        // อ้างอิงครบทั้ง 3 มุมอยู่แล้ว (ไม่ได้พึ่งความละเอียดสูงจากภาพเดียวเหมือนเดิม)
         const detection = await fa
           .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 }))
           .withFaceLandmarks()
           .withFaceDescriptor();
 
         if (detection && detection.descriptor.length === 128) {
-          const match = faceMatcher.findBestMatch(detection.descriptor);
-          const similarity = ((1 - match.distance) * 100).toFixed(1);
-
-          if (match.label !== 'unknown' && match.distance < MATCH_THRESHOLD) {
-            const name = userNames[match.label] || match.label;
-            startLivenessCheck({ id: match.label, name, similarity });
-          } else if (match.label !== 'unknown') {
-            setStatus(`พบใบหน้า แต่ยังไม่ชัด (${similarity}%) ขยับเข้าใกล้กล้องอีกนิด`);
+          const uid = currentUserIdRef.current;
+          if (!uid) {
+            setStatus("ไม่พบข้อมูลผู้ใช้ที่ล็อกอิน กรุณาเข้าสู่ระบบใหม่");
+          } else if (!descriptorsByUserRef.current[uid]) {
+            setStatus("บัญชีนี้ยังไม่ได้ลงทะเบียนใบหน้า กรุณาติดต่อแอดมิน");
           } else {
-            setStatus(`กำลังสแกน... (ไม่พบข้อมูลตรงกัน ${similarity}%)`);
+            const r = evaluateMatch(detection.descriptor);
+            if (r?.ok) {
+              startLivenessCheck({
+                id: uid,
+                name: userNamesRef.current[uid] || uid,
+                similarity: r.similarity,
+              });
+            } else if (r) {
+              setStatus(`ใบหน้ายังไม่ตรงกับที่ลงทะเบียน (${r.similarity}%) ลองขยับเข้าใกล้หรือหาที่สว่างขึ้น`);
+            }
           }
         } else {
           setStatus("กรุณาจัดใบหน้าให้อยู่ในกรอบสแกน");
@@ -494,7 +526,7 @@ export default function FaceScanPage() {
       } finally {
         isDetectingRef.current = false;
       }
-    }, 300); // เดิม 800ms — ลดลงมากเพราะ inputSize เล็กลง ทำให้แต่ละรอบประมวลผลไวพอที่จะสแกนถี่ขึ้นได้โดยไม่หน่วง
+    }, 300);
   };
 
   // ── 6.5 การยืนยันว่าเป็นคนจริง (liveness) ด้วยการกระพริบตา ──────────────────
@@ -555,10 +587,10 @@ export default function FaceScanPage() {
             .withFaceLandmarks()
             .withFaceDescriptor();
 
-          const candidate = candidateRef.current;
-          if (finalDet && faceMatcher && candidate) {
-            const reMatch = faceMatcher.findBestMatch(finalDet.descriptor);
-            if (reMatch.label === candidate.id && reMatch.distance < MATCH_THRESHOLD) {
+                      const candidate = candidateRef.current;
+          if (finalDet && candidate) {
+            const r = evaluateMatch(finalDet.descriptor);
+            if (r?.ok) {
               setScanStage('confirm');
               setStatus("ยืนยันตัวตนจริงสำเร็จ");
               setPendingMatch(candidate);
@@ -839,7 +871,7 @@ export default function FaceScanPage() {
             </div>
 
             <button type="button" onClick={isCameraActive ? stopVideo : startVideo}
-              disabled={!modelsReady || (!isInsideSchool && !canOffsiteScan)}
+              disabled={!modelsReady || !currentUserId || (!isInsideSchool && !canOffsiteScan)}
               className={`w-full py-4 rounded-2xl font-semibold text-[16px] transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 shadow-lg ${isCameraActive ? 'bg-gradient-to-r from-[#FF3B30] to-[#FF6961] text-white shadow-[#FF3B30]/25' : 'bg-gradient-to-r from-[#0A84FF] to-[#5E5CE6] text-white shadow-[#0A84FF]/25'}`}>
               {isCameraActive ? "ยกเลิกและปิดกล้อง" : "เปิดกล้องเพื่อสแกนใบหน้า"}
             </button>

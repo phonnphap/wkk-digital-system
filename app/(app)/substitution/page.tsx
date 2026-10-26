@@ -255,6 +255,31 @@ function isHomeroomPriorityGrade(gradeGroup?: string | null): boolean {
   const g = extractGradeOnly(gradeGroup);
   return g === "ป.1" || g === "ป.2";
 }
+// ★ หาเทอมของวันที่ — ถ้าตกช่องว่างระหว่างเทอม ใช้เทอมล่าสุดที่เริ่มไปแล้ว
+function semesterOfDate(date: string, years: any[], yearName: string): number {
+  const sameYear = years.filter(y => y.year_name === yearName && y.start_date);
+  const hit = sameYear.find(y => y.end_date && date >= y.start_date && date <= y.end_date);
+  if (hit) return hit.semester ?? 1;
+  const started = sameYear
+    .filter(y => y.start_date <= date)
+    .sort((a, b) => b.start_date.localeCompare(a.start_date));
+  return started[0]?.semester ?? 1;
+}
+
+// ★ กรองตารางสอนให้เหลือเฉพาะของเทอมที่ตรงกับวันที่นั้น (ใช้เฉพาะห้อง ม. / ห้องที่แยกเทอมแล้ว)
+function entriesForDate(
+  date: string, all: TimetableEntry[], rooms: Record<string, any>, years: any[], yearName: string
+): TimetableEntry[] {
+  const sem = semesterOfDate(date, years, yearName);
+  return all.filter(e => {
+    const room = rooms[e.classroom_id];
+    if (!room) return true;
+    const isSecondary = /^ม\./.test(room.room_name ?? "") || !!room.split_by_semester;
+    if (!isSecondary) return true;          // อ./ป. ที่ไม่แยกเทอม ใช้ได้ทั้งปี
+    const yr = years.find(y => y.id === room.academic_year_id);
+    return (yr?.semester ?? 1) === sem;
+  });
+}
 
 // ★ หา id ครูที่มีสายชั้นเดียวกับ "ครูที่ลา" — อ้างอิงตรงจากคอลัมน์ users.grade_level
 function sameGradeTeacherIds(absentTeacher: User | null | undefined, allTeachers: User[]): Set<string> {
@@ -755,11 +780,12 @@ function SwapRequestModal({
   user, allEntries, allTeachers, allTimeSlots, academicYearId, homeroomMap,
   initialReason: initialReasonProp, mode: modeProp = "normal",
   fixedTargetTeacherId: fixedTargetTeacherIdProp, repayRefId,
-  editingRequest, onSave, onClose, swapRequests, 
+  editingRequest, onSave, onClose, swapRequests, years, rooms, yearName,
 }: {
   user: User; allEntries: TimetableEntry[]; allTeachers: User[]; allTimeSlots: any[]; academicYearId: string;
   homeroomMap: Record<string, string>;
   initialReason?: string; mode?: "normal" | "repay"; fixedTargetTeacherId?: string;
+  years: any[]; rooms: Record<string, any>; yearName: string;
   // ★ FIX: รหัสอ้างอิงของ "คำขอเดิม/รายการสอนแทนเดิม" ที่กำลังขอแลกคืนให้ (เช่น "sw:<id>" หรือ "sub:<id>")
   // ใช้ฝังต่อท้าย reason ตอนบันทึก เพื่อให้เช็ค "แลกคืนแล้วหรือยัง" แม่นยำ 100% ไม่ขึ้นกับข้อความวันที่/ชื่อคาบที่อาจ resolve ไม่ได้ภายหลัง
   repayRefId?: string;
@@ -798,6 +824,10 @@ function SwapRequestModal({
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const dow = swapDate ? dowOf(swapDate) : null;
   const didInitRef = useRef(false); // ★ กันไม่ให้ useEffect ล้างค่าที่โหลดมาแก้ไขตอน mount ครั้งแรก
+  const entriesOn = useMemo(
+  () => entriesForDate(swapDate, allEntries, rooms, years, yearName),
+  [swapDate, allEntries, rooms, years, yearName]
+);
 
   // ★ โหมด repay: หา user ของครูที่เราจะแลกคาบคืนให้ (ครูที่เคยสอนแทนเรา)
   const targetTeacher = useMemo(
@@ -807,27 +837,27 @@ function SwapRequestModal({
 
   // ★ ตารางสอนของครูคนนั้นในวันที่เลือก (โหมด repay)
   const targetDayEntries = useMemo(() =>
-    (mode !== "repay" || dow === null || !fixedTargetTeacherId) ? [] : allEntries.filter(e =>
+    (mode !== "repay" || dow === null || !fixedTargetTeacherId) ? [] : entriesOn.filter(e =>
       (e.teacher_id === fixedTargetTeacherId || e.teacher_id_2 === fixedTargetTeacherId) && e.day_of_week === dow && !e.is_break
     ).sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0))
-  , [mode, allEntries, dow, fixedTargetTeacherId]);
+  , [mode, entriesOn, dow, fixedTargetTeacherId]);
 
   // ★ คาบของเราเองในวันเดียวกัน (ใช้เช็คว่าง/ไม่ว่างจริง แบบเทียบเวลาทับกัน)
   const myBusyEntriesThatDay = useMemo(() =>
-    (dow === null) ? [] : allEntries.filter(e =>
+    (dow === null) ? [] : entriesOn.filter(e =>
       (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break
     )
-  , [allEntries, dow, user.id]);
+  , [entriesOn, dow, user.id]);
 
   function amIFreeAt(entry: TimetableEntry) {
     return !myBusyEntriesThatDay.some(e => timeRangesOverlap(entry.start_time, entry.end_time, e.start_time, e.end_time));
   }
 
   const myDayEntries = useMemo(() =>
-    (dow === null ? [] : allEntries.filter(e =>
+    (dow === null ? [] : entriesOn.filter(e =>
       (e.teacher_id === user.id || e.teacher_id_2 === user.id) && e.day_of_week === dow && !e.is_break
     )).sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0))
-  , [allEntries, dow, user.id]);
+  , [entriesOn, dow, user.id]);
 
   // ★ โหลดครูที่ลาวันนั้น ทุกครั้งที่เปลี่ยนวันที่
   useEffect(() => {
@@ -854,15 +884,15 @@ function SwapRequestModal({
   // ไม่ว่าจะเป็นครูทั่วไป (ขอแลกคาบเอง) หรือหัวหน้าสายชั้น/แอดมิน (จัดสอนแทน) — ให้เกณฑ์การจัดลำดับตรงกันเป๊ะ
   const candidateTeachers = useMemo(() => {
   if (!selectedEntry || dow === null) return [] as User[];
-  const free = computeFreeTeachersForEntry(selectedEntry, swapDate, allEntries, allTeachers, user.id, swapRequests)
-    .filter(t => !onLeaveIds.has(t.id));
-  return sortTeachersByGrade(free, selectedEntry, user, allEntries, homeroomMap);
-}, [selectedEntry, dow, swapDate, allEntries, allTeachers, user, onLeaveIds, homeroomMap, swapRequests]); // ★ เพิ่ม swapRequests
+  const free = computeFreeTeachersForEntry(selectedEntry, swapDate, entriesOn, allTeachers, user.id, swapRequests)
+  .filter(t => !onLeaveIds.has(t.id));
+return sortTeachersByGrade(free, selectedEntry, user, entriesOn, homeroomMap);
+}, [selectedEntry, dow, swapDate, entriesOn, allTeachers, user, onLeaveIds, homeroomMap, swapRequests]);
 
   const candidateLoadMap = useMemo(() => {
     if (dow === null) return {} as Record<string, number>;
-    return Object.fromEntries(candidateTeachers.map(t => [t.id, computeTaughtPeriodsForDay(t.id, dow, allEntries)]));
-  }, [candidateTeachers, dow, allEntries]);
+    return Object.fromEntries(candidateTeachers.map(t => [t.id, computeTaughtPeriodsForDay(t.id, dow, entriesOn)]));
+  }, [candidateTeachers, dow, entriesOn]);
 
   const validate = () => {
     const e: Record<string,boolean> = {};
@@ -1064,12 +1094,13 @@ function SwapRequestModal({
 }
 
 // ── AssignSubModal ──────────────────────────────────────────
-function AssignSubModal({ leaveRequest, teachers, entries, subRecords, swapRequests, academicYearId, currentUser, homeroomMap, restrictDates, allTimeSlots, onSave, onClose }: {
+function AssignSubModal({ leaveRequest, teachers, entries, subRecords, swapRequests, academicYearId, currentUser, homeroomMap, restrictDates, allTimeSlots, years, rooms, yearName, onSave, onClose }: {
   leaveRequest: LeaveRequest; teachers: User[];
   entries: TimetableEntry[]; subRecords: SubRecord[]; swapRequests: SwapRequest[];   // ★ เพิ่ม
   academicYearId: string;
   currentUser: User; homeroomMap: Record<string, string>; restrictDates?: string[];
   allTimeSlots: any[];
+   years: any[]; rooms: Record<string, any>; yearName: string;
   onSave: () => void; onClose: () => void;
 }) {
   const absentId = leaveRequest.user_id;
@@ -1091,6 +1122,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, swapReque
   () => teachers.find(t => t.id === absentId) ?? null,
   [teachers, absentId]
 );
+  const entriesOn = (date: string) => entriesForDate(date, entries, rooms, years, yearName);
   const leaveDates: string[] = (restrictDates && restrictDates.length > 0) ? restrictDates : getLeaveWeekdayDates(leaveRequest);
   const [assignments, setAssignments] = useState<Record<string, string>>(
     () => Object.fromEntries(absentEntries.flatMap(e =>
@@ -1131,9 +1163,11 @@ function toggleMismatchExpanded(date: string) {
     const tally: Record<string, number> = {}; // `${teacherId}_${date}`
     let total = 0, newlyFilled = 0, unfilled = 0;
     for (const date of leaveDates) {
-      const dow = dowOf(date);
-      const dayEntries = absentEntries.filter(e => e.day_of_week === dow && !e.is_break);
-      for (const entry of dayEntries) {
+  const dow = dowOf(date);
+  const dayAll = entriesOn(date);
+  const validIds = new Set(dayAll.map(e => e.id));
+  const dayEntries = absentEntries.filter(e => e.day_of_week === dow && !e.is_break && validIds.has(e.id));
+  for (const entry of dayEntries) {
   const key = `${entry.id}_${date}`;
   if (coTeacherId(entry, absentId)) continue; // ★ มีครูคู่สอนอยู่แล้ว ไม่ต้องจัด ไม่ต้องนับ
   // ★ ข้ามคาบที่ระบบเตือนว่าอาจอยู่นอกช่วงลาไปเลย ไม่จัดอัตโนมัติให้ — กันจัดผิดคาบโดยไม่มีใครตรวจสอบ
@@ -1141,14 +1175,14 @@ function toggleMismatchExpanded(date: string) {
   if (isMismatch) continue;
   total++;
   if (next[key]) continue;
-  const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, entries, absentId);
-const candidatesAll = computeFreeTeachersForEntry(entry, date, entries, teachers, absentId, swapRequests); // ★ เพิ่ม swapRequests
+  const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, dayAll, absentId);
+const candidatesAll = computeFreeTeachersForEntry(entry, date, dayAll, teachers, absentId, swapRequests);
 const candidates = candidatesAll.filter(t => !conflictMapForEntry[t.id]);
         if (candidates.length === 0) { unfilled++; continue; }
         const scored = candidates.map(t => {
           const tKey = `${t.id}_${date}`;
-          const load = computeTotalLoadForDay(t.id, dow, date, entries, subRecords) + (tally[tKey] ?? 0);
-          const priority = substitutePriority(t, entry, absentTeacher, entries, homeroomMap);
+          const load = computeTotalLoadForDay(t.id, dow, date, dayAll, subRecords) + (tally[tKey] ?? 0);
+const priority = substitutePriority(t, entry, absentTeacher, dayAll, homeroomMap);
           return { t, load, priority };
         }).sort((a, b) => a.priority - b.priority || a.load - b.load || fullName(a.t).localeCompare(fullName(b.t), "th"));
         const pick = scored[0].t;
@@ -1239,9 +1273,11 @@ const candidates = candidatesAll.filter(t => !conflictMapForEntry[t.id]);
               )}
               {leaveDates.map(date => {
   const dayOfWeek = new Date(date+"T00:00:00").getDay();
-  const dayEntries = absentEntries
-    .filter(e => e.day_of_week === dayOfWeek && !e.is_break)
-    .sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
+const dayAll = entriesOn(date);
+const validIds = new Set(dayAll.map(e => e.id));
+const dayEntries = absentEntries
+  .filter(e => e.day_of_week === dayOfWeek && !e.is_break && validIds.has(e.id))
+  .sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
   if (dayEntries.length === 0) return null;
 
   // ★ helper สร้างแถวของ 1 คาบ (ใช้ร่วมกันทั้งกลุ่มปกติและกลุ่มนอกช่วงลา)
@@ -1291,14 +1327,14 @@ const candidates = candidatesAll.filter(t => !conflictMapForEntry[t.id]);
         <div className="shrink-0 w-72 sm:w-80">
           <TeacherSearchSelect
   teachers={sortTeachersByGrade(
-    computeFreeTeachersForEntry(entry, date, entries, teachers, absentId, swapRequests), // ★ เพิ่ม
-    entry, absentTeacher, entries, homeroomMap
+    computeFreeTeachersForEntry(entry, date, dayAll, teachers, absentId, swapRequests),
+    entry, absentTeacher, dayAll, homeroomMap
   )}
   value={assignments[key] || ""}
   onChange={id => setAsgn(key, id)}
   placeholder="— เลือกครูสอนแทน —"
-  loadMap={dayLoadMap(date, computeFreeTeachersForEntry(entry, date, entries, teachers, absentId, swapRequests))} // ★ เพิ่ม
-  conflictMap={computeSubstituteConflictMap(entry, date, subRecords, entries, absentId)}
+  loadMap={dayLoadMap(date, computeFreeTeachersForEntry(entry, date, dayAll, teachers, absentId, swapRequests))}
+  conflictMap={computeSubstituteConflictMap(entry, date, subRecords, dayAll, absentId)}
 />
         </div>
       </div>
@@ -1360,9 +1396,9 @@ const candidates = candidatesAll.filter(t => !conflictMapForEntry[t.id]);
 // ══════════════════════════════════════════════════════════
 // ── ManualAssignModal — จัดสอนแทนทันทีไม่ต้องรอใบลา (ลาผ่าตัด/ลายาว)
 // ══════════════════════════════════════════════════════════
-function ManualAssignModal({ selectableTeachers, allTeachers, entries, subRecords, swapRequests, academicYearId, currentUser, homeroomMap, onSave, onClose }: {
+function ManualAssignModal({ selectableTeachers, allTeachers, entries, subRecords, swapRequests, years, rooms, yearName, academicYearId, currentUser, homeroomMap, onSave, onClose }: {
   selectableTeachers: User[]; allTeachers: User[]; entries: TimetableEntry[]; subRecords: SubRecord[]; swapRequests: SwapRequest[];
-  academicYearId: string;
+  academicYearId: string; years: any[]; rooms: Record<string, any>; yearName: string;
   currentUser: User; homeroomMap: Record<string, string>; onSave: () => void; onClose: () => void;
 }) {
   const [absentTeacherId, setAbsentTeacherId] = useState("");
@@ -1378,6 +1414,7 @@ const absentTeacher = useMemo(
   () => allTeachers.find(t => t.id === absentTeacherId) ?? null,
   [allTeachers, absentTeacherId]
 );
+const entriesOn = (date: string) => entriesForDate(date, entries, rooms, years, yearName);
   const leaveDates = useMemo(() => {
     if (!absentTeacherId || !startDate || !endDate || startDate > endDate) return [] as string[];
     const dates: string[] = [];
@@ -1412,13 +1449,12 @@ const absentTeacher = useMemo(
   // ★ สุ่มเลือกครูสอนแทน — จากครูสายชั้นเดียวกับครูที่ลา ที่ว่างตรงคาบ และมีคาบสอนวันนั้นน้อยที่สุด (นับรวมคาบที่กำลังจัดในเซสชันนี้ด้วย)
   function randomAssignTeacher(key: string, entry: TimetableEntry, date: string) {
     const dow = dowOf(date);
-    const candidatesAll = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId, swapRequests);
-    const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, entries, absentTeacherId);
-    const candidates = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId, swapRequests);
-    if (candidates.length === 0) { alert("⚠️ ไม่มีครูว่างในคาบนี้ (หรือครูที่ว่างกำลังสอนแทนคนอื่นในคาบเดียวกันอยู่แล้ว)"); return; }
-    const bestPriority = Math.min(...candidates.map(t => substitutePriority(t, entry, absentTeacher, entries, homeroomMap)));
-    const pool = candidates.filter(t => substitutePriority(t, entry, absentTeacher, entries, homeroomMap) === bestPriority);
-    const scored = pool.map(t => ({ t, load: computeTotalLoadForDay(t.id, dow, date, entries, subRecords) + sessionExtraLoad(t.id, date) }));
+const dayAll = entriesOn(date);
+const candidates = computeFreeTeachersForEntry(entry, date, dayAll, allTeachers, absentTeacherId, swapRequests);
+if (candidates.length === 0) { alert("⚠️ ไม่มีครูว่างในคาบนี้ (หรือครูที่ว่างกำลังสอนแทนคนอื่นในคาบเดียวกันอยู่แล้ว)"); return; }
+const bestPriority = Math.min(...candidates.map(t => substitutePriority(t, entry, absentTeacher, dayAll, homeroomMap)));
+const pool = candidates.filter(t => substitutePriority(t, entry, absentTeacher, dayAll, homeroomMap) === bestPriority);
+const scored = pool.map(t => ({ t, load: computeTotalLoadForDay(t.id, dow, date, dayAll, subRecords) + sessionExtraLoad(t.id, date) }));
     const minLoad = Math.min(...scored.map(s => s.load));
     const minPool = scored.filter(s => s.load === minLoad).map(s => s.t);
     const pick = minPool[Math.floor(Math.random() * minPool.length)];
@@ -1521,9 +1557,11 @@ const absentTeacher = useMemo(
                 </p>
 {leaveDates.map(date => {
   const dayOfWeek = new Date(date + "T00:00:00").getDay();
-  const dayEntries = absentEntries
-    .filter(e => e.day_of_week === dayOfWeek)   // ← ไม่มี !e.is_break ต่างจาก AssignSubModal
-    .sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
+  const dayAll = entriesOn(date);
+const validIds = new Set(dayAll.map(e => e.id));
+const dayEntries = absentEntries
+  .filter(e => e.day_of_week === dayOfWeek && validIds.has(e.id))
+  .sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0));
   if (dayEntries.length === 0) return null;
                   return (
                     <div key={date}>
@@ -1556,11 +1594,10 @@ const absentTeacher = useMemo(
     );
   }
 
-  const dow = dowOf(date);
-  const candidates = computeFreeTeachersForEntry(entry, date, entries, allTeachers, absentTeacherId);
-  const sortedCandidates = sortTeachersByGrade(candidates, entry, absentTeacher, entries, homeroomMap);
-  const loadMap = dayLoadMapManual(date, sortedCandidates);
-  const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, entries, absentTeacherId);
+  const candidates = computeFreeTeachersForEntry(entry, date, dayAll, allTeachers, absentTeacherId, swapRequests);
+const sortedCandidates = sortTeachersByGrade(candidates, entry, absentTeacher, dayAll, homeroomMap);
+const loadMap = dayLoadMapManual(date, sortedCandidates);
+const conflictMapForEntry = computeSubstituteConflictMap(entry, date, subRecords, dayAll, absentTeacherId);
   const pickedId = assignments[key] || "";
   const pickedLoad = pickedId ? (loadMap[pickedId] ?? null) : null;
   return (
@@ -1619,6 +1656,109 @@ const absentTeacher = useMemo(
     </div>
   );
 }
+function EditSubModal({ record, allEntries, teachers, swapRequests, subRecords, homeroomMap, years, rooms, yearName, currentUser, onSave, onClose }: {
+  record: SubRecord; allEntries: TimetableEntry[]; teachers: User[]; swapRequests: SwapRequest[];
+  subRecords: SubRecord[]; homeroomMap: Record<string, string>;
+  years: any[]; rooms: Record<string, any>; yearName: string;
+  currentUser: User; onSave: () => void; onClose: () => void;
+}) {
+  // ★ ตารางสอนเฉพาะเทอมที่ตรงกับวันที่สอนแทน
+  const dayEntries = useMemo(
+    () => entriesForDate(record.substitute_date, allEntries, rooms, years, yearName),
+    [record.substitute_date, allEntries, rooms, years, yearName]
+  );
+  const entry = dayEntries.find(e => e.id === record.timetable_entry_id)
+    ?? allEntries.find(e => e.id === record.timetable_entry_id) ?? null;
+  const [newTeacherId, setNewTeacherId] = useState(record.substitute_teacher_id ?? "");
+  const [saving, setSaving] = useState(false);
+
+  // ★ ครูที่ลา (เจ้าของคาบเดิม) — ใช้หาสายชั้นเดียวกันจาก grade_level
+  const absentTeacher = useMemo(
+    () => teachers.find(t => t.id === record.absent_teacher_id) ?? null,
+    [teachers, record.absent_teacher_id]
+  );
+  
+  const rawCandidates = useMemo(() => {
+    if (!entry) return teachers.filter(isSelectableTeacher);
+    const free = computeFreeTeachersForEntry(entry, record.substitute_date, dayEntries, teachers, record.absent_teacher_id, swapRequests);
+    // เผื่อครูคนเดิมไม่โผล่ในลิสต์ว่าง (เช่นถูกจัดสอนแทนที่อื่นซ้อนพอดี) ให้ใส่กลับเข้าไปด้วยเสมอ
+    if (record.substitute_teacher_id && !free.some(t => t.id === record.substitute_teacher_id)) {
+      const old = teachers.find(t => t.id === record.substitute_teacher_id);
+      if (old) return [old, ...free];
+    }
+    return free;
+  }, [entry, dayEntries, teachers, record, swapRequests]);
+
+  // ★ เรียงครูสายชั้นเดียวกับ "ครูที่ลา" ขึ้นก่อน
+  const candidates = useMemo(
+    () => sortTeachersByGrade(rawCandidates, entry, absentTeacher, dayEntries, homeroomMap),
+[rawCandidates, absentTeacher, entry, dayEntries, homeroomMap]
+  );
+
+  // ★ จำนวนคาบที่แต่ละคนสอนอยู่แล้วในวันนั้น — โชว์เป็น badge ข้างชื่อ
+  const loadMap = useMemo(() => {
+    const dow = dowOf(record.substitute_date);
+    return Object.fromEntries(candidates.map(t => [t.id, computeTotalLoadForDay(t.id, dow, record.substitute_date, dayEntries, subRecords)]));
+  }, [candidates, dayEntries, record.substitute_date, subRecords]);
+
+  const conflictMapForEntry = useMemo(() => {
+    if (!entry) return {} as Record<string, string>;
+    return computeSubstituteConflictMap(entry, record.substitute_date, subRecords, dayEntries, record.absent_teacher_id);
+  }, [entry, record.substitute_date, record.absent_teacher_id, subRecords, dayEntries]);
+
+  const handleSave = async () => {
+    if (!newTeacherId) { alert("กรุณาเลือกครูสอนแทนคนใหม่"); return; }
+    setSaving(true);
+    const { error } = await supabase.from("substitution_records").update({
+      substitute_teacher_id: newTeacherId,
+      acknowledged_at: null,                // ★ เพิ่ม
+      assigned_by: currentUser.id,
+      note: `${record.note ?? ""}${record.note ? " " : ""}(แก้ไขครูสอนแทนโดยแอดมิน)`,
+    }).eq("id", record.id);
+    setSaving(false);
+    if (error) { alert("❌ "+error.message); return; }
+    if (record.leave_request_id) await pushSubstituted(record.leave_request_id);   // ★ เพิ่ม
+    onSave();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col" onClick={e=>e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between">
+          <h3 className="font-bold text-slate-800 text-base">✏️ แก้ไขครูสอนแทน</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#FCE7F3] flex items-center justify-center text-slate-500">✕</button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div className="bg-[#FDF2F8] rounded-xl px-4 py-3 text-sm">
+            <p><span className="text-slate-400">วันที่:</span> {thaiDate(record.substitute_date)} · {record.slot_label ?? "-"}</p>
+            <p><span className="text-slate-400">วิชา:</span> {record.subject_name ?? "-"} · {record.room_name ?? "-"}</p>
+            <p><span className="text-slate-400">ครูที่ลา:</span> {fullName(record.absent_teacher)}</p>
+            <p><span className="text-slate-400">ครูสอนแทนเดิม:</span> <span className="font-bold text-[#DB2777]">{fullName(record.substitute_teacher)}</span></p>
+          </div>
+          <div>
+  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">เปลี่ยนเป็นครู *</label>
+  <TeacherSearchSelect
+    teachers={candidates}
+    value={newTeacherId}
+    onChange={setNewTeacherId}
+    placeholder="— เลือกครูสอนแทนคนใหม่ —"
+    loadMap={loadMap}
+    conflictMap={conflictMapForEntry}
+  />
+  {candidates.length === 0 && <p className="text-xs text-red-500 font-bold mt-1">ไม่พบครูว่างในคาบนี้</p>}
+</div>
+        </div>
+        <div className="px-6 py-4 border-t border-[#FCE7F3] flex gap-2 justify-end bg-[#FDF2F8] rounded-b-2xl">
+          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#FBCFE8] text-slate-600 text-sm">ยกเลิก</button>
+          <button onClick={handleSave} disabled={saving || newTeacherId === record.substitute_teacher_id}
+            className="px-5 py-2.5 rounded-xl bg-[#DB2777] hover:bg-[#9D174D] text-white text-sm font-bold disabled:opacity-50">
+            {saving ? "กำลังบันทึก..." : "💾 บันทึกการแก้ไข"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Main Page ────────────────────────────────────────────────
 export default function SubstitutionPage() {
@@ -1631,6 +1771,8 @@ export default function SubstitutionPage() {
   const [homeroomMap, setHomeroomMap] = useState<Record<string, string>>({});
   const [allEntries, setAllEntries] = useState<TimetableEntry[]>([]);
   const [allTimeSlots, setAllTimeSlots] = useState<any[]>([]);
+  const [yearsFull, setYearsFull] = useState<any[]>([]);
+  const [roomsById, setRoomsById] = useState<Record<string, any>>({});
   const [swapRequests, setSwapRequests] = useState<SwapRequest[]>([]);
   const [subRecords, setSubRecords] = useState<SubRecord[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
@@ -1640,7 +1782,6 @@ export default function SubstitutionPage() {
   const [showManualAssign, setShowManualAssign] = useState(false);
   const [filterDate, setFilterDate] = useState("");
   const [filterTeacher, setFilterTeacher] = useState("");
-  const [yearsFull, setYearsFull] = useState<any[]>([]);
   const [classroomsMap, setClassroomsMap] = useState<Record<string, any>>({});
   const [subSortOrder, setSubSortOrder] = useState<"desc" | "asc">("desc"); // ★ ใหม่-เก่า (default) / เก่า-ใหม่
   const [selectedSubIds, setSelectedSubIds] = useState<Set<string>>(new Set()); // ★ รายการที่ติ๊กเลือกไว้พิมพ์
@@ -1785,8 +1926,9 @@ if (tchErr) {
     // ★ ตารางสอน — ใช้วิธี resolve เดียวกับหน้าใบลาเป๊ะ (schedule template + virtual slot id)
     const { data: yearsFullData } = await supabase.from("academic_years")
   .select("id,year_name,semester,is_current,start_date,end_date");
-const curRow = (yearsFull ?? []).find((y: any) => y.id === ayId);
-const sameYearIds = (yearsFull ?? [])
+setYearsFull(yearsFullData ?? []);   // ★ เก็บเข้า state ให้ modal ใช้
+const curRow = (yearsFullData ?? []).find((y: any) => y.id === ayId);
+const sameYearIds = (yearsFullData ?? [])
   .filter((y: any) => y.year_name === curRow?.year_name).map((y: any) => y.id);
 
 let entriesQuery = supabase.from("timetable_entries")
@@ -1804,7 +1946,7 @@ const [entriesData, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
 
     const timeSlots = slotsRes.data || [];
     setAllTimeSlots(timeSlots);
-    const classroomsMap = Object.fromEntries((classroomsRes.data || []).map((c: any) => [c.id, c]));
+    const classroomsMap = Object.fromEntries((classroomsRes.data || []).map((c: any) => [c.id, c])); setRoomsById(classroomsMap);
     const subjectsMap = Object.fromEntries((subjectsRes.data || []).map((s: any) => [s.id, s]));
     const hrMap: Record<string, string> = {};
     (classroomsRes.data || []).forEach((c: any) => { if (c.homeroom_teacher_id) hrMap[c.id] = c.homeroom_teacher_id; });
@@ -1858,24 +2000,6 @@ const [entriesData, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
   
 
   useEffect(() => { if (!loading && user) loadData(); }, [loading, user, loadData]);
-
-  function semesterOfDate(date: string, years: any[], yearName: string): number {
-  const hit = years.find(y => y.year_name === yearName && y.start_date && y.end_date
-    && date >= y.start_date && date <= y.end_date);
-  return hit?.semester ?? 1;
-}
-
-function entriesForDate(date: string, all: TimetableEntry[], rooms: Record<string, any>, years: any[], yearName: string) {
-  const sem = semesterOfDate(date, years, yearName);
-  return all.filter(e => {
-    const room = rooms[e.classroom_id];
-    if (!room) return true;
-    const isSecondary = /^ม\./.test(extractGradeOnly(room.grade_group)) || room.split_by_semester;
-    if (!isSecondary) return true; // อ./ป. ที่ไม่แยกเทอม ใช้ได้ทั้งปี
-    const yr = years.find(y => y.id === room.academic_year_id);
-    return (yr?.semester ?? 1) === sem;
-  });
-}
 
   // ── Swap actions ─────────────────────────────────────────
   const handleSwapRespond = async (id: string, accept: boolean) => {
@@ -1948,101 +2072,6 @@ const handleSubDeletePermanent = async (id: string) => {
   if (error) { alert("❌ ลบไม่สำเร็จ: " + error.message); return; }
   await loadData();
 };
-  function EditSubModal({ record, allEntries, teachers, swapRequests, currentUser, onSave, onClose }: {
-  record: SubRecord; allEntries: TimetableEntry[]; teachers: User[]; swapRequests: SwapRequest[]; currentUser: User;
-  onSave: () => void; onClose: () => void;
-}) {
-  const entry = allEntries.find(e => e.id === record.timetable_entry_id) ?? null;
-  const [newTeacherId, setNewTeacherId] = useState(record.substitute_teacher_id ?? "");
-  const [saving, setSaving] = useState(false);
-
-  // ★ ครูที่ลา (เจ้าของคาบเดิม) — ใช้หาสายชั้นเดียวกันจาก grade_level
-  const absentTeacher = useMemo(
-    () => teachers.find(t => t.id === record.absent_teacher_id) ?? null,
-    [teachers, record.absent_teacher_id]
-  );
-  
-  const rawCandidates = useMemo(() => {
-    if (!entry) return teachers.filter(isSelectableTeacher);
-    const free = computeFreeTeachersForEntry(entry, record.substitute_date, allEntries, teachers, record.absent_teacher_id, swapRequests);
-    // เผื่อครูคนเดิมไม่โผล่ในลิสต์ว่าง (เช่นถูกจัดสอนแทนที่อื่นซ้อนพอดี) ให้ใส่กลับเข้าไปด้วยเสมอ
-    if (record.substitute_teacher_id && !free.some(t => t.id === record.substitute_teacher_id)) {
-      const old = teachers.find(t => t.id === record.substitute_teacher_id);
-      if (old) return [old, ...free];
-    }
-    return free;
-  }, [entry, allEntries, teachers, record]);
-
-  // ★ เรียงครูสายชั้นเดียวกับ "ครูที่ลา" ขึ้นก่อน
-  const candidates = useMemo(
-    () => sortTeachersByGrade(rawCandidates, entry, absentTeacher, allEntries, homeroomMap),
-    [rawCandidates, absentTeacher, entry, allEntries, homeroomMap]
-  );
-
-  // ★ จำนวนคาบที่แต่ละคนสอนอยู่แล้วในวันนั้น — โชว์เป็น badge ข้างชื่อ
-  const loadMap = useMemo(() => {
-    const dow = dowOf(record.substitute_date);
-    return Object.fromEntries(candidates.map(t => [t.id, computeTotalLoadForDay(t.id, dow, record.substitute_date, allEntries, subRecords)]));
-  }, [candidates, allEntries, record.substitute_date, subRecords]);
-
-  const conflictMapForEntry = useMemo(() => {
-    if (!entry) return {} as Record<string, string>;
-    return computeSubstituteConflictMap(entry, record.substitute_date, subRecords, allEntries, record.absent_teacher_id);
-  }, [entry, record.substitute_date, record.absent_teacher_id, subRecords, allEntries]);
-
-  const handleSave = async () => {
-    if (!newTeacherId) { alert("กรุณาเลือกครูสอนแทนคนใหม่"); return; }
-    setSaving(true);
-    const { error } = await supabase.from("substitution_records").update({
-      substitute_teacher_id: newTeacherId,
-      acknowledged_at: null,                // ★ เพิ่ม
-      assigned_by: currentUser.id,
-      note: `${record.note ?? ""}${record.note ? " " : ""}(แก้ไขครูสอนแทนโดยแอดมิน)`,
-    }).eq("id", record.id);
-    setSaving(false);
-    if (error) { alert("❌ "+error.message); return; }
-    if (record.leave_request_id) await pushSubstituted(record.leave_request_id);   // ★ เพิ่ม
-    onSave();
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col" onClick={e=>e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-[#FCE7F3] flex items-center justify-between">
-          <h3 className="font-bold text-slate-800 text-base">✏️ แก้ไขครูสอนแทน</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-[#FCE7F3] flex items-center justify-center text-slate-500">✕</button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          <div className="bg-[#FDF2F8] rounded-xl px-4 py-3 text-sm">
-            <p><span className="text-slate-400">วันที่:</span> {thaiDate(record.substitute_date)} · {record.slot_label ?? "-"}</p>
-            <p><span className="text-slate-400">วิชา:</span> {record.subject_name ?? "-"} · {record.room_name ?? "-"}</p>
-            <p><span className="text-slate-400">ครูที่ลา:</span> {fullName(record.absent_teacher)}</p>
-            <p><span className="text-slate-400">ครูสอนแทนเดิม:</span> <span className="font-bold text-[#DB2777]">{fullName(record.substitute_teacher)}</span></p>
-          </div>
-          <div>
-  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">เปลี่ยนเป็นครู *</label>
-  <TeacherSearchSelect
-    teachers={candidates}
-    value={newTeacherId}
-    onChange={setNewTeacherId}
-    placeholder="— เลือกครูสอนแทนคนใหม่ —"
-    loadMap={loadMap}
-    conflictMap={conflictMapForEntry}
-  />
-  {candidates.length === 0 && <p className="text-xs text-red-500 font-bold mt-1">ไม่พบครูว่างในคาบนี้</p>}
-</div>
-        </div>
-        <div className="px-6 py-4 border-t border-[#FCE7F3] flex gap-2 justify-end bg-[#FDF2F8] rounded-b-2xl">
-          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-[#FBCFE8] text-slate-600 text-sm">ยกเลิก</button>
-          <button onClick={handleSave} disabled={saving || newTeacherId === record.substitute_teacher_id}
-            className="px-5 py-2.5 rounded-xl bg-[#DB2777] hover:bg-[#9D174D] text-white text-sm font-bold disabled:opacity-50">
-            {saving ? "กำลังบันทึก..." : "💾 บันทึกการแก้ไข"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ══════════════════════════════════════════════════════════
 // ── EditSwapDateModal — เฉพาะ admin@khienkhet.ac.th แก้วันที่/ลบได้ทุกสถานะ
@@ -2928,9 +2957,10 @@ const adminFilteredSwaps = useMemo(() => {
 
       {/* Modals */}
       {showSwapModal && academicYear && (
-  <SwapRequestModal
+    <SwapRequestModal
     user={user} allEntries={allEntries} allTeachers={teachers} allTimeSlots={allTimeSlots}
     academicYearId={academicYear.id} homeroomMap={homeroomMap}
+    years={yearsFull} rooms={roomsById} yearName={academicYear?.year_name ?? ""}
     initialReason={swapInitialReason}
     mode={swapMode}
     fixedTargetTeacherId={swapFixedTargetTeacherId}
@@ -2947,6 +2977,7 @@ const adminFilteredSwaps = useMemo(() => {
     teachers={teachers} entries={allEntries} subRecords={subRecords}
     swapRequests={swapRequests} 
     academicYearId={academicYear.id}
+    years={yearsFull} rooms={roomsById} yearName={academicYear?.year_name ?? ""}
     currentUser={user} homeroomMap={homeroomMap} restrictDates={assignRestrictDates}
     allTimeSlots={allTimeSlots}   // ★ เพิ่ม
     onSave={async()=>{ setAssignLeave(null); setAssignRestrictDates(undefined); await loadData(); }}
@@ -2955,11 +2986,14 @@ const adminFilteredSwaps = useMemo(() => {
 )}
       {editingSub && (
   <EditSubModal
-    record={editingSub}
-    allEntries={allEntries}
-    teachers={teachers}
-    swapRequests={swapRequests}   // ★ เพิ่ม
-    currentUser={user}
+  record={editingSub}
+  allEntries={allEntries}
+  teachers={teachers}
+  swapRequests={swapRequests}
+  subRecords={subRecords}
+  homeroomMap={homeroomMap}
+  years={yearsFull} rooms={roomsById} yearName={academicYear?.year_name ?? ""}
+  currentUser={user}
     onSave={async()=>{ setEditingSub(null); await loadData(); }}
     onClose={()=>setEditingSub(null)}
   />
@@ -2980,6 +3014,7 @@ const adminFilteredSwaps = useMemo(() => {
     subRecords={subRecords}
     swapRequests={swapRequests}   // ★ เพิ่ม
     academicYearId={academicYear.id}
+    years={yearsFull} rooms={roomsById} yearName={academicYear?.year_name ?? ""}
     currentUser={user} homeroomMap={homeroomMap}
     onSave={async()=>{ setShowManualAssign(false); await loadData(); }}
     onClose={()=>setShowManualAssign(false)}
