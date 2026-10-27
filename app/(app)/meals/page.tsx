@@ -107,16 +107,14 @@ export default function MealsPage() {
     return t;
   }, [sheet]);
 
-  // แบ่งคอลัมน์วัน: วันหยุด/เสาร์-อาทิตย์ที่ติดกันและชื่อเดียวกันรวมเป็นช่องเดียว แล้วเขียนข้อความแนวนอนคลุมทุกแถว
+  // คอลัมน์วัน: วันหยุด/ปิดภาคเรียน/เสาร์-อาทิตย์ แสดงเป็นช่องสีชมพูคลุมทุกแถว มีข้อความแนวตั้ง (เหมือนหน้าเช็คชื่อ)
   const segments = useMemo(() => {
     const out: { start: number; len: number; label?: string }[] = [];
     if (!sheet) return out;
     const sch = new Set(sheet.schoolDays);
     for (let d = 1; d <= sheet.days; d++) {
       const label = sch.has(d) ? undefined : sheet.dayLabels[d];
-      const prev = out[out.length - 1];
-      if (label && prev?.label === label && prev.start + prev.len === d) prev.len++;
-      else out.push({ start: d, len: 1, label });
+      out.push({ start: d, len: 1, label });
     }
     return out;
   }, [sheet]);
@@ -228,10 +226,10 @@ export default function MealsPage() {
                     {segments.map((seg) => {
                       if (seg.label) {
                         return i === 0 ? (
-                          <td key={seg.start} colSpan={seg.len} rowSpan={sheet.students.length} title={seg.label}
-                            className="border border-slate-300 bg-slate-100 px-0.5 text-center align-middle text-[10px] font-semibold leading-tight text-slate-500"
-                            style={{ writingMode: "horizontal-tb", overflowWrap: "anywhere" }}>
-                            {seg.label}
+                          <td key={seg.start} rowSpan={sheet.students.length} title={seg.label}
+                            className="border border-rose-200 bg-rose-100 px-0 text-center align-middle text-[11px] font-bold text-rose-500"
+                            style={{ writingMode: "vertical-rl", whiteSpace: "nowrap" }}>
+                            {seg.label.startsWith("วัน") && /^วัน(เสาร์|อาทิตย์)$/.test(seg.label) ? seg.label : `วันหยุด ${seg.label}`}
                           </td>
                         ) : null;
                       }
