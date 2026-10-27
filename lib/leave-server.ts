@@ -525,6 +525,14 @@ async function deliver(url: string, leaveId: string, s: Send, existing?: Stored)
   else console.warn("[teams] ไม่ได้รับ messageId จาก Flow — ครั้งหน้าจะสร้างการ์ดใหม่อีก", s.to);
 }
 
+export async function post(url: string, to: string, card: any) {
+  const r = await fetch(url, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to, card }),
+  });
+  if (!r.ok) console.warn("[teams] send failed", to, r.status);
+}
+
 export async function notifyLeaveTeams(leaveId: string, event: LeaveEvent, slot?: 1 | 2 | 3, reason?: string, actorId?: string) {
   const url = process.env.TEAMS_LEAVE_WEBHOOK_URL;
   if (!url) return;
