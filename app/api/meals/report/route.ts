@@ -118,8 +118,8 @@ export async function POST(req: NextRequest) {
     if (!a) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const b = (await req.json()) as {
-      action: "confirm" | "unconfirm" | "approve" | "unapprove";
-      classroomId: string; month: string; type: MealType;
+      action: "confirm" | "unconfirm" | "approve" | "unapprove" | "set_pack";
+      classroomId: string; month: string; type: MealType; pack?: "ถุง" | "กล่อง";
     };
     if (!b.classroomId || !/^\d{4}-\d{2}$/.test(b.month) || !["lunch", "milk"].includes(b.type)) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
@@ -129,7 +129,16 @@ export async function POST(req: NextRequest) {
     const { data: cur } = await a.service.from("meal_month_reports").select("*").match(key).maybeSingle();
 
     let patch: Record<string, unknown>;
-    if (b.action === "confirm" || b.action === "unconfirm") {
+    if (b.action === "set_pack") {
+      if (!canEditRoom(a, b.classroomId)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (b.type !== "milk" || !["ถุง", "กล่อง"].includes(b.pack ?? "")) {
+        return NextResponse.json({ error: "Invalid pack" }, { status: 400 });
+      }
+      if (cur?.teacher_confirmed_at) {
+        return NextResponse.json({ error: "รายงานเดือนนี้ยืนยันแล้ว ต้องปลดล็อกก่อน" }, { status: 409 });
+      }
+      patch = { milk_pack: b.pack };
+    } else if (b.action === "confirm" || b.action === "unconfirm") {
       if (!canEditRoom(a, b.classroomId)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       if (cur?.owner_approved_at) {
         return NextResponse.json({ error: "เจ้าของโครงการรับรองแล้ว ต้องยกเลิกการรับรองก่อน" }, { status: 409 });

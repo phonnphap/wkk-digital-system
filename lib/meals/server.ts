@@ -1,7 +1,7 @@
 // lib/meals/server.ts — ใช้ใน API routes เท่านั้น
 import { createServerSupabaseClient, createServiceClient } from "@/lib/supabase/server";
 import {
-  ADMIN_ROLES, FIXED_HOLIDAYS, OWNER_ROLES, daysInMonth, dateOf, mapAttendance, milkEligible, parseGrade,
+  ADMIN_ROLES, FIXED_HOLIDAYS, GROUP_HEAD_LABEL, GROUP_HEAD_USER_ID, OWNER_ROLES, PROJECT_HEAD_LABEL, PROJECT_HEAD_USER_ID, daysInMonth, dateOf, mapAttendance, milkEligible, parseGrade,
   todayBkk, UNKNOWN_GRADE,
   type CellStatus, type ClassroomLite, type MealType, type SheetData, type SheetStudent,
 } from "./shared";
@@ -153,6 +153,64 @@ async function signedUrls(a: Actor, paths: string[]): Promise<Record<string, str
   const { data } = await a.service.storage.from(BUCKET).createSignedUrls(paths, 3600);
   for (const d of data ?? []) if (d.signedUrl && d.path) out[d.path] = d.signedUrl;
   return out;
+}
+
+// ── ข้อมูลหัวกระดาษ / ผู้ลงนาม ──────────────────────────────────────────────
+async function academicYearName(a: Actor, date: string): Promise<string | null> {
+  try {
+    const { data } = await a.service.from("academic_years").select("*");
+    if (!data?.length) return null;
+    const hit =
+      data.find((y: any) => y.start_date && y.end_date && y.start_date <= date && date <= y.end_date) ??
+      data.find((y: any) => y.is_current === true) ??
+      [...data].sort((x: any, y: any) => String(y.year_name).localeCompare(String(x.year_name)))[0];
+    return hit?.year_name != null ? String(hit.year_name) : null;
+  } catch { return null; }
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** หา users.id ของครูที่ปรึกษาห้องนี้ — ปรับให้ตรง schema จริงได้ที่ HOMEROOM_JUNCTIONS */
+const HOMEROOM_JUNCTIONS = ["classroom_teachers", "homeroom_teachers"];
+async function homeroomTeacherIds(a: Actor, classroomId: string): Promise<string[]> {
+  const ids = new Set<string>();
+  const collect = (row: Record<string, unknown>, keyRe: RegExp) => {
+    for (const [k, v] of Object.entries(row)) if (keyRe.test(k) && typeof v === "string" && UUID_RE.test(v)) ids.add(v);
+  };
+  try {
+    const { data } = await a.service.from(CLASSROOMS.table).select("*").eq(CLASSROOMS.id, classroomId).maybeSingle();
+    if (data) collect(data, /teacher/i);
+  } catch { /* ignore */ }
+  if (!ids.size) {
+    for (const t of HOMEROOM_JUNCTIONS) {
+      try {
+        const { data, error } = await a.service.from(t).select("*").eq("classroom_id", classroomId);
+        if (!error) (data ?? []).forEach((r: any) => collect(r, /(user|teacher)_id$/i));
+      } catch { /* ignore */ }
+      if (ids.size) break;
+    }
+  }
+  if (!ids.size && a.myRoomIds.has(classroomId)) ids.add(a.profile.id); // สำรอง: ครูที่ล็อกอินและเป็นประจำชั้นห้องนี้
+  return [...ids];
+}
+
+async function loadSigners(a: Actor, classroomId: string, type: MealType): Promise<SheetData["signers"]> {
+  const teacherIds = (await homeroomTeacherIds(a, classroomId)).slice(0, 2);
+  const want = [...teacherIds, PROJECT_HEAD_USER_ID, GROUP_HEAD_USER_ID];
+  let res = await a.service.from("users").select("id, title, first_name, last_name, signature_url").in("id", want);
+  if (res.error) res = await a.service.from("users").select("id, first_name, last_name, signature_url").in("id", want);
+  const users = (res.data ?? []) as any[];
+  const person = (id: string, role: string) => {
+    const u = users.find((x) => x.id === id);
+    return {
+      role,
+      name: u ? `${u.title ?? ""}${u.first_name}  ${u.last_name}` : null,
+      signatureUrl: (u?.signature_url as string | null) || null,
+    };
+  };
+  const teachers = teacherIds.length
+    ? teacherIds.map((id) => person(id, "ครูที่ปรึกษา"))
+    : [{ role: "ครูที่ปรึกษา", name: null, signatureUrl: null }];
+  return [...teachers, person(PROJECT_HEAD_USER_ID, PROJECT_HEAD_LABEL[type]), person(GROUP_HEAD_USER_ID, GROUP_HEAD_LABEL)];
 }
 
 // ── Sync: ดึงจากเช็คชื่อโฮมรูม → meal_records + จัดแจกเพิ่ม ───────────────────
@@ -319,6 +377,11 @@ export async function buildSheet(a: Actor, classroomId: string, month: string, t
     t.extra += r.extra_portions ?? 0;
   }
 
+  const [signers, academicYear] = await Promise.all([
+    loadSigners(a, classroomId, type),
+    academicYearName(a, dateOf(month, 15)),
+  ]);
+
   // ป้ายวันหยุด/เสาร์-อาทิตย์ (เฉพาะวันที่ไม่มีข้อมูลเช็คชื่อ = ไม่ใช่วันเรียน)
   const custom = new Map<string, string>();
   try {
@@ -343,6 +406,9 @@ export async function buildSheet(a: Actor, classroomId: string, month: string, t
     students: [...rowsByStudent.values()],
     dayTotals,
     dayLabels,
+    academicYear,
+    milkPack: rep?.milk_pack === "กล่อง" ? "กล่อง" : "ถุง",
+    signers,
     editable: canEditRoom(a, classroomId),
     me: {
       id: a.profile.id, name: `${a.profile.first_name} ${a.profile.last_name}`, isOwner: a.isOwner,

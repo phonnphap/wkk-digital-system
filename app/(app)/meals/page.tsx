@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { BarChart3, Lock, PenLine, Printer, Unlock } from "lucide-react";
 import SignaturePad from "@/components/meals/SignaturePad";
 import {
-  FORM_TITLE, currentMonth, dateOf, monthLabel, shiftMonth,
+  FORM_TITLE, SCHOOL_LINE, currentMonth, dateOf, fullRoomName, monthLabel, shiftMonth,
   type CellStatus, type ClassroomLite, type MealType, type SheetData, type SheetStudent,
 } from "@/lib/meals/shared";
 
@@ -94,6 +94,13 @@ export default function MealsPage() {
     if (action === "confirm" && !confirm("ยืนยันรายงานเดือนนี้? หลังยืนยันจะแก้ตารางไม่ได้จนกว่าจะปลดล็อก")) return;
     try { await post("/api/meals/report", { action, classroomId, month, type }); await load(false); }
     catch (e) { setErr((e as Error).message); }
+  }
+  async function togglePack() {
+    if (!sheet || !canEdit) return;
+    try {
+      await post("/api/meals/report", { action: "set_pack", pack: sheet.milkPack === "ถุง" ? "กล่อง" : "ถุง", classroomId, month, type });
+      await load(false);
+    } catch (e) { setErr((e as Error).message); }
   }
   async function saveSignature(png: string) {
     if (!signFor) return;
@@ -198,16 +205,24 @@ export default function MealsPage() {
 
           <div className="overflow-x-auto rounded-xl border border-slate-300 bg-white p-3 print:border-0 print:p-0">
             <h2 className="text-center text-sm font-bold text-slate-800">
-              {FORM_TITLE[sheet.type]} ชั้น {sheet.classroom.name}
+              {FORM_TITLE[sheet.type]}{fullRoomName(sheet.classroom.name)}
+              {sheet.type === "milk" && (
+                <button onClick={togglePack} disabled={!canEdit} title={canEdit ? "คลิกเพื่อสลับ ถุง / กล่อง" : ""}
+                  className="ml-2 font-bold text-rose-600 disabled:cursor-default">
+                  (*นม{sheet.milkPack})
+                </button>
+              )}
             </h2>
-            <p className="mb-2 text-center text-xs text-slate-600">ประจำเดือน {monthLabel(sheet.month)}</p>
+            <p className="mb-2 whitespace-pre-wrap text-center text-xs text-slate-700">
+              {SCHOOL_LINE}{sheet.academicYear ? `  ปีการศึกษา  ${sheet.academicYear}` : ""}
+            </p>
 
             <table className="w-full border-collapse text-[11px]">
               <thead>
                 <tr className="bg-slate-100">
                   <th rowSpan={2} className={th}>ที่</th>
                   <th rowSpan={2} className={`${th} min-w-[11rem] text-left`}>ชื่อ - สกุล</th>
-                  <th colSpan={days.length} className={th}>วันที่</th>
+                  <th colSpan={days.length} className={th}>เดือน {monthLabel(sheet.month).replace(" ", " พ.ศ. ")}</th>
                   <th colSpan={4} className={th}>สรุปรายเดือน</th>
                   <th colSpan={2} className={th}>ข้อมูลปลายเดือน</th>
                   <th rowSpan={2} className={`${th} min-w-[6rem]`}>ลายมือชื่อ นร.</th>
@@ -215,7 +230,7 @@ export default function MealsPage() {
                 <tr className="bg-slate-100">
                   {days.map((d) => <th key={d} className={`${th} min-w-[1.75rem] font-semibold ${school.has(d) ? "" : "text-slate-400"}`}>{d}</th>)}
                   <th className={th}>รวมวัน</th><th className={th}>ล</th><th className={th}>ข</th><th className={th}>เพิ่ม</th>
-                  <th className={th}>นน.</th><th className={th}>สส.</th>
+                  <th className={th}>น้ำหนัก</th><th className={th}>ส่วนสูง</th>
                 </tr>
               </thead>
               <tbody>
@@ -290,23 +305,26 @@ export default function MealsPage() {
               </tfoot>
             </table>
 
-            {/* ── ลงนามท้ายรายงาน ── */}
-            <div className="mt-6 grid grid-cols-2 gap-6 text-center text-xs text-slate-700">
-              {[
-                { who: "ครูประจำชั้น", name: sheet.report.teacherName, sig: sheet.report.teacherSignatureUrl, on: sheet.report.confirmed, at: sheet.report.confirmedAt },
-                { who: "เจ้าของโครงการอาหาร (ผู้รับรอง)", name: sheet.report.ownerName, sig: sheet.report.ownerSignatureUrl, on: sheet.report.approved, at: sheet.report.approvedAt },
-              ].map((b) => (
-                <div key={b.who}>
-                  <div className="mx-auto grid h-12 place-items-end">{b.sig && <img src={b.sig} alt="" className="max-h-11" />}</div>
-                  <p>ลงชื่อ ................................................</p>
-                  <p className="font-bold">({b.name ?? "........................................"})</p>
-                  <p>{b.who}</p>
-                  <p className="text-[10px] text-slate-400">
-                    {b.on && b.at ? `ลงวันที่ ${new Date(b.at).toLocaleDateString("th-TH", { dateStyle: "long" })}` : "รอดำเนินการ"}
-                  </p>
+            <p className="mt-3 text-[11px] leading-snug text-slate-700">
+              <b>*+1</b> = ได้ทำการจัดสรร{sheet.type === "milk" ? "อาหารเสริม(นม)" : "อาหารกลางวัน"}ส่วนที่เหลือให้แก่นักเรียนที่มีเกณฑ์{sheet.type === "milk" ? "ส่วนสูง" : "น้ำหนัก"}ต่ำกว่าเกณฑ์ เพิ่มอีก 1 ชุด ตามเกณฑ์การช่วยเหลือนักเรียนโภชนาการต่ำ
+            </p>
+
+            {/* ── ลงนามท้ายรายงาน (ลายเซ็นจาก users.signature_url) ── */}
+            <div className="mt-6 flex flex-wrap justify-around gap-x-6 gap-y-5 text-center text-xs text-slate-800">
+              {sheet.signers.map((p, i) => (
+                <div key={i} className="min-w-[11rem]">
+                  <div className="mx-auto grid h-12 place-items-end">
+                    {p.signatureUrl && <img src={p.signatureUrl} alt="" className="max-h-11 max-w-[9rem]" />}
+                  </div>
+                  <p>ลงชื่อ.........................................</p>
+                  <p>({p.name ?? "..............................."})</p>
+                  <p className="font-semibold">{p.role}</p>
                 </div>
               ))}
             </div>
+            <p className="mt-3 text-center text-[10px] text-slate-400 print:hidden">
+              สถานะรายงาน: ครูยืนยัน {sheet.report.confirmed ? "แล้ว" : "ยัง"} · เจ้าของโครงการรับรอง {sheet.report.approved ? "แล้ว" : "ยัง"}
+            </p>
           </div>
         </>
       )}
