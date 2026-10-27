@@ -47,6 +47,7 @@ export async function getActor() {
     profile: profile as { id: string; role: string; first_name: string; last_name: string },
     isAdmin: ADMIN_ROLES.has(profile.role),
     isOwner: OWNER_ROLES.has(profile.role),
+    myRooms: ((rooms ?? []) as { classroom_id: string; room_name: string }[]).map((r) => ({ id: r.classroom_id, name: r.room_name })),
     myRoomIds: new Set<string>(((rooms ?? []) as { classroom_id: string }[]).map((r) => r.classroom_id)),
   };
 }
@@ -75,17 +76,19 @@ const chunk = <T,>(arr: T[], n: number) => Array.from({ length: Math.ceil(arr.le
 export async function listClassrooms(a: Actor, all: boolean): Promise<ClassroomLite[]> {
   let rows: { id: string; name: string }[];
   if (all || a.isAdmin || a.isOwner) {
-    const { data } = await a.service.from(CLASSROOMS.table).select(`id:${CLASSROOMS.id}, name:${CLASSROOMS.name}`);
-    rows = data ?? [];
+    const { data, error } = await a.service.from(CLASSROOMS.table).select(`id:${CLASSROOMS.id}, name:${CLASSROOMS.name}`);
+    if (error) {
+      if (!a.myRooms.length) throw new Error(`อ่านตารางห้องเรียนไม่ได้: ${error.message}`);
+      rows = a.myRooms; // สำรอง: ใช้ห้องของครูจาก get_my_classrooms
+    } else rows = data ?? [];
   } else {
-    const { data } = await a.service
-      .from(CLASSROOMS.table)
-      .select(`id:${CLASSROOMS.id}, name:${CLASSROOMS.name}`)
-      .in(CLASSROOMS.id, [...a.myRoomIds]);
-    rows = data ?? [];
+    rows = a.myRooms;
   }
   return rows
-    .map((r) => ({ id: r.id, name: r.name, milk: milkEligible(parseGrade(r.name) ?? UNKNOWN_GRADE), o: (parseGrade(r.name) ?? UNKNOWN_GRADE).order }))
+    .map((r) => {
+      const g = parseGrade(r.name) ?? UNKNOWN_GRADE;
+      return { id: r.id, name: r.name, milk: milkEligible(g), o: g.order };
+    })
     .sort((x, y) => x.o - y.o || x.name.localeCompare(y.name, "th"))
     .map(({ o, ...r }) => r);
 }
@@ -225,8 +228,9 @@ export async function syncMonth(
 // ── Sheet: ข้อมูลตารางรายเดือนของห้องเดียว ─────────────────────────────────────
 export async function buildSheet(a: Actor, classroomId: string, month: string, type: MealType): Promise<SheetData> {
   const s = a.service;
-  const rooms = await listClassrooms(a, true);
-  const classroom = rooms.find((r) => r.id === classroomId);
+  const classroom =
+    (await listClassrooms(a, true)).find((r) => r.id === classroomId) ??
+    (await listClassrooms(a, false)).find((r) => r.id === classroomId);
   if (!classroom) throw new Error("ไม่พบห้องเรียน");
 
   const students = await loadStudents(a, classroomId);
