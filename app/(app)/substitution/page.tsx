@@ -830,6 +830,7 @@ function SwapRequestModal({
     return ""; // โหมด repay สร้างใหม่: ช่องนี้เก็บแค่ "หมายเหตุเพิ่มเติม" ผู้ใช้พิมพ์เอง ไม่ใช่ marker
   });
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [onLeaveIds, setOnLeaveIds] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, boolean>>({});
@@ -916,7 +917,8 @@ return sortTeachersByGrade(free, selectedEntry, user, entriesOn, homeroomMap);
 
    const handleSave = async () => {
   if (!validate()) return;
-  setSaving(true);
+  if (savingRef.current) return;
+  savingRef.current = true;setSaving(true);
   const targetId = mode === "repay" ? fixedTargetTeacherId! : pickedTeacherId;
   // ★ FIX: ต่อ marker (ล็อกไว้) เข้ากับหมายเหตุที่ผู้ใช้พิมพ์เอง ก่อนบันทึกลง DB เสมอ
   // กันเคส user แก้/ลบข้อความจนระบบเช็ค "แลกคืนแล้วหรือยัง" ไม่เจอ
@@ -927,7 +929,7 @@ return sortTeachersByGrade(free, selectedEntry, user, entriesOn, homeroomMap);
   // แยกจากข้อความที่ครูเห็น เพราะ stripRepayRef() จะตัดส่วนนี้ออกก่อนแสดงผลทุกที่
   const finalReason = effectiveRepayRef ? `${finalReasonText} [ref:${effectiveRepayRef}]` : finalReasonText;
 
-  if (isEditing) {
+    if (isEditing) {
     // ★ แก้ไขคำขอเดิม — เปลี่ยนกลับเป็น pending ให้อีกฝ่ายคอนเฟิร์มใหม่เสมอ เพราะเนื้อหาเปลี่ยน
     const { error } = await supabase.from("class_swap_requests").update({
       target_teacher_id: targetId,
@@ -937,10 +939,14 @@ return sortTeachersByGrade(free, selectedEntry, user, entriesOn, homeroomMap);
       status: "pending",
       responded_at: null,
     }).eq("id", editingRequest!.id);
-    setSaving(false);
-        if (error) { alert("❌ "+error.message); return; }
-    await pushSwap(editingRequest!.id, "edited");
+    if (error) {
+      alert("❌ " + error.message);
+      savingRef.current = false;
+      setSaving(false);
+      return;
+    }
     onSave();
+    pushSwap(editingRequest!.id, "edited"); // ไม่ await (ส่งแจ้งเตือนเบื้องหลัง)
     return;
   }
 
@@ -949,7 +955,7 @@ return sortTeachersByGrade(free, selectedEntry, user, entriesOn, homeroomMap);
       requester_entry_id: selectedEntry!.id, target_entry_id: null,
       swap_date: swapDate, reason: finalReason, status: "pending", academic_year_id: academicYearId,
     }]).select("id").single();
-    setSaving(false);
+    savingRef.current = false;
     if (error) { alert("❌ "+error.message); return; }
     if (ins?.id) await pushSwap(ins.id, "requested");
     onSave();
@@ -1139,6 +1145,7 @@ function AssignSubModal({ leaveRequest, teachers, entries, subRecords, swapReque
     ))
   );
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [autoRunning, setAutoRunning] = useState(false);
   const [expandedMismatchDates, setExpandedMismatchDates] = useState<Set<string>>(new Set());
 function toggleMismatchExpanded(date: string) {
@@ -1213,7 +1220,11 @@ const priority = substitutePriority(t, entry, absentTeacher, dayAll, homeroomMap
   }
 
   const handleSave = async () => {
-    setSaving(true);
+  if (savingRef.current) return;          // ★ กันกดซ้ำทันที
+  savingRef.current = true;
+  setSaving(true);
+  let success = false;
+  try {
     const records = Object.entries(assignments)
       .filter(([,v]) => v)
       .map(([key, subId]) => {
@@ -1236,16 +1247,31 @@ const priority = substitutePriority(t, entry, absentTeacher, dayAll, homeroomMap
           note: "จัดโดยแอดมิน (หน้าแลกคาบ)",
         };
       });
-    if (records.length === 0) { alert("กรุณาเลือกครูสอนแทนอย่างน้อย 1 คาบ"); setSaving(false); return; }
-    const { error } = await supabase.from("substitution_records").insert(records);
-    setSaving(false);
-    if (error) { alert("❌ "+error.message); return; }
+    if (records.length === 0) { alert("กรุณาเลือกครูสอนแทนอย่างน้อย 1 คาบ"); return; }
 
-        // ★ การ์ด Teams พร้อมปุ่มรับทราบ (แทนข้อความเดิม กันครูได้ 2 ข้อความ)
-    await pushSubstituted(leaveRequest.id);
+    // ★ กันซ้ำอีกชั้น: ตัดรายการที่คาบ+วันนั้นมีคนจัดไว้แล้วออก
+    const { data: existing } = await supabase.from("substitution_records")
+      .select("timetable_entry_id,substitute_date")
+      .in("timetable_entry_id", [...new Set(records.map(r => r.timetable_entry_id))])
+      .in("substitute_date", [...new Set(records.map(r => r.substitute_date))])
+      .neq("status", "cancelled");
+    const existingKeys = new Set((existing ?? []).map((x: any) => `${x.timetable_entry_id}_${x.substitute_date}`));
+    const fresh = records.filter(r => !existingKeys.has(`${r.timetable_entry_id}_${r.substitute_date}`));
+    if (fresh.length === 0) {
+      alert("คาบเหล่านี้ถูกจัดสอนแทนไว้แล้ว");
+      success = true; onSave(); return;
+    }
 
-    onSave();
-  };
+    const { error } = await supabase.from("substitution_records").insert(fresh);
+    if (error) { alert("❌ " + error.message); return; }
+
+    success = true;
+    onSave();                              // ★ ปิดหน้าทันที
+    pushSubstituted(leaveRequest.id);      // ★ ไม่ await แล้ว ส่งแจ้งเตือนเบื้องหลัง
+  } finally {
+    if (!success) { savingRef.current = false; setSaving(false); }  // ปลดล็อกเฉพาะตอนล้มเหลว
+  }
+};
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
@@ -1416,6 +1442,7 @@ function ManualAssignModal({ selectableTeachers, allTeachers, entries, subRecord
   const [reason, setReason] = useState("");
   const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const absentEntries = useMemo(() =>
   absentTeacherId ? entries.filter(e => (e.teacher_id === absentTeacherId || e.teacher_id_2 === absentTeacherId) && !e.is_break) : []
 , [entries, absentTeacherId]);
@@ -1471,9 +1498,13 @@ const scored = pool.map(t => ({ t, load: computeTotalLoadForDay(t.id, dow, date,
   }
 
   const handleSave = async () => {
-    if (!absentTeacherId) { alert("กรุณาเลือกครูที่ลา"); return; }
-    if (leaveDates.length === 0) { alert("กรุณาเลือกช่วงวันที่ให้ถูกต้อง"); return; }
-    setSaving(true);
+  if (savingRef.current) return;
+  if (!absentTeacherId) { alert("กรุณาเลือกครูที่ลา"); return; }
+  if (leaveDates.length === 0) { alert("กรุณาเลือกช่วงวันที่ให้ถูกต้อง"); return; }
+  savingRef.current = true;
+  setSaving(true);
+  let success = false;
+  try {
     const records = Object.entries(assignments)
       .filter(([, v]) => v)
       .map(([key, subId]) => {
@@ -1496,18 +1527,31 @@ const scored = pool.map(t => ({ t, load: computeTotalLoadForDay(t.id, dow, date,
           note: `จัดโดยแอดมิน (ลาต่อเนื่อง/ไม่มีใบลาในระบบ)${reason ? " — " + reason : ""}`,
         };
       });
-    if (records.length === 0) { alert("กรุณาเลือกครูสอนแทนอย่างน้อย 1 คาบ"); setSaving(false); return; }
-    const { error } = await supabase.from("substitution_records").insert(records);
-    setSaving(false);
+    if (records.length === 0) { alert("กรุณาเลือกครูสอนแทนอย่างน้อย 1 คาบ"); return; }
+
+    const { data: existing } = await supabase.from("substitution_records")
+      .select("timetable_entry_id,substitute_date")
+      .in("timetable_entry_id", [...new Set(records.map(r => r.timetable_entry_id))])
+      .in("substitute_date", [...new Set(records.map(r => r.substitute_date))])
+      .neq("status", "cancelled");
+    const existingKeys = new Set((existing ?? []).map((x: any) => `${x.timetable_entry_id}_${x.substitute_date}`));
+    const fresh = records.filter(r => !existingKeys.has(`${r.timetable_entry_id}_${r.substitute_date}`));
+    if (fresh.length === 0) { alert("คาบเหล่านี้ถูกจัดสอนแทนไว้แล้ว"); success = true; onSave(); return; }
+
+    const { error } = await supabase.from("substitution_records").insert(fresh);
     if (error) { alert("❌ " + error.message); return; }
-    const uniqueSubTeacherIds = [...new Set(records.map(r => r.substitute_teacher_id))];
-    uniqueSubTeacherIds.forEach(id => {
-      const t = allTeachers.find(x => x.id === id);
-      const countForThisTeacher = records.filter(r => r.substitute_teacher_id === id).length;
-      notifyTeams(t?.email, `📋 คุณถูกจัดให้สอนแทน ${fullName(absentTeacher)} จำนวน ${countForThisTeacher} คาบ กรุณาตรวจสอบตารางในระบบ`);
-    });
+
+    success = true;
     onSave();
-  };
+    [...new Set(fresh.map(r => r.substitute_teacher_id))].forEach(id => {
+      const t = allTeachers.find(x => x.id === id);
+      const n = fresh.filter(r => r.substitute_teacher_id === id).length;
+      notifyTeams(t?.email, `📋 คุณถูกจัดให้สอนแทน ${fullName(absentTeacher)} จำนวน ${n} คาบ กรุณาตรวจสอบตารางในระบบ`);
+    });
+  } finally {
+    if (!success) { savingRef.current = false; setSaving(false); }
+  }
+};
 
   return (
   <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 sm:p-6" onClick={onClose}>
@@ -1680,6 +1724,7 @@ function EditSubModal({ record, allEntries, teachers, swapRequests, subRecords, 
     ?? allEntries.find(e => e.id === record.timetable_entry_id) ?? null;
   const [newTeacherId, setNewTeacherId] = useState(record.substitute_teacher_id ?? "");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   // ★ ครูที่ลา (เจ้าของคาบเดิม) — ใช้หาสายชั้นเดียวกันจาก grade_level
   const absentTeacher = useMemo(
@@ -1716,19 +1761,19 @@ function EditSubModal({ record, allEntries, teachers, swapRequests, subRecords, 
   }, [entry, record.substitute_date, record.absent_teacher_id, subRecords, dayEntries]);
 
   const handleSave = async () => {
-    if (!newTeacherId) { alert("กรุณาเลือกครูสอนแทนคนใหม่"); return; }
-    setSaving(true);
-    const { error } = await supabase.from("substitution_records").update({
-      substitute_teacher_id: newTeacherId,
-      acknowledged_at: null,                // ★ เพิ่ม
-      assigned_by: currentUser.id,
-      note: `${record.note ?? ""}${record.note ? " " : ""}(แก้ไขครูสอนแทนโดยแอดมิน)`,
-    }).eq("id", record.id);
-    setSaving(false);
-    if (error) { alert("❌ "+error.message); return; }
-    if (record.leave_request_id) await pushSubstituted(record.leave_request_id);   // ★ เพิ่ม
-    onSave();
-  };
+  if (savingRef.current) return;
+  if (!newTeacherId) { alert("กรุณาเลือกครูสอนแทนคนใหม่"); return; }
+  savingRef.current = true; setSaving(true);
+  const { error } = await supabase.from("substitution_records").update({
+    substitute_teacher_id: newTeacherId,
+    acknowledged_at: null,
+    assigned_by: currentUser.id,
+    note: `${record.note ?? ""}${record.note ? " " : ""}(แก้ไขครูสอนแทนโดยแอดมิน)`,
+  }).eq("id", record.id);
+  if (error) { alert("❌ " + error.message); savingRef.current = false; setSaving(false); return; }
+  onSave();
+  if (record.leave_request_id) pushSubstituted(record.leave_request_id);
+};
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
