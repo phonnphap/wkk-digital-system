@@ -107,6 +107,20 @@ export default function MealsPage() {
     return t;
   }, [sheet]);
 
+  // แบ่งคอลัมน์วัน: วันหยุด/เสาร์-อาทิตย์ที่ติดกันและชื่อเดียวกันรวมเป็นช่องเดียว แล้วเขียนข้อความแนวนอนคลุมทุกแถว
+  const segments = useMemo(() => {
+    const out: { start: number; len: number; label?: string }[] = [];
+    if (!sheet) return out;
+    const sch = new Set(sheet.schoolDays);
+    for (let d = 1; d <= sheet.days; d++) {
+      const label = sch.has(d) ? undefined : sheet.dayLabels[d];
+      const prev = out[out.length - 1];
+      if (label && prev?.label === label && prev.start + prev.len === d) prev.len++;
+      else out.push({ start: d, len: 1, label });
+    }
+    return out;
+  }, [sheet]);
+
   const days = Array.from({ length: sheet?.days ?? 0 }, (_, i) => i + 1);
   const school = new Set(sheet?.schoolDays ?? []);
   const th = "border border-slate-400 px-1 py-1 text-center font-bold";
@@ -169,9 +183,13 @@ export default function MealsPage() {
 
       {sheet && (
         <>
-          {sheet.schoolDays.length === 0 && (
+          {(sheet.schoolDays.length === 0 || !!sheet.diag?.unmapped.length) && (
             <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 print:hidden">
-              ยังไม่มีข้อมูลเช็คชื่อโฮมรูมของเดือนนี้ — เมื่อครูเช็คชื่อแล้ว เปิดหน้านี้ใหม่ ระบบจะเติมให้อัตโนมัติ
+              {sheet.diag?.unmapped.length
+                ? `พบข้อมูลเช็คชื่อ ${sheet.diag.fetched} แถว (ตาราง ${sheet.diag.source}) แต่ไม่รู้จักค่าสถานะ: ${sheet.diag.unmapped.join(", ")} — แจ้งผู้พัฒนาเพื่อเพิ่มในฟังก์ชัน mapAttendance`
+                : sheet.diag && sheet.diag.fetched === 0
+                  ? "ไม่พบข้อมูลเช็คชื่อโฮมรูมของนักเรียนห้องนี้ในเดือนนี้ — ตรวจว่าครูเช็คชื่อโฮมรูมแล้ว จากนั้นเปิดหน้านี้ใหม่"
+                  : "ยังไม่มีข้อมูลเช็คชื่อโฮมรูมของเดือนนี้ — เมื่อครูเช็คชื่อแล้ว เปิดหน้านี้ใหม่ ระบบจะเติมให้อัตโนมัติ"}
             </p>
           )}
           {canEdit && (
@@ -197,7 +215,7 @@ export default function MealsPage() {
                   <th rowSpan={2} className={`${th} min-w-[6rem]`}>ลายมือชื่อ นร.</th>
                 </tr>
                 <tr className="bg-slate-100">
-                  {days.map((d) => <th key={d} className={`${th} w-6 font-semibold ${school.has(d) ? "" : "text-slate-400"}`}>{d}</th>)}
+                  {days.map((d) => <th key={d} className={`${th} min-w-[1.75rem] font-semibold ${school.has(d) ? "" : "text-slate-400"}`}>{d}</th>)}
                   <th className={th}>รวมวัน</th><th className={th}>ล</th><th className={th}>ข</th><th className={th}>เพิ่ม</th>
                   <th className={th}>นน.</th><th className={th}>สส.</th>
                 </tr>
@@ -207,7 +225,17 @@ export default function MealsPage() {
                   <tr key={st.id}>
                     <td className={td}>{st.no ?? i + 1}</td>
                     <td className={`${td} whitespace-nowrap text-left`}>{st.name}</td>
-                    {days.map((d) => {
+                    {segments.map((seg) => {
+                      if (seg.label) {
+                        return i === 0 ? (
+                          <td key={seg.start} colSpan={seg.len} rowSpan={sheet.students.length} title={seg.label}
+                            className="border border-slate-300 bg-slate-100 px-0.5 text-center align-middle text-[10px] font-semibold leading-tight text-slate-500"
+                            style={{ writingMode: "horizontal-tb", overflowWrap: "anywhere" }}>
+                            {seg.label}
+                          </td>
+                        ) : null;
+                      }
+                      const d = seg.start;
                       const c = st.cells[d];
                       return (
                         <td key={d} onClick={() => cycle(st, d)}

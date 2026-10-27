@@ -24,10 +24,11 @@ export async function GET(req: NextRequest) {
     if (!/^\d{4}-\d{2}$/.test(month)) {
       return NextResponse.json({ error: "Invalid month" }, { status: 400 });
     }
+    let diag;
     if (q.get("sync") === "1" && canEditRoom(a, classroomId)) {
-      await syncMonth(a, classroomId, month, type);
+      diag = (await syncMonth(a, classroomId, month, type)).diag;
     }
-    return NextResponse.json({ sheet: await buildSheet(a, classroomId, month, type) });
+    return NextResponse.json({ sheet: { ...(await buildSheet(a, classroomId, month, type)), diag } });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }

@@ -1,7 +1,7 @@
 // lib/meals/server.ts — ใช้ใน API routes เท่านั้น
 import { createServerSupabaseClient, createServiceClient } from "@/lib/supabase/server";
 import {
-  ADMIN_ROLES, OWNER_ROLES, daysInMonth, dateOf, mapAttendance, milkEligible, parseGrade,
+  ADMIN_ROLES, FIXED_HOLIDAYS, OWNER_ROLES, daysInMonth, dateOf, mapAttendance, milkEligible, parseGrade,
   todayBkk, UNKNOWN_GRADE,
   type CellStatus, type ClassroomLite, type MealType, type SheetData, type SheetStudent,
 } from "./shared";
@@ -26,6 +26,8 @@ const ATTENDANCE = {
   date: "attendance_date",
   status: "status",
 };
+// สำรอง: ถ้า homeroom_attendance ไม่มีข้อมูลเดือนนั้น จะลองตารางนี้
+const ATTENDANCE_ALT = { table: "attendance_records", student: "student_id", classroom: "classroom_id", date: "attendance_date", status: "status" };
 const CLASSROOMS = { table: "classrooms", id: "classroom_id", name: "room_name" };
 const BUCKET = "student-signatures";
 
@@ -182,12 +184,21 @@ export async function syncMonth(
   const { start, end } = monthRange(month);
   const last = end < todayBkk() ? end : todayBkk();
 
-  const att = await fetchAll<any>((f, t) =>
-    s.from(ATTENDANCE.table)
-      .select(`student:${ATTENDANCE.student}, date:${ATTENDANCE.date}, status:${ATTENDANCE.status}`)
-      .eq(ATTENDANCE.classroom, classroomId)
-      .gte(ATTENDANCE.date, start).lte(ATTENDANCE.date, end)
-      .order(ATTENDANCE.date).order(ATTENDANCE.student).range(f, t));
+  // ค้นด้วยรายชื่อนักเรียนในห้อง (ไม่พึ่ง classroom_id ในตารางเช็คชื่อ) และลองตารางสำรองถ้าตารางแรกว่าง
+  let att: any[] = [];
+  let source = ATTENDANCE.table;
+  for (const A of [ATTENDANCE, ATTENDANCE_ALT]) {
+    if (!ids.length) break;
+    att = await fetchAll<any>((f, t) =>
+      s.from(A.table)
+        .select(`student:${A.student}, date:${A.date}, status:${A.status}`)
+        .in(A.student, ids)
+        .gte(A.date, start).lte(A.date, end)
+        .order(A.date).order(A.student).range(f, t));
+    source = A.table;
+    if (att.length) break;
+  }
+  const unmapped = new Set<string>();
   const existing = await fetchAll<any>((f, t) =>
     s.from("meal_records").select("id, student_id, record_date, status, source")
       .eq("classroom_id", classroomId).eq("meal_type", type)
@@ -204,6 +215,7 @@ export async function syncMonth(
     if (r.date > last || !ids.includes(r.student)) continue;
     const st = mapAttendance(r.status);
     if (st) put(r.date, r.student, st);
+    else unmapped.add(String(r.status));
   }
   const manualKeys = new Set<string>();
   for (const r of existing) {
@@ -240,7 +252,7 @@ export async function syncMonth(
   // ลบแถว auto ที่ไม่มีข้อมูลเช็คชื่อรองรับแล้ว
   const stale = existing.filter((r) => r.source === "auto" && !keep.has(`${r.student_id}|${r.record_date}`)).map((r) => r.id);
   for (const part of chunk(stale, 200)) await s.from("meal_records").delete().in("id", part);
-  return { locked: false, days: days.length };
+  return { locked: false, days: days.length, diag: { source, fetched: att.length, unmapped: [...unmapped] } };
 }
 
 // ── Sheet: ข้อมูลตารางรายเดือนของห้องเดียว ─────────────────────────────────────
@@ -307,11 +319,30 @@ export async function buildSheet(a: Actor, classroomId: string, month: string, t
     t.extra += r.extra_portions ?? 0;
   }
 
+  // ป้ายวันหยุด/เสาร์-อาทิตย์ (เฉพาะวันที่ไม่มีข้อมูลเช็คชื่อ = ไม่ใช่วันเรียน)
+  const custom = new Map<string, string>();
+  try {
+    const { data: hol } = await s.from("school_holidays").select("holiday_date, name").gte("holiday_date", start).lte("holiday_date", end);
+    (hol ?? []).forEach((h: any) => custom.set(h.holiday_date, h.name));
+  } catch { /* ยังไม่ได้สร้างตาราง school_holidays */ }
+  const [yy, mm] = month.split("-").map(Number);
+  const dayLabels: Record<number, string> = {};
+  for (let d = 1; d <= daysInMonth(month); d++) {
+    if (schoolDaySet.has(d)) continue;
+    const date = dateOf(month, d);
+    const dow = new Date(Date.UTC(yy, mm - 1, d)).getUTCDay();
+    const name = custom.get(date) ?? FIXED_HOLIDAYS[date.slice(5)];
+    if (name) dayLabels[d] = name;
+    else if (dow === 0) dayLabels[d] = "วันอาทิตย์";
+    else if (dow === 6) dayLabels[d] = "วันเสาร์";
+  }
+
   return {
     classroom, month, type, days: daysInMonth(month),
     schoolDays: [...schoolDaySet].sort((x, y) => x - y),
     students: [...rowsByStudent.values()],
     dayTotals,
+    dayLabels,
     editable: canEditRoom(a, classroomId),
     me: {
       id: a.profile.id, name: `${a.profile.first_name} ${a.profile.last_name}`, isOwner: a.isOwner,

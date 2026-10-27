@@ -50,6 +50,15 @@ export function mapAttendance(raw?: string | null): CellStatus | null {
   return null;
 }
 
+// ── วันหยุดที่วันที่คงที่ทุกปี (วันหยุดที่เลื่อนตามปี/วันหยุดโรงเรียน ให้เพิ่มในตาราง school_holidays) ──
+export const FIXED_HOLIDAYS: Record<string, string> = {
+  "01-01": "วันขึ้นปีใหม่", "04-06": "วันจักรี", "04-13": "วันสงกรานต์", "04-14": "วันสงกรานต์",
+  "04-15": "วันสงกรานต์", "05-01": "วันแรงงานแห่งชาติ", "05-04": "วันฉัตรมงคล",
+  "06-03": "วันเฉลิมฯ พระราชินี", "07-28": "วันเฉลิมฯ ร.10", "08-12": "วันแม่แห่งชาติ",
+  "10-13": "วันนวมินทรมหาราช", "10-23": "วันปิยมหาราช", "12-05": "วันพ่อแห่งชาติ",
+  "12-10": "วันรัฐธรรมนูญ", "12-31": "วันสิ้นปี",
+};
+
 // ── ระดับชั้น ───────────────────────────────────────────────────────────────
 export type LevelKey = "kindergarten" | "primary" | "lower_secondary" | "unknown";
 export type GradeInfo = { key: string; label: string; level: LevelKey; order: number };
@@ -101,6 +110,10 @@ export type SheetData = {
   type: MealType;
   days: number;
   schoolDays: number[];
+  /** ป้ายวันที่ไม่ใช่วันเรียน: ชื่อวันหยุด หรือ "วันเสาร์"/"วันอาทิตย์" */
+  dayLabels: Record<number, string>;
+  /** ข้อมูลวินิจฉัยการดึงเช็คชื่อ (มีเมื่อสั่ง sync) */
+  diag?: { source: string; fetched: number; unmapped: string[] };
   students: SheetStudent[];
   dayTotals: Record<number, { present: number; leave: number; absent: number; extra: number }>;
   editable: boolean;
