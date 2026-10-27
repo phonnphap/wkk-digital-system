@@ -14,7 +14,7 @@ const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface User {
   id: string; first_name: string; last_name: string;
-  title?: string; role: string; position?: string; signature_url?: string;
+  title?: string; role: string; position?: string; signature_url?: string; email?: string;
 }
 interface Building {
   id: string; name: string; description?: string;
@@ -32,6 +32,7 @@ interface RepairRequest {
   reporter?: User; assignee?: User; building?: Building;
 }
 interface ProjectManager { id: string; user_id: string; user?: User; added_by?: string; created_at: string; }
+interface RepairRoute { id: string; category: string; user_id: string; }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fullName(u?: User | null) {
@@ -62,17 +63,25 @@ const PRIORITY_CFG: Record<string,{label:string;color:string}> = {
   medium: { label:"ปานกลาง",color:"#d97706" },
   high:   { label:"เร่งด่วน",color:"#dc2626" },
 };
-const CATEGORIES = ["ระบบไฟฟ้า","ระบบประปา","ประตู/หน้าต่าง","พื้น/ฝ้า/ผนัง","เฟอร์นิเจอร์","คอมพิวเตอร์/อุปกรณ์","เครือข่ายอินเตอร์เน็ต","ห้องน้ำ","อื่นๆ"];
+const BULB_CATEGORY = "เปลี่ยนหลอดไฟ";
+const INTERNET_CATEGORY = "เครือข่ายอินเตอร์เน็ต";
+const CATEGORIES = ["ระบบไฟฟ้า", BULB_CATEGORY, "ระบบประปา","ประตู/หน้าต่าง","พื้น/ฝ้า/ผนัง","เฟอร์นิเจอร์","คอมพิวเตอร์/อุปกรณ์", INTERNET_CATEGORY,"ห้องน้ำ","อื่นๆ"];
 
-// ★ หมวดหมู่ที่ต้องแจ้งเตือนอีเมลเฉพาะทาง (ต้องมีสิทธิ์ Mail.Send ใน Azure App ถึงจะส่งได้จริง)
-const CATEGORY_NOTIFY_EMAIL: Record<string,string> = {
-  "เครือข่ายอินเตอร์เน็ต": "sirilack@khienkhet.ac.th",
-};
+// ★ บัญชีที่แก้ไข/สร้างบันทึกข้อความได้
+const MEMO_EDITOR_EMAILS = ["general@khienkhet.ac.th"];
 
-// ★ หมวดหมู่ที่ต้องมอบหมายงานให้ครูที่รับผิดชอบทันทีตอนแจ้งซ่อม (ล็อกไม่ให้ครูผู้แจ้งแก้ไข/ลบเองอัตโนมัติ)
-const CATEGORY_AUTO_ASSIGN: Record<string,string> = {
-  "เครือข่ายอินเตอร์เน็ต": "76c71d91-9064-42a6-a54f-3a5be184301f", // sirilack@khienkhet.ac.th
-};
+// ★ หาผู้รับเรื่องตามสาย: เน็ต -> 2 คนที่กำหนด / หลอดไฟ -> ครูประจำตึก / อื่นๆ -> หน.โครงการ
+function resolveRecipients(category: string|undefined, building: Building|undefined|null,
+  managers: ProjectManager[], allUsers: User[], routes: RepairRoute[]): User[] {
+  const byIds = (ids: string[]) => allUsers.filter(u => ids.includes(u.id));
+  const routed = routes.filter(r => r.category === category).map(r => r.user_id);
+  if (routed.length) return byIds(routed);
+  if (category === BULB_CATEGORY) {
+    const t = byIds(building?.repair_user_ids ?? []);
+    if (t.length) return t;
+  }
+  return byIds(managers.map(m => m.user_id));
+}
 
 // ★ แปลงเลขอารบิกในสตริงให้เป็นเลขไทยล้วน (ใช้เฉพาะข้อความเนื้อหาในบันทึกข้อความ ห้ามใช้กับ CSS/สี)
 function toThaiDigits(input: string | number): string {
@@ -485,9 +494,10 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
 }
 
 // ── RepairFormModal ───────────────────────────────────────────────────────────
-function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: {
+function RepairFormModal({ existing, buildings, currentUser,  onSave, onClose }: {
   existing?: RepairRequest|null; buildings: Building[];
-  currentUser: User; onSave: () => void; onClose: () => void;
+  currentUser: User; 
+  onSave: () => void; onClose: () => void;
 }) {
   const [title,       setTitle]      = useState(existing?.title ?? "");
   const [desc,        setDesc]       = useState(existing?.description ?? "");
@@ -574,72 +584,29 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
     //   - ไม่ส่ง ticket_no / location เพราะมี default ให้แล้วที่ฝั่ง DB
     // ★ มอบหมายงานอัตโนมัติให้ "ครูผู้ดูแลอาคารทุกคน" (buildings.repair_user_ids) ทันทีตอนแจ้งซ่อมใหม่
     //   ไม่ต้องเลือกว่าจะมอบให้ใครคนใดคนหนึ่ง — มอบให้ทุกคนที่ดูแลอาคารนั้น พร้อมรวมผู้รับผิดชอบเฉพาะหมวดหมู่ (ถ้ามี)
-    const selectedBuilding = buildings.find(b => b.id === buildingId);
-    const buildingCaretakerIds = (selectedBuilding as any)?.repair_user_ids ?? [];
-    const categoryAssignId = CATEGORY_AUTO_ASSIGN[category];
-    const autoAssignIds = Array.from(new Set([...buildingCaretakerIds, ...(categoryAssignId ? [categoryAssignId] : [])]));
     const payload = {
-      title: title.trim(), description: desc.trim(), building_id: buildingId,
-      room: room.trim(), category, priority, photo_urls: imageUrls,
-      reporter_id: currentUser.id, status: existing?.status ?? "pending",
+  title: title.trim(), description: desc.trim(), building_id: buildingId,
+  room: room.trim(), category, priority, photo_urls: imageUrls,
+  reporter_id: existing?.reporter_id ?? currentUser.id,   // ★ แก้รายการเดิม = คงผู้แจ้งเดิม
+  status: existing?.status ?? "pending",
       // ★ assigned_user_ids (jsonb array คอลัมน์ใหม่) เก็บผู้รับมอบหมายทุกคน
       //   ตอนแก้ไขรายการเดิม ให้คงรายชื่อที่มอบหมายไว้แล้วไม่เปลี่ยนอัตโนมัติซ้ำ
-      assigned_user_ids: existing?.id ? ((existing as any).assigned_user_ids ?? autoAssignIds) : autoAssignIds,
-      // ★ คง assigned_to (คอลัมน์เดิม) ไว้เพื่อ backward-compat กับโค้ด/รายงานอื่นที่อาจยังอ้างอิงอยู่
-      assigned_to: existing?.assigned_to ?? (autoAssignIds[0] ?? null),
+      assigned_user_ids: existing?.id ? ((existing as any).assigned_user_ids ?? []) : [],
+      assigned_to: existing?.assigned_to ?? null,
     };
-    const isNewRequest = !existing?.id;
-    if (existing?.id) {
+        if (existing?.id) {
       const { error } = await supabase.from("repair_requests").update(payload).eq("id", existing.id);
       if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); setSaving(false); return; }
     } else {
-      const { error } = await supabase.from("repair_requests").insert([payload]);
+      const { data: created, error } = await supabase.from("repair_requests").insert([payload]).select("id").single();
       if (error) { alert("❌ แจ้งซ่อมไม่สำเร็จ: " + error.message); setSaving(false); return; }
-    }
-
-    // ★ แจ้งเตือนอีเมลเฉพาะหมวดหมู่ที่ตั้งไว้ (เช่น เครือข่ายอินเตอร์เน็ต -> sirilack@)
-    //   ยิงแบบ fire-and-forget ห่อด้วย try/catch ทั้งหมด กันไม่ให้กระทบการบันทึกหลัก
-    //   ถ้า Azure App ยังไม่มีสิทธิ์ Mail.Send จะแค่เงียบๆ ไม่ได้ส่ง ไม่ทำให้ฟอร์มพัง
-    const notifyEmail = CATEGORY_NOTIFY_EMAIL[category];
-    if (notifyEmail) {
-      fetch("/api/notify-repair", {
+      const { data: { session } } = await supabase.auth.getSession();
+      fetch("/api/repair-notify", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: notifyEmail,
-          subject: `แจ้งซ่อม: ${title.trim()}`,
-          body: `มีการแจ้งซ่อมหมวดหมู่ "${category}"\n\nหัวข้อ: ${title.trim()}\nรายละเอียด: ${desc.trim() || "-"}\nผู้แจ้ง: ${fullName(currentUser)}\nอาคาร: ${buildings.find(b=>b.id===buildingId)?.name ?? "-"} ${room.trim()}\n\nกรุณาเข้าระบบแจ้งซ่อมเพื่อดำเนินการต่อ`,
-        }),
-      }).catch((e) => console.warn("[repair] ส่งอีเมลแจ้งเตือนไม่สำเร็จ (ไม่กระทบการบันทึก):", e));
-    }
-
-    // ★ เด้งเตือนครูที่รับผิดชอบอาคารนี้ทันที (จาก buildings.repair_user_ids) เฉพาะตอนแจ้งซ่อมใหม่
-    //   ดึงอีเมลของครูดูแลอาคารแยกอีกครั้ง (allUsers ที่โหลดไว้ปกติไม่มี email) แล้วยิงอีเมลแจ้งเตือนทีละคน
-    //   fire-and-forget ทั้งหมด ไม่กระทบการบันทึกหลักหากส่งไม่สำเร็จ
-    // ★ ตอนนี้มอบหมายให้ครูดูแลอาคารทุกคนแล้ว (ไม่ใช่แค่คนเดียว) จึงอีเมลแจ้งทุกคนใน buildingCaretakerIds เช่นเดิม
-    if (isNewRequest) {
-      const bld = buildings.find(b => b.id === buildingId);
-      const repairIds = (bld as any)?.repair_user_ids ?? [];
-      if (repairIds.length > 0) {
-        supabase.from("users").select("email,first_name,last_name,title")
-          .in("id", repairIds)
-          .then(({ data: teachers, error: tErr }) => {
-            if (tErr) { console.warn("[repair] โหลดรายชื่อครูดูแลอาคารไม่สำเร็จ:", tErr.message); return; }
-            (teachers ?? []).forEach((t: any) => {
-              if (!t.email) return;
-              fetch("/api/notify-repair", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  to: t.email,
-                  subject: `🔧 แจ้งซ่อมใหม่ในอาคารที่ท่านดูแล: ${title.trim()}`,
-                  body: `มีการแจ้งซ่อมใหม่ในอาคาร "${bld?.name ?? "-"}" ซึ่งท่านเป็นผู้รับผิดชอบดูแล (มอบหมายงานให้ท่านโดยอัตโนมัติแล้ว)\n\nหัวข้อ: ${title.trim()}\nหมวดหมู่: ${category}\nห้อง/บริเวณ: ${room.trim() || "-"}\nความเร่งด่วน: ${PRIORITY_CFG[priority]?.label ?? priority}\nรายละเอียด: ${desc.trim() || "-"}\nผู้แจ้ง: ${fullName(currentUser)}\n\nกรุณาเข้าระบบแจ้งซ่อมเพื่อดำเนินการต่อ`,
-                }),
-              }).catch((e) => console.warn("[repair] ส่งอีเมลเตือนครูดูแลอาคารไม่สำเร็จ (ไม่กระทบการบันทึก):", e));
-            });
-          });
-      }
-    }
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ requestId: created.id }),
+      }).catch(e => console.warn("[repair] notify ไม่สำเร็จ:", e));
+    }   // ← ปิด else ตรงนี้
 
     setSaving(false);
     onSave();
@@ -756,13 +723,32 @@ function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: 
 }
 
 // ── ManagersModal ─────────────────────────────────────────────────────────────
-function ManagersModal({ currentUser, allUsers, managers, onClose, onRefresh }: {
-  currentUser: User; allUsers: User[]; managers: ProjectManager[];
+function ManagersModal({ currentUser, allUsers, managers, routes, onClose, onRefresh }: {
+  currentUser: User; allUsers: User[]; managers: ProjectManager[]; routes: RepairRoute[];
   onClose: () => void; onRefresh: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
   const managerIds = useMemo(() => new Set(managers.map(m => m.user_id)), [managers]);
+  // state / logic
+const [routeCat, setRouteCat] = useState(INTERNET_CATEGORY);
+const [routeSearch, setRouteSearch] = useState("");
+const catRoutes = routes.filter(r => r.category === routeCat);
+const routeFiltered = useMemo(() => {
+  const q = routeSearch.trim().toLowerCase();
+  if (!q) return [];
+  return allUsers.filter(u => !catRoutes.some(r => r.user_id === u.id) &&
+    `${u.first_name} ${u.last_name}`.toLowerCase().includes(q)).slice(0, 8);
+}, [allUsers, routeSearch, catRoutes]);
+const addRoute = async (u: User) => {
+  const { error } = await supabase.from("repair_category_routes")
+    .insert([{ category: routeCat, user_id: u.id, added_by: currentUser.id }]);
+  if (error) { alert("❌ " + error.message); return; }
+  setRouteSearch(""); onRefresh();
+};
+const removeRoute = async (id: string) => {
+  await supabase.from("repair_category_routes").delete().eq("id", id); onRefresh();
+};
 
   const filtered = useMemo(() => {
     if (!search.trim()) return [];
@@ -832,6 +818,36 @@ function ManagersModal({ currentUser, allUsers, managers, onClose, onRefresh }: 
               </div>
             )}
           </div>
+          {/* วางต่อท้ายส่วนผู้ดูแลโครงการ */}
+<div className="pt-4 border-t border-slate-100 space-y-3">
+  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">ผู้รับเรื่องตามหมวดหมู่</p>
+  <select value={routeCat} onChange={e => setRouteCat(e.target.value)}
+    className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white">
+    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+  </select>
+  <div className="relative">
+    <input value={routeSearch} onChange={e => setRouteSearch(e.target.value)} placeholder="🔍 ค้นหาชื่อเพื่อเพิ่ม..."
+      className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
+    {routeFiltered.length > 0 && (
+      <div className="absolute top-full left-0 right-0 bg-white border-2 border-blue-200 rounded-xl shadow-lg z-10 mt-1 overflow-hidden">
+        {routeFiltered.map(u => (
+          <button key={u.id} onClick={() => addRoute(u)}
+            className="w-full px-4 py-2.5 text-left text-sm hover:bg-blue-50 border-b border-slate-100 last:border-0 flex justify-between">
+            <span>{fullName(u)}</span><span className="text-blue-500 font-bold text-xs">+ เพิ่ม</span>
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+  {catRoutes.length === 0
+    ? <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">ยังไม่ได้ตั้งค่า — หมวดนี้จะส่งให้ หน.โครงการ{routeCat === BULB_CATEGORY ? " (หรือครูประจำตึก)" : ""}</p>
+    : catRoutes.map(r => (
+      <div key={r.id} className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">
+        <span className="text-sm font-bold text-slate-700">{fullName(allUsers.find(u => u.id === r.user_id))}</span>
+        <button onClick={() => removeRoute(r.id)} className="text-xs font-bold text-red-600">🗑️ ลบ</button>
+      </div>
+    ))}
+</div>
         </div>
       </div>
     </div>
@@ -839,9 +855,10 @@ function ManagersModal({ currentUser, allUsers, managers, onClose, onRefresh }: 
 }
 
 // ── DetailModal ───────────────────────────────────────────────────────────────
-function DetailModal({ request, canManage, allUsers, currentUserId, isAdmin, isProjManager, onEdit, onDelete, onUpdate, onClose }: {
-  request: RepairRequest; canManage: boolean; allUsers: User[];
+function DetailModal({ request, allUsers, currentUserId, isAdmin, isProjManager, recipientIds, isMemoEditor, onEdit, onDelete, onUpdate, onClose }: {
+  request: RepairRequest; allUsers: User[];
   currentUserId: string; isAdmin: boolean; isProjManager: boolean;
+  recipientIds: string[]; isMemoEditor: boolean;
   onEdit: (r: RepairRequest) => void; onDelete: (id: string) => void;
   onUpdate: () => void; onClose: () => void;
 }) {
@@ -881,6 +898,27 @@ function DetailModal({ request, canManage, allUsers, currentUserId, isAdmin, isP
   const isReporter = request.reporter_id === currentUserId;
   const isLocked = ((request as any).assigned_user_ids?.length ?? 0) > 0 || !!request.assigned_to;
   const canEditDelete = isAdmin || isProjManager || (isReporter && !isLocked);
+  const acknowledged = !!request.assigned_to || (((request as any).assigned_user_ids?.length ?? 0) > 0);
+const isAssignee = request.assigned_to === currentUserId ||
+  (((request as any).assigned_user_ids ?? []) as string[]).includes(currentUserId);
+const canAcknowledge = recipientIds.includes(currentUserId) && !acknowledged && request.status === "pending";
+const canChangeStatus = isAdmin || isProjManager || isAssignee;   // ★ คนรับเรื่อง/แอดมิน/หน.โครงการ
+const canReassign = isAdmin || isProjManager;
+const canManage = canChangeStatus || isMemoEditor;                // memo editor แก้งบประมาณได้
+
+const handleAcknowledge = async () => {
+  setSaving(true);
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch("/api/repair-ack", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+    body: JSON.stringify({ requestId: request.id }),
+  });
+  const j = await res.json();
+  setSaving(false);
+  if (!j.ok) alert(j.error);
+  onUpdate();
+};
 
   const handleUpdate = async () => {
     setSaving(true);
@@ -956,6 +994,17 @@ function DetailModal({ request, canManage, allUsers, currentUserId, isAdmin, isP
               ✅ มอบหมายงานให้: {allUsers.filter(u=>assignedIds.includes(u.id)).map(fullName).join(", ") || `${assignedIds.length} คน`}
             </p>
           )}
+          {canAcknowledge && (
+  <button onClick={handleAcknowledge} disabled={saving}
+    className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-50">
+    ✋ กดรับทราบ / รับเรื่องนี้
+  </button>
+)}
+{!acknowledged && !canAcknowledge && request.status === "pending" && (
+  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+    ⏳ รอผู้รับผิดชอบในสายงานกดรับทราบ
+  </p>
+)}
 
           <div className="pt-2 border-t border-slate-100">
             {canEditDelete ? (
@@ -979,35 +1028,38 @@ function DetailModal({ request, canManage, allUsers, currentUserId, isAdmin, isP
           </div>
 
           {canManage && (
-            <div className="space-y-3 pt-2 border-t border-slate-100">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">จัดการ</p>
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">สถานะ</label>
-                <select value={status} onChange={e=>setStatus(e.target.value)}
-                  className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none">
-                  {Object.entries(STATUS_CFG).map(([k,v])=>(
-                    <option key={k} value={k}>{v.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">
-                  มอบหมายให้ (เลือกได้หลายคน) {buildingRepairIds.length===0 && <span className="text-amber-500 font-normal">(อาคารนี้ยังไม่ได้ตั้งค่าครูดูแล แสดงทุกคน)</span>}
-                </label>
-                <div className="max-h-40 overflow-y-auto space-y-1 border-2 border-blue-100 rounded-xl p-2 bg-white">
-                  {assignableUsers.length === 0 && (
-                    <p className="text-xs text-slate-400 px-2 py-1">ไม่มีรายชื่อให้เลือก</p>
-                  )}
-                  {assignableUsers.map(u=>(
-                    <label key={u.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-blue-50 cursor-pointer">
-                      <input type="checkbox" checked={assignedIds.includes(u.id)}
-                        onChange={()=>toggleAssignee(u.id)}
-                        className="w-4 h-4 accent-blue-600 shrink-0" />
-                      <span className="text-sm text-slate-700">{fullName(u)}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
+  <div className="space-y-3 pt-2 border-t border-slate-100">
+    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">จัดการ</p>
+
+    {canChangeStatus && (
+      <div>
+        <label className="block text-xs font-bold text-slate-400 mb-1">สถานะ</label>
+        <select value={status} onChange={e=>setStatus(e.target.value)}
+          className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none">
+          {Object.entries(STATUS_CFG).map(([k,v])=>(
+            <option key={k} value={k}>{v.label}</option>
+          ))}
+        </select>
+      </div>
+    )}
+
+    {canReassign && (
+      <div>
+        <label className="block text-xs font-bold text-slate-400 mb-1">
+          มอบหมายให้ (เลือกได้หลายคน) {buildingRepairIds.length===0 && <span className="text-amber-500 font-normal">(อาคารนี้ยังไม่ได้ตั้งค่าครูดูแล แสดงทุกคน)</span>}
+        </label>
+        <div className="max-h-40 overflow-y-auto space-y-1 border-2 border-blue-100 rounded-xl p-2 bg-white">
+          {assignableUsers.length === 0 && <p className="text-xs text-slate-400 px-2 py-1">ไม่มีรายชื่อให้เลือก</p>}
+          {assignableUsers.map(u=>(
+            <label key={u.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-blue-50 cursor-pointer">
+              <input type="checkbox" checked={assignedIds.includes(u.id)} onChange={()=>toggleAssignee(u.id)}
+                className="w-4 h-4 accent-blue-600 shrink-0" />
+              <span className="text-sm text-slate-700">{fullName(u)}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+    )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-400 mb-1">งบประมาณโดยประมาณ (บาท)</label>
@@ -1061,6 +1113,7 @@ export default function Page() {
   const [showManagers, setShowManagers]= useState(false);
   const [showMemo,     setShowMemo]    = useState(false);
   const [detailReq,    setDetailReq]   = useState<RepairRequest|null>(null);
+  const [routes, setRoutes] = useState<RepairRoute[]>([]);
 
   const isAdmin       = useMemo(()=>ADMIN_ROLES.includes(user?.role??""),[user]);
   const isProjManager = useMemo(()=>managers.some(m=>m.user_id===user?.id),[managers,user]);
@@ -1070,18 +1123,20 @@ export default function Page() {
   },[buildings,user]);
   const isBuildingManager = myBuildingIds.size > 0;
   const canSeeAll = isAdmin || isProjManager;
-  const canManage = isAdmin || isProjManager || isBuildingManager;
+  const isMemoEditor = useMemo(
+  () => MEMO_EDITOR_EMAILS.includes((user?.email ?? "").toLowerCase()), [user]);
+const canMemo = canSeeAll || isMemoEditor;
 
   useEffect(()=>{
     const init=async()=>{
       const {data:{user:au}}=await supabase.auth.getUser();
       if (!au){setLoading(false);return;}
       let {data}=await supabase.from("users")
-        .select("id,first_name,last_name,title,role,position,signature_url")
+        .select("id,first_name,last_name,title,role,position,signature_url,email")
         .eq("auth_id",au.id).maybeSingle();
       if (!data&&au.email){
         const r=await supabase.from("users")
-          .select("id,first_name,last_name,title,role,position,signature_url")
+          .select("id,first_name,last_name,title,role,position,signature_url,email")
           .eq("email",au.email).maybeSingle();
         data=r.data;
         if (data) await supabase.from("users").update({auth_id:au.id}).eq("id",(data as any).id);
@@ -1101,6 +1156,8 @@ export default function Page() {
     setAllUsers((usrs??[]) as User[]);
     const dir=(usrs??[]).find((u:any)=>u.role==="director") as User|undefined;
     setDirector(dir);
+const { data: rt } = await supabase.from("repair_category_routes").select("*");
+setRoutes((rt ?? []) as RepairRoute[]);
     // ★ แก้: repair_project_managers มี FK ไปยัง users 2 เส้นทาง (user_id, added_by)
     //   embed แบบ 'user:users(...)' เดิม ambiguous ทำให้ query error เงียบๆ (data=null)
     //   -> เพิ่มผู้ดูแลสำเร็จแต่รายชื่อไม่ขึ้นเลย แก้โดยดึงแยก 2 รอบแล้ว join เองใน JS
@@ -1187,7 +1244,7 @@ export default function Page() {
               ⚙️ ผู้ดูแล
             </button>
           )}
-          {(canSeeAll) && (
+          {canMemo && (
             <button onClick={()=>setShowMemo(true)}
               className="px-3 py-2 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-xl border border-white/30">
               📄 บันทึกข้อความ
@@ -1290,6 +1347,7 @@ export default function Page() {
             </div>
           </div>
         )}
+        
 
         {tab==="list" && (
           <div className="max-w-4xl mx-auto p-5 space-y-4">
@@ -1406,13 +1464,13 @@ export default function Page() {
       </div>
 
       {(showForm || editingReq) && (
-        <RepairFormModal buildings={buildings} currentUser={user} existing={editingReq}
+        <RepairFormModal buildings={buildings} currentUser={user} existing={editingReq} 
           onSave={async()=>{setShowForm(false);setEditingReq(null);await loadData();}}
           onClose={()=>{setShowForm(false);setEditingReq(null);}} />
       )}
       {showManagers && (
-        <ManagersModal currentUser={user} allUsers={allUsers} managers={managers}
-          onClose={()=>setShowManagers(false)} onRefresh={loadData} />
+        <ManagersModal currentUser={user} allUsers={allUsers} managers={managers} routes={routes}
+  onClose={()=>setShowManagers(false)} onRefresh={loadData} />
       )}
       {showMemo && (
         <MemoModal requests={visibleRequests.filter(r=>r.status!=="completed")}
@@ -1420,8 +1478,10 @@ export default function Page() {
           onClose={()=>setShowMemo(false)} />
       )}
       {detailReq && (
-        <DetailModal request={detailReq} canManage={canManage} allUsers={allUsers}
+        <DetailModal request={detailReq} allUsers={allUsers}
           currentUserId={user.id} isAdmin={isAdmin} isProjManager={isProjManager}
+          recipientIds={resolveRecipients(detailReq.category, detailReq.building, managers, allUsers, routes).map(u=>u.id)}
+          isMemoEditor={isMemoEditor}
           onEdit={(r)=>{setDetailReq(null); setEditingReq(r);}}
           onDelete={handleDeleteRequest}
           onUpdate={async()=>{setDetailReq(null);await loadData();}}

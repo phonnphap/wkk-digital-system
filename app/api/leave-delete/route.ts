@@ -23,13 +23,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "ใบลานี้ลบเองไม่ได้ กรุณาติดต่อผู้ดูแลระบบ" }, { status: 403 });
   }
 
-  // แจ้ง Teams ก่อนลบ (server ต้องอ่านข้อมูลใบลา) — เฉพาะใบที่ส่งแล้ว
-  if (leave.status !== "draft") await notifyLeaveTeams(leaveId, "cancelled").catch(e => console.warn("[leave-delete notify]", e));
+  // 1) แก้การ์ดทุกใบเป็น "ยกเลิกแล้ว" ก่อนลบ (เพราะต้องอ่านข้อมูลใบลาจาก DB) — เฉพาะใบที่ส่งแล้ว
+  if (leave.status !== "draft") {
+    await notifyLeaveTeams(leaveId, "cancelled").catch(e => console.warn("[leave-delete notify]", e));
+  }
 
+  // 2) ลบข้อมูลจริง
   const { error: e1 } = await admin.from("substitution_records").delete().eq("leave_request_id", leaveId);
   if (e1) return NextResponse.json({ ok: false, error: "ลบรายการสอนแทนไม่สำเร็จ: " + e1.message }, { status: 400 });
   const { error: e2 } = await admin.from("leave_requests").delete().eq("id", leaveId);
   if (e2) return NextResponse.json({ ok: false, error: e2.message }, { status: 400 });
+
+  // 3) ล้าง messageId หลังลบสำเร็จแล้วเท่านั้น
+  await admin.from("leave_teams_messages").delete().eq("leave_id", leaveId);
 
   return NextResponse.json({ ok: true });
 }

@@ -27,6 +27,7 @@ const APPROVER_EMAILS  = [APPROVER_1_EMAIL, APPROVER_2_EMAIL, APPROVER_3_EMAIL];
 // ใบลา            = PDF ใบลาที่อนุมัติครบแล้ว
 const OD_ATTACH_FOLDER = "ใบลา_เอกสารแนบ";
 const OD_LEAVE_FOLDER  = "ใบลา";
+const OD_LEAVE_UNSIGNED_FOLDER = "ใบลา_ไม่มีลายเซน";   // ★ ใส่คู่กับ OD_LEAVE_FOLDER ด้านบน
 
 // ─── helpers ──────────────────────────────────────────────
 function toThaiDate(iso: string) {
@@ -631,83 +632,75 @@ async function uploadAttachment(file: File, teacherFirstName: string): Promise<{
 }
 
 /** หาชื่อไฟล์ที่ยังไม่ถูกใช้ใน Documents/ใบลา/ — ถ้าซ้ำจะเติม (1),(2)... */
-/** หาชื่อไฟล์ที่ยังไม่ถูกใช้ใน Documents/ใบลา/ — ถ้าซ้ำจะเติม (1),(2)... */
-async function findAvailableLeavePath(fileNameBase: string, ext: string): Promise<string> {
+async function findAvailableLeavePath(folder: string, fileNameBase: string, ext: string): Promise<string> {
   const MAX_TRIES = 20;
-  let candidate = `${OD_LEAVE_FOLDER}/${fileNameBase}.${ext}`;
-
+  let candidate = `${folder}/${fileNameBase}.${ext}`;
   for (let i = 0; i < MAX_TRIES; i++) {
     try {
       const res = await fetch("/api/resolve-onedrive", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: candidate }),
       });
       const json = await res.json().catch(() => null);
-      if (!json?.ok || !json?.downloadUrl) {
-        return candidate; // ไม่มีไฟล์นี้อยู่ → ใช้ได้เลย
-      }
-    } catch {
-      return candidate; // เรียก API ไม่สำเร็จ → ใช้ชื่อนี้ไปก่อน
-    }
-    candidate = `${OD_LEAVE_FOLDER}/${fileNameBase} (${i + 1}).${ext}`;
+      if (!json?.ok || !json?.downloadUrl) return candidate;
+    } catch { return candidate; }
+    candidate = `${folder}/${fileNameBase} (${i + 1}).${ext}`;
   }
-  return `${OD_LEAVE_FOLDER}/${fileNameBase}_${Date.now()}.${ext}`;
+  return `${folder}/${fileNameBase}_${Date.now()}.${ext}`;
 }
 
-/** อัพโหลด PDF ใบลาที่อนุมัติครบ → Documents/ใบลา/
- *  ⚠️ ใช้ "วันที่เริ่มลา" (leaveStartDate) ตั้งชื่อไฟล์ ไม่ใช่วันที่อนุมัติ
- *  เพื่อไม่ให้ครูคนเดียวกันที่ลาคนละวัน แต่ถูกอนุมัติวันเดียวกัน ไฟล์ชนกัน
- */
-async function uploadApprovedLeavePDF(
+async function uploadLeavePDF(
   html: string,
   teacherInfo: { first_name?: string; last_name?: string },
-  leaveStartDate?: string
+  leaveStartDate: string | undefined,
+  folder: string
 ): Promise<void> {
-  // ✅ ใช้วันที่ลาจริง ถ้าไม่มีค่อย fallback เป็นวันนี้
-  const dateForFile = leaveStartDate ? new Date(leaveStartDate) : new Date();
-  const dd = String(dateForFile.getDate()).padStart(2, "0");
-  const mm = String(dateForFile.getMonth() + 1).padStart(2, "0");
-  const yyyyBE = dateForFile.getFullYear() + 543;
-  const firstName = (teacherInfo.first_name || "").trim();
-  const lastName  = (teacherInfo.last_name  || "").trim();
-  const fileNameBase = `${dd}${mm}${yyyyBE}_${firstName}_${lastName}`;
+  const d = leaveStartDate ? new Date(leaveStartDate) : new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyyBE = d.getFullYear() + 543;
+  const fileNameBase = `${dd}${mm}${yyyyBE}_${(teacherInfo.first_name || "").trim()}_${(teacherInfo.last_name || "").trim()}`;
 
-  // 1. ลอง generate PDF ผ่าน API ก่อน
   try {
     const pdfRes = await fetch("/api/generate-leave-pdf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ html }),
     });
-
     if (pdfRes.ok) {
       const pdfBlob = await pdfRes.blob();
-      const uniquePath = await findAvailableLeavePath(fileNameBase, "pdf");
-      const uniqueName = uniquePath.split("/").pop()!;
-      const formData = new FormData();
-      formData.append("file", pdfBlob, uniqueName);
-      formData.append("path", uniquePath);
-      await fetch("/api/upload-onedrive", { method: "POST", body: formData });
-      console.log("[uploadApprovedLeavePDF] PDF uploaded successfully:", uniquePath);
+      const uniquePath = await findAvailableLeavePath(folder, fileNameBase, "pdf");
+      const fd = new FormData();
+      fd.append("file", pdfBlob, uniquePath.split("/").pop()!);
+      fd.append("path", uniquePath);
+      await fetch("/api/upload-onedrive", { method: "POST", body: fd });
       return;
     }
-
     const errJson = await pdfRes.json().catch(() => ({ fallback: true }));
     if (!errJson.fallback) throw new Error(errJson.error);
   } catch (e) {
-    console.warn("[uploadApprovedLeavePDF] PDF API failed, uploading HTML:", e);
+    console.warn("[uploadLeavePDF] PDF API failed, uploading HTML:", folder, e);
   }
 
-  // 2. Fallback: อัพ HTML แทน
-  const uniquePath = await findAvailableLeavePath(fileNameBase, "html");
-  const uniqueName = uniquePath.split("/").pop()!;
-  const htmlBlob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const formData = new FormData();
-  formData.append("file", htmlBlob, uniqueName);
-  formData.append("path", uniquePath);
-  await fetch("/api/upload-onedrive", { method: "POST", body: formData });
-  console.log("[uploadApprovedLeavePDF] HTML fallback uploaded:", uniquePath);
+  const uniquePath = await findAvailableLeavePath(folder, fileNameBase, "html");
+  const fd = new FormData();
+  fd.append("file", new Blob([html], { type: "text/html;charset=utf-8" }), uniquePath.split("/").pop()!);
+  fd.append("path", uniquePath);
+  await fetch("/api/upload-onedrive", { method: "POST", body: fd });
+}
+
+/** อนุมัติครบ → อัปโหลดฉบับมีลายเซ็น (ใบลา/) + ฉบับไม่มีลายเซ็น (ใบลา_ไม่มีลายเซน/) */
+async function uploadApprovedLeaveBothVersions(
+  leaveData: any, reqUser: any, approverSigs: any[],
+  docUrl: string | undefined, stats: LeaveStats, startDate: string
+): Promise<void> {
+  const teacher = { first_name: reqUser?.first_name, last_name: reqUser?.last_name };
+  const signedHtml   = buildLeaveHTML(leaveData, reqUser?.signature_url || "", approverSigs, docUrl, stats);
+  const unsignedHtml = buildLeaveHTML(leaveData, "", approverSigs, docUrl, stats, true);
+  const results = await Promise.allSettled([
+    uploadLeavePDF(signedHtml,   teacher, startDate, OD_LEAVE_FOLDER),
+    uploadLeavePDF(unsignedHtml, teacher, startDate, OD_LEAVE_UNSIGNED_FOLDER),
+  ]);
+  results.forEach((r, i) => { if (r.status === "rejected") console.warn("[uploadApprovedLeaveBothVersions]", i, r.reason); });
 }
 
 // ══════════════════════════════════════════════════════════
@@ -718,8 +711,13 @@ function buildLeaveHTML(
   signatureUrl: string,
   approverSignatures?: { name: string; position: string; signature_url?: string; approved_at?: string; }[],
   documentUrl?: string,
-  leaveStats?: LeaveStats
+  leaveStats?: LeaveStats,
+  hideSignatures = false            // ★ เพิ่ม
 ): string {
+  if (hideSignatures) {
+    signatureUrl = "";
+    approverSignatures = approverSignatures?.map(a => ({ ...a, signature_url: undefined }));
+  }
   const docDate = data.createdAt ? new Date(data.createdAt) : new Date();
   const thDay   = docDate.getDate();
   const thMonth = docDate.toLocaleDateString("th-TH",{ month:"long", timeZone:"Asia/Bangkok" });
@@ -807,12 +805,12 @@ function buildLeaveHTML(
   <div class="box" style="font-size:10.5pt;line-height:1.6">
     <div style="font-weight:700;margin-bottom:3px">ความเห็นของผู้บังคับบัญชา</div>
     <div style="margin-bottom:4px">
-      <span class="chk">${approver3?.signature_url ? "✓" : ""}</span>อนุญาต
+      <span class="chk">${approver3?.approved_at ? "✓" : ""}</span>อนุญาต
       &nbsp;&nbsp;&nbsp;
       <span class="chk"></span>ไม่อนุญาต
     </div>
     <div style="min-height:16px;padding:1px 4px;margin:2px 0;border-bottom:1px dotted #555">
-      ${approver3?.signature_url ? "พิจารณาแล้วเห็นสมควรอนุญาต" : ""}
+      ${approver3?.approved_at ? "พิจารณาแล้วเห็นสมควรอนุญาต" : ""}
     </div>
     <div style="display:flex;flex-direction:column;align-items:center;margin-top:6px">
       <div style="height:42px;display:flex;align-items:flex-end;justify-content:center">
@@ -1393,12 +1391,11 @@ async function generateApprovedPdfFor(leaveId: string) {
     { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล", signature_url:req.approver_2_signature, approved_at:req.approver_2_approved_at },
     { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต", signature_url:req.approver_3_signature, approved_at:req.approver_3_approved_at },
   ];
-  const [stats, docUrl] = await Promise.all([
+    const [stats, docUrl] = await Promise.all([
     loadLeaveStats(req.user_id, req.id, req.start_date),
     resolveAttachmentUrl(req.document_path, req.document_url),
   ]);
-  const html = buildLeaveHTML(leaveData, reqUser?.signature_url || "", approverSigs, docUrl ?? undefined, stats);
-  await uploadApprovedLeavePDF(html, { first_name: reqUser?.first_name, last_name: reqUser?.last_name }, req.start_date);
+  await uploadApprovedLeaveBothVersions(leaveData, reqUser, approverSigs, docUrl ?? undefined, stats, req.start_date);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -2368,7 +2365,7 @@ async function printFullLeave(r: any, userForPrint: UserProfile, savedSignature:
     win.document.write("<p style='font-family:sans-serif;padding:20px'>⏳ กำลังโหลดใบลา...</p>");
   }
 
-  const [stats, resolvedDocUrl] = await Promise.all([
+    const [stats, resolvedDocUrl] = await Promise.all([
     loadLeaveStats(r.user_id ?? userForPrint.id, r.id, r.start_date),
     resolveAttachmentUrl(r.document_path, r.document_url),
   ]);
@@ -3224,38 +3221,29 @@ useEffect(() => {
 
   // ✅ อัพโหลด PDF ใบลาอนุมัติไปยัง OneDrive ของ hr@khienkhet.ac.th / Documents/ใบลา/
   try {
-    const reqUser = (req as any).user;
-    const leaveData = {
-      fullName: fullName(reqUser), position: reqUser?.position,
-      leaveType: req.leave_type, leaveTypeName: LEAVE_TYPE_CONFIG[req.leave_type]?.label??"",
-      otherLeaveName: (req as any).other_leave_name,
-      startDate: req.start_date, endDate: req.end_date,
-      days: req.days_count, halfDay: (req as any).half_day,
-      reason: req.reason, phone: reqUser?.phone, contactInfo: (req as any).contact_info,
-    };
-    const approverSigs = [
-      { name:"นางสาวพรรษา แก้วใหญ่", position:"ครู ตรวจสอบสถิติการลา",
-        signature_url:(req as any).approver_1_signature, approved_at:(req as any).approver_1_approved_at },
-      { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
-        signature_url:(req as any).approver_2_signature, approved_at:(req as any).approver_2_approved_at },
-      { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต",
-        signature_url: updates.approver_3_signature ?? (req as any).approver_3_signature,
-        approved_at:   updates.approver_3_approved_at ?? (req as any).approver_3_approved_at },
-    ];
-
-    // ดึงสถิติของครูคนนี้
-    const stats = await loadLeaveStats(req.user_id, req.id, req.start_date);
-    const html = buildLeaveHTML(leaveData, reqUser?.signature_url||"", approverSigs, (req as any).document_url, stats);
-
-    // อัพโหลด (async, ไม่บล็อก) — ✅ ใช้วันที่ลาจริง ไม่ใช่วันที่อนุมัติ ป้องกันไฟล์ชนกัน
-    uploadApprovedLeavePDF(
-      html,
-      { first_name: reqUser?.first_name, last_name: reqUser?.last_name },
-      req.start_date
-    ).catch(e => console.warn("[upload approved PDF] failed:", e));
-  } catch(e) {
-    console.warn("[handleApprove] PDF build error:", e);
-  }
+  const reqUser = (req as any).user;
+  const leaveData = {
+    fullName: fullName(reqUser), position: reqUser?.position,
+    leaveType: req.leave_type, leaveTypeName: LEAVE_TYPE_CONFIG[req.leave_type]?.label ?? "",
+    otherLeaveName: (req as any).other_leave_name,
+    startDate: req.start_date, endDate: req.end_date,
+    days: req.days_count, halfDay: (req as any).half_day,
+    reason: req.reason, phone: reqUser?.phone, contactInfo: (req as any).contact_info,
+    createdAt: (req as any).created_at,          // ★ ให้วันที่บนใบเป็นวันที่ยื่น ไม่ใช่วันที่อนุมัติ
+  };
+  const approverSigs = [
+    { name: "นางสาวพรรษา แก้วใหญ่", position: "ครู ตรวจสอบสถิติการลา",
+      signature_url: (req as any).approver_1_signature, approved_at: (req as any).approver_1_approved_at },
+    { name: "นางสาวฐิติมา กาบแก้ว", position: "รองผู้อำนวยการกลุ่มบริหารงานบุคคล",
+      signature_url: (req as any).approver_2_signature, approved_at: (req as any).approver_2_approved_at },
+    { name: "นายธนณัฐ ศิระวงษ์", position: "ผู้อำนวยการโรงเรียนวัดเขียนเขต",
+      signature_url: updates.approver_3_signature ?? (req as any).approver_3_signature,
+      approved_at:   updates.approver_3_approved_at ?? (req as any).approver_3_approved_at },
+  ];
+  const stats = await loadLeaveStats(req.user_id, req.id, req.start_date);
+  uploadApprovedLeaveBothVersions(leaveData, reqUser, approverSigs, (req as any).document_url, stats, req.start_date)
+    .catch(e => console.warn("[upload approved PDFs] failed:", e));
+} catch (e) { console.warn("[handleApprove] PDF build error:", e); }
 
   // ✅ ส่งเมล (เปลี่ยนกลับ — แทนที่จะลบออก ยังคงส่งเมลอยู่)
   fetch("/api/send-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:[teacherEmail,HR_EMAIL,ADMIN_EMAIL].filter(Boolean),subject:`[อนุมัติแล้ว] ใบลา ${teacherName} · ${typeCfg?.label} · ${req.days_count} วัน`,html:`<div style="font-family:Sarabun,Arial,sans-serif;max-width:600px;margin:0 auto"><div style="background:linear-gradient(135deg,#10b981,#059669);padding:24px;border-radius:12px 12px 0 0;color:white"><h2 style="margin:0">✅ ใบลาได้รับการอนุมัติครบแล้ว</h2></div><div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px"><table style="width:100%;border-collapse:collapse;font-size:14px"><tr><td style="padding:8px 0;color:#64748b;width:120px">ผู้ลา</td><td style="font-weight:700">${teacherName}</td></tr><tr><td style="padding:8px 0;color:#64748b">ประเภท</td><td>${typeCfg?.icon} ${typeCfg?.label}</td></tr><tr><td style="padding:8px 0;color:#64748b">วันที่</td><td>${toThaiDate(req.start_date)} – ${toThaiDate(req.end_date)}</td></tr><tr><td style="padding:8px 0;color:#64748b">จำนวน</td><td><strong>${req.days_count} วัน</strong></td></tr></table><p style="margin-top:16px;font-size:12px;color:#94a3b8">อีเมลนี้ส่งโดยอัตโนมัติ · ${new Date().toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})}</p></div></div>`})}).catch(console.warn);
@@ -3270,13 +3258,7 @@ useEffect(() => {
 
     const {error}=await (supabase.from("leave_requests") as any).update(updates).eq("id",id);
 if(error){alert("❌ บันทึกไม่สำเร็จ: "+error.message);return;}
-await pushApprovalTeams(id, action, slotNum, reason); 
-    // แจ้ง Teams ต้องมีสถานะล่าสุดแล้ว (ใช้ endpoint ภายในที่ยอมรับ approved/rejected)
-    await fetch("/api/leave-notify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}` },
-      body: JSON.stringify({ leaveId: id, event: action, slot: slotNum, reason }),
-    }).catch(console.warn);
+await pushApprovalTeams(id, action, slotNum, reason);
 
 // ✅ รีเฟรชข้อมูล — ถ้าเคยโหลดข้อมูลทั้งหมดแล้ว (กดแท็บอื่นมาก่อน) ให้โหลดใหม่ทั้งหมด
 // ถ้ายังไม่เคยโหลด ก็แค่รีเฟรชรายการรออนุมัติพอ

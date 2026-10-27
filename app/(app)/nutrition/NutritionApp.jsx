@@ -12,6 +12,17 @@ import {
 
 const supabase = createClient();
 const ADMIN_ROLES = ["admin", "director", "deputy_director", "dept_head", "grade_head"];
+// เดือนนับจาก 0: มิ.ย.=5, พ.ย.=10
+const TERM_DEADLINE = { term1:{month:5, day:30}, term2:{month:10, day:30} };
+
+function getMeasureDate(term, today = new Date()) {
+  // ปีการศึกษาเริ่ม พ.ค. (ม.ค.–เม.ย. ถือเป็นปีการศึกษาก่อนหน้า)
+  const y = today.getMonth() >= 4 ? today.getFullYear() : today.getFullYear() - 1;
+  const d = TERM_DEADLINE[term];
+  const end = new Date(y, d.month, d.day);
+  const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return format(t > end ? end : t, "yyyy-MM-dd");
+}
 
 // ============================================================
 // WHO / กรมอนามัย LMS Parameters — ถูกต้องตามมาตรฐาน
@@ -188,19 +199,16 @@ function haStatusFromLabel(label) {
 }
 
 function getTotalMonths(birthDate, measuredDate) {
-  const b = new Date(birthDate);
-  const m = new Date(measuredDate);
-  return (m.getFullYear() - b.getFullYear()) * 12 + (m.getMonth() - b.getMonth());
+  const b = new Date(birthDate), m = new Date(measuredDate);
+  let months = (m.getFullYear()-b.getFullYear())*12 + (m.getMonth()-b.getMonth());
+  if (m.getDate() < b.getDate()) months--;
+  return Math.max(months, 0);
 }
 const getMonthsDiff = getTotalMonths;
-function gKey(gender) {
-  return (gender || "").toLowerCase().includes("male") || (gender || "").includes("ชาย") ? "male" : "female";
-}
 
-function formatAge(bd) {
-  const y=differenceInYears(new Date(),new Date(bd));
-  const m=differenceInMonths(new Date(),new Date(bd))%12;
-  return `${y} ปี ${m} เดือน`;
+function formatAge(bd, ref = new Date()) {
+  const months = getTotalMonths(bd, ref);
+  return `${Math.floor(months/12)} ปี ${months%12} เดือน`;
 }
 function genderLabel(g) {
   if(!g) return "—";
@@ -465,7 +473,7 @@ export default function NutritionApp() {
       </div>
 
       <div style={S.content}>
-        {tab==="assess" && <ClassAssessPage currentUser={currentUser}/>}
+        {tab==="assess" && <ClassAssessPage currentUser={currentUser} isAdmin={isAdmin}/>}
         {tab==="class"   && <ClassPage   currentUser={currentUser} isAdmin={isAdmin}/>}
         {tab==="compare" && <ComparePage currentUser={currentUser} isAdmin={isAdmin}/>}
         {tab==="admin"   && isAdmin && <AdminPage currentUser={currentUser}/>}
@@ -476,12 +484,11 @@ export default function NutritionApp() {
 }
 
 // ── ClassAssessPage — layout 2 คอลัมน์ ──────────────────────────────────────
-function ClassAssessPage({currentUser}) {
+function ClassAssessPage({currentUser,isAdmin}) {
   const [classrooms, setClassrooms] = useState([]);
   const [selectedClass, setSelectedClass] = useState(null);
   const [students, setStudents] = useState([]);
   const [term, setTerm] = useState("term1");
-  const [measuredDate, setMeasuredDate] = useState(format(new Date(),"yyyy-MM-dd"));
   const [values, setValues] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
@@ -489,6 +496,11 @@ function ClassAssessPage({currentUser}) {
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingRooms, setLoadingRooms] = useState(true);
   const printRef = useRef(null);
+  const [savedT1, setSavedT1] = useState({});        // student_id -> record เทอม 1
+const [savedCurrent, setSavedCurrent] = useState({}); // student_id -> record ของเทอมที่เลือก
+const [unlocked, setUnlocked] = useState(false);
+const [loadingT1, setLoadingT1] = useState(false);
+const measuredDate = useMemo(()=>getMeasureDate(term),[term]);
 
   useEffect(()=>{
     if(!selectedClass) return;
@@ -512,68 +524,100 @@ function ClassAssessPage({currentUser}) {
   },[currentUser]);
 
   useEffect(()=>{
-    if(!selectedClass||students.length===0) return;
-    const cid=selectedClass.classroom_id||selectedClass.id;
-    supabase.from("v_nutrition_student_detail").select("*")
-      .eq("classroom_id",cid).eq("term",term)
-      .then(({data})=>{
-        const map={};
-        (data||[]).forEach(r=>{map[r.student_id]=r;});
-        setValues(prev=>{
-          const next={...prev};
-          students.forEach(s=>{
-            const key=s.student_id||s.id;
-            const ex=map[key];
-            if(!next[key]) next[key]={};
-            if(ex?.weight_kg) next[key].weight=String(ex.weight_kg);
-            if(ex?.height_cm) next[key].height=String(ex.height_cm);
-            next[key].seat=s.seat_number||"";
-          });
-          return next;
-        });
-      });
-  },[selectedClass,students,term]);
+  if(!selectedClass||students.length===0) return;
+  const cid=selectedClass.classroom_id||selectedClass.id;
+  let cancelled=false;
+  setLoadingT1(true); setUnlocked(false);
+
+  Promise.all([
+    supabase.from("v_nutrition_student_detail").select("*").eq("classroom_id",cid).eq("term","term1"),
+    supabase.from("v_nutrition_student_detail").select("*").eq("classroom_id",cid).eq("term",term),
+  ]).then(([r1,rc])=>{
+    if(cancelled) return;
+    const m1={}, mc={};
+    (r1.data||[]).forEach(r=>{m1[r.student_id]=r;});
+    (rc.data||[]).forEach(r=>{mc[r.student_id]=r;});
+    setSavedT1(m1); setSavedCurrent(mc);
+
+    // ✅ รีเซ็ตค่าใหม่ทุกครั้งที่เปลี่ยนเทอม/ห้อง (ไม่ merge กับ prev แล้ว)
+    const next={};
+    students.forEach(s=>{
+      const key=s.student_id||s.id;
+      const ex=mc[key];
+      next[key]={
+        seat:s.seat_number||"",
+        weight: ex?.weight_kg!=null?String(ex.weight_kg):"",
+        height: ex?.height_cm!=null?String(ex.height_cm):"",
+      };
+    });
+    setValues(next);
+    setLoadingT1(false);
+  });
+  return ()=>{cancelled=true;};
+},[selectedClass,students,term]);
 
   function setVal(key,field,val){
     setValues(prev=>({...prev,[key]:{...(prev[key]||{}),[field]:val}}));
   }
 
-  const rows=useMemo(()=>{
-    return students.map((s,i)=>{
-      const key=s.student_id||s.id;
-      const v=values[key]||{};
-      const w=parseFloat(v.weight),h=parseFloat(v.height);
-      let result=null;
-      if(w>=5&&h>=50) result={...calcNutrition(s,w,h,measuredDate),weight_kg:w,height_cm:h};
-      return {student:s,key,v,result,idx:i};
-    });
-  },[students,values,measuredDate]);
+  const t1Count = Object.keys(savedT1).length;
+const term2Blocked = term==="term2" && !loadingT1 && t1Count===0;   // ยังไม่ได้ประเมินเทอม 1
+const t1Missing = students.length - t1Count;                         // คนที่ยังไม่มีเทอม 1
 
-  const filledCount=rows.filter(r=>r.result).length;
+const rows=useMemo(()=>{
+  return students.map((s,i)=>{
+    const key=s.student_id||s.id;
+    const v=values[key]||{};
+    const w=parseFloat(v.weight),h=parseFloat(v.height);
+    let result=null;
+    if(w>=5&&h>=50) result={...calcNutrition(s,w,h,measuredDate),weight_kg:w,height_cm:h};
+    // ✅ ล็อคอัตโนมัติ: เทอม 1 ที่มีข้อมูลในระบบแล้ว (ปลดล็อคได้เฉพาะ admin)
+    const locked = term==="term1" && !!savedCurrent[key] && !unlocked;
+    return {student:s,key,v,result,idx:i,locked,t1:savedT1[key]};
+  });
+},[students,values,measuredDate,term,savedCurrent,savedT1,unlocked]);
+
+const filledCount=rows.filter(r=>r.result).length;
+const lockedCount=rows.filter(r=>r.locked).length;
+const savableCount=rows.filter(r=>r.result && !r.locked).length;
 
   const handleSaveAll=async()=>{
-    if(!selectedClass) return;
-    const cid=selectedClass.classroom_id||selectedClass.id;
-    const ay=selectedClass.academic_year_id;
-    const toSave=rows.filter(r=>r.result).map(r=>({
-      student_id:r.student.student_id||r.student.id,
-      classroom_id:cid,academic_year_id:ay,
-      recorded_by:currentUser.id,term,measured_date:measuredDate,
-      weight_kg:r.result.weight_kg,height_cm:r.result.height_cm,
-      age_months:r.result.age_months,median_height:r.result.median_height,
-      median_weight_for_height:r.result.median_weight_for_height,
-      ibw_kg:r.result.ibw_kg,pct_height_for_age:r.result.pct_height_for_age,
-      pct_weight_for_height:r.result.pct_weight_for_height,
-      ha_status: r.result.ha_status.label,  // ✅ เอาแค่ label
-      wh_status: r.result.wh_status.label,  // ✅ เอาแค่ label
-    }));
-    if(toSave.length===0){setSaveMsg("⚠️ กรุณากรอกน้ำหนัก/ส่วนสูงอย่างน้อย 1 คน");return;}
-    setSaving(true);setSaveMsg("");
-    const {error}=await supabase.from("nutrition_records")
-      .upsert(toSave,{onConflict:"student_id,academic_year_id,term"});
-    setSaving(false);
-    setSaveMsg(error?`❌ ${error.message}`:`✅ บันทึกสำเร็จ ${toSave.length} คน`);
-  };
+  if(!selectedClass) return;
+  if(term2Blocked){
+    setSaveMsg("⚠️ ยังไม่มีข้อมูลครั้งที่ 1 ของห้องนี้ จึงยังประเมินครั้งที่ 2 ไม่ได้");
+    return;
+  }
+  const cid=selectedClass.classroom_id||selectedClass.id;
+  const ay=selectedClass.academic_year_id;
+  const toSave=rows.filter(r=>r.result && !r.locked).map(r=>({
+    student_id:r.student.student_id||r.student.id,
+    classroom_id:cid,academic_year_id:ay,
+    recorded_by:currentUser.id,term,measured_date:measuredDate,
+    weight_kg:r.result.weight_kg,height_cm:r.result.height_cm,
+    age_months:r.result.age_months,median_height:r.result.median_height,
+    median_weight_for_height:r.result.median_weight_for_height,
+    ibw_kg:r.result.ibw_kg,pct_height_for_age:r.result.pct_height_for_age,
+    pct_weight_for_height:r.result.pct_weight_for_height,
+    ha_status:r.result.ha_status.label,
+    wh_status:r.result.wh_status.label,
+  }));
+  if(toSave.length===0){
+    setSaveMsg("⚠️ ไม่มีข้อมูลใหม่ให้บันทึก (กรอกน้ำหนัก/ส่วนสูงอย่างน้อย 1 คน หรือแถวที่เหลือถูกล็อคอยู่)");
+    return;
+  }
+  setSaving(true); setSaveMsg("");
+  const {error}=await supabase.from("nutrition_records")
+    .upsert(toSave,{onConflict:"student_id,academic_year_id,term"});
+  setSaving(false);
+  if(error){ setSaveMsg(`❌ ${error.message}`); return; }
+
+  // อัปเดตสถานะล็อค หลังบันทึกสำเร็จเท่านั้น
+  const patch={};
+  toSave.forEach(t=>{patch[t.student_id]={student_id:t.student_id,weight_kg:t.weight_kg,height_cm:t.height_cm};});
+  setSavedCurrent(prev=>({...prev,...patch}));
+  if(term==="term1") setSavedT1(prev=>({...prev,...patch}));
+  setSaveMsg(`✅ บันทึกสำเร็จ ${toSave.length} คน`);
+};
 
   // Print report สำหรับห้องนี้
   const handlePrint=()=>{
@@ -595,7 +639,7 @@ function ClassAssessPage({currentUser}) {
             return `<tr>
               <td style="text-align:center">${r.v.seat||s.seat_number||(i+1)}</td>
               <td>${genderPrefix(s.gender, selectedClass?.room_name)} ${s.first_name} ${s.last_name}</td>
-              <td>${formatAge(s.birth_date)}</td>
+              <td>${formatAge(s.birth_date, measuredDate)}</td>
               <td>${r.result?r.result.weight_kg:"—"}</td>
               <td>${r.result?r.result.height_cm:"—"}</td>
               <td>${r.result ? r.result.median_weight_for_height : "—"}</td>
@@ -673,12 +717,32 @@ function ClassAssessPage({currentUser}) {
                 <option value="term2">🍂 ครั้งที่ 2</option>
               </select>
             </div>
-            <div style={{minWidth:140}}>
-              <label style={S.label}>วันที่วัด</label>
-              <input type="date" style={S.input} value={measuredDate} onChange={e=>setMeasuredDate(e.target.value)}/>
+                        <div style={{minWidth:140}}>
+              <label style={S.label}>วันที่ใช้คำนวณอายุ</label>
+              <div style={{...S.input,background:"#eff6ff",fontWeight:700}}>
+                {format(new Date(measuredDate),"dd/MM/yyyy")}
+              </div>
             </div>
           </div>
         </div>
+
+        {!loadingT1 && term==="term2" && (
+  <div style={{...S.card,
+    background:term2Blocked?"#fef2f2":t1Missing>0?"#fffbeb":"#f0fdf4",
+    border:`1px solid ${term2Blocked?"#fca5a5":t1Missing>0?"#fcd34d":"#86efac"}`}}>
+    {term2Blocked
+      ? <b style={{color:"#991b1b"}}>🚫 ยังประเมินครั้งที่ 2 ไม่ได้ — ห้องนี้ยังไม่มีข้อมูลครั้งที่ 1</b>
+      : t1Missing>0
+        ? <b style={{color:"#92400e"}}>⚠️ ประเมินครั้งที่ 2 ได้ · แต่ครั้งที่ 1 ยังขาด {t1Missing} คน (บันทึกแล้ว {t1Count}/{students.length})</b>
+        : <b style={{color:"#166534"}}>✅ พร้อมประเมินครั้งที่ 2 — ครั้งที่ 1 ครบ {t1Count}/{students.length} คน</b>}
+  </div>
+)}
+{term==="term1" && lockedCount>0 && (
+  <div style={{...S.card,background:"#eff6ff",border:"1px solid #bfdbfe",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+    <b style={{color:"#1e40af"}}>🔒 ล็อคค่าครั้งที่ 1 แล้ว {lockedCount} คน</b>
+    {isAdmin && <button style={S.btnSm} onClick={()=>setUnlocked(u=>!u)}>{unlocked?"🔒 ล็อคกลับ":"🔓 ปลดล็อค (admin)"}</button>}
+  </div>
+)}
 
         {/* stats */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
@@ -702,10 +766,10 @@ function ClassAssessPage({currentUser}) {
             <div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>📭 ไม่พบนักเรียนในห้องนี้</div>
           ):(
             <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:620}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:700}}>
                 <thead>
                   <tr style={{background:"linear-gradient(135deg,#1e40af,#3b82f6)"}}>
-                    {["เลขที่","ชื่อ-นามสกุล","อายุ","น้ำหนัก(กก.)","ส่วนสูง(ซม.)","ภาวะ WH","ภาวะ HA",""].map(h=>(
+                    {["เลขที่","ชื่อ-นามสกุล","อายุ","ครั้งที่ 1","น้ำหนัก(กก.)","ส่วนสูง(ซม.)","ภาวะ WH","ภาวะ HA",""].map(h=>(
                       <th key={h} style={{padding:"8px 6px",textAlign:"left",color:"#fff",fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>{h}</th>
                     ))}
                   </tr>
@@ -724,18 +788,28 @@ function ClassAssessPage({currentUser}) {
                         <td style={{padding:"6px 8px",fontWeight:600,color:isActive?"#1e40af":"#1e3a8a",whiteSpace:"nowrap",fontSize:12}}>
                           {isActive?"▶ ":""}{genderPrefix(s.gender, selectedClass?.room_name)} {s.first_name} {s.last_name}
                           {s.nick_name&&<span style={{color:"#9ca3af",fontWeight:400}}> ({s.nick_name})</span>}
+{r.locked && " 🔒"}
                         </td>
-                        <td style={{padding:"6px 8px",color:"#6b7280",whiteSpace:"nowrap",fontSize:11}}>{formatAge(s.birth_date)}</td>
-                        <td style={{padding:"4px 6px",width:95}} onClick={e=>e.stopPropagation()}>
-                          <input type="number" step="0.1" placeholder="0.0" value={r.v.weight??""}
-                            onChange={e=>setVal(r.key,"weight",e.target.value)}
-                            style={{...S.input,padding:"5px 7px",width:82,fontSize:13}}/>
-                        </td>
-                        <td style={{padding:"4px 6px",width:95}} onClick={e=>e.stopPropagation()}>
-                          <input type="number" step="0.1" placeholder="0.0" value={r.v.height??""}
-                            onChange={e=>setVal(r.key,"height",e.target.value)}
-                            style={{...S.input,padding:"5px 7px",width:82,fontSize:13}}/>
-                        </td>
+                        <td style={{padding:"6px 8px",color:"#6b7280",whiteSpace:"nowrap",fontSize:11}}>
+  {formatAge(s.birth_date, measuredDate)}
+</td>
+<td style={{padding:"6px 8px",fontSize:11,color:"#6b7280",whiteSpace:"nowrap"}}>
+  {r.t1 ? `${r.t1.weight_kg} กก. / ${r.t1.height_cm} ซม.` : "—"}
+</td>
+<td style={{padding:"4px 6px",width:95}} onClick={e=>e.stopPropagation()}>
+  <input type="number" step="0.1" placeholder="0.0" value={r.v.weight??""}
+    onChange={e=>setVal(r.key,"weight",e.target.value)}
+    disabled={r.locked || term2Blocked}
+    style={{...S.input,padding:"5px 7px",width:82,fontSize:13,
+      ...(r.locked||term2Blocked?{background:"#f1f5f9",color:"#6b7280",cursor:"not-allowed"}:{})}}/>
+</td>
+<td style={{padding:"4px 6px",width:95}} onClick={e=>e.stopPropagation()}>
+  <input type="number" step="0.1" placeholder="0.0" value={r.v.height??""}
+    onChange={e=>setVal(r.key,"height",e.target.value)}
+    disabled={r.locked || term2Blocked}
+    style={{...S.input,padding:"5px 7px",width:82,fontSize:13,
+      ...(r.locked||term2Blocked?{background:"#f1f5f9",color:"#6b7280",cursor:"not-allowed"}:{})}}/>
+</td>
                         <td style={{padding:"6px 8px"}}>
   {r.result ? <Badge status={getWHStatus(r.result.z_weight_for_height)}/> 
              : <span style={{color:"#d1d5db",fontSize:11}}>—</span>}
@@ -761,9 +835,9 @@ function ClassAssessPage({currentUser}) {
 
           {students.length>0&&(
             <div style={{marginTop:14,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-              <button onClick={handleSaveAll} disabled={saving} style={{...S.btn,opacity:saving?0.6:1}}>
-                {saving?"⏳ กำลังบันทึก...":`💾 บันทึกทั้งห้อง (${filledCount} คน)`}
-              </button>
+              <button onClick={handleSaveAll} disabled={saving||term2Blocked} style={{...S.btn,opacity:(saving||term2Blocked)?0.6:1}}>
+  {saving?"⏳ กำลังบันทึก...":`💾 บันทึกทั้งห้อง (${savableCount} คน)`}
+</button>
               {saveMsg&&(
                 <div style={{padding:"7px 14px",borderRadius:10,fontWeight:700,fontSize:13,
                   background:saveMsg.includes("✅")?"#f0fdf4":saveMsg.includes("⚠️")?"#fffbeb":"#fef2f2",
@@ -837,7 +911,7 @@ function StudentDetailPanel({student,currentResult,measuredDate,onClose,roomName
           width:28,height:28,cursor:"pointer",fontSize:14,color:"#6b7280"}}>✕</button>
       </div>
       <div style={{color:"#6b7280",fontSize:12,marginBottom:12}}>
-        {formatAge(student.birth_date)} · {student.student_code}
+        {formatAge(student.birth_date, measuredDate)} · {student.student_code}
         {student.seat_number?` · เลขที่ ${student.seat_number}`:""}
       </div>
 

@@ -6,7 +6,7 @@ export const admin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://system.khienkhet.ac.th";
+export const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://system.khienkhet.ac.th";
 // ลิงก์ที่ หน.สายใช้จัดครูสอนแทน — ปรับเป็นหน้าจริงของคุณ
 const SUBSTITUTE_URL = `${SITE}/leave`;
 
@@ -19,15 +19,25 @@ const GRADE_LABEL: Record<string, string> = {
   k2:"อ.2",k3:"อ.3",p1:"ป.1",p2:"ป.2",p3:"ป.3",p4:"ป.4",p5:"ป.5",p6:"ป.6",
   m1:"ม.1",m2:"ม.2",m3:"ม.3",m4:"ม.4",m5:"ม.5",m6:"ม.6",
 };
-const THAI_TO_CODE: Record<string, string> =
+export const THAI_TO_CODE: Record<string, string> =
   Object.fromEntries(Object.entries(GRADE_LABEL).map(([k, v]) => [v, k]));
 
 export type LeaveEvent = "submitted" | "edited" | "cancelled" | "approved" | "rejected" | "substituted" | "acknowledged";
 
+const APPROVER_NAMES: Record<1 | 2 | 3, string> = {
+  1: "นางสาวพรรษา แก้วใหญ่", 2: "นางสาวฐิติมา กาบแก้ว", 3: "นายธนณัฐ ศิระวงษ์",
+};
+type Role = "approver1" | "approver2" | "director" | "requester" | "head" | "substitute";
+type Send = { to: string; role: Role; card: any };
+type Stored = { email: string; role: Role; message_id: string };
+const approverRole = (slot: 1 | 2 | 3): Role => (slot === 3 ? "director" : slot === 1 ? "approver1" : "approver2");
+const rejectedSlot = (req: any): 1 | 2 | 3 | null =>
+  ([1, 2, 3] as const).find(s => req[`approver_${s}_status`] === "rejected") ?? null;
+
 // ───────────── helpers ─────────────
-const nm = (u: any) =>
+export const nm = (u: any) =>
   u ? `${u.title ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.replace(/\s+/g, " ").trim() : "-";
-const thDate = (iso: string) =>
+export const thDate = (iso: string) =>
   new Date(iso + "T00:00:00Z").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 function eachDate(s: string, e: string) {
   const out: string[] = [];
@@ -202,13 +212,18 @@ const subUsers = Object.fromEntries((subUsersData ?? []).map((u: any) => [u.id, 
 }
 
 // ───────────── card building blocks ─────────────
-const tb = (text: string, o: any = {}) => ({ type: "TextBlock", text, wrap: true, ...o });
-const facts = (rows: [string, string][]) => ({ type: "FactSet", facts: rows.map(([title, value]) => ({ title, value })) });
-const wrapCard = (body: any[], actions: any[] = []) => ({
+export const tb = (text: string, o: any = {}) => ({ type: "TextBlock", text, wrap: true, ...o });
+export const facts = (rows: [string, string][]) => ({ type: "FactSet", facts: rows.map(([title, value]) => ({ title, value })) });
+export const wrapCard = (body: any[], actions: any[] = [], source = "ระบบลา · โรงเรียนวัดเขียนเขต") => ({
   $schema: "http://adaptivecards.io/schemas/adaptive-card.json", type: "AdaptiveCard", version: "1.4",
-  msteams: { width: "Full" }, body, actions,
+  msteams: { width: "Full" },
+  body: [
+    { type: "TextBlock", text: source, size: "Small", weight: "Bolder", isSubtle: true, wrap: true },
+    ...body,
+  ],
+  actions,
 });
-const openUrl = (title: string, url: string, style?: string) => ({ type: "Action.OpenUrl", title, url, ...(style ? { style } : {}) });
+export const openUrl = (title: string, url: string, style?: string) => ({ type: "Action.OpenUrl", title, url, ...(style ? { style } : {}) });
 
 function periodLines(list: Period[], max = 12) {
   const rows = list.slice(0, max).map(p => {
@@ -244,84 +259,106 @@ const baseFacts = (c: Ctx, withDetail: boolean): [string, string][] => {
 };
 
 // ───────────── แต่ละบทบาท ─────────────
-function approverCard(c: Ctx, slot: 1 | 2, live: boolean) {
-  const title = !live ? "🗑️ ใบลานี้ถูกยกเลิก ไม่ต้องดำเนินการ"
-    : `${c.event === "edited" ? "✏️ (แก้ไขแล้ว) " : "⏳ "}ใบลารอคุณอนุมัติ (ลำดับ ${slot})`;
-  const body = [
-    tb(title, { weight: "Bolder", size: "Large", color: live ? "Accent" : "Attention" }),
+function approverCard(c: Ctx, slot: 1 | 2 | 3) {
+  const { req, event } = c;
+  const mine = req[`approver_${slot}_status`];
+  const rej = rejectedSlot(req);
+  const live = event !== "cancelled" && req.status === "pending" && mine === "pending" &&
+    (slot === 1 || req.approver_1_status === "approved");
+  let title: string, color: string;
+  if (event === "cancelled") { title = "🗑️ ผู้ขอยกเลิกใบลานี้แล้ว — ไม่ต้องดำเนินการ"; color = "Attention"; }
+  else if (req.status === "rejected") {
+    title = `❌ ${rej === slot ? "คุณ" : rej ? APPROVER_NAMES[rej] : "ผู้อนุมัติ"}ไม่อนุมัติใบลานี้`; color = "Attention";
+  }
+  else if (req.status === "approved") { title = mine === "approved" ? "✅ คุณอนุมัติแล้ว — ใบลาอนุมัติครบ 3 ท่าน" : "✅ ใบลาอนุมัติครบแล้ว"; color = "Good"; }
+  else if (mine === "approved") { title = `✅ คุณอนุมัติแล้ว (ลำดับ ${slot}) — รอผู้อนุมัติท่านถัดไป`; color = "Good"; }
+  else { title = `${event === "edited" ? "✏️ (แก้ไขแล้ว) " : "⏳ "}ใบลารอคุณอนุมัติ (ลำดับ ${slot})`; color = "Accent"; }
+
+  const body: any[] = [
+    tb(title, { weight: "Bolder", size: "Large", color }),
     tb(`ขั้นตอนอนุมัติ: ${c.progress}`, { weight: "Bolder" }),
     facts(baseFacts(c, true)),
-    ...(live ? [swapSummary(c.periods)] : []),
   ];
+  const reason = c.reason ?? req.reject_reason;
+  if (req.status === "rejected" && reason) body.push(tb(`เหตุผลที่ไม่อนุมัติ: ${reason}`, { color: "Attention" }));
+  if (event !== "cancelled" && req.status !== "rejected") body.push(swapSummary(c.periods));
+
   const actions: any[] = [];
   if (live) {
-    const base = `${SITE}/leave/action?id=${c.req.id}&slot=${slot}`;
+    const base = `${SITE}/leave/action?id=${req.id}&slot=${slot}`;
     actions.push(
       openUrl(`✅ อนุมัติ (ลำดับ ${slot})`, `${base}&action=approved`, "positive"),
       openUrl("❌ ไม่อนุมัติ", `${base}&action=rejected`, "destructive"),
     );
   }
-  actions.push(openUrl("เปิดในระบบ", `${SITE}/leave`));
+  if (event !== "cancelled") actions.push(openUrl("เปิดในระบบ", `${SITE}/leave`));
   return wrapCard(body, actions);
 }
 
 function requesterCard(c: Ctx) {
-  const { req, event, slot } = c;
+  const { req, event } = c;
   const final = req.status === "approved";
+  const rej = rejectedSlot(req);
+  const n = [req.approver_1_status, req.approver_2_status, req.approver_3_status].filter(s => s === "approved").length;
+  const cancelled = event === "cancelled";
+  const rejected = req.status === "rejected";
   const title =
-    event === "submitted" ? "📝 ส่งใบลาแล้ว รอผู้อนุมัติ" :
-    event === "edited" ? "✏️ แก้ไขใบลาแล้ว รอผู้อนุมัติ" :
-    event === "cancelled" ? "🗑️ ยกเลิกใบลาแล้ว" :
-    event === "rejected" ? `❌ ใบลาไม่ได้รับอนุมัติ (ลำดับ ${slot})` :
-    final ? "✅ ใบลาได้รับอนุมัติครบแล้ว" : `✅ ผู้อนุมัติลำดับ ${slot} อนุมัติแล้ว`;
-  const color = event === "rejected" || event === "cancelled" ? "Attention" : event === "approved" ? "Good" : "Accent";
+    cancelled ? "🗑️ ยกเลิกใบลาแล้ว" :
+    rejected ? `❌ ใบลาไม่ได้รับอนุมัติ${rej ? ` (โดย ${APPROVER_NAMES[rej]})` : ""}` :
+    final ? "✅ ใบลาได้รับอนุมัติครบแล้ว" :
+    n > 0 ? `✅ อนุมัติแล้ว ${n}/3 — รอผู้อนุมัติท่านถัดไป` :
+    event === "edited" ? "✏️ แก้ไขใบลาแล้ว รอผู้อนุมัติ" : "📝 ส่งใบลาแล้ว รอผู้อนุมัติ";
+  const color = cancelled || rejected ? "Attention" : final || n > 0 ? "Good" : "Accent";
   const body: any[] = [
     tb(title, { weight: "Bolder", size: "Large", color }),
     tb(`ขั้นตอนอนุมัติ: ${c.progress}`, { weight: "Bolder" }),
     facts(baseFacts(c, false)),
   ];
-  if (event === "rejected" && c.reason) body.push(tb(`เหตุผลที่ไม่อนุมัติ: ${c.reason}`, { color: "Attention" }));
-    if (event !== "cancelled" && event !== "rejected") {
-    body.push(swapSummary(c.periods));
-    body.push(...ackSummary(c.periods));
-  }
-  return wrapCard(body, event === "cancelled" ? [] : [openUrl("เปิดในระบบ", `${SITE}/leave`)]);
+  const reason = c.reason ?? req.reject_reason;
+  if (rejected && reason) body.push(tb(`เหตุผลที่ไม่อนุมัติ: ${reason}`, { color: "Attention" }));
+  if (!cancelled && !rejected) { body.push(swapSummary(c.periods)); body.push(...ackSummary(c.periods)); }
+  return wrapCard(body, cancelled ? [] : [openUrl("เปิดในระบบ", `${SITE}/leave`)]);
 }
 
 function directorCard(c: Ctx) {
+  const cancelled = c.event === "cancelled";
   return wrapCard([
-    tb("✅ ใบลาอนุมัติครบแล้ว (แจ้งให้ทราบ)", { weight: "Bolder", size: "Large", color: "Good" }),
+    tb(cancelled ? "🗑️ ผู้ขอยกเลิกใบลานี้แล้ว" : "✅ ใบลาอนุมัติครบแล้ว (แจ้งให้ทราบ)",
+      { weight: "Bolder", size: "Large", color: cancelled ? "Attention" : "Good" }),
     tb(`ขั้นตอนอนุมัติ: ${c.progress}`, { weight: "Bolder" }),
     facts(baseFacts(c, false)),
-  ], [openUrl("เปิดในระบบ", `${SITE}/leave`)]);
+  ], cancelled ? [] : [openUrl("เปิดในระบบ", `${SITE}/leave`)]);
 }
 
 function headCard(c: Ctx, head: any, list: Period[], ownSide: boolean) {
   const { event, req } = c;
   const final = req.status === "approved";
+  const cancelled = event === "cancelled";
+  const rejected = req.status === "rejected";
   const title =
-    event === "cancelled" ? "🗑️ ใบลาในสายชั้นของคุณถูกยกเลิก" :
-    event === "rejected" ? "❌ ใบลาในสายชั้นของคุณไม่ได้รับอนุมัติ" :
-    event === "approved" && final ? "✅ ใบลาในสายชั้นของคุณอนุมัติครบแล้ว" :
+    cancelled ? "🗑️ ใบลาในสายชั้นของคุณถูกยกเลิก" :
+    rejected ? "❌ ใบลาในสายชั้นของคุณไม่ได้รับอนุมัติ" :
+    final ? "✅ ใบลาในสายชั้นของคุณอนุมัติครบแล้ว" :
     event === "edited" ? "✏️ ใบลาในสายชั้นของคุณมีการแก้ไข" : "📝 มีใบลาในสายชั้นของคุณ";
-  const color = event === "cancelled" || event === "rejected" ? "Attention" : final ? "Good" : "Accent";
+  const color = cancelled || rejected ? "Attention" : final ? "Good" : "Accent";
   const body: any[] = [
     tb(title, { weight: "Bolder", size: "Large", color }),
     tb(`ขั้นตอนอนุมัติ: ${c.progress}`, { weight: "Bolder" }),
     facts(baseFacts(c, false)),
   ];
-  const live = event !== "cancelled" && event !== "rejected";
+  const live = !cancelled && !rejected;
   let miss = 0;
   if (live) {
     const scope = ownSide ? "คาบทั้งหมดของผู้ลา" : `เฉพาะคาบสายชั้น ${GRADE_LABEL[head.grade_level] ?? head.grade_level}`;
     miss = missingCount(list);
-    body.push(tb(`${scope}`, { isSubtle: true, size: "Small" }));
+    body.push(tb(scope, { isSubtle: true, size: "Small" }));
     if (list.length === 0) body.push(tb("ไม่มีคาบสอนของผู้ลาในวันที่ลา", { isSubtle: true }));
     else {
       body.push(miss > 0
         ? tb(`⚠️ ยังไม่ได้จัดสอนแทน ${miss} คาบ กรุณาจัดครูสอนแทน`, { color: "Warning", weight: "Bolder" })
         : tb("🔄 จัดครูสอนแทนครบแล้ว", { color: "Good", weight: "Bolder" }));
       body.push(...periodLines(list));
+      body.push(...ackSummary(list));          // ★ แทน ackCard เดิม
     }
   }
   return wrapCard(body, miss > 0 ? [openUrl("📂 เปิดในระบบเพื่อจัดสอนแทน", SUBSTITUTE_URL)] : []);
@@ -363,43 +400,64 @@ function ackSummary(list: Period[]) {
   ];
 }
 
-function ackCard(c: Ctx, mine: Period[], who: string) {
-  const all = c.periods.filter(p => p.subId);
-  const done = all.filter(p => p.acked).length;
-  return wrapCard([
-    tb(`✅ ${who} รับทราบการสอนแทนแล้ว`, { weight: "Bolder", size: "Large", color: "Good" }),
-    tb(`สอนแทน: ${nm(c.requester)} · ${c.dateText}`, { weight: "Bolder" }),
-    tb(`ภาพรวมรับทราบแล้ว ${done}/${all.length} คาบ`, { isSubtle: true, size: "Small" }),
-    ...mine.slice(0, 12).map(p => tb(`• ${thDate(p.date)} ${p.time} · ${p.subject} · ${p.room}`, { size: "Small", spacing: "None" })),
-  ], [openUrl("เปิดในระบบ", `${SITE}/leave`)]);
+// ───────────── ใครได้การ์ดอะไร ─────────────
+
+function headView(c: Ctx, h: any) {
+  const ownSide = !!c.requester?.grade_level && h.grade_level === c.requester.grade_level;
+  const rel = ownSide ? c.periods : c.periods.filter(p => p.gradeCode === h.grade_level);
+  return { ownSide, rel };
+}
+function periodsOfSub(c: Ctx, email: string): Period[] {
+  const u: any = Object.values(c.subUsers).find((x: any) => x.email?.toLowerCase() === email.toLowerCase());
+  return u ? c.periods.filter(p => p.subId === u.id) : [];
 }
 
-// ───────────── ใครได้การ์ดอะไร ─────────────
-function buildSends(c: Ctx) {
+// สร้างการ์ดใหม่ให้คนที่เคยได้การ์ดไปแล้ว ตามบทบาทเดิม (ใช้อัปเดตการ์ดเก่า)
+function cardForRole(c: Ctx, role: Role, email: string) {
+  switch (role) {
+    case "approver1": return approverCard(c, 1);
+    case "approver2": return approverCard(c, 2);
+    case "director": return directorCard(c);
+    case "requester": return requesterCard(c);
+    case "head": {
+      const h = c.heads.find((x: any) => x.email?.toLowerCase() === email.toLowerCase());
+      if (!h) return null;
+      const { ownSide, rel } = headView(c, h);
+      return headCard(c, h, rel, ownSide);
+    }
+    case "substitute": {
+      const list = periodsOfSub(c, email);
+      const cancel = list.length === 0 || c.event === "cancelled" || c.req.status === "rejected";
+      return substituteCard(c, list, cancel ? "cancel" : "assign");
+    }
+  }
+}
+
+function buildSends(c: Ctx): Send[] {
   const { req, event } = c;
-  const out: { to: string; card: any }[] = [];
-  const add = (to?: string | null, card?: any) => {
-    if (!to || !card) return;
-    if (out.some(o => o.to.toLowerCase() === to.toLowerCase())) return;   // 1 คนได้ 1 ใบ
-    out.push({ to, card });
-  };
+  const out: Send[] = [];
   const final = req.status === "approved";
-    // ── มีครูกดรับทราบ → แจ้งผู้ลา + หน.สายที่เกี่ยวข้อง ──
+  const add = (to: string | null | undefined, role: Role, card: any) => {
+  if (!to || !card) return;
+  if (out.some(o => o.to.toLowerCase() === to.toLowerCase())) return;   // 1 คน 1 การ์ด
+  out.push({ to, role, card });
+};
+
+  // ── ครูกดรับทราบ → อัปเดตการ์ดครูคนนั้น + ผู้ลา + หน.สายที่เกี่ยวข้อง ──
   if (event === "acknowledged") {
-    const actor = c.subUsers[c.actorId ?? ""];
-    const who = actor ? nm(actor) : "ครูสอนแทน";
     const mineAll = c.periods.filter(p => p.subId === c.actorId);
-    add(c.requester?.email, ackCard(c, mineAll, who));
+    add(c.subUsers[c.actorId ?? ""]?.email, "substitute", substituteCard(c, mineAll, "assign"));
+    add(c.requester?.email, "requester", requesterCard(c));
     for (const h of c.heads) {
       if (!h.email || !h.grade_level) continue;
-      const ownSide = !!c.requester?.grade_level && h.grade_level === c.requester.grade_level;
-      const rel = ownSide ? mineAll : mineAll.filter(p => p.gradeCode === h.grade_level);
-      if (rel.length === 0) continue;
-      add(h.email, ackCard(c, rel, who));
+      const { ownSide, rel } = headView(c, h);
+      if (!mineAll.some(p => ownSide || p.gradeCode === h.grade_level)) continue;
+      add(h.email, "head", headCard(c, h, rel, ownSide));
     }
     return out;
   }
-    // ── ครูที่ถูกจัดสอนแทน ──
+
+  // ── ครูที่ถูกจัดสอนแทน ──
   const bySub = new Map<string, Period[]>();
   c.periods.forEach(p => { if (p.subId) bySub.set(p.subId, [...(bySub.get(p.subId) ?? []), p]); });
   const subMode: "assign" | "cancel" | null =
@@ -408,53 +466,63 @@ function buildSends(c: Ctx) {
   if (subMode) {
     for (const [sid, list] of bySub) {
       const u = c.subUsers[sid];
-      // "substituted" = ส่งเฉพาะคนที่ยังไม่รับทราบ กันแจ้งซ้ำ
       if (event === "substituted" && list.every(p => p.acked)) continue;
-      add(u?.email, substituteCard(c, list, subMode));
+      add(u?.email, "substitute", substituteCard(c, list, subMode));
     }
   }
-  if (event === "substituted") return out;   // ไม่ต้องแจ้งผู้อนุมัติ/ผู้ลาซ้ำ
+  if (event === "substituted") return out;   // คนอื่นถูกรีเฟรชเงียบๆ ในขั้น stale
 
-  // ผู้อนุมัติที่ถึงคิว
+  // ── ผู้อนุมัติที่ถึงคิว ──
   let actionSlot: 1 | 2 | null = null;
   if (req.status === "pending") {
     if (req.approver_1_status === "pending") actionSlot = 1;
     else if (req.approver_1_status === "approved" && req.approver_2_status === "pending") actionSlot = 2;
   }
-  if (actionSlot) {
-    if (event === "submitted" || event === "edited" || (event === "approved" && !final))
-      add(APPROVER_EMAILS[actionSlot], approverCard(c, actionSlot, true));
-    if (event === "cancelled") add(APPROVER_EMAILS[actionSlot], approverCard(c, actionSlot, false));
-  }
+  if (actionSlot &&
+    (event === "submitted" || event === "edited" || event === "cancelled" || (event === "approved" && !final)))
+    add(APPROVER_EMAILS[actionSlot], approverRole(actionSlot), approverCard(c, actionSlot));
 
-  // ผู้ลา
-  add(c.requester?.email, requesterCard(c));
+  add(c.requester?.email, "requester", requesterCard(c));
+  if (event === "approved" && final) add(APPROVER_EMAILS[3], "director", directorCard(c));
 
-  // ผอ. เมื่ออนุมัติครบ
-  if (event === "approved" && final) add(APPROVER_EMAILS[3], directorCard(c));
-
-  // หัวหน้าสาย
   const sendHeads = event === "submitted" || event === "edited" || event === "cancelled" ||
     event === "rejected" || (event === "approved" && final);
   if (sendHeads) {
     for (const h of c.heads) {
       if (!h.email || !h.grade_level) continue;
-      const ownSide = !!c.requester?.grade_level && h.grade_level === c.requester.grade_level;
-      const rel = ownSide ? c.periods : c.periods.filter(p => p.gradeCode === h.grade_level);
-      if (!ownSide && rel.length === 0) continue;       // ไม่เกี่ยวกับสายนี้
-      add(h.email, headCard(c, h, rel, ownSide));
+      const { ownSide, rel } = headView(c, h);
+      if (!ownSide && rel.length === 0) continue;
+      add(h.email, "head", headCard(c, h, rel, ownSide));
     }
   }
   return out;
 }
 
 // ───────────── ส่ง ─────────────
-async function post(url: string, to: string, card: any) {
-  const r = await fetch(url, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ to, card }),
+async function callFlow(url: string, payload: any): Promise<{ messageId?: string } | null> {
+  try {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    if (!r.ok) { console.warn("[teams]", payload.action, payload.to, r.status); return null; }
+    return (await r.json().catch(() => ({}))) ?? {};
+  } catch (e) { console.warn("[teams] fetch error", e); return null; }
+}
+
+async function remember(leaveId: string, s: Send, messageId: string) {
+  await admin.from("leave_teams_messages").upsert({
+    leave_id: leaveId, email: s.to.toLowerCase(), role: s.role, message_id: messageId,
+    updated_at: new Date().toISOString(),
   });
-  if (!r.ok) console.warn("[teams] send failed", to, r.status);
+}
+
+async function deliver(url: string, leaveId: string, s: Send, existing?: Stored) {
+  if (existing) {
+    const r = await callFlow(url, { action: "update", to: s.to, messageId: existing.message_id, card: s.card });
+    if (r) { await remember(leaveId, s, existing.message_id); return; }   // อัปเดตการ์ดเดิมสำเร็จ
+    // อัปเดตไม่ได้ (เช่นข้อความถูกลบ) → ตกไปสร้างใหม่
+  }
+  const r = await callFlow(url, { action: "create", to: s.to, card: s.card });
+  if (r?.messageId) await remember(leaveId, s, r.messageId);
+  else console.warn("[teams] ไม่ได้รับ messageId จาก Flow — ครั้งหน้าจะสร้างการ์ดใหม่อีก", s.to);
 }
 
 export async function notifyLeaveTeams(leaveId: string, event: LeaveEvent, slot?: 1 | 2 | 3, reason?: string, actorId?: string) {
@@ -462,8 +530,23 @@ export async function notifyLeaveTeams(leaveId: string, event: LeaveEvent, slot?
   if (!url) return;
   const ctx = await loadCtx(leaveId, event, slot, reason, actorId);
   if (!ctx) return;
+
+  const { data: stored } = await admin.from("leave_teams_messages")
+    .select("email,role,message_id").eq("leave_id", leaveId);
+  const storedBy = new Map<string, Stored>((stored ?? []).map((m: any) => [m.email.toLowerCase(), m as Stored]));
+
   const sends = buildSends(ctx);
-  await Promise.allSettled(sends.map(s => post(url, s.to, s.card)));
+
+  // คนที่เคยได้การ์ดแต่ไม่อยู่ในรอบนี้ (เช่น ผู้อนุมัติลำดับ 1 หลังกดอนุมัติ) → แก้การ์ดเดิมให้เป็นสถานะล่าสุด
+  if (event !== "acknowledged") {
+    const have = new Set(sends.map(s => s.to.toLowerCase()));
+    for (const m of storedBy.values()) {
+      if (have.has(m.email.toLowerCase())) continue;
+      const card = cardForRole(ctx, m.role, m.email);
+      if (card) sends.push({ to: m.email, role: m.role, card });
+    }
+  }
+  await Promise.allSettled(sends.map(s => deliver(url, leaveId, s, storedBy.get(s.to.toLowerCase()))));
 }
 
 // ───────────── อนุมัติ/ไม่อนุมัติ ─────────────
@@ -489,7 +572,7 @@ export async function applyApproval(leaveId: string, slot: 1 | 2, action: "appro
       updates.approver_3_approved_at = now(); updates.status = "approved";
     }
   }
-  const { error } = await admin.from("leave_requests").update(updates).eq("id", leaveId);
+      const { error } = await admin.from("leave_requests").update(updates).eq("id", leaveId);
   if (error) throw new Error(error.message);
   await notifyLeaveTeams(leaveId, action === "approved" ? "approved" : "rejected", slot, reason);
   return { fullyApproved: updates.status === "approved" };

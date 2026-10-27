@@ -245,6 +245,17 @@ async function pushSubstituted(leaveId: string) {
     });
   } catch (e) { console.warn("[pushSubstituted]", e); }
 }
+async function pushSwap(swapId: string, event: "requested" | "edited" | "accepted" | "rejected" | "cancelled") {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await fetch("/api/swap-notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ swapId, event }),
+    });
+  } catch (e) { console.warn("[pushSwap]", e); }
+}
 
 // ── สายชั้น / ครูประจำชั้น helpers ────────────────────────
 function extractGradeOnly(gradeGroup?: string | null): string {
@@ -927,23 +938,21 @@ return sortTeachersByGrade(free, selectedEntry, user, entriesOn, homeroomMap);
       responded_at: null,
     }).eq("id", editingRequest!.id);
     setSaving(false);
-    if (error) { alert("❌ "+error.message); return; }
-    const targetT = allTeachers.find(t => t.id === targetId);
-    notifyTeams(targetT?.email, `✏️ ${fullName(user)} แก้ไขคำขอแลกคาบ วันที่ ${thaiDate(swapDate)} คาบ ${selectedEntry?.slot_label ?? "-"} — กรุณาตรวจสอบและตอบรับอีกครั้ง`);
+        if (error) { alert("❌ "+error.message); return; }
+    await pushSwap(editingRequest!.id, "edited");
     onSave();
     return;
   }
 
-    const { error } = await supabase.from("class_swap_requests").insert([{
-    requester_id: user.id, target_teacher_id: targetId,
-    requester_entry_id: selectedEntry!.id, target_entry_id: null,
-    swap_date: swapDate, reason: finalReason, status: "pending", academic_year_id: academicYearId,   // ★ เปลี่ยนจาก reason
-  }]);
-  setSaving(false);
-  if (error) { alert("❌ "+error.message); return; }
-  const targetT = allTeachers.find(t => t.id === targetId);
-  notifyTeams(targetT?.email, `🔄 ${fullName(user)} ขอแลกคาบกับคุณ วันที่ ${thaiDate(swapDate)} คาบ ${selectedEntry?.slot_label ?? "-"} — กรุณาเข้าไปตอบรับในระบบ`);
-  onSave();
+        const { data: ins, error } = await supabase.from("class_swap_requests").insert([{
+      requester_id: user.id, target_teacher_id: targetId,
+      requester_entry_id: selectedEntry!.id, target_entry_id: null,
+      swap_date: swapDate, reason: finalReason, status: "pending", academic_year_id: academicYearId,
+    }]).select("id").single();
+    setSaving(false);
+    if (error) { alert("❌ "+error.message); return; }
+    if (ins?.id) await pushSwap(ins.id, "requested");
+    onSave();
 };
 
   const iCls = (err?: boolean) =>
@@ -2066,29 +2075,14 @@ const [entriesData, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
   const handleSwapRespond = async (id: string, accept: boolean) => {
   const status = accept ? "accepted" : "rejected";
   await supabase.from("class_swap_requests").update({ status, responded_at: new Date().toISOString() }).eq("id", id);
-  const req = swapRequests.find(r => r.id === id);
-  if (req) {
-    notifyTeams(
-      req.requester?.email,
-      accept
-        ? `✅ คำขอแลกคาบวันที่ ${thaiDate(req.swap_date)} ของคุณได้รับการตอบรับแล้ว`
-        : `❌ คำขอแลกคาบวันที่ ${thaiDate(req.swap_date)} ของคุณถูกปฏิเสธ`
-    );
-  }
+    await pushSwap(id, accept ? "accepted" : "rejected");
   await loadData();
 };
 // ★ แอดมิน/ผอ./รองผอ. อนุมัติหรือปฏิเสธคำขอแลกคาบแทนใครก็ได้ (ไม่ต้องเป็นเจ้าของคาบ)
 const handleAdminSwapRespond = async (id: string, action: "accepted" | "rejected") => {
   if (!confirm(action === "accepted" ? "ยืนยันอนุมัติคำขอแลกคาบนี้แทนครู?" : "ยืนยันปฏิเสธคำขอแลกคาบนี้แทนครู?")) return;
   await supabase.from("class_swap_requests").update({ status: action, responded_at: new Date().toISOString() }).eq("id", id);
-  const req = swapRequests.find(r => r.id === id);
-  if (req) {
-    const msg = action === "accepted"
-      ? `✅ ผู้ดูแลระบบ (${fullName(user)}) อนุมัติคำขอแลกคาบวันที่ ${thaiDate(req.swap_date)} แทนแล้ว`
-      : `❌ ผู้ดูแลระบบ (${fullName(user)}) ปฏิเสธคำขอแลกคาบวันที่ ${thaiDate(req.swap_date)} แทนแล้ว`;
-    notifyTeams(req.requester?.email, msg);
-    notifyTeams(req.target_teacher?.email, msg);
-  }
+    await pushSwap(id, action);
   await loadData();
 };
 // ★ ลบคำขอแลกคาบที่ยกเลิกแล้วออกจาก Supabase ถาวร
@@ -2114,7 +2108,8 @@ const handleAdminSwapDeleteAny = async (id: string) => {
   // ★ FIX: ยกเลิกคำขอแลกคาบ — ลบรายการออกจากฐานข้อมูลถาวรทันที ไม่ต้องเก็บไว้เป็นประวัติ (status "cancelled") อีกต่อไป
   // ตามที่ผู้ใช้ต้องการ: กดยกเลิกแล้วให้หายไปเลย ไม่ต้องมีรายการ "ยกเลิก" ค้างให้เห็นในประวัติ
   const handleSwapCancel = async (id: string) => {
-    if (!confirm("ยืนยันการยกเลิกคำขอ? รายการนี้จะถูกลบออกจากระบบทันทีและกู้คืนไม่ได้")) return;
+        if (!confirm("ยืนยันการยกเลิกคำขอ? รายการนี้จะถูกลบออกจากระบบทันทีและกู้คืนไม่ได้")) return;
+    await pushSwap(id, "cancelled");   // ← เพิ่ม
     const { error } = await supabase.from("class_swap_requests").delete().eq("id", id);
     if (error) { alert("❌ ยกเลิกไม่สำเร็จ: " + error.message); return; }
     await loadData();
