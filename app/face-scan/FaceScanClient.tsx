@@ -472,15 +472,19 @@ export default function FaceScanPage() {
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        setIsCameraActive(true);
-        setScanStage('detecting');
-        setStatus("กำลังสแกน — มองกล้องตรง ๆ");
-        detectFaceLoop();
-      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+  video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+  audio: false,
+});
+streamRef.current = stream;
+if (videoRef.current) {
+  videoRef.current.srcObject = stream;
+  await videoRef.current.play();
+  setIsCameraActive(true);
+  setScanStage('detecting');
+  setStatus("กำลังสแกน — มองกล้องตรง ๆ");
+  detectFaceLoop();
+}
     } catch {
       setStatus("ตรวจไม่พบอุปกรณ์กล้อง");
     }
@@ -510,7 +514,9 @@ export default function FaceScanPage() {
             setStatus("บัญชีนี้ยังไม่ได้ลงทะเบียนใบหน้า กรุณาติดต่อแอดมิน");
           } else {
             const r = evaluateMatch(detection.descriptor);
-            if (r?.ok) {
+            if (!r) {
+  setStatus("ไม่พบข้อมูลใบหน้าที่ลงทะเบียนของบัญชีนี้ กรุณาติดต่อแอดมิน");
+} else if (r.ok) {
               startLivenessCheck({
                 id: uid,
                 name: userNamesRef.current[uid] || uid,
@@ -523,9 +529,12 @@ export default function FaceScanPage() {
         } else {
           setStatus("กรุณาจัดใบหน้าให้อยู่ในกรอบสแกน");
         }
-      } finally {
-        isDetectingRef.current = false;
-      }
+      } catch (e) {
+  console.error('detect error:', e);
+  setStatus("เกิดข้อผิดพลาดระหว่างสแกน: " + (e as any)?.message);
+} finally {
+  isDetectingRef.current = false;
+}
     }, 300);
   };
 
