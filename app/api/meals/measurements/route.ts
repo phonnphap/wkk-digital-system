@@ -1,6 +1,6 @@
 // app/api/meals/measurements/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { canEditRoom, getActor } from "@/lib/meals/server";
+import { STUDENTS, canEditRoom, getActor } from "@/lib/meals/server";
 
 // POST { classroomId, month, studentId, weight: number|null, height: number|null }
 export async function POST(req: NextRequest) {
@@ -19,8 +19,8 @@ export async function POST(req: NextRequest) {
 
     // ต้องเป็นนักเรียนในห้องนี้จริง
     const { data: st } = await a.service
-      .from("students").select("student_id")
-      .eq("student_id", b.studentId).eq("classroom_id", b.classroomId).maybeSingle();
+      .from(STUDENTS.table).select(STUDENTS.id)
+      .eq(STUDENTS.id, b.studentId).eq(STUDENTS.classroom, b.classroomId).maybeSingle();
     if (!st) return NextResponse.json({ error: "ไม่พบนักเรียนในห้องนี้" }, { status: 404 });
 
     const clean = (v: number | null, lo: number, hi: number) =>

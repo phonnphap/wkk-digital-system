@@ -10,17 +10,17 @@ import { planExtras, type DayInput } from "./distribute";
 // ════════════════════════════════════════════════════════════════════════════
 // ★ จุดเดียวที่ต้องปรับให้ตรงกับ schema จริงของโรงเรียน (ชื่อตาราง/คอลัมน์)
 // ════════════════════════════════════════════════════════════════════════════
-const STUDENTS = {
-  table: "students",
-  id: "student_id",
+export const STUDENTS = {
+  table: "active_students",
+  id: "id",
   classroom: "classroom_id",
-  no: "student_number", // เลขที่
+  no: "seat_number", // เลขที่
   prefix: "prefix",
   first: "first_name",
   last: "last_name",
 };
 const ATTENDANCE = {
-  table: "student_attendance", // ตารางเช็คชื่อโฮมรูมรายวัน
+  table: "homeroom_attendance", // ตารางเช็คชื่อโฮมรูมรายวัน
   student: "student_id",
   classroom: "classroom_id",
   date: "attendance_date",
@@ -99,6 +99,7 @@ async function loadStudents(a: Actor, classroomId: string): Promise<StudentRow[]
     .from(STUDENTS.table)
     .select(`id:${STUDENTS.id}, no:${STUDENTS.no}, prefix:${STUDENTS.prefix}, first:${STUDENTS.first}, last:${STUDENTS.last}`)
     .eq(STUDENTS.classroom, classroomId)
+    .eq("is_active", true)
     .order(STUDENTS.no, { ascending: true });
   if (error) throw new Error(error.message);
   return (data ?? []).map((s: any) => ({
@@ -108,11 +109,25 @@ async function loadStudents(a: Actor, classroomId: string): Promise<StudentRow[]
   }));
 }
 
-async function latestMetric(a: Actor, ids: string[], month: string, type: MealType) {
-  const col = type === "lunch" ? "weight_kg" : "height_cm";
+/** ค่าล่าสุด ≤ สิ้นเดือน: เริ่มจากหน้าประเมินโภชนาการ (nutrition_assessments) แล้วให้ค่าที่ครูกรอกในหน้านี้ (meal_month_measures) ทับ */
+async function latestValue(a: Actor, ids: string[], month: string, col: "weight_kg" | "height_cm") {
   const out: Record<string, number> = {};
   if (!ids.length) return out;
-  const rows = await fetchAll<any>((f, t) =>
+  const { end } = monthRange(month);
+  const nut = await fetchAll<any>((f, t) =>
+    a.service
+      .from("nutrition_assessments")
+      .select(`student_id, assessment_date, v:${col}`)
+      .in("student_id", ids)
+      .lte("assessment_date", end)
+      .not(col, "is", null)
+      .order("assessment_date", { ascending: false })
+      .order("student_id")
+      .range(f, t),
+  );
+  for (const r of nut) if (!(r.student_id in out)) out[r.student_id] = Number(r.v);
+
+  const mm = await fetchAll<any>((f, t) =>
     a.service
       .from("meal_month_measures")
       .select(`student_id, month, v:${col}`)
@@ -123,9 +138,12 @@ async function latestMetric(a: Actor, ids: string[], month: string, type: MealTy
       .order("student_id")
       .range(f, t),
   );
-  for (const r of rows) if (!(r.student_id in out)) out[r.student_id] = Number(r.v);
+  const seen = new Set<string>();
+  for (const r of mm) if (!seen.has(r.student_id)) { seen.add(r.student_id); out[r.student_id] = Number(r.v); }
   return out;
 }
+const latestMetric = (a: Actor, ids: string[], month: string, type: MealType) =>
+  latestValue(a, ids, month, type === "lunch" ? "weight_kg" : "height_cm");
 
 async function signedUrls(a: Actor, paths: string[]): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
@@ -237,17 +255,18 @@ export async function buildSheet(a: Actor, classroomId: string, month: string, t
   const ids = students.map((x) => x.id);
   const { start, end } = monthRange(month);
 
-  const [records, measures, sigRows, repRes] = await Promise.all([
+  const [records, weights, sigRows, repRes] = await Promise.all([
     fetchAll<any>((f, t) =>
       s.from("meal_records").select("student_id, record_date, status, extra_portions, source")
         .eq("classroom_id", classroomId).eq("meal_type", type)
         .gte("record_date", start).lte("record_date", end)
         .order("record_date").order("student_id").range(f, t)),
-    ids.length ? s.from("meal_month_measures").select("student_id, weight_kg, height_cm").eq("month", month).in("student_id", ids) : { data: [] },
+    latestValue(a, ids, month, "weight_kg"),
     ids.length ? s.from("meal_signatures").select("subject_id, storage_path").eq("subject_type", "student").in("subject_id", ids) : { data: [] },
     s.from("meal_month_reports").select("*").eq("classroom_id", classroomId).eq("month", month).eq("meal_type", type).maybeSingle(),
   ]);
   const rep = repRes.data as any;
+  const heights = await latestValue(a, ids, month, "height_cm");
 
   // ผู้ใช้ที่เกี่ยวข้อง (ครูที่ยืนยัน / เจ้าของโครงการ / ตัวเอง) + ลายมือชื่อ
   const userIds = [rep?.teacher_confirmed_by, rep?.owner_approved_by, a.profile.id].filter(Boolean) as string[];
@@ -265,14 +284,13 @@ export async function buildSheet(a: Actor, classroomId: string, month: string, t
     return r ? urls[r.storage_path] ?? null : null;
   };
 
-  const meas = new Map<string, any>((measures.data ?? []).map((m: any) => [m.student_id, m]));
   const schoolDaySet = new Set<number>();
   const dayTotals: SheetData["dayTotals"] = {};
   const rowsByStudent = new Map<string, SheetStudent>(
     students.map((st) => [st.id, {
       ...st, cells: {}, present: 0, leave: 0, absent: 0, extra: 0,
-      weight: meas.get(st.id)?.weight_kg != null ? Number(meas.get(st.id).weight_kg) : null,
-      height: meas.get(st.id)?.height_cm != null ? Number(meas.get(st.id).height_cm) : null,
+      weight: weights[st.id] ?? null,
+      height: heights[st.id] ?? null,
       signatureUrl: sigOf(sigRows.data, st.id),
     }]),
   );

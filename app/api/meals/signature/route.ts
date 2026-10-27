@@ -1,6 +1,6 @@
 // app/api/meals/signature/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { BUCKET, canEditRoom, getActor } from "@/lib/meals/server";
+import { BUCKET, STUDENTS, canEditRoom, getActor } from "@/lib/meals/server";
 
 const PREFIX = "data:image/png;base64,";
 const MAX_BYTES = 600 * 1024;
@@ -34,9 +34,9 @@ export async function POST(req: NextRequest) {
       if (subjectId !== a.profile.id) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     } else {
       const { data: st } = await a.service
-        .from("students")
-        .select("classroom_id")
-        .eq("student_id", subjectId)
+        .from(STUDENTS.table)
+        .select(`classroom_id:${STUDENTS.classroom}`)
+        .eq(STUDENTS.id, subjectId)
         .maybeSingle();
       if (!st || !canEditRoom(a, st.classroom_id)) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
