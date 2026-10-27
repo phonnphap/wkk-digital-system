@@ -205,6 +205,9 @@ function getTotalMonths(birthDate, measuredDate) {
   return Math.max(months, 0);
 }
 const getMonthsDiff = getTotalMonths;
+function gKey(gender) {
+  return genderLabel(gender) === "ชาย" ? "male" : "female";
+}
 
 function formatAge(bd, ref = new Date()) {
   const months = getTotalMonths(bd, ref);
