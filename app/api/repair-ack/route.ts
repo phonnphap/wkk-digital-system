@@ -25,6 +25,6 @@ const { data: me } = await admin.from("users").select("id,title,first_name,last_
   if (!upd?.length) return NextResponse.json({ ok: false, error: "มีผู้รับเรื่องนี้ไปแล้ว" }, { status: 409 });
 
   const name = `${me.title ?? ""}${me.first_name} ${me.last_name}`.trim();
-  await notifyRepairAcknowledged(requestId, name);
+  await notifyRepairAcknowledged(requestId, me.id, name);
   return NextResponse.json({ ok: true });
 }

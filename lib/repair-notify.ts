@@ -6,6 +6,7 @@ export const admin = createClient(
 );
 const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://system.khienkhet.ac.th";
 const BULB_CATEGORY = "เปลี่ยนหลอดไฟ";
+const NOTIFY_MEMO_EMAIL = "general@khienkhet.ac.th";
 const nm = (u: any) => u ? `${u.title ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.replace(/\s+/g, " ").trim() : "-";
 
 const tb = (text: string, o: any = {}) => ({ type: "TextBlock", text, wrap: true, ...o });
@@ -63,13 +64,57 @@ export async function notifyRepairCreated(requestId: string) {
   await Promise.allSettled(recipients.filter(u => u.email).map(u => post(u.email, card)));
 }
 
-export async function notifyRepairAcknowledged(requestId: string, actorName: string) {
+export async function notifyRepairAcknowledged(requestId: string, actorId: string, actorName: string) {
   const { data: req } = await admin.from("repair_requests")
-    .select("id,title,reporter:users!reporter_id(email)").eq("id", requestId).maybeSingle();
-  const to = (req as any)?.reporter?.email;
-  if (!to) return;
-  await post(to, wrapCard([
+    .select("*, reporter:users!reporter_id(email,title,first_name,last_name), building:buildings(name)")
+    .eq("id", requestId).maybeSingle();
+  if (!req) return;
+
+  // 1 คน = 1 การ์ด (ลำดับก่อนมีสิทธิ์ก่อน)
+  const sends = new Map<string, { to: string; card: any }>();
+  const add = (to?: string | null, card?: any) => {
+    if (!to || !card) return;
+    const k = to.toLowerCase();
+    if (!sends.has(k)) sends.set(k, { to, card });
+  };
+  const link = [openUrl("เปิดในระบบ", `${SITE}/repair`)];
+  const where = `${req.building?.name ?? "-"} ${req.room ?? ""}`.trim();
+
+  // ① ผู้แจ้ง
+  add(req.reporter?.email, wrapCard([
     tb("✅ มีผู้รับเรื่องแจ้งซ่อมของคุณแล้ว", { weight: "Bolder", size: "Large", color: "Good" }),
-    tb(`${req!.title}\nผู้รับผิดชอบ: ${actorName}`),
-  ], [openUrl("เปิดในระบบ", `${SITE}/repair`)]));
+    tb(`${req.title}\nผู้รับผิดชอบ: ${actorName}`),
+  ], link));
+
+  // ② staff ผู้ดูแลโครงการ + HR → ให้จัดทำบันทึกข้อความ
+  const memoCard = wrapCard([
+    tb("📄 มีรายการแจ้งซ่อมที่ต้องจัดทำบันทึกข้อความ", { weight: "Bolder", size: "Large", color: "Accent" }),
+    { type: "FactSet", facts: [
+      { title: "เรื่อง", value: req.title },
+      { title: "หมวดหมู่", value: req.category ?? "-" },
+      { title: "อาคาร", value: where },
+      { title: "ผู้แจ้ง", value: nm(req.reporter) },
+      { title: "ผู้รับเรื่อง", value: actorName },
+      { title: "งบโดยประมาณ", value: req.estimated_cost ? `${Number(req.estimated_cost).toLocaleString("th-TH")} บาท` : "ยังไม่ระบุ" },
+    ]},
+    tb("เข้าระบบแจ้งซ่อม → ปุ่ม 📄 บันทึกข้อความ เพื่อรวมรายการและพิมพ์", { size: "Small", isSubtle: true }),
+  ], link);
+
+  const { data: mgrs } = await admin.from("repair_project_managers").select("user_id");
+  const mgrIds = (mgrs ?? []).map((m: any) => m.user_id);
+  if (mgrIds.length) {
+    const { data: staff } = await admin.from("users").select("email").in("id", mgrIds).eq("role", "staff");
+    (staff ?? []).forEach((u: any) => add(u.email, memoCard));
+  }
+  add(NOTIFY_MEMO_EMAIL, memoCard);
+
+  // ③ ผู้รับเรื่องคนอื่นที่เคยได้การ์ดตอนแจ้งซ่อม → บอกว่ามีคนรับแล้ว
+  const takenCard = wrapCard([
+    tb("🔒 มีผู้รับเรื่องนี้แล้ว — ไม่ต้องกดรับซ้ำ", { weight: "Bolder", size: "Large", color: "Warning" }),
+    tb(`${req.title}\nรับเรื่องโดย: ${actorName}`),
+  ], link);
+  const recipients = await resolveRecipientUsers(req);
+  recipients.filter(u => u.id !== actorId).forEach(u => add(u.email, takenCard));
+
+  await Promise.allSettled([...sends.values()].map(s => post(s.to, s.card)));
 }
