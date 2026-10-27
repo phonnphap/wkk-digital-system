@@ -861,7 +861,34 @@ function MediaGridModal({ item, currentUser, isAdmin, teachers, departments, les
                 </td>
 
                 {/* คอลัมน์ข้อความ (วางได้) */}
-                {TEXT_COLS.map((c, ci) => (
+                {TEXT_COLS.map((c, ci) => {
+                  // ★ ช่องที่มีตัวเลือกตายตัวใช้ dropdown จริง (datalist จะกรองเหลือแต่ค่าที่ตรงกับที่พิมพ์/เลือกไว้)
+                  const opts: string[] | undefined =
+                    c.col === "media_type" ? MEDIA_TYPES.map(t => t.value)
+                    : c.col === "grade_level" ? GRADE_LEVELS
+                    : c.col === "status" ? STATUS_OPTIONS.map(s => s.value)
+                    : c.col === "subject" && availableSubjects.length > 0 ? availableSubjects
+                    : undefined;
+                  if (opts) {
+                    const cur = String(r[c.col]);
+                    return (
+                      <td key={c.col} className="border border-slate-200 p-0 align-middle">
+                        <select
+                          data-cell={`${ri}-${ci}`}
+                          value={cur}
+                          onChange={e => setCell(r.key, c.col, e.target.value)}
+                          title={r.error}
+                          style={{ minWidth: c.w }}
+                          className="w-full px-2 py-2.5 text-sm font-bold bg-transparent text-slate-800 focus:bg-blue-50 focus:outline-none"
+                        >
+                          <option value="">—</option>
+                          {cur && !opts.includes(cur) && <option value={cur}>{cur} (ไม่อยู่ในรายการ)</option>}
+                          {opts.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </td>
+                    );
+                  }
+                  return (
                   <td key={c.col} className="border border-slate-200 p-0 align-middle">
                     <input
                       data-cell={`${ri}-${ci}`}
@@ -876,7 +903,8 @@ function MediaGridModal({ item, currentUser, isAdmin, teachers, departments, les
                       className={`w-full px-2 py-2.5 text-sm font-bold bg-transparent text-slate-800 focus:bg-blue-50 focus:outline focus:outline-2 focus:outline-blue-400 focus:-outline-offset-2 ${r.error && ["title", "unit_no"].includes(c.col) && !r[c.col].trim() ? "bg-red-100" : ""}`}
                     />
                   </td>
-                ))}
+                  );
+                })}
 
                 {/* คลังแผน */}
                 <td className="border border-slate-200 p-0 align-middle">
