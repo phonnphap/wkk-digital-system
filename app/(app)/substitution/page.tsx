@@ -955,10 +955,9 @@ return sortTeachersByGrade(free, selectedEntry, user, entriesOn, homeroomMap);
       requester_entry_id: selectedEntry!.id, target_entry_id: null,
       swap_date: swapDate, reason: finalReason, status: "pending", academic_year_id: academicYearId,
     }]).select("id").single();
-    savingRef.current = false;
-    if (error) { alert("❌ "+error.message); return; }
-    if (ins?.id) await pushSwap(ins.id, "requested");
-    onSave();
+    if (error) { alert("❌ "+error.message); savingRef.current = false; setSaving(false); return; }
+onSave();
+if (ins?.id) pushSwap(ins.id, "requested"); // ไม่ await ให้ปิดหน้าเร็ว
 };
 
   const iCls = (err?: boolean) =>
@@ -1165,7 +1164,7 @@ function toggleMismatchExpanded(date: string) {
     const dow = dowOf(date);
     const map: Record<string, number> = {};
     for (const t of candidates) {
-      const base = computeTotalLoadForDay(t.id, dow, date, entries, subRecords);
+      const base = computeTotalLoadForDay(t.id, dow, date, entriesOn(date), subRecords);
       const extra = Object.entries(assignments).filter(([k, subId]) => subId === t.id && k.endsWith(`_${date}`)).length;
       map[t.id] = base + extra;
     }
@@ -1897,7 +1896,6 @@ export default function SubstitutionPage() {
   const [showManualAssign, setShowManualAssign] = useState(false);
   const [filterDate, setFilterDate] = useState("");
   const [filterTeacher, setFilterTeacher] = useState("");
-  const [classroomsMap, setClassroomsMap] = useState<Record<string, any>>({});
   const [subSortOrder, setSubSortOrder] = useState<"desc" | "asc">("desc"); // ★ ใหม่-เก่า (default) / เก่า-ใหม่
   const [selectedSubIds, setSelectedSubIds] = useState<Set<string>>(new Set()); // ★ รายการที่ติ๊กเลือกไว้พิมพ์
   const [swapInitialReason, setSwapInitialReason] = useState<string | undefined>(undefined);

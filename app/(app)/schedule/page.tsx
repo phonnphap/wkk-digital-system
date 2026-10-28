@@ -2361,9 +2361,11 @@ async function enableSemesterSplit(roomIds: string[]) {
   .from("classrooms").select("*").eq("id", room.id).single();
 if (fetchErr || !fullRoom) throw fetchErr ?? new Error("ไม่พบข้อมูลห้องเดิม");
 
-const { id: _omitId, created_at: _omitCreated, ...copyable } = fullRoom as any;
+const { id: _omitId, created_at: _omitCreated, join_code: _omitJoin, ...copyable } = fullRoom as any;
+const newJoinCode = Math.random().toString(36).slice(2, 8).toUpperCase();
 const { data: ins, error } = await (supabase.from("classrooms") as any).insert([{
   ...copyable,
+  join_code: newJoinCode,
   academic_year_id: otherYear.id,
   split_by_semester: true,
 }]).select("id").single();
