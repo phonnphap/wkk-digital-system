@@ -23,8 +23,7 @@ function fmtTime(iso?: string | null) {
   });
 }
 
-/** ส่งแจ้งเตือน Teams ผ่าน Workflows/Power Automate webhook (TEAMS_VISITOR_WEBHOOK_URL)
- *  ถ้าระบบลาของคุณใช้วิธีส่งอื่นอยู่แล้ว ให้ปรับเฉพาะส่วน fetch ด้านล่างให้ตรงกับของเดิม */
+/** ส่งแจ้งเตือน Teams ผ่าน Workflows/Power Automate webhook (TEAMS_VISITOR_WEBHOOK_URL) */
 export async function notifyVisitor(visitorId: string): Promise<boolean> {
   const url = process.env.TEAMS_VISITOR_WEBHOOK_URL;
   if (!url) { console.warn("[notifyVisitor] missing TEAMS_VISITOR_WEBHOOK_URL"); return false; }
@@ -33,16 +32,22 @@ export async function notifyVisitor(visitorId: string): Promise<boolean> {
   const { data: v } = await db.from("visitors").select("*").eq("id", visitorId).maybeSingle();
   if (!v) return false;
 
-  // หาครูประจำชั้นของห้องที่มาติดต่อ เพื่อ @mention
-  let mention: { name: string; email: string } | null = null;
+  // หาครูประจำชั้น "ทุกคน" ของห้องที่มาติดต่อ เพื่อ @mention
+  const mentions: { name: string; email: string }[] = [];
   if (v.target_classroom_id) {
-    const { data: room } = await db.from("classrooms")
-      .select("homeroom_teacher_id").eq("id", v.target_classroom_id).maybeSingle();
-    if (room?.homeroom_teacher_id) {
-      const { data: t } = await db.from("users")
-        .select("title,first_name,last_name,email").eq("id", room.homeroom_teacher_id).maybeSingle();
-      if (t?.email) {
-        mention = { name: `${t.title ?? ""}${t.first_name ?? ""} ${t.last_name ?? ""}`.trim(), email: t.email };
+    const { data: room } = await db.from("classrooms").select("*").eq("id", v.target_classroom_id).maybeSingle();
+    const ids = Object.entries(room ?? {})
+      .filter(([k, val]) => /^homeroom_teacher.*id/.test(k) && typeof val === "string" && val)
+      .map(([, val]) => val as string);
+    const uniq = [...new Set(ids)];
+    if (uniq.length) {
+      const { data: ts } = await db.from("users")
+        .select("id,title,first_name,last_name,email").in("id", uniq);
+      for (const t of ts ?? []) {
+        if (t.email) mentions.push({
+          name: `${t.title ?? ""}${t.first_name ?? ""} ${t.last_name ?? ""}`.trim(),
+          email: t.email,
+        });
       }
     }
   }
@@ -58,11 +63,16 @@ export async function notifyVisitor(visitorId: string): Promise<boolean> {
     { type: "TextBlock", text: "🚪 มีผู้มาติดต่อที่โรงเรียน", weight: "Bolder", size: "Large", wrap: true },
     { type: "FactSet", facts },
   ];
-  if (mention) body.push({ type: "TextBlock", text: `<at>${mention.name}</at> กรุณาทราบ`, wrap: true });
+  if (mentions.length) {
+    body.push({
+      type: "TextBlock",
+      text: `${mentions.map(m => `<at>${m.name}</at>`).join(" ")} กรุณาทราบ`,
+      wrap: true,
+    });
+  }
 
-  const ackUrl = `${process.env.NEXT_PUBLIC_SITE_URL}/api/visitors/ack?id=${v.id}&t=${signAck(v.id)}`;
-// ในการ์ด Adaptive Card เพิ่ม:
-actions: [{ type: "Action.OpenUrl", title: "✅ รับทราบ", url: ackUrl }]
+  const base = process.env.NEXT_PUBLIC_SITE_URL || "";
+  const ackUrl = `${base}/api/visitors/ack?id=${v.id}&t=${signAck(v.id)}`;
 
   const card = {
     type: "message",
@@ -72,11 +82,12 @@ actions: [{ type: "Action.OpenUrl", title: "✅ รับทราบ", url: ack
         type: "AdaptiveCard", version: "1.4",
         $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
         body,
-        msteams: mention ? {
-          entities: [{
-            type: "mention", text: `<at>${mention.name}</at>`,
-            mentioned: { id: mention.email, name: mention.name },
-          }],
+        actions: [{ type: "Action.OpenUrl", title: "✅ รับทราบ", url: ackUrl }],
+        msteams: mentions.length ? {
+          entities: mentions.map(m => ({
+            type: "mention", text: `<at>${m.name}</at>`,
+            mentioned: { id: m.email, name: m.name },
+          })),
         } : undefined,
       },
     }],

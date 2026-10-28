@@ -25,6 +25,10 @@ type Subject = {
   id: string;
   subject_code: string;
   name_th: string;
+  grading_structure?: string;
+formative_max_score?: number;
+midterm_max_score?: number;
+final_max_score?: number;
   subject_type: "basic" | "additional";
   credit_hours: number | null;
   hours_per_year: number | null;
@@ -1960,9 +1964,9 @@ const [gradeRounding, setGradeRounding] = useState<"round_up" | "truncate">(
   (subject as any)?.grade_rounding_mode ?? "truncate"
 );
   const useMidterm = true;
-  const [formativeMax, setFormativeMax] = useState(String((section as any).formative_max_score ?? 70));
-  const [midtermMax, setMidtermMax] = useState(String((section as any).midterm_max_score ?? 0));
-  const [finalMax, setFinalMax] = useState(String((section as any).final_max_score ?? 30));
+  const [formativeMax, setFormativeMax] = useState(String(subject?.formative_max_score ?? 70));
+const [midtermMax,   setMidtermMax]   = useState(String(subject?.midterm_max_score ?? 0));
+const [finalMax,     setFinalMax]     = useState(String(subject?.final_max_score ?? 30));
   const scoreSum =
     (Number(formativeMax) || 0) + (useMidterm ? (Number(midtermMax) || 0) : 0) + (Number(finalMax) || 0);
   const scoreSumInvalid = Math.abs(scoreSum - 100) > 0.01;   // ★ ต้องรวมให้ได้ 100 พอดี
@@ -1986,9 +1990,9 @@ const [selectedSemester, setSelectedSemester] = useState<1 | 2>(
     studentPortalEnabled !== (section.student_portal_enabled ?? true) ||
     studentSubmitEnabled !== ((section as any).student_submit_enabled ?? true) ||
     allowLateSubmission !== (section.allow_late_submission ?? true) ||
-    formativeMax !== String((section as any).formative_max_score ?? 70) ||
-    midtermMax !== String((section as any).midterm_max_score ?? 0) ||
-    finalMax !== String((section as any).final_max_score ?? 30) ||
+    formativeMax !== String(subject?.formative_max_score ?? 70) ||
+midtermMax   !== String(subject?.midterm_max_score ?? 0) ||
+finalMax     !== String(subject?.final_max_score ?? 30) ||
     showSpecialScores !== (section.show_special_scores ?? true) ||
     showAssignmentScores !== (section.show_assignment_scores ?? true);
     const [groupName, setGroupName] = useState("");
@@ -2164,6 +2168,13 @@ async function removeFromGroup() {
     setSaving(true);
     setError(null);
 
+    const structure = {
+  grading_structure: "formative_midterm_final",
+  formative_max_score: Number(formativeMax) || 0,
+  midterm_max_score: Number(midtermMax) || 0,
+  final_max_score: Number(finalMax) || 0,
+};
+
     const subjectUpdate = {
       subject_type: subjectType,
       credit_hours: creditHours.trim() === "" ? null : Number(creditHours),
@@ -2174,16 +2185,13 @@ async function removeFromGroup() {
       pass_threshold_percent: Math.max(0, Math.min(100, Number(passThreshold) || 50)),            // ★ เพิ่ม
       score_period_mode: scorePeriodMode,                                    // ★ เพิ่มบรรทัดนี้
   default_semester: scorePeriodMode === "semester" ? selectedSemester : null,
+  structure,
     };
     const sectionUpdate = {
   student_portal_enabled: studentPortalEnabled,
-  student_submit_enabled: studentSubmitEnabled, 
+  student_submit_enabled: studentSubmitEnabled,
   allow_late_submission: allowLateSubmission,
-  student_access_mode: studentAccessMode, // ★ เพิ่ม
-  grading_structure: "formative_midterm_final",
-  formative_max_score: Number(formativeMax) || 0,
-  midterm_max_score: Number(midtermMax) || 0,
-  final_max_score: Number(finalMax) || 0,
+  student_access_mode: studentAccessMode,
   show_special_scores: showSpecialScores,
   show_assignment_scores: showAssignmentScores,
 };
@@ -2197,7 +2205,7 @@ async function removeFromGroup() {
       if (secErr) throw secErr;
 
       onSubjectSaved(subjectUpdate);
-      onSectionSaved(sectionUpdate);
+onSectionSaved({ ...sectionUpdate, ...structure } as any);
       setSavedAt(Date.now());
     } catch (e: any) {
       setError(e?.message ?? "บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
@@ -2885,7 +2893,7 @@ setSection(sec as SectionRow);
 
 const [{ data: subj }, { data: room }] = await Promise.all([
   supabase.from("subjects")
-  .select("id, subject_code, name_th, subject_type, credit_hours, hours_per_year, score_group_code, score_group_weight_percent, grading_mode, pass_threshold_percent, score_period_mode, default_semester, grade_rounding_mode, is_archived, archived_semester")
+  .select("id, subject_code, name_th, subject_type, credit_hours, hours_per_year, score_group_code, score_group_weight_percent, grading_mode, pass_threshold_percent, score_period_mode, default_semester, grade_rounding_mode, is_archived, archived_semester, grading_structure, formative_max_score, midterm_max_score, final_max_score")
   .eq("id", subjectId).maybeSingle(),
         sec?.classroom_id
           ? supabase.from("classrooms").select("id, room_name, grade_group").eq("id", sec.classroom_id).maybeSingle()
