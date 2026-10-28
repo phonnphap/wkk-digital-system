@@ -132,6 +132,13 @@ export default function MealsPage() {
       await load(false);
     } catch (e) { setErr((e as Error).message); }
   }
+  async function clearManual() {
+    if (!confirm("ล้างช่องที่แก้ด้วยมือทั้งเดือน แล้วใช้ค่าตามเช็คชื่อโฮมรูมทั้งหมด?")) return;
+    try {
+      await post("/api/meals/sync", { classroomId, month, type, clearManual: true });
+      await load(false);
+    } catch (e) { setErr((e as Error).message); }
+  }
   async function togglePack() {
     if (!sheet || !canEdit) return;
     try {
@@ -146,6 +153,10 @@ export default function MealsPage() {
   }
 
   countRef.current = sheet?.students.length ?? 0;
+  const manualCount = useMemo(
+    () => (sheet?.students ?? []).reduce((n, st) => n + Object.values(st.cells).filter((c) => c.m).length, 0),
+    [sheet],
+  );
   const sumAll = useMemo(() => {
     const t = { present: 0, leave: 0, absent: 0, extra: 0 };
     sheet?.students.forEach((s) => { t.present += s.present; t.leave += s.leave; t.absent += s.absent; t.extra += s.extra; });
@@ -210,6 +221,11 @@ export default function MealsPage() {
             <Link href="/meals/report" className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700">
               <BarChart3 className="h-3.5 w-3.5" /> รายงานรวม
             </Link>
+          )}
+          {canEdit && manualCount > 0 && (
+            <button onClick={clearManual} className="flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-black text-amber-700">
+              ล้างช่องที่แก้เอง ({manualCount})
+            </button>
           )}
           <button onClick={() => window.print()} className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700">
             <Printer className="h-3.5 w-3.5" /> พิมพ์
@@ -305,7 +321,7 @@ export default function MealsPage() {
                       const c = st.cells[d];
                       return (
                         <td key={d} onClick={() => cycle(st, d)}
-                          className={`${td} ${school.has(d) ? "" : "bg-slate-100"} ${c && canEdit ? "cursor-pointer hover:bg-blue-50 print:hover:bg-transparent" : ""} ${c?.m ? "underline decoration-dotted" : ""} ${c?.s === "absent" ? "font-bold text-rose-600" : c?.s === "leave" ? "font-bold text-amber-600" : ""}`}>
+                          className={`${td} ${school.has(d) ? "" : "bg-slate-100"} ${c && canEdit ? "cursor-pointer hover:bg-blue-50 print:hover:bg-transparent" : ""} ${c?.m ? "bg-amber-100 ring-1 ring-inset ring-amber-400" : ""} ${c?.s === "absent" ? "font-bold text-rose-600" : c?.s === "leave" ? "font-bold text-amber-600" : ""}`}>
                           {c ? MARK[c.s] : ""}
                           {c && c.x > 0 && <sup className="font-bold text-emerald-600">+{c.x}</sup>}
                         </td>

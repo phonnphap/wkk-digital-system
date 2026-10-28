@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
       month: string;
       type: MealType;
       override?: { studentId: string; date: string; status: CellStatus | null };
+      clearManual?: boolean;
     };
     if (!body.classroomId || !/^\d{4}-\d{2}$/.test(body.month) || !["lunch", "milk"].includes(body.type)) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid date" }, { status: 400 });
     }
 
-    const result = await syncMonth(a, body.classroomId, body.month, body.type, body.override);
+    const result = await syncMonth(a, body.classroomId, body.month, body.type, body.override, { clearManual: !!body.clearManual });
     if (result.locked) {
       return NextResponse.json({ error: "รายงานเดือนนี้ยืนยันแล้ว ต้องปลดล็อกก่อนจึงจะแก้ไขได้" }, { status: 409 });
     }

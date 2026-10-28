@@ -10,8 +10,9 @@ import { planExtras, type DayInput } from "./distribute";
 // ════════════════════════════════════════════════════════════════════════════
 // ★ จุดเดียวที่ต้องปรับให้ตรงกับ schema จริงของโรงเรียน (ชื่อตาราง/คอลัมน์)
 // ════════════════════════════════════════════════════════════════════════════
+// ตารางเดียวกับหน้า /attendance (เช็คชื่อโฮมรูม): students + attendance_records
 export const STUDENTS = {
-  table: "active_students",
+  table: "students",
   id: "id",
   classroom: "classroom_id",
   no: "seat_number", // เลขที่
@@ -20,16 +21,18 @@ export const STUDENTS = {
   last: "last_name",
 };
 const ATTENDANCE = {
-  table: "homeroom_attendance", // ตารางเช็คชื่อโฮมรูมรายวัน
+  table: "attendance_records", // หน้าเช็คชื่อโฮมรูมบันทึกลงตารางนี้ (recorded_source = 'homeroom')
   student: "student_id",
   classroom: "classroom_id",
   date: "attendance_date",
   status: "status",
-  ts: "check_time", // ใช้เรียงเวลา: ถ้านักเรียนมีหลายแถวต่อวัน ให้ยึดแถวล่าสุด
+  ts: "recorded_at",
 };
-// สำรอง: ถ้า homeroom_attendance ไม่มีข้อมูลเดือนนั้น จะลองตารางนี้
-const ATTENDANCE_ALT = { table: "attendance_records", student: "student_id", classroom: "classroom_id", date: "attendance_date", status: "status", ts: "recorded_at" };
-const CLASSROOMS = { table: "classrooms", id: "classroom_id", name: "room_name" };
+// สำรอง: ถ้า attendance_records ไม่มีข้อมูลเดือนนั้น จะลองตารางนี้
+const ATTENDANCE_ALT = { table: "homeroom_attendance", student: "student_id", classroom: "classroom_id", date: "attendance_date", status: "status", ts: "check_time" };
+// ตาราง classrooms ใช้ PK ชื่อ id (ฟังก์ชัน get_my_classrooms ส่งออกเป็น classroom_id)
+const CLASSROOMS = { table: "classrooms", id: "id", name: "room_name" };
+
 const BUCKET = "student-signatures";
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -103,7 +106,7 @@ async function loadStudents(a: Actor, classroomId: string): Promise<StudentRow[]
     .from(STUDENTS.table)
     .select(`id:${STUDENTS.id}, no:${STUDENTS.no}, prefix:${STUDENTS.prefix}, first:${STUDENTS.first}, last:${STUDENTS.last}`)
     .eq(STUDENTS.classroom, classroomId)
-    .eq("is_active", true)
+    .is("moved_out_at", null)
     .order(STUDENTS.no, { ascending: true });
   if (error) throw new Error(error.message);
   return (data ?? []).map((s: any) => ({
@@ -172,13 +175,17 @@ async function academicYearName(a: Actor, date: string): Promise<string | null> 
 
 /** ครูที่ปรึกษา: classrooms.homeroom_teacher_id และ homeroom_teacher_2_id (มีกี่คนก็สร้างช่องลงชื่อเท่านั้น) */
 async function homeroomTeacherIds(a: Actor, classroomId: string): Promise<string[]> {
-  const { data } = await a.service
-    .from(CLASSROOMS.table)
-    .select("homeroom_teacher_id, homeroom_teacher_2_id")
-    .eq(CLASSROOMS.id, classroomId)
-    .maybeSingle();
-  const ids = [data?.homeroom_teacher_id, data?.homeroom_teacher_2_id].filter(Boolean) as string[];
-  return [...new Set(ids)];
+  // PK ของ classrooms น่าจะเป็น id — ถ้าไม่เจอลอง classroom_id
+  for (const pk of [CLASSROOMS.id, "classroom_id"]) {
+    const { data, error } = await a.service
+      .from(CLASSROOMS.table)
+      .select("homeroom_teacher_id, homeroom_teacher_2_id")
+      .eq(pk, classroomId)
+      .maybeSingle();
+    if (error || !data) continue;
+    return [...new Set([data.homeroom_teacher_id, data.homeroom_teacher_2_id].filter(Boolean) as string[])];
+  }
+  return [];
 }
 
 async function loadSigners(a: Actor, classroomId: string, type: MealType): Promise<SheetData["signers"]> {
@@ -187,6 +194,13 @@ async function loadSigners(a: Actor, classroomId: string, type: MealType): Promi
   let res = await a.service.from("users").select("id, title, first_name, last_name, signature_url").in("id", want);
   if (res.error) res = await a.service.from("users").select("id, first_name, last_name, signature_url").in("id", want);
   const users = (res.data ?? []) as any[];
+  // ถ้า homeroom_teacher_id เก็บเป็น auth_id ให้ลองหาจาก users.auth_id เพิ่ม
+  const missing = teacherIds.filter((id) => !users.some((u) => u.id === id));
+  if (missing.length) {
+    let r2 = await a.service.from("users").select("id, auth_id, title, first_name, last_name, signature_url").in("auth_id", missing);
+    if (r2.error) r2 = await a.service.from("users").select("id, auth_id, first_name, last_name, signature_url").in("auth_id", missing);
+    for (const u of (r2.data ?? []) as any[]) users.push({ ...u, id: u.auth_id });
+  }
   const person = (id: string, role: string) => {
     const u = users.find((x) => x.id === id);
     return {
@@ -205,12 +219,19 @@ async function loadSigners(a: Actor, classroomId: string, type: MealType): Promi
 export async function syncMonth(
   a: Actor, classroomId: string, month: string, type: MealType,
   override?: { studentId: string; date: string; status: CellStatus | null },
+  opts?: { clearManual?: boolean },
 ) {
   const s = a.service;
   const { data: rep } = await s.from("meal_month_reports").select("teacher_confirmed_at")
     .eq("classroom_id", classroomId).eq("month", month).eq("meal_type", type).maybeSingle();
   if (rep?.teacher_confirmed_at) return { locked: true };
 
+  if (opts?.clearManual) {
+    const r = monthRange(month);
+    await s.from("meal_records").delete()
+      .eq("classroom_id", classroomId).eq("meal_type", type).eq("source", "manual")
+      .gte("record_date", r.start).lte("record_date", r.end);
+  }
   if (override) {
     if (override.status) {
       await s.from("meal_records").upsert({
@@ -265,13 +286,20 @@ export async function syncMonth(
     if (st) put(r.date, r.student, st); // แถวหลังสุด (ใหม่สุด) ทับแถวก่อนหน้า
     else unmapped.add(String(r.status));
   }
+  // วันที่มีการเช็คชื่อจริง: นักเรียนที่ไม่มีแถวในวันนั้น = "มา" (ตรงกับหน้าเช็คชื่อที่ตั้งค่าเริ่มต้นเป็นมา)
+  const attDates = [...byDate.keys()];
+  const fromAtt = new Map<string, CellStatus>();
+  byDate.forEach((m, d) => m.forEach((st, sid) => fromAtt.set(`${sid}|${d}`, st)));
+
   const manualKeys = new Set<string>();
   for (const r of existing) {
-    if (r.source === "manual" && ids.includes(r.student_id)) {
-      put(r.record_date, r.student_id, r.status);
-      manualKeys.add(`${r.student_id}|${r.record_date}`);
-    }
+    const key = `${r.student_id}|${r.record_date}`;
+    if (r.source !== "manual" || !ids.includes(r.student_id)) continue;
+    if (fromAtt.get(key) === r.status) continue; // ค่าที่แก้เองตรงกับเช็คชื่อแล้ว → ใช้ค่าอัตโนมัติ
+    put(r.record_date, r.student_id, r.status);
+    manualKeys.add(key);
   }
+  for (const d of attDates) for (const sid of ids) if (!byDate.get(d)!.has(sid)) put(d, sid, "present");
 
   const days: DayInput[] = [...byDate.entries()].map(([date, m]) => ({
     date, students: [...m.entries()].map(([id, status]) => ({ id, status })),
