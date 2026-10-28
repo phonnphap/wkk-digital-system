@@ -7,14 +7,13 @@ const supabase = createClient();
 
 /* =========================================================================
    วผ.7.1 ระดับมัธยม — หน้ารายงานคะแนน (พิมพ์ได้)
-   - วิชาพื้นฐาน    : ตัวชี้วัดปลายทาง (มีคะแนน รวม/สรุป ต่อหน่วย) + ตัวชี้วัดระหว่างทาง (สรุป ผ/มผ)
+   - วิชาพื้นฐาน    : ตัวชี้วัดปลายทาง (มีคะแนน รวม/สรุป ต่อหน่วย)
+                      + ตัวชี้วัดระหว่างทาง (หัวคอลัมน์จากช่องกรอกในหน้าแก้ไขแผน, ผ/มผ รายคน
+                        ค่าเริ่มต้น = ผ่านทุกคน ครูเลือกรายคนได้)
    - วิชาเพิ่มเติม  : ผลการเรียนรู้ (ปลายทางอย่างเดียว) รวม/สรุป ต่อหน่วย
+   - หน่วย "สอบกลางภาค": ตัวชี้วัดปลายทางของข้อสอบ หารคะแนนสอบกลางภาคเท่ากันทุกข้อ
 
-   การแยก "ระหว่างทาง" / "ปลายทาง" ของวิชาพื้นฐาน (ดู indicatorKind ด้านล่าง):
-   1) ถ้าบรรทัดขึ้นต้นด้วย [ระหว่างทาง] หรือ [ปลายทาง] → ใช้ตามที่ระบุ
-   2) รหัสช่วงชั้น เช่น ม.1-3/1, ม.4-6/2        → ปลายทาง
-   3) รหัสชั้นปี เช่น ม.1/1, ม.2/3               → ระหว่างทาง
-   4) นอกนั้น                                      → ปลายทาง
+   ตารางที่ต้องสร้างใน Supabase: vp71_midway_status (ดูไฟล์ vp71_extra_tables.sql)
    ========================================================================= */
 
 type Student = { id: string; prefix?: string; first_name: string; last_name: string; seat_number: number };
@@ -42,8 +41,10 @@ type UnitLayout = {
   mid: Ind[];
   share: number; // คะแนนต่อ 1 ตัวชี้วัดปลายทาง
   groups: { standard: string; count: number }[]; // จัดกลุ่ม มฐ. (วิชาพื้นฐาน)
+  isExam?: boolean; // ★ หน่วยสอบกลางภาค (คะแนนมาจากคะแนนสอบ ไม่ใช่ชิ้นงาน)
 };
 type CellState = "none" | "pending" | "pass" | "fail";
+type MidStatus = "pass" | "fail";
 
 /* ---------- helpers ---------- */
 
@@ -94,6 +95,21 @@ function parseIndicator(raw: string, isBasic: boolean): Ind {
   return { raw, kind, standard: "", short: "-", desc: clean };
 }
 
+function groupByStandard(list: Ind[]): { standard: string; count: number }[] {
+  const groups: { standard: string; count: number }[] = [];
+  list.forEach(l => {
+    const last = groups[groups.length - 1];
+    if (last && last.standard === l.standard) last.count += 1;
+    else groups.push({ standard: l.standard, count: 1 });
+  });
+  return groups;
+}
+
+// คีย์ของตัวชี้วัดระหว่างทางที่ใช้เก็บสถานะ ผ/มผ (ถ้าครูแก้ข้อความบรรทัดนั้น สถานะที่เคยเลือกไว้จะหลุด)
+function midKey(ind: Ind): string {
+  return stripTag(ind.raw).trim();
+}
+
 const SIGNATURES = [
   { role: "ครูประจำวิชา", name: "" },
   { role: "หัวหน้ากลุ่มสาระฯ", name: "" },
@@ -106,6 +122,7 @@ const SIGNATURES = [
 export default function Vp71SecondaryReportView({
   subjectCode, subjectTitle, sectionId, students, units, isBasicSubject,
   midtermMaxScore, finalMaxScore, formativeMaxScore, classroomLabel, semester,
+  readOnly, midwayText = "", examText = "",
 }: {
   subjectCode: string;
   subjectTitle: string;
@@ -118,11 +135,16 @@ export default function Vp71SecondaryReportView({
   formativeMaxScore: number;
   classroomLabel?: string;
   semester?: number;
+  readOnly?: boolean;
+  midwayText?: string; // ★ ตัวชี้วัดระหว่างทาง (กรอกครั้งเดียวในหน้าแก้ไขแผน)
+  examText?: string;   // ★ ตัวชี้วัดของข้อสอบกลางภาค
 }) {
   const [loading, setLoading] = useState(true);
   const [assignments, setAssignments] = useState<ReportAssignment[]>([]);
   const [submissions, setSubmissions] = useState<ReportSubmission[]>([]);
   const [examScores, setExamScores] = useState<Record<string, { midterm: number | null; final: number | null }>>({});
+  // ★ สถานะตัวชี้วัดระหว่างทางรายคน key = `${studentId}|${indicatorKey}` — ไม่มีแถว = ผ่าน
+  const [midStatus, setMidStatus] = useState<Record<string, MidStatus>>({});
 
   const midtermMax = midtermMaxScore;
   const finalMax = finalMaxScore;
@@ -177,6 +199,26 @@ export default function Vp71SecondaryReportView({
     })();
   }, [sectionId]);
 
+  // ★ โหลดสถานะ ผ/มผ ของตัวชี้วัดระหว่างทาง
+  useEffect(() => {
+    if (!sectionId) return;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from("vp71_midway_status")
+          .select("student_id, indicator_key, status")
+          .eq("subject_section_id", sectionId);
+        const m: Record<string, MidStatus> = {};
+        (data ?? []).forEach((r: any) => {
+          m[`${r.student_id}|${r.indicator_key}`] = r.status === "fail" ? "fail" : "pass";
+        });
+        setMidStatus(m);
+      } catch {
+        setMidStatus({});
+      }
+    })();
+  }, [sectionId]);
+
   const subMap = useMemo(() => {
     const m = new Map<string, number | null>();
     submissions.forEach(s => m.set(`${s.assignment_id}|${s.student_id}`, s.score));
@@ -194,23 +236,50 @@ export default function Vp71SecondaryReportView({
         let mid = all.filter(l => l.kind === "mid");
         if (end.length === 0) { end = all; mid = []; } // กันหน่วยที่มีแต่ระหว่างทาง ไม่ให้คะแนนหาย
         const share = end.length > 0 ? (Number(u.score_points) || 0) / end.length : 0;
-        const groups: { standard: string; count: number }[] = [];
-        if (isBasicSubject) {
-          end.forEach(l => {
-            const last = groups[groups.length - 1];
-            if (last && last.standard === l.standard) last.count += 1;
-            else groups.push({ standard: l.standard, count: 1 });
-          });
-        }
+        const groups = isBasicSubject ? groupByStandard(end) : [];
         return { unit: u, end, mid, share, groups };
       });
   }, [units, isBasicSubject]);
 
+  // ★ หน่วยสอบกลางภาค — หารคะแนนสอบเท่ากันทุกตัวชี้วัด
+  const examLayout: UnitLayout | null = useMemo(() => {
+    const inds = linesOf(examText).map(raw => ({ ...parseIndicator(raw, isBasicSubject), kind: "end" as IndKind }));
+    if (inds.length === 0) return null;
+    return {
+      unit: { unit_no: 0, unit_name: "สอบกลางภาค", indicators: examText, learning_hours: null, score_points: midtermMax },
+      end: inds,
+      mid: [],
+      share: midtermMax / inds.length,
+      groups: isBasicSubject ? groupByStandard(inds) : [],
+      isExam: true,
+    };
+  }, [examText, isBasicSubject, midtermMax]);
+
+  const allLayouts: UnitLayout[] = useMemo(
+    () => (examLayout ? [...layouts, examLayout] : layouts),
+    [layouts, examLayout]
+  );
+
+  // ★ ตัวชี้วัดระหว่างทาง: จากช่องกรอก + (ของเดิมที่ฝังในหน่วย) ตัดซ้ำ
+  const midwayInds: Ind[] = useMemo(() => {
+    if (!isBasicSubject) return [];
+    const fromText = linesOf(midwayText).map(raw => ({ ...parseIndicator(raw, true), kind: "mid" as IndKind }));
+    const legacy = layouts.flatMap(l => l.mid);
+    const seen = new Set<string>();
+    const out: Ind[] = [];
+    [...fromText, ...legacy].forEach(i => {
+      const k = midKey(i);
+      if (!seen.has(k)) { seen.add(k); out.push(i); }
+    });
+    return out;
+  }, [midwayText, layouts, isBasicSubject]);
+  const midGroups = useMemo(() => groupByStandard(midwayInds), [midwayInds]);
+
   const sumUnitScorePoints = layouts.reduce((s, l) => s + (Number(l.unit.score_points) || 0), 0);
   const totalPossible = formativeMaxScore + midtermMax + finalMax;
   const totalHours = units.reduce((s, u) => s + (Number(u.learning_hours) || 0), 0);
-  const midColCount = isBasicSubject ? 1 : 0;
-  const endColCount = layouts.reduce((s, l) => s + l.end.length + 2, 0);
+  const midColCount = isBasicSubject ? midwayInds.length + 1 : 0; // + คอลัมน์ "สรุป"
+  const endColCount = allLayouts.reduce((s, l) => s + l.end.length + 2, 0);
   const betweenSpan = endColCount + midColCount;
   const HEADER_ROWS = isBasicSubject ? 5 : 4;
 
@@ -236,37 +305,59 @@ export default function Vp71SecondaryReportView({
     return { achieved, state: pass ? "pass" : "fail" };
   }
 
-  function midState(layout: UnitLayout, ind: Ind, studentId: string): CellState {
-    const related = assignments.filter(
-      a => a.teaching_unit_no === layout.unit.unit_no && (a.selected_indicator_lines ?? []).includes(ind.raw)
-    );
-    if (related.length === 0) return "none";
-    let sumScore = 0, sumMax = 0, anyGraded = false;
-    related.forEach(a => {
-      sumMax += a.max_score || 0;
-      const sc = subMap.get(`${a.id}|${studentId}`);
-      if (sc != null) { sumScore += sc; anyGraded = true; }
-    });
-    if (!anyGraded) return "pending";
-    return sumMax > 0 && sumScore / sumMax >= 0.5 ? "pass" : "fail";
+  function getMid(studentId: string, ind: Ind): MidStatus {
+    return midStatus[`${studentId}|${midKey(ind)}`] ?? "pass";
   }
 
-  function computeStudent(studentId: string) {
+  function computeStudent(studentId: string, midterm: number | null) {
     let sumUnits = 0;
-    const midStates: CellState[] = [];
-    const unitCells = layouts.map(l => {
+    const unitCells = allLayouts.map(l => {
+      if (l.isExam) {
+        // ★ แบ่งคะแนนสอบกลางภาคเท่ากันทุกตัวชี้วัด
+        const has = midterm != null;
+        const each = has && l.end.length > 0 ? (midterm as number) / l.end.length : 0;
+        const state: CellState = !has ? "pending" : midtermMax > 0 && (midterm as number) / midtermMax >= 0.5 ? "pass" : "fail";
+        const cells = l.end.map(() => ({ achieved: each, state }));
+        return { cells, achieved: has ? (midterm as number) : 0, verdict: !has ? "-" : state === "pass" ? "ผ" : "มผ" };
+      }
       const cells = l.end.map(ind => endCell(l, ind, studentId));
       const achieved = cells.reduce((s, c) => s + c.achieved, 0);
       const anyGraded = cells.some(c => c.state === "pass" || c.state === "fail");
       const points = Number(l.unit.score_points) || 0;
       const verdict = !anyGraded ? "-" : points > 0 && achieved / points >= 0.5 ? "ผ" : "มผ";
       sumUnits += achieved;
-      l.mid.forEach(ind => midStates.push(midState(l, ind, studentId)));
       return { cells, achieved, verdict };
     });
-    const graded = midStates.filter(s => s === "pass" || s === "fail");
-    const midVerdict = graded.length === 0 ? "-" : graded.some(s => s === "fail") ? "มผ" : "ผ";
-    return { unitCells, sumUnits, midVerdict };
+    const midVals = midwayInds.map(ind => getMid(studentId, ind));
+    const midVerdict = midwayInds.length === 0 ? "-" : midVals.some(v => v === "fail") ? "มผ" : "ผ";
+    return { unitCells, sumUnits, midVals, midVerdict };
+  }
+
+  /* ----- บันทึกสถานะตัวชี้วัดระหว่างทาง ----- */
+  async function writeMid(studentIds: string[], keys: string[], status: MidStatus) {
+    if (readOnly || !sectionId || studentIds.length === 0 || keys.length === 0) return;
+    const prev = midStatus;
+    setMidStatus(p => {
+      const n = { ...p };
+      studentIds.forEach(sid => keys.forEach(k => { n[`${sid}|${k}`] = status; }));
+      return n;
+    });
+    const rows = studentIds.flatMap(sid =>
+      keys.map(k => ({ subject_section_id: sectionId, student_id: sid, indicator_key: k, status }))
+    );
+    const { error } = await supabase
+      .from("vp71_midway_status")
+      .upsert(rows, { onConflict: "subject_section_id,student_id,indicator_key" });
+    if (error) {
+      setMidStatus(prev);
+      alert("บันทึกไม่สำเร็จ: " + error.message + "\n(ตรวจว่าสร้างตาราง vp71_midway_status แล้ว)");
+    }
+  }
+
+  function bulkMid(keys: string[], status: MidStatus) {
+    if (!students) return;
+    if (status === "fail" && !confirm("ตั้งเป็น ‘ไม่ผ่าน’ ทุกคนใช่ไหม?")) return;
+    writeMid(students.map(s => s.id), keys, status);
   }
 
   /* ----- guards ----- */
@@ -297,6 +388,23 @@ export default function Vp71SecondaryReportView({
   const dots = (s: string | number | undefined, w = "min-w-[70px]") => (
     <span className={`inline-block border-b border-dotted border-black px-1 ${w}`}>{s || "\u00A0"}</span>
   );
+  const verdictCls = (v: string) =>
+    v === "ผ" ? "text-emerald-600" : v === "มผ" ? "text-rose-500" : "text-slate-300";
+  const unitTitle = (l: UnitLayout) =>
+    l.isExam ? "สอบกลางภาค" : `หน่วยที่ ${l.unit.unit_no}${l.unit.unit_name ? ` · ${l.unit.unit_name}` : ""}`;
+
+  const renderList = (list: Ind[]) => (
+    <ul className="pl-4 list-disc space-y-0.5">
+      {list.map((ind, i) => (
+        <li key={i} className="font-bold text-slate-500">
+          <span className="text-slate-400">
+            {isBasicSubject ? `${ind.standard} ${ind.short}`.trim() : `ผลการเรียนรู้ข้อที่ ${ind.short}`}:
+          </span>{" "}
+          {ind.desc}
+        </li>
+      ))}
+    </ul>
+  );
 
   return (
     <div>
@@ -306,10 +414,25 @@ export default function Vp71SecondaryReportView({
           (กลางภาค {midtermMax} + ปลายภาค {finalMax}) · คะแนนเต็มรวม = {totalPossible} คะแนน
           {isBasicSubject && (
             <span className="ml-1 text-slate-300">
-              — ตัวชี้วัดระหว่างทางสรุปเป็น ผ/มผ ไม่นับคะแนน (ระบุประเภทด้วย [ระหว่างทาง] / [ปลายทาง] หน้าบรรทัดได้)
+              — ตัวชี้วัดระหว่างทางสรุปเป็น ผ/มผ ไม่นับคะแนน (กรอกหัวคอลัมน์ที่แท็บ "แก้ไขแผน")
             </span>
           )}
         </span>
+
+        {isBasicSubject && midwayInds.length > 0 && !readOnly && (
+          <>
+            <button
+              type="button"
+              onClick={() => bulkMid(midwayInds.map(midKey), "pass")}
+              className="px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 font-black text-[15px]"
+            >
+              ✅ ตั้งทุกคนผ่านทุกตัวชี้วัดระหว่างทาง
+            </button>
+            <span className="text-[14px] font-bold text-slate-400">
+              แล้วเลือก ‘มผ’ รายคนในช่องตาราง หรือใช้เมนูใต้หัวคอลัมน์เพื่อตั้งทั้งห้อง
+            </span>
+          </>
+        )}
       </div>
 
       <div className="vp71s-print-area">
@@ -352,20 +475,30 @@ export default function Vp71SecondaryReportView({
                 <th colSpan={endColCount} className={`${th} bg-pink-200`}>
                   {isBasicSubject ? "ตัวชี้วัดปลายทาง" : "ตัวชี้วัดปลายทาง (ผลการเรียนรู้)"}
                 </th>
-                {isBasicSubject && <th className={`${th} bg-emerald-300`}>ตัวชี้วัดระหว่างทาง</th>}
+                {isBasicSubject && <th colSpan={midColCount} className={`${th} bg-emerald-300`}>ตัวชี้วัดระหว่างทาง</th>}
               </tr>
-              {/* R3 : หน่วย */}
+              {/* R3 : หน่วย (รวมหน่วยสอบกลางภาค) */}
               <tr className="bg-yellow-100">
-                {layouts.map(l => (
-                  <th key={l.unit.unit_no} colSpan={l.end.length + 2} className={th} title={l.unit.unit_name}>
-                    หน่วยที่ {l.unit.unit_no}{l.unit.unit_name ? ` · ${l.unit.unit_name}` : ""}
+                {allLayouts.map(l => (
+                  <th
+                    key={l.unit.unit_no}
+                    colSpan={l.end.length + 2}
+                    className={`${th} ${l.isExam ? "bg-amber-100" : ""}`}
+                    title={l.unit.unit_name}
+                  >
+                    {unitTitle(l)}
+                  </th>
+                ))}
+                {isBasicSubject && midGroups.map((g, gi) => (
+                  <th key={`mg${gi}`} colSpan={g.count} rowSpan={2} className={`${th} bg-emerald-100 whitespace-nowrap`}>
+                    {g.standard ? `มฐ. ${g.standard}` : "มฐ."}
                   </th>
                 ))}
                 {isBasicSubject && <th rowSpan={3} className={`${th} bg-emerald-100`}>สรุป</th>}
               </tr>
               {/* R4 : มฐ. (พื้นฐาน) หรือ รหัส ผลการเรียนรู้ (เพิ่มเติม) */}
               <tr className="bg-yellow-100">
-                {layouts.map(l => (
+                {allLayouts.map(l => (
                   <Fragment key={l.unit.unit_no}>
                     {isBasicSubject
                       ? l.groups.map((g, gi) => (
@@ -381,15 +514,35 @@ export default function Vp71SecondaryReportView({
                   </Fragment>
                 ))}
               </tr>
-              {/* R5 : ตัวชี้วัด (พื้นฐานเท่านั้น) */}
+              {/* R5 : ตัวชี้วัด (พื้นฐานเท่านั้น) — ปลายทาง + หน่วยสอบกลางภาค + ระหว่างทาง */}
               {isBasicSubject && (
                 <tr className="bg-yellow-100">
-                  {layouts.map(l => (
+                  {allLayouts.map(l => (
                     <Fragment key={l.unit.unit_no}>
                       {l.end.map((ind, i) => (
                         <th key={`i${i}`} className={`${th} whitespace-nowrap`} title={ind.desc}>{ind.short}</th>
                       ))}
                     </Fragment>
+                  ))}
+                  {midwayInds.map((ind, i) => (
+                    <th key={`m${i}`} className={`${th} whitespace-nowrap bg-emerald-50`} title={ind.desc}>
+                      {ind.short}
+                      {!readOnly && (
+                        <select
+                          value=""
+                          onChange={e => {
+                            const v = e.target.value as MidStatus | "";
+                            if (v) bulkMid([midKey(ind)], v);
+                          }}
+                          className="print:hidden block mx-auto mt-0.5 text-[11px] font-bold border border-slate-300 rounded bg-white"
+                          title="ตั้งสถานะทั้งห้องสำหรับตัวชี้วัดนี้"
+                        >
+                          <option value="">ทุกคน…</option>
+                          <option value="pass">ผ่านทุกคน</option>
+                          <option value="fail">ไม่ผ่านทุกคน</option>
+                        </select>
+                      )}
+                    </th>
                   ))}
                 </tr>
               )}
@@ -400,13 +553,14 @@ export default function Vp71SecondaryReportView({
               <tr className="bg-yellow-50 font-black">
                 <td className={td}></td>
                 <td className={`${td} text-right pr-2`}>คะแนนเต็ม</td>
-                {layouts.map(l => (
+                {allLayouts.map(l => (
                   <Fragment key={l.unit.unit_no}>
                     {l.end.map((_, i) => <td key={i} className={td}>{fmtScore(l.share)}</td>)}
                     <td className={td}>{fmtScore(Number(l.unit.score_points) || 0)}</td>
                     <td className={td}>ผ/มผ</td>
                   </Fragment>
                 ))}
+                {isBasicSubject && midwayInds.map((_, i) => <td key={`mf${i}`} className={td}>ผ/มผ</td>)}
                 {isBasicSubject && <td className={td}>ผ/มผ</td>}
                 <td className={td}>{fmtScore(sumUnitScorePoints)}</td>
                 <td className={td}>{midtermMax}</td>
@@ -418,19 +572,17 @@ export default function Vp71SecondaryReportView({
 
               {sortedStudents.map(s => {
                 const exam = examScores[s.id] ?? { midterm: null, final: null };
-                const { unitCells, sumUnits, midVerdict } = computeStudent(s.id);
+                const { unitCells, sumUnits, midVals, midVerdict } = computeStudent(s.id, exam.midterm);
                 const midterm = exam.midterm ?? 0;
                 const total = sumUnits + midterm + (exam.final ?? 0);
                 const percent = totalPossible > 0 ? (total / totalPossible) * 100 : 0;
-                const verdictCls = (v: string) =>
-                  v === "ผ" ? "text-emerald-600" : v === "มผ" ? "text-rose-500" : "text-slate-300";
                 return (
                   <tr key={s.id} className="hover:bg-slate-50">
                     <td className={`${td} font-bold whitespace-nowrap`}>{s.seat_number}</td>
                     <td className="border border-slate-300 px-2 py-1 font-bold whitespace-nowrap">
                       {s.prefix ?? ""}{s.first_name} {s.last_name}
                     </td>
-                    {layouts.map((l, li) => (
+                    {allLayouts.map((l, li) => (
                       <Fragment key={l.unit.unit_no}>
                         {unitCells[li].cells.map((c, i) => (
                           <td
@@ -444,7 +596,33 @@ export default function Vp71SecondaryReportView({
                         <td className={`${td} ${verdictCls(unitCells[li].verdict)}`}>{unitCells[li].verdict}</td>
                       </Fragment>
                     ))}
+
+                    {/* ★ ตัวชี้วัดระหว่างทางรายตัว: เลือก ผ/มผ ได้ (ค่าเริ่มต้น ผ) */}
+                    {isBasicSubject && midwayInds.map((ind, mi) => {
+                      const st = midVals[mi];
+                      const label = st === "pass" ? "ผ" : "มผ";
+                      return (
+                        <td key={`mc${mi}`} className={`${td} ${verdictCls(label)}`}>
+                          {readOnly ? (
+                            label
+                          ) : (
+                            <>
+                              <select
+                                value={st}
+                                onChange={e => writeMid([s.id], [midKey(ind)], e.target.value as MidStatus)}
+                                className="print:hidden bg-transparent font-black text-center cursor-pointer"
+                              >
+                                <option value="pass">ผ</option>
+                                <option value="fail">มผ</option>
+                              </select>
+                              <span className="hidden print:inline">{label}</span>
+                            </>
+                          )}
+                        </td>
+                      );
+                    })}
                     {isBasicSubject && <td className={`${td} ${verdictCls(midVerdict)}`}>{midVerdict}</td>}
+
                     <td className={td}>{sumUnitScorePoints ? fmtScore(sumUnits) : "-"}</td>
                     <td className={td}>{exam.midterm ?? "-"}</td>
                     <td className={td}>{fmtScore(sumUnits + midterm)}</td>
@@ -463,43 +641,39 @@ export default function Vp71SecondaryReportView({
           <p className="font-black text-slate-600">
             คำอธิบาย{isBasicSubject ? "ตัวชี้วัด" : "ผลการเรียนรู้"}
           </p>
-          {layouts.map(l => {
-            const renderList = (list: Ind[]) => (
-              <ul className="pl-4 list-disc space-y-0.5">
-                {list.map((ind, i) => (
-                  <li key={i} className="font-bold text-slate-500">
-                    <span className="text-slate-400">
-                      {isBasicSubject ? `${ind.standard} ${ind.short}`.trim() : `ผลการเรียนรู้ข้อที่ ${ind.short}`}:
-                    </span>{" "}
-                    {ind.desc}
-                  </li>
-                ))}
-              </ul>
-            );
-            return (
-              <div key={l.unit.unit_no}>
-                <p className="font-black text-slate-500">หน่วยที่ {l.unit.unit_no} {l.unit.unit_name}</p>
-                {isBasicSubject ? (
-                  <>
-                    {l.end.length > 0 && (
-                      <>
-                        <p className="font-black text-pink-500 text-[15px]">ตัวชี้วัดปลายทาง</p>
-                        {renderList(l.end)}
-                      </>
-                    )}
-                    {l.mid.length > 0 && (
-                      <>
-                        <p className="font-black text-emerald-600 text-[15px] mt-1">ตัวชี้วัดระหว่างทาง</p>
-                        {renderList(l.mid)}
-                      </>
-                    )}
-                  </>
-                ) : (
-                  renderList(l.end)
-                )}
-              </div>
-            );
-          })}
+          {layouts.map(l => (
+            <div key={l.unit.unit_no}>
+              <p className="font-black text-slate-500">หน่วยที่ {l.unit.unit_no} {l.unit.unit_name}</p>
+              {isBasicSubject ? (
+                <>
+                  {l.end.length > 0 && (
+                    <>
+                      <p className="font-black text-pink-500 text-[15px]">ตัวชี้วัดปลายทาง</p>
+                      {renderList(l.end)}
+                    </>
+                  )}
+                </>
+              ) : (
+                renderList(l.end)
+              )}
+            </div>
+          ))}
+
+          {examLayout && (
+            <div>
+              <p className="font-black text-slate-500">
+                สอบกลางภาค ({fmtScore(midtermMax)} คะแนน หารเท่ากันข้อละ {fmtScore(examLayout.share)})
+              </p>
+              {renderList(examLayout.end)}
+            </div>
+          )}
+
+          {isBasicSubject && midwayInds.length > 0 && (
+            <div>
+              <p className="font-black text-emerald-600">ตัวชี้วัดระหว่างทาง</p>
+              {renderList(midwayInds)}
+            </div>
+          )}
         </div>
 
         {/* ===== ลายเซ็น ===== */}

@@ -11,7 +11,7 @@ const supabase = createClient();
    ========================================================================= */
 
 type Unit = {
-  _key: string;               // ★★★ NEW — id ฝั่ง client เท่านั้น ใช้ผูก state/DOM ไม่ส่งขึ้น backend
+  _key: string;               // id ฝั่ง client เท่านั้น ใช้ผูก state/DOM ไม่ส่งขึ้น backend
   unit_no: number;
   unit_name: string;
   indicators: string;
@@ -20,18 +20,15 @@ type Unit = {
   note: string | null;
 };
 
-// ★★★ NEW — หน่วยที่ merge มาแสดงรวมกันในตาราง (อาจมาจากวิชาตัวเอง หรือวิชาอื่นในกลุ่มคะแนน)
 type CombinedUnit = Unit & {
   source_subject_id: string;
   source_subject_code: string;
   source_subject_name: string;
-  editable: boolean; // true = วิชาตัวเอง แก้ไขได้ / false = วิชาอื่นในกลุ่ม แสดงอย่างเดียว
+  editable: boolean;
 };
 
-// ★★★ NEW — รายการตัวชี้วัด/ผลการเรียนรู้ในคลังหลักสูตรของวิชา (ต้องเช็คชื่อคอลัมน์จริงกับ schema)
 type IndicatorBankItem = { id: string; code: string; description: string; unit_id: string };
 
-// ★ ข้อมูลชิ้นงานที่ผูกหน่วยนี้ + น้ำหนักคะแนนที่คำนวณอัตโนมัติ
 type UnitLinkedAssignment = {
   id: string;
   title: string;
@@ -42,7 +39,6 @@ type UnitLinkedAssignment = {
 };
 type UnitScoreInfo = { totalMaxScore: number; scorePoints: number; assignments: UnitLinkedAssignment[] };
 
-// ★★ NEW — สำหรับหน้ารายงานคะแนน นร.ทั้งหมด
 type Student = { id: string; prefix?: string; first_name: string; last_name: string; seat_number: number };
 type ReportAssignment = {
   id: string;
@@ -53,8 +49,10 @@ type ReportAssignment = {
 };
 type ReportSubmission = { assignment_id: string; student_id: string; score: number | null; status: string };
 
+// ★★★ NEW — ตัวชี้วัดเสริมของวผ.7.1 (เก็บในตาราง vp71_extra_indicators ดูไฟล์ vp71_extra_tables.sql)
+type ExtraKind = "midway" | "midterm_exam";
+
 function makeKey(): string {
-  // ★★★ NEW — เผื่อ browser เก่าที่ไม่มี crypto.randomUUID
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
@@ -67,7 +65,6 @@ function fmtScore(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
-// ★ เกณฑ์ระดับผลการเรียน 0–4 มาตรฐาน (ปรับได้ตามโรงเรียน)
 function gradeLevel(percent: number): string {
   if (percent >= 80) return "4";
   if (percent >= 75) return "3.5";
@@ -91,9 +88,6 @@ function indicatorTextOnly(line: string): string {
   return line.replace(/^\d+\s*/, "");
 }
 
-// ★★★ NEW — ดึง "รหัส" ของตัวชี้วัด/ผลการเรียนรู้
-// วิชาพื้นฐาน (เช่น "ว 4.2 ป.5/1 การพัฒนาทักษะ...") → รหัสคือ "ว 4.2 ป.5/1" (token ที่มี "/" รวมด้วย)
-// วิชาเพิ่มเติม (เช่น "1 ผลการเรียนรู้...") → รหัสคือเลขนำหน้า "1" (เหมือนเดิม)
 function indicatorCodeOf(line: string, isBasicSubject: boolean): string {
   if (isBasicSubject) {
     const slashIdx = line.indexOf("/");
@@ -108,7 +102,6 @@ function indicatorCodeOf(line: string, isBasicSubject: boolean): string {
   return match ? match[1] : "-";
 }
 
-// ★★★ NEW — ดึงเนื้อความคำอธิบาย โดยตัด "รหัส" ที่หาได้ออกจากหน้าบรรทัด
 function indicatorTextAfterCode(line: string, code: string): string {
   if (code !== "-" && line.startsWith(code)) {
     return line.slice(code.length).trim();
@@ -123,9 +116,9 @@ export default function Vp71Tool({
   midtermMaxScore = 0,
   finalMaxScore = 0,
   formativeMaxScore = 0,
-  level = "primary",      
-  classroomLabel,         
-  semester, 
+  level = "primary",
+  classroomLabel,
+  semester,
 }: {
   subjectId: string;
   academicYearId?: string | null;
@@ -140,9 +133,9 @@ export default function Vp71Tool({
   midtermMaxScore?: number;
   finalMaxScore?: number;
   formativeMaxScore?: number;
-  level?: "primary" | "secondary";   
-  classroomLabel?: string;           
-  semester?: number;  
+  level?: "primary" | "secondary";
+  classroomLabel?: string;
+  semester?: number;
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -169,23 +162,70 @@ export default function Vp71Tool({
   const indicatorLabel = resolvedSubjectType === "additional" ? "ผลการเรียนรู้" : "ตัวชี้วัด";
   const indicatorAbbr = resolvedSubjectType === "additional" ? "ผช." : "ตช.";
   const indicatorItemLabel = resolvedSubjectType === "additional" ? "ผลการเรียนรู้" : "ตัวชี้วัด";
-  const isBasicSubject = resolvedSubjectType !== "additional"; 
+  const isBasicSubject = resolvedSubjectType !== "additional";
 
-  // ★★★ NEW — คลังตัวชี้วัดของวิชานี้ (สำหรับปุ่ม "เลือกจากคลัง")
-  // หมายเหตุ: ชื่อคอลัมน์ code/description เป็นการสมมติ — เช็ค schema จริงของ learning_indicators ก่อนใช้งาน
+  // ★★★ NEW — มัธยม + วิชาพื้นฐาน เท่านั้นที่มี "ตัวชี้วัดระหว่างทาง"
+  const showMidway = level === "secondary" && isBasicSubject;
+  const examLabel = showMidway ? "ตัวชี้วัดปลายทาง" : indicatorItemLabel;
+
+  // ★★★ NEW — ตัวชี้วัดระหว่างทาง (กรอกครั้งเดียวใช้ทุกหน่วย) + ตัวชี้วัดของข้อสอบกลางภาค
+  const [midwayText, setMidwayText] = useState("");
+  const [examText, setExamText] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        let q = supabase
+          .from("vp71_extra_indicators")
+          .select("kind, indicators")
+          .eq("subject_id", subjectId);
+        q = academicYearId ? q.eq("academic_year_id", academicYearId) : q.is("academic_year_id", null);
+        const { data } = await q;
+        if (!active) return;
+        const rows = (data ?? []) as { kind: ExtraKind; indicators: string }[];
+        setMidwayText(rows.find(r => r.kind === "midway")?.indicators ?? "");
+        setExamText(rows.find(r => r.kind === "midterm_exam")?.indicators ?? "");
+      } catch {
+        if (active) { setMidwayText(""); setExamText(""); }
+      }
+    })();
+    return () => { active = false; };
+  }, [subjectId, academicYearId]);
+
+  async function saveExtra(kind: ExtraKind, text: string) {
+    let find = supabase
+      .from("vp71_extra_indicators")
+      .select("id")
+      .eq("subject_id", subjectId)
+      .eq("kind", kind);
+    find = academicYearId ? find.eq("academic_year_id", academicYearId) : find.is("academic_year_id", null);
+    const { data: existing } = await find.maybeSingle();
+    const payload = { indicators: text, updated_by: currentUserId || null, updated_at: new Date().toISOString() };
+    if (existing?.id) {
+      const { error } = await supabase.from("vp71_extra_indicators").update(payload).eq("id", existing.id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("vp71_extra_indicators").insert({
+        subject_id: subjectId, academic_year_id: academicYearId ?? null, kind, ...payload,
+      });
+      if (error) throw error;
+    }
+  }
+
   const [indicatorBank, setIndicatorBank] = useState<IndicatorBankItem[]>([]);
   useEffect(() => {
     let active = true;
     (async () => {
       try {
         const { data } = await supabase
-  .from("learning_indicators")
-  .select("id, indicator_code, indicator_text, unit_id")
-  .eq("subject_id", subjectId)
-  .order("order_index");
-if (active) setIndicatorBank(
-  (data ?? []).map((d: any) => ({ id: d.id, code: d.indicator_code ?? "", description: d.indicator_text, unit_id: d.unit_id }))
-);
+          .from("learning_indicators")
+          .select("id, indicator_code, indicator_text, unit_id")
+          .eq("subject_id", subjectId)
+          .order("order_index");
+        if (active) setIndicatorBank(
+          (data ?? []).map((d: any) => ({ id: d.id, code: d.indicator_code ?? "", description: d.indicator_text, unit_id: d.unit_id }))
+        );
       } catch {
         if (active) setIndicatorBank([]);
       }
@@ -193,7 +233,6 @@ if (active) setIndicatorBank(
     return () => { active = false; };
   }, [subjectId]);
 
-  // ★★★ NEW — วิชาอื่นที่รวมกลุ่มคะแนนเดียวกัน + หน่วยการเรียนรู้ของวิชาเหล่านั้น (อ่านอย่างเดียว)
   const [groupMembers, setGroupMembers] = useState<{ id: string; subject_code: string; name_th: string }[]>([]);
   const [otherGroupUnits, setOtherGroupUnits] = useState<CombinedUnit[]>([]);
   const [loadingGroupUnits, setLoadingGroupUnits] = useState(false);
@@ -245,7 +284,6 @@ if (active) setIndicatorBank(
     return () => { active = false; };
   }, [subjectId, academicYearId]);
 
-  // ★★★ NEW — รวมหน่วยของตัวเอง + วิชาอื่นในกลุ่ม เรียงตามเลขที่หน่วยจากน้อยไปมาก
   const combinedUnits: CombinedUnit[] = useMemo(() => {
     const own: CombinedUnit[] = units.map(u => ({
       ...u,
@@ -259,7 +297,6 @@ if (active) setIndicatorBank(
     );
   }, [units, otherGroupUnits, subjectId, subjectCode, subjectTitle]);
 
-  // ★★★ NEW — เช็คเลขหน่วยซ้ำ (ภายในวิชาตัวเอง / ข้ามวิชาในกลุ่ม)
   const ownDuplicateNos = useMemo(() => {
     const counts: Record<number, number> = {};
     units.forEach(u => { counts[u.unit_no] = (counts[u.unit_no] || 0) + 1; });
@@ -346,7 +383,6 @@ if (active) setIndicatorBank(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subjectId, academicYearId, view]);
 
-  // ★★★ CHANGED — updateUnit/removeUnit ทำงานผ่าน _key แทน index ของแถว (เพราะตอนนี้เรียงตามเลขหน่วย ไม่ใช่ลำดับ array)
   function updateUnit(key: string, field: keyof Unit, value: any) {
     setUnits(prev => prev.map(u => (u._key === key ? { ...u, [field]: value } : u)));
   }
@@ -357,7 +393,6 @@ if (active) setIndicatorBank(
     });
   }
   function removeUnit(key: string) {
-    // ★★★ CHANGED — ไม่ renumber หน่วยที่เหลืออัตโนมัติอีกต่อไป เพราะเลขหน่วยตอนนี้ครูเลือกเองมีความหมาย
     setUnits(prev => prev.filter(u => u._key !== key));
   }
 
@@ -378,12 +413,21 @@ if (active) setIndicatorBank(
         body: JSON.stringify({
           subject_id: subjectId,
           academic_year_id: academicYearId ?? null,
-          rows: units.map(({ _key, ...rest }) => rest), // ★★★ CHANGED — ตัด _key (client-only) ก่อนส่งขึ้น backend
+          rows: units.map(({ _key, ...rest }) => rest),
           updated_by: currentUserId || null,
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "บันทึกไม่สำเร็จ");
+
+      // ★★★ NEW — บันทึกตัวชี้วัดระหว่างทาง + ตัวชี้วัดข้อสอบกลางภาค
+      try {
+        await saveExtra("midterm_exam", examText);
+        if (showMidway) await saveExtra("midway", midwayText);
+      } catch (e: any) {
+        throw new Error("บันทึกตัวชี้วัดสอบกลางภาค/ระหว่างทางไม่สำเร็จ (ตรวจว่าสร้างตาราง vp71_extra_indicators แล้ว): " + (e?.message ?? ""));
+      }
+
       setSavedAt(Date.now());
       loadUnitScores();
     } catch (e: any) {
@@ -474,16 +518,26 @@ if (active) setIndicatorBank(
           indicatorItemLabel={indicatorItemLabel}
           onUnlinkAssignment={handleUnlinkAssignment}
           onDeleteAssignment={handleDeleteLinkedAssignment}
+          showMidway={showMidway}
+          midwayText={midwayText}
+          setMidwayText={setMidwayText}
+          examText={examText}
+          setExamText={setExamText}
+          examLabel={examLabel}
+          midtermMaxScore={midtermMaxScore}
         />
       ) : level === "secondary" ? (
-  <Vp71SecondaryReportView
-    subjectCode={subjectCode} subjectTitle={subjectTitle}
-    sectionId={sectionId} students={students} units={units}
-    isBasicSubject={isBasicSubject}
-    midtermMaxScore={midtermMaxScore} finalMaxScore={finalMaxScore} formativeMaxScore={formativeMaxScore}
-    classroomLabel={classroomLabel} semester={semester}
-  />
-) : (
+        <Vp71SecondaryReportView
+          subjectCode={subjectCode} subjectTitle={subjectTitle}
+          sectionId={sectionId} students={students} units={units}
+          isBasicSubject={isBasicSubject}
+          midtermMaxScore={midtermMaxScore} finalMaxScore={finalMaxScore} formativeMaxScore={formativeMaxScore}
+          classroomLabel={classroomLabel} semester={semester}
+          readOnly={readOnly}
+          midwayText={midwayText}
+          examText={examText}
+        />
+      ) : (
         <ReportView
           subjectId={subjectId}
           subjectCode={subjectCode}
@@ -501,6 +555,7 @@ if (active) setIndicatorBank(
           midtermMaxScore={midtermMaxScore}
           finalMaxScore={finalMaxScore}
           formativeMaxScore={formativeMaxScore}
+          examText={examText}
         />
       )}
     </div>
@@ -508,7 +563,7 @@ if (active) setIndicatorBank(
 }
 
 /* =========================================================================
-   ★★★ NEW — ป๊อปอัพเลือกตัวชี้วัด/ผลการเรียนรู้จากคลังหลักสูตร
+   ป๊อปอัพเลือกตัวชี้วัด/ผลการเรียนรู้จากคลังหลักสูตร
    ========================================================================= */
 
 function IndicatorPickerModal({
@@ -524,7 +579,8 @@ function IndicatorPickerModal({
     [currentText]
   );
   const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(bank.filter(b => existingLines.some(l => l.startsWith(b.code))).map(b => b.id))
+    // ★ FIX — ถ้า code ว่าง ห้าม startsWith("") (จะติ๊กทุกข้อ)
+    () => new Set(bank.filter(b => b.code && existingLines.some(l => l.startsWith(b.code))).map(b => b.id))
   );
   const [q, setQ] = useState("");
   const filtered = bank.filter(b => (b.code + " " + b.description).toLowerCase().includes(q.toLowerCase()));
@@ -579,7 +635,51 @@ function IndicatorPickerModal({
 }
 
 /* =========================================================================
-   หน้าแก้ไขแผน — ★★★ CHANGED ทั้งหมด: รองรับเลือกเลขหน่วยเอง + คลังตัวชี้วัด + รวมกลุ่มวิชา
+   ★★★ NEW — การ์ดกรอกตัวชี้วัดเสริม (ระหว่างทาง / ข้อสอบกลางภาค)
+   ========================================================================= */
+
+function ExtraIndicatorCard({
+  title, hint, value, onChange, placeholder, readOnly, bank, tone,
+}: {
+  title: string;
+  hint: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  readOnly?: boolean;
+  bank: IndicatorBankItem[];
+  tone: "emerald" | "amber";
+}) {
+  const [open, setOpen] = useState(false);
+  const border = tone === "emerald" ? "border-emerald-200 bg-emerald-50/30" : "border-amber-200 bg-amber-50/30";
+  return (
+    <div className={`rounded-2xl border-2 ${border} p-4 space-y-2 print:hidden`}>
+      <p className="font-black text-slate-700 text-m">{title}</p>
+      <p className="text-[14px] font-bold text-slate-400">{hint}</p>
+      <textarea
+        value={value} disabled={readOnly} rows={3}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full border-2 border-slate-200 rounded-lg px-2 py-1.5 font-bold resize-y bg-white disabled:bg-slate-50"
+      />
+      {!readOnly && bank.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-[12px]"
+        >
+          📚 เลือกจากคลังตัวชี้วัด
+        </button>
+      )}
+      {open && (
+        <IndicatorPickerModal bank={bank} currentText={value} onClose={() => setOpen(false)} onApply={onChange} />
+      )}
+    </div>
+  );
+}
+
+/* =========================================================================
+   หน้าแก้ไขแผน
    ========================================================================= */
 function EditPlanView({
   loading, combinedUnits, groupMembers, loadingGroupUnits, indicatorBank,
@@ -587,6 +687,7 @@ function EditPlanView({
   unitScores, loadingUnitScores, expandedUnit, setExpandedUnit,
   readOnly, updateUnit, removeUnit, addUnit, totalHours, totalScore, indicatorItemLabel,
   onUnlinkAssignment, onDeleteAssignment,
+  showMidway, midwayText, setMidwayText, examText, setExamText, examLabel, midtermMaxScore,
 }: {
   loading: boolean;
   combinedUnits: CombinedUnit[];
@@ -608,6 +709,13 @@ function EditPlanView({
   indicatorItemLabel: string;
   onUnlinkAssignment: (assignmentIds: string[]) => void;
   onDeleteAssignment: (assignmentIds: string[], title: string) => void;
+  showMidway: boolean;
+  midwayText: string;
+  setMidwayText: (v: string) => void;
+  examText: string;
+  setExamText: (v: string) => void;
+  examLabel: string;
+  midtermMaxScore: number;
 }) {
   const [pickerForKey, setPickerForKey] = useState<string | null>(null);
   const pickerUnit = combinedUnits.find(u => u._key === pickerForKey) ?? null;
@@ -616,9 +724,13 @@ function EditPlanView({
     return <div className="text-center py-16 text-slate-300 font-bold text-base">กำลังโหลด...</div>;
   }
 
+  const examCount = examText.split("\n").map(s => s.trim()).filter(Boolean).length;
+  const examHint = examCount > 0
+    ? `คะแนนสอบกลางภาค ${fmtScore(midtermMaxScore)} ÷ ${examCount} ข้อ = ข้อละ ${fmtScore(midtermMaxScore / examCount)} คะแนน (ระบบหารให้อัตโนมัติ นำไปแสดงเป็นหัวคอลัมน์ในหน้ารายงาน)`
+    : `ใส่${examLabel}ที่ข้อสอบกลางภาคครอบคลุม (พิมพ์ 1 บรรทัดต่อ 1 ข้อ) ระบบจะหารคะแนนสอบกลางภาคให้เท่ากันทุกข้อ`;
+
   return (
     <>
-      {/* ★★★ NEW — แบนเนอร์บอกว่าวิชานี้รวมกลุ่มคะแนนกับใคร */}
       {groupMembers.length > 0 && (
         <div className="rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/50 px-4 py-3 text-m font-bold text-indigo-700">
           🔗 วิชานี้รวมกลุ่มคะแนนกับ: {groupMembers.map(m => `${m.subject_code} ${m.name_th}`).join(", ")}
@@ -854,6 +966,32 @@ function EditPlanView({
         </button>
       )}
 
+      {/* ★★★ NEW — หน่วยสอบกลางภาค: ใส่ตัวชี้วัด แล้วหารคะแนนสอบกลางภาคเท่ากันทุกข้อ */}
+      <ExtraIndicatorCard
+        tone="amber"
+        title={`📝 สอบกลางภาค — ${examLabel}ที่ใช้สอบ`}
+        hint={examHint}
+        value={examText}
+        onChange={setExamText}
+        placeholder={"เช่น\nว 4.2 ม.1-3/1 ...\nว 4.2 ม.1-3/2 ..."}
+        readOnly={readOnly}
+        bank={indicatorBank}
+      />
+
+      {/* ★★★ NEW — ตัวชี้วัดระหว่างทาง (มัธยม วิชาพื้นฐาน) กรอกครั้งเดียวใช้ทุกหน่วย */}
+      {showMidway && (
+        <ExtraIndicatorCard
+          tone="emerald"
+          title="🛤️ ตัวชี้วัดระหว่างทาง (กรอกครั้งเดียว ใช้กับทุกหน่วย)"
+          hint="พิมพ์ 1 บรรทัดต่อ 1 ข้อ ระบบนำไปแสดงเป็นหัวคอลัมน์ในหน้ารายงาน ค่าเริ่มต้นคือ ‘ผ่าน’ ทุกคน — ครูไปปรับรายบุคคลเป็น ‘ไม่ผ่าน’ ได้ที่แท็บรายงานคะแนน นร."
+          value={midwayText}
+          onChange={setMidwayText}
+          placeholder={"เช่น\nว 4.2 ม.1/1 ...\nว 4.2 ม.1/2 ..."}
+          readOnly={readOnly}
+          bank={indicatorBank}
+        />
+      )}
+
       {pickerUnit && (
         <IndicatorPickerModal
           bank={indicatorBank}
@@ -867,13 +1005,13 @@ function EditPlanView({
 }
 
 /* =========================================================================
-   ★★ NEW — หน้ารายงานคะแนน นร.ทั้งหมด (ไม่แก้ไขจากงานนี้ ยังอิงวิชาตัวเองเหมือนเดิม)
+   หน้ารายงานคะแนน นร.ทั้งหมด (ประถม)
    ========================================================================= */
 
 function ReportView({
   subjectId, subjectCode, subjectTitle, academicYearId, currentUserId, isBasicSubject,
   sectionId, students, units, readOnly, indicatorLabel, indicatorAbbr, indicatorItemLabel,
-  midtermMaxScore, finalMaxScore, formativeMaxScore,
+  midtermMaxScore, finalMaxScore, formativeMaxScore, examText,
 }: {
   subjectId: string;
   subjectCode: string;
@@ -887,10 +1025,11 @@ function ReportView({
   indicatorLabel: string;
   indicatorAbbr: string;
   indicatorItemLabel: string;
-  isBasicSubject: boolean; 
+  isBasicSubject: boolean;
   midtermMaxScore: number;
   finalMaxScore: number;
   formativeMaxScore: number;
+  examText: string; // ★★★ NEW
 }) {
   const [loading, setLoading] = useState(true);
   const [assignments, setAssignments] = useState<ReportAssignment[]>([]);
@@ -900,6 +1039,10 @@ function ReportView({
   const finalMax = finalMaxScore;
 
   const unitsWithScore = useMemo(() => units.filter(u => u.unit_no && u.score_points), [units]);
+
+  // ★★★ NEW — ตัวชี้วัดของข้อสอบกลางภาค (หารคะแนนสอบเท่ากันทุกข้อ)
+  const examInds = useMemo(() => indicatorLinesOf({ indicators: examText }), [examText]);
+  const examPerInd = examInds.length > 0 ? midtermMax / examInds.length : 0;
 
   useEffect(() => {
     if (!sectionId) return;
@@ -1045,7 +1188,7 @@ function ReportView({
           <thead className="bg-gradient-to-r from-indigo-50 to-fuchsia-50 print:bg-white">
             <tr>
               <th rowSpan={2} className="border border-slate-300 px-2 py-2 font-black whitespace-nowrap">ที่</th>
-<th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black text-left whitespace-nowrap">ชื่อ-นามสกุล</th>
+              <th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black text-left whitespace-nowrap">ชื่อ-นามสกุล</th>
               {unitsWithScore.map(u => (
                 <th key={u.unit_no} colSpan={indicatorLinesOf(u).length + 1} className="border border-slate-300 px-1 py-1 font-black">
                   หน่วยที่ {u.unit_no}{u.unit_name ? ` · ${u.unit_name}` : ""}
@@ -1054,20 +1197,41 @@ function ReportView({
                 </th>
               ))}
               <th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">รวมคะแนนเก็บ<br />({sumUnitScorePoints})</th>
-<th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">กลางภาค<br />({midtermMax})</th>
-<th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">ปลายภาค<br />({finalMax})</th>
-<th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">รวม<br />({totalPossible})</th>
-<th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">ระดับ<br />ผลการเรียน</th>          </tr>
+              {/* ★★★ CHANGED — ถ้ามีตัวชี้วัดข้อสอบกลางภาค แสดงเป็นหน่วยสอบกลางภาค แทนคอลัมน์กลางภาคเดี่ยว */}
+              {examInds.length > 0 ? (
+                <th colSpan={examInds.length + 1} className="border border-slate-300 px-1 py-1 font-black bg-amber-50 print:bg-white">
+                  สอบกลางภาค
+                  <br />
+                  <span className="font-bold text-slate-500">({midtermMax} คะแนน · ข้อละ {fmtScore(examPerInd)})</span>
+                </th>
+              ) : (
+                <th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">กลางภาค<br />({midtermMax})</th>
+              )}
+              <th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">ปลายภาค<br />({finalMax})</th>
+              <th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">รวม<br />({totalPossible})</th>
+              <th rowSpan={2} className="border border-slate-300 px-3 py-2 font-black whitespace-nowrap">ระดับ<br />ผลการเรียน</th>
+            </tr>
             <tr>
               {unitsWithScore.map(u => (
                 <Fragment key={u.unit_no}>
                   {indicatorLinesOf(u).map((line, idx) => (
-  <th key={`${u.unit_no}-i${idx}`} className="border border-slate-300 px-2 py-1 font-bold whitespace-nowrap" title={line}>
-    {indicatorCodeOf(line, isBasicSubject)}
-  </th>
-))}
-                  <th className="border border-slate-300 px-2 py-1 font-black whitespace-nowrap bg-fuchsia-50 print:bg-slate-100">สรุป</th>                </Fragment>
+                    <th key={`${u.unit_no}-i${idx}`} className="border border-slate-300 px-2 py-1 font-bold whitespace-nowrap" title={line}>
+                      {indicatorCodeOf(line, isBasicSubject)}
+                    </th>
+                  ))}
+                  <th className="border border-slate-300 px-2 py-1 font-black whitespace-nowrap bg-fuchsia-50 print:bg-slate-100">สรุป</th>
+                </Fragment>
               ))}
+              {examInds.length > 0 && (
+                <Fragment>
+                  {examInds.map((line, idx) => (
+                    <th key={`ex-i${idx}`} className="border border-slate-300 px-2 py-1 font-bold whitespace-nowrap" title={line}>
+                      {indicatorCodeOf(line, isBasicSubject)}
+                    </th>
+                  ))}
+                  <th className="border border-slate-300 px-2 py-1 font-black whitespace-nowrap bg-amber-50 print:bg-slate-100">รวม</th>
+                </Fragment>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -1080,31 +1244,44 @@ function ReportView({
               return (
                 <tr key={s.id} className="hover:bg-slate-50">
                   <td className="border border-slate-300 text-center px-2 py-1.5 font-bold whitespace-nowrap">{s.seat_number}</td>
-<td className="border border-slate-300 px-3 py-1.5 font-bold whitespace-nowrap">
-  {s.prefix ?? ""}{s.first_name} {s.last_name}
-</td>
+                  <td className="border border-slate-300 px-3 py-1.5 font-bold whitespace-nowrap">
+                    {s.prefix ?? ""}{s.first_name} {s.last_name}
+                  </td>
                   {unitsWithScore.map((u, ui) => (
                     <Fragment key={u.unit_no}>
                       {indicatorLinesOf(u).map((line, idx) => {
-  const info = indicatorLineScore(u, line, s.id, assignments, submissions);
-  return (
-    <td
-      key={`${u.unit_no}-${s.id}-i${idx}`}
-      className={`border border-slate-300 text-center px-1 py-1 font-black ${
-        info.state === "pass" ? "text-emerald-600" : info.state === "fail" ? "text-rose-500" : "text-slate-300"
-      }`}
-    >
-      {info.state === "none" ? "–" : info.state === "pending" ? "–" : fmtScore(info.achieved)}
-    </td>
-  );
-})}
+                        const info = indicatorLineScore(u, line, s.id, assignments, submissions);
+                        return (
+                          <td
+                            key={`${u.unit_no}-${s.id}-i${idx}`}
+                            className={`border border-slate-300 text-center px-1 py-1 font-black ${
+                              info.state === "pass" ? "text-emerald-600" : info.state === "fail" ? "text-rose-500" : "text-slate-300"
+                            }`}
+                          >
+                            {info.state === "none" ? "–" : info.state === "pending" ? "–" : fmtScore(info.achieved)}
+                          </td>
+                        );
+                      })}
                       <td className="border border-slate-300 text-center px-1 py-1 font-black bg-fuchsia-50/40 print:bg-white">
                         {fmtScore(unitTotals[ui])}
                       </td>
                     </Fragment>
                   ))}
                   <td className="border border-slate-300 text-center px-1 py-1 font-black">{sumUnitScorePoints ? fmtScore(sumUnits) : "-"}</td>
-                  <td className="border border-slate-300 text-center px-1 py-1 font-black">{exam.midterm ?? "-"}</td>
+                  {examInds.length > 0 ? (
+                    <Fragment>
+                      {examInds.map((_, idx) => (
+                        <td key={`ex-${s.id}-${idx}`} className="border border-slate-300 text-center px-1 py-1 font-black">
+                          {exam.midterm != null ? fmtScore(exam.midterm / examInds.length) : "-"}
+                        </td>
+                      ))}
+                      <td className="border border-slate-300 text-center px-1 py-1 font-black bg-amber-50/40 print:bg-white">
+                        {exam.midterm != null ? fmtScore(exam.midterm) : "-"}
+                      </td>
+                    </Fragment>
+                  ) : (
+                    <td className="border border-slate-300 text-center px-1 py-1 font-black">{exam.midterm ?? "-"}</td>
+                  )}
                   <td className="border border-slate-300 text-center px-1 py-1 font-black">{exam.final ?? "-"}</td>
                   <td className="border border-slate-300 text-center px-1 py-1 font-black">{fmtScore(total)}</td>
                   <td className="border border-slate-300 text-center px-1 py-1 font-black">{gradeLevel(percent)}</td>
@@ -1121,23 +1298,39 @@ function ReportView({
           <div key={u.unit_no}>
             <p className="font-black text-slate-500">หน่วยที่ {u.unit_no} {u.unit_name}</p>
             <ul className="pl-4 list-disc space-y-0.5">
-  {indicatorLinesOf(u).map((line, idx) => {
-    const code = indicatorCodeOf(line, isBasicSubject);
-    const prefix = isBasicSubject ? `${indicatorLabel}ที่` : `${indicatorLabel} ข้อที่`;
-    return (
-      <li key={idx} className="font-bold text-slate-500">
-        <span className="text-slate-400">{prefix} {code}:</span> {indicatorTextAfterCode(line, code)}
-      </li>
-    );
-  })}
-</ul>
+              {indicatorLinesOf(u).map((line, idx) => {
+                const code = indicatorCodeOf(line, isBasicSubject);
+                const prefix = isBasicSubject ? `${indicatorLabel}ที่` : `${indicatorLabel} ข้อที่`;
+                return (
+                  <li key={idx} className="font-bold text-slate-500">
+                    <span className="text-slate-400">{prefix} {code}:</span> {indicatorTextAfterCode(line, code)}
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         ))}
+        {examInds.length > 0 && (
+          <div>
+            <p className="font-black text-slate-500">สอบกลางภาค ({midtermMax} คะแนน หารเท่ากันข้อละ {fmtScore(examPerInd)})</p>
+            <ul className="pl-4 list-disc space-y-0.5">
+              {examInds.map((line, idx) => {
+                const code = indicatorCodeOf(line, isBasicSubject);
+                const prefix = isBasicSubject ? `${indicatorLabel}ที่` : `${indicatorLabel} ข้อที่`;
+                return (
+                  <li key={idx} className="font-bold text-slate-500">
+                    <span className="text-slate-400">{prefix} {code}:</span> {indicatorTextAfterCode(line, code)}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
       </div>
       </div>
 
 
-            <style jsx global>{`
+      <style jsx global>{`
         @media print {
           @page { size: A4 landscape; margin: 8mm; }
           body * { visibility: hidden; }
@@ -1146,12 +1339,12 @@ function ReportView({
             position: absolute; left: 0; top: 0; width: 100%;
           }
           .vp-report-table { font-size: 11px; }
-.vp-report-table th, .vp-report-table td {
-  border: 1px solid #000 !important;
-  color: #000 !important;
-  background: #fff !important;
-  padding: 3px 5px !important;
-}
+          .vp-report-table th, .vp-report-table td {
+            border: 1px solid #000 !important;
+            color: #000 !important;
+            background: #fff !important;
+            padding: 3px 5px !important;
+          }
           .vp-report-table thead { display: table-header-group; }
           .vp-report-table tr { break-inside: avoid; }
         }
