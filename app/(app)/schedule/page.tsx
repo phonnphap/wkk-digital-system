@@ -2237,7 +2237,9 @@ function TeacherConflictPanel({ groups, classrooms, allClassrooms, subjects, tea
                 <div className="bg-rose-50 border-b border-rose-200 px-5 py-3">
                   <p className="font-black text-rose-700 text-sm">
                     ⚠️ {displayName(teacher)} · {DAYS[(dayOfWeek ?? 1) - 1]} · {slot?.slot_label ?? "—"} ({formatTime(slot?.start_time ?? "")}–{formatTime(slot?.end_time ?? "")})
-<span className="ml-2 text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-200 text-rose-800">เทอม {key.split("|").pop()}</span>
+<span className="ml-2 text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-200 text-rose-800">
+  ปี {key.split("|").slice(-2, -1)[0] || "—"} · เทอม {key.split("|").pop()}
+</span>
                   </p>
                   <p className="text-rose-600 text-xs font-bold">ถูกจัดสอนพร้อมกัน {list.length} ห้อง</p>
                 </div>
@@ -3496,11 +3498,16 @@ function entrySemesterKey(e: TimetableEntry): string {
   if (!isSecondaryClassroom(room)) return "all";
   return String(getSemesterForClassroom(room, academicYearsRaw));
 }
+function entryYearName(e: TimetableEntry): string {
+  const room = allClassrooms.find(c => c.id === e.classroom_id);
+  const yrId = room?.academic_year_id ?? e.academic_year_id;
+  return academicYearsRaw.find(y => y.id === yrId)?.year_name ?? "";
+}
 
 const duplicateGroups = (() => {
   const map = new Map<string, TimetableEntry[]>();
   allEntriesForCheck.forEach(e => {
-    const key = `${e.classroom_id}|${e.day_of_week}|${normalizedSlotKey(e)}|${entrySemesterKey(e)}`;
+    const key = `${e.classroom_id}|${e.day_of_week}|${normalizedSlotKey(e)}|${entryYearName(e)}|${entrySemesterKey(e)}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(e);
   });
@@ -3517,7 +3524,7 @@ const teacherConflictGroups = (() => {
     const semsToCount = sem === "all" ? ["1", "2"] : [sem];
     ids.forEach(tid => {
       semsToCount.forEach(s => {
-        const key = `${tid}|${e.day_of_week}|${slotKey}|${s}`;
+        const key = `${tid}|${e.day_of_week}|${slotKey}|${entryYearName(e)}|${s}`;
         if (!map.has(key)) map.set(key, []);
         map.get(key)!.push({ teacherId: tid, entry: e });
       });
