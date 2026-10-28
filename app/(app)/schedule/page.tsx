@@ -531,6 +531,11 @@ function displayName(u: any) {
   if (fn || ln) return `${fn} ${ln}`.trim();
   return u.full_name ?? "—";
 }
+// ชื่อพร้อมคำนำหน้า เช่น "นางสาวสมศรี ใจดี"
+function displayNameWithTitle(u: any) {
+  if (!u) return "—";
+  return `${(u.title ?? "").trim()}${displayName(u)}`;
+}
 async function sendTeamsDM(sender: "hr" | "general" | "academic", targetEmail: string, message: string) {
   try {
     const res = await fetch("/api/teams-dm", {
@@ -2132,8 +2137,9 @@ return (
   );
 }
 
-function DayDetailModal({ day, entries, timeSlots, subjects, teachers, classrooms, userId, onClose }: {
-  day: number; entries: TimetableEntry[]; timeSlots: TimeSlot[]; subjects: Subject[];
+function DayDetailModal({ day, entries, clubBlocks, timeSlots, subjects, teachers, classrooms, userId, onClose }: {
+  day: number; entries: TimetableEntry[]; clubBlocks: { dayOfWeek: number; slotLabel: string; club: Club }[];
+  timeSlots: TimeSlot[]; subjects: Subject[];
   teachers: Teacher[]; classrooms: Classroom[]; userId: string; onClose: () => void;
 }) {
   const dc = DAY_COLORS[day - 1];
@@ -2146,10 +2152,10 @@ function DayDetailModal({ day, entries, timeSlots, subjects, teachers, classroom
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className={`${dc.header} px-6 py-4 shrink-0`}>
-          <h3 className="text-lg font-black text-white">📅 วัน{DAYS[day - 1]} · {dayEntries.length} คาบ</h3>
+          <h3 className="text-lg font-black text-white">📅 วัน{DAYS[day - 1]} · {dayEntries.length + clubBlocks.length} คาบ</h3>
         </div>
         <div className="p-5 overflow-y-auto space-y-2">
-          {dayEntries.length === 0 ? (
+          {dayEntries.length === 0 && clubBlocks.length === 0 ? (
             <p className="text-center text-slate-400 py-8 font-bold">ไม่มีคาบสอนในวันนี้</p>
           ) : dayEntries.map(e => {
             const subject = subjects.find(s => s.id === e.subject_id) ?? (e as any).subject;
@@ -2176,6 +2182,17 @@ function DayDetailModal({ day, entries, timeSlots, subjects, teachers, classroom
               </div>
             );
           })}
+          {clubBlocks.map(b => (
+  <div key={b.club.id} className="rounded-xl border-2 border-purple-200 bg-purple-50 px-4 py-3 flex items-center gap-3">
+    <div className="shrink-0 text-center w-16">
+      <p className="text-xs font-black text-purple-600">{b.slotLabel}</p>
+    </div>
+    <p className="font-black text-purple-700 text-sm truncate">
+      🎪 ชุมนุม{b.club.name}
+      <span className="ml-1 text-[10px] font-bold text-purple-400">{b.club.grade_label}</span>
+    </p>
+  </div>
+))}
         </div>
         <div className="px-5 pb-5 pt-2 border-t border-slate-100 shrink-0">
           <button onClick={onClose} className="w-full py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-black text-sm">ปิด</button>
@@ -2220,6 +2237,7 @@ function TeacherConflictPanel({ groups, classrooms, allClassrooms, subjects, tea
                 <div className="bg-rose-50 border-b border-rose-200 px-5 py-3">
                   <p className="font-black text-rose-700 text-sm">
                     ⚠️ {displayName(teacher)} · {DAYS[(dayOfWeek ?? 1) - 1]} · {slot?.slot_label ?? "—"} ({formatTime(slot?.start_time ?? "")}–{formatTime(slot?.end_time ?? "")})
+<span className="ml-2 text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-200 text-rose-800">เทอม {key.split("|").pop()}</span>
                   </p>
                   <p className="text-rose-600 text-xs font-bold">ถูกจัดสอนพร้อมกัน {list.length} ห้อง</p>
                 </div>
@@ -2337,6 +2355,8 @@ const gradeLevelName = (v?: string | null): string => {
   return gradeLevelNames[v] ?? (UUID_RE.test(v) ? "สาย (ไม่พบชื่อ)" : v);
 };
 const [showSplitModal, setShowSplitModal] = useState(false);
+const [dashTeacherId, setDashTeacherId] = useState<string | null>(null);   // ครูที่คลิกดูตารางในแดชบอร์ด
+const [dashGradeFilter, setDashGradeFilter] = useState("");                // กรองตามสายชั้น ("" = ทุกสาย)
 
 async function enableSemesterSplit(roomIds: string[]) {
   const failed: string[] = [];
@@ -3027,7 +3047,9 @@ async function desyncSubjectSection({
   // ✅ เพิ่ม try/catch + alert ให้เห็น error จริงเสมอ (เดิมไม่เช็ค error เลย ทำให้ "กดแล้วเงียบ")
   // ── Save direct (admin) ───────────────────────────────────────────────────
   async function handleSaveDirect(data: any) {
-    try {
+  // ★ ใช้ปีการศึกษาของ "ห้อง" เสมอ (ห้องเทอม 1 กับเทอม 2 ผูกคนละแถว)
+  data = { ...data, academic_year_id: allClassrooms.find(c => c.id === data.classroom_id)?.academic_year_id ?? data.academic_year_id };
+  try {
       const realSlotId = await ensureRealTimeSlot(data.time_slot_id, data.time_slot);
 
       const { data: clash, error: clashErr } = await supabase
@@ -3343,9 +3365,12 @@ function roomsOfSemester(sem: number): Classroom[] {
   const matched = allClassrooms.filter(r => sameYearIds.includes(r.academic_year_id ?? ""));
   return filterRoomsBySemester(matched.length > 0 ? matched : allClassrooms, sem, academicYearsRaw);
 }
-function myEntriesOfSemester(sem: number): TimetableEntry[] {
+function entriesOfTeacherSemester(tid: string, sem: number): TimetableEntry[] {
   const ids = new Set(roomsOfSemester(sem).map(r => r.id));
-  return entries.filter(e => ids.has(e.classroom_id) && (e.teacher_id === uid || e.teacher_id_2 === uid));
+  return entries.filter(e => ids.has(e.classroom_id) && (e.teacher_id === tid || e.teacher_id_2 === tid));
+}
+function myEntriesOfSemester(sem: number): TimetableEntry[] {
+  return entriesOfTeacherSemester(uid, sem);
 }
 
 const mySlotStart: Record<string, string> = {};
@@ -3372,22 +3397,29 @@ const mySemesterViews: number[] = mySemesterChanged ? [2, 1] : [selectedSemester
 const topSemester = mySemesterViews[0];
 const topEntries  = myEntriesOfSemester(topSemester);
 
-const myClubBlocksAll = clubs
-  .filter(c => c.teacher_id === uid)
-  .map(c => {
-    const period = clubPeriods.find(cp => cp.grade_label === c.grade_label);
-    return period ? { dayOfWeek: period.day_of_week, slotLabel: period.slot_label, club: c } : null;
-  })
-  .filter((b): b is { dayOfWeek: number; slotLabel: string; club: Club } => !!b);
+type ClubBlock = { dayOfWeek: number; slotLabel: string; club: Club };
+function clubBlocksOfTeacher(tid: string): ClubBlock[] {
+  return clubs
+    .filter(c => c.teacher_id === tid)
+    .map(c => {
+      const period = clubPeriods.find(cp => cp.grade_label === c.grade_label);
+      return period ? { dayOfWeek: period.day_of_week, slotLabel: period.slot_label, club: c } : null;
+    })
+    .filter((b): b is ClubBlock => !!b);
+}
+const myClubBlocksAll = clubBlocksOfTeacher(uid);
 
-function renderMySemesterTimetable(sem: number) {
-  const semEntries = myEntriesOfSemester(sem);
+const topTotalPeriods = topEntries.length + myClubBlocksAll.length;   // ✅ ย้ายลงมาหลังประกาศ
+
+function renderTeacherSemesterTimetable(tid: string, sem: number, showChangeBadge: boolean) {
+  const semEntries = entriesOfTeacherSemester(tid, sem);
   const semRooms   = roomsOfSemester(sem);
+  const teacherClubBlocks = clubBlocksOfTeacher(tid);
 
   const tables = (["kindergarten", "primary", "junior", "senior"] as const).map(type => {
     const roomIds       = semRooms.filter(c => (c.schedule_type ?? "primary") === type).map(r => r.id);
     const entriesOfType = semEntries.filter(e => roomIds.includes(e.classroom_id));
-    const clubBlocks    = myClubBlocksAll.filter(b => scheduleTypeForGradeLabel(b.club.grade_label) === type);
+    const clubBlocks    = teacherClubBlocks.filter(b => scheduleTypeForGradeLabel(b.club.grade_label) === type);
     if (entriesOfType.length === 0 && clubBlocks.length === 0) return null;
 
     const slots = buildRoomSlots(type, timeSlots);
@@ -3398,23 +3430,26 @@ function renderMySemesterTimetable(sem: number) {
         <PersonalTimetableGrid
           myEntries={entriesOfType} myClubBlocks={clubBlocks} timeSlots={slots}
           allTimeSlots={timeSlots} subjects={subjects} teachers={teachers}
-          classrooms={semRooms} userId={uid}
+          classrooms={semRooms} userId={tid}
         />
       </div>
     );
   }).filter(Boolean);
 
   return (
-    <section key={sem} className={mySemesterChanged ? "rounded-2xl border-2 border-slate-200 bg-white/60 p-4" : ""}>
+    <section key={sem} className={showChangeBadge ? "rounded-2xl border-2 border-slate-200 bg-white/60 p-4" : ""}>
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <h3 className="font-black text-slate-800 text-base">📘 ตารางสอน เทอม {sem}</h3>
-        {mySemesterChanged && sem === 2 && (
+        {showChangeBadge && sem === 2 && (
           <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-amber-100 text-amber-700 border border-amber-300">🔄 มีการเปลี่ยนแปลง</span>
         )}
-        {mySemesterChanged && sem === 1 && (
+        {showChangeBadge && sem === 1 && (
           <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-slate-100 text-slate-500 border border-slate-300">ตารางเดิม</span>
         )}
-        <span className="text-xs text-slate-400 font-bold">{semEntries.length} คาบ/สัปดาห์</span>
+        <span className="text-xs text-slate-400 font-bold">
+          {semEntries.length + teacherClubBlocks.length} คาบ/สัปดาห์
+          {teacherClubBlocks.length > 0 && ` (รวมชุมนุม ${teacherClubBlocks.length})`}
+        </span>
       </div>
       {tables.length === 0 ? (
         <div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">
@@ -3424,6 +3459,9 @@ function renderMySemesterTimetable(sem: number) {
       ) : <div className="space-y-5">{tables}</div>}
     </section>
   );
+}
+function renderMySemesterTimetable(sem: number) {
+  return renderTeacherSemesterTimetable(uid, sem, mySemesterChanged);
 }
   const homeroomClassroom = classrooms.find(c => c.homeroom_teacher_id === user.id || c.homeroom_teacher_2_id === user.id) ?? null;
   const pendingCount      = changeRequests.filter(r => r.status === "pending").length;
@@ -3450,7 +3488,12 @@ function normalizedSlotKey(e: TimetableEntry): string {
 // ★ เทอมของ entry นั้น — ห้อง ม. อ้างจากปีการศึกษาของห้อง, ห้อง อ./ป. ที่ไม่แยกเทอมให้เป็น 0 (ใช้ร่วมทุกเทอม)
 function entrySemesterKey(e: TimetableEntry): string {
   const room = allClassrooms.find(c => c.id === e.classroom_id);
-  if (!room || !isSecondaryClassroom(room)) return "all";
+  if (!room) {
+    // ไม่พบห้อง → ใช้เทอมจากปีการศึกษาของ entry เอง แทนการถือว่าใช้ร่วมทุกเทอม
+    const yr = academicYearsRaw.find(y => y.id === e.academic_year_id);
+    return String(yr?.semester ?? 1);
+  }
+  if (!isSecondaryClassroom(room)) return "all";
   return String(getSemesterForClassroom(room, academicYearsRaw));
 }
 
@@ -3505,23 +3548,39 @@ const duplicateClassroomGroups = (() => {
   return Array.from(map.values()).filter(group => group.length > 1);
 })();
 
-// ── สถิติสำหรับแดชบอร์ด ──
+// ── สถิติสำหรับแดชบอร์ด (นับเฉพาะเทอมที่เลือก; ห้อง อ./ป. ที่ไม่แยกเทอมนับทั้งสองเทอม) ──
+const dashEntries = filterEntriesBySemester(entries, allClassrooms, selectedSemester, academicYearsRaw);
+
+// คาบชุมนุมของครูแต่ละคน (นับเฉพาะชั้นที่ตั้งคาบชุมนุมไว้แล้ว)
+const clubCountByTeacher = new Map<string, number>();
+clubs.forEach(c => {
+  if (!clubPeriods.some(cp => cp.grade_label === c.grade_label)) return;
+  clubCountByTeacher.set(c.teacher_id, (clubCountByTeacher.get(c.teacher_id) ?? 0) + 1);
+});
+
 const teacherHoursMap = (() => {
   const map = new Map<string, number>();
-  entries.forEach(e => {
+  dashEntries.forEach(e => {
     map.set(e.teacher_id, (map.get(e.teacher_id) ?? 0) + 1);
     if (e.teacher_id_2) map.set(e.teacher_id_2, (map.get(e.teacher_id_2) ?? 0) + 1);
   });
+  clubCountByTeacher.forEach((n, tid) => map.set(tid, (map.get(tid) ?? 0) + n));
   return map;
 })();
+
+const dashGradeOptions = ([...new Set(teachers.map(t => t.grade_level).filter(Boolean))] as string[])
+  .sort((a, b) => gradeLevelName(a).localeCompare(gradeLevelName(b), "th", { numeric: true }));
+
 const teacherHoursList = teachers
+  .filter(t => !dashGradeFilter || t.grade_level === dashGradeFilter)
   .map(t => ({ teacher: t, hours: teacherHoursMap.get(t.id) ?? 0 }))
   .sort((a, b) => b.hours - a.hours);
 const maxTeacherHours = Math.max(1, ...teacherHoursList.map(t => t.hours));
+const filteredTotalHours = teacherHoursList.reduce((s, t) => s + t.hours, 0);
 
 const subjectGroupHoursMap = (() => {
   const map = new Map<string, number>();
-  entries.forEach(e => {
+  dashEntries.forEach(e => {
     const subj = subjects.find(s => s.id === e.subject_id);
     const group = subj?.subject_group ?? "ไม่ระบุ";
     map.set(group, (map.get(group) ?? 0) + 1);
@@ -3533,7 +3592,7 @@ const maxSubjectGroupHours = Math.max(1, ...subjectGroupList.map(([, v]) => v));
 
 const gradeHoursMap = (() => {
   const map = new Map<string, number>();
-  entries.forEach(e => {
+  dashEntries.forEach(e => {
     const room = classrooms.find(c => c.id === e.classroom_id) ?? allClassrooms.find(c => c.id === e.classroom_id);
     const grade = room?.grade_group ?? "ไม่ระบุ";
     map.set(grade, (map.get(grade) ?? 0) + 1);
@@ -3543,7 +3602,7 @@ const gradeHoursMap = (() => {
 const gradeHoursList = Array.from(gradeHoursMap.entries())
   .sort((a, b) => gradeGroupSortKey(a[0]) - gradeGroupSortKey(b[0]));
 const maxGradeHours = Math.max(1, ...gradeHoursList.map(([, v]) => v));
-const totalScheduledPeriods = entries.length;
+const totalScheduledPeriods = dashEntries.length;
 
   const currentScheduleType = SCHEDULE_TEMPLATES.find(t => t.key === selectedClassroom?.schedule_type)?.label ?? "ประถม";
 
@@ -3560,6 +3619,7 @@ const totalScheduledPeriods = entries.length;
   <DayDetailModal
     day={selectedDayDetail} entries={topEntries} timeSlots={timeSlots}
     subjects={subjects} teachers={teachers} classrooms={classrooms} userId={user.id}
+    clubBlocks={myClubBlocksAll.filter(b => b.dayOfWeek === selectedDayDetail)}
     onClose={() => setSelectedDayDetail(null)}
   />
 )}
@@ -3611,7 +3671,55 @@ const totalScheduledPeriods = entries.length;
 {showSplitModal && (
   <SemesterSplitModal rooms={classrooms} onClose={() => setShowSplitModal(false)} onConfirm={enableSemesterSplit} />
 )}
-
+{dashTeacherId && (() => {
+  const t = teachers.find(x => x.id === dashTeacherId);
+  if (!t) return null;
+  const tEntries = entriesOfTeacherSemester(dashTeacherId, selectedSemester);
+  const tClubs   = clubBlocksOfTeacher(dashTeacherId);
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setDashTeacherId(null)}>
+      <div className="bg-slate-50 w-full max-w-6xl max-h-[92vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="bg-indigo-600 px-6 py-4 flex items-center justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <h3 className="text-lg font-black text-white truncate">📅 ตารางสอน: {displayNameWithTitle(t)}</h3>
+            <p className="text-sm text-white/70">
+              สาย {gradeLevelName(t.grade_level)} · {tEntries.length + tClubs.length} คาบ/สัปดาห์
+              {tClubs.length > 0 && ` (รวมชุมนุม ${tClubs.length})`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex bg-white/20 rounded-xl p-1 gap-0.5">
+              {[1, 2].map(s => (
+                <button key={s} onClick={() => setSelectedSemester(s)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black ${selectedSemester === s ? "bg-white text-indigo-700" : "text-white"}`}>
+                  เทอม {s}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setDashTeacherId(null)} className="w-8 h-8 rounded-lg bg-white/20 hover:bg-white/30 text-white font-black">✕</button>
+          </div>
+        </div>
+        <div className="p-5 overflow-y-auto space-y-5">
+          <div className="grid grid-cols-5 gap-3">
+            {DAYS.map((day, i) => {
+              const count = tEntries.filter(e => e.day_of_week === i + 1).length
+                + tClubs.filter(b => b.dayOfWeek === i + 1).length;
+              const dc = DAY_COLORS[i];
+              return (
+                <div key={day} className={`${dc.bg} border-2 ${dc.border} rounded-2xl p-3 text-center`}>
+                  <p className={`text-xs font-black ${dc.text}`}>{day}</p>
+                  <p className={`text-2xl font-black ${dc.text}`}>{count}</p>
+                  <p className="text-slate-400 text-[10px] font-bold">คาบ</p>
+                </div>
+              );
+            })}
+          </div>
+          {renderTeacherSemesterTimetable(dashTeacherId, selectedSemester, false)}
+        </div>
+      </div>
+    </div>
+  );
+})()}
       {/* Top bar */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm px-4 py-3 print:hidden">
         <div className="flex items-center gap-3 flex-wrap">
@@ -3873,7 +3981,7 @@ const totalScheduledPeriods = entries.length;
     <div className="mb-4">
       <h2 className="text-xl font-black text-slate-800">ตารางสอนของฉัน</h2>
       <p className="text-slate-400 text-sm">
-        {fullName(user)} · {topEntries.length} คาบ/สัปดาห์
+        {fullName(user)} · {topTotalPeriods} คาบ/สัปดาห์{myClubBlocksAll.length > 0 && ` (รวมชุมนุม ${myClubBlocksAll.length})`}
         {mySemesterChanged && <span className="ml-1">(นับตามเทอม {topSemester})</span>}
       </p>
       {homeroomClassroom && <p className="text-blue-600 text-sm font-bold mt-1">⭐ ครูประจำชั้น: {homeroomClassroom.grade_group} {homeroomClassroom.room_name}</p>}
@@ -3884,7 +3992,8 @@ const totalScheduledPeriods = entries.length;
 
     <div className="grid grid-cols-5 gap-3 mb-5">
       {DAYS.map((day, i) => {
-        const count = topEntries.filter(e => e.day_of_week === i + 1).length;
+        const count = topEntries.filter(e => e.day_of_week === i + 1).length
+  + myClubBlocksAll.filter(b => b.dayOfWeek === i + 1).length;
         const dc = DAY_COLORS[i];
         return (
           <button key={day} onClick={() => setSelectedDayDetail(i + 1)}
@@ -4119,21 +4228,36 @@ const totalScheduledPeriods = entries.length;
     </div>
 
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-      <h3 className="font-black text-slate-700 text-sm mb-4">👩‍🏫 ชั่วโมงสอนรายบุคคล (คาบ/สัปดาห์)</h3>
-      <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-        {teacherHoursList.map(({ teacher, hours }) => (
-          <div key={teacher.id} className="flex items-center gap-3">
-            <span className="w-32 shrink-0 text-xs font-bold text-slate-600 truncate">{displayName(teacher)}</span>
-            <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
-              <div className="bg-blue-500 h-full rounded-full flex items-center justify-end pr-2 transition-all"
-                style={{ width: `${Math.max(4, (hours / maxTeacherHours) * 100)}%` }}>
-                {hours > 0 && <span className="text-white text-[10px] font-black">{hours}</span>}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+  <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+    <h3 className="font-black text-slate-700 text-sm">
+      👩‍🏫 ชั่วโมงสอนรายบุคคล · เทอม {selectedSemester} (คาบ/สัปดาห์ รวมชุมนุม)
+    </h3>
+    <div className="flex items-center gap-2">
+      <select value={dashGradeFilter} onChange={e => setDashGradeFilter(e.target.value)}
+        className="bg-white border-2 border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold focus:outline-none">
+        <option value="">ทุกสายชั้น</option>
+        {dashGradeOptions.map(g => <option key={g} value={g}>{gradeLevelName(g)}</option>)}
+      </select>
+      <span className="text-xs font-bold text-slate-400">{teacherHoursList.length} คน · รวม {filteredTotalHours} คาบ</span>
     </div>
+  </div>
+  <p className="text-[11px] text-slate-400 mb-3">💡 คลิกชื่อครูเพื่อดูตารางสอนของครูคนนั้น</p>
+  <div className="space-y-1 max-h-[420px] overflow-y-auto pr-1">
+    {teacherHoursList.map(({ teacher, hours }) => (
+      <button key={teacher.id} onClick={() => setDashTeacherId(teacher.id)}
+        className="w-full flex items-center gap-3 text-left rounded-lg px-1 py-1 hover:bg-slate-50 transition-colors">
+        <span className="w-44 shrink-0 text-xs font-bold text-slate-600 truncate">{displayNameWithTitle(teacher)}</span>
+        <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
+          <div className="bg-blue-500 h-full rounded-full flex items-center justify-end pr-2 transition-all"
+            style={{ width: `${Math.max(4, (hours / maxTeacherHours) * 100)}%` }}>
+            {hours > 0 && <span className="text-white text-[10px] font-black">{hours}</span>}
+          </div>
+        </div>
+      </button>
+    ))}
+    {teacherHoursList.length === 0 && <p className="text-center text-slate-400 text-sm py-6">ไม่พบครูในสายชั้นนี้</p>}
+  </div>
+</div>
 
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
