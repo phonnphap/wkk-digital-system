@@ -41,12 +41,14 @@ export async function POST(req: Request) {
     const json = await res.json();
     if (!res.ok) return NextResponse.json({ ok: false, error: json?.error?.message ?? `HTTP ${res.status}` }, { status: 502 });
     const text = (json.content ?? []).map((c: any) => c.text ?? "").join("");
-    const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
-    return NextResponse.json({
-      ok: true,
-      full_name: parsed.full_name ?? null,
-      car_plate: parsed.car_plate ?? null,
-    });
+    const m = text.match(/\{[\s\S]*\}/);
+const parsed = m ? JSON.parse(m[0]) : {};
+const full_name = typeof parsed.full_name === "string"
+  ? parsed.full_name.replace(/[0-9๐-๙]/g, "").trim() || null
+  : null;
+let car_plate = typeof parsed.car_plate === "string" ? parsed.car_plate.trim() || null : null;
+if (car_plate && /\d{13}/.test(car_plate.replace(/[\s-]/g, ""))) car_plate = null;
+return NextResponse.json({ ok: true, full_name, car_plate });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: "อ่านภาพไม่สำเร็จ: " + e.message }, { status: 500 });
   }

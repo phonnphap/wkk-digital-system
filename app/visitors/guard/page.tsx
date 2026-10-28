@@ -1,4 +1,5 @@
-// path: app/visitors/guard/page.tsx — หน้า รปภ. (ต้อง login) ปุ่มใหญ่ ตัวใหญ่
+// path: app/visitors/guard/page.tsx — หน้า รปภ. (ต้อง login) แทนที่ไฟล์เดิม
+// เปลี่ยนจากเดิม: โหมดบัตร "อ่านแล้วทิ้งภาพทันที", แสดงสถานะครูรับทราบ, ลิงก์ไปหน้ารายงาน
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -11,6 +12,7 @@ type Visitor = {
   id: string; full_name: string; phone?: string | null; car_plate?: string | null;
   target_label?: string | null; purpose?: string | null; source?: string | null;
   status: string; check_in_at?: string | null; created_at?: string;
+  acknowledged_at?: string | null;
 };
 type Mode = "home" | "id" | "face";
 
@@ -23,6 +25,7 @@ async function downscale(file: File, max = 1600): Promise<Blob> {
   const c = document.createElement("canvas");
   c.width = Math.round(bmp.width * r); c.height = Math.round(bmp.height * r);
   c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close();
   return new Promise(res => c.toBlob(b => res(b!), "image/jpeg", 0.85));
 }
 async function getToken() {
@@ -47,7 +50,7 @@ export default function GuardPage() {
   const [target, setTarget] = useState<Target>(null);
   const [name, setName] = useState("");
   const [plate, setPlate] = useState("");
-  const [photo, setPhoto] = useState<Blob | null>(null);
+  const [photo, setPhoto] = useState<Blob | null>(null);   // ใช้เฉพาะโหมด "ไม่มีบัตร"
   const [preview, setPreview] = useState("");
   const [ocrBusy, setOcrBusy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -76,6 +79,7 @@ export default function GuardPage() {
   }, [load]);
 
   function reset() {
+    if (preview) URL.revokeObjectURL(preview);
     setMode("home"); setTarget(null); setName(""); setPlate("");
     setPhoto(null); setPreview(""); setMsg("");
   }
@@ -95,17 +99,28 @@ export default function GuardPage() {
   }
 
   async function onPickPhoto(file: File | undefined) {
+    if (camRef.current) camRef.current.value = "";   // ล้าง input กันไฟล์ค้างในเบราว์เซอร์
     if (!file) return;
     const blob = await downscale(file);
-    setPhoto(blob); setPreview(URL.createObjectURL(blob));
-    if (mode !== "id") return;
+
+    // โหมดไม่มีบัตร: เก็บรูปหน้าไว้แนบ
+    if (mode === "face") {
+      if (preview) URL.revokeObjectURL(preview);
+      setPhoto(blob); setPreview(URL.createObjectURL(blob));
+      return;
+    }
+
+    // โหมดบัตร/ทะเบียน: อ่านแล้วทิ้ง — ไม่ set state รูป ไม่แสดง preview ไม่อัปโหลด
     setOcrBusy(true); setMsg("");
     try {
       const fd = new FormData(); fd.append("file", blob, "p.jpg");
       const res = await fetch("/api/visitors/ocr", { method: "POST", headers: { Authorization: `Bearer ${await getToken()}` }, body: fd });
       const j = await res.json();
-      if (j.ok) { if (j.full_name) setName(j.full_name); if (j.car_plate) setPlate(j.car_plate); if (!j.full_name && !j.car_plate) setMsg("⚠️ อ่านไม่ออก กรุณาพิมพ์เอง หรือถ่ายใหม่"); }
-      else setMsg("⚠️ " + (j.error ?? "อ่านภาพไม่สำเร็จ"));
+      if (j.ok) {
+        if (j.full_name) setName(j.full_name);
+        if (j.car_plate) setPlate(j.car_plate);
+        setMsg(j.full_name || j.car_plate ? "🗑️ อ่านแล้ว ลบภาพทิ้งทันที (ไม่เก็บรูปบัตร)" : "⚠️ อ่านไม่ออก กรุณาพิมพ์เอง หรือถ่ายใหม่");
+      } else setMsg("⚠️ " + (j.error ?? "อ่านภาพไม่สำเร็จ"));
     } catch { setMsg("⚠️ อ่านภาพไม่สำเร็จ"); }
     setOcrBusy(false);
   }
@@ -130,7 +145,7 @@ export default function GuardPage() {
       contact_person: target.label,
       target_type: target.type, target_classroom_id: target.classroom_id ?? null, target_label: target.label,
       source: mode === "id" ? "guard_id" : "guard_face",
-      status: "inside", check_in_at: new Date().toISOString(),   // ไม่ต้องกดยืนยันซ้ำ — รอเช็คเอาท์อย่างเดียว
+      status: "inside", check_in_at: new Date().toISOString(),
       photo_path, photo_url: null, check_out_at: null,
     }).select("id").single();
     setBusy(false);
@@ -144,7 +159,7 @@ export default function GuardPage() {
     <div className="min-h-screen bg-slate-100 pb-10">
       <div className="bg-teal-700 px-5 py-5 text-white">
         <h1 className="text-3xl font-black">🛡️ ป้อมยาม — ผู้มาติดต่อ</h1>
-        <p className="mt-1 text-xl">อยู่ในโรงเรียนตอนนี้ {inside.length} คน</p>
+        <p className="mt-1 text-xl">อยู่ในโรงเรียนตอนนี้ {inside.length} คน · เช็คเอาท์อัตโนมัติ 17:00 น.</p>
       </div>
 
       {msg && <div className="mx-4 mt-4 rounded-2xl bg-yellow-100 px-5 py-4 text-2xl font-black text-yellow-900">{msg}</div>}
@@ -181,6 +196,9 @@ export default function GuardPage() {
                   <p className="text-3xl font-black text-slate-800">{v.full_name}</p>
                   <p className="text-2xl font-bold text-teal-700">ติดต่อ: {v.target_label} · เข้า {timeTH(v.check_in_at)}</p>
                   {v.car_plate && <p className="text-2xl text-slate-600">🚗 {v.car_plate}</p>}
+                  <p className={`mt-1 text-xl font-bold ${v.acknowledged_at ? "text-green-600" : "text-slate-400"}`}>
+                    {v.acknowledged_at ? `✔ ครูรับทราบแล้ว ${timeTH(v.acknowledged_at)}` : "⏳ รอครูรับทราบ"}
+                  </p>
                   <button onClick={() => checkout(v)} className={`${bigBtn} mt-4 bg-orange-500 py-7 text-3xl text-white`}>🚪 ออกแล้ว (เช็คเอาท์)</button>
                 </div>
               ))}
@@ -197,15 +215,15 @@ export default function GuardPage() {
               onChange={e => onPickPhoto(e.target.files?.[0])} />
             <button onClick={() => camRef.current?.click()} disabled={ocrBusy}
               className={`${bigBtn} bg-sky-600 py-8 text-3xl text-white`}>
-              {ocrBusy ? "⏳ กำลังอ่าน..." : preview ? "📷 ถ่ายใหม่" : "📷 เปิดกล้อง"}
+              {ocrBusy ? "⏳ กำลังอ่าน..." : preview || name || plate ? "📷 ถ่ายใหม่" : "📷 เปิดกล้อง"}
             </button>
-            {preview && <img src={preview} alt="" className="max-h-64 w-full rounded-2xl object-contain bg-white" />}
+            {mode === "face" && preview && <img src={preview} alt="" className="max-h-64 w-full rounded-2xl object-contain bg-white" />}
 
             {mode === "id" && (
               <div className="space-y-3">
                 <input value={name} onChange={e => setName(e.target.value)} placeholder="ชื่อ-นามสกุล (AI กรอกให้ แก้ได้)" className="w-full rounded-2xl border-4 border-slate-300 px-5 py-5 text-2xl" />
                 <input value={plate} onChange={e => setPlate(e.target.value)} placeholder="ทะเบียนรถ (AI กรอกให้ แก้ได้)" className="w-full rounded-2xl border-4 border-slate-300 px-5 py-5 text-2xl" />
-                <p className="text-lg text-slate-500">รูปบัตรไม่ถูกบันทึกในระบบ เก็บเฉพาะชื่อและทะเบียน</p>
+                <p className="text-lg text-slate-500">ระบบอ่านเฉพาะชื่อและทะเบียน แล้วลบภาพทิ้งทันที — ไม่เก็บรูปบัตรและไม่เก็บเลขบัตรประชาชน</p>
               </div>
             )}
 

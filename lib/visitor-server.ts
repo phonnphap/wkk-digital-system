@@ -1,5 +1,6 @@
 // path: lib/visitor-server.ts  (ใช้ฝั่ง server เท่านั้น)
 import { createClient } from "@supabase/supabase-js";
+import { signAck } from "@/lib/visitors/ackToken";
 
 export function adminClient() {
   return createClient(
@@ -58,6 +59,10 @@ export async function notifyVisitor(visitorId: string): Promise<boolean> {
     { type: "FactSet", facts },
   ];
   if (mention) body.push({ type: "TextBlock", text: `<at>${mention.name}</at> กรุณาทราบ`, wrap: true });
+
+  const ackUrl = `${process.env.NEXT_PUBLIC_SITE_URL}/api/visitors/ack?id=${v.id}&t=${signAck(v.id)}`;
+// ในการ์ด Adaptive Card เพิ่ม:
+actions: [{ type: "Action.OpenUrl", title: "✅ รับทราบ", url: ackUrl }]
 
   const card = {
     type: "message",
