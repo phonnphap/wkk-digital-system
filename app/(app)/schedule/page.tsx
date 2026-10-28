@@ -2357,12 +2357,16 @@ async function enableSemesterSplit(roomIds: string[]) {
       )?.id;
 
       if (!otherRoomId) {
-        const { data: ins, error } = await (supabase.from("classrooms") as any).insert([{
-          room_number: room.room_number, room_name: room.room_name, grade_group: room.grade_group,
-          schedule_type: room.schedule_type, homeroom_teacher_id: room.homeroom_teacher_id ?? null,
-          homeroom_teacher_2_id: room.homeroom_teacher_2_id ?? null,
-          academic_year_id: otherYear.id, split_by_semester: true,
-        }]).select("id").single();
+        const { data: fullRoom, error: fetchErr } = await supabase
+  .from("classrooms").select("*").eq("id", room.id).single();
+if (fetchErr || !fullRoom) throw fetchErr ?? new Error("ไม่พบข้อมูลห้องเดิม");
+
+const { id: _omitId, created_at: _omitCreated, ...copyable } = fullRoom as any;
+const { data: ins, error } = await (supabase.from("classrooms") as any).insert([{
+  ...copyable,
+  academic_year_id: otherYear.id,
+  split_by_semester: true,
+}]).select("id").single();
         if (error) throw error;
         otherRoomId = ins.id as string;
       } else {
