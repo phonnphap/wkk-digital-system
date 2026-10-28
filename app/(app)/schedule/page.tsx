@@ -103,6 +103,14 @@ function isAdminRole(role?: string | null): boolean {
   if (role === "director" || role === "deputy_director") return true;
   return role.toLowerCase().includes("admin");
 }
+// ★ นิสิตฝึกประสบการณ์วิชาชีพครู → ครูคนที่ 2 ในคาบนั้นคือ "ครูพี่เลี้ยง"
+const TRAINEE_KEYWORD = "นิสิตฝึกประสบการณ์";
+function isMentorEntry(
+  e: { teacher_id?: string; teacher_id_2?: string | null } | undefined | null,
+  traineeIds: Set<string>
+): boolean {
+  return !!e && !!e.teacher_id && !!e.teacher_id_2 && traineeIds.has(e.teacher_id);
+}
 
 type TimeSlot   = { id: string; slot_number: number; start_time: string; end_time: string; slot_label?: string; is_break: boolean; schedule_type?: string };
 type Subject = { id: string; subject_code: string; name_th: string; subject_group?: string; periods_per_week?: number };
@@ -943,10 +951,10 @@ function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjec
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Entry Modal ───────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicYearId,
+function EntryModal({ entry, slot, day, classroom, subjects, teachers, academicYearId, traineeIds,
   permission, currentUser, onSave, onRequestChange, onDelete, onClose }: {
   entry?: TimetableEntry; slot: TimeSlot; day: number; classroom: Classroom;
-  subjects: Subject[]; teachers: Teacher[]; academicYearId: string;
+  subjects: Subject[]; teachers: Teacher[]; academicYearId: string; traineeIds: Set<string>;
   permission: "direct" | "request"; // ← เปลี่ยนจาก canEditDirect: boolean
   currentUser: UserProfile;
   onSave: (d: any) => Promise<void>;
@@ -1100,7 +1108,8 @@ const filteredByGrade = roomGradeLabel
 
           <div>
             <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
-              ครูผู้สอน คนที่ 2 <span className="text-slate-400 font-normal normal-case">(ถ้ามี — ผู้ร่วมสอน)</span>
+              {teacherId1 && traineeIds.has(teacherId1) ? "ครูพี่เลี้ยง" : "ครูผู้สอน คนที่ 2"}
+<span className="text-slate-400 font-normal normal-case"> {teacherId1 && traineeIds.has(teacherId1) ? "(ระบบกำหนดให้อัตโนมัติ)" : "(ถ้ามี — ผู้ร่วมสอน)"}</span>
             </label>
             <select value={teacherId2} onChange={e => setTeacherId2(e.target.value)} className={inp}>
               <option value="">— ไม่มีครูคนที่ 2 —</option>
@@ -1665,11 +1674,11 @@ function GradeScheduleManager({ currentUser, isAdmin, teachers, classrooms, subj
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Timetable Grid ────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-function TimetableGrid({ classroom, entries, timeSlots, allTimeSlots, subjects, teachers, academicYearId,
+function TimetableGrid({ classroom, entries, timeSlots, allTimeSlots, subjects, teachers, academicYearId, traineeIds,
   currentUser, clubPeriod, clubsForGrade, onSave, onRequestChange, onDelete }: {
   classroom: Classroom; entries: TimetableEntry[]; timeSlots: TimeSlot[]; allTimeSlots: TimeSlot[];
   subjects: Subject[]; teachers: Teacher[]; academicYearId: string;
-  currentUser: UserProfile;
+  currentUser: UserProfile; traineeIds: Set<string>;
   clubPeriod?: ClubPeriod; clubsForGrade: Club[];
   onSave: (d: any) => Promise<void>;
   onRequestChange: (d: any) => Promise<void>;
@@ -1744,12 +1753,12 @@ function TimetableGrid({ classroom, entries, timeSlots, allTimeSlots, subjects, 
       {modal && (
         <EntryModal
           entry={modal.entry} slot={modal.slot} day={modal.day} classroom={classroom}
-          subjects={subjects} teachers={teachers} academicYearId={academicYearId}
-          permission={modal.permission} currentUser={currentUser}
+          subjects={subjects} teachers={teachers} academicYearId={academicYearId} 
+          permission={modal.permission} currentUser={currentUser} 
           onSave={async (d) => { await onSave(d); setModal(null); }}
           onRequestChange={async (d) => { await onRequestChange(d); setModal(null); }}
           onDelete={async (id) => { await onDelete(id); setModal(null); }}
-          onClose={() => setModal(null)}
+          onClose={() => setModal(null)} traineeIds={traineeIds}
         />
       )}
 
@@ -1836,7 +1845,9 @@ function TimetableGrid({ classroom, entries, timeSlots, allTimeSlots, subjects, 
   )}
 </p>
 <p className="text-[11px] font-bold opacity-80 leading-tight">{displayName(teacher1)}{teacher1?.is_active === false && <span className="text-[9px] font-black bg-red-500 text-white px-1.5 py-0.5 rounded">⚠️ ครูย้ายออก</span>}</p>
-                            {teacher2 && <p className="text-[11px] font-bold opacity-80 leading-tight mt-0.5">{displayName(teacher2)}</p>}
+                            {teacher2 && <p className="text-[11px] font-bold opacity-80 leading-tight mt-0.5">
+  {isMentorEntry(entry, traineeIds) ? "👨‍🏫 ครูพี่เลี้ยง: " : ""}{displayName(teacher2)}
+</p>}
                             {isMyClass && <span className="text-[9px] font-black bg-blue-500 text-white px-1.5 py-0.5 rounded mt-1 inline-block">ฉัน</span>}
                           </div>
                         ) : (
@@ -2028,9 +2039,9 @@ function ClubManagementModal({ clubPeriods, clubs, teachers, academicYearId, onC
 }
 
 // ── Personal Timetable Grid ────────────────────────────────────────────────────
-function PersonalTimetableGrid({ myEntries, myClubBlocks, timeSlots, allTimeSlots, subjects, teachers, classrooms, userId }: {
+function PersonalTimetableGrid({ myEntries, myClubBlocks, timeSlots, allTimeSlots, subjects, teachers, classrooms, userId, traineeIds }: {
   myEntries: TimetableEntry[];
-  myClubBlocks: { dayOfWeek: number; slotLabel: string; club: Club }[];
+  myClubBlocks: { dayOfWeek: number; slotLabel: string; club: Club }[];traineeIds: Set<string>;
   timeSlots: TimeSlot[]; allTimeSlots: TimeSlot[]; subjects: Subject[]; teachers: Teacher[]; classrooms: Classroom[]; userId: string;
 }) {
   const subjectColorMap: Record<string, typeof SUBJECT_COLORS[0]> = {};
@@ -2041,13 +2052,11 @@ function PersonalTimetableGrid({ myEntries, myClubBlocks, timeSlots, allTimeSlot
   allTimeSlots.forEach(s => { startTimeMap[s.id] = (s.start_time ?? "").slice(0, 5); });
 
   function getMyEntry(day: number, slot: TimeSlot) {
-    const slotStart = (slot.start_time ?? "").slice(0, 5);
-    return myEntries.find(e => {
-      if (e.day_of_week !== day) return false;
-      if (e.time_slot_id === slot.id) return true;
-      return startTimeMap[e.time_slot_id] === slotStart;
-    });
-  }
+  const slotStart = (slot.start_time ?? "").slice(0, 5);
+  const matches = myEntries.filter(e =>
+    e.day_of_week === day && (e.time_slot_id === slot.id || startTimeMap[e.time_slot_id] === slotStart));
+  return matches.find(e => !(isMentorEntry(e, traineeIds) && e.teacher_id_2 === userId)) ?? matches[0];
+}
   return (
     <div className="w-full rounded-2xl border border-slate-200 shadow-sm bg-white overflow-x-auto">
       <table className="border-collapse w-full" style={{ minWidth: "600px" }}>
@@ -2110,6 +2119,8 @@ const room    = classrooms.find(c => c.id === entry.classroom_id);
 // ★ ย้ายมาตรงนี้
 const otherTeacherId = entry.teacher_id === userId ? entry.teacher_id_2 : entry.teacher_id;
 const otherTeacher = otherTeacherId ? teachers.find(t => t.id === otherTeacherId) : null;
+const mentor = isMentorEntry(entry, traineeIds);
+const iAmMentor = mentor && entry.teacher_id_2 === userId;
 return (
   <td key={slot.id} className="p-1 align-top border-r border-slate-100">
     <div className={`rounded-xl border-2 px-2 py-2 ${colors.bg} ${colors.border} ${colors.text} ring-2 ring-offset-1 ring-blue-400`} style={{ minHeight: "92px" }}>
@@ -2120,10 +2131,11 @@ return (
   )}
 </p>
 {room && <p className="text-[10px] font-bold opacity-70">{room.grade_group} {room.room_name}</p>}
-      {otherTeacher && <p className="text-[10px] font-bold opacity-70">ร่วมกับ {displayName(otherTeacher)}</p>}
-      <span className="text-[9px] font-black bg-blue-500 text-white px-1.5 py-0.5 rounded mt-1 inline-block">
-        {entry.teacher_id_2 === userId ? "ครู 2" : "ครู 1"}
-      </span>
+      {otherTeacher && <p className="text-[10px] font-bold opacity-70">
+  {iAmMentor ? "ดูแลนิสิต: " : mentor ? "ครูพี่เลี้ยง: " : "ร่วมกับ "}{displayName(otherTeacher)}</p>}
+<span className="text-[9px] font-black bg-blue-500 text-white px-1.5 py-0.5 rounded mt-1 inline-block">
+  {iAmMentor ? "ครูพี่เลี้ยง" : entry.teacher_id_2 === userId ? "ครู 2" : "ครู 1"}
+</span>
     </div>
   </td>
 );
@@ -2137,10 +2149,10 @@ return (
   );
 }
 
-function DayDetailModal({ day, entries, clubBlocks, timeSlots, subjects, teachers, classrooms, userId, onClose }: {
+function DayDetailModal({ day, entries, clubBlocks, timeSlots, subjects, teachers, classrooms, traineeIds, userId, onClose }: {
   day: number; entries: TimetableEntry[]; clubBlocks: { dayOfWeek: number; slotLabel: string; club: Club }[];
   timeSlots: TimeSlot[]; subjects: Subject[];
-  teachers: Teacher[]; classrooms: Classroom[]; userId: string; onClose: () => void;
+  teachers: Teacher[]; classrooms: Classroom[]; traineeIds: Set<string>; userId: string; onClose: () => void;
 }) {
   const dc = DAY_COLORS[day - 1];
   const dayEntries = entries
@@ -2178,7 +2190,8 @@ function DayDetailModal({ day, entries, clubBlocks, timeSlots, subjects, teacher
 </p>
                 </div>
                 {otherTeacher && <span className="text-[10px] font-bold text-slate-400 shrink-0">+ {displayName(otherTeacher)}</span>}
-                {isMe2 && <span className="text-[9px] font-black bg-purple-500 text-white px-1.5 py-0.5 rounded shrink-0">ครู 2</span>}
+                {isMe2 && <span className="text-[9px] font-black bg-purple-500 text-white px-1.5 py-0.5 rounded shrink-0">
+  {isMentorEntry(e, traineeIds) ? "ครูพี่เลี้ยง" : "ครู 2"}</span>}
               </div>
             );
           })}
@@ -2357,6 +2370,25 @@ const gradeLevelName = (v?: string | null): string => {
   return gradeLevelNames[v] ?? (UUID_RE.test(v) ? "สาย (ไม่พบชื่อ)" : v);
 };
 const [showSplitModal, setShowSplitModal] = useState(false);
+const [traineeIds, setTraineeIds] = useState<Set<string>>(new Set());
+const [allowedDupKeys, setAllowedDupKeys] = useState<Set<string>>(new Set());
+
+// โหลดรายชื่อนิสิตฝึกสอน (ดูจาก users.position) แยกจาก teachers เผื่อถูกกรองด้วย NON_TEACHING_ROLES
+useEffect(() => {
+  (async () => {
+    const { data, error } = await supabase.from("users").select("id")
+      .ilike("position", `%${TRAINEE_KEYWORD}%`);
+    if (error) { console.warn("[trainees] โหลดไม่ได้:", error.message); return; }
+    setTraineeIds(new Set((data ?? []).map((r: any) => r.id as string)));
+  })();
+}, []);
+
+const loadAllowedDups = useCallback(async () => {
+  const { data, error } = await (supabase.from("allowed_schedule_duplicates") as any).select("dup_key");
+  if (error) { console.warn("[allowedDups] โหลดไม่ได้:", error.message); return; }
+  setAllowedDupKeys(new Set((data ?? []).map((r: any) => r.dup_key as string)));
+}, []);
+useEffect(() => { loadAllowedDups(); }, [loadAllowedDups]);
 const [dashTeacherId, setDashTeacherId] = useState<string | null>(null);   // ครูที่คลิกดูตารางในแดชบอร์ด
 const [dashGradeFilter, setDashGradeFilter] = useState("");                // กรองตามสายชั้น ("" = ทุกสาย)
 
@@ -2447,7 +2479,18 @@ async function toggleGradeHeadPermission(teacherId: string, value: boolean) {
   await (supabase.from("users") as any).update({ can_arrange_schedule: value }).eq("id", teacherId);
   setTeachers(prev => prev.map(t => t.id === teacherId ? { ...t, can_arrange_schedule: value } : t));
 }
-
+async function allowDuplicate(key: string) {
+  if (!user) return;
+  const { error } = await (supabase.from("allowed_schedule_duplicates") as any)
+    .upsert([{ dup_key: key, allowed_by: user.id }], { onConflict: "dup_key" });
+  if (error) { alert("❌ บันทึกการอนุญาตไม่สำเร็จ: " + error.message); return; }
+  setAllowedDupKeys(prev => new Set([...prev, key]));
+}
+async function revokeAllowedDuplicate(key: string) {
+  const { error } = await (supabase.from("allowed_schedule_duplicates") as any).delete().eq("dup_key", key);
+  if (error) { alert("❌ ยกเลิกไม่สำเร็จ: " + error.message); return; }
+  setAllowedDupKeys(prev => { const n = new Set(prev); n.delete(key); return n; });
+}
 useEffect(() => { loadClubs(); }, [loadClubs]);
 
   // ── Init ──────────────────────────────────────────────────────────────────
@@ -3432,7 +3475,7 @@ function renderTeacherSemesterTimetable(tid: string, sem: number, showChangeBadg
         <PersonalTimetableGrid
           myEntries={entriesOfType} myClubBlocks={clubBlocks} timeSlots={slots}
           allTimeSlots={timeSlots} subjects={subjects} teachers={teachers}
-          classrooms={semRooms} userId={tid}
+          classrooms={semRooms} userId={tid} traineeIds={traineeIds}
         />
       </div>
     );
@@ -3513,11 +3556,36 @@ const duplicateGroups = (() => {
   });
   return Array.from(map.values()).filter(group => group.length > 1);
 })();
+const sameDaySubjectGroups = (() => {
+  const map = new Map<string, TimetableEntry[]>();
+  allEntriesForCheck.forEach(e => {
+    const key = `${e.classroom_id}|${e.day_of_week}|${e.subject_id}|${entryYearName(e)}|${entrySemesterKey(e)}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(e);
+  });
+  return Array.from(map.entries()).map(([base, list]) => {
+    const sorted = [...list].sort((a, b) =>
+      (timeSlotStartMap[a.time_slot_id] ?? "").localeCompare(timeSlotStartMap[b.time_slot_id] ?? ""));
+    const room = allClassrooms.find(c => c.id === sorted[0].classroom_id);
+    const rs = buildRoomSlots(room?.schedule_type, timeSlots).filter(s => !s.is_break);
+    const slotAt = (id: string) => rs.find(s => s.start_time.slice(0, 5) === timeSlotStartMap[id]);
+    const adjacent = sorted.some((e, i) => {
+      if (i === 0) return false;
+      const a = slotAt(sorted[i - 1].time_slot_id), b = slotAt(e.time_slot_id);
+      return !!a && !!b && areSlotsAdjacent(a, b);
+    });
+    // ใส่จำนวนคาบไว้ใน key — ถ้าภายหลังเพิ่มเป็น 3 คาบ จะแจ้งใหม่ (ดูทีละเคส)
+    return { allowKey: `${base}|n${sorted.length}`, list: sorted, adjacent };
+  }).filter(g => new Set(g.list.map(normalizedSlotKey)).size > 1); // ไม่รวมกรณี "ช่องเดียวกัน" ที่มีหัวข้อของมันเองอยู่แล้ว
+})();
+const sameDayActiveGroups  = sameDaySubjectGroups.filter(g => !allowedDupKeys.has(g.allowKey));
+const sameDayAllowedGroups = sameDaySubjectGroups.filter(g =>  allowedDupKeys.has(g.allowKey));
 
 const teacherConflictGroups = (() => {
   const map = new Map<string, { teacherId: string; entry: TimetableEntry }[]>();
   allEntriesForCheck.forEach(e => {
-    const ids = [e.teacher_id, e.teacher_id_2].filter(Boolean) as string[];
+    // ★ ถ้าคาบนี้ครู 1 เป็นนิสิตฝึกสอน → ครู 2 คือครูพี่เลี้ยง ไม่นับเป็นการสอนซ้อน
+const ids = [e.teacher_id, isMentorEntry(e, traineeIds) ? null : e.teacher_id_2].filter(Boolean) as string[];
     const slotKey = normalizedSlotKey(e);
     const sem = entrySemesterKey(e);
     // อ./ป. (all) ต้องนับรวมเข้าทั้งเทอม 1 และ 2 ส่วน ม. นับเฉพาะเทอมของตัวเอง
@@ -3624,7 +3692,7 @@ const totalScheduledPeriods = dashEntries.length;
 
       {selectedDayDetail !== null && (
   <DayDetailModal
-    day={selectedDayDetail} entries={topEntries} timeSlots={timeSlots}
+    day={selectedDayDetail} entries={topEntries} timeSlots={timeSlots} traineeIds={traineeIds}
     subjects={subjects} teachers={teachers} classrooms={classrooms} userId={user.id}
     clubBlocks={myClubBlocksAll.filter(b => b.dayOfWeek === selectedDayDetail)}
     onClose={() => setSelectedDayDetail(null)}
@@ -3791,9 +3859,9 @@ const totalScheduledPeriods = dashEntries.length;
   <button onClick={() => setViewMode("duplicates")}
     className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all relative ${viewMode === "duplicates" ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
     🧹 คาบซ้ำ
-    {(duplicateGroups.length + teacherConflictGroups.length + duplicateClassroomGroups.length) > 0 && (
+    {(duplicateGroups.length + teacherConflictGroups.length + duplicateClassroomGroups.length + sameDayActiveGroups.length) > 0 && (
       <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">
-        {duplicateGroups.length + teacherConflictGroups.length + duplicateClassroomGroups.length}
+        {duplicateGroups.length + teacherConflictGroups.length + duplicateClassroomGroups.length + sameDayActiveGroups.length}
       </span>
     )}
   </button>
@@ -3958,7 +4026,7 @@ const totalScheduledPeriods = dashEntries.length;
       currentUser={user}
       clubPeriod={clubPeriods.find(cp => cp.grade_label === getClassroomGradeLabel(selectedClassroom))}
       clubsForGrade={clubs.filter(c => c.grade_label === getClassroomGradeLabel(selectedClassroom))}
-      onSave={handleSaveDirect}
+      onSave={handleSaveDirect} traineeIds={traineeIds} 
       onRequestChange={handleRequestChange}
       onDelete={handleDeleteEntry}
     />
@@ -4201,6 +4269,100 @@ const totalScheduledPeriods = dashEntries.length;
         </div>
       )}
     </div>
+    <div>
+  <div className="mb-4">
+    <h2 className="text-xl font-black text-slate-800">⏱️ วิชาเดียวกันซ้ำในวันเดียวกัน</h2>
+    <p className="text-slate-400 text-sm">
+      วิชาเดียวกันถูกจัดมากกว่า 1 คาบในวันเดียว (เช่น วิชาที่สอน 2 ชม.) — กด “อนุญาต” ถ้าตั้งใจจัดแบบนี้ ระบบจะไม่แจ้งเคสนี้อีก
+    </p>
+  </div>
+
+  {sameDayActiveGroups.length === 0 ? (
+    <div className="text-center py-10 text-slate-400 bg-white rounded-2xl border border-slate-200">
+      <p className="text-3xl mb-2">✅</p>
+      <p className="font-bold text-sm">ไม่พบวิชาซ้ำในวันเดียวกัน</p>
+    </div>
+  ) : (
+    <div className="space-y-4">
+      {sameDayActiveGroups.map(g => {
+        const first = g.list[0];
+        const room = allClassrooms.find(c => c.id === first.classroom_id);
+        const subject = subjects.find(s => s.id === first.subject_id) ?? (first as any).subject;
+        const rs = buildRoomSlots(room?.schedule_type, timeSlots);
+        return (
+          <div key={g.allowKey} className="bg-white rounded-2xl border-2 border-orange-200 shadow-sm overflow-hidden">
+            <div className="bg-orange-50 border-b border-orange-200 px-5 py-3">
+              <p className="font-black text-orange-700 text-sm">
+                ⚠️ ห้อง {room?.grade_group} {room?.room_name} · {DAYS[(first.day_of_week ?? 1) - 1]} · {(subject as any)?.name_th ?? "—"}
+                <span className={`ml-2 text-[10px] font-black px-1.5 py-0.5 rounded ${g.adjacent ? "bg-orange-200 text-orange-800" : "bg-slate-200 text-slate-700"}`}>
+                  {g.adjacent ? "คาบติดกัน" : "ไม่ติดกัน"}
+                </span>
+              </p>
+              <p className="text-orange-600 text-xs font-bold">พบ {g.list.length} คาบในวันเดียวกัน</p>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {g.list.map(e => {
+                const slot = rs.find(s => s.start_time.slice(0, 5) === timeSlotStartMap[e.time_slot_id])
+                  ?? timeSlots.find(s => s.id === e.time_slot_id);
+                const t1 = teachers.find(t => t.id === e.teacher_id) ?? (e as any).teacher;
+                const t2 = e.teacher_id_2 ? (teachers.find(t => t.id === e.teacher_id_2) ?? (e as any).teacher2) : null;
+                return (
+                  <div key={e.id} className="px-5 py-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-bold text-slate-800 text-sm">
+                        {slot?.slot_label ?? "—"} ({formatTime(slot?.start_time ?? "")}–{formatTime(slot?.end_time ?? "")})
+                      </p>
+                      <p className="text-slate-500 text-xs">
+                        {displayName(t1)}{t2 ? ` + ${isMentorEntry(e, traineeIds) ? "ครูพี่เลี้ยง " : ""}${displayName(t2)}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button onClick={() => allowDuplicate(g.allowKey)}
+                        className="px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs">
+                        ✅ อนุญาต
+                      </button>
+                      <button
+                        onClick={async () => { if (confirm("ลบรายการนี้?")) { await handleDeleteEntry(e.id); await loadAllEntriesForCheck(); } }}
+                        className="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-xs">
+                        🗑️ ลบรายการนี้
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  )}
+
+  {sameDayAllowedGroups.length > 0 && (
+    <details className="mt-3 bg-white rounded-2xl border border-slate-200 p-4">
+      <summary className="cursor-pointer text-sm font-black text-slate-600">
+        ✅ เคสที่อนุญาตแล้ว ({sameDayAllowedGroups.length})
+      </summary>
+      <div className="mt-3 divide-y divide-slate-100">
+        {sameDayAllowedGroups.map(g => {
+          const first = g.list[0];
+          const room = allClassrooms.find(c => c.id === first.classroom_id);
+          const subject = subjects.find(s => s.id === first.subject_id) ?? (first as any).subject;
+          return (
+            <div key={g.allowKey} className="py-2 flex items-center justify-between gap-2">
+              <p className="text-xs font-bold text-slate-600">
+                {room?.grade_group} {room?.room_name} · {DAYS[(first.day_of_week ?? 1) - 1]} · {(subject as any)?.name_th ?? "—"} ({g.list.length} คาบ)
+              </p>
+              <button onClick={() => revokeAllowedDuplicate(g.allowKey)}
+                className="px-2 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-600 text-[11px] font-black shrink-0">
+                ยกเลิกอนุญาต
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </details>
+  )}
+</div>
 
     {/* ── ★ ครูสอนซ้อนคาบ (คนละห้อง) — ใช้ component เดียวกับที่แสดงในหน้าคำขอ ── */}
     <TeacherConflictPanel
