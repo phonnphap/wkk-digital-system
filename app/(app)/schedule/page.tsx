@@ -2808,7 +2808,7 @@ async function syncSubjectSection({
         teacher_id: teacherId, co_teacher_id: teacherId2 || null,
         join_code: joinCode, is_active: true, created_by: createdBy, semester,
       }]).select("id").single();
-      if (error) { console.error("[syncSubjectSection] insert error:", error); return { carriedOver }; }
+      if (error) { console.error("[syncSubjectSection] insert error:", error); throw error; }
       if (semester === 2) {
         carriedOver = await linkPreviousSemester({ sectionId: inserted.id, subjectId, classroomId, newTeacherIds: wantedTeachers });
       }
@@ -2834,9 +2834,10 @@ async function syncSubjectSection({
       carriedOver = await linkPreviousSemester({ sectionId: existing.id, subjectId, classroomId, newTeacherIds: wantedTeachers });
     }
   } catch (err) {
-    console.error("[syncSubjectSection] unexpected error:", err);
-  }
-  return { carriedOver };
+  console.error("[syncSubjectSection] unexpected error:", err);
+  throw err;
+}
+return { carriedOver };
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -3440,11 +3441,17 @@ function normalizedSlotKey(e: TimetableEntry): string {
   // ถ้าหา start_time ไม่เจอใน timeSlots (เช่น virtual slot จาก template) ให้ fallback ไปใช้ time_slot_id ดิบ
   return timeSlotStartMap[e.time_slot_id] || e.time_slot_id;
 }
+// ★ เทอมของ entry นั้น — ห้อง ม. อ้างจากปีการศึกษาของห้อง, ห้อง อ./ป. ที่ไม่แยกเทอมให้เป็น 0 (ใช้ร่วมทุกเทอม)
+function entrySemesterKey(e: TimetableEntry): string {
+  const room = allClassrooms.find(c => c.id === e.classroom_id);
+  if (!room || !isSecondaryClassroom(room)) return "all";
+  return String(getSemesterForClassroom(room, academicYearsRaw));
+}
 
 const duplicateGroups = (() => {
   const map = new Map<string, TimetableEntry[]>();
   allEntriesForCheck.forEach(e => {
-    const key = `${e.classroom_id}|${e.day_of_week}|${normalizedSlotKey(e)}`;
+    const key = `${e.classroom_id}|${e.day_of_week}|${normalizedSlotKey(e)}|${entrySemesterKey(e)}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(e);
   });
@@ -3456,18 +3463,28 @@ const teacherConflictGroups = (() => {
   allEntriesForCheck.forEach(e => {
     const ids = [e.teacher_id, e.teacher_id_2].filter(Boolean) as string[];
     const slotKey = normalizedSlotKey(e);
+    const sem = entrySemesterKey(e);
+    // อ./ป. (all) ต้องนับรวมเข้าทั้งเทอม 1 และ 2 ส่วน ม. นับเฉพาะเทอมของตัวเอง
+    const semsToCount = sem === "all" ? ["1", "2"] : [sem];
     ids.forEach(tid => {
-      const key = `${tid}|${e.day_of_week}|${slotKey}`;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push({ teacherId: tid, entry: e });
+      semsToCount.forEach(s => {
+        const key = `${tid}|${e.day_of_week}|${slotKey}|${s}`;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push({ teacherId: tid, entry: e });
+      });
     });
   });
-  // ★ เปลี่ยนเงื่อนไข: ตอนนี้นับเป็น conflict ทันทีถ้าครูคนเดียวกันมี entry มากกว่า 1
-  // ในวัน+เวลาเดียวกัน ไม่ว่าจะห้องเดียวกันหรือคนละห้อง (ถ้าห้องเดียวกันก็ซ้ำอยู่แล้วใน duplicateGroups
-  // แต่ยังอยากเห็นในนี้ด้วยเผื่อกรณี classroom_id ต่างกันแต่จริงๆ คือห้องเดียวกันที่ถูกสร้างซ้ำ)
+    // ต่อท้ายก่อน return: ตัดกลุ่มที่เหมือนกันทุกประการ (อ./ป. ที่ถูกนับสองรอบ)
+  const seen = new Set<string>();
   return Array.from(map.entries())
     .map(([key, list]) => ({ key, list, isConflict: list.length > 1 }))
-    .filter(g => g.isConflict);
+    .filter(g => g.isConflict)
+    .filter(g => {
+      const sig = g.list.map(i => i.entry.id).sort().join(",");
+      if (seen.has(sig)) return false;
+      seen.add(sig);
+      return true;
+    });
 })();
 
 const duplicateClassroomGroups = (() => {
