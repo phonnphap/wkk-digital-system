@@ -55,7 +55,8 @@ export function mapAttendance(raw?: string | null): CellStatus | null {
   if (!s) return null;
   if (/ขาด|absent/.test(s)) return "absent";
   if (/ลา|leave|sick|personal|excused/.test(s)) return "leave";
-  if (/present|late|มา|สาย/.test(s)) return "present";
+  // "ไปกิจกรรม" ถือว่ามา (ยังรับอาหาร/นม)
+  if (/present|late|ontime|on_time|activity|กิจกรรม|มา|สาย/.test(s)) return "present";
   return null;
 }
 
@@ -134,7 +135,7 @@ export type SheetData = {
   /** ผู้ลงนามท้ายรายงาน: ครูที่ปรึกษา (1–2 คน) → หัวหน้าโครงการ → หัวหน้ากลุ่มงาน */
   signers: { role: string; name: string | null; signatureUrl: string | null }[];
   /** ข้อมูลวินิจฉัยการดึงเช็คชื่อ (มีเมื่อสั่ง sync) */
-  diag?: { source: string; fetched: number; unmapped: string[] };
+  diag?: { source: string; fetched: number; unmapped: string[]; statusCounts: Record<string, number> };
   students: SheetStudent[];
   dayTotals: Record<number, { present: number; leave: number; absent: number; extra: number }>;
   editable: boolean;

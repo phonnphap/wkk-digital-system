@@ -59,3 +59,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
 }
+
+// DELETE { subjectId } — รีเซ็ตลายมือชื่อนักเรียน (ครูประจำชั้นของห้องนั้น/แอดมิน)
+export async function DELETE(req: NextRequest) {
+  try {
+    const a = await getActor();
+    if (!a) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { subjectId } = (await req.json()) as { subjectId: string };
+    if (!subjectId) return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+
+    const { data: st } = await a.service
+      .from(STUDENTS.table)
+      .select(`classroom_id:${STUDENTS.classroom}`)
+      .eq(STUDENTS.id, subjectId)
+      .maybeSingle();
+    if (!st || !canEditRoom(a, st.classroom_id)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    await a.service.storage.from(BUCKET).remove([`student/${subjectId}.png`]);
+    const { error } = await a.service.from("meal_signatures").delete().eq("subject_type", "student").eq("subject_id", subjectId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+  }
+}

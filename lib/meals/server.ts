@@ -25,9 +25,10 @@ const ATTENDANCE = {
   classroom: "classroom_id",
   date: "attendance_date",
   status: "status",
+  ts: "check_time", // ใช้เรียงเวลา: ถ้านักเรียนมีหลายแถวต่อวัน ให้ยึดแถวล่าสุด
 };
 // สำรอง: ถ้า homeroom_attendance ไม่มีข้อมูลเดือนนั้น จะลองตารางนี้
-const ATTENDANCE_ALT = { table: "attendance_records", student: "student_id", classroom: "classroom_id", date: "attendance_date", status: "status" };
+const ATTENDANCE_ALT = { table: "attendance_records", student: "student_id", classroom: "classroom_id", date: "attendance_date", status: "status", ts: "recorded_at" };
 const CLASSROOMS = { table: "classrooms", id: "classroom_id", name: "room_name" };
 const BUCKET = "student-signatures";
 
@@ -47,8 +48,9 @@ export async function getActor() {
   return {
     service,
     profile: profile as { id: string; role: string; first_name: string; last_name: string },
-    isAdmin: ADMIN_ROLES.has(profile.role),
-    isOwner: OWNER_ROLES.has(profile.role),
+    // ฝ่ายบริหาร = role admin/ผอ./รองผอ. หรือ หัวหน้ากลุ่มงาน; เจ้าของโครงการ = role ที่กำหนด หรือ หัวหน้าโครงการ (users.id)
+    isAdmin: ADMIN_ROLES.has(profile.role) || profile.id === GROUP_HEAD_USER_ID,
+    isOwner: OWNER_ROLES.has(profile.role) || profile.id === PROJECT_HEAD_USER_ID,
     myRooms: ((rooms ?? []) as { classroom_id: string; room_name: string }[]).map((r) => ({ id: r.classroom_id, name: r.room_name })),
     myRoomIds: new Set<string>(((rooms ?? []) as { classroom_id: string }[]).map((r) => r.classroom_id)),
   };
@@ -168,33 +170,19 @@ async function academicYearName(a: Actor, date: string): Promise<string | null> 
   } catch { return null; }
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** หา users.id ของครูที่ปรึกษาห้องนี้ — ปรับให้ตรง schema จริงได้ที่ HOMEROOM_JUNCTIONS */
-const HOMEROOM_JUNCTIONS = ["classroom_teachers", "homeroom_teachers"];
+/** ครูที่ปรึกษา: classrooms.homeroom_teacher_id และ homeroom_teacher_2_id (มีกี่คนก็สร้างช่องลงชื่อเท่านั้น) */
 async function homeroomTeacherIds(a: Actor, classroomId: string): Promise<string[]> {
-  const ids = new Set<string>();
-  const collect = (row: Record<string, unknown>, keyRe: RegExp) => {
-    for (const [k, v] of Object.entries(row)) if (keyRe.test(k) && typeof v === "string" && UUID_RE.test(v)) ids.add(v);
-  };
-  try {
-    const { data } = await a.service.from(CLASSROOMS.table).select("*").eq(CLASSROOMS.id, classroomId).maybeSingle();
-    if (data) collect(data, /teacher/i);
-  } catch { /* ignore */ }
-  if (!ids.size) {
-    for (const t of HOMEROOM_JUNCTIONS) {
-      try {
-        const { data, error } = await a.service.from(t).select("*").eq("classroom_id", classroomId);
-        if (!error) (data ?? []).forEach((r: any) => collect(r, /(user|teacher)_id$/i));
-      } catch { /* ignore */ }
-      if (ids.size) break;
-    }
-  }
-  if (!ids.size && a.myRoomIds.has(classroomId)) ids.add(a.profile.id); // สำรอง: ครูที่ล็อกอินและเป็นประจำชั้นห้องนี้
-  return [...ids];
+  const { data } = await a.service
+    .from(CLASSROOMS.table)
+    .select("homeroom_teacher_id, homeroom_teacher_2_id")
+    .eq(CLASSROOMS.id, classroomId)
+    .maybeSingle();
+  const ids = [data?.homeroom_teacher_id, data?.homeroom_teacher_2_id].filter(Boolean) as string[];
+  return [...new Set(ids)];
 }
 
 async function loadSigners(a: Actor, classroomId: string, type: MealType): Promise<SheetData["signers"]> {
-  const teacherIds = (await homeroomTeacherIds(a, classroomId)).slice(0, 2);
+  const teacherIds = await homeroomTeacherIds(a, classroomId);
   const want = [...teacherIds, PROJECT_HEAD_USER_ID, GROUP_HEAD_USER_ID];
   let res = await a.service.from("users").select("id, title, first_name, last_name, signature_url").in("id", want);
   if (res.error) res = await a.service.from("users").select("id, first_name, last_name, signature_url").in("id", want);
@@ -252,11 +240,12 @@ export async function syncMonth(
         .select(`student:${A.student}, date:${A.date}, status:${A.status}`)
         .in(A.student, ids)
         .gte(A.date, start).lte(A.date, end)
-        .order(A.date).order(A.student).range(f, t));
+        .order(A.date).order(A.student).order(A.ts, { ascending: true }).range(f, t));
     source = A.table;
     if (att.length) break;
   }
   const unmapped = new Set<string>();
+  const statusCounts: Record<string, number> = {};
   const existing = await fetchAll<any>((f, t) =>
     s.from("meal_records").select("id, student_id, record_date, status, source")
       .eq("classroom_id", classroomId).eq("meal_type", type)
@@ -271,8 +260,9 @@ export async function syncMonth(
   };
   for (const r of att) {
     if (r.date > last || !ids.includes(r.student)) continue;
+    statusCounts[String(r.status)] = (statusCounts[String(r.status)] ?? 0) + 1;
     const st = mapAttendance(r.status);
-    if (st) put(r.date, r.student, st);
+    if (st) put(r.date, r.student, st); // แถวหลังสุด (ใหม่สุด) ทับแถวก่อนหน้า
     else unmapped.add(String(r.status));
   }
   const manualKeys = new Set<string>();
@@ -310,7 +300,7 @@ export async function syncMonth(
   // ลบแถว auto ที่ไม่มีข้อมูลเช็คชื่อรองรับแล้ว
   const stale = existing.filter((r) => r.source === "auto" && !keep.has(`${r.student_id}|${r.record_date}`)).map((r) => r.id);
   for (const part of chunk(stale, 200)) await s.from("meal_records").delete().in("id", part);
-  return { locked: false, days: days.length, diag: { source, fetched: att.length, unmapped: [...unmapped] } };
+  return { locked: false, days: days.length, diag: { source, fetched: att.length, unmapped: [...unmapped], statusCounts } };
 }
 
 // ── Sheet: ข้อมูลตารางรายเดือนของห้องเดียว ─────────────────────────────────────

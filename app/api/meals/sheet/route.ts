@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     const type: MealType = q.get("type") === "milk" ? "milk" : "lunch";
 
     if (!classroomId) {
-      return NextResponse.json({ classrooms: await listClassrooms(a, false) });
+      return NextResponse.json({ classrooms: await listClassrooms(a, false), canReport: a.isAdmin || a.isOwner });
     }
     if (!canAccessRoom(a, classroomId)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });

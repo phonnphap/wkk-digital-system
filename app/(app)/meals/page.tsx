@@ -1,10 +1,10 @@
 // app/meals/page.tsx — แบบบันทึกอาหารกลางวัน / นม รายเดือน (ครูประจำชั้น)
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BarChart3, Lock, PenLine, Printer, Unlock } from "lucide-react";
+import { BarChart3, Lock, Printer, Unlock } from "lucide-react";
 import SignaturePad from "@/components/meals/SignaturePad";
 import {
   FORM_TITLE, SCHOOL_LINE, currentMonth, dateOf, fullRoomName, monthLabel, shiftMonth,
@@ -32,6 +32,9 @@ export default function MealsPage() {
   const [sheet, setSheet] = useState<SheetData | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [canReport, setCanReport] = useState(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const countRef = useRef(0);
   const [signFor, setSignFor] = useState<{ type: "student" | "user"; id: string; name: string } | null>(null);
 
   // อ่านค่าเริ่มต้นจาก URL (?classroomId=&month=&type=) + โหลดรายชื่อห้อง
@@ -39,14 +42,37 @@ export default function MealsPage() {
     const q = new URLSearchParams(window.location.search);
     if (q.get("month")) setMonth(q.get("month")!);
     if (q.get("type") === "milk") setType("milk");
-    api<{ classrooms: ClassroomLite[] }>("/api/meals/sheet")
-      .then(({ classrooms }) => {
+    api<{ classrooms: ClassroomLite[]; canReport: boolean }>("/api/meals/sheet")
+      .then(({ classrooms, canReport }) => {
+        setCanReport(!!canReport);
         setClassrooms(classrooms);
         const want = q.get("classroomId");
         setClassroomId(classrooms.find((c) => c.id === want)?.id ?? classrooms[0]?.id ?? "");
         if (!classrooms.length) setLoading(false);
       })
       .catch((e) => { setErr(e.message); setLoading(false); });
+  }, []);
+
+  // พิมพ์ให้พอดี 1 หน้า A4 แนวนอน: ประมาณความสูงจากจำนวนนักเรียน แล้วย่อ (scale) ถ้าเกิน
+  useEffect(() => {
+    const reset = () => {
+      const el = sheetRef.current;
+      if (el) { el.style.transform = ""; el.style.width = ""; el.style.transformOrigin = ""; }
+    };
+    const before = () => {
+      const el = sheetRef.current;
+      if (!el) return;
+      const est = 170 + (countRef.current + 7) * 14; // ส่วนหัว+หมายเหตุ+ลายเซ็น + แถว (ตัวอักษร 9px)
+      const z = Math.min(1, 735 / est);
+      if (z < 1) {
+        el.style.transformOrigin = "top left";
+        el.style.transform = `scale(${z})`;
+        el.style.width = `calc(100% / ${z})`;
+      }
+    };
+    window.addEventListener("beforeprint", before);
+    window.addEventListener("afterprint", reset);
+    return () => { window.removeEventListener("beforeprint", before); window.removeEventListener("afterprint", reset); };
   }, []);
 
   const current = classrooms.find((c) => c.id === classroomId);
@@ -95,6 +121,17 @@ export default function MealsPage() {
     try { await post("/api/meals/report", { action, classroomId, month, type }); await load(false); }
     catch (e) { setErr((e as Error).message); }
   }
+  async function resetSignature(st: SheetStudent) {
+    if (!canEdit || !st.signatureUrl) return;
+    if (!confirm(`รีเซ็ตลายมือชื่อของ ${st.name}?`)) return;
+    try {
+      await api("/api/meals/signature", {
+        method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subjectId: st.id }),
+      });
+      await load(false);
+    } catch (e) { setErr((e as Error).message); }
+  }
   async function togglePack() {
     if (!sheet || !canEdit) return;
     try {
@@ -108,6 +145,7 @@ export default function MealsPage() {
     await load(false);
   }
 
+  countRef.current = sheet?.students.length ?? 0;
   const sumAll = useMemo(() => {
     const t = { present: 0, leave: 0, absent: 0, extra: 0 };
     sheet?.students.forEach((s) => { t.present += s.present; t.leave += s.leave; t.absent += s.absent; t.extra += s.extra; });
@@ -129,11 +167,19 @@ export default function MealsPage() {
   const days = Array.from({ length: sheet?.days ?? 0 }, (_, i) => i + 1);
   const school = new Set(sheet?.schoolDays ?? []);
   const th = "border border-slate-400 px-1 py-1 text-center font-bold";
-  const td = "border border-slate-300 px-1 py-0.5 text-center";
+  const td = "border border-slate-300 px-0.5 py-0.5 text-center";
+  const tdName = "border border-slate-300 px-1 py-0.5 text-left whitespace-nowrap overflow-hidden text-ellipsis";
 
   return (
     <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
-      <style>{`@media print{@page{size:A4 landscape;margin:8mm}}`}</style>
+      <style>{`@media print{
+        @page{size:A4 landscape;margin:6mm}
+        body *{visibility:hidden!important}
+        .meal-print,.meal-print *{visibility:visible!important}
+        .meal-print{position:fixed;left:0;top:0;width:100%}
+        .meal-print table td,.meal-print table th{padding:1px 2px!important;font-size:9px!important;line-height:1.15!important}
+        .meal-print input{font-size:9px!important}
+      }`}</style>
       {signFor && <SignaturePad title={signFor.name} onSave={saveSignature} onClose={() => setSignFor(null)} />}
 
       {/* ── แถบควบคุม ── */}
@@ -160,13 +206,11 @@ export default function MealsPage() {
         </div>
 
         <div className="ml-auto flex flex-wrap gap-2">
-          <Link href="/meals/report" className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700">
-            <BarChart3 className="h-3.5 w-3.5" /> รายงานรวม
-          </Link>
-          <button onClick={() => setSignFor({ type: "user", id: sheet!.me.id, name: sheet!.me.name })} disabled={!sheet}
-            className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700">
-            <PenLine className="h-3.5 w-3.5" /> ลายมือชื่อของฉัน{sheet?.me.hasSignature ? " ✓" : ""}
-          </button>
+          {canReport && (
+            <Link href="/meals/report" className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700">
+              <BarChart3 className="h-3.5 w-3.5" /> รายงานรวม
+            </Link>
+          )}
           <button onClick={() => window.print()} className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700">
             <Printer className="h-3.5 w-3.5" /> พิมพ์
           </button>
@@ -199,11 +243,12 @@ export default function MealsPage() {
           )}
           {canEdit && (
             <p className="mb-2 text-[11px] text-slate-400 print:hidden">
-              กดที่ช่องวันที่เพื่อแก้ ✓ → ล → ข → (กลับค่าอัตโนมัติ) · ตัวเลข <b>+n</b> คือได้รับแจกเพิ่ม · กรอก นน./สส. ปลายเดือนได้ในตาราง (ใช้จัดลำดับผู้ได้รับเพิ่มด้วย)
+              กดที่ช่องวันที่เพื่อแก้ ✓ → ล → ข → (กลับค่าอัตโนมัติ) · ตัวเลข <b>+n</b> คือได้รับแจกเพิ่ม · กรอก นน./สส. ปลายเดือนได้ในตาราง · คลิกขวาที่ช่องลายมือชื่อ นร. เพื่อรีเซ็ต
             </p>
           )}
 
-          <div className="overflow-x-auto rounded-xl border border-slate-300 bg-white p-3 print:border-0 print:p-0">
+          <div className="meal-print">
+          <div ref={sheetRef} className="overflow-x-auto rounded-xl border border-slate-300 bg-white p-3 print:overflow-visible print:border-0 print:p-0">
             <h2 className="text-center text-sm font-bold text-slate-800">
               {FORM_TITLE[sheet.type]}{fullRoomName(sheet.classroom.name)}
               {sheet.type === "milk" && (
@@ -217,18 +262,26 @@ export default function MealsPage() {
               {SCHOOL_LINE}{sheet.academicYear ? `  ปีการศึกษา  ${sheet.academicYear}` : ""}
             </p>
 
-            <table className="w-full border-collapse text-[11px]">
+            <table className="w-full min-w-[860px] border-collapse text-[10px]" style={{ tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: "1.75rem" }} />
+                <col style={{ width: "11rem" }} />
+                {days.map((d) => <col key={d} />)}
+                <col style={{ width: "2.6rem" }} /><col style={{ width: "1.6rem" }} /><col style={{ width: "1.6rem" }} /><col style={{ width: "2rem" }} />
+                <col style={{ width: "3rem" }} /><col style={{ width: "3rem" }} />
+                <col style={{ width: "5.5rem" }} />
+              </colgroup>
               <thead>
                 <tr className="bg-slate-100">
                   <th rowSpan={2} className={th}>ที่</th>
-                  <th rowSpan={2} className={`${th} min-w-[11rem] text-left`}>ชื่อ - สกุล</th>
+                  <th rowSpan={2} className={th}>ชื่อ - สกุล</th>
                   <th colSpan={days.length} className={th}>เดือน {monthLabel(sheet.month).replace(" ", " พ.ศ. ")}</th>
                   <th colSpan={4} className={th}>สรุปรายเดือน</th>
                   <th colSpan={2} className={th}>ข้อมูลปลายเดือน</th>
-                  <th rowSpan={2} className={`${th} min-w-[6rem]`}>ลายมือชื่อ นร.</th>
+                  <th rowSpan={2} className={th}>ลายมือชื่อ นร.</th>
                 </tr>
                 <tr className="bg-slate-100">
-                  {days.map((d) => <th key={d} className={`${th} min-w-[1.75rem] font-semibold ${school.has(d) ? "" : "text-slate-400"}`}>{d}</th>)}
+                  {days.map((d) => <th key={d} className={`${th} font-semibold ${school.has(d) ? "" : "text-slate-400"}`}>{d}</th>)}
                   <th className={th}>รวมวัน</th><th className={th}>ล</th><th className={th}>ข</th><th className={th}>เพิ่ม</th>
                   <th className={th}>น้ำหนัก</th><th className={th}>ส่วนสูง</th>
                 </tr>
@@ -237,7 +290,7 @@ export default function MealsPage() {
                 {sheet.students.map((st, i) => (
                   <tr key={st.id}>
                     <td className={td}>{st.no ?? i + 1}</td>
-                    <td className={`${td} whitespace-nowrap text-left`}>{st.name}</td>
+                    <td className={tdName} title={st.name}>{st.name}</td>
                     {segments.map((seg) => {
                       if (seg.label) {
                         return i === 0 ? (
@@ -267,13 +320,15 @@ export default function MealsPage() {
                         {canEdit ? (
                           <input defaultValue={st[f] ?? ""} key={`${st.id}-${f}-${st[f]}`} inputMode="decimal"
                             onBlur={(e) => saveMeasure(st, f, e.target.value)}
-                            className="w-12 rounded border border-slate-200 px-1 text-center print:border-0" />
+                            className="w-full rounded border border-slate-200 px-0.5 text-center print:border-0" />
                         ) : (st[f] ?? "")}
                       </td>
                     ))}
-                    <td className={`${td} h-8`}>
+                    <td className={`${td} h-7`}
+                      title={st.signatureUrl && canEdit ? "คลิกขวาเพื่อรีเซ็ตลายมือชื่อ" : undefined}
+                      onContextMenu={(e) => { if (st.signatureUrl && canEdit) { e.preventDefault(); resetSignature(st); } }}>
                       {st.signatureUrl ? (
-                        <img src={st.signatureUrl} alt="" className="mx-auto max-h-7 max-w-[5.5rem]" />
+                        <img src={st.signatureUrl} alt="" className="mx-auto max-h-6 max-w-[5rem]" />
                       ) : sheet.editable ? (
                         <button onClick={() => setSignFor({ type: "student", id: st.id, name: st.name })}
                           className="rounded-lg bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700 print:hidden">+ เพิ่ม</button>
@@ -310,21 +365,27 @@ export default function MealsPage() {
             </p>
 
             {/* ── ลงนามท้ายรายงาน (ลายเซ็นจาก users.signature_url) ── */}
-            <div className="mt-6 flex flex-wrap justify-around gap-x-6 gap-y-5 text-center text-xs text-slate-800">
+            <div className="mt-5 flex flex-wrap justify-around gap-x-6 gap-y-4 text-xs text-slate-800">
               {sheet.signers.map((p, i) => (
-                <div key={i} className="min-w-[11rem]">
-                  <div className="mx-auto grid h-12 place-items-end">
-                    {p.signatureUrl && <img src={p.signatureUrl} alt="" className="max-h-11 max-w-[9rem]" />}
+                <div key={i} className="min-w-[13rem] text-center">
+                  <div className="flex items-end justify-center gap-1">
+                    <span>ลงชื่อ</span>
+                    <span className="relative inline-block h-11 w-44 border-b border-dotted border-slate-700">
+                      {p.signatureUrl && (
+                        <img src={p.signatureUrl} alt="" className="absolute bottom-0.5 left-1/2 max-h-10 max-w-[9rem] -translate-x-1/2" />
+                      )}
+                    </span>
                   </div>
-                  <p>ลงชื่อ.........................................</p>
-                  <p>({p.name ?? "..............................."})</p>
+                  <p className="mt-0.5">({p.name ?? "..............................."})</p>
                   <p className="font-semibold">{p.role}</p>
                 </div>
               ))}
             </div>
             <p className="mt-3 text-center text-[10px] text-slate-400 print:hidden">
               สถานะรายงาน: ครูยืนยัน {sheet.report.confirmed ? "แล้ว" : "ยัง"} · เจ้าของโครงการรับรอง {sheet.report.approved ? "แล้ว" : "ยัง"}
+              {sheet.diag && ` · ค่าสถานะเช็คชื่อที่พบเดือนนี้: ${Object.entries(sheet.diag.statusCounts).map(([k, v]) => `${k}×${v}`).join(", ") || "-"} (ตาราง ${sheet.diag.source})`}
             </p>
+          </div>
           </div>
         </>
       )}
