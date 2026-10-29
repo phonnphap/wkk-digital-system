@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { resolveRosterClassroomIds } from "@/lib/smartclass/rosterClassroom";
 
 const supabase = createClient();
 
@@ -95,13 +96,20 @@ setSections(rows);
           .from("classrooms").select("id, room_name, grade_group").in("id", classroomIds);
         setClassrooms((rooms ?? []) as Classroom[]);
 
-        const { data: studentsData } = await supabase
-          .from("students")
-          .select("id, classroom_id").is("moved_out_at", null)
-          .in("classroom_id", classroomIds);
-        const counts: Record<string, number> = {};
-        (studentsData ?? []).forEach((s: any) => { counts[s.classroom_id] = (counts[s.classroom_id] ?? 0) + 1; });
-        setStudentCounts(counts);
+        const rosterMap = await resolveRosterClassroomIds(supabase, classroomIds);
+const rosterIds = [...new Set(Object.values(rosterMap))];
+
+const { data: studentsData } = await supabase
+  .from("students")
+  .select("id, classroom_id").is("moved_out_at", null)
+  .in("classroom_id", rosterIds);
+
+const byRoster: Record<string, number> = {};
+(studentsData ?? []).forEach((s: any) => { byRoster[s.classroom_id] = (byRoster[s.classroom_id] ?? 0) + 1; });
+
+const counts: Record<string, number> = {};
+classroomIds.forEach(id => { counts[id] = byRoster[rosterMap[id] ?? id] ?? 0; });
+setStudentCounts(counts);
       }
 
       setLoading(false);

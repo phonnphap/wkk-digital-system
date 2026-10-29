@@ -11,6 +11,7 @@ import AttendanceOverviewTool from "@/components/attendance/AttendanceOverviewTo
 import GradeOverviewTool from "@/components/attendance/GradeOverviewTool";
 import InsightsTool from "@/components/insights/InsightsTool";
 import ReportsHubTool from "@/components/reports/ReportsHubTool";
+import { resolveRosterClassroomIds } from "@/lib/smartclass/rosterClassroom";
 
 const supabase = createClient();
 // สถานะที่ถือว่า "ไม่มาเรียน" (สาย = มา) แก้ตามต้องการได้ เช่นเอา "excused" ออกถ้าไปกิจกรรมยังให้คะแนนได้
@@ -2175,25 +2176,27 @@ async function removeFromGroup() {
   final_max_score: Number(finalMax) || 0,
 };
 
-    const subjectUpdate = {
-      subject_type: subjectType,
-      credit_hours: creditHours.trim() === "" ? null : Number(creditHours),
-      hours_per_year: hoursPerYear.trim() === "" ? null : Number(hoursPerYear),
-      score_group_code: scoreGroupCode.trim() === "" ? null : scoreGroupCode.trim(),
-      grading_mode: gradingMode,         
-      grade_rounding_mode: gradeRounding,                                                        // ★ เพิ่ม
-      pass_threshold_percent: Math.max(0, Math.min(100, Number(passThreshold) || 50)),            // ★ เพิ่ม
-      score_period_mode: scorePeriodMode,                                    // ★ เพิ่มบรรทัดนี้
+const subjectUpdate = {
+  subject_type: subjectType,
+  credit_hours: creditHours.trim() === "" ? null : Number(creditHours),
+  hours_per_year: hoursPerYear.trim() === "" ? null : Number(hoursPerYear),
+  score_group_code: scoreGroupCode.trim() === "" ? null : scoreGroupCode.trim(),
+  grading_mode: gradingMode,
+  grade_rounding_mode: gradeRounding,
+  pass_threshold_percent: Math.max(0, Math.min(100, Number(passThreshold) || 50)),
+  score_period_mode: scorePeriodMode,
   default_semester: scorePeriodMode === "semester" ? selectedSemester : null,
-  structure,
-    };
-    const sectionUpdate = {
+  ...structure,            // ← แทน structure,
+};
+
+const sectionUpdate = {
   student_portal_enabled: studentPortalEnabled,
   student_submit_enabled: studentSubmitEnabled,
   allow_late_submission: allowLateSubmission,
   student_access_mode: studentAccessMode,
   show_special_scores: showSpecialScores,
   show_assignment_scores: showAssignmentScores,
+  ...structure,            // ← เพิ่ม เพราะหน้ารายงาน/คะแนนรวมอ่านจาก section
 };
 
     try {
@@ -2903,13 +2906,17 @@ const [{ data: subj }, { data: room }] = await Promise.all([
       setClassroom(room as Classroom);
 
       if (sec?.classroom_id) {
-        const { data: studentsData } = await supabase
-          .from("students")
-          .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url")
-          .eq("classroom_id", sec.classroom_id).is("moved_out_at", null)
-          .order("seat_number");
-        setStudents((studentsData ?? []) as Student[]);
-      }
+  const rosterMap = await resolveRosterClassroomIds(supabase, [sec.classroom_id]);
+  const rosterId = rosterMap[sec.classroom_id] ?? sec.classroom_id;
+
+  const { data: studentsData, error: stuErr } = await supabase
+    .from("students")
+    .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url")
+    .eq("classroom_id", rosterId).is("moved_out_at", null)
+    .order("seat_number");
+  if (stuErr) console.error("โหลดนักเรียนไม่สำเร็จ:", stuErr);
+  setStudents((studentsData ?? []) as Student[]);
+}
 
       if (sec?.id) {
         try {
