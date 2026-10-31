@@ -1433,64 +1433,189 @@ function ReportsView({ items, reports, user, isAdmin, currentYear, year, setYear
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── Dashboard (Admin Summary) ────────────────────────────────────────────────
+// ── Dashboard (Admin Summary) — วางทับ DashboardSummary เดิมทั้งตัว ───────────
 // ══════════════════════════════════════════════════════════════════════════════
-function DashboardSummary({ items, teachers, reports, year }: { items: MediaItem[]; teachers: UserProfile[]; reports: MediaReport[]; year: number }) {
-  const total = items.length;
-  const reportedThisYear = new Set(reports.filter(r => r.academic_year === year).map(r => r.media_id)).size;
 
+// ดึงข้อมูลทั้งตาราง (Supabase จำกัด 1,000 แถว/ครั้ง — timetable_entries อาจเกิน)
+async function fetchAllRows(table: string, select: string): Promise<any[]> {
+  const out: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await (supabase.from(table) as any).select(select).range(from, from + 999);
+    if (error || !data) break;
+    out.push(...data);
+    if (data.length < 1000) break;
+  }
+  return out;
+}
+
+type RegRow = { teacher: UserProfile | undefined; id: string; taught: string[]; registered: string[]; missing: string[] };
+type PanelKey = "regPending" | "reportDone" | "reportPending" | null;
+
+function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
+  items: MediaItem[]; teachers: UserProfile[]; reports: MediaReport[]; year: number;
+  onSelectOwner: (ownerId: string) => void;
+}) {
+  const [teaching, setTeaching] = useState<Map<string, Set<string>>>(new Map()); // teacherId → ชื่อวิชาที่สอน
+  const [loadingTeach, setLoadingTeach] = useState(true);
+  const [panel, setPanel] = useState<PanelKey>(null);
+
+  // ── ตารางสอน → วิชาที่ครูแต่ละคนสอนจริง ──
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const entries = await fetchAllRows("timetable_entries", "subject_id, teacher_id, teacher_id_2");
+      const subjects = await fetchAllRows("subjects", "id,name_th");
+      const nameById = new Map<string, string>();
+      subjects.forEach(s => { if (s.name_th) nameById.set(s.id, s.name_th); });
+      const map = new Map<string, Set<string>>();
+      entries.forEach(e => {
+        const name = nameById.get(e.subject_id);
+        if (!name) return;
+        [e.teacher_id, e.teacher_id_2].forEach(tid => {
+          if (!tid) return;
+          if (!map.has(tid)) map.set(tid, new Set());
+          map.get(tid)!.add(name);
+        });
+      });
+      if (!cancelled) { setTeaching(map); setLoadingTeach(false); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const teacherById = useMemo(() => new Map(teachers.map(t => [t.id, t])), [teachers]);
+  const byName = (a: { teacher?: UserProfile }, b: { teacher?: UserProfile }) =>
+    displayName(a.teacher).localeCompare(displayName(b.teacher), "th");
+
+  // ── 1) การลงทะเบียนสื่อรายวิชา ──
+  const regRows: RegRow[] = useMemo(() => {
+    return [...teaching.entries()].map(([id, subs]) => {
+      const taught = [...subs].sort((a, b) => a.localeCompare(b, "th"));
+      const have = new Set(items.filter(i => i.owner_id === id && i.subject).map(i => i.subject!));
+      const registered = taught.filter(s => have.has(s));
+      const missing = taught.filter(s => !have.has(s));
+      return { teacher: teacherById.get(id), id, taught, registered, missing };
+    }).sort((a, b) => b.missing.length - a.missing.length || byName(a, b));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teaching, items, teacherById]);
+  const regPendingRows = regRows.filter(r => r.missing.length > 0);
+  const regCompleteCount = regRows.length - regPendingRows.length;
+
+  // รายวิชาที่ยังไม่มีสื่อเลย (ทั้งโรงเรียน)
+  const subjectsNoMedia = useMemo(() => {
+    const subjTeachers = new Map<string, string[]>();
+    teaching.forEach((subs, tid) => subs.forEach(s => {
+      if (!subjTeachers.has(s)) subjTeachers.set(s, []);
+      subjTeachers.get(s)!.push(tid);
+    }));
+    const withMedia = new Set(items.map(i => i.subject).filter(Boolean) as string[]);
+    return [...subjTeachers.entries()]
+      .filter(([s]) => !withMedia.has(s))
+      .map(([s, tids]) => ({ subject: s, teachers: tids.map(t => displayName(teacherById.get(t))) }))
+      .sort((a, b) => a.subject.localeCompare(b.subject, "th"));
+  }, [teaching, items, teacherById]);
+
+  // ── 2) รายงานการใช้สื่อ: ครูแต่ละคนต้องทำ ≥ 1 ชิ้น/ปีการศึกษา ──
+  const teacherPool = useMemo(() => {
+    const ids = new Set<string>([...teaching.keys()]);
+    items.forEach(i => { if (i.owner_id) ids.add(i.owner_id); });
+    return [...ids];
+  }, [teaching, items]);
+  const reportCountByTeacher = useMemo(() => {
+    const m = new Map<string, number>();
+    reports.filter(r => r.academic_year === year).forEach(r => {
+      const tid = r.teacher_id ?? r.media?.owner_id;
+      if (tid) m.set(tid, (m.get(tid) ?? 0) + 1);
+    });
+    return m;
+  }, [reports, year]);
+  const reportDone = teacherPool.filter(id => (reportCountByTeacher.get(id) ?? 0) >= 1)
+    .map(id => ({ teacher: teacherById.get(id), id, n: reportCountByTeacher.get(id) ?? 0 })).sort(byName);
+  const reportPending = teacherPool.filter(id => (reportCountByTeacher.get(id) ?? 0) < 1)
+    .map(id => ({ teacher: teacherById.get(id), id })).sort(byName);
+
+  // ── สถิติรวม ──
+  const total = items.length;
   const byType = useMemo(() => {
     const map = new Map<string, number>();
     items.forEach(i => map.set(i.media_type, (map.get(i.media_type) ?? 0) + 1));
     return Array.from(map.entries());
   }, [items]);
-
   const byStatus = useMemo(() => {
     const map = new Map<string, number>();
     items.forEach(i => map.set(i.status, (map.get(i.status) ?? 0) + 1));
     return Array.from(map.entries());
   }, [items]);
-
   const bySubject = useMemo(() => {
     const map = new Map<string, number>();
     items.forEach(i => { const k = i.subject || "ไม่ระบุวิชา"; map.set(k, (map.get(k) ?? 0) + 1); });
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
   }, [items]);
-
   const byGrade = useMemo(() => {
     const map = new Map<string, number>();
     items.forEach(i => { const k = i.grade_level || "ไม่ระบุชั้น"; map.set(k, (map.get(k) ?? 0) + 1); });
     return Array.from(map.entries()).sort((a, b) => GRADE_LEVELS.indexOf(a[0]) - GRADE_LEVELS.indexOf(b[0]));
   }, [items]);
 
+  // ── 3) ผู้ลงทะเบียนมากที่สุด: แยกสื่อดิจิทัล (ฟ้า) / สื่ออุปกรณ์ (ชมพู) ──
   const byOwner = useMemo(() => {
-    const map = new Map<string, number>();
-    items.forEach(i => { if (i.owner_id) map.set(i.owner_id, (map.get(i.owner_id) ?? 0) + 1); });
-    return Array.from(map.entries())
-      .map(([id, count]) => ({ owner: teachers.find(t => t.id === id), count }))
+    const map = new Map<string, { digital: number; equip: number; other: number }>();
+    items.forEach(i => {
+      if (!i.owner_id) return;
+      const c = map.get(i.owner_id) ?? { digital: 0, equip: 0, other: 0 };
+      if (i.media_type === "สื่อดิจิทัล") c.digital++;
+      else if (i.media_type === "สื่ออุปกรณ์") c.equip++;
+      else c.other++;
+      map.set(i.owner_id, c);
+    });
+    return [...map.entries()]
+      .map(([id, c]) => ({ id, owner: teacherById.get(id), ...c, count: c.digital + c.equip + c.other }))
       .sort((a, b) => b.count - a.count);
-  }, [items, teachers]);
+  }, [items, teacherById]);
 
   const maxSubject = Math.max(1, ...bySubject.map(([, v]) => v));
-  const maxGrade   = Math.max(1, ...byGrade.map(([, v]) => v));
-  const maxOwner   = Math.max(1, ...byOwner.map(o => o.count));
+  const maxGrade = Math.max(1, ...byGrade.map(([, v]) => v));
+  const maxOwner = Math.max(1, ...byOwner.map(o => o.count));
+
+  const cardBase = "rounded-2xl p-4 text-center border-2 transition-all w-full";
+  const toggle = (k: Exclude<PanelKey, null>) => setPanel(p => (p === k ? null : k));
+  const ring = (k: PanelKey) => (panel === k ? " ring-4 ring-offset-1" : " hover:-translate-y-0.5 hover:shadow-md");
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-black text-slate-800">📊 แดชบอร์ดคลังสื่อการสอน</h2>
-        <p className="text-slate-400 text-sm">ภาพรวมสื่อการสอนและอุปกรณ์ทั้งโรงเรียน</p>
+        <p className="text-slate-400 text-sm">ภาพรวมสื่อการสอนและอุปกรณ์ทั้งโรงเรียน · ปีการศึกษา {year}</p>
       </div>
 
+      {/* การ์ดสรุป */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-4 text-center">
           <div className="text-3xl font-black text-blue-600">{total}</div>
           <div className="text-slate-400 text-[10px] font-bold">รายการสื่อทั้งหมด</div>
         </div>
-        <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4 text-center">
-          <div className="text-3xl font-black text-emerald-600">{reportedThisYear}<span className="text-base text-emerald-400">/{total}</span></div>
-          <div className="text-slate-400 text-[10px] font-bold">ทำรายงานการใช้สื่อ ปี {year}</div>
-        </div>
+
+        {/* ★ ครูลงทะเบียนสื่อครบทุกวิชาที่สอน (กดดูรายชื่อ) */}
+        <button onClick={() => toggle("regPending")}
+          className={`${cardBase} bg-indigo-50 border-indigo-200 text-indigo-700 ring-indigo-300${ring("regPending")}`}>
+          <div className="text-3xl font-black">{loadingTeach ? "…" : regCompleteCount}<span className="text-base opacity-50">/{loadingTeach ? "…" : regRows.length}</span></div>
+          <div className="text-[10px] font-bold opacity-70">ครูลงทะเบียนสื่อครบทุกวิชา</div>
+          <div className="text-[10px] font-black mt-0.5">{panel === "regPending" ? "▲ ซ่อน" : `▼ ยังไม่ครบ ${loadingTeach ? "…" : regPendingRows.length} คน`}</div>
+        </button>
+
+        {/* ★ ครูที่ทำรายงานการใช้สื่ออย่างน้อย 1 ชิ้น (กดดูรายชื่อ) */}
+        <button onClick={() => toggle("reportPending")}
+          className={`${cardBase} bg-emerald-50 border-emerald-200 text-emerald-700 ring-emerald-300${ring("reportPending")}`}>
+          <div className="text-3xl font-black">{reportDone.length}<span className="text-base opacity-50">/{teacherPool.length}</span></div>
+          <div className="text-[10px] font-bold opacity-70">ครูที่ทำรายงานการใช้สื่อครบ (≥1 ชิ้น) ปี {year}</div>
+          <div className="text-[10px] font-black mt-0.5">{panel === "reportPending" ? "▲ ซ่อน" : `▼ ยังไม่ทำ ${reportPending.length} คน`}</div>
+        </button>
+        <button onClick={() => toggle("reportDone")}
+          className={`${cardBase} bg-white border-emerald-200 text-emerald-700 ring-emerald-300${ring("reportDone")}`}>
+          <div className="text-3xl font-black">{reports.filter(r => r.academic_year === year).length}</div>
+          <div className="text-[10px] font-bold opacity-70">รายงานที่ส่งแล้ว (ชิ้น)</div>
+          <div className="text-[10px] font-black mt-0.5">{panel === "reportDone" ? "▲ ซ่อน" : "▼ ดูรายชื่อที่ทำแล้ว"}</div>
+        </button>
+
         {byType.map(([type, count]) => (
           <div key={type} className={`rounded-2xl p-4 text-center border-2 ${mediaTypeBadge(type)}`}>
             <div className="text-3xl font-black">{count}</div>
@@ -1504,6 +1629,84 @@ function DashboardSummary({ items, teachers, reports, year }: { items: MediaItem
           </div>
         ))}
       </div>
+
+      {/* ★ แผงรายชื่อ: ลงทะเบียนสื่อไม่ครบ */}
+      {panel === "regPending" && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4">
+          <h3 className="font-black text-indigo-800 text-sm mb-3">
+            📚 ครูที่ยังลงทะเบียนสื่อไม่ครบทุกวิชาที่สอน ({regPendingRows.length} คน)
+          </h3>
+          {regPendingRows.length === 0 ? (
+            <p className="text-sm font-bold text-emerald-600">🎉 ครูทุกคนลงทะเบียนสื่อครบทุกวิชาที่สอนแล้ว</p>
+          ) : (
+            <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
+              {regPendingRows.map(r => (
+                <div key={r.id} className="bg-white rounded-xl border border-indigo-100 px-3 py-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button onClick={() => onSelectOwner(r.id)} className="text-sm font-black text-slate-800 hover:text-blue-600 hover:underline">
+                      {displayName(r.teacher)}
+                    </button>
+                    <span className="text-[11px] font-bold text-slate-500">
+                      สอน {r.taught.length} วิชา · ลงทะเบียน {r.registered.length} · <span className="text-red-600">ขาด {r.missing.length}</span>
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {r.missing.map(s => <span key={s} className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">{s}</span>)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {subjectsNoMedia.length > 0 && (
+            <div className="mt-4">
+              <h4 className="font-black text-indigo-800 text-xs mb-2">🚫 รายวิชาที่ยังไม่มีสื่อเลย ({subjectsNoMedia.length} วิชา)</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-60 overflow-y-auto pr-1">
+                {subjectsNoMedia.map(s => (
+                  <div key={s.subject} className="bg-white rounded-lg border border-indigo-100 px-3 py-1.5">
+                    <p className="text-xs font-black text-slate-700">{s.subject}</p>
+                    <p className="text-[10px] font-bold text-slate-400 truncate">{s.teachers.join(", ")}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ★ แผงรายชื่อ: ยังไม่ทำรายงาน */}
+      {panel === "reportPending" && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+          <h3 className="font-black text-amber-800 text-sm mb-3">⏳ ครูที่ยังไม่ได้ทำรายงานการใช้สื่อ ปีการศึกษา {year} ({reportPending.length} คน)</h3>
+          {reportPending.length === 0 ? (
+            <p className="text-sm font-bold text-emerald-600">🎉 ครูทุกคนทำรายงานครบแล้ว</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-80 overflow-y-auto pr-1">
+              {reportPending.map(r => (
+                <button key={r.id} onClick={() => onSelectOwner(r.id)}
+                  className="text-left bg-white rounded-xl border border-amber-100 px-3 py-2 text-xs font-black text-slate-700 hover:bg-amber-100 truncate">
+                  {displayName(r.teacher)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ★ แผงรายชื่อ: ทำรายงานแล้ว */}
+      {panel === "reportDone" && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
+          <h3 className="font-black text-emerald-800 text-sm mb-3">✅ ครูที่ทำรายงานการใช้สื่อแล้ว ปีการศึกษา {year} ({reportDone.length} คน)</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-80 overflow-y-auto pr-1">
+            {reportDone.map(r => (
+              <div key={r.id} className="bg-white rounded-xl border border-emerald-100 px-3 py-2 text-xs font-black text-slate-700 flex justify-between gap-2">
+                <span className="truncate">{displayName(r.teacher)}</span>
+                <span className="text-emerald-600 shrink-0">{r.n} ชิ้น</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
@@ -1541,18 +1744,40 @@ function DashboardSummary({ items, teachers, reports, year }: { items: MediaItem
         </div>
       </div>
 
+      {/* ★ ผู้ลงทะเบียนสื่อมากที่สุด — แยกสี + คลิกชื่อดูสื่อของครูคนนั้น */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-        <h3 className="font-black text-slate-700 text-sm mb-4">👩‍🏫 ผู้ลงทะเบียนสื่อมากที่สุด</h3>
+        <div className="flex items-center gap-3 flex-wrap mb-4">
+          <h3 className="font-black text-slate-700 text-sm flex-1">👩‍🏫 ผู้ลงทะเบียนสื่อมากที่สุด <span className="text-slate-400 font-bold text-xs">(คลิกชื่อเพื่อดูสื่อของครู)</span></h3>
+          <span className="flex items-center gap-1 text-[11px] font-bold text-slate-500"><span className="w-3 h-3 rounded bg-blue-500" /> สื่อดิจิทัล</span>
+          <span className="flex items-center gap-1 text-[11px] font-bold text-slate-500"><span className="w-3 h-3 rounded bg-pink-500" /> สื่ออุปกรณ์</span>
+        </div>
         <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-          {byOwner.map(({ owner, count }, idx) => (
-            <div key={owner?.id ?? idx} className="flex items-center gap-3">
-              <span className="w-32 shrink-0 text-xs font-bold text-slate-600 truncate">{displayName(owner)}</span>
+          {byOwner.map(o => (
+            <div key={o.id} className="flex items-center gap-3">
+              <button onClick={() => onSelectOwner(o.id)} title="ดูสื่อของครูคนนี้"
+                className="w-40 shrink-0 text-left text-xs font-bold text-slate-600 hover:text-blue-600 hover:underline truncate">
+                {displayName(o.owner)}
+              </button>
               <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
-                <div className="bg-blue-500 h-full rounded-full flex items-center justify-end pr-2"
-                  style={{ width: `${Math.max(4, (count / maxOwner) * 100)}%` }}>
-                  <span className="text-white text-[10px] font-black">{count}</span>
+                <div className="h-full rounded-full overflow-hidden flex" style={{ width: `${Math.max(8, (o.count / maxOwner) * 100)}%` }}>
+                  {o.digital > 0 && (
+                    <div className="bg-blue-500 h-full flex items-center justify-center" style={{ flex: o.digital }}>
+                      <span className="text-white text-[10px] font-black">{o.digital}</span>
+                    </div>
+                  )}
+                  {o.equip > 0 && (
+                    <div className="bg-pink-500 h-full flex items-center justify-center" style={{ flex: o.equip }}>
+                      <span className="text-white text-[10px] font-black">{o.equip}</span>
+                    </div>
+                  )}
+                  {o.other > 0 && (
+                    <div className="bg-slate-400 h-full flex items-center justify-center" style={{ flex: o.other }}>
+                      <span className="text-white text-[10px] font-black">{o.other}</span>
+                    </div>
+                  )}
                 </div>
               </div>
+              <span className="w-8 shrink-0 text-right text-xs font-black text-slate-500">{o.count}</span>
             </div>
           ))}
         </div>
@@ -1584,7 +1809,7 @@ export default function MediaLibraryPage() {
   const [filterGrade, setFilterGrade]   = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterOwner, setFilterOwner]   = useState("");
-
+  const [mineOwnerId, setMineOwnerId] = useState<string | null>(null);
   const [showForm, setShowForm]   = useState(false);
   const [editingItem, setEditingItem] = useState<MediaItem | undefined>(undefined);
   const [detailItem, setDetailItem]   = useState<MediaItem | null>(null);
@@ -1721,7 +1946,8 @@ export default function MediaLibraryPage() {
   const subjectOptions = [...new Set(items.map(i => i.subject).filter(Boolean))] as string[];
   const reportedNow = new Set(reports.filter(r => r.academic_year === currentYear).map(r => r.media_id));
 
-  const baseItems = viewMode === "mine" ? items.filter(i => i.owner_id === user.id) : items;
+  const viewOwnerId = mineOwnerId ?? user.id;
+  const baseItems = viewMode === "mine" ? items.filter(i => i.owner_id === viewOwnerId) : items;
   const filteredItems = baseItems.filter(i => {
     if (search && !`${i.title} ${i.subject ?? ""} ${i.source ?? ""} ${i.unit_no ?? ""}`.toLowerCase().includes(search.toLowerCase())) return false;
     if (filterType && i.media_type !== filterType) return false;
@@ -1735,11 +1961,11 @@ export default function MediaLibraryPage() {
   function canEditItem(i: MediaItem) { return isAdmin || i.owner_id === user!.id; }
   function canEditReport(r: MediaReport) { return isAdmin || r.teacher_id === user!.id; }
   const tabBtn = (m: typeof viewMode, label: string) => (
-    <button onClick={() => setViewMode(m)}
-      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${viewMode === m ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
-      {label}
-    </button>
-  );
+       <button onClick={() => { setViewMode(m); if (m === "mine") setMineOwnerId(null); }}
+         className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${viewMode === m ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
+         {label}
+       </button>
+     );
 
   return (
     <div className="min-h-screen bg-slate-50 print:bg-white">
@@ -1814,7 +2040,8 @@ export default function MediaLibraryPage() {
 
       <main className="p-4 max-w-7xl mx-auto">
         {viewMode === "dashboard" && isAdmin ? (
-          <DashboardSummary items={items} teachers={teachers} reports={reports} year={currentYear} />
+          <DashboardSummary items={items} teachers={teachers} reports={reports} year={currentYear}
+       onSelectOwner={(id) => { setMineOwnerId(id); setViewMode("mine"); }} />
         ) : viewMode === "reports" ? (
           <ReportsView
             items={items} reports={reports} user={user} isAdmin={isAdmin}
@@ -1825,6 +2052,16 @@ export default function MediaLibraryPage() {
         ) : (
           <div>
             {/* Filters */}
+            {viewMode === "mine" && mineOwnerId && mineOwnerId !== user.id && (
+       <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2 mb-3 flex items-center gap-3 print:hidden">
+         <p className="text-sm font-black text-blue-700 flex-1">
+           👤 กำลังดูสื่อของ {displayName(teachers.find(t => t.id === mineOwnerId))}
+         </p>
+         <button onClick={() => setMineOwnerId(null)} className="px-3 py-1 rounded-lg bg-white border border-blue-200 text-blue-700 text-xs font-black">
+           กลับไปดูของฉัน
+         </button>
+       </div>
+     )}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-4 print:hidden">
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
                 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 ค้นหาชื่อสื่อ..."
