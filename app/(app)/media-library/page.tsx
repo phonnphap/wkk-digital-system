@@ -1447,10 +1447,18 @@ async function fetchAllRows(table: string, select: string): Promise<any[]> {
   }
   return out;
 }
-
+ 
+// รหัสวิชาที่ไม่ต้องลงทะเบียนสื่อ/ไม่นับ: ขึ้นต้นด้วย "ก" (กิจกรรม), K02-HOME, K03-HOME
+const EXCLUDED_SUBJECT_CODES = ["K02-HOME", "K03-HOME"];
+function isExcludedSubjectCode(code?: string | null) {
+  const c = (code ?? "").trim();
+  if (!c) return false;
+  return c.startsWith("ก") || EXCLUDED_SUBJECT_CODES.includes(c.toUpperCase());
+}
+ 
 type RegRow = { teacher: UserProfile | undefined; id: string; taught: string[]; registered: string[]; missing: string[] };
 type PanelKey = "regPending" | "reportDone" | "reportPending" | null;
-
+ 
 function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   items: MediaItem[]; teachers: UserProfile[]; reports: MediaReport[]; year: number;
   onSelectOwner: (ownerId: string) => void;
@@ -1458,15 +1466,19 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   const [teaching, setTeaching] = useState<Map<string, Set<string>>>(new Map()); // teacherId → ชื่อวิชาที่สอน
   const [loadingTeach, setLoadingTeach] = useState(true);
   const [panel, setPanel] = useState<PanelKey>(null);
-
+ 
   // ── ตารางสอน → วิชาที่ครูแต่ละคนสอนจริง ──
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const entries = await fetchAllRows("timetable_entries", "subject_id, teacher_id, teacher_id_2");
-      const subjects = await fetchAllRows("subjects", "id,name_th");
+      const subjects = await fetchAllRows("subjects", "id,name_th,subject_code");
       const nameById = new Map<string, string>();
-      subjects.forEach(s => { if (s.name_th) nameById.set(s.id, s.name_th); });
+      subjects.forEach(s => {
+        // ★ วิชากิจกรรม (ขึ้นต้น "ก") และ K02-HOME / K03-HOME ไม่ต้องลงทะเบียนสื่อ → ไม่นับ
+        if (isExcludedSubjectCode(s.subject_code)) return;
+        if (s.name_th) nameById.set(s.id, s.name_th);
+      });
       const map = new Map<string, Set<string>>();
       entries.forEach(e => {
         const name = nameById.get(e.subject_id);
@@ -1481,11 +1493,11 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
     })();
     return () => { cancelled = true; };
   }, []);
-
+ 
   const teacherById = useMemo(() => new Map(teachers.map(t => [t.id, t])), [teachers]);
   const byName = (a: { teacher?: UserProfile }, b: { teacher?: UserProfile }) =>
     displayName(a.teacher).localeCompare(displayName(b.teacher), "th");
-
+ 
   // ── 1) การลงทะเบียนสื่อรายวิชา ──
   const regRows: RegRow[] = useMemo(() => {
     return [...teaching.entries()].map(([id, subs]) => {
@@ -1499,7 +1511,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   }, [teaching, items, teacherById]);
   const regPendingRows = regRows.filter(r => r.missing.length > 0);
   const regCompleteCount = regRows.length - regPendingRows.length;
-
+ 
   // รายวิชาที่ยังไม่มีสื่อเลย (ทั้งโรงเรียน)
   const subjectsNoMedia = useMemo(() => {
     const subjTeachers = new Map<string, string[]>();
@@ -1513,7 +1525,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
       .map(([s, tids]) => ({ subject: s, teachers: tids.map(t => displayName(teacherById.get(t))) }))
       .sort((a, b) => a.subject.localeCompare(b.subject, "th"));
   }, [teaching, items, teacherById]);
-
+ 
   // ── 2) รายงานการใช้สื่อ: ครูแต่ละคนต้องทำ ≥ 1 ชิ้น/ปีการศึกษา ──
   const teacherPool = useMemo(() => {
     const ids = new Set<string>([...teaching.keys()]);
@@ -1532,7 +1544,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
     .map(id => ({ teacher: teacherById.get(id), id, n: reportCountByTeacher.get(id) ?? 0 })).sort(byName);
   const reportPending = teacherPool.filter(id => (reportCountByTeacher.get(id) ?? 0) < 1)
     .map(id => ({ teacher: teacherById.get(id), id })).sort(byName);
-
+ 
   // ── สถิติรวม ──
   const total = items.length;
   const byType = useMemo(() => {
@@ -1555,7 +1567,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
     items.forEach(i => { const k = i.grade_level || "ไม่ระบุชั้น"; map.set(k, (map.get(k) ?? 0) + 1); });
     return Array.from(map.entries()).sort((a, b) => GRADE_LEVELS.indexOf(a[0]) - GRADE_LEVELS.indexOf(b[0]));
   }, [items]);
-
+ 
   // ── 3) ผู้ลงทะเบียนมากที่สุด: แยกสื่อดิจิทัล (ฟ้า) / สื่ออุปกรณ์ (ชมพู) ──
   const byOwner = useMemo(() => {
     const map = new Map<string, { digital: number; equip: number; other: number }>();
@@ -1571,29 +1583,29 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
       .map(([id, c]) => ({ id, owner: teacherById.get(id), ...c, count: c.digital + c.equip + c.other }))
       .sort((a, b) => b.count - a.count);
   }, [items, teacherById]);
-
+ 
   const maxSubject = Math.max(1, ...bySubject.map(([, v]) => v));
   const maxGrade = Math.max(1, ...byGrade.map(([, v]) => v));
   const maxOwner = Math.max(1, ...byOwner.map(o => o.count));
-
+ 
   const cardBase = "rounded-2xl p-4 text-center border-2 transition-all w-full";
   const toggle = (k: Exclude<PanelKey, null>) => setPanel(p => (p === k ? null : k));
   const ring = (k: PanelKey) => (panel === k ? " ring-4 ring-offset-1" : " hover:-translate-y-0.5 hover:shadow-md");
-
+ 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-black text-slate-800">📊 แดชบอร์ดคลังสื่อการสอน</h2>
         <p className="text-slate-400 text-sm">ภาพรวมสื่อการสอนและอุปกรณ์ทั้งโรงเรียน · ปีการศึกษา {year}</p>
       </div>
-
+ 
       {/* การ์ดสรุป */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-4 text-center">
           <div className="text-3xl font-black text-blue-600">{total}</div>
           <div className="text-slate-400 text-[10px] font-bold">รายการสื่อทั้งหมด</div>
         </div>
-
+ 
         {/* ★ ครูลงทะเบียนสื่อครบทุกวิชาที่สอน (กดดูรายชื่อ) */}
         <button onClick={() => toggle("regPending")}
           className={`${cardBase} bg-indigo-50 border-indigo-200 text-indigo-700 ring-indigo-300${ring("regPending")}`}>
@@ -1601,7 +1613,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
           <div className="text-[10px] font-bold opacity-70">ครูลงทะเบียนสื่อครบทุกวิชา</div>
           <div className="text-[10px] font-black mt-0.5">{panel === "regPending" ? "▲ ซ่อน" : `▼ ยังไม่ครบ ${loadingTeach ? "…" : regPendingRows.length} คน`}</div>
         </button>
-
+ 
         {/* ★ ครูที่ทำรายงานการใช้สื่ออย่างน้อย 1 ชิ้น (กดดูรายชื่อ) */}
         <button onClick={() => toggle("reportPending")}
           className={`${cardBase} bg-emerald-50 border-emerald-200 text-emerald-700 ring-emerald-300${ring("reportPending")}`}>
@@ -1615,7 +1627,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
           <div className="text-[10px] font-bold opacity-70">รายงานที่ส่งแล้ว (ชิ้น)</div>
           <div className="text-[10px] font-black mt-0.5">{panel === "reportDone" ? "▲ ซ่อน" : "▼ ดูรายชื่อที่ทำแล้ว"}</div>
         </button>
-
+ 
         {byType.map(([type, count]) => (
           <div key={type} className={`rounded-2xl p-4 text-center border-2 ${mediaTypeBadge(type)}`}>
             <div className="text-3xl font-black">{count}</div>
@@ -1629,7 +1641,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
           </div>
         ))}
       </div>
-
+ 
       {/* ★ แผงรายชื่อ: ลงทะเบียนสื่อไม่ครบ */}
       {panel === "regPending" && (
         <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4">
@@ -1657,7 +1669,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
               ))}
             </div>
           )}
-
+ 
           {subjectsNoMedia.length > 0 && (
             <div className="mt-4">
               <h4 className="font-black text-indigo-800 text-xs mb-2">🚫 รายวิชาที่ยังไม่มีสื่อเลย ({subjectsNoMedia.length} วิชา)</h4>
@@ -1673,7 +1685,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
           )}
         </div>
       )}
-
+ 
       {/* ★ แผงรายชื่อ: ยังไม่ทำรายงาน */}
       {panel === "reportPending" && (
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
@@ -1692,7 +1704,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
           )}
         </div>
       )}
-
+ 
       {/* ★ แผงรายชื่อ: ทำรายงานแล้ว */}
       {panel === "reportDone" && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
@@ -1707,7 +1719,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
           </div>
         </div>
       )}
-
+ 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
           <h3 className="font-black text-slate-700 text-sm mb-4">📚 สื่อการสอนตามวิชา (10 อันดับแรก)</h3>
@@ -1725,7 +1737,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
             ))}
           </div>
         </div>
-
+ 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
           <h3 className="font-black text-slate-700 text-sm mb-4">🏫 สื่อการสอนตามระดับชั้น</h3>
           <div className="space-y-2">
@@ -1743,7 +1755,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
           </div>
         </div>
       </div>
-
+ 
       {/* ★ ผู้ลงทะเบียนสื่อมากที่สุด — แยกสี + คลิกชื่อดูสื่อของครูคนนั้น */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
         <div className="flex items-center gap-3 flex-wrap mb-4">
