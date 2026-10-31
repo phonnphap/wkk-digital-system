@@ -1436,6 +1436,7 @@ function ReportsView({ items, reports, user, isAdmin, currentYear, year, setYear
 // ── Dashboard (Admin Summary) — วางทับ DashboardSummary เดิมทั้งตัว ───────────
 // ══════════════════════════════════════════════════════════════════════════════
 
+
 // ดึงข้อมูลทั้งตาราง (Supabase จำกัด 1,000 แถว/ครั้ง — timetable_entries อาจเกิน)
 async function fetchAllRows(table: string, select: string): Promise<any[]> {
   const out: any[] = [];
@@ -1588,15 +1589,111 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   const maxGrade = Math.max(1, ...byGrade.map(([, v]) => v));
   const maxOwner = Math.max(1, ...byOwner.map(o => o.count));
  
+ 
+  // ── 🖨️ พิมพ์รายงาน: เปิดหน้าต่างใหม่ (A4) แล้วสั่งพิมพ์ ──
+  function printReport() {
+    const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" } as Record<string, string>)[c]);
+    const th = (d: Date) => d.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
+    const pendingByName = [...regPendingRows].sort(byName);
+    const missingTotal = regPendingRows.reduce((n, r) => n + r.missing.length, 0);
+ 
+    const regTable = pendingByName.length === 0
+      ? `<p class="ok">ครูทุกคนลงทะเบียนสื่อครบทุกวิชาที่สอนแล้ว</p>`
+      : `<table>
+          <thead><tr><th style="width:32px">ที่</th><th style="width:190px">ชื่อครู</th><th style="width:44px">สอน<br>(วิชา)</th><th style="width:44px">ลงแล้ว</th><th style="width:44px">ขาด</th><th>วิชาที่ยังไม่ได้ลงทะเบียนสื่อ</th></tr></thead>
+          <tbody>${pendingByName.map((r, i) => `<tr>
+            <td class="c">${i + 1}</td><td>${esc(displayName(r.teacher))}</td>
+            <td class="c">${r.taught.length}</td><td class="c">${r.registered.length}</td><td class="c bad">${r.missing.length}</td>
+            <td>${r.missing.map(m => `<span class="tag">${esc(m)}</span>`).join(" ")}</td></tr>`).join("")}</tbody>
+        </table>`;
+ 
+    const noMediaTable = subjectsNoMedia.length === 0
+      ? `<p class="ok">ทุกรายวิชามีสื่ออย่างน้อย 1 รายการ</p>`
+      : `<table>
+          <thead><tr><th style="width:32px">ที่</th><th style="width:260px">รายวิชา</th><th>ครูผู้สอน</th></tr></thead>
+          <tbody>${subjectsNoMedia.map((s, i) => `<tr><td class="c">${i + 1}</td><td>${esc(s.subject)}</td><td>${esc(s.teachers.join(", "))}</td></tr>`).join("")}</tbody>
+        </table>`;
+ 
+    const reportTable = reportPending.length === 0
+      ? `<p class="ok">ครูทุกคนทำรายงานการใช้สื่อครบแล้ว</p>`
+      : `<table>
+          <thead><tr><th style="width:32px">ที่</th><th>ชื่อครู</th></tr></thead>
+          <tbody>${reportPending.map((r, i) => `<tr><td class="c">${i + 1}</td><td>${esc(displayName(r.teacher))}</td></tr>`).join("")}</tbody>
+        </table>`;
+ 
+    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8">
+<title>รายงานการลงทะเบียนสื่อการสอน ปีการศึกษา ${year}</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  @page { size: A4; margin: 14mm 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Sarabun","TH Sarabun New",Tahoma,sans-serif; font-size: 13px; color: #111; margin: 0; }
+  h1 { font-size: 20px; margin: 0; text-align: center; }
+  .sub { text-align: center; margin: 2px 0 12px; color: #444; }
+  h2 { font-size: 15px; margin: 18px 0 6px; padding: 4px 8px; background: #e8eefc; border-left: 4px solid #2563eb; }
+  .sum { display: flex; gap: 8px; margin-bottom: 4px; }
+  .sum div { flex: 1; border: 1px solid #bbb; border-radius: 6px; padding: 6px; text-align: center; }
+  .sum b { display: block; font-size: 20px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  th, td { border: 1px solid #777; padding: 3px 6px; vertical-align: top; }
+  th { background: #f1f5f9; }
+  tr { page-break-inside: avoid; }
+  thead { display: table-header-group; }
+  .c { text-align: center; } .bad { color: #b91c1c; font-weight: 700; }
+  .tag { display: inline-block; border: 1px solid #fca5a5; background: #fef2f2; color: #991b1b; border-radius: 4px; padding: 0 5px; margin: 1px 2px 1px 0; }
+  .ok { color: #047857; font-weight: 700; margin: 6px 0; }
+  .note { font-size: 11px; color: #555; margin-top: 4px; }
+  .pb { page-break-before: always; }
+  .foot { margin-top: 28px; display: flex; justify-content: flex-end; }
+  .sign { width: 230px; text-align: center; }
+  @media screen { body { max-width: 800px; margin: 16px auto; padding: 0 12px; } }
+</style></head><body>
+  <h1>รายงานสถานะการลงทะเบียนสื่อการสอน</h1>
+  <p class="sub">โรงเรียนวัดเขียนเขต · ปีการศึกษา ${year} · ข้อมูล ณ วันที่ ${th(new Date())}</p>
+ 
+  <div class="sum">
+    <div><b>${regRows.length}</b>ครูที่มีสอน (คน)</div>
+    <div><b style="color:#047857">${regCompleteCount}</b>ลงทะเบียนครบ (คน)</div>
+    <div><b style="color:#b91c1c">${regPendingRows.length}</b>ยังไม่ครบ (คน)</div>
+    <div><b style="color:#b91c1c">${missingTotal}</b>รายการวิชาที่ขาด</div>
+    <div><b style="color:#b91c1c">${subjectsNoMedia.length}</b>วิชาที่ไม่มีสื่อเลย</div>
+  </div>
+  <p class="note">* ไม่นับรายวิชากิจกรรม (รหัสขึ้นต้นด้วย "ก") และ K02-HOME / K03-HOME</p>
+ 
+  <h2>1. ครูที่ยังลงทะเบียนสื่อไม่ครบ (${pendingByName.length} คน)</h2>
+  ${regTable}
+ 
+  <h2>2. รายวิชาที่ยังไม่มีการลงทะเบียนสื่อเลย (${subjectsNoMedia.length} วิชา)</h2>
+  ${noMediaTable}
+ 
+  <h2>3. ครูที่ยังไม่ได้ทำรายงานการใช้สื่อ ปีการศึกษา ${year} (${reportPending.length} คน)</h2>
+  <p class="note">เกณฑ์: ครูแต่ละคนต้องทำรายงานการใช้สื่ออย่างน้อย 1 ชิ้นต่อปีการศึกษา (ทำแล้ว ${reportDone.length} จาก ${teacherPool.length} คน)</p>
+  ${reportTable}
+ 
+  <div class="foot"><div class="sign"><br><br>ลงชื่อ ........................................<br>(........................................)<br>ผู้รับผิดชอบโครงการ</div></div>
+  <script>window.addEventListener("load", function () { setTimeout(function () { window.focus(); window.print(); }, 700); });</script>
+</body></html>`;
+ 
+    const w = window.open("", "_blank");
+    if (!w) { alert("เบราว์เซอร์บล็อกหน้าต่างใหม่ — กรุณาอนุญาตป๊อปอัปแล้วลองอีกครั้ง"); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+  }
+ 
   const cardBase = "rounded-2xl p-4 text-center border-2 transition-all w-full";
   const toggle = (k: Exclude<PanelKey, null>) => setPanel(p => (p === k ? null : k));
   const ring = (k: PanelKey) => (panel === k ? " ring-4 ring-offset-1" : " hover:-translate-y-0.5 hover:shadow-md");
  
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-black text-slate-800">📊 แดชบอร์ดคลังสื่อการสอน</h2>
-        <p className="text-slate-400 text-sm">ภาพรวมสื่อการสอนและอุปกรณ์ทั้งโรงเรียน · ปีการศึกษา {year}</p>
+      <div className="flex items-start gap-3 flex-wrap">
+        <div className="flex-1 min-w-[220px]">
+          <h2 className="text-xl font-black text-slate-800">📊 แดชบอร์ดคลังสื่อการสอน</h2>
+          <p className="text-slate-400 text-sm">ภาพรวมสื่อการสอนและอุปกรณ์ทั้งโรงเรียน · ปีการศึกษา {year}</p>
+        </div>
+        <button onClick={printReport} disabled={loadingTeach}
+          className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-black text-sm disabled:opacity-50">
+          {loadingTeach ? "⏳ กำลังโหลดตารางสอน..." : "🖨️ พิมพ์รายงาน"}
+        </button>
       </div>
  
       {/* การ์ดสรุป */}
