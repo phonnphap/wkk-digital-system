@@ -1450,12 +1450,24 @@ async function fetchAllRows(table: string, select: string): Promise<any[]> {
 }
  
 // รหัสวิชาที่ไม่ต้องลงทะเบียนสื่อ/ไม่นับ: ขึ้นต้นด้วย "ก" (กิจกรรม), K02-HOME, K03-HOME
-const EXCLUDED_SUBJECT_CODES = ["K02-HOME", "K03-HOME"];
+const EXCLUDED_SUBJECT_CODES = ["K02-HOME", "K03-HOME","K02-HYG", "K03-HYG"];
 function isExcludedSubjectCode(code?: string | null) {
   const c = (code ?? "").trim();
   if (!c) return false;
   return c.startsWith("ก") || EXCLUDED_SUBJECT_CODES.includes(c.toUpperCase());
 }
+ 
+// ครูที่ไม่ต้องลงทะเบียนสื่อ/ทำรายงานสื่อ: ย้ายออก 2 คน + ครูที่ชื่อเป็นอักษรอังกฤษ (ครูต่างชาติ/ภาษาอังกฤษ)
+const EXCLUDED_TEACHER_NAMES = ["วีรยุทธ", "สุรีพร"];
+function isExcludedTeacher(u?: UserProfile) {
+  if (!u) return false;
+  const full = displayName(u);
+  if (EXCLUDED_TEACHER_NAMES.some(n => full.includes(n))) return true;
+  const nm = `${u.first_name ?? ""}${u.last_name ?? ""}`.trim();
+  return !!nm && !/[ก-๙]/.test(nm); // ชื่อ-นามสกุลไม่มีอักษรไทยเลย
+}
+const NO_GRADE = "ไม่ระบุสายชั้น";
+const gradeIdx = (g: string) => { const i = GRADE_LEVELS.indexOf(g); return i < 0 ? 999 : i; };
  
 type RegRow = { teacher: UserProfile | undefined; id: string; taught: string[]; registered: string[]; missing: string[] };
 type PanelKey = "regPending" | "reportDone" | "reportPending" | null;
@@ -1464,7 +1476,9 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   items: MediaItem[]; teachers: UserProfile[]; reports: MediaReport[]; year: number;
   onSelectOwner: (ownerId: string) => void;
 }) {
-  const [teaching, setTeaching] = useState<Map<string, Set<string>>>(new Map()); // teacherId → ชื่อวิชาที่สอน
+  const [rawTeaching, setRawTeaching] = useState<Map<string, Set<string>>>(new Map()); // teacherId → ชื่อวิชาที่สอน
+  const [teacherGrade, setTeacherGrade] = useState<Map<string, string>>(new Map());     // teacherId → สายชั้นหลัก
+  const [subjectGrade, setSubjectGrade] = useState<Map<string, string>>(new Map());     // ชื่อวิชา → ระดับชั้น
   const [loadingTeach, setLoadingTeach] = useState(true);
   const [panel, setPanel] = useState<PanelKey>(null);
  
@@ -1475,22 +1489,40 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
       const entries = await fetchAllRows("timetable_entries", "subject_id, teacher_id, teacher_id_2");
       const subjects = await fetchAllRows("subjects", "id,name_th,subject_code");
       const nameById = new Map<string, string>();
+      const gradeById = new Map<string, string>();
+      const subjGrade = new Map<string, string>();
       subjects.forEach(s => {
         // ★ วิชากิจกรรม (ขึ้นต้น "ก") และ K02-HOME / K03-HOME ไม่ต้องลงทะเบียนสื่อ → ไม่นับ
         if (isExcludedSubjectCode(s.subject_code)) return;
-        if (s.name_th) nameById.set(s.id, s.name_th);
+        if (!s.name_th) return;
+        nameById.set(s.id, s.name_th);
+        const g = gradeFromSubjectCode(s.subject_code);
+        if (g) { gradeById.set(s.id, g); if (!subjGrade.has(s.name_th)) subjGrade.set(s.name_th, g); }
       });
       const map = new Map<string, Set<string>>();
+      const gradeTally = new Map<string, Map<string, number>>(); // teacher → (ชั้น → จำนวนคาบ)
       entries.forEach(e => {
         const name = nameById.get(e.subject_id);
         if (!name) return;
+        const g = gradeById.get(e.subject_id);
         [e.teacher_id, e.teacher_id_2].forEach(tid => {
           if (!tid) return;
           if (!map.has(tid)) map.set(tid, new Set());
           map.get(tid)!.add(name);
+          if (g) {
+            if (!gradeTally.has(tid)) gradeTally.set(tid, new Map());
+            const t = gradeTally.get(tid)!;
+            t.set(g, (t.get(g) ?? 0) + 1);
+          }
         });
       });
-      if (!cancelled) { setTeaching(map); setLoadingTeach(false); }
+      // สายชั้นหลัก = ชั้นที่สอนมากที่สุด (เท่ากัน → ชั้นต่ำกว่า)
+      const tg = new Map<string, string>();
+      gradeTally.forEach((t, tid) => {
+        const best = [...t.entries()].sort((a, b) => b[1] - a[1] || gradeIdx(a[0]) - gradeIdx(b[0]))[0];
+        if (best) tg.set(tid, best[0]);
+      });
+      if (!cancelled) { setRawTeaching(map); setTeacherGrade(tg); setSubjectGrade(subjGrade); setLoadingTeach(false); }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -1498,6 +1530,16 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   const teacherById = useMemo(() => new Map(teachers.map(t => [t.id, t])), [teachers]);
   const byName = (a: { teacher?: UserProfile }, b: { teacher?: UserProfile }) =>
     displayName(a.teacher).localeCompare(displayName(b.teacher), "th");
+  const gradeOf = (id: string) => teacherGrade.get(id) ?? NO_GRADE;
+  // ★ เรียงตามสายชั้น (อ.2 → ม.3 → ไม่ระบุ) แล้วตามชื่อครู
+  const byGradeName = (a: { id: string; teacher?: UserProfile }, b: { id: string; teacher?: UserProfile }) =>
+    gradeIdx(gradeOf(a.id)) - gradeIdx(gradeOf(b.id)) || byName(a, b);
+  // ★ ตัดครูที่ย้ายออก / ครูชื่ออังกฤษ ออกจากการตรวจทั้งหมด
+  const teaching = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    rawTeaching.forEach((subs, id) => { if (!isExcludedTeacher(teacherById.get(id))) m.set(id, subs); });
+    return m;
+  }, [rawTeaching, teacherById]);
  
   // ── 1) การลงทะเบียนสื่อรายวิชา ──
   const regRows: RegRow[] = useMemo(() => {
@@ -1507,9 +1549,9 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
       const registered = taught.filter(s => have.has(s));
       const missing = taught.filter(s => !have.has(s));
       return { teacher: teacherById.get(id), id, taught, registered, missing };
-    }).sort((a, b) => b.missing.length - a.missing.length || byName(a, b));
+    }).sort(byGradeName);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teaching, items, teacherById]);
+  }, [teaching, items, teacherById, teacherGrade]);
   const regPendingRows = regRows.filter(r => r.missing.length > 0);
   const regCompleteCount = regRows.length - regPendingRows.length;
  
@@ -1523,16 +1565,16 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
     const withMedia = new Set(items.map(i => i.subject).filter(Boolean) as string[]);
     return [...subjTeachers.entries()]
       .filter(([s]) => !withMedia.has(s))
-      .map(([s, tids]) => ({ subject: s, teachers: tids.map(t => displayName(teacherById.get(t))) }))
-      .sort((a, b) => a.subject.localeCompare(b.subject, "th"));
-  }, [teaching, items, teacherById]);
+      .map(([s, tids]) => ({ subject: s, grade: subjectGrade.get(s) ?? NO_GRADE, teachers: tids.map(t => displayName(teacherById.get(t))) }))
+      .sort((a, b) => gradeIdx(a.grade) - gradeIdx(b.grade) || a.subject.localeCompare(b.subject, "th"));
+  }, [teaching, items, teacherById, subjectGrade]);
  
   // ── 2) รายงานการใช้สื่อ: ครูแต่ละคนต้องทำ ≥ 1 ชิ้น/ปีการศึกษา ──
   const teacherPool = useMemo(() => {
     const ids = new Set<string>([...teaching.keys()]);
-    items.forEach(i => { if (i.owner_id) ids.add(i.owner_id); });
+    items.forEach(i => { if (i.owner_id && !isExcludedTeacher(teacherById.get(i.owner_id))) ids.add(i.owner_id); });
     return [...ids];
-  }, [teaching, items]);
+  }, [teaching, items, teacherById]);
   const reportCountByTeacher = useMemo(() => {
     const m = new Map<string, number>();
     reports.filter(r => r.academic_year === year).forEach(r => {
@@ -1542,9 +1584,9 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
     return m;
   }, [reports, year]);
   const reportDone = teacherPool.filter(id => (reportCountByTeacher.get(id) ?? 0) >= 1)
-    .map(id => ({ teacher: teacherById.get(id), id, n: reportCountByTeacher.get(id) ?? 0 })).sort(byName);
+    .map(id => ({ teacher: teacherById.get(id), id, n: reportCountByTeacher.get(id) ?? 0 })).sort(byGradeName);
   const reportPending = teacherPool.filter(id => (reportCountByTeacher.get(id) ?? 0) < 1)
-    .map(id => ({ teacher: teacherById.get(id), id })).sort(byName);
+    .map(id => ({ teacher: teacherById.get(id), id })).sort(byGradeName);
  
   // ── สถิติรวม ──
   const total = items.length;
@@ -1594,31 +1636,55 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   function printReport() {
     const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" } as Record<string, string>)[c]);
     const th = (d: Date) => d.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
-    const pendingByName = [...regPendingRows].sort(byName);
+    const pendingByName = regPendingRows; // เรียงตามสายชั้นแล้ว
     const missingTotal = regPendingRows.reduce((n, r) => n + r.missing.length, 0);
+ 
+    // แถวหัวกลุ่ม "สายชั้น ..." เมื่อสายชั้นเปลี่ยน
+    const grp = <T extends { id: string }>(rows: T[], cols: number, render: (r: T, n: number) => string) => {
+      let last = ""; let n = 0;
+      return rows.map(r => {
+        const g = gradeOf(r.id);
+        let head = "";
+        if (g !== last) {
+          last = g;
+          head = `<tr class="grp"><td colspan="${cols}">สายชั้น ${esc(g)} (${rows.filter(x => gradeOf(x.id) === g).length} คน)</td></tr>`;
+        }
+        n++;
+        return head + render(r, n);
+      }).join("");
+    };
  
     const regTable = pendingByName.length === 0
       ? `<p class="ok">ครูทุกคนลงทะเบียนสื่อครบทุกวิชาที่สอนแล้ว</p>`
       : `<table>
           <thead><tr><th style="width:32px">ที่</th><th style="width:190px">ชื่อครู</th><th style="width:44px">สอน<br>(วิชา)</th><th style="width:44px">ลงแล้ว</th><th style="width:44px">ขาด</th><th>วิชาที่ยังไม่ได้ลงทะเบียนสื่อ</th></tr></thead>
-          <tbody>${pendingByName.map((r, i) => `<tr>
-            <td class="c">${i + 1}</td><td>${esc(displayName(r.teacher))}</td>
+          <tbody>${grp(pendingByName, 6, (r, n) => `<tr>
+            <td class="c">${n}</td><td>${esc(displayName(r.teacher))}</td>
             <td class="c">${r.taught.length}</td><td class="c">${r.registered.length}</td><td class="c bad">${r.missing.length}</td>
-            <td>${r.missing.map(m => `<span class="tag">${esc(m)}</span>`).join(" ")}</td></tr>`).join("")}</tbody>
+            <td>${r.missing.map(m => `<span class="tag">${esc(m)}</span>`).join(" ")}</td></tr>`)}</tbody>
         </table>`;
  
+    let lastSg = ""; let sn = 0;
     const noMediaTable = subjectsNoMedia.length === 0
       ? `<p class="ok">ทุกรายวิชามีสื่ออย่างน้อย 1 รายการ</p>`
       : `<table>
           <thead><tr><th style="width:32px">ที่</th><th style="width:260px">รายวิชา</th><th>ครูผู้สอน</th></tr></thead>
-          <tbody>${subjectsNoMedia.map((s, i) => `<tr><td class="c">${i + 1}</td><td>${esc(s.subject)}</td><td>${esc(s.teachers.join(", "))}</td></tr>`).join("")}</tbody>
+          <tbody>${subjectsNoMedia.map(s => {
+            let head = "";
+            if (s.grade !== lastSg) {
+              lastSg = s.grade;
+              head = `<tr class="grp"><td colspan="3">ระดับชั้น ${esc(s.grade === NO_GRADE ? "ไม่ระบุ" : s.grade)} (${subjectsNoMedia.filter(x => x.grade === s.grade).length} วิชา)</td></tr>`;
+            }
+            sn++;
+            return head + `<tr><td class="c">${sn}</td><td>${esc(s.subject)}</td><td>${esc(s.teachers.join(", "))}</td></tr>`;
+          }).join("")}</tbody>
         </table>`;
  
     const reportTable = reportPending.length === 0
       ? `<p class="ok">ครูทุกคนทำรายงานการใช้สื่อครบแล้ว</p>`
       : `<table>
           <thead><tr><th style="width:32px">ที่</th><th>ชื่อครู</th></tr></thead>
-          <tbody>${reportPending.map((r, i) => `<tr><td class="c">${i + 1}</td><td>${esc(displayName(r.teacher))}</td></tr>`).join("")}</tbody>
+          <tbody>${grp(reportPending, 2, (r, n) => `<tr><td class="c">${n}</td><td>${esc(displayName(r.teacher))}</td></tr>`)}</tbody>
         </table>`;
  
     const html = `<!doctype html><html lang="th"><head><meta charset="utf-8">
@@ -1643,6 +1709,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   .tag { display: inline-block; border: 1px solid #fca5a5; background: #fef2f2; color: #991b1b; border-radius: 4px; padding: 0 5px; margin: 1px 2px 1px 0; }
   .ok { color: #047857; font-weight: 700; margin: 6px 0; }
   .note { font-size: 11px; color: #555; margin-top: 4px; }
+  tr.grp td { background: #fef3c7; font-weight: 700; border-top: 2px solid #777; }
   .pb { page-break-before: always; }
   .foot { margin-top: 28px; display: flex; justify-content: flex-end; }
   .sign { width: 230px; text-align: center; }
@@ -1658,7 +1725,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
     <div><b style="color:#b91c1c">${missingTotal}</b>รายการวิชาที่ขาด</div>
     <div><b style="color:#b91c1c">${subjectsNoMedia.length}</b>วิชาที่ไม่มีสื่อเลย</div>
   </div>
-  <p class="note">* ไม่นับรายวิชากิจกรรม (รหัสขึ้นต้นด้วย "ก") และ K02-HOME / K03-HOME</p>
+  <p class="note">* เรียงตามสายชั้น (ชั้นที่ครูสอนมากที่สุด) · ไม่นับรายวิชากิจกรรม (รหัสขึ้นต้นด้วย "ก") และ K02-HOME / K03-HOME · ไม่รวมครูที่ย้ายออกและครูชื่อภาษาอังกฤษ</p>
  
   <h2>1. ครูที่ยังลงทะเบียนสื่อไม่ครบ (${pendingByName.length} คน)</h2>
   ${regTable}
@@ -1749,7 +1816,8 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
             <p className="text-sm font-bold text-emerald-600">🎉 ครูทุกคนลงทะเบียนสื่อครบทุกวิชาที่สอนแล้ว</p>
           ) : (
             <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
-              {regPendingRows.map(r => (
+              {regPendingRows.flatMap((r, i) => [
+                (i === 0 || gradeOf(r.id) !== gradeOf(regPendingRows[i - 1].id)) ? <p key={"g" + r.id} className="text-[11px] font-black text-indigo-700 pt-1">🏷️ สายชั้น {gradeOf(r.id)} ({regPendingRows.filter(x => gradeOf(x.id) === gradeOf(r.id)).length} คน)</p> : null,
                 <div key={r.id} className="bg-white rounded-xl border border-indigo-100 px-3 py-2">
                   <div className="flex items-center gap-2 flex-wrap">
                     <button onClick={() => onSelectOwner(r.id)} className="text-sm font-black text-slate-800 hover:text-blue-600 hover:underline">
@@ -1763,7 +1831,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
                     {r.missing.map(s => <span key={s} className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">{s}</span>)}
                   </div>
                 </div>
-              ))}
+              ])}
             </div>
           )}
  
@@ -1773,7 +1841,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-60 overflow-y-auto pr-1">
                 {subjectsNoMedia.map(s => (
                   <div key={s.subject} className="bg-white rounded-lg border border-indigo-100 px-3 py-1.5">
-                    <p className="text-xs font-black text-slate-700">{s.subject}</p>
+                    <p className="text-xs font-black text-slate-700">{s.subject} <span className="text-[10px] text-indigo-500">{s.grade === NO_GRADE ? "" : `· ${s.grade}`}</span></p>
                     <p className="text-[10px] font-bold text-slate-400 truncate">{s.teachers.join(", ")}</p>
                   </div>
                 ))}
@@ -1791,12 +1859,13 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
             <p className="text-sm font-bold text-emerald-600">🎉 ครูทุกคนทำรายงานครบแล้ว</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-80 overflow-y-auto pr-1">
-              {reportPending.map(r => (
+              {reportPending.flatMap((r, i) => [
+                (i === 0 || gradeOf(r.id) !== gradeOf(reportPending[i - 1].id)) ? <p key={"g" + r.id} className="col-span-full text-[11px] font-black text-amber-700 pt-1">🏷️ สายชั้น {gradeOf(r.id)} ({reportPending.filter(x => gradeOf(x.id) === gradeOf(r.id)).length} คน)</p> : null,
                 <button key={r.id} onClick={() => onSelectOwner(r.id)}
                   className="text-left bg-white rounded-xl border border-amber-100 px-3 py-2 text-xs font-black text-slate-700 hover:bg-amber-100 truncate">
                   {displayName(r.teacher)}
                 </button>
-              ))}
+              ])}
             </div>
           )}
         </div>
