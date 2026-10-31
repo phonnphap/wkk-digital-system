@@ -886,7 +886,7 @@ function buildLeaveHTML(
     <div style="margin-bottom:10px;font-size:11pt">เรียน ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
   ` : `
     <div style="text-align:center;margin-bottom:4px">
-      <img src="/school-logo.png" style="width:54px;height:54px;object-fit:contain" onerror="this.style.display='none'"/>
+      <img src="/school-logo.png" style="width:125px;height:125px;object-fit:contain" onerror="this.style.display='none'"/>
     </div>
     <div style="font-size:14.5pt;font-weight:900;text-align:center;margin:3px 0">แบบใบลาป่วย ลากิจส่วนตัว ลาคลอดบุตร</div>
     <div style="height:10px"></div>

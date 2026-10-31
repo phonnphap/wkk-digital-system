@@ -23,7 +23,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Home, ArrowLeft, Users, Search, Loader2, X, User, LogOut } from "lucide-react";
+import { Home, ArrowLeft, Users, Search, Loader2, X, User, LogOut, LogIn } from "lucide-react";
 
 const supabase = createClient();
 
@@ -63,6 +63,17 @@ function formatThaiDate(dateStr: string): string {
   return `${day}/${month}/${buddhistYear}`;
 }
 
+// ★ ย้ายออกอยู่ตอนนี้ไหม: มี moved_out_at และยังไม่เคยกลับเข้า (หรือกลับเข้าก่อนวันย้ายออก)
+function isCurrentlyMovedOut(s: { moved_out_at: string | null; returned_at: string | null }): boolean {
+  if (!s.moved_out_at) return false;
+  if (!s.returned_at) return true;
+  return s.returned_at < s.moved_out_at; // yyyy-mm-dd เทียบเป็นสตริงได้
+}
+// ★ กลับเข้าเรียนแล้ว (เคยย้ายออก แล้วมีการบันทึกกลับเข้า)
+function isReturned(s: { moved_out_at: string | null; returned_at: string | null }): boolean {
+  return !!s.returned_at && !isCurrentlyMovedOut(s);
+}
+
 // ★ Supabase/PostgREST จำกัดผลลัพธ์ query ละ 1,000 แถวโดยดีฟอลต์ — วนดึงทีละหน้าจนครบ
 async function fetchAllRows<T>(
   table: string,
@@ -98,6 +109,8 @@ type StudentRow = {
   // ★ ฟิลด์ "ย้ายออก" — null = ยังเรียนอยู่, มีค่า = ย้ายออกแล้ว (แต่ยังคงแสดงในหน้านี้)
   moved_out_at: string | null;
   moved_out_by_name: string | null;
+  returned_at: string | null;     // ★
+  returned_term: string | null;
 };
 
 const GENDER_LABEL: Record<string, string> = { male: "ชาย", female: "หญิง" };
@@ -134,6 +147,8 @@ const FIELD_LABELS: Record<string, string> = {
   // ★ ฟิลด์ย้ายออก
   moved_out_at: "วันที่ย้ายออก",
   moved_out_by_name: "ครูที่บันทึกการย้ายออก",
+  returned_at: "วันที่กลับเข้าเรียน",     // ★
+  returned_term: "กลับเข้าเรียนในเทอม",   // ★
 };
 
 // ★ สร้างรายชื่อคอลัมน์ที่จะ SELECT จาก FIELD_LABELS โดยอัตโนมัติ
@@ -147,7 +162,7 @@ const DETAIL_SELECT_COLUMNS = ["id", "prefix", ...Object.keys(FIELD_LABELS)]
 function formatFieldValue(key: string, value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   if (key === "gender" && typeof value === "string") return GENDER_LABEL[value] ?? value;
-  if (key === "moved_out_at" && typeof value === "string") return formatThaiDate(value);
+  if ((key === "moved_out_at" || key === "returned_at") && typeof value === "string") return formatThaiDate(value);
   if (typeof value === "boolean") return value ? "ใช่" : "ไม่ใช่";
   return String(value);
 }
@@ -174,11 +189,10 @@ function StudentDetailModal({
     setLoading(true);
     setErrorMsg("");
     supabase
-      .from("students")
-      .select(DETAIL_SELECT_COLUMNS)
-      .eq("id", studentId)
-      .is("moved_out_at", null)
-      .maybeSingle()
+  .from("students")
+  .select(DETAIL_SELECT_COLUMNS)
+  .eq("id", studentId)
+  .maybeSingle()
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error || !data) {
@@ -212,6 +226,11 @@ function StudentDetailModal({
     : "";
 
   const movedOutAt = row?.moved_out_at as string | null | undefined;
+const returnedAt = row?.returned_at as string | null | undefined;
+const returnedTerm = row?.returned_term as string | null | undefined;
+const movedOutNow = !!row && isCurrentlyMovedOut({
+  moved_out_at: movedOutAt ?? null, returned_at: returnedAt ?? null,
+});
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -241,13 +260,21 @@ function StudentDetailModal({
         </div>
 
         {/* ★ แถบแจ้งเตือนถ้านักเรียนย้ายออกไปแล้ว */}
-        {!loading && movedOutAt && (
-          <div className="mx-6 mt-2 rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs font-bold text-rose-600 shrink-0 flex items-center gap-1.5">
-            <LogOut className="h-3.5 w-3.5" />
-            ย้ายออกเมื่อ {formatThaiDate(movedOutAt)}
-            {row?.moved_out_by_name ? ` โดยครู${row.moved_out_by_name as string}` : ""}
-          </div>
-        )}
+        {!loading && movedOutNow && movedOutAt && (
+  <div className="mx-6 mt-2 rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs font-bold text-rose-600 shrink-0 flex items-center gap-1.5">
+    <LogOut className="h-3.5 w-3.5" />
+    ย้ายออกเมื่อ {formatThaiDate(movedOutAt)}
+    {row?.moved_out_by_name ? ` โดยครู${row.moved_out_by_name as string}` : ""}
+  </div>
+)}
+
+{!loading && !movedOutNow && returnedAt && (
+  <div className="mx-6 mt-2 rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs font-bold text-emerald-700 shrink-0 flex items-center gap-1.5">
+    <LogIn className="h-3.5 w-3.5" />
+    กลับเข้าเรียนเมื่อ {formatThaiDate(returnedAt)}
+    {returnedTerm ? ` (เทอม ${returnedTerm})` : ""}
+  </div>
+)}
 
         {/* Body */}
         <div className="overflow-y-auto px-6 py-4 space-y-4">
@@ -334,13 +361,14 @@ export default function StudentsOverviewPage() {
         supabase.from("classrooms").select("id, room_name").order("room_name"),
         // ★ ไม่กรอง moved_out_at ออก — แอดมินต้องเห็นนักเรียนที่ย้ายออกไปแล้วด้วย
         fetchAllRows<{
-          id: string; classroom_id: string; student_code: string | null;
-          prefix: string | null; first_name: string | null; last_name: string | null; gender: string | null;
-          moved_out_at: string | null; moved_out_by_name: string | null;
-        }>(
-          "students",
-          "id, classroom_id, student_code, prefix, first_name, last_name, gender, moved_out_at, moved_out_by_name"
-        ),
+  id: string; classroom_id: string; student_code: string | null;
+  prefix: string | null; first_name: string | null; last_name: string | null; gender: string | null;
+  moved_out_at: string | null; moved_out_by_name: string | null;
+  returned_at: string | null; returned_term: string | null;
+}>(
+  "students",
+  "id, classroom_id, student_code, prefix, first_name, last_name, gender, moved_out_at, moved_out_by_name, returned_at, returned_term"
+),
       ]);
 
       if (classroomsRes.error || studentsRes.error) {
@@ -405,8 +433,8 @@ export default function StudentsOverviewPage() {
       })
       .sort((a, b) => {
         // ★ นักเรียนที่ยังเรียนอยู่ขึ้นก่อนนักเรียนที่ย้ายออกแล้วเสมอ (ภายในผลลัพธ์เดียวกัน)
-        const movedA = a.moved_out_at ? 1 : 0;
-        const movedB = b.moved_out_at ? 1 : 0;
+        const movedA = isCurrentlyMovedOut(a) ? 1 : 0;
+const movedB = isCurrentlyMovedOut(b) ? 1 : 0;
         if (movedA !== movedB) return movedA - movedB;
         const roomA = classroomName.get(a.classroom_id) ?? "";
         const roomB = classroomName.get(b.classroom_id) ?? "";
@@ -427,9 +455,13 @@ export default function StudentsOverviewPage() {
 
   // ★ จำนวนที่ย้ายออกแล้ว ในผลลัพธ์ที่กรองอยู่ตอนนี้
   const movedOutCount = useMemo(
-    () => filteredStudents.filter((s) => s.moved_out_at).length,
-    [filteredStudents]
-  );
+  () => filteredStudents.filter((s) => isCurrentlyMovedOut(s)).length,
+  [filteredStudents]
+);
+const returnedCount = useMemo(
+  () => filteredStudents.filter((s) => isReturned(s)).length,
+  [filteredStudents]
+);
 
   if (checkingAuth) {
     return (
@@ -529,6 +561,11 @@ export default function StudentsOverviewPage() {
                   <LogOut className="h-3 w-3" /> ย้ายออกแล้ว {movedOutCount} คน
                 </span>
               )}
+              {returnedCount > 0 && (
+  <span className="rounded-full bg-sky-50 px-4 py-1.5 text-xs font-bold text-sky-700 flex items-center gap-1">
+    <LogIn className="h-3 w-3" /> กลับเข้าเรียน {returnedCount} คน
+  </span>
+)}
             </div>
 
             {/* ตารางรายชื่อ */}
@@ -548,45 +585,53 @@ export default function StudentsOverviewPage() {
                         <th className="px-4 py-3 text-left font-semibold">เพศ</th>
                         <th className="px-4 py-3 text-left font-semibold">ห้อง</th>
                         <th className="px-4 py-3 text-left font-semibold">สถานะ</th>
+                        <th className="px-4 py-3 text-left font-semibold">กลับเข้าเรียน</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredStudents.map((s) => {
-                        const movedOut = !!s.moved_out_at;
-                        return (
-                          <tr key={s.id} className={`border-t border-slate-50 hover:bg-slate-50/60 ${movedOut ? "bg-amber-50/40" : ""}`}>
-                            <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{s.student_code ?? "-"}</td>
-                            <td className="px-4 py-2.5 text-slate-500">{s.prefix ?? "-"}</td>
-                            <td className="px-4 py-2.5">
-                              {/* ★ กดชื่อเพื่อเปิด modal ดูรายละเอียดแบบ read-only (ย้ายออกแล้วก็ยังกดดูได้) */}
-                              <button
-                                onClick={() => setViewingStudent(s)}
-                                className={`font-semibold hover:underline text-left ${movedOut ? "text-slate-400 hover:text-amber-600" : "text-slate-700 hover:text-blue-600"}`}
-                              >
-                                {(s.first_name ?? "-")} {s.last_name ?? ""}
-                              </button>
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-500">{s.gender ? GENDER_LABEL[s.gender] ?? s.gender : "-"}</td>
-                            <td className="px-4 py-2.5 font-semibold text-blue-700">ห้อง {classroomName.get(s.classroom_id) ?? "-"}</td>
-                            <td className="px-4 py-2.5">
-                              {movedOut ? (
-                                <div className="inline-flex flex-col">
-                                  <span className="inline-flex w-fit items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-700">
-                                    <LogOut className="h-3 w-3" /> ย้ายออก {formatThaiDate(s.moved_out_at as string)}
-                                  </span>
-                                  {s.moved_out_by_name && (
-                                    <span className="mt-0.5 text-[10px] text-slate-400">โดยครู{s.moved_out_by_name}</span>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="inline-flex w-fit items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
-                                  กำลังศึกษา
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
+  const movedOut = isCurrentlyMovedOut(s);
+  const returned = isReturned(s);
+  return (
+    <tr key={s.id} className={`border-t border-slate-50 hover:bg-slate-50/60 ${movedOut ? "bg-amber-50/40" : ""}`}>
+      {/* ...คอลัมน์เดิมถึงห้อง... */}
+
+      {/* สถานะ */}
+      <td className="px-4 py-2.5">
+        {movedOut ? (
+          <div className="inline-flex flex-col">
+            <span className="inline-flex w-fit items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-700">
+              <LogOut className="h-3 w-3" /> ย้ายออก {formatThaiDate(s.moved_out_at as string)}
+            </span>
+            {s.moved_out_by_name && (
+              <span className="mt-0.5 text-[10px] text-slate-400">โดยครู{s.moved_out_by_name}</span>
+            )}
+          </div>
+        ) : (
+          <span className="inline-flex w-fit items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
+            กำลังศึกษา
+          </span>
+        )}
+      </td>
+
+      {/* ★ กลับเข้าเรียน */}
+      <td className="px-4 py-2.5">
+        {returned ? (
+          <div className="inline-flex flex-col">
+            <span className="inline-flex w-fit items-center gap-1 rounded-full bg-sky-100 px-2.5 py-0.5 text-[11px] font-bold text-sky-700">
+              <LogIn className="h-3 w-3" /> {formatThaiDate(s.returned_at as string)}
+            </span>
+            {s.returned_term && (
+              <span className="mt-0.5 text-[10px] text-slate-400">เทอม {s.returned_term}</span>
+            )}
+          </div>
+        ) : (
+          <span className="text-slate-300">—</span>
+        )}
+      </td>
+    </tr>
+  );
+})}
                     </tbody>
                   </table>
                 </div>

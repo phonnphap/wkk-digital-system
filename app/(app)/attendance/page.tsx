@@ -16,6 +16,9 @@ const HOMEROOM_PATH = "/homeroom";
 type Classroom = {
   classroom_id: string;
   room_name: string;
+  year_name?: string;
+  semester?: number;
+  is_current?: boolean;
 };
 
 type Student = {
@@ -567,8 +570,10 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
                   onChange={(e) => setSelectedClass(classrooms.find((c) => c.classroom_id === e.target.value) ?? null)}
                 >
                   {classrooms.map((c) => (
-                    <option key={c.classroom_id} value={c.classroom_id}>{c.room_name}</option>
-                  ))}
+  <option key={c.classroom_id} value={c.classroom_id}>
+    {c.room_name} (เทอม {c.semester}/{c.year_name})
+  </option>
+))}
                 </select>
               </div>
             )}
