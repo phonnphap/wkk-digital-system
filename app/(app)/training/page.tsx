@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { getTrainingAccess, getAllTeachers, getTargetHoursPerYear } from '@/lib/training-permissions';
+import { getTrainingAccess, getAllTeachers, getTargetHoursPerYear, getGradeLevels } from '@/lib/training-permissions';
 import {
   fetchTrainingRecords, deleteTrainingRecord, TRAINING_TYPE_LABELS, TRAINING_STATUS_LABELS,
 } from '@/lib/training-records';
@@ -35,13 +35,11 @@ function esc(s: string) {
 }
 // ✅ ดึงชื่อสายชั้นจากตาราง grade_level (คอลัมน์ name)
 // รองรับทั้งกรณี join เป็น object และกรณีแบนเป็นสตริงอยู่แล้ว
-function getGrade(u: any): string {
-  const g =
-    u.grade_level?.name ??            // join: grade_level(name)
-    u.grade_levels?.name ??           // กรณีชื่อ relation เป็นพหูพจน์
-    u.grade_level_name ??             // กรณี view/flatten แล้ว
-    (typeof u.grade_level === 'string' ? u.grade_level : '');
-  return String(g ?? '').trim() || 'ไม่ระบุสายชั้น';
+function getGrade(u: any, gradeMap: Record<string, string> = {}): string {
+  const raw = u.grade_level?.name ?? u.grade_level;   // รองรับทั้ง object และ id
+  if (raw == null || raw === '') return 'ไม่ระบุสายชั้น';
+  const mapped = gradeMap[String(raw)];
+  return (mapped ?? String(raw)).trim() || 'ไม่ระบุสายชั้น';
 }
 
 // เรียง อ. → ป. → ม. แล้วตามด้วยเลขชั้น (อ.2, อ.3, ป.1 … ป.6, ม.1 … ม.6)
@@ -58,6 +56,7 @@ export default function TrainingPage() {
   const [access, setAccess] = useState<Awaited<ReturnType<typeof getTrainingAccess>> | null>(null);
   const [records, setRecords] = useState<TrainingRecordWithUser[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [gradeMap, setGradeMap] = useState<Record<string, string>>({});
   const [targetHours, setTargetHours] = useState(20);
   const [tab, setTab] = useState<'dashboard' | 'list' | 'mine' | 'missing'>('list');
   const [filterType, setFilterType] = useState<TrainingType | 'All'>('All');
@@ -73,13 +72,13 @@ export default function TrainingPage() {
     const acc = await getTrainingAccess();
     setAccess(acc);
     if (!acc.user) { setLoading(false); return; }
-    const [recs, users, target] = await Promise.all([
-      fetchTrainingRecords(), getAllTeachers(), getTargetHoursPerYear(),
-    ]);
-    setRecords(recs);
-    setAllUsers(users);
-    setTargetHours(target);
-    setLoading(false);
+    const [recs, users, target, grades] = await Promise.all([
+  fetchTrainingRecords(), getAllTeachers(), getTargetHoursPerYear(), getGradeLevels(),
+]);
+setRecords(recs);
+setAllUsers(users);
+setTargetHours(target);
+setGradeMap(grades);
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -117,7 +116,7 @@ if (EXCLUDED_ROLES.some((r) => role === r.toLowerCase())) return false;
   const percent = eligible.length ? (missing.length / eligible.length) * 100 : 0;
   const byGrade = new Map<string, any[]>();
 for (const u of missing) {
-  const g = getGrade(u);
+  const g = getGrade(u, gradeMap);
   if (!byGrade.has(g)) byGrade.set(g, []);
   byGrade.get(g)!.push(u);
 }
@@ -126,10 +125,10 @@ const groups = [...byGrade.entries()]
   .map(([grade, users]) => ({
     grade,
     users: users.sort((a, b) => fullName(a).localeCompare(fullName(b), 'th')),
-    total: eligible.filter((u) => getGrade(u) === grade).length, // ครูทั้งหมดในสายชั้นนั้น
+    total: eligible.filter((u) => getGrade(u, gradeMap) === grade).length,
   }));
 return { eligible, missing, percent, groups };
-}, [allUsers, records]);
+    }, [allUsers, records, gradeMap]);
 
 function printMissingReport() {
   const { eligible, missing, percent, groups } = missingReport;

@@ -67,6 +67,14 @@ export async function getAllTeachers() {
   return data ?? [];
 }
 
+export async function getGradeLevels(): Promise<Record<string, string>> {
+  const { data, error } = await supabase.from('grade_level').select('id, name');
+  if (error) throw error;
+  const map: Record<string, string> = {};
+  for (const g of data ?? []) map[String(g.id)] = g.name;
+  return map;
+}
+
 export async function listTrainingSupervisors() {
   const { data, error } = await supabase
     .from('training_project_supervisors')
