@@ -24,7 +24,7 @@ function thaiDate(s?: string) {
 // ✅ ครูที่ย้ายออกแล้ว (ตรวจจากชื่อที่มีคำเหล่านี้)
 const RESIGNED_NAMES = ['วีรยุทธ', 'สุรีพร','เด่นศักดิ์'];
 // ✅ โรลที่ไม่นับ — ปรับให้ตรงกับค่าในตาราง users ของคุณ
-const EXCLUDED_ROLES = ['admin', 'management', 'executive', 'director', 'ผู้บริหาร', 'แอดมิน','นิสิตฝึกประสบการณ์วิชาชีพครู'];
+const EXCLUDED_ROLES = ['admin', 'director', 'deputy_director', 'นิสิตฝึกประสบการณ์วิชาชีพครู'];
 
 // ชื่อต้องมีตัวอักษรไทยอย่างน้อย 1 ตัว (ตัดชื่ออังกฤษ/ไม่มีชื่อ)
 function hasThaiName(u: any) {
@@ -33,17 +33,24 @@ function hasThaiName(u: any) {
 function esc(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
-// ✅ ดึงสายชั้นของครู — แก้ชื่อฟิลด์ให้ตรงกับข้อมูลจริงที่นี่ที่เดียว
+// ✅ ดึงชื่อสายชั้นจากตาราง grade_level (คอลัมน์ name)
+// รองรับทั้งกรณี join เป็น object และกรณีแบนเป็นสตริงอยู่แล้ว
 function getGrade(u: any): string {
-  return String(u.grade_level ?? u.level ?? u.grade ?? '').trim() || 'ไม่ระบุสายชั้น';
+  const g =
+    u.grade_level?.name ??            // join: grade_level(name)
+    u.grade_levels?.name ??           // กรณีชื่อ relation เป็นพหูพจน์
+    u.grade_level_name ??             // กรณี view/flatten แล้ว
+    (typeof u.grade_level === 'string' ? u.grade_level : '');
+  return String(g ?? '').trim() || 'ไม่ระบุสายชั้น';
 }
 
-// ลำดับการแสดงสายชั้น (อนุบาล → ประถม → มัธยม) ถ้าไม่ตรงกับของโรงเรียนให้แก้ลิสต์นี้
-const GRADE_ORDER = ['อนุบาล', 'ประถมศึกษาตอนต้น', 'ประถมศึกษาตอนปลาย', 'ประถม', 'มัธยมศึกษาตอนต้น', 'มัธยมศึกษาตอนปลาย', 'มัธยม'];
+// เรียง อ. → ป. → ม. แล้วตามด้วยเลขชั้น (อ.2, อ.3, ป.1 … ป.6, ม.1 … ม.6)
+const LEVEL_PREFIX_RANK: Record<string, number> = { 'อ': 0, 'ป': 1, 'ม': 2 };
 function gradeRank(g: string) {
-  const i = GRADE_ORDER.findIndex((x) => g.includes(x));
-  if (g === 'ไม่ระบุสายชั้น') return 999;
-  return i === -1 ? 500 : i;
+  if (g === 'ไม่ระบุสายชั้น') return 9999;
+  const m = g.match(/^\s*(อ|ป|ม)\s*\.?\s*(\d+)/);
+  if (!m) return 5000;
+  return LEVEL_PREFIX_RANK[m[1]] * 100 + Number(m[2]);
 }
 
 export default function TrainingPage() {
@@ -99,9 +106,8 @@ export default function TrainingPage() {
   const missingReport = useMemo(() => {
   const eligible = allUsers.filter((u) => {
     if (!hasThaiName(u)) return false;
-    const role = String(u.role ?? '').toLowerCase();
-    if (EXCLUDED_ROLES.some((r) => role.includes(r.toLowerCase()))) return false;
-    if (u.is_admin || u.is_management) return false;
+    const role = String(u.role ?? '').trim().toLowerCase();
+if (EXCLUDED_ROLES.some((r) => role === r.toLowerCase())) return false;
     const name = fullName(u);
     if (RESIGNED_NAMES.some((n) => name.includes(n))) return false;
     return true;
