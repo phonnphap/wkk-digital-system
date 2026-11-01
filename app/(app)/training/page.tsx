@@ -24,7 +24,7 @@ function thaiDate(s?: string) {
 // ✅ ครูที่ย้ายออกแล้ว (ตรวจจากชื่อที่มีคำเหล่านี้)
 const RESIGNED_NAMES = ['วีรยุทธ', 'สุรีพร','เด่นศักดิ์'];
 // ✅ โรลที่ไม่นับ — ปรับให้ตรงกับค่าในตาราง users ของคุณ
-const EXCLUDED_ROLES = ['admin', 'management', 'executive', 'director', 'ผู้บริหาร', 'แอดมิน'];
+const EXCLUDED_ROLES = ['admin', 'management', 'executive', 'director', 'ผู้บริหาร', 'แอดมิน','นิสิตฝึกประสบการณ์วิชาชีพครู'];
 
 // ชื่อต้องมีตัวอักษรไทยอย่างน้อย 1 ตัว (ตัดชื่ออังกฤษ/ไม่มีชื่อ)
 function hasThaiName(u: any) {
@@ -32,6 +32,18 @@ function hasThaiName(u: any) {
 }
 function esc(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+// ✅ ดึงสายชั้นของครู — แก้ชื่อฟิลด์ให้ตรงกับข้อมูลจริงที่นี่ที่เดียว
+function getGrade(u: any): string {
+  return String(u.grade_level ?? u.level ?? u.grade ?? '').trim() || 'ไม่ระบุสายชั้น';
+}
+
+// ลำดับการแสดงสายชั้น (อนุบาล → ประถม → มัธยม) ถ้าไม่ตรงกับของโรงเรียนให้แก้ลิสต์นี้
+const GRADE_ORDER = ['อนุบาล', 'ประถมศึกษาตอนต้น', 'ประถมศึกษาตอนปลาย', 'ประถม', 'มัธยมศึกษาตอนต้น', 'มัธยมศึกษาตอนปลาย', 'มัธยม'];
+function gradeRank(g: string) {
+  const i = GRADE_ORDER.findIndex((x) => g.includes(x));
+  if (g === 'ไม่ระบุสายชั้น') return 999;
+  return i === -1 ? 500 : i;
 }
 
 export default function TrainingPage() {
@@ -97,18 +109,34 @@ export default function TrainingPage() {
   const hasRecord = new Set(records.map((r) => r.user_id));
   const missing = eligible.filter((u) => !hasRecord.has(u.id));
   const percent = eligible.length ? (missing.length / eligible.length) * 100 : 0;
-  return { eligible, missing, percent };
+  const byGrade = new Map<string, any[]>();
+for (const u of missing) {
+  const g = getGrade(u);
+  if (!byGrade.has(g)) byGrade.set(g, []);
+  byGrade.get(g)!.push(u);
+}
+const groups = [...byGrade.entries()]
+  .sort((a, b) => gradeRank(a[0]) - gradeRank(b[0]) || a[0].localeCompare(b[0], 'th'))
+  .map(([grade, users]) => ({
+    grade,
+    users: users.sort((a, b) => fullName(a).localeCompare(fullName(b), 'th')),
+    total: eligible.filter((u) => getGrade(u) === grade).length, // ครูทั้งหมดในสายชั้นนั้น
+  }));
+return { eligible, missing, percent, groups };
 }, [allUsers, records]);
 
 function printMissingReport() {
-  const { eligible, missing, percent } = missingReport;
-  const rows = missing.map((u, i) => `
+  const { eligible, missing, percent, groups } = missingReport;
+const rows = groups.map((g) => `
+  <tr class="grp"><td colspan="4">${esc(g.grade)} — ยังไม่บันทึก ${g.users.length}/${g.total} คน (${g.total ? ((g.users.length / g.total) * 100).toFixed(1) : 0}%)</td></tr>
+  ${g.users.map((u, i) => `
     <tr>
       <td style="text-align:center">${i + 1}</td>
       <td>${esc(fullName(u))}</td>
       <td>${esc(u.position ?? '—')}</td>
       <td>${esc(u.department_name ?? u.department ?? '—')}</td>
-    </tr>`).join('');
+    </tr>`).join('')}
+`).join('');
   const w = window.open('', '_blank');
   if (!w) return alert('เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต pop-up');
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>รายงานครูที่ยังไม่บันทึกการอบรม</title>
@@ -118,6 +146,7 @@ function printMissingReport() {
     table{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px}
     th,td{border:1px solid #94a3b8;padding:6px 8px} th{background:#e2e8f0}
     .sum{margin-top:12px;padding:10px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc}
+    .grp td{background:#dbeafe;font-weight:bold}
     @media print{button{display:none}}
   </style></head><body>
     <h2>รายงานครูที่ยังไม่ได้บันทึกการอบรม</h2>
@@ -265,19 +294,29 @@ function canEditRecord(r: TrainingRecordWithUser): boolean {
       </button>
     </div>
 
-    <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100">
-      {missingReport.missing.map((u, i) => (
+    {missingReport.groups.map((g) => (
+  <div key={g.grade} className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+    <div className="px-4 py-2.5 bg-slate-100 flex justify-between items-center">
+      <span className="font-bold text-slate-700 text-sm">{g.grade}</span>
+      <span className="text-xs font-bold text-red-500">
+        ยังไม่บันทึก {g.users.length}/{g.total} คน ({g.total ? ((g.users.length / g.total) * 100).toFixed(1) : 0}%)
+      </span>
+    </div>
+    <div className="divide-y divide-slate-100">
+      {g.users.map((u, i) => (
         <div key={u.id} className="px-4 py-3 flex items-center gap-3 text-sm">
           <span className="w-8 text-slate-400 text-xs">{i + 1}</span>
           <span className="font-bold text-slate-700 flex-1">{fullName(u)}</span>
           <span className="text-xs text-slate-400">{u.position ?? ''}</span>
         </div>
       ))}
-      {missingReport.missing.length === 0 && (
-        <p className="text-center py-10 text-slate-400 text-sm">ทุกคนบันทึกแล้ว 🎉</p>
-      )}
     </div>
   </div>
+))}
+{missingReport.missing.length === 0 && (
+  <p className="text-center py-10 text-slate-400 text-sm bg-white rounded-2xl border border-slate-200">ทุกคนบันทึกแล้ว 🎉</p>
+)}
+    </div>
 )}
 
         {(tab === 'list' || tab === 'mine') && (
