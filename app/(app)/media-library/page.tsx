@@ -1469,13 +1469,19 @@ function isExcludedTeacher(u?: UserProfile) {
 const NO_GRADE = "ไม่ระบุสายชั้น";
 const gradeIdx = (g: string) => { const i = GRADE_LEVELS.indexOf(g); return i < 0 ? 999 : i; };
  
-// ★ วิชาที่ถือเป็นวิชาเดียวกัน (ในชั้นเดียวกัน): สุขศึกษา = พลศึกษา(พละ)
-//   ลงสื่ออันใดอันหนึ่ง → นับว่าลงครบทั้งคู่ของชั้นนั้น (ป.1 พลศึกษา ≡ ป.1 สุขศึกษา แต่ไม่ข้ามชั้น)
-const PEH_RE = /สุขศึกษา|พลศึกษา|พละ/;
-const PEH_STRIP = /สุขศึกษา|พลศึกษา|พละ|และ|\s/g;
+// ★ กลุ่มวิชาที่ถือเป็นวิชาเดียวกัน (ในชั้นเดียวกัน) — ลงสื่ออันใดอันหนึ่ง = ครบทั้งกลุ่มของชั้นนั้น
+//   จะเพิ่มกลุ่มใหม่ก็แค่เติมบรรทัดในรายการนี้
+const SAME_SUBJECT_GROUPS: { id: string; re: RegExp }[] = [
+  { id: "PEH", re: /สุขศึกษา|พลศึกษา|พละ/ },
+  { id: "ART", re: /ศิลปะ|ดนตรี|นาฏศิลป์|ทัศนศิลป์/ },
+  { id: "SCI", re: /วิทยาศาสตร์|เทคโนโลยี/ },
+];
 function canonSubject(name: string, grade?: string) {
-  if (!PEH_RE.test(name)) return name;
-  return `PEH|${grade ?? name.replace(PEH_STRIP, "")}`; // ไม่รู้ชั้นจากรหัสวิชา → ใช้ส่วนที่เหลือของชื่อ (เช่น "ป.1")
+  const g = SAME_SUBJECT_GROUPS.find(x => x.re.test(name));
+  if (!g) return name;
+  // ไม่รู้ชั้นจากรหัสวิชา → ใช้ส่วนที่เหลือของชื่อ (เช่น "ป.1")
+  const rest = name.replace(new RegExp(`${g.re.source}|และ|[\\s/\\-]`, "g"), "");
+  return `${g.id}|${grade ?? rest}`;
 }
  
 type RegRow = { teacher: UserProfile | undefined; id: string; taught: string[]; registered: string[]; missing: string[] };
