@@ -61,17 +61,23 @@ export async function getTrainingAccess(): Promise<TrainingAccess> {
 export async function getAllTeachers() {
   const { data, error } = await supabase
     .from('users')
-    .select('*')
+    .select('id, title, first_name, last_name, full_name, position, role, grade_level')
     .order('first_name');
   if (error) throw error;
   return data ?? [];
 }
 
-export async function getGradeLevels(): Promise<Record<string, string>> {
-  const { data, error } = await supabase.from('grade_level').select('id, name');
+export interface GradeInfo { name: string; order: number }
+
+let gradeCache: Record<string, GradeInfo> | null = null;
+
+export async function getGradeLevels(): Promise<Record<string, GradeInfo>> {
+  if (gradeCache) return gradeCache;
+  const { data, error } = await supabase.from('grade_levels').select('id, name, level_order');
   if (error) throw error;
-  const map: Record<string, string> = {};
-  for (const g of data ?? []) map[String(g.id)] = g.name;
+  const map: Record<string, GradeInfo> = {};
+  for (const g of data ?? []) map[String(g.id)] = { name: g.name, order: Number(g.level_order ?? 999) };
+  gradeCache = map;
   return map;
 }
 

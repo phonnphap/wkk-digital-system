@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { GradeInfo } from '@/lib/training-permissions';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { getTrainingAccess, getAllTeachers, getTargetHoursPerYear, getGradeLevels } from '@/lib/training-permissions';
 import {
@@ -35,20 +36,9 @@ function esc(s: string) {
 }
 // ✅ ดึงชื่อสายชั้นจากตาราง grade_level (คอลัมน์ name)
 // รองรับทั้งกรณี join เป็น object และกรณีแบนเป็นสตริงอยู่แล้ว
-function getGrade(u: any, gradeMap: Record<string, string> = {}): string {
-  const raw = u.grade_level?.name ?? u.grade_level;   // รองรับทั้ง object และ id
-  if (raw == null || raw === '') return 'ไม่ระบุสายชั้น';
-  const mapped = gradeMap[String(raw)];
-  return (mapped ?? String(raw)).trim() || 'ไม่ระบุสายชั้น';
-}
-
-// เรียง อ. → ป. → ม. แล้วตามด้วยเลขชั้น (อ.2, อ.3, ป.1 … ป.6, ม.1 … ม.6)
-const LEVEL_PREFIX_RANK: Record<string, number> = { 'อ': 0, 'ป': 1, 'ม': 2 };
-function gradeRank(g: string) {
-  if (g === 'ไม่ระบุสายชั้น') return 9999;
-  const m = g.match(/^\s*(อ|ป|ม)\s*\.?\s*(\d+)/);
-  if (!m) return 5000;
-  return LEVEL_PREFIX_RANK[m[1]] * 100 + Number(m[2]);
+function getGrade(u: any, gradeMap: Record<string, GradeInfo> = {}): { name: string; order: number } {
+  const info = gradeMap[String(u.grade_level ?? '')];
+  return info ?? { name: 'ไม่ระบุสายชั้น', order: 9999 };
 }
 
 export default function TrainingPage() {
@@ -56,7 +46,7 @@ export default function TrainingPage() {
   const [access, setAccess] = useState<Awaited<ReturnType<typeof getTrainingAccess>> | null>(null);
   const [records, setRecords] = useState<TrainingRecordWithUser[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
-  const [gradeMap, setGradeMap] = useState<Record<string, string>>({});
+  const [gradeMap, setGradeMap] = useState<Record<string, GradeInfo>>({});
   const [targetHours, setTargetHours] = useState(20);
   const [tab, setTab] = useState<'dashboard' | 'list' | 'mine' | 'missing'>('list');
   const [filterType, setFilterType] = useState<TrainingType | 'All'>('All');
@@ -69,17 +59,34 @@ export default function TrainingPage() {
   
 
   const loadAll = useCallback(async () => {
-    const acc = await getTrainingAccess();
+  try {
+    const [acc, recs, users, target, grades] = await Promise.all([
+      getTrainingAccess(),
+      fetchTrainingRecords(),
+      getAllTeachers(),
+      getTargetHoursPerYear(),
+      getGradeLevels(),
+    ]);
     setAccess(acc);
-    if (!acc.user) { setLoading(false); return; }
-    const [recs, users, target, grades] = await Promise.all([
-  fetchTrainingRecords(), getAllTeachers(), getTargetHoursPerYear(), getGradeLevels(),
-]);
-setRecords(recs);
-setAllUsers(users);
-setTargetHours(target);
-setGradeMap(grades);
-setLoading(false);
+    if (!acc.user) return;
+    setRecords(recs);
+    setAllUsers(users);
+    setTargetHours(target);
+    setGradeMap(grades);
+  } catch (e) {
+    console.error('loadAll error:', e);
+  } finally {
+    setLoading(false);
+  }
+}, []);
+
+// ใช้หลังบันทึก/ลบ โหลดแค่ records
+const reloadRecords = useCallback(async () => {
+  try {
+    setRecords(await fetchTrainingRecords());
+  } catch (e) {
+    console.error('reloadRecords error:', e);
+  }
 }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -115,18 +122,18 @@ if (EXCLUDED_ROLES.some((r) => role === r.toLowerCase())) return false;
   const hasRecord = new Set(records.map((r) => r.user_id));
   const missing = eligible.filter((u) => !hasRecord.has(u.id));
   const percent = eligible.length ? (missing.length / eligible.length) * 100 : 0;
-  const byGrade = new Map<string, any[]>();
+  const byGrade = new Map<string, { order: number; users: any[] }>();
 for (const u of missing) {
   const g = getGrade(u, gradeMap);
-  if (!byGrade.has(g)) byGrade.set(g, []);
-  byGrade.get(g)!.push(u);
+  if (!byGrade.has(g.name)) byGrade.set(g.name, { order: g.order, users: [] });
+  byGrade.get(g.name)!.users.push(u);
 }
 const groups = [...byGrade.entries()]
-  .sort((a, b) => gradeRank(a[0]) - gradeRank(b[0]) || a[0].localeCompare(b[0], 'th'))
-  .map(([grade, users]) => ({
+  .sort((a, b) => a[1].order - b[1].order)
+  .map(([grade, { users }]) => ({
     grade,
     users: users.sort((a, b) => fullName(a).localeCompare(fullName(b), 'th')),
-    total: eligible.filter((u) => getGrade(u, gradeMap) === grade).length,
+    total: eligible.filter((u) => getGrade(u, gradeMap).name === grade).length,
   }));
 return { eligible, missing, percent, groups };
     }, [allUsers, records, gradeMap]);
@@ -179,10 +186,10 @@ function canEditRecord(r: TrainingRecordWithUser): boolean {
 }
 
   async function handleDelete(id: string) {
-    if (!confirm('ยืนยันการลบรายงานนี้?')) return;
-    await deleteTrainingRecord(id);
-    await loadAll();
-  }
+  if (!confirm('ยืนยันการลบรายงานนี้?')) return;
+  await deleteTrainingRecord(id);
+  await reloadRecords();
+}
 
   async function handlePrintOwn() {
     if (!access?.user) return;
@@ -403,7 +410,7 @@ function canEditRecord(r: TrainingRecordWithUser): boolean {
           currentUser={access.user}
           allUsers={allUsers}
           canPickAnyUser={access.isManagement}
-          onSave={async () => { setShowForm(false); setEditing(null); await loadAll(); }}
+          onSave={async () => { setShowForm(false); setEditing(null); await reloadRecords(); }}
           onClose={() => { setShowForm(false); setEditing(null); }}
         />
       )}
