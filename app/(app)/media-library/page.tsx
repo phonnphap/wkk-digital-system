@@ -1477,6 +1477,22 @@ const codeKey = (code?: string | null) => (code ?? "").trim().toUpperCase().slic
 function canonSubject(name: string, baseByName: Map<string, string>) {
   return baseByName.get(name) || name; // หารหัสไม่เจอ → ใช้ชื่อวิชาเอง
 }
+// ── แถบ % ความคืบหน้า (เขียว ≥80 · เหลือง 50–79 · แดง <50) ──
+const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
+const pctColor = (p: number) => (p >= 80 ? "bg-emerald-500" : p >= 50 ? "bg-amber-500" : "bg-red-500");
+function PctBar({ label, done, total, unit }: { label: string; done: number; total: number; unit: string }) {
+  const p = pct(done, total);
+  return (
+    <div>
+      <div className="flex items-end justify-between mb-1">
+        <p className="text-xs font-black text-slate-600">{label}</p>
+        <p className="text-2xl font-black text-slate-800 leading-none">{p}<span className="text-sm text-slate-400">%</span></p>
+      </div>
+      <div className="bg-slate-100 rounded-full h-3 overflow-hidden"><div className={`${pctColor(p)} h-full`} style={{ width: `${p}%` }} /></div>
+      <p className="text-[11px] font-bold text-slate-400 mt-1">{done} / {total} {unit}</p>
+    </div>
+  );
+}
  
 type RegRow = { teacher: UserProfile | undefined; id: string; taught: string[]; registered: string[]; missing: string[] };
 type PanelKey = "regPending" | "reportDone" | "reportPending" | null;
@@ -1556,17 +1572,30 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   }, [rawTeaching, teacherById]);
  
   // ── 1) การลงทะเบียนสื่อรายวิชา ──
-  const regRows: RegRow[] = useMemo(() => {
-    return [...teaching.entries()].map(([id, subs]) => {
-      const taught = [...subs].sort((a, b) => a.localeCompare(b, "th"));
-      // เทียบด้วย "วิชาเชิงเทียบเท่า" (สุขศึกษา≡พลศึกษา ในชั้นเดียวกัน)
-      const have = new Set(items.filter(i => i.owner_id === id && i.subject).map(i => canonSubject(i.subject!, subjectBase)));
-const registered = taught.filter(s => have.has(canonSubject(s, subjectBase)));
-const missing = taught.filter(s => !have.has(canonSubject(s, subjectBase)));
-      return { teacher: teacherById.get(id), id, taught, registered, missing };
-    }).sort(byGradeName);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teaching, items, teacherById, teacherGrade, subjectGrade, subjectBase]);
+  // ── 1) การลงทะเบียนสื่อรายวิชา ──
+const regRows: RegRow[] = useMemo(() => {
+  return [...teaching.entries()].map(([id, subs]) => {
+    // ★ วิชาที่ "ครูคนเดียวกัน" สอน แล้วคีย์เดียวกัน (รหัส 6 ตัวแรกเหมือนกัน เช่น พ11101_PE กับ พ11101,
+    //   หรือสุขศึกษา≡พลศึกษา ชั้นเดียวกัน) → นับเป็น 1 รายการ · ครูคนละคนไม่รวมกัน
+    const groups = new Map<string, string[]>();
+    subs.forEach(s => {
+      const k = canonSubject(s, subjectBase);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(s);
+    });
+    const have = new Set(
+      items.filter(i => i.owner_id === id && i.subject).map(i => canonSubject(i.subject!, subjectBase))
+    );
+    const entries = [...groups.entries()]
+      .map(([k, names]) => ({ k, label: names.sort((a, b) => a.localeCompare(b, "th")).join(" / ") }))
+      .sort((a, b) => a.label.localeCompare(b.label, "th"));
+    const taught = entries.map(e => e.label);
+    const registered = entries.filter(e => have.has(e.k)).map(e => e.label);
+    const missing = entries.filter(e => !have.has(e.k)).map(e => e.label);
+    return { teacher: teacherById.get(id), id, taught, registered, missing };
+  }).sort(byGradeName);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [teaching, items, teacherById, teacherGrade, subjectGrade, subjectBase]);
   const regPendingRows = regRows.filter(r => r.missing.length > 0);
   const regCompleteCount = regRows.length - regPendingRows.length;
  
@@ -1763,6 +1792,16 @@ return [...subjTeachers.entries()]
     if (!w) { alert("เบราว์เซอร์บล็อกหน้าต่างใหม่ — กรุณาอนุญาตป๊อปอัปแล้วลองอีกครั้ง"); return; }
     w.document.open(); w.document.write(html); w.document.close();
   }
+  // ── % ความคืบหน้า (รวม + แยกสายชั้น) ──
+const subjTaught = regRows.reduce((n, r) => n + r.taught.length, 0);
+const subjDone = regRows.reduce((n, r) => n + r.registered.length, 0);
+const gradeProgress = (() => {
+  const m = new Map<string, { regAll: number; regFull: number; repAll: number; repDone: number }>();
+  const get = (g: string) => { if (!m.has(g)) m.set(g, { regAll: 0, regFull: 0, repAll: 0, repDone: 0 }); return m.get(g)!; };
+  regRows.forEach(r => { const x = get(gradeOf(r.id)); x.regAll++; if (r.missing.length === 0) x.regFull++; });
+  teacherPool.forEach(id => { const x = get(gradeOf(id)); x.repAll++; if ((reportCountByTeacher.get(id) ?? 0) >= 1) x.repDone++; });
+  return [...m.entries()].sort((a, b) => gradeIdx(a[0]) - gradeIdx(b[0]));
+})();
  
   const cardBase = "rounded-2xl p-4 text-center border-2 transition-all w-full";
   const toggle = (k: Exclude<PanelKey, null>) => setPanel(p => (p === k ? null : k));
@@ -1823,6 +1862,48 @@ return [...subjTeachers.entries()]
           </div>
         ))}
       </div>
+      {/* ★ % ความคืบหน้า */}
+<div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-5">
+  <h3 className="font-black text-slate-700 text-sm">📈 ความคืบหน้าการลงทะเบียนสื่อและรายงานการใช้สื่อ · ปี {year}</h3>
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+    <PctBar label="ครูลงทะเบียนสื่อครบทุกวิชาที่สอน" done={regCompleteCount} total={regRows.length} unit="คน" />
+    <PctBar label="รายวิชาที่ลงทะเบียนสื่อแล้ว" done={subjDone} total={subjTaught} unit="วิชา" />
+    <PctBar label="ครูที่ทำรายงานการใช้สื่อ (≥1 ชิ้น)" done={reportDone.length} total={teacherPool.length} unit="คน" />
+  </div>
+  <div className="overflow-x-auto">
+    <table className="w-full text-xs min-w-[560px]">
+      <thead>
+        <tr className="bg-slate-50 text-[11px] font-black text-slate-500 text-left">
+          <th className="px-3 py-2">สายชั้น</th>
+          <th className="px-3 py-2">ลงทะเบียนสื่อครบ</th>
+          <th className="px-3 py-2">ทำรายงานการใช้สื่อ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {gradeProgress.map(([g, x]) => {
+          const rp = pct(x.regFull, x.regAll), pp = pct(x.repDone, x.repAll);
+          return (
+            <tr key={g} className="border-t border-slate-100">
+              <td className="px-3 py-2 font-black text-slate-700 whitespace-nowrap">{g}</td>
+              <td className="px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 bg-slate-100 rounded-full h-2.5 overflow-hidden"><div className={`${pctColor(rp)} h-full`} style={{ width: `${rp}%` }} /></div>
+                  <span className="w-24 text-right font-bold text-slate-600">{rp}% ({x.regFull}/{x.regAll})</span>
+                </div>
+              </td>
+              <td className="px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 bg-slate-100 rounded-full h-2.5 overflow-hidden"><div className={`${pctColor(pp)} h-full`} style={{ width: `${pp}%` }} /></div>
+                  <span className="w-24 text-right font-bold text-slate-600">{pp}% ({x.repDone}/{x.repAll})</span>
+                </div>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+</div>
  
       {/* ★ แผงรายชื่อ: ลงทะเบียนสื่อไม่ครบ */}
       {panel === "regPending" && (
