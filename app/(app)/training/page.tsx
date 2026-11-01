@@ -79,7 +79,8 @@ setRecords(recs);
 setAllUsers(users);
 setTargetHours(target);
 setGradeMap(grades);
-  }, []);
+setLoading(false);
+}, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
