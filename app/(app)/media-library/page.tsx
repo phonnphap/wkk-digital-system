@@ -1505,6 +1505,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   const [teacherGrade, setTeacherGrade] = useState<Map<string, string>>(new Map());     // teacherId → สายชั้นหลัก
   const [subjectGrade, setSubjectGrade] = useState<Map<string, string>>(new Map());     // ชื่อวิชา → ระดับชั้น
   const [subjectBase, setSubjectBase] = useState<Map<string, string>>(new Map()); // ชื่อวิชา → รหัส 6 ตัวแรก
+  const [subjectCode, setSubjectCode] = useState<Map<string, string>>(new Map()); // ชื่อวิชา → รหัสวิชาเต็ม
   const [loadingTeach, setLoadingTeach] = useState(true);
   const [panel, setPanel] = useState<PanelKey>(null);
  
@@ -1518,10 +1519,12 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
       const gradeById = new Map<string, string>();
       const subjGrade = new Map<string, string>();
       const baseByName = new Map<string, string>();
+      const codeByName = new Map<string, string>();
       subjects.forEach(s => {
   // ★ เก็บรหัสของ "ทุกวิชา" ก่อนตัดวิชาที่ไม่นับ (สื่อที่ลงไว้กับวิชาที่ถูกตัดจะได้ยังจับคู่ได้)
   const base = codeKey(s.subject_code);
   if (s.name_th && base && !baseByName.has(s.name_th)) baseByName.set(s.name_th, base);
+  if (s.name_th && s.subject_code && !codeByName.has(s.name_th)) codeByName.set(s.name_th, s.subject_code);
 
   if (isExcludedSubjectCode(s.subject_code)) return;
         if (!s.name_th) return;
@@ -1552,7 +1555,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
         const best = [...t.entries()].sort((a, b) => b[1] - a[1] || gradeIdx(a[0]) - gradeIdx(b[0]))[0];
         if (best) tg.set(tid, best[0]);
       });
-      if (!cancelled) { setRawTeaching(map); setTeacherGrade(tg); setSubjectGrade(subjGrade); setSubjectBase(baseByName); setLoadingTeach(false); }
+      if (!cancelled) { setRawTeaching(map); setTeacherGrade(tg); setSubjectGrade(subjGrade); setSubjectBase(baseByName); setSubjectCode(codeByName); setLoadingTeach(false); }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -1572,7 +1575,6 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   }, [rawTeaching, teacherById]);
  
   // ── 1) การลงทะเบียนสื่อรายวิชา ──
-  // ── 1) การลงทะเบียนสื่อรายวิชา ──
 const regRows: RegRow[] = useMemo(() => {
   return [...teaching.entries()].map(([id, subs]) => {
     // ★ วิชาที่ "ครูคนเดียวกัน" สอน แล้วคีย์เดียวกัน (รหัส 6 ตัวแรกเหมือนกัน เช่น พ11101_PE กับ พ11101,
@@ -1587,7 +1589,12 @@ const regRows: RegRow[] = useMemo(() => {
       items.filter(i => i.owner_id === id && i.subject).map(i => canonSubject(i.subject!, subjectBase))
     );
     const entries = [...groups.entries()]
-      .map(([k, names]) => ({ k, label: names.sort((a, b) => a.localeCompare(b, "th")).join(" / ") }))
+      .map(([k, names]) => ({
+  k,
+  label: names.sort((a, b) => a.localeCompare(b, "th"))
+    .map(n => (subjectCode.get(n) ? `${n} (${subjectCode.get(n)})` : n))
+    .join(" / "),
+}))
       .sort((a, b) => a.label.localeCompare(b.label, "th"));
     const taught = entries.map(e => e.label);
     const registered = entries.filter(e => have.has(e.k)).map(e => e.label);
@@ -1595,7 +1602,7 @@ const regRows: RegRow[] = useMemo(() => {
     return { teacher: teacherById.get(id), id, taught, registered, missing };
   }).sort(byGradeName);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [teaching, items, teacherById, teacherGrade, subjectGrade, subjectBase]);
+}, [teaching, items, teacherById, teacherGrade, subjectGrade, subjectBase, subjectCode]);
   const regPendingRows = regRows.filter(r => r.missing.length > 0);
   const regCompleteCount = regRows.length - regPendingRows.length;
  
@@ -1609,9 +1616,9 @@ const regRows: RegRow[] = useMemo(() => {
     const withMedia = new Set(items.filter(i => i.subject).map(i => canonSubject(i.subject!, subjectBase)));
 return [...subjTeachers.entries()]
   .filter(([s]) => !withMedia.has(canonSubject(s, subjectBase)))
-      .map(([s, tids]) => ({ subject: s, grade: subjectGrade.get(s) ?? NO_GRADE, teachers: tids.map(t => displayName(teacherById.get(t))) }))
+      .map(([s, tids]) => ({ subject: s, code: subjectCode.get(s) ?? "", grade: subjectGrade.get(s) ?? NO_GRADE, teachers: tids.map(t => displayName(teacherById.get(t))) }))
       .sort((a, b) => gradeIdx(a.grade) - gradeIdx(b.grade) || a.subject.localeCompare(b.subject, "th"));
-  }, [teaching, items, teacherById, subjectGrade, subjectBase]);
+  }, [teaching, items, teacherById, subjectGrade, subjectBase, subjectCode]);
  
   // ── 2) รายงานการใช้สื่อ: ครูแต่ละคนต้องทำ ≥ 1 ชิ้น/ปีการศึกษา ──
   const teacherPool = useMemo(() => {
@@ -1714,15 +1721,15 @@ return [...subjTeachers.entries()]
     const noMediaTable = subjectsNoMedia.length === 0
       ? `<p class="ok">ทุกรายวิชามีสื่ออย่างน้อย 1 รายการ</p>`
       : `<table>
-          <thead><tr><th style="width:32px">ที่</th><th style="width:260px">รายวิชา</th><th>ครูผู้สอน</th></tr></thead>
+          <thead><tr><th style="width:32px">ที่</th><th style="width:230px">รายวิชา</th><th style="width:90px">รหัสวิชา</th><th>ครูผู้สอน</th></tr></thead>
           <tbody>${subjectsNoMedia.map(s => {
             let head = "";
             if (s.grade !== lastSg) {
               lastSg = s.grade;
-              head = `<tr class="grp"><td colspan="3">ระดับชั้น ${esc(s.grade === NO_GRADE ? "ไม่ระบุ" : s.grade)} (${subjectsNoMedia.filter(x => x.grade === s.grade).length} วิชา)</td></tr>`;
+              head = `<tr class="grp"><td colspan="4">ระดับชั้น ${esc(s.grade === NO_GRADE ? "ไม่ระบุ" : s.grade)} (${subjectsNoMedia.filter(x => x.grade === s.grade).length} วิชา)</td></tr>`;
             }
             sn++;
-            return head + `<tr><td class="c">${sn}</td><td>${esc(s.subject)}</td><td>${esc(s.teachers.join(", "))}</td></tr>`;
+            return head + `<tr><td class="c">${sn}</td><td>${esc(s.subject)}</td><td>${esc(s.code)}</td><td>${esc(s.teachers.join(", "))}</td></tr>`;
           }).join("")}</tbody>
         </table>`;
  
@@ -1942,7 +1949,7 @@ const gradeProgress = (() => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-60 overflow-y-auto pr-1">
                 {subjectsNoMedia.map(s => (
                   <div key={s.subject} className="bg-white rounded-lg border border-indigo-100 px-3 py-1.5">
-                    <p className="text-xs font-black text-slate-700">{s.subject} <span className="text-[10px] text-indigo-500">{s.grade === NO_GRADE ? "" : `· ${s.grade}`}</span></p>
+                    <p className="text-xs font-black text-slate-700">{s.subject} {s.code && <span className="text-[10px] font-bold text-slate-400">({s.code})</span>} <span className="text-[10px] text-indigo-500">{s.grade === NO_GRADE ? "" : `· ${s.grade}`}</span></p>
                     <p className="text-[10px] font-bold text-slate-400 truncate">{s.teachers.join(", ")}</p>
                   </div>
                 ))}

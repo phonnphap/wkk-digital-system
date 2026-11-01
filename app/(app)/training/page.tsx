@@ -21,6 +21,18 @@ function thaiDate(s?: string) {
   const d = new Date(s);
   return `${d.getDate()} ${['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][d.getMonth()]} ${d.getFullYear()+543}`;
 }
+// ✅ ครูที่ย้ายออกแล้ว (ตรวจจากชื่อที่มีคำเหล่านี้)
+const RESIGNED_NAMES = ['วีรยุทธ', 'สุรีพร','เด่นศักดิ์'];
+// ✅ โรลที่ไม่นับ — ปรับให้ตรงกับค่าในตาราง users ของคุณ
+const EXCLUDED_ROLES = ['admin', 'management', 'executive', 'director', 'ผู้บริหาร', 'แอดมิน'];
+
+// ชื่อต้องมีตัวอักษรไทยอย่างน้อย 1 ตัว (ตัดชื่ออังกฤษ/ไม่มีชื่อ)
+function hasThaiName(u: any) {
+  return /[\u0E00-\u0E7F]/.test(fullName(u));
+}
+function esc(s: string) {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
 
 export default function TrainingPage() {
   const router = useRouter();
@@ -28,7 +40,7 @@ export default function TrainingPage() {
   const [records, setRecords] = useState<TrainingRecordWithUser[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [targetHours, setTargetHours] = useState(20);
-  const [tab, setTab] = useState<'dashboard' | 'list' | 'mine'>('list');
+  const [tab, setTab] = useState<'dashboard' | 'list' | 'mine' | 'missing'>('list');
   const [filterType, setFilterType] = useState<TrainingType | 'All'>('All');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -36,6 +48,7 @@ export default function TrainingPage() {
   const [editing, setEditing] = useState<TrainingRecordWithUser | null>(null);
   const [viewingRecord, setViewingRecord] = useState<TrainingRecordWithUser | null>(null); // ✅ เพิ่ม
   const [printingOwn, setPrintingOwn] = useState(false);
+  
 
   const loadAll = useCallback(async () => {
     const acc = await getTrainingAccess();
@@ -70,6 +83,59 @@ export default function TrainingPage() {
     for (const r of records) byType[r.training_type] = (byType[r.training_type] ?? 0) + Number(r.hours);
     return Object.entries(byType).map(([type, hours]) => ({ name: TRAINING_TYPE_LABELS[type as TrainingType] ?? type, ชั่วโมง: hours }));
   }, [records]);
+
+  const missingReport = useMemo(() => {
+  const eligible = allUsers.filter((u) => {
+    if (!hasThaiName(u)) return false;
+    const role = String(u.role ?? '').toLowerCase();
+    if (EXCLUDED_ROLES.some((r) => role.includes(r.toLowerCase()))) return false;
+    if (u.is_admin || u.is_management) return false;
+    const name = fullName(u);
+    if (RESIGNED_NAMES.some((n) => name.includes(n))) return false;
+    return true;
+  });
+  const hasRecord = new Set(records.map((r) => r.user_id));
+  const missing = eligible.filter((u) => !hasRecord.has(u.id));
+  const percent = eligible.length ? (missing.length / eligible.length) * 100 : 0;
+  return { eligible, missing, percent };
+}, [allUsers, records]);
+
+function printMissingReport() {
+  const { eligible, missing, percent } = missingReport;
+  const rows = missing.map((u, i) => `
+    <tr>
+      <td style="text-align:center">${i + 1}</td>
+      <td>${esc(fullName(u))}</td>
+      <td>${esc(u.position ?? '—')}</td>
+      <td>${esc(u.department_name ?? u.department ?? '—')}</td>
+    </tr>`).join('');
+  const w = window.open('', '_blank');
+  if (!w) return alert('เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต pop-up');
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>รายงานครูที่ยังไม่บันทึกการอบรม</title>
+  <style>
+    body{font-family:'Sarabun','Noto Sans Thai',sans-serif;padding:24px;color:#1e293b}
+    h2{margin:0 0 4px} p{margin:2px 0;font-size:14px}
+    table{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px}
+    th,td{border:1px solid #94a3b8;padding:6px 8px} th{background:#e2e8f0}
+    .sum{margin-top:12px;padding:10px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc}
+    @media print{button{display:none}}
+  </style></head><body>
+    <h2>รายงานครูที่ยังไม่ได้บันทึกการอบรม</h2>
+    <p>พิมพ์เมื่อ ${thaiDate(new Date().toISOString())}</p>
+    <div class="sum">
+      <p>ครูที่นับทั้งหมด: <b>${eligible.length}</b> คน</p>
+      <p>ยังไม่บันทึกการอบรม: <b>${missing.length}</b> คน (<b>${percent.toFixed(1)}%</b>)</p>
+      <p>บันทึกแล้ว: <b>${eligible.length - missing.length}</b> คน (<b>${(100 - percent).toFixed(1)}%</b>)</p>
+      <p style="font-size:12px;color:#64748b">ไม่นับ: ชื่อภาษาอังกฤษ/ไม่มีชื่อ, ผู้บริหาร, แอดมิน, ครูที่ย้ายออก</p>
+    </div>
+    <table>
+      <thead><tr><th style="width:50px">ลำดับ</th><th>ชื่อ-สกุล</th><th>ตำแหน่ง</th><th>ฝ่าย/กลุ่มสาระ</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="4" style="text-align:center">ทุกคนบันทึกการอบรมแล้ว 🎉</td></tr>'}</tbody>
+    </table>
+    <script>window.onload=()=>window.print()<\/script>
+  </body></html>`);
+  w.document.close();
+}
 
   // ✅ แก้ไข/ลบได้เฉพาะเจ้าของรายการเท่านั้น — ผู้ดูแลโครงการ/แอดมิน/ผู้บริหาร เห็นได้ทุกคนแต่แก้ไข/ลบไม่ได้
 function canEditRecord(r: TrainingRecordWithUser): boolean {
@@ -134,7 +200,7 @@ function canEditRecord(r: TrainingRecordWithUser): boolean {
 
       <div className="bg-white border-b border-slate-200 flex shrink-0">
         {([
-          ...(access.isManagement ? [['dashboard', '📊 แดชบอร์ด']] as const : []),
+          ...(access.isManagement ? [['dashboard', '📊 แดชบอร์ด'], ['missing', '⚠️ ยังไม่บันทึก']] as const : []),
           ['list', '📋 รายการทั้งหมด'],
           ['mine', '📌 ของฉัน'],
         ] as const).map(([k, l]) => (
@@ -181,6 +247,38 @@ function canEditRecord(r: TrainingRecordWithUser): boolean {
             </div>
           </div>
         )}
+
+        {tab === 'missing' && access.isManagement && (
+  <div className="max-w-4xl mx-auto p-5 space-y-4">
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-wrap items-center gap-4 justify-between">
+      <div>
+        <p className="text-xs text-slate-400 font-bold">ครูที่ยังไม่บันทึกการอบรมเลย</p>
+        <p className="text-3xl font-black text-red-500">
+          {missingReport.missing.length}
+          <span className="text-base text-slate-400 font-bold"> / {missingReport.eligible.length} คน</span>
+        </p>
+        <p className="text-sm font-bold text-slate-600">คิดเป็น {missingReport.percent.toFixed(1)}%</p>
+      </div>
+      <button onClick={printMissingReport}
+        className="px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700">
+        🖨️ พิมพ์รายงาน
+      </button>
+    </div>
+
+    <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100">
+      {missingReport.missing.map((u, i) => (
+        <div key={u.id} className="px-4 py-3 flex items-center gap-3 text-sm">
+          <span className="w-8 text-slate-400 text-xs">{i + 1}</span>
+          <span className="font-bold text-slate-700 flex-1">{fullName(u)}</span>
+          <span className="text-xs text-slate-400">{u.position ?? ''}</span>
+        </div>
+      ))}
+      {missingReport.missing.length === 0 && (
+        <p className="text-center py-10 text-slate-400 text-sm">ทุกคนบันทึกแล้ว 🎉</p>
+      )}
+    </div>
+  </div>
+)}
 
         {(tab === 'list' || tab === 'mine') && (
           <div className="max-w-4xl mx-auto p-5 space-y-4">
