@@ -61,7 +61,7 @@ export async function getTrainingAccess(): Promise<TrainingAccess> {
 export async function getAllTeachers() {
   const { data, error } = await supabase
     .from('users')
-    .select('id, title, first_name, last_name, full_name, position, role, signature_url, grade_level:grade_level_id(name)')
+    .select('*')
     .order('first_name');
   if (error) throw error;
   return data ?? [];
