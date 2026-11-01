@@ -1471,17 +1471,11 @@ const gradeIdx = (g: string) => { const i = GRADE_LEVELS.indexOf(g); return i < 
  
 // ★ กลุ่มวิชาที่ถือเป็นวิชาเดียวกัน (ในชั้นเดียวกัน) — ลงสื่ออันใดอันหนึ่ง = ครบทั้งกลุ่มของชั้นนั้น
 //   จะเพิ่มกลุ่มใหม่ก็แค่เติมบรรทัดในรายการนี้
-const SAME_SUBJECT_GROUPS: { id: string; re: RegExp }[] = [
-  { id: "PEH", re: /สุขศึกษา|พลศึกษา|พละ/ },
-  { id: "ART", re: /ศิลปะ|ดนตรี|นาฏศิลป์|ทัศนศิลป์/ },
-  { id: "SCI", re: /วิทยาศาสตร์|เทคโนโลยี/ },
-];
-function canonSubject(name: string, grade?: string) {
-  const g = SAME_SUBJECT_GROUPS.find(x => x.re.test(name));
-  if (!g) return name;
-  // ไม่รู้ชั้นจากรหัสวิชา → ใช้ส่วนที่เหลือของชื่อ (เช่น "ป.1")
-  const rest = name.replace(new RegExp(`${g.re.source}|และ|[\\s/\\-]`, "g"), "");
-  return `${g.id}|${grade ?? rest}`;
+// ★ วิชาที่ถือเป็นวิชาเดียวกัน = รหัสวิชา 6 ตัวแรกเหมือนกัน (เช่น ศ11101 กับ ศ11101_M)
+const CODE_KEY_LEN = 6;
+const codeKey = (code?: string | null) => (code ?? "").trim().toUpperCase().slice(0, CODE_KEY_LEN);
+function canonSubject(name: string, baseByName: Map<string, string>) {
+  return baseByName.get(name) || name; // หารหัสไม่เจอ → ใช้ชื่อวิชาเอง
 }
  
 type RegRow = { teacher: UserProfile | undefined; id: string; taught: string[]; registered: string[]; missing: string[] };
@@ -1494,6 +1488,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   const [rawTeaching, setRawTeaching] = useState<Map<string, Set<string>>>(new Map()); // teacherId → ชื่อวิชาที่สอน
   const [teacherGrade, setTeacherGrade] = useState<Map<string, string>>(new Map());     // teacherId → สายชั้นหลัก
   const [subjectGrade, setSubjectGrade] = useState<Map<string, string>>(new Map());     // ชื่อวิชา → ระดับชั้น
+  const [subjectBase, setSubjectBase] = useState<Map<string, string>>(new Map()); // ชื่อวิชา → รหัส 6 ตัวแรก
   const [loadingTeach, setLoadingTeach] = useState(true);
   const [panel, setPanel] = useState<PanelKey>(null);
  
@@ -1506,9 +1501,13 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
       const nameById = new Map<string, string>();
       const gradeById = new Map<string, string>();
       const subjGrade = new Map<string, string>();
+      const baseByName = new Map<string, string>();
       subjects.forEach(s => {
-        // ★ วิชากิจกรรม (ขึ้นต้น "ก") และ K02-HOME / K03-HOME ไม่ต้องลงทะเบียนสื่อ → ไม่นับ
-        if (isExcludedSubjectCode(s.subject_code)) return;
+  // ★ เก็บรหัสของ "ทุกวิชา" ก่อนตัดวิชาที่ไม่นับ (สื่อที่ลงไว้กับวิชาที่ถูกตัดจะได้ยังจับคู่ได้)
+  const base = codeKey(s.subject_code);
+  if (s.name_th && base && !baseByName.has(s.name_th)) baseByName.set(s.name_th, base);
+
+  if (isExcludedSubjectCode(s.subject_code)) return;
         if (!s.name_th) return;
         nameById.set(s.id, s.name_th);
         const g = gradeFromSubjectCode(s.subject_code);
@@ -1537,7 +1536,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
         const best = [...t.entries()].sort((a, b) => b[1] - a[1] || gradeIdx(a[0]) - gradeIdx(b[0]))[0];
         if (best) tg.set(tid, best[0]);
       });
-      if (!cancelled) { setRawTeaching(map); setTeacherGrade(tg); setSubjectGrade(subjGrade); setLoadingTeach(false); }
+      if (!cancelled) { setRawTeaching(map); setTeacherGrade(tg); setSubjectGrade(subjGrade); setSubjectBase(baseByName); setLoadingTeach(false); }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -1561,13 +1560,13 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
     return [...teaching.entries()].map(([id, subs]) => {
       const taught = [...subs].sort((a, b) => a.localeCompare(b, "th"));
       // เทียบด้วย "วิชาเชิงเทียบเท่า" (สุขศึกษา≡พลศึกษา ในชั้นเดียวกัน)
-      const have = new Set(items.filter(i => i.owner_id === id && i.subject).map(i => canonSubject(i.subject!, subjectGrade.get(i.subject!))));
-      const registered = taught.filter(s => have.has(canonSubject(s, subjectGrade.get(s))));
-      const missing = taught.filter(s => !have.has(canonSubject(s, subjectGrade.get(s))));
+      const have = new Set(items.filter(i => i.owner_id === id && i.subject).map(i => canonSubject(i.subject!, subjectBase)));
+const registered = taught.filter(s => have.has(canonSubject(s, subjectBase)));
+const missing = taught.filter(s => !have.has(canonSubject(s, subjectBase)));
       return { teacher: teacherById.get(id), id, taught, registered, missing };
     }).sort(byGradeName);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teaching, items, teacherById, teacherGrade, subjectGrade]);
+  }, [teaching, items, teacherById, teacherGrade, subjectGrade, subjectBase]);
   const regPendingRows = regRows.filter(r => r.missing.length > 0);
   const regCompleteCount = regRows.length - regPendingRows.length;
  
@@ -1578,12 +1577,12 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
       if (!subjTeachers.has(s)) subjTeachers.set(s, []);
       subjTeachers.get(s)!.push(tid);
     }));
-    const withMedia = new Set(items.filter(i => i.subject).map(i => canonSubject(i.subject!, subjectGrade.get(i.subject!))));
-    return [...subjTeachers.entries()]
-      .filter(([s]) => !withMedia.has(canonSubject(s, subjectGrade.get(s))))
+    const withMedia = new Set(items.filter(i => i.subject).map(i => canonSubject(i.subject!, subjectBase)));
+return [...subjTeachers.entries()]
+  .filter(([s]) => !withMedia.has(canonSubject(s, subjectBase)))
       .map(([s, tids]) => ({ subject: s, grade: subjectGrade.get(s) ?? NO_GRADE, teachers: tids.map(t => displayName(teacherById.get(t))) }))
       .sort((a, b) => gradeIdx(a.grade) - gradeIdx(b.grade) || a.subject.localeCompare(b.subject, "th"));
-  }, [teaching, items, teacherById, subjectGrade]);
+  }, [teaching, items, teacherById, subjectGrade, subjectBase]);
  
   // ── 2) รายงานการใช้สื่อ: ครูแต่ละคนต้องทำ ≥ 1 ชิ้น/ปีการศึกษา ──
   const teacherPool = useMemo(() => {
