@@ -1450,7 +1450,7 @@ async function fetchAllRows(table: string, select: string): Promise<any[]> {
 }
  
 // รหัสวิชาที่ไม่ต้องลงทะเบียนสื่อ/ไม่นับ: ขึ้นต้นด้วย "ก" (กิจกรรม), K02-HOME, K03-HOME
-const EXCLUDED_SUBJECT_CODES = ["K02-HOME", "K03-HOME","K02-HYG", "K03-HYG"];
+const EXCLUDED_SUBJECT_CODES = ["K02-HOME", "K03-HOME", "K02-HYG", "K03-HYG", "K02-ENG", "K03-ENG",, "ค21204", "ค22203", "ค22204", "ค23203", "ค23204", "ค33203", "ค33204", "ว31288", "ว32285", "ว33285", "ว31289", "ว32286"];
 function isExcludedSubjectCode(code?: string | null) {
   const c = (code ?? "").trim();
   if (!c) return false;
@@ -1458,7 +1458,7 @@ function isExcludedSubjectCode(code?: string | null) {
 }
  
 // ครูที่ไม่ต้องลงทะเบียนสื่อ/ทำรายงานสื่อ: ย้ายออก 2 คน + ครูที่ชื่อเป็นอักษรอังกฤษ (ครูต่างชาติ/ภาษาอังกฤษ)
-const EXCLUDED_TEACHER_NAMES = ["วีรยุทธ", "สุรีพร"];
+const EXCLUDED_TEACHER_NAMES = ["วีรยุทธ", "สุรีพร", "เด่นศักดิ์"];
 function isExcludedTeacher(u?: UserProfile) {
   if (!u) return false;
   const full = displayName(u);
@@ -1468,6 +1468,15 @@ function isExcludedTeacher(u?: UserProfile) {
 }
 const NO_GRADE = "ไม่ระบุสายชั้น";
 const gradeIdx = (g: string) => { const i = GRADE_LEVELS.indexOf(g); return i < 0 ? 999 : i; };
+ 
+// ★ วิชาที่ถือเป็นวิชาเดียวกัน (ในชั้นเดียวกัน): สุขศึกษา = พลศึกษา(พละ)
+//   ลงสื่ออันใดอันหนึ่ง → นับว่าลงครบทั้งคู่ของชั้นนั้น (ป.1 พลศึกษา ≡ ป.1 สุขศึกษา แต่ไม่ข้ามชั้น)
+const PEH_RE = /สุขศึกษา|พลศึกษา|พละ/;
+const PEH_STRIP = /สุขศึกษา|พลศึกษา|พละ|และ|\s/g;
+function canonSubject(name: string, grade?: string) {
+  if (!PEH_RE.test(name)) return name;
+  return `PEH|${grade ?? name.replace(PEH_STRIP, "")}`; // ไม่รู้ชั้นจากรหัสวิชา → ใช้ส่วนที่เหลือของชื่อ (เช่น "ป.1")
+}
  
 type RegRow = { teacher: UserProfile | undefined; id: string; taught: string[]; registered: string[]; missing: string[] };
 type PanelKey = "regPending" | "reportDone" | "reportPending" | null;
@@ -1545,13 +1554,14 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   const regRows: RegRow[] = useMemo(() => {
     return [...teaching.entries()].map(([id, subs]) => {
       const taught = [...subs].sort((a, b) => a.localeCompare(b, "th"));
-      const have = new Set(items.filter(i => i.owner_id === id && i.subject).map(i => i.subject!));
-      const registered = taught.filter(s => have.has(s));
-      const missing = taught.filter(s => !have.has(s));
+      // เทียบด้วย "วิชาเชิงเทียบเท่า" (สุขศึกษา≡พลศึกษา ในชั้นเดียวกัน)
+      const have = new Set(items.filter(i => i.owner_id === id && i.subject).map(i => canonSubject(i.subject!, subjectGrade.get(i.subject!))));
+      const registered = taught.filter(s => have.has(canonSubject(s, subjectGrade.get(s))));
+      const missing = taught.filter(s => !have.has(canonSubject(s, subjectGrade.get(s))));
       return { teacher: teacherById.get(id), id, taught, registered, missing };
     }).sort(byGradeName);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teaching, items, teacherById, teacherGrade]);
+  }, [teaching, items, teacherById, teacherGrade, subjectGrade]);
   const regPendingRows = regRows.filter(r => r.missing.length > 0);
   const regCompleteCount = regRows.length - regPendingRows.length;
  
@@ -1562,9 +1572,9 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
       if (!subjTeachers.has(s)) subjTeachers.set(s, []);
       subjTeachers.get(s)!.push(tid);
     }));
-    const withMedia = new Set(items.map(i => i.subject).filter(Boolean) as string[]);
+    const withMedia = new Set(items.filter(i => i.subject).map(i => canonSubject(i.subject!, subjectGrade.get(i.subject!))));
     return [...subjTeachers.entries()]
-      .filter(([s]) => !withMedia.has(s))
+      .filter(([s]) => !withMedia.has(canonSubject(s, subjectGrade.get(s))))
       .map(([s, tids]) => ({ subject: s, grade: subjectGrade.get(s) ?? NO_GRADE, teachers: tids.map(t => displayName(teacherById.get(t))) }))
       .sort((a, b) => gradeIdx(a.grade) - gradeIdx(b.grade) || a.subject.localeCompare(b.subject, "th"));
   }, [teaching, items, teacherById, subjectGrade]);
@@ -1657,11 +1667,13 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
     const regTable = pendingByName.length === 0
       ? `<p class="ok">ครูทุกคนลงทะเบียนสื่อครบทุกวิชาที่สอนแล้ว</p>`
       : `<table>
-          <thead><tr><th style="width:32px">ที่</th><th style="width:190px">ชื่อครู</th><th style="width:44px">สอน<br>(วิชา)</th><th style="width:44px">ลงแล้ว</th><th style="width:44px">ขาด</th><th>วิชาที่ยังไม่ได้ลงทะเบียนสื่อ</th></tr></thead>
+          <thead><tr><th style="width:32px">ที่</th><th style="width:190px">ชื่อครู</th><th style="width:44px">สอน<br>(วิชา)</th><th style="width:44px">ลงแล้ว</th><th style="width:44px">ขาด</th><th>รายวิชา (<span style="color:#047857">เขียว ✓ = ลงทะเบียนสื่อแล้ว</span> · <span style="color:#b91c1c">แดง ✗ = ยังไม่ได้ลง</span>)</th></tr></thead>
           <tbody>${grp(pendingByName, 6, (r, n) => `<tr>
             <td class="c">${n}</td><td>${esc(displayName(r.teacher))}</td>
             <td class="c">${r.taught.length}</td><td class="c">${r.registered.length}</td><td class="c bad">${r.missing.length}</td>
-            <td>${r.missing.map(m => `<span class="tag">${esc(m)}</span>`).join(" ")}</td></tr>`)}</tbody>
+            <td>${r.taught.map(t => r.missing.includes(t)
+              ? `<span class="tag">✗ ${esc(t)}</span>`
+              : `<span class="tag g">✓ ${esc(t)}</span>`).join(" ")}</td></tr>`)}</tbody>
         </table>`;
  
     let lastSg = ""; let sn = 0;
@@ -1692,7 +1704,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
 <style>
   @page { size: A4; margin: 14mm 12mm; }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body { font-family: "Sarabun","TH Sarabun New",Tahoma,sans-serif; font-size: 13px; color: #111; margin: 0; }
   h1 { font-size: 20px; margin: 0; text-align: center; }
   .sub { text-align: center; margin: 2px 0 12px; color: #444; }
@@ -1707,6 +1719,7 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   thead { display: table-header-group; }
   .c { text-align: center; } .bad { color: #b91c1c; font-weight: 700; }
   .tag { display: inline-block; border: 1px solid #fca5a5; background: #fef2f2; color: #991b1b; border-radius: 4px; padding: 0 5px; margin: 1px 2px 1px 0; }
+  .tag.g { border-color: #6ee7b7; background: #ecfdf5; color: #065f46; }
   .ok { color: #047857; font-weight: 700; margin: 6px 0; }
   .note { font-size: 11px; color: #555; margin-top: 4px; }
   tr.grp td { background: #fef3c7; font-weight: 700; border-top: 2px solid #777; }
@@ -1828,7 +1841,9 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {r.missing.map(s => <span key={s} className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">{s}</span>)}
+                    {r.taught.map(s => r.missing.includes(s)
+                      ? <span key={s} className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">✗ {s}</span>
+                      : <span key={s} className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">✓ {s}</span>)}
                   </div>
                 </div>
               ])}
