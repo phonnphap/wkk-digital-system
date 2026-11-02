@@ -21,6 +21,18 @@ type Classroom = {
   is_current?: boolean;
 };
 
+type Term = { year_name: string; semester: number; start_date: string; end_date: string };
+
+function pickTerm(terms: Term[], date: string): Term | null {
+  if (!terms.length) return null;
+  const inRange = terms.find((t) => date >= t.start_date && date <= t.end_date);
+  if (inRange) return inRange;
+  // วันที่อยู่ช่วงรอยต่อ/ปิดเทอม → ใช้เทอมล่าสุดที่เริ่มไปแล้ว ไม่งั้นเทอมแรกสุด
+  const sorted = [...terms].sort((a, b) => a.start_date.localeCompare(b.start_date));
+  const started = sorted.filter((t) => t.start_date <= date);
+  return started.length ? started[started.length - 1] : sorted[0];
+}
+
 type Student = {
   id: string;
   seat_number: number | null;
@@ -291,7 +303,9 @@ function MonthlyStatsTable({
 export default function AttendancePage() {
   const router = useRouter();
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
-  const [selectedClass, setSelectedClass] = useState<Classroom | null>(null);
+const [roomName, setRoomName] = useState("");
+const [terms, setTerms] = useState<Term[]>([]);
+const [termsLoaded, setTermsLoaded] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [date, setDate] = useState(getTodayISO());
   const [statusMap, setStatusMap] = useState<Record<string, AttendanceStatus>>({});
@@ -304,6 +318,20 @@ export default function AttendancePage() {
   const [holidayMap, setHolidayMap] = useState<HolidayMap>(new Map());
   const [lockedMap, setLockedMap] = useState<Record<string, boolean>>({});
   const dateInputRef = useRef<HTMLInputElement>(null);
+  const roomNames = useMemo(() => [...new Set(classrooms.map((c) => c.room_name))], [classrooms]);
+const roomClassrooms = useMemo(() => classrooms.filter((c) => c.room_name === roomName), [classrooms, roomName]);
+const roomIds = useMemo(() => roomClassrooms.map((c) => c.classroom_id), [roomClassrooms]);
+const roomKey = roomIds.join(",");
+
+// ห้องของ "เทอมตามวันที่" ที่ใช้ผูกการบันทึก
+const selectedClass = useMemo<Classroom | null>(() => {
+  if (!termsLoaded || roomClassrooms.length === 0) return null;
+  const term = pickTerm(terms, date);
+  const match = term && roomClassrooms.find(
+    (c) => String(c.year_name) === String(term.year_name) && Number(c.semester) === Number(term.semester)
+  );
+  return match ?? roomClassrooms.find((c) => c.is_current) ?? roomClassrooms[0];
+}, [termsLoaded, terms, roomClassrooms, date]);
 
   useEffect(() => {
   const days = getDaysInMonth(date);
@@ -330,73 +358,75 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
 
   // โหลดห้องที่ครูดูแล
   useEffect(() => {
-    supabase.rpc("get_my_classrooms").then(({ data }: { data: Classroom[] | null }) => {
-      setClassrooms(data ?? []);
-      if (data?.length) setSelectedClass(data[0]);
-    });
-  }, []);
+  supabase.rpc("get_my_classrooms").then(({ data }: { data: Classroom[] | null }) => {
+    setClassrooms(data ?? []);
+    if (data?.length) setRoomName(data[0].room_name);
+  });
+  supabase.from("academic_years").select("year_name, semester, start_date, end_date")
+    .then(({ data }) => { setTerms((data ?? []) as Term[]); setTermsLoaded(true); });
+}, []);
 
   // โหลดนักเรียน + สถานะเช็คชื่อของวันที่เลือก
+    // โหลดนักเรียน + สถานะเช็คชื่อของวันที่เลือก
   useEffect(() => {
-    if (!selectedClass) return;
-    setLoading(true);
-    setSummaryFilter(null);
-    const cid = selectedClass.classroom_id;
+    if (!selectedClass || roomIds.length === 0) return;
+    let cancelled = false;
 
-    Promise.all([
-      supabase
-        .from("students")
-        .select("id, seat_number, prefix, first_name, last_name, nick_name, gender")
-        .eq("classroom_id", cid)
-        .is("moved_out_at", null) 
-        .order("seat_number"),
-      supabase
-        .from("attendance_records")
-        .select("student_id, status, recorded_source")
-        .eq("classroom_id", cid)
-        .eq("attendance_date", date),
-    ])
-      .then(([studentsRes, attendanceRes]) => {
+    (async () => {
+      setLoading(true);
+      setSummaryFilter(null);
+      try {
+        const studentsRes = await supabase
+          .from("students")
+          .select("id, seat_number, prefix, first_name, last_name, nick_name, gender")
+          .in("classroom_id", roomIds)
+          .is("moved_out_at", null)
+          .order("seat_number");
         const studentList: Student[] = studentsRes.data ?? [];
-        setStudents(studentList);
+
+        const attRes = studentList.length
+          ? await supabase
+              .from("attendance_records")
+              .select("student_id, status, recorded_source")
+              .in("student_id", studentList.map((s) => s.id))
+              .eq("attendance_date", date)
+          : { data: [] as any[] };
+
+        if (cancelled) return;
 
         const map: Record<string, AttendanceStatus> = {};
         const locked: Record<string, boolean> = {};
         studentList.forEach((s) => { map[s.id] = "present"; });
-
-        (attendanceRes.data ?? []).forEach((r: {
-  student_id: string;
-  status: AttendanceStatus;
-  recorded_source?: string;
-}) => {
-  map[r.student_id] = r.status;
-  // ★ ล็อกสถานะ "สาย" ที่ไม่ได้บันทึกโดยครูประจำชั้นเอง (homeroom) — ครอบคลุม
-  //   gate_scan, council_link และแหล่งอื่นใดในอนาคต ให้ admin เท่านั้นแก้ไขได้
-  if (r.status === "late" && r.recorded_source !== "homeroom") locked[r.student_id] = true;
-});
-
+        ((attRes.data ?? []) as { student_id: string; status: AttendanceStatus; recorded_source?: string }[]).forEach((r) => {
+          map[r.student_id] = r.status;
+          if (r.status === "late" && r.recorded_source !== "homeroom") locked[r.student_id] = true;
+        });
+        setStudents(studentList);
         setStatusMap(map);
         setLockedMap(locked);
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error("โหลดข้อมูลนักเรียน/การเช็คชื่อไม่สำเร็จ:", err);
-      })
-      .finally(() => setLoading(false)); // ★ เพิ่มบรรทัดนี้ — สำคัญที่สุด
-}, [selectedClass, date]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClass, roomKey, date]);
 
   // โหลดสถิติการมาเรียนรายวันทั้งเดือนของห้องนี้ (แยกชาย/หญิง)
   // หมายเหตุ: ต้องมี foreign key จาก attendance_records.student_id -> students.id
   // ให้ Supabase join ตาราง students(gender) ได้ ถ้ายังไม่มีให้เพิ่ม FK ก่อน
-  useEffect(() => {
-    if (!selectedClass) { setDayStats([]); return; }
-    const cid = selectedClass.classroom_id;
+    useEffect(() => {
+    if (!roomIds.length) { setDayStats([]); return; }
     const start = getMonthStartISO(date);
     const end = getNextMonthStartISO(date);
 
     supabase
       .from("attendance_records")
       .select("status, attendance_date, students(gender)")
-      .eq("classroom_id", cid)
+      .in("classroom_id", roomIds)
       .gte("attendance_date", start)
       .lt("attendance_date", end)
       .then(({ data, error }) => {
@@ -410,7 +440,6 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
 
         const byDate = new Map<string, { male: number; female: number; total: number }>();
         rows.forEach((r) => {
-          // "มาเรียน" นับสถานะ present + late (มาโรงเรียนจริง แค่มาสาย) — ปรับได้ตามนโยบายโรงเรียน
           const attended = r.status === "present" || r.status === "late";
           if (!attended) return;
           const genderInfo = Array.isArray(r.students) ? r.students[0] : r.students;
@@ -428,7 +457,8 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
         });
         setDayStats(days);
       });
-  }, [selectedClass, date]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomKey, date]);
 
   // จำนวนนักเรียนทั้งหมดในห้อง แยกชาย/หญิง ("นักเรียนเต็ม")
   const enrolledCounts = useMemo(() => {
@@ -536,7 +566,6 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-sky-50 via-white to-violet-50">
       <div className="w-full px-4 sm:px-6 py-6 lg:px-8">
-        {/* แถบนำทางด้านบน */}
         <div className="flex items-center gap-2">
           <button
             onClick={() => router.push(DASHBOARD_PATH)}
@@ -552,7 +581,6 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
           </button>
         </div>
 
-        {/* หัวข้อ + วันที่ อยู่แถวเดียวกัน (วันที่ย้ายมาไว้ต่อจากหัวข้อ "บันทึกเช็คชื่อ") */}
         <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs font-bold uppercase tracking-wider text-indigo-500">ระบบดูแลนักเรียน</p>
@@ -560,27 +588,22 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
             <p className="mt-1 text-sm text-slate-500">บันทึกการมาเรียนของนักเรียนรายวัน</p>
           </div>
 
-          <div className="flex flex-wrap items-end gap-3">
-            {classrooms.length > 1 && (
+                    <div className="flex flex-wrap items-end gap-3">
+            {roomNames.length > 1 && (
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-500">ห้องเรียน</label>
                 <select
                   className="rounded-2xl border-2 border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
-                  value={selectedClass?.classroom_id ?? ""}
-                  onChange={(e) => setSelectedClass(classrooms.find((c) => c.classroom_id === e.target.value) ?? null)}
+                  value={roomName}
+                  onChange={(e) => setRoomName(e.target.value)}
                 >
-                  {classrooms.map((c) => (
-  <option key={c.classroom_id} value={c.classroom_id}>
-    {c.room_name} (เทอม {c.semester}/{c.year_name})
-  </option>
-))}
+                  {roomNames.map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
             )}
 
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500">วันที่</label>
-              {/* ปุ่มจริงที่กดง่าย + เรียก showPicker() ตรง ๆ แทน overlay input แบบเดิมที่กดพลาดง่าย */}
               <button
                 type="button"
                 onClick={openDatePicker}
@@ -598,6 +621,11 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
                 aria-hidden="true"
                 className="sr-only"
               />
+              {selectedClass && (
+                <p className="mt-1 text-[11px] text-slate-400">
+                  ภาคเรียนที่ {selectedClass.semester}/{selectedClass.year_name} (เลือกอัตโนมัติตามวันที่)
+                </p>
+              )}
             </div>
 
             {date !== getTodayISO() && (
@@ -611,11 +639,8 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
           </div>
         </div>
 
-        {/* ★ จำกัดให้ฝั่งรายชื่อ+สถานะ ไม่เกินครึ่งหนึ่งของพื้นที่เว็บ (grid 2 คอลัมน์เท่ากัน) */}
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* ฝั่งซ้าย: รายชื่อ + ปุ่มบันทึก */}
           <div className="space-y-3">
-            {/* ปุ่มตั้งค่าทั้งห้องอย่างเร็ว */}
             <div className="flex flex-wrap gap-2">
               <span className="self-center text-xs text-slate-400">ตั้งค่าทั้งห้อง:</span>
               {STATUS_OPTIONS.map((opt) => (

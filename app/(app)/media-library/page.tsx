@@ -1450,7 +1450,7 @@ async function fetchAllRows(table: string, select: string): Promise<any[]> {
 }
  
 // รหัสวิชาที่ไม่ต้องลงทะเบียนสื่อ/ไม่นับ: ขึ้นต้นด้วย "ก" (กิจกรรม), K02-HOME, K03-HOME
-const EXCLUDED_SUBJECT_CODES = ["K02-HOME", "K03-HOME", "K02-HYG", "K03-HYG", "K02-ENG", "K03-ENG",, "ค21204", "ค22203", "ค22204", "ค23203", "ค23204", "ค33203", "ค33204", "ว31288", "ว32285", "ว33285", "ว31289", "ว32286"];
+const EXCLUDED_SUBJECT_CODES = ["K02-HOME", "K03-HOME", "K02-HYG", "K03-HYG", "K02-ENG", "K03-ENG","ค21203", "ค21204", "ค22203", "ค22204", "ค23203", "ค23204", "ค33203", "ค33204", "ว31288", "ว32285", "ว33285", "ว31289", "ว32286"];
 function isExcludedSubjectCode(code?: string | null) {
   const c = (code ?? "").trim();
   if (!c) return false;
