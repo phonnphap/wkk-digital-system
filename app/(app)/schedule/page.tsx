@@ -168,7 +168,8 @@ type AutoScheduleParams = {
 
 // ★ ใหม่: เช็คว่าคาบสองคาบติดกันจริงไหม (ไม่มีคาบพักคั่นกลาง)
 function areSlotsAdjacent(a: TimeSlot, b: TimeSlot): boolean {
-  return a.end_time === b.start_time || b.end_time === a.start_time;
+  const hhmm = (t?: string) => (t ?? "").slice(0, 5);
+  return hhmm(a.end_time) === hhmm(b.start_time) || hhmm(b.end_time) === hhmm(a.start_time);
 }
 
 function computeAutoScheduleSlots(p: AutoScheduleParams): { assignments: { day_of_week: number; time_slot: TimeSlot }[]; warnings: string[] } {
@@ -2965,7 +2966,23 @@ async function desyncSubjectSection({
 }) {
   try {
     const r = allClassrooms.find(c => c.id === classroomId);
-if (r && isYearlyRoom(r)) return;
+if (r && isYearlyRoom(r)) {
+  const canon = findPrevSemesterClassroom(r) ?? r;
+  const yn = getYearNameForClassroom(canon, academicYearsRaw);
+  const siblingIds = allClassrooms
+    .filter(c => c.grade_group === canon.grade_group
+      && (c.room_name ?? "").trim() === (canon.room_name ?? "").trim()
+      && getYearNameForClassroom(c, academicYearsRaw) === yn)
+    .map(c => c.id);
+  const { data: left } = await supabase.from("timetable_entries")
+    .select("id").eq("subject_id", subjectId).in("classroom_id", siblingIds).limit(1);
+  if (!left || left.length === 0) {
+    await (supabase.from("subject_sections") as any).update({ is_active: false })
+      .eq("subject_id", subjectId).eq("classroom_id", canon.id)
+      .eq("academic_year_id", canon.academic_year_id);
+  }
+  return;
+}
     // เช็คก่อนว่าครูคนนี้ยังมีคาบของ subject+classroom คู่นี้เหลืออยู่ไหม
     const { data: stillTeaching } = await supabase
       .from("timetable_entries")
@@ -3010,11 +3027,12 @@ if (r && isYearlyRoom(r)) return;
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{ created: number; updated: number; closed: number; carried: number } | null>(null);
 
-  async function syncAllSections() {
+    async function syncAllSections() {
     if (!user) return;
     setSyncing(true);
     setSyncResult(null);
     let created = 0, updated = 0, closed = 0, carried = 0;
+    const skipped: string[] = [];
 
     try {
       // ดึง timetable_entries ทั้งหมดทุกปีการศึกษา
@@ -3022,11 +3040,11 @@ if (r && isYearlyRoom(r)) return;
         supabase.from("timetable_entries").select("*")
       );
 
-      // ดึง subject_sections ทั้งหมดมาไว้ในหน่วยความจำ (ลด round-trip)
-      const { data: allSections } = await supabase
-        .from("subject_sections")
-        .select("id, subject_id, classroom_id, academic_year_id, teacher_id, co_teacher_id, is_active");
-      const sections = (allSections ?? []) as any[];
+      const sections = await fetchAllRows<any>(
+  supabase.from("subject_sections")
+    .select("id, subject_id, classroom_id, academic_year_id, teacher_id, co_teacher_id, is_active")
+    .order("id")
+);
 
       // จัดกลุ่ม entries ตาม subject+classroom+ปี เพื่อหาว่าใครสอนคู่ไหนบ้าง (สูงสุด 2 คน)
       type GroupKey = string;
@@ -3059,7 +3077,11 @@ for (const g of groups.values()) {
   });
   const entryRoomId = sem2Room ?? roomIds[0];
   const teacherIds = g.byRoom.get(entryRoomId) ?? [];
-  if (teacherIds.length > 2) { console.warn("[syncAllSections] ครูเกิน 2 คน ข้าม:", g); continue; }
+    if (teacherIds.length > 2) {
+    console.warn("[syncAllSections] ครูเกิน 2 คน ข้าม:", g);
+    skipped.push(`${subjects.find(s => s.id === g.subjectId)?.name_th} / ${allClassrooms.find(c => c.id === entryRoomId)?.room_name}`);
+    continue;
+  }
 
   const existing = sections.find(s =>
     s.subject_id === g.subjectId && s.classroom_id === g.classroomId && s.academic_year_id === g.academicYearId);
@@ -3087,7 +3109,14 @@ for (const g of groups.values()) {
         if (!s.is_active) continue;
         // ★ เพิ่มตรงนี้ ★  ห้อง อ./ป. ไม่ถอดครู/ไม่ปิด section อัตโนมัติ
   const sRoom = allClassrooms.find(c => c.id === s.classroom_id);
-  if (sRoom && isYearlyRoom(sRoom)) continue;
+if (sRoom && isYearlyRoom(sRoom)) {
+  // ห้องรายปี: ปิด section เฉพาะเมื่อไม่มีคาบวิชานี้เหลือในตารางเลย (ไม่ถอดครู เพื่อรักษาสิทธิ์ viewer)
+  if (!groups.get(`${s.subject_id}|${s.classroom_id}|${s.academic_year_id}`)) {
+    await (supabase.from("subject_sections") as any).update({ is_active: false }).eq("id", s.id);
+    closed++;
+  }
+  continue;
+}
         const key = `${s.subject_id}|${s.classroom_id}|${s.academic_year_id}`;
         const g = groups.get(key);
         const stillTeaching = (tid: string) => g?.teacherIds.includes(tid) ?? false;
@@ -3109,6 +3138,7 @@ for (const g of groups.values()) {
       }
 
       setSyncResult({ created, updated, closed, carried });
+      if (skipped.length) alert("⚠️ ข้ามเพราะมีครูเกิน 2 คน (ตรวจคาบซ้ำ):\n" + skipped.join("\n"));
     } catch (err: any) {
       console.error("[syncAllSections] error:", err);
       alert("❌ ซิงค์ไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
