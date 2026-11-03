@@ -23,7 +23,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Home, ArrowLeft, Users, Search, Loader2, X, User, LogOut, LogIn } from "lucide-react";
+import { Home, ArrowLeft, Users, Search, Loader2, X, User, LogOut, LogIn, Undo2 } from "lucide-react";
 
 const supabase = createClient();
 
@@ -251,7 +251,7 @@ const movedOutNow = !!row && isCurrentlyMovedOut({
 
         {/* แถบเตือนว่าดูได้อย่างเดียว */}
         <div className="mx-6 mt-4 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs font-bold text-amber-700 shrink-0">
-          🔒 โหมดดูข้อมูลเท่านั้น — แก้ไขข้อมูลนักเรียนได้ที่หน้าครูประจำชั้นของห้องนั้น
+          🔒 โหมดดูข้อมูล — การย้ายออก/กลับเข้าเรียนจัดการได้จากปุ่มในตาราง
         </div>
 
         {/* ★ แถบแจ้งเตือนถ้านักเรียนย้ายออกไปแล้ว */}
@@ -322,6 +322,93 @@ const movedOutNow = !!row && isCurrentlyMovedOut({
 
 /* ------------------------------------------------------------------ */
 
+function StudentActionDialog({
+  student, type, terms, onClose, onDone,
+}: {
+  student: StudentRow;
+  type: "return" | "undo";
+  terms: TermRow[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const currentTerm = terms.find((t) => t.start_date <= today && today <= t.end_date) ?? terms[0];
+  const [termId, setTermId] = useState(currentTerm?.id ?? "");
+  const [date, setDate] = useState(today);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const name = `${student.prefix ?? ""}${student.first_name ?? ""} ${student.last_name ?? ""}`.trim();
+
+  const submit = async () => {
+    setSaving(true);
+    setErr("");
+    const payload =
+      type === "return"
+        ? { returned_at: date, returned_academic_year_id: termId || null }
+        : { moved_out_at: null, moved_out_by: null, moved_out_by_name: null,
+            returned_at: null, returned_academic_year_id: null };
+
+    const { data, error } = await supabase
+      .from("students").update(payload).eq("id", student.id).select("id");
+
+    if (error || !data || data.length === 0) {
+      setErr("บันทึกไม่สำเร็จ — ตรวจสอบ RLS policy ว่าอนุญาตให้ admin UPDATE ตาราง students");
+      setSaving(false);
+      return;
+    }
+    onDone();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-black text-slate-800">
+          {type === "return" ? "บันทึกกลับเข้าเรียน" : "ยกเลิกการย้ายออก"}
+        </h3>
+        <p className="mt-1 text-sm text-slate-500">{name}</p>
+
+        {type === "return" ? (
+          <div className="mt-4 space-y-3">
+            <div>
+              <label className="text-xs font-bold text-slate-500">วันที่กลับเข้าเรียน</label>
+              <input type="date" value={date} min={student.moved_out_at ?? undefined}
+                onChange={(e) => setDate(e.target.value)}
+                className="mt-1 w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-500">กลับเข้าเรียนในเทอม</label>
+              <select value={termId} onChange={(e) => setTermId(e.target.value)}
+                className="mt-1 w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm">
+                {terms.map((t) => (
+                  <option key={t.id} value={t.id}>เทอม {t.semester}/{t.year_name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-4 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs font-bold text-amber-700">
+            ใช้เมื่อกดย้ายออกผิดเท่านั้น ระบบจะลบข้อมูลการย้ายออกและการกลับเข้าเรียนของนักเรียนคนนี้ทั้งหมด
+          </p>
+        )}
+
+        {err && <p className="mt-3 text-xs font-semibold text-rose-600">{err}</p>}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onClose} disabled={saving}
+            className="rounded-xl border-2 border-slate-200 px-4 py-2 text-sm font-bold text-slate-600">
+            ยกเลิก
+          </button>
+          <button onClick={submit} disabled={saving || (type === "return" && !date)}
+            className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">
+            {saving ? "กำลังบันทึก..." : "ยืนยัน"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function StudentsOverviewPage() {
   const router = useRouter();
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -335,6 +422,9 @@ export default function StudentsOverviewPage() {
   const [selectedGrade, setSelectedGrade] = useState<string>("__all__");
   const [selectedClassroom, setSelectedClassroom] = useState<string>("__all__");
   const [search, setSearch] = useState("");
+
+  const [actionStudent, setActionStudent] = useState<StudentRow | null>(null);
+const [actionType, setActionType] = useState<"return" | "undo" | null>(null);
 
   // ★ นักเรียนที่กำลังเปิดดูรายละเอียด (read-only modal)
   const [viewingStudent, setViewingStudent] = useState<StudentRow | null>(null);
@@ -356,12 +446,10 @@ const termLabel = useMemo(
     })();
   }, [router]);
 
-  useEffect(() => {
-    if (!allowed) return;
-    setLoading(true);
-    setErrorMsg("");
-    (async () => {
-      const [classroomsRes, studentsRes, termsRes] = await Promise.all([
+    const loadData = async () => {
+  setLoading(true);
+  setErrorMsg("");
+  const [classroomsRes, studentsRes, termsRes] = await Promise.all([
   supabase.from("classrooms").select("id, room_name").order("room_name"),
   fetchAllRows<{
     id: string; classroom_id: string; student_code: string | null;
@@ -391,8 +479,13 @@ const termLabel = useMemo(
       setStudents((studentsRes.data ?? []) as StudentRow[]);
       setTerms((termsRes.data ?? []) as TermRow[]);
       setLoading(false);
-    })();
-  }, [allowed]);
+    };
+
+      useEffect(() => {
+  if (!allowed) return;
+  loadData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [allowed]);
 
   const classroomGrade = useMemo(
     () => new Map(classrooms.map((c) => [c.classroom_id, extractGradeLevel(c.room_name)])),
@@ -584,14 +677,15 @@ const returnedCount = useMemo(
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr className="text-xs text-slate-500">
-                        <th className="px-4 py-3 text-left font-semibold">รหัสนักเรียน</th>
-                        <th className="px-4 py-3 text-left font-semibold">คำนำหน้า</th>
-                        <th className="px-4 py-3 text-left font-semibold">ชื่อ-สกุล</th>
-                        <th className="px-4 py-3 text-left font-semibold">เพศ</th>
-                        <th className="px-4 py-3 text-left font-semibold">ห้อง</th>
-                        <th className="px-4 py-3 text-left font-semibold">สถานะ</th>
-                        <th className="px-4 py-3 text-left font-semibold">กลับเข้าเรียน</th>
-                      </tr>
+  <th className="px-4 py-3 text-left font-semibold">รหัสนักเรียน</th>
+  <th className="px-4 py-3 text-left font-semibold">คำนำหน้า</th>
+  <th className="px-4 py-3 text-left font-semibold">ชื่อ-สกุล</th>
+  <th className="px-4 py-3 text-left font-semibold">เพศ</th>
+  <th className="px-4 py-3 text-left font-semibold">ห้อง</th>
+  <th className="px-4 py-3 text-left font-semibold">สถานะ</th>
+  <th className="px-4 py-3 text-left font-semibold">กลับเข้าเรียน</th>
+  <th className="px-4 py-3 text-left font-semibold">จัดการ</th>
+</tr>
                     </thead>
                     <tbody>
                       {filteredStudents.map((s) => {
@@ -647,6 +741,25 @@ const returnedCount = useMemo(
           <span className="text-slate-300">—</span>
         )}
       </td>
+      {/* จัดการ */}
+      <td className="px-4 py-2.5">
+        {movedOut && (
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => { setActionStudent(s); setActionType("return"); }}
+              className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-sky-700"
+            >
+              <LogIn className="h-3 w-3" /> กลับเข้าเรียน
+            </button>
+            <button
+              onClick={() => { setActionStudent(s); setActionType("undo"); }}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+            >
+              <Undo2 className="h-3 w-3" /> ยกเลิกย้ายออก
+            </button>
+          </div>
+        )}
+      </td>
     </tr>
   );
 })}
@@ -668,6 +781,15 @@ const returnedCount = useMemo(
   onClose={() => setViewingStudent(null)}
 />
       )}
+      {actionStudent && actionType && (
+  <StudentActionDialog
+    student={actionStudent}
+    type={actionType}
+    terms={terms}
+    onClose={() => { setActionStudent(null); setActionType(null); }}
+    onDone={() => { setActionStudent(null); setActionType(null); loadData(); }}
+  />
+)}
     </div>
   );
 }
