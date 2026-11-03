@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { isYearlyRoom } from "@/lib/smartclass/yearly";
 
 const supabase = createClient();
 
@@ -106,6 +107,8 @@ export default function SmartClassSubjectsPage() {
   const [levelFilter, setLevelFilter] = useState<LevelKey | "all">("all");
   const [studentCounts, setStudentCounts] = useState<Record<string, number>>({});
 
+  const [yearlyRoomIds, setYearlyRoomIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     (async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -160,10 +163,21 @@ if (viewIds.length > 0) {
   viewRows = ((data ?? []) as SectionRow[]).map(r => ({ ...r, viewOnly: true }));
 }
 
-const own = ((secRows ?? []) as SectionRow[]).filter(r => !viewRows.some(v => v.id === r.id));
-const rows = [...own, ...viewRows];
+const ownRows = (secRows ?? []) as SectionRow[];
+// ★ แก้บั๊ก: ถ้าเป็นเจ้าของ section อยู่แล้ว ห้ามถูกทับเป็น viewOnly
+const viewOnlyRows = viewRows.filter(v => !ownRows.some(o => o.id === v.id));
+const rows = [...ownRows, ...viewOnlyRows];
 setSections(rows);
-if (rows.some(r => r.semester === 2)) setSemester(2); // เปิดเทอมล่าสุดก่อน
+
+const secRoomIds = [...new Set(rows.map(r => r.classroom_id))];
+let yearlyIds = new Set<string>();
+if (secRoomIds.length > 0) {
+  const { data: roomRows } = await supabase
+    .from("classrooms").select("id, room_name, grade_group").in("id", secRoomIds);
+  yearlyIds = new Set((roomRows ?? []).filter((r: any) => isYearlyRoom(r)).map((r: any) => r.id));
+}
+setYearlyRoomIds(yearlyIds);
+if (rows.some(r => !yearlyIds.has(r.classroom_id) && r.semester === 2)) setSemester(2);
 
         const subjectIds = [...new Set(rows.map(r => r.subject_id))];
         if (subjectIds.length > 0) {
@@ -179,20 +193,23 @@ if (rows.some(r => r.semester === 2)) setSemester(2); // เปิดเทอ�
 
   /* ----- มุมมองครู: จัดกลุ่มวิชา ----- */
   const groupedSubjects = useMemo(() => {
-  const semSections = sections.filter(sec => (sec.semester ?? 1) === semester);
-  return subjects
-    .map(s => {
-      const secs = semSections.filter(sec => sec.subject_id === s.id);
-      if (secs.length === 0) return null;
-      return {
-        subject: s,
-        roomCount: new Set(secs.map(x => x.classroom_id)).size,
-        viewOnly: secs.every(x => x.viewOnly),
-        inherited: secs.some(x => x.previous_section_id),
-      };
-    })
-    .filter(Boolean) as { subject: Subject; roomCount: number; viewOnly: boolean; inherited: boolean }[];
-}, [subjects, sections, semester]);
+  // อ./ป. = รายปี แสดงทุกเทอม · ม. = กรองตามเทอม
+  const semSections = sections.filter(sec =>
+    yearlyRoomIds.has(sec.classroom_id) || (sec.semester ?? 1) === semester);
+  return subjects.map(s => {
+    const secs = semSections.filter(sec => sec.subject_id === s.id);
+    if (secs.length === 0) return null;
+    return {
+      subject: s,
+      roomCount: new Set(secs.map(x => x.classroom_id)).size,
+      viewOnly: secs.every(x => x.viewOnly),
+      inherited: secs.some(x => x.previous_section_id && !yearlyRoomIds.has(x.classroom_id)),
+    };
+  }).filter(Boolean) as { subject: Subject; roomCount: number; viewOnly: boolean; inherited: boolean }[];
+}, [subjects, sections, semester, yearlyRoomIds]);
+
+const hasSecondary = useMemo(
+  () => sections.some(s => !yearlyRoomIds.has(s.classroom_id)), [sections, yearlyRoomIds]);
 
   const filteredSubjects = useMemo(() => {
     if (!search.trim()) return groupedSubjects;
@@ -270,7 +287,7 @@ if (rows.some(r => r.semester === 2)) setSemester(2); // เปิดเทอ�
   placeholder={isAdmin ? "🔍 ค้นหาชื่อห้อง/สายชั้น..." : "🔍 ค้นหาชื่อ/รหัสวิชา..."}
   className="mt-2 ml-[60px] bg-white/90 border-2 border-white/40 rounded-lg px-3 py-1 text-sm font-bold text-slate-700 placeholder:text-slate-400 focus:border-white focus:outline-none w-full max-w-[1320px] font-['TH_Sarabun_New',_sans-serif]" />
 
-  {!isAdmin && (
+  {!isAdmin && hasSecondary && (
   <div className="flex gap-1 mt-2 ml-[60px]">
     {[1, 2].map(s => (
       <button key={s} onClick={() => setSemester(s)}
@@ -350,7 +367,7 @@ if (rows.some(r => r.semester === 2)) setSemester(2); // เปิดเทอ�
     <p className="text-4xl mb-3">📚</p>
     <p className="font-black text-slate-500">
   {search ? "ไม่พบวิชาตามที่ค้นหา"
-    : semester === 2 ? "เทอม 2 ยังไม่มีวิชา (รอแอดมินกด 🔄 ซิงค์ Smart Class จากตารางสอนเทอม 2)"
+    : semester === 2 && hasSecondary? "เทอม 2 ยังไม่มีวิชา (รอแอดมินกด 🔄 ซิงค์ Smart Class จากตารางสอนเทอม 2)"
     : "คุณยังไม่มีวิชาที่สอน"}
 </p>
   </div>

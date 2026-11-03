@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { format } from "date-fns";
 import { th } from "date-fns/locale";
 import { notifyTeams } from "@/lib/notify-teams";
+import { isYearlyRoom } from "@/lib/smartclass/yearly";
 
 
 const supabase = createClient();
@@ -2862,53 +2863,95 @@ async function syncSubjectSection({
 }): Promise<{ carriedOver: boolean }> {
   let carriedOver = false;
   try {
-    const room = allClassrooms.find(c => c.id === classroomId);
-    const semester = room ? getSemesterForClassroom(room, academicYearsRaw) : 1;
+    const entryRoom = allClassrooms.find(c => c.id === classroomId);
+    const yearly = !!entryRoom && isYearlyRoom(entryRoom);
+    const entrySemester = entryRoom ? getSemesterForClassroom(entryRoom, academicYearsRaw) : 1;
+
+    // ★ อ./ป.: ใช้ห้อง+ปีของ "เทอม 1" เป็น section เดียวตลอดปี
+    let secClassroomId = classroomId;
+    let secYearId = academicYearId;
+    if (yearly && entryRoom) {
+      const canon = findPrevSemesterClassroom(entryRoom) ?? entryRoom;
+      secClassroomId = canon.id;
+      secYearId = canon.academic_year_id ?? academicYearId;
+    }
+    const semester = yearly ? 1 : entrySemester;
     const wantedTeachers = [teacherId, teacherId2].filter(Boolean) as string[];
+
+    // ★ อ./ป. แก้จากห้องเทอม 2: ครูปัจจุบัน = ครูทุกคนที่สอนวิชานี้ในห้องเทอม 2
+    let termTeachers: string[] = [];
+    let handover = false;
+    if (yearly && entrySemester === 2) {
+      const { data: te } = await supabase.from("timetable_entries")
+        .select("teacher_id, teacher_id_2").eq("classroom_id", classroomId).eq("subject_id", subjectId);
+      termTeachers = [...new Set((te ?? []).flatMap((e: any) => [e.teacher_id, e.teacher_id_2]).filter(Boolean))] as string[];
+      handover = termTeachers.length > 0 && termTeachers.length <= 2; // เกิน 2 คน → ใช้แบบเพิ่มอย่างเดียว
+    }
 
     const { data: existing } = await supabase
       .from("subject_sections")
       .select("id, teacher_id, co_teacher_id, is_active, previous_section_id")
-      .eq("subject_id", subjectId).eq("classroom_id", classroomId)
-      .eq("academic_year_id", academicYearId).maybeSingle();
+      .eq("subject_id", subjectId).eq("classroom_id", secClassroomId)
+      .eq("academic_year_id", secYearId).maybeSingle();
 
     if (!existing) {
+      const initial = handover ? termTeachers : wantedTeachers;
       const joinCode = Math.random().toString(36).slice(2, 8);
       const { data: inserted, error } = await (supabase.from("subject_sections") as any).insert([{
-        subject_id: subjectId, classroom_id: classroomId, academic_year_id: academicYearId,
-        teacher_id: teacherId, co_teacher_id: teacherId2 || null,
+        subject_id: subjectId, classroom_id: secClassroomId, academic_year_id: secYearId,
+        teacher_id: initial[0], co_teacher_id: initial[1] ?? null,
         join_code: joinCode, is_active: true, created_by: createdBy, semester,
       }]).select("id").single();
       if (error) { console.error("[syncSubjectSection] insert error:", error); throw error; }
-      if (semester === 2) {
+      if (!yearly && semester === 2) {
         carriedOver = await linkPreviousSemester({ sectionId: inserted.id, subjectId, classroomId, newTeacherIds: wantedTeachers });
       }
       return { carriedOver };
     }
 
-    const currentTeachers = [existing.teacher_id, existing.co_teacher_id].filter(Boolean);
+    const currentTeachers = [existing.teacher_id, existing.co_teacher_id].filter(Boolean) as string[];
+
+    // ★ ส่งมอบต่อครู (อ./ป. เทอม 2): ใช้ section เดิม คะแนนเดิมอยู่ครบ
+    if (handover) {
+      const departed = currentTeachers.filter(t => !termTeachers.includes(t));
+      const arrived  = termTeachers.filter(t => !currentTeachers.includes(t));
+      if (arrived.length > 0 || departed.length > 0 || !existing.is_active) {
+        const { error } = await (supabase.from("subject_sections") as any).update({
+          teacher_id: termTeachers[0], co_teacher_id: termTeachers[1] ?? null, is_active: true,
+        }).eq("id", existing.id);
+        if (error) throw error;
+        if (departed.length > 0) {
+          await (supabase.from("section_teacher_access") as any).upsert(
+            departed.map(tid => ({ section_id: existing.id, teacher_id: tid, access_level: "viewer" })),
+            { onConflict: "section_id,teacher_id" }
+          );
+        }
+        carriedOver = arrived.length > 0;
+      }
+      return { carriedOver };
+    }
+
+    // แบบเดิม: เพิ่มครูที่ขาดเท่านั้น (ไม่ถอดใคร)
     const missing = wantedTeachers.filter(t => !currentTeachers.includes(t));
     const patch: any = {};
     if (!existing.is_active) patch.is_active = true;
     if (missing.length > 0) {
       if (!existing.teacher_id) patch.teacher_id = missing[0];
       else if (!existing.co_teacher_id) patch.co_teacher_id = missing.find(m => m !== existing.teacher_id) ?? missing[0];
-      else console.warn("[syncSubjectSection] มีครูเกิน 2 คนสำหรับ", { subjectId, classroomId }, "ครูที่ขาด:", missing);
+      else console.warn("[syncSubjectSection] มีครูเกิน 2 คน", { subjectId, classroomId }, missing);
     }
     if (Object.keys(patch).length > 0) {
       const { error } = await (supabase.from("subject_sections") as any).update(patch).eq("id", existing.id);
       if (error) console.error("[syncSubjectSection] update error:", error);
     }
-
-    // เทอม 2 ที่ยังไม่เคยผูกกับเทอม 1 (เช่น แก้ครูทีหลัง) → ลองผูกตอนนี้
-    if (semester === 2 && !existing.previous_section_id) {
+    if (!yearly && semester === 2 && !existing.previous_section_id) {
       carriedOver = await linkPreviousSemester({ sectionId: existing.id, subjectId, classroomId, newTeacherIds: wantedTeachers });
     }
   } catch (err) {
-  console.error("[syncSubjectSection] unexpected error:", err);
-  throw err;
-}
-return { carriedOver };
+    console.error("[syncSubjectSection] unexpected error:", err);
+    throw err;
+  }
+  return { carriedOver };
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -2921,6 +2964,8 @@ async function desyncSubjectSection({
   subjectId: string; classroomId: string; academicYearId: string; teacherId: string;
 }) {
   try {
+    const r = allClassrooms.find(c => c.id === classroomId);
+if (r && isYearlyRoom(r)) return;
     // เช็คก่อนว่าครูคนนี้ยังมีคาบของ subject+classroom คู่นี้เหลืออยู่ไหม
     const { data: stillTeaching } = await supabase
       .from("timetable_entries")
@@ -2985,32 +3030,45 @@ async function desyncSubjectSection({
 
       // จัดกลุ่ม entries ตาม subject+classroom+ปี เพื่อหาว่าใครสอนคู่ไหนบ้าง (สูงสุด 2 คน)
       type GroupKey = string;
-      const groups = new Map<GroupKey, { subjectId: string; classroomId: string; academicYearId: string; teacherIds: string[] }>();
-      allEntries.forEach(e => {
-        const key = `${e.subject_id}|${e.classroom_id}|${e.academic_year_id}`;
-        if (!groups.has(key)) {
-          groups.set(key, { subjectId: e.subject_id, classroomId: e.classroom_id, academicYearId: e.academic_year_id, teacherIds: [] });
-        }
-        const g = groups.get(key)!;
-        if (!g.teacherIds.includes(e.teacher_id)) g.teacherIds.push(e.teacher_id);
-        if (e.teacher_id_2 && !g.teacherIds.includes(e.teacher_id_2)) g.teacherIds.push(e.teacher_id_2);
-      });
+      const groups = new Map<string, {
+  subjectId: string; classroomId: string; academicYearId: string;
+  teacherIds: string[]; byRoom: Map<string, string[]>;
+}>();
+allEntries.forEach(e => {
+  const raw = allClassrooms.find(c => c.id === e.classroom_id);
+  const canon = raw && isYearlyRoom(raw) ? (findPrevSemesterClassroom(raw) ?? raw) : raw;
+  const cId = canon?.id ?? e.classroom_id;
+  const yId = canon?.academic_year_id ?? e.academic_year_id;
+  const key = `${e.subject_id}|${cId}|${yId}`;
+  if (!groups.has(key)) groups.set(key, { subjectId: e.subject_id, classroomId: cId, academicYearId: yId, teacherIds: [], byRoom: new Map() });
+  const g = groups.get(key)!;
+  const room = g.byRoom.get(e.classroom_id) ?? [];
+  [e.teacher_id, e.teacher_id_2].filter(Boolean).forEach(t => {
+    if (!room.includes(t as string)) room.push(t as string);
+    if (!g.teacherIds.includes(t as string)) g.teacherIds.push(t as string);
+  });
+  g.byRoom.set(e.classroom_id, room);
+});
 
-      // 1) สร้าง/อัปเดต section ให้ตรงกับตารางสอนปัจจุบัน (ข้ามกลุ่มที่มีครูเกิน 2 คน — ต้องจัดการเอง)
-      for (const g of groups.values()) {
-        if (g.teacherIds.length > 2) {
-          console.warn("[syncAllSections] มีครูเกิน 2 คนสำหรับคู่นี้ ข้ามไป ต้องจัดการเอง:", g);
-          continue;
-        }
-                const existing = sections.find(s =>
-          s.subject_id === g.subjectId && s.classroom_id === g.classroomId && s.academic_year_id === g.academicYearId
-        );
-        const before = existing ? JSON.stringify([existing.teacher_id, existing.co_teacher_id, existing.is_active]) : null;
+for (const g of groups.values()) {
+  // อ./ป. ถ้ามีห้องเทอม 2 ให้ยึดครูเทอม 2 เป็นปัจจุบัน
+  const roomIds = [...g.byRoom.keys()];
+  const sem2Room = roomIds.find(id => {
+    const r = allClassrooms.find(c => c.id === id);
+    return !!r && isYearlyRoom(r) && getSemesterForClassroom(r, academicYearsRaw) === 2;
+  });
+  const entryRoomId = sem2Room ?? roomIds[0];
+  const teacherIds = g.byRoom.get(entryRoomId) ?? [];
+  if (teacherIds.length > 2) { console.warn("[syncAllSections] ครูเกิน 2 คน ข้าม:", g); continue; }
 
-        const res = await syncSubjectSection({
-          subjectId: g.subjectId, classroomId: g.classroomId, academicYearId: g.academicYearId,
-          teacherId: g.teacherIds[0], teacherId2: g.teacherIds[1] ?? null, createdBy: user.id,
-        });
+  const existing = sections.find(s =>
+    s.subject_id === g.subjectId && s.classroom_id === g.classroomId && s.academic_year_id === g.academicYearId);
+  const before = existing ? JSON.stringify([existing.teacher_id, existing.co_teacher_id, existing.is_active]) : null;
+
+  const res = await syncSubjectSection({
+    subjectId: g.subjectId, classroomId: entryRoomId, academicYearId: g.academicYearId,
+    teacherId: teacherIds[0], teacherId2: teacherIds[1] ?? null, createdBy: user.id,
+  });
         if (res.carriedOver) carried++;
 
         if (!existing) {

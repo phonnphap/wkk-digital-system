@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { resolveRosterClassroomIds } from "@/lib/smartclass/rosterClassroom";
+import { isYearlyRoom } from "@/lib/smartclass/yearly";
 
 const supabase = createClient();
 
@@ -86,31 +87,30 @@ if (admin) {
   }
   rows = [...(own ?? []) as SectionRow[], ...viewRows.filter(v => !(own ?? []).some((o: any) => o.id === v.id))];
 }
-// กรองตามเทอมที่เลือกมาจากหน้ารายการ (แอดมินเห็นทั้งหมด)
-if (!admin) rows = rows.filter(r => (r.semester ?? 1) === semester);
+
+const allRoomIds = [...new Set(rows.map(r => r.classroom_id))];
+let roomsData: Classroom[] = [];
+if (allRoomIds.length > 0) {
+  const { data: rr } = await supabase.from("classrooms").select("id, room_name, grade_group").in("id", allRoomIds);
+  roomsData = (rr ?? []) as Classroom[];
+}
+const yearlyIds = new Set(roomsData.filter(r => isYearlyRoom(r)).map(r => r.id));
+if (!admin) rows = rows.filter(r => yearlyIds.has(r.classroom_id) || (r.semester ?? 1) === semester);
 setSections(rows);
 
-      const classroomIds = [...new Set(rows.map(r => r.classroom_id))];
-      if (classroomIds.length > 0) {
-        const { data: rooms } = await supabase
-          .from("classrooms").select("id, room_name, grade_group").in("id", classroomIds);
-        setClassrooms((rooms ?? []) as Classroom[]);
-
-        const rosterMap = await resolveRosterClassroomIds(supabase, classroomIds);
-const rosterIds = [...new Set(Object.values(rosterMap))];
-
-const { data: studentsData } = await supabase
-  .from("students")
-  .select("id, classroom_id").is("moved_out_at", null)
-  .in("classroom_id", rosterIds);
-
-const byRoster: Record<string, number> = {};
-(studentsData ?? []).forEach((s: any) => { byRoster[s.classroom_id] = (byRoster[s.classroom_id] ?? 0) + 1; });
-
-const counts: Record<string, number> = {};
-classroomIds.forEach(id => { counts[id] = byRoster[rosterMap[id] ?? id] ?? 0; });
-setStudentCounts(counts);
-      }
+const classroomIds = [...new Set(rows.map(r => r.classroom_id))];
+setClassrooms(roomsData.filter(r => classroomIds.includes(r.id)));
+if (classroomIds.length > 0) {
+  const rosterMap = await resolveRosterClassroomIds(supabase, classroomIds);
+  const rosterIds = [...new Set(Object.values(rosterMap))];
+  const { data: studentsData } = await supabase.from("students")
+    .select("id, classroom_id").is("moved_out_at", null).in("classroom_id", rosterIds);
+  const byRoster: Record<string, number> = {};
+  (studentsData ?? []).forEach((s: any) => { byRoster[s.classroom_id] = (byRoster[s.classroom_id] ?? 0) + 1; });
+  const counts: Record<string, number> = {};
+  classroomIds.forEach(id => { counts[id] = byRoster[rosterMap[id] ?? id] ?? 0; });
+  setStudentCounts(counts);
+}
 
       setLoading(false);
     })();
@@ -187,6 +187,9 @@ setStudentCounts(counts);
 </div>
 <div className="p-4 text-left">
   <p className="font-black text-xl text-slate-900 leading-tight truncate">{label}</p>
+  {room && isYearlyRoom(room) && sec.semester === 2 && (
+  <span className="text-[11px] font-black text-amber-600">ข้อมูลเดิมของเทอม 2</span>
+)}
   <div className="mt-2.5 flex justify-start">
     <span className="text-sm font-black bg-fuchsia-100 border-2 border-fuchsia-200 px-3 py-1.5 rounded-lg text-fuchsia-700 inline-flex items-center gap-1.5">
       👥 {count} คน
