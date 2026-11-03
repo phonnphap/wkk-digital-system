@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/visitor-server";
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-3.8-flash";
 
 const PROMPT = `รูปนี้คือบัตรประชาชน/ใบขับขี่ หรือป้ายทะเบียนรถ/เล่มทะเบียนรถของไทย
 อ่านเฉพาะ "ชื่อ-นามสกุล" (ไม่ต้องมีคำนำหน้าก็ได้) และ "ทะเบียนรถ" (พร้อมจังหวัดถ้าเห็น)
