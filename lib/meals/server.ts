@@ -91,6 +91,16 @@ export async function fetchAll<T>(
 }
 export const monthRange = (month: string) => ({ start: dateOf(month, 1), end: dateOf(month, daysInMonth(month)) });
 const chunk = <T,>(arr: T[], n: number) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
+async function levelHolidayMap(a: Actor, roomName: string, start: string, end: string) {
+  const level = (parseGrade(roomName) ?? UNKNOWN_GRADE).level;
+  const out = new Map<string, string>();
+  try {
+    const { data } = await a.service.from("level_holidays").select("holiday_date, name, levels")
+      .gte("holiday_date", start).lte("holiday_date", end);
+    (data ?? []).forEach((h: any) => { if ((h.levels ?? []).includes(level)) out.set(h.holiday_date, h.name); });
+  } catch { /* ยังไม่ได้สร้างตาราง */ }
+  return out;
+}
 type RoomGroup = { name: string; canonical: string; ids: string[] };
 
 /** จับห้องชื่อเดียวกัน (คนละเทอม) เป็นกลุ่ม; id หลัก = ห้องที่มีนักเรียนมากที่สุด */
@@ -151,41 +161,40 @@ async function loadStudents(a: Actor, classroomId: string): Promise<StudentRow[]
   }));
 }
 
-/** ค่าล่าสุด ≤ สิ้นเดือน: เริ่มจากหน้าประเมินโภชนาการ (nutrition_assessments) แล้วให้ค่าที่ครูกรอกในหน้านี้ (meal_month_measures) ทับ */
-async function latestValue(a: Actor, ids: string[], month: string, col: "weight_kg" | "height_cm") {
+/** mode: latest = ล่าสุด ≤ สิ้นเดือน (ใช้จัดแจกเพิ่ม) | in = เฉพาะที่บันทึกในเดือนนี้ | before = ล่าสุดก่อนเดือนนี้ */
+async function latestValue(
+  a: Actor, ids: string[], month: string, col: "weight_kg" | "height_cm",
+  mode: "latest" | "in" | "before" = "latest",
+) {
   const out: Record<string, number> = {};
   if (!ids.length) return out;
-  const { end } = monthRange(month);
-  const nut = await fetchAll<any>((f, t) =>
-    a.service
-      .from("nutrition_assessments")
+  const { start, end } = monthRange(month);
+  const nut = await fetchAll<any>((f, t) => {
+    let q = a.service.from("nutrition_assessments")
       .select(`student_id, assessment_date, v:${col}`)
-      .in("student_id", ids)
-      .lte("assessment_date", end)
-      .not(col, "is", null)
-      .order("assessment_date", { ascending: false })
-      .order("student_id")
-      .range(f, t),
-  );
+      .in("student_id", ids).not(col, "is", null);
+    q = mode === "latest" ? q.lte("assessment_date", end)
+      : mode === "in" ? q.gte("assessment_date", start).lte("assessment_date", end)
+      : q.lt("assessment_date", start);
+    return q.order("assessment_date", { ascending: false }).order("student_id").range(f, t);
+  });
   for (const r of nut) if (!(r.student_id in out)) out[r.student_id] = Number(r.v);
 
-  const mm = await fetchAll<any>((f, t) =>
-    a.service
-      .from("meal_month_measures")
+  const mm = await fetchAll<any>((f, t) => {
+    let q = a.service.from("meal_month_measures")
       .select(`student_id, month, v:${col}`)
-      .in("student_id", ids)
-      .lte("month", month)
-      .not(col, "is", null)
-      .order("month", { ascending: false })
-      .order("student_id")
-      .range(f, t),
-  );
+      .in("student_id", ids).not(col, "is", null);
+    q = mode === "latest" ? q.lte("month", month)
+      : mode === "in" ? q.eq("month", month)
+      : q.lt("month", month);
+    return q.order("month", { ascending: false }).order("student_id").range(f, t);
+  });
   const seen = new Set<string>();
   for (const r of mm) if (!seen.has(r.student_id)) { seen.add(r.student_id); out[r.student_id] = Number(r.v); }
   return out;
 }
 const latestMetric = (a: Actor, ids: string[], month: string, type: MealType) =>
-  latestValue(a, ids, month, type === "lunch" ? "weight_kg" : "height_cm");
+  latestValue(a, ids, month, type === "lunch" ? "weight_kg" : "height_cm", "latest");
 
 async function signedUrls(a: Actor, paths: string[]): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
@@ -194,6 +203,8 @@ async function signedUrls(a: Actor, paths: string[]): Promise<Record<string, str
   for (const d of data ?? []) if (d.signedUrl && d.path) out[d.path] = d.signedUrl;
   return out;
 }
+
+// ── ข้อมูลหัวกระดาษ / ผู้ลงนาม ──────────────────────────────────────────────
 
 // ── ข้อมูลหัวกระดาษ / ผู้ลงนาม ──────────────────────────────────────────────
 async function academicYearName(a: Actor, date: string): Promise<string | null> {
@@ -321,6 +332,8 @@ export async function syncMonth(
     if (st) put(r.date, r.student, st); // แถวหลังสุด (ใหม่สุด) ทับแถวก่อนหน้า
     else unmapped.add(String(r.status));
   }
+    const roomName = (await groupOf(a, classroomId))?.name ?? "";
+  (await levelHolidayMap(a, roomName, start, end)).forEach((_, d) => byDate.delete(d));
   // วันที่มีการเช็คชื่อจริง: นักเรียนที่ไม่มีแถวในวันนั้น = "มา" (ตรงกับหน้าเช็คชื่อที่ตั้งค่าเริ่มต้นเป็นมา)
   const attDates = [...byDate.keys()];
   const fromAtt = new Map<string, CellStatus>();
@@ -385,12 +398,14 @@ export async function buildSheet(a: Actor, classroomIdIn: string, month: string,
         .eq("classroom_id", classroomId).eq("meal_type", type)
         .gte("record_date", start).lte("record_date", end)
         .order("record_date").order("student_id").range(f, t)),
-    latestValue(a, ids, month, "weight_kg"),
+        latestValue(a, ids, month, "weight_kg", "in"),
     ids.length ? s.from("meal_signatures").select("subject_id, storage_path").eq("subject_type", "student").in("subject_id", ids) : { data: [] },
     s.from("meal_month_reports").select("*").eq("classroom_id", classroomId).eq("month", month).eq("meal_type", type).maybeSingle(),
   ]);
   const rep = repRes.data as any;
-  const heights = await latestValue(a, ids, month, "height_cm");
+    const heights = await latestValue(a, ids, month, "height_cm", "in");
+  const prevWeights = await latestValue(a, ids, month, "weight_kg", "before");
+  const prevHeights = await latestValue(a, ids, month, "height_cm", "before");
 
   // ผู้ใช้ที่เกี่ยวข้อง (ครูที่ยืนยัน / เจ้าของโครงการ / ตัวเอง) + ลายมือชื่อ
   const userIds = [rep?.teacher_confirmed_by, rep?.owner_approved_by, a.profile.id].filter(Boolean) as string[];
@@ -415,6 +430,8 @@ export async function buildSheet(a: Actor, classroomIdIn: string, month: string,
       ...st, cells: {}, present: 0, leave: 0, absent: 0, extra: 0,
       weight: weights[st.id] ?? null,
       height: heights[st.id] ?? null,
+      prevWeight: prevWeights[st.id] ?? null,
+      prevHeight: prevHeights[st.id] ?? null,
       signatureUrl: sigOf(sigRows.data, st.id),
     }]),
   );
@@ -441,7 +458,8 @@ export async function buildSheet(a: Actor, classroomIdIn: string, month: string,
   try {
     const { data: hol } = await s.from("school_holidays").select("holiday_date, name").gte("holiday_date", start).lte("holiday_date", end);
     (hol ?? []).forEach((h: any) => custom.set(h.holiday_date, h.name));
-  } catch { /* ยังไม่ได้สร้างตาราง school_holidays */ }
+   } catch { /* ยังไม่ได้สร้างตาราง school_holidays */ }
+  (await levelHolidayMap(a, classroom.name, start, end)).forEach((name, d) => custom.set(d, name));
   const [yy, mm] = month.split("-").map(Number);
   const dayLabels: Record<number, string> = {};
   for (let d = 1; d <= daysInMonth(month); d++) {

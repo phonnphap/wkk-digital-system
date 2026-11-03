@@ -119,6 +119,8 @@ export type SheetStudent = {
   extra: number;
   weight: number | null;
   height: number | null;
+  prevWeight: number | null;
+  prevHeight: number | null;
   signatureUrl: string | null;
 };
 export type SheetData = {

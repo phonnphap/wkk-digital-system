@@ -331,15 +331,19 @@ export default function MealsPage() {
                     <td className={td}>{st.leave || ""}</td>
                     <td className={td}>{st.absent || ""}</td>
                     <td className={td}>{st.extra || ""}</td>
-                    {(["weight", "height"] as const).map((f) => (
-                      <td key={f} className={td}>
-                        {canEdit ? (
-                          <input defaultValue={st[f] ?? ""} key={`${st.id}-${f}-${st[f]}`} inputMode="decimal"
-                            onBlur={(e) => saveMeasure(st, f, e.target.value)}
-                            className="w-full rounded border border-slate-200 px-0.5 text-center print:border-0" />
-                        ) : (st[f] ?? "")}
-                      </td>
-                    ))}
+                                        {(["weight", "height"] as const).map((f) => {
+                      const prev = f === "weight" ? st.prevWeight : st.prevHeight;
+                      return (
+                        <td key={f} className={td}>
+                          {canEdit ? (
+                            <input defaultValue={st[f] ?? ""} key={`${st.id}-${f}-${st[f]}`} inputMode="decimal"
+                              onBlur={(e) => saveMeasure(st, f, e.target.value)}
+                              className="w-full rounded border border-slate-200 px-0.5 text-center print:border-0" />
+                          ) : (st[f] ?? "")}
+                          {prev != null && <div className="text-[8px] leading-none text-slate-400">ก่อน {prev}</div>}
+                        </td>
+                      );
+                    })}
                     <td className={`${td} h-7`}
                       title={st.signatureUrl && canEdit ? "คลิกขวาเพื่อรีเซ็ตลายมือชื่อ" : undefined}
                       onContextMenu={(e) => { if (st.signatureUrl && canEdit) { e.preventDefault(); resetSignature(st); } }}>

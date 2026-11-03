@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Save, Home, ArrowLeft, Calendar, TrendingUp, Users } from "lucide-react";
 import { fetchHolidayMap, isHoliday, HolidayMap } from "@/lib/holidays";
+import { parseGrade } from "@/lib/meals/shared";
 
 const supabase = createClient();
 
@@ -221,12 +222,14 @@ function MonthlyStatsTable({
   selectedDate,
   onSelectDate,
   holidayMap,                    // ★ เพิ่มบรรทัดนี้
+  extraHolidays,
 }: {
   dayStats: DayStat[];
   enrolledCounts: { male: number; female: number; total: number };
   selectedDate: string;
   onSelectDate: (iso: string) => void;
   holidayMap: HolidayMap;        // ★ เพิ่มบรรทัดนี้
+  extraHolidays: Map<string, string>;
 }) {
   if (dayStats.length === 0) {
     return <p className="text-xs text-slate-400 py-8 text-center">ยังไม่มีข้อมูลสำหรับเดือนนี้</p>;
@@ -270,7 +273,7 @@ function MonthlyStatsTable({
           {dayStats.map((d) => {
   const dt = parseISODateLocal(d.date);
   const isWeekend = dt.getDay() === 0 || dt.getDay() === 6;
-  const holiday = isHoliday(d.date, holidayMap);
+  const holiday = isHoliday(d.date, holidayMap) || (extraHolidays.get(d.date) ? { name: extraHolidays.get(d.date)! } : null);
   const isSelected = d.date === selectedDate;
   return (
     <tr
@@ -316,6 +319,7 @@ const [termsLoaded, setTermsLoaded] = useState(false);
   // ตัวกรองรายชื่อใต้ชิปสรุป (คลิกชิปเพื่อดูรายชื่อ เลขที่ + ชื่อ)
   const [summaryFilter, setSummaryFilter] = useState<SummaryFilter | null>(null);
   const [holidayMap, setHolidayMap] = useState<HolidayMap>(new Map());
+  const [levelHolidays, setLevelHolidays] = useState<{ holiday_date: string; name: string; levels: string[] }[]>([]);
   const [lockedMap, setLockedMap] = useState<Record<string, boolean>>({});
   const dateInputRef = useRef<HTMLInputElement>(null);
   const roomNames = useMemo(() => [...new Set(classrooms.map((c) => c.room_name))], [classrooms]);
@@ -333,12 +337,22 @@ const selectedClass = useMemo<Classroom | null>(() => {
   return match ?? roomClassrooms.find((c) => c.is_current) ?? roomClassrooms[0];
 }, [termsLoaded, terms, roomClassrooms, date]);
 
-  useEffect(() => {
-  const days = getDaysInMonth(date);
-  fetchHolidayMap(days[0], days[days.length - 1]).then(setHolidayMap);
-}, [date]);
+    useEffect(() => {
+    const days = getDaysInMonth(date);
+    fetchHolidayMap(days[0], days[days.length - 1]).then(setHolidayMap);
+    supabase.from("level_holidays").select("holiday_date, name, levels")
+      .gte("holiday_date", days[0]).lte("holiday_date", days[days.length - 1])
+      .then(({ data }) => setLevelHolidays((data ?? []) as any));
+  }, [date]);
 
-const todayHoliday = isHoliday(date, holidayMap);
+const roomLevel = parseGrade(roomName)?.level;
+const levelHolidayMap = useMemo(() => {
+  const m = new Map<string, string>();
+  levelHolidays.forEach((h) => { if (roomLevel && (h.levels ?? []).includes(roomLevel)) m.set(h.holiday_date, h.name); });
+  return m;
+}, [levelHolidays, roomLevel]);
+const levelHolName = levelHolidayMap.get(date);
+const todayHoliday = isHoliday(date, holidayMap) || (levelHolName ? { name: levelHolName } : null);
 // ★ วันหยุดสุดสัปดาห์ / วันหยุดนักขัตฤกษ์ ห้ามเช็คชื่อ (ล็อกทั้งวัน กันเช็คผิด)
 const selectedDow = parseISODateLocal(date).getDay();
 const isWeekendSelected = selectedDow === 0 || selectedDow === 6;
@@ -782,7 +796,7 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
               <h3 className="mb-3 flex items-center gap-1.5 text-sm font-black text-slate-700">
                 <TrendingUp className="h-4 w-4 text-indigo-500" /> สถิติมาเรียนประจำเดือน
               </h3>
-              <MonthlyStatsTable dayStats={dayStats} enrolledCounts={enrolledCounts} selectedDate={date} onSelectDate={setDate} holidayMap={holidayMap} />
+              <MonthlyStatsTable dayStats={dayStats} enrolledCounts={enrolledCounts} selectedDate={date} onSelectDate={setDate} holidayMap={holidayMap} extraHolidays={levelHolidayMap} />
             </div>
 
             <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
