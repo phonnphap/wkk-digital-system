@@ -291,7 +291,7 @@ function approverCard(c: Ctx, slot: 1 | 2 | 3) {
       openUrl("❌ ไม่อนุมัติ", `${base}&action=rejected`, "destructive"),
     );
   }
-  if (event !== "cancelled") actions.push(openUrl("เปิดในระบบ", `${SITE}/leave`));
+  if (event !== "cancelled" && live) actions.push(openUrl("เปิดในระบบ", `${SITE}/leave`));
   return wrapCard(body, actions);
 }
 

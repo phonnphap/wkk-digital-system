@@ -2519,17 +2519,24 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
             status: "assigned",
             note: a.mode === "auto" ? "จัดอัตโนมัติจากใบลา" : "แลกคาบแบบเจาะจงจากใบลา",
           }));
-        if(rows.length){
+                     if(rows.length){
   const {error:subErr} = await (supabase.from("substitution_records") as any).insert(rows);
   if(subErr) console.warn("[submitLeave] substitution_records insert error:", subErr.message);
-  else await notifySwapAssignments(user, substitute_assignments, allTeachers);
+  else if(leavePayload.status !== "draft") await notifySwapAssignments(user, substitute_assignments, allTeachers);
 }
       }
     } 
-        if (leaveId && leavePayload.status === "pending") {
+            if (leaveId && leavePayload.status === "pending") {
       await pushLeaveTeams(leaveId, editRequest?.id ? "edited" : "submitted");
     }
-    alert(editRequest?.id ? "✅ แก้ไขคำขอลาเรียบร้อย" : "✅ ส่งคำขอลาสำเร็จ");
+    const isDraftSave = leavePayload.status === "draft";
+    alert(
+      isDraftSave
+        ? "✅ บันทึกร่างใบลาสำเร็จ"
+        : editRequest?.id
+          ? "✅ แก้ไขคำขอลาเรียบร้อย"
+          : "✅ ส่งคำขอลาสำเร็จ"
+    );
     setShowForm(false); setEditRequest(null);
     await loadRequests();
   }
