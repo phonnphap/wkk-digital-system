@@ -98,6 +98,7 @@ async function fetchAllRows<T>(
 /* ------------------------------------------------------------------ */
 
 type ClassroomRow = { classroom_id: string; room_name: string };
+type TermRow = { id: string; year_name: string; semester: number; start_date: string; end_date: string };
 type StudentRow = {
   id: string;
   classroom_id: string;
@@ -110,7 +111,7 @@ type StudentRow = {
   moved_out_at: string | null;
   moved_out_by_name: string | null;
   returned_at: string | null;     // ★
-  returned_term: string | null;
+  returned_academic_year_id: string | null;
 };
 
 const GENDER_LABEL: Record<string, string> = { male: "ชาย", female: "หญิง" };
@@ -148,7 +149,7 @@ const FIELD_LABELS: Record<string, string> = {
   moved_out_at: "วันที่ย้ายออก",
   moved_out_by_name: "ครูที่บันทึกการย้ายออก",
   returned_at: "วันที่กลับเข้าเรียน",     // ★
-  returned_term: "กลับเข้าเรียนในเทอม",   // ★
+  returned_academic_year_id: "กลับเข้าเรียนในเทอม",
 };
 
 // ★ สร้างรายชื่อคอลัมน์ที่จะ SELECT จาก FIELD_LABELS โดยอัตโนมัติ
@@ -171,14 +172,8 @@ function formatFieldValue(key: string, value: unknown): string {
 /* Student detail modal — READ ONLY (แอดมินดูได้ แก้ไขไม่ได้)             */
 /* ------------------------------------------------------------------ */
 
-function StudentDetailModal({
-  studentId,
-  roomName,
-  onClose,
-}: {
-  studentId: string;
-  roomName: string;
-  onClose: () => void;
+function StudentDetailModal({ studentId, roomName, termLabel, onClose }: {
+  studentId: string; roomName: string; termLabel: Map<string, string>; onClose: () => void;
 }) {
   const [row, setRow] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -227,7 +222,7 @@ function StudentDetailModal({
 
   const movedOutAt = row?.moved_out_at as string | null | undefined;
 const returnedAt = row?.returned_at as string | null | undefined;
-const returnedTerm = row?.returned_term as string | null | undefined;
+const returnedTermId = row?.returned_academic_year_id as string | null | undefined;
 const movedOutNow = !!row && isCurrentlyMovedOut({
   moved_out_at: movedOutAt ?? null, returned_at: returnedAt ?? null,
 });
@@ -272,7 +267,7 @@ const movedOutNow = !!row && isCurrentlyMovedOut({
   <div className="mx-6 mt-2 rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs font-bold text-emerald-700 shrink-0 flex items-center gap-1.5">
     <LogIn className="h-3.5 w-3.5" />
     กลับเข้าเรียนเมื่อ {formatThaiDate(returnedAt)}
-    {returnedTerm ? ` (เทอม ${returnedTerm})` : ""}
+    {returnedTermId ? ` (${termLabel.get(returnedTermId) ?? ""})` : ""}
   </div>
 )}
 
@@ -284,14 +279,18 @@ const movedOutNow = !!row && isCurrentlyMovedOut({
             <p className="py-10 text-center text-sm text-rose-500">{errorMsg}</p>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-3">
-                {known.map(([key, value]) => (
-                  <div key={key} className={key === "address" ? "col-span-2" : ""}>
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{FIELD_LABELS[key]}</p>
-                    <p className="mt-0.5 text-sm font-semibold text-slate-700 break-words">{formatFieldValue(key, value)}</p>
-                  </div>
-                ))}
-              </div>
+                  <div className="grid grid-cols-2 gap-3">
+  {known.map(([key, value]) => (
+    <div key={key} className={key === "address" ? "col-span-2" : ""}>
+      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{FIELD_LABELS[key]}</p>
+      <p className="mt-0.5 text-sm font-semibold text-slate-700 break-words">
+        {key === "returned_academic_year_id"
+          ? (termLabel.get(value as string) ?? "—")
+          : formatFieldValue(key, value)}
+      </p>
+    </div>
+  ))}
+</div>
 
               {unknown.length > 0 && (
                 <div className="border-t border-slate-100 pt-3">
@@ -339,6 +338,11 @@ export default function StudentsOverviewPage() {
 
   // ★ นักเรียนที่กำลังเปิดดูรายละเอียด (read-only modal)
   const [viewingStudent, setViewingStudent] = useState<StudentRow | null>(null);
+  const [terms, setTerms] = useState<TermRow[]>([]);
+const termLabel = useMemo(
+  () => new Map(terms.map((t) => [t.id, `เทอม ${t.semester}/${t.year_name}`])),
+  [terms]
+);
 
   useEffect(() => {
     (async () => {
@@ -357,19 +361,19 @@ export default function StudentsOverviewPage() {
     setLoading(true);
     setErrorMsg("");
     (async () => {
-      const [classroomsRes, studentsRes] = await Promise.all([
-        supabase.from("classrooms").select("id, room_name").order("room_name"),
-        // ★ ไม่กรอง moved_out_at ออก — แอดมินต้องเห็นนักเรียนที่ย้ายออกไปแล้วด้วย
-        fetchAllRows<{
-  id: string; classroom_id: string; student_code: string | null;
-  prefix: string | null; first_name: string | null; last_name: string | null; gender: string | null;
-  moved_out_at: string | null; moved_out_by_name: string | null;
-  returned_at: string | null; returned_term: string | null;
-}>(
-  "students",
-  "id, classroom_id, student_code, prefix, first_name, last_name, gender, moved_out_at, moved_out_by_name, returned_at, returned_term"
-),
-      ]);
+      const [classroomsRes, studentsRes, termsRes] = await Promise.all([
+  supabase.from("classrooms").select("id, room_name").order("room_name"),
+  fetchAllRows<{
+    id: string; classroom_id: string; student_code: string | null;
+    prefix: string | null; first_name: string | null; last_name: string | null; gender: string | null;
+    moved_out_at: string | null; moved_out_by_name: string | null;
+    returned_at: string | null; returned_academic_year_id: string | null;
+  }>(
+    "students",
+    "id, classroom_id, student_code, prefix, first_name, last_name, gender, moved_out_at, moved_out_by_name, returned_at, returned_academic_year_id"
+  ),
+  supabase.from("academic_years").select("id, year_name, semester, start_date, end_date"),
+]);
 
       if (classroomsRes.error || studentsRes.error) {
         console.error(classroomsRes.error || studentsRes.error);
@@ -385,6 +389,7 @@ export default function StudentsOverviewPage() {
       }));
       setClassrooms(cls);
       setStudents((studentsRes.data ?? []) as StudentRow[]);
+      setTerms((termsRes.data ?? []) as TermRow[]);
       setLoading(false);
     })();
   }, [allowed]);
@@ -594,7 +599,18 @@ const returnedCount = useMemo(
   const returned = isReturned(s);
   return (
     <tr key={s.id} className={`border-t border-slate-50 hover:bg-slate-50/60 ${movedOut ? "bg-amber-50/40" : ""}`}>
-      {/* ...คอลัมน์เดิมถึงห้อง... */}
+      <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{s.student_code ?? "-"}</td>
+<td className="px-4 py-2.5 text-slate-500">{s.prefix ?? "-"}</td>
+<td className="px-4 py-2.5">
+  <button
+    onClick={() => setViewingStudent(s)}
+    className={`font-semibold hover:underline text-left ${movedOut ? "text-slate-400 hover:text-amber-600" : "text-slate-700 hover:text-blue-600"}`}
+  >
+    {(s.first_name ?? "-")} {s.last_name ?? ""}
+  </button>
+</td>
+<td className="px-4 py-2.5 text-slate-500">{s.gender ? GENDER_LABEL[s.gender] ?? s.gender : "-"}</td>
+<td className="px-4 py-2.5 font-semibold text-blue-700">ห้อง {classroomName.get(s.classroom_id) ?? "-"}</td>
 
       {/* สถานะ */}
       <td className="px-4 py-2.5">
@@ -621,9 +637,11 @@ const returnedCount = useMemo(
             <span className="inline-flex w-fit items-center gap-1 rounded-full bg-sky-100 px-2.5 py-0.5 text-[11px] font-bold text-sky-700">
               <LogIn className="h-3 w-3" /> {formatThaiDate(s.returned_at as string)}
             </span>
-            {s.returned_term && (
-              <span className="mt-0.5 text-[10px] text-slate-400">เทอม {s.returned_term}</span>
-            )}
+            {s.returned_academic_year_id && (
+  <span className="mt-0.5 text-[10px] text-slate-400">
+    {termLabel.get(s.returned_academic_year_id) ?? ""}
+  </span>
+)}
           </div>
         ) : (
           <span className="text-slate-300">—</span>
@@ -644,10 +662,11 @@ const returnedCount = useMemo(
       {/* Modal รายละเอียดนักเรียน — read-only */}
       {viewingStudent && (
         <StudentDetailModal
-          studentId={viewingStudent.id}
-          roomName={classroomName.get(viewingStudent.classroom_id) ?? "-"}
-          onClose={() => setViewingStudent(null)}
-        />
+  studentId={viewingStudent.id}
+  roomName={classroomName.get(viewingStudent.classroom_id) ?? "-"}
+  termLabel={termLabel}
+  onClose={() => setViewingStudent(null)}
+/>
       )}
     </div>
   );

@@ -15,6 +15,13 @@ interface UserRow {
   face_features: any;
 }
 
+function getDeviceId(): string {
+  try {
+    let id = localStorage.getItem('device_id');
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem('device_id', id); }
+    return id;
+  } catch { return 'unknown'; }
+}
 /* ──────────────────────────────────────────────────────────────────────────
    ไอคอนเส้น (สไตล์ SF Symbols) — ใช้แทนอิโมจิส่วนใหญ่เพื่อความสะอาดตา
    ────────────────────────────────────────────────────────────────────────── */
@@ -90,6 +97,55 @@ export default function FaceScanPage() {
   const BLINK_SCORE_THRESHOLD = 0.5; // ค่า blendshape จาก MediaPipe ที่ถือว่า "กำลังหลับตา"
   const LIVENESS_DURATION_MS = 5000; // เดิม 10 วิ — คนกระพริบตาเองทุก 2-4 วิ อยู่แล้ว 5 วิพอ ถ้าไม่ทันระบบจะเริ่มรอบใหม่ให้อัตโนมัติ
   const LIVENESS_INTERVAL_MS = 100;
+    // ── challenge สุ่ม (กันวิดีโอที่อัดไว้ล่วงหน้า) ──
+  type Challenge = 'blink' | 'mouth_open' | 'smile' | 'turn_left' | 'turn_right';
+
+  const CHALLENGE_LABELS: Record<Challenge, string> = {
+    blink: 'กระพริบตาตามปกติ',
+    mouth_open: 'อ้าปากกว้าง ๆ',
+    smile: 'ยิ้มกว้าง ๆ',
+    turn_left: 'หันหน้าไปทางซ้าย (ตามที่เห็นในจอ)',
+    turn_right: 'หันหน้าไปทางขวา (ตามที่เห็นในจอ)',
+  };
+  const RANDOM_CHALLENGES: Challenge[] = ['mouth_open', 'smile', 'turn_left', 'turn_right'];
+
+  const MOUTH_OPEN_THRESHOLD = 0.5; // blendshape jawOpen
+  const SMILE_THRESHOLD = 0.5;      // blendshape mouthSmileLeft/Right (เฉลี่ย)
+  const TURN_RATIO_HIGH = 0.62;     // จมูกขยับไปทางซ้ายของจอ
+  const TURN_RATIO_LOW = 0.38;      // จมูกขยับไปทางขวาของจอ
+  const HOLD_FRAMES = 3;            // ต้องทำค้างไว้ต่อเนื่อง ~0.3 วิ (ไม่นับแค่เฟรมเดียวที่สุ่มเจอ)
+
+  function pickRandomChallenge(): Challenge {
+    // ใช้ crypto แทน Math.random เพื่อให้เดายากกว่า
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    return RANDOM_CHALLENGES[arr[0] % RANDOM_CHALLENGES.length];
+  }
+
+  function getScore(categories: any[], name: string): number {
+    return categories.find((c: any) => c.categoryName === name)?.score ?? 0;
+  }
+
+  function checkChallenge(ch: Challenge, categories: any[], landmarks: any[]): boolean {
+    switch (ch) {
+      case 'blink':
+        return Math.max(getScore(categories, 'eyeBlinkLeft'), getScore(categories, 'eyeBlinkRight')) > BLINK_SCORE_THRESHOLD;
+      case 'mouth_open':
+        return getScore(categories, 'jawOpen') > MOUTH_OPEN_THRESHOLD;
+      case 'smile':
+        return (getScore(categories, 'mouthSmileLeft') + getScore(categories, 'mouthSmileRight')) / 2 > SMILE_THRESHOLD;
+      case 'turn_left':
+      case 'turn_right': {
+        // landmark 1 = ปลายจมูก, 234 / 454 = ขอบแก้มสองข้าง
+        const nose = landmarks[1], a = landmarks[234], b = landmarks[454];
+        if (!nose || !a || !b) return false;
+        const width = Math.abs(b.x - a.x);
+        if (width < 0.01) return false;
+        const ratio = (nose.x - Math.min(a.x, b.x)) / width; // ~0.5 = หน้าตรง
+        return ch === 'turn_left' ? ratio > TURN_RATIO_HIGH : ratio < TURN_RATIO_LOW;
+      }
+    }
+  }
 
   const TERM1_START = new Date('2026-05-14T00:00:00+07:00');
   const TERM1_END = new Date('2026-10-09T23:59:59+07:00');
@@ -171,6 +227,8 @@ export default function FaceScanPage() {
   const candidateRef = useRef<{ id: string; name: string; similarity: string } | null>(null);
   const livenessBusyRef = useRef(false); // กันเฟรมซ้อนกัน: ถ้ารอบก่อนยังประมวลผลไม่เสร็จให้ข้ามรอบนี้
   const [blinkHint, setBlinkHint] = useState(false); // true เมื่อตรวจพบว่าเริ่มหลับตาแล้ว (ใช้โชว์ฟีดแบ็ก)
+    const [challengeLabel, setChallengeLabel] = useState('');
+  const [stepText, setStepText] = useState('');
 
   const canOffsiteScan = allowOffsiteScan && officialLeaveOk === true;
     const SELF_THRESHOLD = 0.58;
@@ -244,6 +302,16 @@ export default function FaceScanPage() {
 
     loadInitialStats();
   }, []);
+
+  const [deviceStatus, setDeviceStatus] =
+  useState<'checking'|'ok'|'pending'|'device_used_by_other'|'error'>('checking');
+
+useEffect(() => {
+  (async () => {
+    const { data, error } = await supabase.rpc('check_device', { p_device_id: getDeviceId() });
+    setDeviceStatus(error ? 'error' : (data as any));
+  })();
+}, []);
 
   // ── 3. โหลดโมเดล AI + เวกเตอร์ใบหน้าจากตาราง users เดิม (ไม่มีการสร้างผู้ใช้ใหม่) ──
   useEffect(() => {
@@ -411,7 +479,7 @@ export default function FaceScanPage() {
   // ── 4.5 ตรวจใบลาไปราชการ ─────────────────────────────────────────────────
   async function checkOfficialLeaveToday(userId: string): Promise<boolean> {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' }); // รูปแบบ YYYY-MM-DD
       const { data, error } = await supabase
         .from('leave_requests')
         .select('id, start_date, end_date, status, leave_type')
@@ -541,84 +609,113 @@ if (videoRef.current) {
   // ── 6.5 การยืนยันว่าเป็นคนจริง (liveness) ด้วยการกระพริบตา ──────────────────
   // ป้องกันการนำรูปถ่ายหรือภาพนิ่งบนหน้าจอมาสแกนแทนตัวจริง: ต้องตรวจพบการ
   // กระพริบตาตามธรรมชาติภายในเวลาที่กำหนด และยืนยันตัวตนซ้ำอีกครั้งก่อนบันทึกเวลา
+    // เทียบใบหน้าซ้ำหลังทำ challenge ครบ: ให้เวลาผู้ใช้กลับมามองตรงก่อน (ลองสูงสุด ~3 วินาที)
+  async function finalizeVerification() {
+    const fa = faceApiRef.current;
+    setStatus("ผ่านการทดสอบแล้ว — กรุณามองกล้องตรง ๆ เพื่อยืนยันใบหน้าอีกครั้ง");
+
+    for (let i = 0; i < 10; i++) {
+      if (!videoRef.current || !streamRef.current) return; // ผู้ใช้ปิดกล้องไปแล้ว
+      try {
+        const det = await fa
+          .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 }))
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+        const candidate = candidateRef.current;
+        if (det && candidate) {
+          const r = evaluateMatch(det.descriptor);
+          if (r?.ok) {
+            setScanStage('confirm');
+            setStatus("ยืนยันตัวตนจริงสำเร็จ");
+            setPendingMatch(candidate);
+            return;
+          }
+        }
+      } catch { /* ข้าม error ชั่วคราว */ }
+      await new Promise(res => setTimeout(res, 300));
+    }
+
+    if (!streamRef.current) return;
+    candidateRef.current = null;
+    setScanStage('detecting');
+    setStatus("ยืนยันใบหน้าซ้ำไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+    detectFaceLoop();
+  }
+
   function startLivenessCheck(candidate: { id: string; name: string; similarity: string }) {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    if (livenessIntervalRef.current) { clearInterval(livenessIntervalRef.current); livenessIntervalRef.current = null; }
+
     candidateRef.current = candidate;
-    blinkFoundRef.current = false;
+    const steps: Challenge[] = ['blink', pickRandomChallenge()];
+    let stepIndex = 0;
+    let holdCount = 0;
+    let stepStart = Date.now();
+    let finished = false;
+
+    const showStep = () => {
+      setChallengeLabel(CHALLENGE_LABELS[steps[stepIndex]]);
+      setStepText(`ขั้น ${stepIndex + 1}/${steps.length}`);
+      setLivenessSecondsLeft(Math.ceil(LIVENESS_DURATION_MS / 1000));
+      setStatus(`พบคุณ ${candidate.name} — ${CHALLENGE_LABELS[steps[stepIndex]]}`);
+    };
+
     setBlinkHint(false);
-    livenessStartRef.current = Date.now();
     setScanStage('liveness');
-    setLivenessSecondsLeft(Math.ceil(LIVENESS_DURATION_MS / 1000));
-    setStatus(`พบคุณ ${candidate.name} — กรุณากระพริบตาตามปกติเพื่อยืนยันว่าเป็นคนจริง`);
+    showStep();
 
-    livenessBusyRef.current = false;
+    const stopLiveness = () => {
+      finished = true;
+      if (livenessIntervalRef.current) { clearInterval(livenessIntervalRef.current); livenessIntervalRef.current = null; }
+    };
+
     const tick = async () => {
-      const fa = faceApiRef.current;
+      if (finished) return;
       const landmarker = mediaPipeRef.current;
-      if (!videoRef.current || !fa || !landmarker) return;
+      if (!videoRef.current || !landmarker) return;
 
-      const elapsed = Date.now() - livenessStartRef.current;
-      const remainMs = Math.max(0, LIVENESS_DURATION_MS - elapsed);
-      setLivenessSecondsLeft(Math.ceil(remainMs / 1000));
+      const elapsed = Date.now() - stepStart;
+      setLivenessSecondsLeft(Math.ceil(Math.max(0, LIVENESS_DURATION_MS - elapsed) / 1000));
 
       if (elapsed > LIVENESS_DURATION_MS) {
-        if (livenessIntervalRef.current) { clearInterval(livenessIntervalRef.current); livenessIntervalRef.current = null; }
+        stopLiveness();
         candidateRef.current = null;
         setScanStage('detecting');
-        setStatus("ยืนยันไม่สำเร็จ ไม่พบการกระพริบตา กรุณาลองใหม่อีกครั้ง");
+        setStatus("ยืนยันไม่สำเร็จ ทำตามคำสั่งไม่ทัน กรุณาลองใหม่อีกครั้ง");
         detectFaceLoop();
         return;
       }
 
       try {
-        // อ่านคะแนน blendshape "eyeBlinkLeft"/"eyeBlinkRight" จาก MediaPipe โดยตรง
-        // (ค่า 0-1 จากโมเดลที่ฝึกมาเฉพาะ ไม่ใช่การคำนวณเรขาคณิตเองแบบเดิม จึงแม่นยำ
-        // และคงที่กว่ามากในทุกกล้อง/แสง ไม่ต้องปรับเกณฑ์ทีละเครื่องอีกต่อไป)
         const result = landmarker.detectForVideo(videoRef.current, performance.now());
         const categories = result?.faceBlendshapes?.[0]?.categories;
-        if (!categories) return;
+        const landmarks = result?.faceLandmarks?.[0];
+        if (!categories || !landmarks) { holdCount = 0; return; }
 
-        const leftBlink = categories.find((c: any) => c.categoryName === 'eyeBlinkLeft')?.score ?? 0;
-        const rightBlink = categories.find((c: any) => c.categoryName === 'eyeBlinkRight')?.score ?? 0;
-        const blinkScore = Math.max(leftBlink, rightBlink);
+        const ch = steps[stepIndex];
+        if (checkChallenge(ch, categories, landmarks)) holdCount++; else holdCount = 0;
 
-        if (!blinkFoundRef.current && blinkScore > BLINK_SCORE_THRESHOLD) {
-          blinkFoundRef.current = true;
-          setBlinkHint(true);
-        }
-
-        if (blinkFoundRef.current) {
-          if (livenessIntervalRef.current) { clearInterval(livenessIntervalRef.current); livenessIntervalRef.current = null; }
-
-          // ยืนยันซ้ำอีกครั้งว่ายังเป็นคนเดิมที่ตรวจพบตอนแรก ก่อนเปิด modal ยืนยัน
-          const finalDet = await fa
-            .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 }))
-            .withFaceLandmarks()
-            .withFaceDescriptor();
-
-                      const candidate = candidateRef.current;
-          if (finalDet && candidate) {
-            const r = evaluateMatch(finalDet.descriptor);
-            if (r?.ok) {
-              setScanStage('confirm');
-              setStatus("ยืนยันตัวตนจริงสำเร็จ");
-              setPendingMatch(candidate);
-              return;
-            }
+        const need = ch === 'blink' ? 1 : HOLD_FRAMES;
+        if (holdCount >= need) {
+          stepIndex++;
+          holdCount = 0;
+          if (stepIndex >= steps.length) {
+            stopLiveness();
+            setBlinkHint(true); // ใช้เป็นธงว่า "ผ่านแล้ว กำลังยืนยัน"
+            await finalizeVerification();
+            return;
           }
-          // ยืนยันซ้ำไม่ผ่าน — เริ่มสแกนใหม่
-          candidateRef.current = null;
-          setScanStage('detecting');
-          setStatus("ยืนยันตัวตนไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
-          detectFaceLoop();
+          stepStart = Date.now();
+          showStep();
         }
       } catch {
-        // ข้าม error ชั่วคราวระหว่างตรวจ ไม่ต้องหยุด loop
+        // ข้าม error ชั่วคราวระหว่างตรวจ
       }
     };
 
+    livenessBusyRef.current = false;
     livenessIntervalRef.current = setInterval(() => {
-      if (livenessBusyRef.current) return; // รอบก่อนยังไม่เสร็จ ข้ามไปก่อนเพื่อไม่ให้เฟรมซ้อนกันจนช้า
+      if (livenessBusyRef.current) return;
       livenessBusyRef.current = true;
       tick().finally(() => { livenessBusyRef.current = false; });
     }, LIVENESS_INTERVAL_MS);
@@ -664,72 +761,31 @@ if (videoRef.current) {
       stopVideo();
       return;
     }
-
-    const finalUserId: string = (foundUser as any).id;
-    const today = new Date().toISOString().split('T')[0];
-    const nowISO = new Date().toISOString();
     const thaiTime = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Bangkok' });
-    const thaiDate = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Bangkok' });
+const thaiDate = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Bangkok' });
 
-    const now = new Date();
-    const isLate = attendanceType === 'check_in' &&
-      (now.getHours() * 60 + now.getMinutes() > 7 * 60 + 45);
-    const statusText = attendanceType === 'check_in'
-      ? (isLate ? 'เข้างานสาย' : 'เข้างานปกติ')
-      : 'ออกงานตามเวลา';
+    const { data: result, error } = await supabase.rpc('record_attendance', {
+  p_type: attendanceType,
+  p_device_id: getDeviceId(),
+  p_is_onsite: !!isInsideSchool,
+  p_distance: distanceFromSchool,
+});
 
-    if (attendanceType === 'check_in') {
-      const { data: existing } = await supabase
-        .from('teacher_attendance').select('id, check_time')
-        .eq('user_id', finalUserId).eq('attendance_date', today).eq('type', 'check_in')
-        .maybeSingle();
-
-      if (existing) {
-        const existTime = toThaiTime((existing as any).check_time);
-        window.alert(`บันทึกเวลาเข้างานวันนี้ไปแล้ว\nเวลา: ${existTime} น.`);
-        stopVideo();
-        return;
-      }
-
-      const { error } = await supabase.from('teacher_attendance').insert([{
-        user_id: finalUserId, attendance_date: today, check_time: nowISO,
-        type: 'check_in', is_onsite: isInsideSchool, status: statusText, distance: distanceFromSchool
-      }] as any);
-
-      if (!error) {
-        window.alert(`บันทึกเวลาเข้างานสำเร็จ\n${thaiDate}\n${thaiTime} น.\n${statusText}`);
-        await refreshStats(finalUserId);
-      } else {
-        window.alert("ผิดพลาด: " + error.message);
-      }
-
-    } else {
-      const { data: existingOut } = await supabase
-        .from('teacher_attendance').select('id, check_time')
-        .eq('user_id', finalUserId).eq('attendance_date', today).eq('type', 'check_out')
-        .maybeSingle();
-
-      if (existingOut) {
-        const existTime = toThaiTime((existingOut as any).check_time);
-        window.alert(`บันทึกเวลาออกงานวันนี้ไปแล้ว\nเวลา: ${existTime} น.`);
-        stopVideo();
-        return;
-      }
-
-      const { error } = await supabase.from('teacher_attendance').insert([{
-        user_id: finalUserId, attendance_date: today, check_time: nowISO,
-        type: 'check_out', is_onsite: isInsideSchool, status: statusText, distance: distanceFromSchool
-      }] as any);
-
-      if (!error) {
-        window.alert(`บันทึกเวลาออกงานสำเร็จ\n${thaiDate}\n${thaiTime} น.`);
-        await refreshStats(finalUserId);
-      } else {
-        window.alert("ผิดพลาด: " + error.message);
-      }
-    }
-
-    stopVideo();
+if (error) {
+  window.alert("ผิดพลาด: " + error.message);
+} else if (result === 'device_not_approved') {
+  window.alert("เครื่องนี้ไม่ได้รับอนุมัติสำหรับบัญชีนี้");
+} else if (result === 'duplicate') {
+  window.alert(attendanceType === 'check_in'
+    ? "บันทึกเวลาเข้างานวันนี้ไปแล้ว" : "บันทึกเวลาออกงานวันนี้ไปแล้ว");
+} else if (result?.startsWith('ok:')) {
+  const statusText = result.slice(3);
+  window.alert(`บันทึกสำเร็จ\n${thaiDate}\n${thaiTime} น.\n${statusText}`);
+  if (currentUserId) await refreshStats(currentUserId);
+} else {
+  window.alert("ไม่สามารถบันทึกได้: " + result);
+}
+stopVideo();
   };
 
   const isLivenessPhase = scanStage === 'liveness';
@@ -861,7 +917,9 @@ if (videoRef.current) {
             {isCameraActive && isLivenessPhase && (
               <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-[#5E5CE6] text-white text-xs font-semibold px-4 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 whitespace-nowrap">
                 <IconEye className="w-3.5 h-3.5 blink-pulse" />
-                {blinkHint ? "ตรวจพบการกระพริบตาแล้ว กำลังยืนยัน..." : "กระพริบตาตามปกติ"} · {livenessSecondsLeft} วิ
+                {blinkHint
+  ? "ผ่านแล้ว กำลังยืนยันใบหน้า..."
+  : `${stepText} · ${challengeLabel}`} · {livenessSecondsLeft} วิ
               </div>
             )}
           </div>
@@ -880,7 +938,7 @@ if (videoRef.current) {
             </div>
 
             <button type="button" onClick={isCameraActive ? stopVideo : startVideo}
-              disabled={!modelsReady || !currentUserId || (!isInsideSchool && !canOffsiteScan)}
+              disabled={!modelsReady || !currentUserId || deviceStatus !== 'ok' || (!isInsideSchool && !canOffsiteScan)}
               className={`w-full py-4 rounded-2xl font-semibold text-[16px] transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 shadow-lg ${isCameraActive ? 'bg-gradient-to-r from-[#FF3B30] to-[#FF6961] text-white shadow-[#FF3B30]/25' : 'bg-gradient-to-r from-[#0A84FF] to-[#5E5CE6] text-white shadow-[#0A84FF]/25'}`}>
               {isCameraActive ? "ยกเลิกและปิดกล้อง" : "เปิดกล้องเพื่อสแกนใบหน้า"}
             </button>
@@ -891,6 +949,15 @@ if (videoRef.current) {
             {modelsReady && !isInsideSchool && !canOffsiteScan && (
               <p className="text-center text-xs text-[#B8720A] -mt-2">ต้องอยู่ในพื้นที่โรงเรียนจึงจะสแกนได้ หรือยืนยันปฏิบัติราชการนอกสถานที่ด้านล่าง</p>
             )}
+            {deviceStatus === 'pending' && (
+  <p className="text-center text-xs text-[#B8720A] -mt-2">เครื่องนี้ยังไม่ได้รับอนุมัติ กรุณาแจ้งแอดมินเพื่ออนุมัติเครื่อง</p>
+)}
+{deviceStatus === 'device_used_by_other' && (
+  <p className="text-center text-xs text-[#FF3B30] -mt-2">เครื่องนี้ถูกผูกกับบัญชีอื่นแล้ว ไม่สามารถสแกนได้</p>
+)}
+{deviceStatus === 'error' && (
+  <p className="text-center text-xs text-[#FF3B30] -mt-2">ตรวจสอบอุปกรณ์ไม่สำเร็จ กรุณารีเฟรชหน้านี้</p>
+)}
 
             {!isInsideSchool && (
               <div>
