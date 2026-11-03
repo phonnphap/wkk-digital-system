@@ -323,11 +323,33 @@ const todayHoliday = isHoliday(date, holidayMap);
         return;
       }
 
-      const classrooms = ((classroomsRes.data ?? []) as { id: string; room_name: string }[]).map((c) => ({
-        classroom_id: c.id,
-        room_name: c.room_name,
-      })) as ClassroomRow[];
-      const students = (studentsRes.data ?? []) as StudentRow[];
+            const rawClassrooms = (classroomsRes.data ?? []) as { id: string; room_name: string }[];
+      const rawStudents = (studentsRes.data ?? []) as StudentRow[];
+
+      // ★ รวมห้องที่ชื่อเดียวกัน (คนละเทอม) ให้เหลือห้องละ 1 รายการ
+      //   เลือก id หลัก = ห้องที่มีนักเรียนมากที่สุด (ถ้าเท่ากันใช้ตัวแรก)
+      const countByRoomId = new Map<string, number>();
+      rawStudents.forEach((s) => countByRoomId.set(s.classroom_id, (countByRoomId.get(s.classroom_id) ?? 0) + 1));
+
+      const canonicalByName = new Map<string, string>(); // room_name -> id หลัก
+      rawClassrooms.forEach((c) => {
+        const cur = canonicalByName.get(c.room_name);
+        if (!cur || (countByRoomId.get(c.id) ?? 0) > (countByRoomId.get(cur) ?? 0)) {
+          canonicalByName.set(c.room_name, c.id);
+        }
+      });
+      const canonicalById = new Map<string, string>(); // id ทุกตัว -> id หลัก
+      rawClassrooms.forEach((c) => canonicalById.set(c.id, canonicalByName.get(c.room_name)!));
+
+      const classrooms: ClassroomRow[] = Array.from(canonicalByName.entries()).map(([room_name, id]) => ({
+        classroom_id: id,
+        room_name,
+      }));
+      // ย้ายนักเรียนทุกคนไปอยู่ห้องหลัก (กันนับตกหล่น/แยกแถว)
+      const students: StudentRow[] = rawStudents.map((s) => ({
+        ...s,
+        classroom_id: canonicalById.get(s.classroom_id) ?? s.classroom_id,
+      }));
       setBaseData({ classrooms, students });
     })();
   }, [allowed]);

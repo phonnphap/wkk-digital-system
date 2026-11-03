@@ -52,8 +52,7 @@ const SUBJECT_GROUP_COLORS = [
 // ══════════════════════════════════════════════════════════════════════════════
 type UserProfile = {
   id: string; title?: string; first_name?: string; last_name?: string; full_name?: string;
-  email: string; role: string; position?: string; department_id?: string;
-};
+  email: string; role: string; position?: string; department_id?: string; grade_level?: string };
 type Department = { id: string; name?: string; name_th?: string };
 type LessonPlan = { id: string; title: string; unit_no?: string; subject_name?: string; teacher_id?: string };
 type MediaItem = {
@@ -1461,6 +1460,7 @@ function isExcludedSubjectCode(code?: string | null) {
 const EXCLUDED_TEACHER_NAMES = ["วีรยุทธ", "สุรีพร", "เด่นศักดิ์"];
 function isExcludedTeacher(u?: UserProfile) {
   if (!u) return false;
+  if ((u.role ?? "").trim().toLowerCase() === "staff") return true;
   const full = displayName(u);
   if (EXCLUDED_TEACHER_NAMES.some(n => full.includes(n))) return true;
   const nm = `${u.first_name ?? ""}${u.last_name ?? ""}`.trim();
@@ -1474,9 +1474,13 @@ const gradeIdx = (g: string) => { const i = GRADE_LEVELS.indexOf(g); return i < 
 // ★ วิชาที่ถือเป็นวิชาเดียวกัน = รหัสวิชา 6 ตัวแรกเหมือนกัน (เช่น ศ11101 กับ ศ11101_M)
 const CODE_KEY_LEN = 6;
 const codeKey = (code?: string | null) => (code ?? "").trim().toUpperCase().slice(0, CODE_KEY_LEN);
-function canonSubject(name: string, baseByName: Map<string, string>) {
-  return baseByName.get(name) || name; // หารหัสไม่เจอ → ใช้ชื่อวิชาเอง
-}
+type SubjInfo = { name: string; code: string; key: string };
+// คีย์เทียบวิชา = รหัส 6 ตัวแรก (ศ11101_M ≡ ศ11101) · ไม่มีรหัส → ใช้ชื่อวิชา
+const subjectKey = (name: string, code?: string | null) => codeKey(code) || name;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// เรียงชื่อสายชั้นแบบเดียวกับหน้าตารางสอน (ตัวเลขตามธรรมชาติ, "ไม่ระบุ" ไว้ท้าย)
+const gradeCmp = (a: string, b: string) =>
+  a === b ? 0 : a === NO_GRADE ? 1 : b === NO_GRADE ? -1 : a.localeCompare(b, "th", { numeric: true });
 // ── แถบ % ความคืบหน้า (เขียว ≥80 · เหลือง 50–79 · แดง <50) ──
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 const pctColor = (p: number) => (p >= 80 ? "bg-emerald-500" : p >= 50 ? "bg-amber-500" : "bg-red-500");
@@ -1501,72 +1505,85 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
   items: MediaItem[]; teachers: UserProfile[]; reports: MediaReport[]; year: number;
   onSelectOwner: (ownerId: string) => void;
 }) {
-  const [rawTeaching, setRawTeaching] = useState<Map<string, Set<string>>>(new Map()); // teacherId → ชื่อวิชาที่สอน
-  const [teacherGrade, setTeacherGrade] = useState<Map<string, string>>(new Map());     // teacherId → สายชั้นหลัก
-  const [subjectGrade, setSubjectGrade] = useState<Map<string, string>>(new Map());     // ชื่อวิชา → ระดับชั้น
-  const [subjectBase, setSubjectBase] = useState<Map<string, string>>(new Map()); // ชื่อวิชา → รหัส 6 ตัวแรก
-  const [subjectCode, setSubjectCode] = useState<Map<string, string>>(new Map()); // ชื่อวิชา → รหัสวิชาเต็ม
+  const [rawTeaching, setRawTeaching] = useState<Map<string, Set<string>>>(new Map()); // teacherId → Set ของ "subject id" ที่สอน
+const [subjectInfo, setSubjectInfo] = useState<Map<string, SubjInfo>>(new Map());      // subject id → ชื่อ/รหัส/คีย์
+const [nameKeys, setNameKeys] = useState<Map<string, Set<string>>>(new Map());         // ชื่อวิชา (ที่เก็บในสื่อ) → คีย์ทั้งหมดที่ใช้ชื่อนี้
+const [gradeNames, setGradeNames] = useState<Map<string, string>>(new Map());          // grade_levels.id → ชื่อสายชั้น
   const [loadingTeach, setLoadingTeach] = useState(true);
   const [panel, setPanel] = useState<PanelKey>(null);
  
   // ── ตารางสอน → วิชาที่ครูแต่ละคนสอนจริง ──
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const entries = await fetchAllRows("timetable_entries", "subject_id, teacher_id, teacher_id_2");
-      const subjects = await fetchAllRows("subjects", "id,name_th,subject_code");
-      const nameById = new Map<string, string>();
-      const gradeById = new Map<string, string>();
-      const subjGrade = new Map<string, string>();
-      const baseByName = new Map<string, string>();
-      const codeByName = new Map<string, string>();
-      subjects.forEach(s => {
-  // ★ เก็บรหัสของ "ทุกวิชา" ก่อนตัดวิชาที่ไม่นับ (สื่อที่ลงไว้กับวิชาที่ถูกตัดจะได้ยังจับคู่ได้)
-  const base = codeKey(s.subject_code);
-  if (s.name_th && base && !baseByName.has(s.name_th)) baseByName.set(s.name_th, base);
-  if (s.name_th && s.subject_code && !codeByName.has(s.name_th)) codeByName.set(s.name_th, s.subject_code);
-
-  if (isExcludedSubjectCode(s.subject_code)) return;
-        if (!s.name_th) return;
-        nameById.set(s.id, s.name_th);
-        const g = gradeFromSubjectCode(s.subject_code);
-        if (g) { gradeById.set(s.id, g); if (!subjGrade.has(s.name_th)) subjGrade.set(s.name_th, g); }
+  let cancelled = false;
+  (async () => {
+    const [yearsRaw, rooms, subjects, glRows, entriesAll] = await Promise.all([
+      fetchAllRows("academic_years", "id,year_name,semester,is_current"),
+      fetchAllRows("classrooms", "id,room_name,academic_year_id"),
+      fetchAllRows("subjects", "id,name_th,subject_code"),
+      fetchAllRows("grade_levels", "*"),
+      fetchAllRows("timetable_entries", "subject_id, teacher_id, teacher_id_2, classroom_id, academic_year_id"),
+    ]);
+ 
+    // ── เลือกปีการศึกษา/เทอมปัจจุบัน (เหมือนหน้าตารางสอน) ──
+    let yearRows = yearsRaw.filter(y => String(y.year_name) === String(year));
+    if (yearRows.length === 0) {
+      const cur = yearsRaw.find(y => y.is_current);
+      if (cur) yearRows = yearsRaw.filter(y => y.year_name === cur.year_name);
+    }
+    const yearIds = new Set<string>(yearRows.map(y => y.id));
+    const curRow = yearRows.find(y => y.is_current) ?? [...yearRows].sort((a, b) => (b.semester ?? 1) - (a.semester ?? 1))[0];
+    const curSem = curRow?.semester ?? 1;
+    const semOf = (yearId?: string) => yearsRaw.find(y => y.id === yearId)?.semester ?? 1;
+    const roomById = new Map<string, any>(rooms.map(r => [r.id, r]));
+    // ห้อง ม.1–ม.6 แยกเทอม · ห้อง อ./ป. ใช้ร่วมทุกเทอม
+    const isSecondary = (r: any) => ((r?.room_name ?? "").match(/([ปมอ])\.?(\d+)/)?.[1] ?? "") === "ม";
+ 
+    // ── ข้อมูลวิชา ──
+    const info = new Map<string, SubjInfo>();
+    const nk = new Map<string, Set<string>>();
+    const excluded = new Set<string>();
+    subjects.forEach(s => {
+      if (!s.name_th) return;
+      const key = subjectKey(s.name_th, s.subject_code);
+      if (!nk.has(s.name_th)) nk.set(s.name_th, new Set());
+      nk.get(s.name_th)!.add(key);                       // รวมทุกวิชา (แม้วิชาที่ไม่นับ) ไว้จับคู่สื่อที่เคยลง
+      if (isExcludedSubjectCode(s.subject_code)) { excluded.add(s.id); return; }
+      info.set(s.id, { name: s.name_th, code: s.subject_code ?? "", key });
+    });
+ 
+    // ── ตารางสอนเฉพาะปี/เทอมปัจจุบัน ──
+    const map = new Map<string, Set<string>>();
+    entriesAll.forEach(e => {
+      if (yearIds.size > 0 && !yearIds.has(e.academic_year_id)) return;
+      const room = roomById.get(e.classroom_id);
+      if (room && isSecondary(room) && semOf(room.academic_year_id ?? e.academic_year_id) !== curSem) return;
+      if (!info.has(e.subject_id)) return;               // วิชาที่ถูกตัด/ไม่รู้จัก
+      [e.teacher_id, e.teacher_id_2].forEach(tid => {
+        if (!tid) return;
+        if (!map.has(tid)) map.set(tid, new Set());
+        map.get(tid)!.add(e.subject_id);
       });
-      const map = new Map<string, Set<string>>();
-      const gradeTally = new Map<string, Map<string, number>>(); // teacher → (ชั้น → จำนวนคาบ)
-      entries.forEach(e => {
-        const name = nameById.get(e.subject_id);
-        if (!name) return;
-        const g = gradeById.get(e.subject_id);
-        [e.teacher_id, e.teacher_id_2].forEach(tid => {
-          if (!tid) return;
-          if (!map.has(tid)) map.set(tid, new Set());
-          map.get(tid)!.add(name);
-          if (g) {
-            if (!gradeTally.has(tid)) gradeTally.set(tid, new Map());
-            const t = gradeTally.get(tid)!;
-            t.set(g, (t.get(g) ?? 0) + 1);
-          }
-        });
-      });
-      // สายชั้นหลัก = ชั้นที่สอนมากที่สุด (เท่ากัน → ชั้นต่ำกว่า)
-      const tg = new Map<string, string>();
-      gradeTally.forEach((t, tid) => {
-        const best = [...t.entries()].sort((a, b) => b[1] - a[1] || gradeIdx(a[0]) - gradeIdx(b[0]))[0];
-        if (best) tg.set(tid, best[0]);
-      });
-      if (!cancelled) { setRawTeaching(map); setTeacherGrade(tg); setSubjectGrade(subjGrade); setSubjectBase(baseByName); setSubjectCode(codeByName); setLoadingTeach(false); }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+    });
+ 
+    // ── ชื่อสายชั้น (ตาราง grade_levels) ──
+    const gn = new Map<string, string>();
+    glRows.forEach(r => { gn.set(String(r.id), String(r.name ?? r.name_th ?? r.grade_name ?? r.label ?? r.id)); });
+ 
+    if (!cancelled) { setRawTeaching(map); setSubjectInfo(info); setNameKeys(nk); setGradeNames(gn); setLoadingTeach(false); }
+  })();
+  return () => { cancelled = true; };
+}, [year]);
  
   const teacherById = useMemo(() => new Map(teachers.map(t => [t.id, t])), [teachers]);
   const byName = (a: { teacher?: UserProfile }, b: { teacher?: UserProfile }) =>
     displayName(a.teacher).localeCompare(displayName(b.teacher), "th");
-  const gradeOf = (id: string) => teacherGrade.get(id) ?? NO_GRADE;
-  // ★ เรียงตามสายชั้น (อ.2 → ม.3 → ไม่ระบุ) แล้วตามชื่อครู
-  const byGradeName = (a: { id: string; teacher?: UserProfile }, b: { id: string; teacher?: UserProfile }) =>
-    gradeIdx(gradeOf(a.id)) - gradeIdx(gradeOf(b.id)) || byName(a, b);
+ const gradeNameOf = (v?: string | null): string => {
+  if (!v) return NO_GRADE;
+  return gradeNames.get(v) ?? (UUID_RE.test(v) ? NO_GRADE : v);
+};
+const gradeOf = (id: string) => gradeNameOf(teacherById.get(id)?.grade_level);
+const byGradeName = (a: { id: string; teacher?: UserProfile }, b: { id: string; teacher?: UserProfile }) =>
+  gradeCmp(gradeOf(a.id), gradeOf(b.id)) || byName(a, b);
   // ★ ตัดครูที่ย้ายออก / ครูชื่ออังกฤษ ออกจากการตรวจทั้งหมด
   const teaching = useMemo(() => {
     const m = new Map<string, Set<string>>();
@@ -1576,49 +1593,64 @@ function DashboardSummary({ items, teachers, reports, year, onSelectOwner }: {
  
   // ── 1) การลงทะเบียนสื่อรายวิชา ──
 const regRows: RegRow[] = useMemo(() => {
-  return [...teaching.entries()].map(([id, subs]) => {
-    // ★ วิชาที่ "ครูคนเดียวกัน" สอน แล้วคีย์เดียวกัน (รหัส 6 ตัวแรกเหมือนกัน เช่น พ11101_PE กับ พ11101,
-    //   หรือสุขศึกษา≡พลศึกษา ชั้นเดียวกัน) → นับเป็น 1 รายการ · ครูคนละคนไม่รวมกัน
+  return [...teaching.entries()].map(([id, subIds]) => {
+    // รวมวิชาที่ "ครูคนเดียวกัน" สอนและคีย์เดียวกันเป็น 1 รายการ · ครูคนละคนไม่รวมกัน
     const groups = new Map<string, string[]>();
-    subs.forEach(s => {
-      const k = canonSubject(s, subjectBase);
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k)!.push(s);
+    subIds.forEach(sid => {
+      const inf = subjectInfo.get(sid); if (!inf) return;
+      if (!groups.has(inf.key)) groups.set(inf.key, []);
+      groups.get(inf.key)!.push(sid);
     });
-    const have = new Set(
-      items.filter(i => i.owner_id === id && i.subject).map(i => canonSubject(i.subject!, subjectBase))
-    );
-    const entries = [...groups.entries()]
-      .map(([k, names]) => ({
-  k,
-  label: names.sort((a, b) => a.localeCompare(b, "th"))
-    .map(n => (subjectCode.get(n) ? `${n} (${subjectCode.get(n)})` : n))
-    .join(" / "),
-}))
-      .sort((a, b) => a.label.localeCompare(b.label, "th"));
-    const taught = entries.map(e => e.label);
-    const registered = entries.filter(e => have.has(e.k)).map(e => e.label);
-    const missing = entries.filter(e => !have.has(e.k)).map(e => e.label);
-    return { teacher: teacherById.get(id), id, taught, registered, missing };
+    // คีย์ของสื่อที่ครูคนนี้ลงทะเบียนไว้ (สื่อเก็บเป็นชื่อวิชา → แปลงเป็นคีย์)
+    const have = new Set<string>();
+    items.forEach(i => {
+      if (i.owner_id !== id || !i.subject) return;
+      (nameKeys.get(i.subject) ?? new Set([i.subject])).forEach(k => have.add(k));
+    });
+    const list = [...groups.entries()].map(([k, sids]) => ({
+      k,
+      // ชื่อ + รหัส "ของวิชานั้นจริง ๆ" (ไม่ใช่รหัสแรกที่เจอจากชื่อเดียวกัน)
+      label: sids.map(s => subjectInfo.get(s)!)
+        .sort((a, b) => a.name.localeCompare(b.name, "th"))
+        .map(x => (x.code ? `${x.name} (${x.code})` : x.name)).join(" / "),
+    })).sort((a, b) => a.label.localeCompare(b.label, "th"));
+    return {
+      teacher: teacherById.get(id), id,
+      taught: list.map(e => e.label),
+      registered: list.filter(e => have.has(e.k)).map(e => e.label),
+      missing: list.filter(e => !have.has(e.k)).map(e => e.label),
+    };
   }).sort(byGradeName);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [teaching, items, teacherById, teacherGrade, subjectGrade, subjectBase, subjectCode]);
+}, [teaching, items, teacherById, subjectInfo, nameKeys, gradeNames]);
   const regPendingRows = regRows.filter(r => r.missing.length > 0);
   const regCompleteCount = regRows.length - regPendingRows.length;
  
   // รายวิชาที่ยังไม่มีสื่อเลย (ทั้งโรงเรียน)
   const subjectsNoMedia = useMemo(() => {
-    const subjTeachers = new Map<string, string[]>();
-    teaching.forEach((subs, tid) => subs.forEach(s => {
-      if (!subjTeachers.has(s)) subjTeachers.set(s, []);
-      subjTeachers.get(s)!.push(tid);
-    }));
-    const withMedia = new Set(items.filter(i => i.subject).map(i => canonSubject(i.subject!, subjectBase)));
-return [...subjTeachers.entries()]
-  .filter(([s]) => !withMedia.has(canonSubject(s, subjectBase)))
-      .map(([s, tids]) => ({ subject: s, code: subjectCode.get(s) ?? "", grade: subjectGrade.get(s) ?? NO_GRADE, teachers: tids.map(t => displayName(teacherById.get(t))) }))
-      .sort((a, b) => gradeIdx(a.grade) - gradeIdx(b.grade) || a.subject.localeCompare(b.subject, "th"));
-  }, [teaching, items, teacherById, subjectGrade, subjectBase, subjectCode]);
+  const withMedia = new Set<string>();
+  items.forEach(i => { if (i.subject) (nameKeys.get(i.subject) ?? new Set([i.subject])).forEach(k => withMedia.add(k)); });
+  const byKey = new Map<string, { subs: Set<string>; tids: Set<string> }>();
+  teaching.forEach((sids, tid) => sids.forEach(sid => {
+    const inf = subjectInfo.get(sid); if (!inf) return;
+    if (!byKey.has(inf.key)) byKey.set(inf.key, { subs: new Set(), tids: new Set() });
+    const g = byKey.get(inf.key)!; g.subs.add(sid); g.tids.add(tid);
+  }));
+  return [...byKey.entries()]
+    .filter(([k]) => !withMedia.has(k))
+    .map(([, g]) => {
+      const infos = [...g.subs].map(s => subjectInfo.get(s)!);
+      const grades = [...new Set([...g.tids].map(t => gradeOf(t)))].sort(gradeCmp);
+      return {
+        subject: [...new Set(infos.map(i => i.name))].join(" / "),
+        code: [...new Set(infos.map(i => i.code).filter(Boolean))].join(" / "),
+        grade: grades.find(x => x !== NO_GRADE) ?? NO_GRADE,
+        teachers: [...g.tids].map(t => displayName(teacherById.get(t))),
+      };
+    })
+    .sort((a, b) => gradeCmp(a.grade, b.grade) || a.subject.localeCompare(b.subject, "th"));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [teaching, items, teacherById, subjectInfo, nameKeys, gradeNames]);
  
   // ── 2) รายงานการใช้สื่อ: ครูแต่ละคนต้องทำ ≥ 1 ชิ้น/ปีการศึกษา ──
   const teacherPool = useMemo(() => {
@@ -1807,7 +1839,7 @@ const gradeProgress = (() => {
   const get = (g: string) => { if (!m.has(g)) m.set(g, { regAll: 0, regFull: 0, repAll: 0, repDone: 0 }); return m.get(g)!; };
   regRows.forEach(r => { const x = get(gradeOf(r.id)); x.regAll++; if (r.missing.length === 0) x.regFull++; });
   teacherPool.forEach(id => { const x = get(gradeOf(id)); x.repAll++; if ((reportCountByTeacher.get(id) ?? 0) >= 1) x.repDone++; });
-  return [...m.entries()].sort((a, b) => gradeIdx(a[0]) - gradeIdx(b[0]));
+  return [...m.entries()].sort((a, b) => gradeCmp(a[0], b[0]));
 })();
  
   const cardBase = "rounded-2xl p-4 text-center border-2 transition-all w-full";
@@ -2125,7 +2157,7 @@ export default function MediaLibraryPage() {
       setUser(profileData);
 
       const { data: allUsers } = await supabase.from("users")
-        .select("id,title,first_name,last_name,full_name,email,role,position,department_id")
+        .select("id,title,first_name,last_name,full_name,email,role,position,department_id,grade_level")
         .order("first_name");
       const teacherList = ((allUsers ?? []) as any[]).map(t => ({ ...t, full_name: t.full_name || `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim() }));
       setTeachers(teacherList);

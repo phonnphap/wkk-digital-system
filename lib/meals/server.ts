@@ -48,14 +48,26 @@ export async function getActor() {
     .maybeSingle();
   if (!profile) return null;
   const { data: rooms } = await supabase.rpc("get_my_classrooms");
+
+  // ★ ห้องทั้งหมด (ทุกเทอม) ใช้จับกลุ่มห้องชื่อเดียวกัน
+  const { data: allRoomsData } = await service.from(CLASSROOMS.table).select(`id:${CLASSROOMS.id}, name:${CLASSROOMS.name}`);
+  const allRooms = ((allRoomsData ?? []) as { id: string; name: string }[]);
+
+  const mine = ((rooms ?? []) as { classroom_id: string; room_name: string }[]);
+  const myNames = new Set(mine.map((r) => r.room_name));
+  const myRoomIds = new Set<string>(mine.map((r) => r.classroom_id));
+  // ★ ครูมีสิทธิ์กับห้องพี่น้องทุกเทอมของห้องตัวเอง
+  allRooms.forEach((r) => { if (myNames.has(r.name)) myRoomIds.add(r.id); });
+
   return {
     service,
     profile: profile as { id: string; role: string; first_name: string; last_name: string },
-    // ฝ่ายบริหาร = role admin/ผอ./รองผอ. หรือ หัวหน้ากลุ่มงาน; เจ้าของโครงการ = role ที่กำหนด หรือ หัวหน้าโครงการ (users.id)
     isAdmin: ADMIN_ROLES.has(profile.role) || profile.id === GROUP_HEAD_USER_ID,
     isOwner: OWNER_ROLES.has(profile.role) || profile.id === PROJECT_HEAD_USER_ID,
-    myRooms: ((rooms ?? []) as { classroom_id: string; room_name: string }[]).map((r) => ({ id: r.classroom_id, name: r.room_name })),
-    myRoomIds: new Set<string>(((rooms ?? []) as { classroom_id: string }[]).map((r) => r.classroom_id)),
+    myRooms: mine.map((r) => ({ id: r.classroom_id, name: r.room_name })),
+    myRoomIds,
+    allRooms,
+    cache: {} as { groups?: Map<string, { name: string; canonical: string; ids: string[] }> },
   };
 }
 export type Actor = NonNullable<Awaited<ReturnType<typeof getActor>>>;
@@ -79,22 +91,44 @@ export async function fetchAll<T>(
 }
 export const monthRange = (month: string) => ({ start: dateOf(month, 1), end: dateOf(month, daysInMonth(month)) });
 const chunk = <T,>(arr: T[], n: number) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
+type RoomGroup = { name: string; canonical: string; ids: string[] };
 
-export async function listClassrooms(a: Actor, all: boolean): Promise<ClassroomLite[]> {
-  let rows: { id: string; name: string }[];
-  if (all || a.isAdmin || a.isOwner) {
-    const { data, error } = await a.service.from(CLASSROOMS.table).select(`id:${CLASSROOMS.id}, name:${CLASSROOMS.name}`);
-    if (error) {
-      if (!a.myRooms.length) throw new Error(`อ่านตารางห้องเรียนไม่ได้: ${error.message}`);
-      rows = a.myRooms; // สำรอง: ใช้ห้องของครูจาก get_my_classrooms
-    } else rows = data ?? [];
-  } else {
-    rows = a.myRooms;
+/** จับห้องชื่อเดียวกัน (คนละเทอม) เป็นกลุ่ม; id หลัก = ห้องที่มีนักเรียนมากที่สุด */
+async function roomGroups(a: Actor): Promise<Map<string, RoomGroup>> {
+  if (a.cache.groups) return a.cache.groups;
+  const rooms = a.allRooms.length ? a.allRooms : a.myRooms;
+
+  const counts = new Map<string, number>();
+  const stu = await fetchAll<any>((f, t) =>
+    a.service.from(STUDENTS.table).select("classroom_id").is("moved_out_at", null).order(STUDENTS.id).range(f, t));
+  stu.forEach((s) => counts.set(s.classroom_id, (counts.get(s.classroom_id) ?? 0) + 1));
+
+  const groups = new Map<string, RoomGroup>();
+  for (const r of rooms) {
+    const g = groups.get(r.name);
+    if (!g) { groups.set(r.name, { name: r.name, canonical: r.id, ids: [r.id] }); continue; }
+    g.ids.push(r.id);
+    if ((counts.get(r.id) ?? 0) > (counts.get(g.canonical) ?? 0)) g.canonical = r.id;
   }
-  return rows
-    .map((r) => {
-      const g = parseGrade(r.name) ?? UNKNOWN_GRADE;
-      return { id: r.id, name: r.name, milk: milkEligible(g), o: g.order };
+  a.cache.groups = groups;
+  return groups;
+}
+async function groupOf(a: Actor, classroomId: string): Promise<RoomGroup | null> {
+  for (const g of (await roomGroups(a)).values()) if (g.ids.includes(classroomId)) return g;
+  return null;
+}
+/** แปลง id ใดก็ได้ของห้อง → id หลัก (กรณี URL เก่าที่ส่ง id ของเทอมอื่นมา) */
+export async function canonicalRoomId(a: Actor, classroomId: string) {
+  return (await groupOf(a, classroomId))?.canonical ?? classroomId;
+}
+export async function listClassrooms(a: Actor, all: boolean): Promise<ClassroomLite[]> {
+  const groups = [...(await roomGroups(a)).values()];
+  const seeAll = all || a.isAdmin || a.isOwner;
+  const visible = seeAll ? groups : groups.filter((g) => g.ids.some((id) => a.myRoomIds.has(id)));
+  return visible
+    .map((g) => {
+      const gr = parseGrade(g.name) ?? UNKNOWN_GRADE;
+      return { id: g.canonical, name: g.name, milk: milkEligible(gr), o: gr.order };
     })
     .sort((x, y) => x.o - y.o || x.name.localeCompare(y.name, "th"))
     .map(({ o, ...r }) => r);
@@ -102,10 +136,11 @@ export async function listClassrooms(a: Actor, all: boolean): Promise<ClassroomL
 
 type StudentRow = { id: string; no: number | null; name: string };
 async function loadStudents(a: Actor, classroomId: string): Promise<StudentRow[]> {
+  const ids = (await groupOf(a, classroomId))?.ids ?? [classroomId]; // ★ นักเรียนทุกเทอมของห้องนี้
   const { data, error } = await a.service
     .from(STUDENTS.table)
     .select(`id:${STUDENTS.id}, no:${STUDENTS.no}, prefix:${STUDENTS.prefix}, first:${STUDENTS.first}, last:${STUDENTS.last}`)
-    .eq(STUDENTS.classroom, classroomId)
+    .in(STUDENTS.classroom, ids)
     .is("moved_out_at", null)
     .order(STUDENTS.no, { ascending: true });
   if (error) throw new Error(error.message);
@@ -175,15 +210,14 @@ async function academicYearName(a: Actor, date: string): Promise<string | null> 
 
 /** ครูที่ปรึกษา: classrooms.homeroom_teacher_id และ homeroom_teacher_2_id (มีกี่คนก็สร้างช่องลงชื่อเท่านั้น) */
 async function homeroomTeacherIds(a: Actor, classroomId: string): Promise<string[]> {
-  // PK ของ classrooms น่าจะเป็น id — ถ้าไม่เจอลอง classroom_id
+  const ids = (await groupOf(a, classroomId))?.ids ?? [classroomId];
   for (const pk of [CLASSROOMS.id, "classroom_id"]) {
     const { data, error } = await a.service
       .from(CLASSROOMS.table)
       .select("homeroom_teacher_id, homeroom_teacher_2_id")
-      .eq(pk, classroomId)
-      .maybeSingle();
-    if (error || !data) continue;
-    return [...new Set([data.homeroom_teacher_id, data.homeroom_teacher_2_id].filter(Boolean) as string[])];
+      .in(pk, ids);
+    if (error || !data?.length) continue;
+    return [...new Set(data.flatMap((d: any) => [d.homeroom_teacher_id, d.homeroom_teacher_2_id]).filter(Boolean) as string[])];
   }
   return [];
 }
@@ -217,10 +251,11 @@ async function loadSigners(a: Actor, classroomId: string, type: MealType): Promi
 
 // ── Sync: ดึงจากเช็คชื่อโฮมรูม → meal_records + จัดแจกเพิ่ม ───────────────────
 export async function syncMonth(
-  a: Actor, classroomId: string, month: string, type: MealType,
+  a: Actor, classroomIdIn: string, month: string, type: MealType,
   override?: { studentId: string; date: string; status: CellStatus | null },
   opts?: { clearManual?: boolean },
 ) {
+  const classroomId = await canonicalRoomId(a, classroomIdIn);   // ★ เพิ่ม
   const s = a.service;
   const { data: rep } = await s.from("meal_month_reports").select("teacher_confirmed_at")
     .eq("classroom_id", classroomId).eq("month", month).eq("meal_type", type).maybeSingle();
@@ -332,8 +367,9 @@ export async function syncMonth(
 }
 
 // ── Sheet: ข้อมูลตารางรายเดือนของห้องเดียว ─────────────────────────────────────
-export async function buildSheet(a: Actor, classroomId: string, month: string, type: MealType): Promise<SheetData> {
-  const s = a.service;
+export async function buildSheet(a: Actor, classroomIdIn: string, month: string, type: MealType): Promise<SheetData> {
+  const classroomId = await canonicalRoomId(a, classroomIdIn);
+  const s = a.service;                      // ← เพิ่มบรรทัดนี้
   const classroom =
     (await listClassrooms(a, true)).find((r) => r.id === classroomId) ??
     (await listClassrooms(a, false)).find((r) => r.id === classroomId);

@@ -1,6 +1,6 @@
 // app/api/meals/report/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { canEditRoom, fetchAll, getActor, listClassrooms, monthRange } from "@/lib/meals/server";
+import { canEditRoom, canonicalRoomId, fetchAll, getActor, listClassrooms, monthRange } from "@/lib/meals/server";
 import {
   LEVEL_LABEL, LEVEL_ORDER, UNKNOWN_GRADE, currentMonth, milkEligible, parseGrade,
   type GradeInfo, type MealType, type ReportRow,
@@ -124,13 +124,14 @@ export async function POST(req: NextRequest) {
     if (!b.classroomId || !/^\d{4}-\d{2}$/.test(b.month) || !["lunch", "milk"].includes(b.type)) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
-    const key = { classroom_id: b.classroomId, month: b.month, meal_type: b.type };
+    const classroomId = await canonicalRoomId(a, b.classroomId);
+    const key = { classroom_id: classroomId, month: b.month, meal_type: b.type };
     const now = new Date().toISOString();
     const { data: cur } = await a.service.from("meal_month_reports").select("*").match(key).maybeSingle();
 
     let patch: Record<string, unknown>;
     if (b.action === "set_pack") {
-      if (!canEditRoom(a, b.classroomId)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (!canEditRoom(a, classroomId)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       if (b.type !== "milk" || !["ถุง", "กล่อง"].includes(b.pack ?? "")) {
         return NextResponse.json({ error: "Invalid pack" }, { status: 400 });
       }
@@ -139,7 +140,7 @@ export async function POST(req: NextRequest) {
       }
       patch = { milk_pack: b.pack };
     } else if (b.action === "confirm" || b.action === "unconfirm") {
-      if (!canEditRoom(a, b.classroomId)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (!canEditRoom(a, classroomId)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       if (cur?.owner_approved_at) {
         return NextResponse.json({ error: "เจ้าของโครงการรับรองแล้ว ต้องยกเลิกการรับรองก่อน" }, { status: 409 });
       }
