@@ -1,7 +1,7 @@
 // lib/meals/server.ts — ใช้ใน API routes เท่านั้น
 import { createServerSupabaseClient, createServiceClient } from "@/lib/supabase/server";
 import {
-  ADMIN_ROLES, FIXED_HOLIDAYS, GROUP_HEAD_LABEL, GROUP_HEAD_USER_ID, OWNER_ROLES, PROJECT_HEAD_LABEL, PROJECT_HEAD_USER_ID, daysInMonth, dateOf, mapAttendance, milkEligible, parseGrade,
+  ADMIN_ROLES, FIXED_HOLIDAYS, GROUP_HEAD_LABEL, GROUP_HEAD_USER_ID, OWNER_ROLES, PROJECT_HEAD_EMAIL, PROJECT_HEAD_LABEL, daysInMonth, dateOf, mapAttendance, milkEligible, parseGrade,
   todayBkk, UNKNOWN_GRADE,
   type CellStatus, type ClassroomLite, type MealType, type SheetData, type SheetStudent,
 } from "./shared";
@@ -43,10 +43,12 @@ export async function getActor() {
   const service = createServiceClient() as any;
   const { data: profile } = await service
     .from("users")
-    .select("id, role, first_name, last_name")
+        .select("id, role, first_name, last_name, email")
     .eq("auth_id", user.id)
     .maybeSingle();
   if (!profile) return null;
+  const myEmail = String(profile.email ?? user.email ?? "").toLowerCase();
+  const isProjectHead = Object.values(PROJECT_HEAD_EMAIL).some((e) => e.toLowerCase() === myEmail);
   const { data: rooms } = await supabase.rpc("get_my_classrooms");
 
   // ★ ห้องทั้งหมด (ทุกเทอม) ใช้จับกลุ่มห้องชื่อเดียวกัน
@@ -62,8 +64,9 @@ export async function getActor() {
   return {
     service,
     profile: profile as { id: string; role: string; first_name: string; last_name: string },
+    email: myEmail,   // ★ เพิ่ม
     isAdmin: ADMIN_ROLES.has(profile.role) || profile.id === GROUP_HEAD_USER_ID,
-    isOwner: OWNER_ROLES.has(profile.role) || profile.id === PROJECT_HEAD_USER_ID,
+    isOwner: OWNER_ROLES.has(profile.role) || isProjectHead,
     myRooms: mine.map((r) => ({ id: r.classroom_id, name: r.room_name })),
     myRoomIds,
     allRooms,
@@ -75,6 +78,12 @@ export const canAccessRoom = (a: Actor, classroomId: string) => a.isAdmin || a.i
 /** แก้ไขได้เฉพาะครูประจำชั้น (หรือ admin) */
 export const canEditRoom = (a: Actor, classroomId: string) =>
   a.profile.role === "admin" || a.myRoomIds.has(classroomId);
+
+/** รับรองรายงานได้เฉพาะหัวหน้าโครงการของประเภทนั้น (หรือ admin / role เจ้าของโครงการ) */
+export const canApproveType = (a: Actor, type: MealType) =>
+  a.profile.role === "admin" ||
+  OWNER_ROLES.has(a.profile.role) ||
+  a.email === PROJECT_HEAD_EMAIL[type].toLowerCase();
 
 // ── Utils ───────────────────────────────────────────────────────────────────
 export async function fetchAll<T>(
@@ -234,8 +243,10 @@ async function homeroomTeacherIds(a: Actor, classroomId: string): Promise<string
 }
 
 async function loadSigners(a: Actor, classroomId: string, type: MealType): Promise<SheetData["signers"]> {
-  const teacherIds = await homeroomTeacherIds(a, classroomId);
-  const want = [...teacherIds, PROJECT_HEAD_USER_ID, GROUP_HEAD_USER_ID];
+   const teacherIds = await homeroomTeacherIds(a, classroomId);
+  const { data: headRow } = await a.service.from("users").select("id").ilike("email", PROJECT_HEAD_EMAIL[type]).maybeSingle();
+  const headId: string = headRow?.id ?? "";
+  const want = [...teacherIds, headId, GROUP_HEAD_USER_ID].filter(Boolean);
   let res = await a.service.from("users").select("id, title, first_name, last_name, signature_url").in("id", want);
   if (res.error) res = await a.service.from("users").select("id, first_name, last_name, signature_url").in("id", want);
   const users = (res.data ?? []) as any[];
@@ -257,7 +268,7 @@ async function loadSigners(a: Actor, classroomId: string, type: MealType): Promi
   const teachers = teacherIds.length
     ? teacherIds.map((id) => person(id, "ครูที่ปรึกษา"))
     : [{ role: "ครูที่ปรึกษา", name: null, signatureUrl: null }];
-  return [...teachers, person(PROJECT_HEAD_USER_ID, PROJECT_HEAD_LABEL[type]), person(GROUP_HEAD_USER_ID, GROUP_HEAD_LABEL)];
+  return [...teachers, person(headId, PROJECT_HEAD_LABEL[type]), person(GROUP_HEAD_USER_ID, GROUP_HEAD_LABEL)];
 }
 
 // ── Sync: ดึงจากเช็คชื่อโฮมรูม → meal_records + จัดแจกเพิ่ม ───────────────────
@@ -482,8 +493,9 @@ export async function buildSheet(a: Actor, classroomIdIn: string, month: string,
     milkPack: rep?.milk_pack === "กล่อง" ? "กล่อง" : "ถุง",
     signers,
     editable: canEditRoom(a, classroomId),
-    me: {
-      id: a.profile.id, name: `${a.profile.first_name} ${a.profile.last_name}`, isOwner: a.isOwner,
+        me: {
+      id: a.profile.id, name: `${a.profile.first_name} ${a.profile.last_name}`,
+      isOwner: canApproveType(a, type),   // ★ เปลี่ยนจาก a.isOwner
       hasSignature: !!sigOf(userSigs, a.profile.id),
     },
     report: {

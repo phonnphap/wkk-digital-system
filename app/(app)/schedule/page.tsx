@@ -3085,6 +3085,9 @@ for (const g of groups.values()) {
       // 2) desync: หา section ที่ active อยู่ แต่ครูไม่มีคาบคู่นี้ในตารางสอนแล้ว
       for (const s of sections) {
         if (!s.is_active) continue;
+        // ★ เพิ่มตรงนี้ ★  ห้อง อ./ป. ไม่ถอดครู/ไม่ปิด section อัตโนมัติ
+  const sRoom = allClassrooms.find(c => c.id === s.classroom_id);
+  if (sRoom && isYearlyRoom(sRoom)) continue;
         const key = `${s.subject_id}|${s.classroom_id}|${s.academic_year_id}`;
         const g = groups.get(key);
         const stillTeaching = (tid: string) => g?.teacherIds.includes(tid) ?? false;

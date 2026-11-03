@@ -1,10 +1,11 @@
 // app/api/meals/report/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { canEditRoom, canonicalRoomId, fetchAll, getActor, listClassrooms, monthRange } from "@/lib/meals/server";
+import { canApproveType, canEditRoom, canonicalRoomId, fetchAll, getActor, listClassrooms, monthRange } from "@/lib/meals/server";
 import {
   LEVEL_LABEL, LEVEL_ORDER, UNKNOWN_GRADE, currentMonth, milkEligible, parseGrade,
   type GradeInfo, type MealType, type ReportRow,
 } from "@/lib/meals/shared";
+
 
 type Scope = "school" | "level" | "grade" | "room";
 
@@ -147,8 +148,10 @@ export async function POST(req: NextRequest) {
       patch = b.action === "confirm"
         ? { teacher_confirmed_at: now, teacher_confirmed_by: a.profile.id }
         : { teacher_confirmed_at: null, teacher_confirmed_by: null };
-    } else if (b.action === "approve" || b.action === "unapprove") {
-      if (!a.isOwner) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        } else if (b.action === "approve" || b.action === "unapprove") {
+      if (!canApproveType(a, b.type)) {   // ★ เดิม: if (!a.isOwner)
+        return NextResponse.json({ error: "ไม่มีสิทธิ์รับรองรายงานประเภทนี้" }, { status: 403 });
+      }
       if (b.action === "approve" && !cur?.teacher_confirmed_at) {
         return NextResponse.json({ error: "ครูประจำชั้นยังไม่ยืนยันรายงานเดือนนี้" }, { status: 409 });
       }

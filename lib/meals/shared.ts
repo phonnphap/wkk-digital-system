@@ -10,7 +10,10 @@ export const FORM_TITLE: Record<MealType, string> = {
 };
 export const SCHOOL_LINE = "โรงเรียนวัดเขียนเขต  สำนักงานเขตพื้นที่การศึกษาประถมศึกษาปทุมธานี  เขต 2";
 /** หัวหน้าโครงการ / หัวหน้ากลุ่มงาน (users.id) ที่ลงนามท้ายรายงาน */
-export const PROJECT_HEAD_USER_ID = "94e4ee5a-31b2-4d84-bf0c-3ca6ddc4dda7";
+export const PROJECT_HEAD_EMAIL: Record<MealType, string> = {
+  lunch: "daungnet@khienkhet.ac.th",
+  milk: "butsara@khienkhet.ac.th",
+};
 export const GROUP_HEAD_USER_ID = "df1ed51c-90c8-4fde-86ea-4478ea671923";
 export const PROJECT_HEAD_LABEL: Record<MealType, string> = {
   lunch: "หัวหน้าโครงการอาหารกลางวัน",
