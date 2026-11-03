@@ -3669,8 +3669,12 @@ const sameDaySubjectGroups = (() => {
     return { allowKey: `${base}|n${sorted.length}`, list: sorted, adjacent };
   }).filter(g => new Set(g.list.map(normalizedSlotKey)).size > 1); // ไม่รวมกรณี "ช่องเดียวกัน" ที่มีหัวข้อของมันเองอยู่แล้ว
 })();
-const sameDayActiveGroups  = sameDaySubjectGroups.filter(g => !allowedDupKeys.has(g.allowKey));
-const sameDayAllowedGroups = sameDaySubjectGroups.filter(g =>  allowedDupKeys.has(g.allowKey));
+// ★ คาบติดกัน = ถือว่าอนุญาตอัตโนมัติ (คาบคู่) · ไม่ติดกัน = ต้องแอดมินกดอนุญาตเอง
+const isAutoAllowed = (g: { allowKey: string; adjacent: boolean }) =>
+  g.adjacent || allowedDupKeys.has(g.allowKey);
+
+const sameDayActiveGroups  = sameDaySubjectGroups.filter(g => !isAutoAllowed(g));
+const sameDayAllowedGroups = sameDaySubjectGroups.filter(g =>  isAutoAllowed(g));
 
 const teacherConflictGroups = (() => {
   const map = new Map<string, { teacherId: string; entry: TimetableEntry }[]>();
@@ -4443,10 +4447,16 @@ const totalScheduledPeriods = dashEntries.length;
               <p className="text-xs font-bold text-slate-600">
                 {room?.grade_group} {room?.room_name} · {DAYS[(first.day_of_week ?? 1) - 1]} · {(subject as any)?.name_th ?? "—"} ({g.list.length} คาบ)
               </p>
-              <button onClick={() => revokeAllowedDuplicate(g.allowKey)}
-                className="px-2 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-600 text-[11px] font-black shrink-0">
-                ยกเลิกอนุญาต
-              </button>
+                            {allowedDupKeys.has(g.allowKey) ? (
+                <button onClick={() => revokeAllowedDuplicate(g.allowKey)}
+                  className="px-2 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-600 text-[11px] font-black shrink-0">
+                  ยกเลิกอนุญาต
+                </button>
+              ) : (
+                <span className="px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-black shrink-0">
+                  อัตโนมัติ (คาบติดกัน)
+                </span>
+              )}
             </div>
           );
         })}
