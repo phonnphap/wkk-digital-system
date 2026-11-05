@@ -33,6 +33,14 @@ export default function Por5SectionPage() {
   const [academicYearLabel, setAcademicYearLabel] = useState("");
   const [homeroomTeacherName, setHomeroomTeacherName] = useState("");
   const [subjectTeacherName, setSubjectTeacherName] = useState("");
+  const [gradingCfg, setGradingCfg] = useState<{
+  gradingMode: "numeric" | "pass_fail";
+  formativeMaxScore: number;
+  midtermMaxScore: number;
+  finalMaxScore: number;
+  educationLevel: "primary" | "secondary";
+  gradeRoundingMode: "round_up" | "truncate";
+} | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -48,18 +56,27 @@ export default function Por5SectionPage() {
     (async () => {
       if (!sectionId) return;
       const { data: sec } = await supabase
-        .from("subject_sections")
-        .select("id, classroom_id, teacher_id, join_code, subject_id, academic_year_id")
-        .eq("id", sectionId).maybeSingle();
+  .from("subject_sections")
+  .select("id, classroom_id, teacher_id, join_code, subject_id, academic_year_id, formative_max_score, midterm_max_score, final_max_score, show_assignment_scores")
+  .eq("id", sectionId).maybeSingle();
       setSection(sec as SectionRow);
 
       if (sec) {
         const [{ data: subj }, { data: room }] = await Promise.all([
-          supabase.from("subjects").select("id, subject_code, name_th").eq("id", sec.subject_id).maybeSingle(),
+          supabase.from("subjects").select("id, subject_code, name_th, grading_mode, grade_rounding_mode").eq("id", sec.subject_id).maybeSingle(),
           supabase.from("classrooms").select("id, room_name, grade_group, homeroom_teacher_id").eq("id", sec.classroom_id).maybeSingle(),
         ]);
         setSubject(subj as Subject);
         setClassroom(room as Classroom);
+        // ★ เพิ่ม: วางตรงนี้ (ต่อจาก setClassroom)
+  setGradingCfg({
+    gradingMode: (subj as any)?.grading_mode ?? "numeric",
+    formativeMaxScore: (sec as any).formative_max_score ?? 70,
+    midtermMaxScore: (sec as any).midterm_max_score ?? 0,
+    finalMaxScore: (sec as any).final_max_score ?? 30,
+    educationLevel: /^ป/.test(room?.room_name ?? "") ? "primary" : "secondary",
+    gradeRoundingMode: (subj as any)?.grade_rounding_mode === "up" ? "round_up" : "truncate",
+  });
 
         if (room?.homeroom_teacher_id) {
           const { data: t } = await supabase.from("users").select("full_name, first_name, last_name").eq("id", room.homeroom_teacher_id).maybeSingle();
@@ -82,8 +99,10 @@ export default function Por5SectionPage() {
         setStudents((studentsData ?? []) as Student[]);
       }
       setLoading(false);
+      
     })();
   }, [sectionId]);
+  
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold">กำลังโหลดข้อมูล...</div>;
   if (!section || !subject) return <div className="min-h-screen flex items-center justify-center text-red-500 font-bold">❌ ไม่พบข้อมูลวิชานี้</div>;
@@ -139,7 +158,13 @@ export default function Por5SectionPage() {
             students={students}
             currentUserId={currentUserId}
             readOnly
-          />
+  gradingMode={gradingCfg?.gradingMode}
+  formativeMaxScore={gradingCfg?.formativeMaxScore}
+  midtermMaxScore={gradingCfg?.midtermMaxScore}
+  finalMaxScore={gradingCfg?.finalMaxScore}
+  educationLevel={gradingCfg?.educationLevel}
+  gradeRoundingMode={gradingCfg?.gradeRoundingMode}
+/>
         )}
         {tab === "insights" && classroom && (
           <InsightsTool
