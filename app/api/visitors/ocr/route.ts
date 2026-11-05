@@ -1,13 +1,45 @@
-// path: app/api/visitors/ocr/route.ts — อ่านชื่อ/ทะเบียนรถจากรูปด้วย Gemini แล้วทิ้งรูปทันที (ไม่เก็บ)
+// path: app/api/visitors/ocr/route.ts — อ่านชื่อ/ทะเบียนรถด้วย Gemini (retry + โมเดลสำรอง) แล้วทิ้งรูปทันที
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/visitor-server";
 
-const MODEL = "gemini-3.8-flash";
+export const maxDuration = 30;
+
+// รุ่นหลัก + รุ่นสำรอง (แก้ได้ที่ Vercel โดยไม่ต้องแก้โค้ด)
+const MODELS = [
+  process.env.GEMINI_MODEL || "gemini-3.8-flash",
+  process.env.GEMINI_FALLBACK_MODEL || "gemini-3.8-flash-lite",
+];
 
 const PROMPT = `รูปนี้คือบัตรประชาชน/ใบขับขี่ หรือป้ายทะเบียนรถ/เล่มทะเบียนรถของไทย
 อ่านเฉพาะ "ชื่อ-นามสกุล" (ไม่ต้องมีคำนำหน้าก็ได้) และ "ทะเบียนรถ" (พร้อมจังหวัดถ้าเห็น)
 ห้ามส่งเลขบัตรประชาชน ที่อยู่ วันเกิด หรือข้อมูลอื่นกลับมาเด็ดขาด
 ถ้าอ่านไม่ออกให้ใส่ null`;
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+// ลองแต่ละโมเดลสูงสุด 2 ครั้ง ถ้าเจอ 503/429 รอแล้วลองใหม่ หมดแล้วค่อยไปโมเดลถัดไป
+async function callGemini(body: string): Promise<Response> {
+  let last: Response | null = null;
+  for (const model of MODELS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      last = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": process.env.GEMINI_API_KEY!,
+          },
+          body,
+        }
+      );
+      if (last.ok) return last;
+      if (last.status !== 503 && last.status !== 429) break; // error แบบอื่น ลองซ้ำก็ไม่หาย ข้ามไปรุ่นถัดไป
+      await sleep(800 * (attempt + 1));
+    }
+  }
+  return last!;
+}
 
 export async function POST(req: Request) {
   const user = await requireUser(req);
@@ -22,36 +54,29 @@ export async function POST(req: Request) {
   if (file.size > 4 * 1024 * 1024) return NextResponse.json({ ok: false, error: "ไฟล์ใหญ่เกินไป" }, { status: 400 });
 
   const data = Buffer.from(await file.arrayBuffer()).toString("base64");
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": process.env.GEMINI_API_KEY,
+
+  const body = JSON.stringify({
+    contents: [{
+      parts: [
+        { inline_data: { mime_type: "image/jpeg", data } },
+        { text: PROMPT },
+      ],
+    }],
+    generationConfig: {
+      temperature: 0,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          full_name: { type: "STRING", nullable: true },
+          car_plate: { type: "STRING", nullable: true },
         },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { inline_data: { mime_type: "image/jpeg", data } },
-              { text: PROMPT },
-            ],
-          }],
-          generationConfig: {
-            temperature: 0,
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: "OBJECT",
-              properties: {
-                full_name: { type: "STRING", nullable: true },
-                car_plate: { type: "STRING", nullable: true },
-              },
-            },
-          },
-        }),
-      }
-    );
+      },
+    },
+  });
+
+  try {
+    const res = await callGemini(body);
     const json = await res.json();
     if (!res.ok)
       return NextResponse.json({ ok: false, error: json?.error?.message ?? `HTTP ${res.status}` }, { status: 502 });
