@@ -1,13 +1,12 @@
 // path: app/api/visitors/ocr/route.ts — อ่านชื่อ/ทะเบียนรถด้วย Gemini (retry + โมเดลสำรอง) แล้วทิ้งรูปทันที
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/visitor-server";
+import { requireGuard } from "@/lib/visitor-server";
 
 export const maxDuration = 30;
 
-// รุ่นหลัก + รุ่นสำรอง (แก้ได้ที่ Vercel โดยไม่ต้องแก้โค้ด)
 const MODELS = [
   process.env.GEMINI_MODEL || "gemini-3.8-flash",
-  process.env.GEMINI_FALLBACK_MODEL || "gemini-3.8-flash-lite",
+  process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite",
 ];
 
 const PROMPT = `รูปนี้คือบัตรประชาชน/ใบขับขี่ หรือป้ายทะเบียนรถ/เล่มทะเบียนรถของไทย
@@ -17,7 +16,6 @@ const PROMPT = `รูปนี้คือบัตรประชาชน/ใ
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-// ลองแต่ละโมเดลสูงสุด 2 ครั้ง ถ้าเจอ 503/429 รอแล้วลองใหม่ หมดแล้วค่อยไปโมเดลถัดไป
 async function callGemini(body: string): Promise<Response> {
   let last: Response | null = null;
   for (const model of MODELS) {
@@ -34,7 +32,7 @@ async function callGemini(body: string): Promise<Response> {
         }
       );
       if (last.ok) return last;
-      if (last.status !== 503 && last.status !== 429) break; // error แบบอื่น ลองซ้ำก็ไม่หาย ข้ามไปรุ่นถัดไป
+      if (last.status !== 503 && last.status !== 429) break;
       await sleep(800 * (attempt + 1));
     }
   }
@@ -42,8 +40,8 @@ async function callGemini(body: string): Promise<Response> {
 }
 
 export async function POST(req: Request) {
-  const user = await requireUser(req);
-  if (!user) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  if (!(await requireGuard(req)))
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
   if (!process.env.GEMINI_API_KEY)
     return NextResponse.json({ ok: false, error: "ยังไม่ได้ตั้ง GEMINI_API_KEY" }, { status: 500 });

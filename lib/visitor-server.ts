@@ -100,3 +100,14 @@ export async function notifyVisitor(visitorId: string): Promise<boolean> {
     return true;
   } catch (e) { console.warn("[notifyVisitor]", e); return false; }
 }
+
+import { timingSafeEqual } from "crypto";
+
+/** ผ่านถ้าส่งรหัส รปภ. ถูก (x-guard-key) หรือเป็นผู้ใช้ที่ล็อกอิน */
+export async function requireGuard(req: Request): Promise<boolean> {
+  const expected = process.env.GUARD_KEY ?? "";
+  const given = req.headers.get("x-guard-key") ?? "";
+  if (expected && given.length === expected.length &&
+      timingSafeEqual(Buffer.from(given), Buffer.from(expected))) return true;
+  return !!(await requireUser(req));
+}

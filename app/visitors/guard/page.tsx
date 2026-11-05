@@ -1,12 +1,8 @@
-// path: app/visitors/guard/page.tsx — หน้า รปภ. (ต้อง login) แทนที่ไฟล์เดิม
-// เปลี่ยนจากเดิม: โหมดบัตร "อ่านแล้วทิ้งภาพทันที", แสดงสถานะครูรับทราบ, ลิงก์ไปหน้ารายงาน
+// path: app/visitors/guard/page.tsx — หน้า รปภ. (ใช้รหัส PIN ไม่ต้อง login)
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import TargetPicker, { Target, Targets } from "@/components/visitors/TargetPicker";
-
-const supabase = createClient();
 
 type Visitor = {
   id: string; full_name: string; phone?: string | null; car_plate?: string | null;
@@ -28,18 +24,18 @@ async function downscale(file: File, max = 1600): Promise<Blob> {
   bmp.close();
   return new Promise(res => c.toBlob(b => res(b!), "image/jpeg", 0.85));
 }
-async function getToken() {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token ?? "";
-}
-async function notify(visitorId: string) {
-  try {
-    await fetch("/api/visitors/notify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` },
-      body: JSON.stringify({ visitorId }),
-    });
-  } catch (e) { console.warn("[notify]", e); }
+
+const KEY = "guard_key";
+const gKey = () => (typeof window === "undefined" ? "" : localStorage.getItem(KEY) ?? "");
+
+async function api(body?: any, form?: FormData) {
+  const headers: Record<string, string> = { "x-guard-key": gKey() };
+  let init: RequestInit = { headers };
+  if (form) init = { method: "POST", headers, body: form };
+  else if (body) init = { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const res = await fetch("/api/visitors/guard", init);
+  if (res.status === 401) throw new Error("401");
+  return res.json();
 }
 
 const bigBtn = "w-full rounded-3xl font-black shadow-lg active:scale-[0.98] disabled:opacity-40";
@@ -50,7 +46,7 @@ export default function GuardPage() {
   const [target, setTarget] = useState<Target>(null);
   const [name, setName] = useState("");
   const [plate, setPlate] = useState("");
-  const [photo, setPhoto] = useState<Blob | null>(null);   // ใช้เฉพาะโหมด "ไม่มีบัตร"
+  const [photo, setPhoto] = useState<Blob | null>(null);
   const [preview, setPreview] = useState("");
   const [ocrBusy, setOcrBusy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -58,25 +54,28 @@ export default function GuardPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [pending, setPending] = useState<Visitor[]>([]);
   const [inside, setInside] = useState<Visitor[]>([]);
+  const [pin, setPin] = useState("");
   const camRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
-    const since = new Date(Date.now() - 12 * 3600_000).toISOString();
-    const [p, i] = await Promise.all([
-      supabase.from("visitors").select("*").eq("status", "pending").gte("created_at", since).order("created_at", { ascending: false }),
-      supabase.from("visitors").select("*").eq("status", "inside").order("check_in_at", { ascending: false }),
-    ]);
-    setPending((p.data as Visitor[]) ?? []);
-    setInside((i.data as Visitor[]) ?? []);
+    try {
+      const j = await api();
+      setPending(j.pending ?? []); setInside(j.inside ?? []); setAuthed(true);
+    } catch (e: any) { if (e.message === "401") setAuthed(false); }
   }, []);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setAuthed(!!data.session));
-    fetch("/api/visitors").then(r => r.json()).then(setTargets).catch(() => {});
-    load();
-    const t = setInterval(load, 15_000);
-    return () => clearInterval(t);
-  }, [load]);
+ useEffect(() => {
+  // ถ้าเปิดผ่านลิงก์ที่มี ?k=รหัส ให้จำรหัสไว้ แล้วลบรหัสออกจากแถบที่อยู่
+  const k = new URLSearchParams(window.location.search).get("k");
+  if (k) {
+    localStorage.setItem(KEY, k);
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+  fetch("/api/visitors").then(r => r.json()).then(setTargets).catch(() => {});
+  load();
+  const t = setInterval(load, 15_000);
+  return () => clearInterval(t);
+}, [load]);
 
   function reset() {
     if (preview) URL.revokeObjectURL(preview);
@@ -85,36 +84,25 @@ export default function GuardPage() {
   }
   function flash(m: string) { setMsg(m); setTimeout(() => setMsg(""), 3000); }
 
-  async function confirmPending(v: Visitor) {
-    await supabase.from("visitors").update({ status: "inside", check_in_at: new Date().toISOString() }).eq("id", v.id);
-    notify(v.id); flash(`✅ ให้เข้า: ${v.full_name}`); load();
-  }
-  async function rejectPending(v: Visitor) {
-    await supabase.from("visitors").update({ status: "rejected" }).eq("id", v.id);
-    load();
-  }
-  async function checkout(v: Visitor) {
-    await supabase.from("visitors").update({ status: "left", check_out_at: new Date().toISOString() }).eq("id", v.id);
-    flash(`🚪 ออกแล้ว: ${v.full_name}`); load();
-  }
+  async function confirmPending(v: Visitor) { await api({ action: "confirm", id: v.id }); flash(`✅ ให้เข้า: ${v.full_name}`); load(); }
+  async function rejectPending(v: Visitor) { await api({ action: "reject", id: v.id }); load(); }
+  async function checkout(v: Visitor) { await api({ action: "checkout", id: v.id }); flash(`🚪 ออกแล้ว: ${v.full_name}`); load(); }
 
   async function onPickPhoto(file: File | undefined) {
-    if (camRef.current) camRef.current.value = "";   // ล้าง input กันไฟล์ค้างในเบราว์เซอร์
+    if (camRef.current) camRef.current.value = "";
     if (!file) return;
     const blob = await downscale(file);
 
-    // โหมดไม่มีบัตร: เก็บรูปหน้าไว้แนบ
     if (mode === "face") {
       if (preview) URL.revokeObjectURL(preview);
       setPhoto(blob); setPreview(URL.createObjectURL(blob));
       return;
     }
 
-    // โหมดบัตร/ทะเบียน: อ่านแล้วทิ้ง — ไม่ set state รูป ไม่แสดง preview ไม่อัปโหลด
     setOcrBusy(true); setMsg("");
     try {
       const fd = new FormData(); fd.append("file", blob, "p.jpg");
-      const res = await fetch("/api/visitors/ocr", { method: "POST", headers: { Authorization: `Bearer ${await getToken()}` }, body: fd });
+      const res = await fetch("/api/visitors/ocr", { method: "POST", headers: { "x-guard-key": gKey() }, body: fd });
       const j = await res.json();
       if (j.ok) {
         if (j.full_name) setName(j.full_name);
@@ -130,30 +118,26 @@ export default function GuardPage() {
     if (mode === "id" && !name.trim() && !plate.trim()) return setMsg("⚠️ กรุณาถ่ายบัตร/ทะเบียน หรือพิมพ์ชื่อ");
     if (mode === "face" && !photo) return setMsg("⚠️ กรุณาถ่ายรูปหน้าผู้ปกครอง");
     setBusy(true); setMsg("");
-
-    let photo_path: string | null = null;
-    if (mode === "face" && photo) {          // เก็บรูปเฉพาะโหมดไม่มีบัตร — รูปบัตรไม่เก็บ
-      const path = `${new Date().toISOString().slice(0, 10)}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
-      const { error } = await supabase.storage.from("visitor-photos").upload(path, photo, { contentType: "image/jpeg" });
-      if (error) { setBusy(false); return setMsg("❌ อัปโหลดรูปไม่สำเร็จ: " + error.message); }
-      photo_path = path;
-    }
-
-    const { data, error } = await supabase.from("visitors").insert({
-      full_name: name.trim() || "ผู้ปกครอง (ไม่ระบุชื่อ)",
-      car_plate: plate.trim() || null,
-      contact_person: target.label,
-      target_type: target.type, target_classroom_id: target.classroom_id ?? null, target_label: target.label,
-      source: mode === "id" ? "guard_id" : "guard_face",
-      status: "inside", check_in_at: new Date().toISOString(),
-      photo_path, photo_url: null, check_out_at: null,
-    }).select("id").single();
+    try {
+      const fd = new FormData();
+      fd.append("data", JSON.stringify({ name, plate, mode, target }));
+      if (mode === "face" && photo) fd.append("photo", photo, "p.jpg");
+      const j = await api(undefined, fd);
+      if (!j.ok) { setBusy(false); return setMsg("❌ " + (j.error ?? "บันทึกไม่สำเร็จ")); }
+      flash("✅ บันทึกเข้าเรียบร้อย"); reset(); load();
+    } catch { setMsg("❌ บันทึกไม่สำเร็จ"); }
     setBusy(false);
-    if (error || !data) return setMsg("❌ บันทึกไม่สำเร็จ: " + (error?.message ?? ""));
-    notify(data.id); flash("✅ บันทึกเข้าเรียบร้อย"); reset(); load();
   }
 
-  if (authed === false) return <div className="p-10 text-center text-3xl font-black text-red-600">❌ กรุณาเข้าสู่ระบบก่อน</div>;
+  if (authed === false) return (
+    <div className="space-y-5 p-8 text-center">
+      <h1 className="text-3xl font-black">🛡️ ป้อมยาม</h1>
+      <input type="password" value={pin} onChange={e => setPin(e.target.value)} placeholder="รหัส รปภ."
+        className="w-full rounded-2xl border-4 border-slate-300 px-5 py-5 text-center text-2xl" />
+      <button className={`${bigBtn} bg-teal-700 py-6 text-3xl text-white`}
+        onClick={() => { localStorage.setItem(KEY, pin); setPin(""); setAuthed(null); load(); }}>เข้าใช้งาน</button>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-slate-100 pb-10">
