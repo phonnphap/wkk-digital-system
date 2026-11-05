@@ -388,7 +388,8 @@ if (!savedHead) {
         try {
           const res = await fetch(`/api/subject-grades/summary?subject_section_id=${sec.id}`);
           const json = await res.json();
-          const assignments = json.assignments ?? [];
+          // ★ ตัดชิ้นงานฉบับร่างออก ให้ตรงกับหน้า Smart Class
+const assignments = (json.assignments ?? []).filter((a: any) => a.status !== "draft");
           const submissions = json.submissions ?? [];
           const scoreEvents = json.scoreEvents ?? [];
           const criteria = json.criteria ?? [];
