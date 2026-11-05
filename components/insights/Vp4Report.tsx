@@ -33,7 +33,11 @@ type SectionInfo = {
   score_group_weight_percent?: number;
   gradeRoundingMode?: "up" | "truncate";
 };
-type GradeCell = { grandTotal: number; percentage: number; grade: string; totalMax: number };
+type GradeCell = {
+  grandTotal: number; percentage: number; grade: string; totalMax: number;
+  collectScore?: number;   // คะแนนเก็บที่ได้ (เช่น 30 จาก 30/40)
+  collectMax?: number;     // คะแนนเก็บเต็ม (เช่น 40 จาก 30/40)
+};
 type AttendCell = { present: number; total: number };
 type AdvisorInfo = { prefix?: string; first_name: string; last_name: string };
 
@@ -94,6 +98,27 @@ function groupCombinedScore(
     return sum + w * cells[i]!.grandTotal;
   }, 0);
   return applyRounding(combined, members[0]?.gradeRoundingMode ?? "truncate");
+}
+// คะแนนเก็บ: เต็ม / ที่ได้ (ใช้ในแบบรายงานเทอม 1 ระดับประถม)
+function collectOf(cell?: GradeCell): { max: number | null; got: number | null } {
+  if (!cell) return { max: null, got: null };
+  return {
+    max: cell.collectMax ?? null,
+    got: cell.collectScore ?? null,
+  };
+}
+
+function groupCollect(
+  gradeMatrix: Record<string, Record<string, GradeCell>>,
+  studentId: string,
+  members: SectionInfo[]
+): { max: number | null; got: number | null } {
+  const parts = members.map(m => collectOf(gradeMatrix[studentId]?.[m.id]));
+  if (parts.some(p => p.max === null || p.got === null)) return { max: null, got: null };
+  return {
+    max: parts.reduce((s, p) => s + (p.max as number), 0),
+    got: parts.reduce((s, p) => s + (p.got as number), 0),
+  };
 }
 
 function formatFullName(a?: AdvisorInfo): string {
@@ -480,8 +505,9 @@ function handleScoreDateChange(v: string) {
                   })
                 ) : (
                   reportRows.map(row => {
-                    if (row.kind === "group") {
+                    if (row.kind === "group") {                      
                       const combined = groupCombinedScore(gradeMatrix, s.id, row.members);
+                      const gc = groupCollect(gradeMatrix, s.id, row.members);
                       const unitSum = row.members.reduce((sum, m) => sum + ((isPrimary ? m.hours_per_year : m.credit_hours) ?? 0), 0);
                       const groupFullScore = row.members.reduce((sum, m) => sum + (gradeMatrix[s.id]?.[m.id]?.totalMax ?? 0), 0);
                       return (
@@ -491,11 +517,11 @@ function handleScoreDateChange(v: string) {
                           <td className={`${TD} text-center`}>พื้นฐาน</td>
                           <td className={`${TD} text-center`}>{unitSum || "-"}</td>
                           <td className={`${TD} text-center font-black text-black`}>
-                            {mode === "primary1" ? (groupFullScore || "-") : (combined ?? "-")}
-                          </td>
-                          <td className={`${TD} text-center font-black text-black`}>
-                            {mode === "primary1" ? (combined ?? "-") : "-"}
-                          </td>
+  {mode === "primary1" ? (gc.max ?? "-") : (combined ?? "-")}
+</td>
+<td className={`${TD} text-center font-black text-black`}>
+  {mode === "primary1" ? (gc.got ?? "-") : "-"}
+</td>
                           {mode === "secondary" && <td className={TD}></td>}
                           <td className={`${TD} text-center`}>{overall?.characteristic ?? "-"}</td>
                           <td className={`${TD} text-center`}>{overall?.readThinkWrite ?? "-"}</td>
@@ -506,6 +532,7 @@ function handleScoreDateChange(v: string) {
 
                     const sec = row.section;
                     const cell = gradeMatrix[s.id]?.[sec.id];
+                    const col = collectOf(cell);
                     const isActivity = isActivitySubject(sec.subject_code);
                     const unitValue = isPrimary ? sec.hours_per_year : sec.credit_hours;
                     return (
@@ -515,11 +542,11 @@ function handleScoreDateChange(v: string) {
                         <td className={`${TD} text-center`}>{subjectTypeLabel(sec)}</td>
                         <td className={`${TD} text-center`}>{isActivity ? "-" : (unitValue ?? "-")}</td>
                         <td className={`${TD} text-center font-black text-black`}>
-                          {isActivity ? "-" : mode === "primary1" ? (cell?.totalMax ?? "-") : (cell?.percentage != null ? Math.round(cell.percentage) : "-")}
-                        </td>
-                        <td className={`${TD} text-center font-black text-black`}>
-                          {isActivity ? activityResult(attendMatrix[s.id]?.[sec.id]) : mode === "primary1" ? (cell?.grandTotal ?? "-") : (cell?.grade ?? "-")}
-                        </td>
+  {isActivity ? "-" : mode === "primary1" ? (col.max ?? "-") : (cell?.percentage != null ? Math.round(cell.percentage) : "-")}
+</td>
+<td className={`${TD} text-center font-black text-black`}>
+  {isActivity ? activityResult(attendMatrix[s.id]?.[sec.id]) : mode === "primary1" ? (col.got ?? "-") : (cell?.grade ?? "-")}
+</td>
                         {mode === "secondary" && <td className={TD}></td>}
                         <td className={`${TD} text-center`}>{overall?.characteristic ?? "-"}</td>
                         <td className={`${TD} text-center`}>{overall?.readThinkWrite ?? "-"}</td>

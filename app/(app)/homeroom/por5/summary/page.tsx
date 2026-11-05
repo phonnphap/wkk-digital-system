@@ -27,7 +27,11 @@ type SectionInfo = {
   finalMaxScore?: number; gradeRoundingMode?: "up" | "truncate";
 };
 
-type GradeCell = { grandTotal: number; percentage: number; grade: string; totalMax: number };
+type GradeCell = {
+  grandTotal: number; percentage: number; grade: string; totalMax: number;
+  collectScore: number;   // คะแนนเก็บที่ได้ (ตัวเลขหน้า /)
+  collectMax: number;     // คะแนนเก็บเต็ม (ตัวเลขหลัง /)
+};
 type AttendCell = { present: number; total: number };
 type ViewTab = "grades" | "attendance" | "insights" | "vp4";
 type DocKind = "final" | "midterm";
@@ -454,8 +458,21 @@ if (!savedHead) {
               : 0;
             const displayTotal = assignmentTotal + specialTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0);
             const displayMax = usesComponentGrading ? totalMaxScore + examMaxTotal : totalMaxScore;
+            // ★ คะแนนเก็บ ให้ตรงกับคอลัมน์ "คะแนนเก็บ" ในหน้า Smart Class
+// = คะแนนงาน (ตามน้ำหนัก) + คะแนนพิเศษ + กลางภาค (ไม่รวมปลายภาค)
+const collectScore = usesComponentGrading
+  ? assignmentTotal + specialTotal + (useMidterm ? (midtermScore ?? 0) : 0)
+  : assignmentTotal;
+const collectMax = usesComponentGrading
+  ? totalMaxScore + (useMidterm ? midtermMaxScore : 0)
+  : totalMaxScore;
 
-            gMatrix[s.id][sec.id] = { grandTotal: applyRounding(displayTotal, sec.gradeRoundingMode), percentage, grade, totalMax: displayMax };
+            gMatrix[s.id][sec.id] = {
+  grandTotal: applyRounding(displayTotal, sec.gradeRoundingMode),
+  percentage, grade, totalMax: displayMax,
+  collectScore: Math.round(collectScore * 100) / 100,
+  collectMax: Math.round(collectMax * 100) / 100,
+};
           });
         } catch { /* ข้ามวิชานี้ถ้าดึงไม่สำเร็จ */ }
 
