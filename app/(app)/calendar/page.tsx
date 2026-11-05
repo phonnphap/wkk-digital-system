@@ -1066,7 +1066,7 @@ export default function CalendarPage() {
   const [modalEv,     setModalEv]    = useState<Partial<CalEvent>|null|false>(false);
   const [catFilter,   setCatFilter]  = useState<Set<string>>(new Set(Object.keys(CATEGORIES)));
   const [showPending, setShowPending]= useState(false);
-  const EXTRA_CALENDAR_APPROVER_EMAILS = ["nantawan@khienkhet.ac.th"];
+  const EXTRA_CALENDAR_APPROVER_EMAILS = ["nantawan@khienkhet.ac.th","wanida@khienkhet.ac.th"];
   const isApprover = !!(user && (
   APPROVER_ROLES.includes(user.role) ||
   EXTRA_CALENDAR_APPROVER_EMAILS.includes((user.email || "").toLowerCase())
