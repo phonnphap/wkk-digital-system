@@ -2921,11 +2921,27 @@ async function syncSubjectSection({
           teacher_id: termTeachers[0], co_teacher_id: termTeachers[1] ?? null, is_active: true,
         }).eq("id", existing.id);
         if (error) throw error;
-        if (departed.length > 0) {
-          await (supabase.from("section_teacher_access") as any).upsert(
-            departed.map(tid => ({ section_id: existing.id, teacher_id: tid, access_level: "viewer" })),
-            { onConflict: "section_id,teacher_id" }
-          );
+                if (departed.length > 0) {
+          const yn = entryRoom ? getYearNameForClassroom(entryRoom, academicYearsRaw) : "";
+          const sibIds = allClassrooms
+            .filter(c => entryRoom
+              && c.grade_group === entryRoom.grade_group
+              && (c.room_name ?? "").trim() === (entryRoom.room_name ?? "").trim()
+              && getYearNameForClassroom(c, academicYearsRaw) === yn)
+            .map(c => c.id);
+          const realDeparted: string[] = [];
+          for (const tid of departed) {
+            const { data: had } = await supabase.from("timetable_entries").select("id")
+              .eq("subject_id", subjectId).in("classroom_id", sibIds)
+              .or(`teacher_id.eq.${tid},teacher_id_2.eq.${tid}`).limit(1);
+            if (had && had.length > 0) realDeparted.push(tid);
+          }
+          if (realDeparted.length > 0) {
+            await (supabase.from("section_teacher_access") as any).upsert(
+              realDeparted.map(tid => ({ section_id: existing.id, teacher_id: tid, access_level: "viewer" })),
+              { onConflict: "section_id,teacher_id" }
+            );
+          }
         }
         carriedOver = arrived.length > 0;
       }
