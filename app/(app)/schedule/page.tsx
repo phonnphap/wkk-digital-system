@@ -3195,12 +3195,34 @@ if (sRoom && isYearlyRoom(sRoom)) {
     return data.id as string;
   }
 
+  async function desyncReplacedEntry(
+  prev: TimetableEntry | null | undefined,
+  next: { subject_id: string; teacher_id: string; teacher_id_2?: string | null }
+) {
+  if (!prev) return;
+  const newTeachers = [next.teacher_id, next.teacher_id_2].filter(Boolean) as string[];
+  const subjectChanged = prev.subject_id !== next.subject_id;
+  const yearId = allClassrooms.find(c => c.id === prev.classroom_id)?.academic_year_id ?? prev.academic_year_id;
+  for (const tid of [prev.teacher_id, prev.teacher_id_2].filter(Boolean) as string[]) {
+    if (subjectChanged || !newTeachers.includes(tid)) {
+      await desyncSubjectSection({
+        subjectId: prev.subject_id, classroomId: prev.classroom_id,
+        academicYearId: yearId, teacherId: tid,
+      });
+    }
+    
+  }
+  
+}
+
+
   // ── Save direct (admin) ───────────────────────────────────────────────────
   // ✅ เพิ่ม try/catch + alert ให้เห็น error จริงเสมอ (เดิมไม่เช็ค error เลย ทำให้ "กดแล้วเงียบ")
   // ── Save direct (admin) ───────────────────────────────────────────────────
   async function handleSaveDirect(data: any) {
   // ★ ใช้ปีการศึกษาของ "ห้อง" เสมอ (ห้องเทอม 1 กับเทอม 2 ผูกคนละแถว)
   data = { ...data, academic_year_id: allClassrooms.find(c => c.id === data.classroom_id)?.academic_year_id ?? data.academic_year_id };
+    const prevEntry = data.id ? (entries.find(e => e.id === data.id) ?? null) : null;
   try {
       const realSlotId = await ensureRealTimeSlot(data.time_slot_id, data.time_slot);
 
