@@ -3252,11 +3252,12 @@ if (sRoom && isYearlyRoom(sRoom)) {
           })
           .eq("id", otherClash[0].id);
         if (overwriteErr) throw overwriteErr;
-        await loadEntries();
+               await loadEntries();
         await syncSubjectSection({
           subjectId: data.subject_id, classroomId: data.classroom_id, academicYearId: data.academic_year_id,
           teacherId: data.teacher_id, teacherId2: data.teacher_id_2, createdBy: user!.id,
         });
+        await desyncReplacedEntry(entries.find(e => e.id === otherClash[0].id), data);
         return;
       }
 
@@ -3280,11 +3281,12 @@ if (sRoom && isYearlyRoom(sRoom)) {
         if (error) throw error;
       }
       await loadEntries();
-      await checkAndNotifyConflict(data.classroom_id, data.day_of_week, realSlotId);
+            await checkAndNotifyConflict(data.classroom_id, data.day_of_week, realSlotId);
       await syncSubjectSection({
         subjectId: data.subject_id, classroomId: data.classroom_id, academicYearId: data.academic_year_id,
         teacherId: data.teacher_id, teacherId2: data.teacher_id_2, createdBy: user!.id,
       });
+      await desyncReplacedEntry(prevEntry, data);
     } catch (err: any) {
       console.error("[handleSaveDirect] error:", err);
 
@@ -3377,12 +3379,18 @@ if (sRoom && isYearlyRoom(sRoom)) {
         subjectId: req.new_subject_id, classroomId: req.classroom_id, academicYearId: req.academic_year_id,
         teacherId: req.new_teacher_id, teacherId2: req.new_teacher_id_2, createdBy: user.id,
       });
+      
       // ★ ถ้าวิชา/ห้องเดิมเปลี่ยนไป ให้ desync ของเก่าด้วย (ครูเก่าอาจไม่ได้สอนคู่เดิมแล้ว)
-      if (req.old_teacher_id && (req.old_subject_id !== req.new_subject_id)) {
-        await desyncSubjectSection({
-          subjectId: req.old_subject_id!, classroomId: req.classroom_id, academicYearId: req.academic_year_id,
-          teacherId: req.old_teacher_id,
-        });
+            if (req.old_subject_id) {
+        const newT = [req.new_teacher_id, req.new_teacher_id_2].filter(Boolean);
+        for (const tid of [req.old_teacher_id, req.old_teacher_id_2].filter(Boolean) as string[]) {
+          if (req.old_subject_id !== req.new_subject_id || !newT.includes(tid)) {
+            await desyncSubjectSection({
+              subjectId: req.old_subject_id, classroomId: req.classroom_id,
+              academicYearId: req.academic_year_id, teacherId: tid,
+            });
+          }
+        }
       }
       if (req.requester?.email) {
         sendTeamsDM("academic", req.requester.email,
@@ -3390,11 +3398,11 @@ if (sRoom && isYearlyRoom(sRoom)) {
       } else {
         console.warn("[handleApproveRequest] ไม่ส่ง DM เพราะไม่มี email ของผู้ขอ:", req.requester);
       }
-      alert("✅ อนุมัติและอัปเดตตารางสอนแล้ว");
+      alert("✅ อนุมัติและอัปเดตตารางสอนแล้ว");  
     } catch (err: any) {
       console.error("[handleApproveRequest] error:", err);
       alert("❌ อนุมัติไม่สำเร็จ: " + (err?.message ?? "เกิดข้อผิดพลาดไม่ทราบสาเหตุ"));
-    }
+    }          
   }
 
   // ── Reject request ────────────────────────────────────────────────────────
@@ -4388,7 +4396,7 @@ const totalScheduledPeriods = dashEntries.length;
                           <p className="text-slate-500 text-xs">{displayName(teacher1)}{teacher1?.is_active === false && <span className="text-[9px] font-black bg-red-500 text-white px-1.5 py-0.5 rounded">⚠️ ครูย้ายออก</span>} {teacher2 ? ` + ${displayName(teacher2)}` : ""}</p>
                         </div>
                         <button
-                          onClick={async () => { if (confirm("ลบรายการนี้?")) { await supabase.from("timetable_entries").delete().eq("id", e.id); await Promise.all([loadEntries(), loadAllEntriesForCheck()]); } }}
+                          onClick={async () => { if (confirm("ลบรายการนี้?")) { await handleDeleteEntry(e.id); await loadAllEntriesForCheck(); } }}
                           className="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-xs shrink-0">
                           🗑️ ลบรายการนี้
                         </button>

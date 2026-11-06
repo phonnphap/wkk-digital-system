@@ -6,6 +6,7 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from 'next/navigation';
 import { createClient } from "@/lib/supabase/client";
 import AdminGuard from "@/components/auth/AdminGuard";
+import DeviceApprovalPanel from "@/components/DeviceApprovalPanel";
 
 const supabase = createClient();
 
@@ -468,6 +469,9 @@ function AdminFaceRegisterPageInner() {
             </button>
           </div>
         </div>
+        <div className="mt-6">
+            <DeviceApprovalPanel />
+          </div>
       </div>
 
       <style jsx global>{`
@@ -490,3 +494,5 @@ export default function AdminFaceRegisterPage() {
     </AdminGuard>
   );
 }
+
+<DeviceApprovalPanel />
