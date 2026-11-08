@@ -415,6 +415,9 @@ const [serverShowScores, setServerShowScores] = useState<boolean | null>(null);
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "บันทึกลำดับไม่สำเร็จ");
+      if (json.syncedSections > 0) {
+  showToast(`ซิงก์คะแนนไปอีก ${json.syncedSections} วิชาในกลุ่มแล้ว`, "info");
+}
     } catch (e: any) {
       showToast("บันทึกลำดับคอลัมน์ไม่สำเร็จ: " + (e?.message ?? "unknown error"), "error");
       loadData(); // rollback: โหลดลำดับจริงจาก server กลับมาใหม่

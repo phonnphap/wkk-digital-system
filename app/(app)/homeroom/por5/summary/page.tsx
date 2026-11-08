@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import InsightsTool from "@/components/insights/InsightsTool";
 import Vp4Report from "@/components/insights/Vp4Report";
+import AuditReport from "@/components/insights/AuditReport";
 
 const supabase = createClient();
 const ADMIN_ROLES = ["admin", "executive", "director", "deputy_director"];
@@ -121,6 +122,7 @@ export default function Por5SummaryPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const [yearName, setYearName] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [auditMode, setAuditMode] = useState(false);
 
   const level = selectedClassroom ? detectLevel(selectedClassroom.room_name) : "primary";
   // ประถมมีแต่ใบเกรด; มัธยมเลือก ใบเกรด/แบบวัดผล 4 (มิดเทอม) ได้
@@ -582,7 +584,16 @@ const collectMax = usesComponentGrading
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold">กำลังโหลดข้อมูล...</div>;
-
+  if (auditMode && isAdmin) {
+  return (
+    <div className="w-full px-4 sm:px-6 py-6 lg:px-8">
+      <button onClick={() => setAuditMode(false)} className="mb-3 text-xs font-bold text-blue-600 underline print:hidden">← กลับ</button>
+      <AuditReport
+        rooms={visibleClassrooms.map(c => ({ classroom_id: c.classroom_id, room_name: c.room_name, split: c.split }))}
+        semester={semester} yearName={yearName} schoolName="โรงเรียนวัดเขียนเขต" />
+    </div>
+  );
+}
   const tabBtn = (active: boolean) =>
     `px-4 py-2 rounded-xl font-black text-sm ${active ? "bg-blue-600 text-white" : "bg-white border border-slate-200 text-slate-500"}`;
 
@@ -607,6 +618,12 @@ const collectMax = usesComponentGrading
           {isAdmin && (
             <p className="mt-3 text-xs font-bold text-indigo-600">🔑 สิทธิ์ผู้ดูแล — เห็นทุกห้องทั้งโรงเรียน ({visibleClassrooms.length} ห้อง)</p>
           )}
+          {isAdmin && (
+  <button onClick={() => setAuditMode(true)}
+    className="mt-3 px-4 py-2 rounded-xl bg-indigo-600 text-white font-black text-sm">
+    📋 ตรวจสอบการกรอกคะแนนทั้งโรงเรียน
+  </button>
+)}
           {(() => {
             const used = new Set<string>();
             const sections = levelGroups.map(g => {
