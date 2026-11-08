@@ -278,6 +278,9 @@ function handleScoreDateChange(v: string) {
   }, [classroomLevel, students]);
 
   const advisors = advisorNames;
+// ครูที่ปรึกษามีคนเดียว (ไม่นับช่องว่าง)
+const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].last_name));
+
 
   function subjectTypeLabel(sec: SectionInfo): string {
     if (isActivitySubject(sec.subject_code)) return "กิจกรรม";
@@ -354,7 +357,7 @@ function handleScoreDateChange(v: string) {
   }
 
   // ความกว้างเส้นลายเซ็น (เท่ากันทุกช่อง)
-  const advisorCombinedName = `${formatFullName(advisors[0])}${advisors[1] ? " / " + formatFullName(advisors[1]) : ""}`;
+  const advisorCombinedName = `${formatFullName(advisors[0])}${hasTwoAdvisors ? " / " + formatFullName(advisors[1]) : ""}`;
   const signatureLineWidthPx = Math.max(
     SIGNATURE_LINE_WIDTH_PX,
     ...[formatFullName(advisors[0]), formatFullName(advisors[1]), advisorCombinedName, directorName, gradeHeadName]
@@ -597,9 +600,18 @@ function handleScoreDateChange(v: string) {
             {mode === "midterm" ? (
               <>
                 <div className="grid grid-cols-2 signature-grid text-xl">
-                  <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
-                  <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[1])} lineWidthPx={signatureLineWidthPx} />
-                </div>
+  {hasTwoAdvisors ? (
+    <>
+      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
+      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[1])} lineWidthPx={signatureLineWidthPx} />
+    </>
+  ) : (
+    <>
+      <div></div>
+      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
+    </>
+  )}
+</div>
                 <div className="h-8 print:h-6"></div>
                 <div className="grid grid-cols-2 signature-grid text-xl items-start">
                   <div><AttendanceBox pct={attendPct} /></div>
@@ -613,15 +625,22 @@ function handleScoreDateChange(v: string) {
               <>
                 <div className={`grid ${isPrimary ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"} signature-grid text-xl`}>
                   {isPrimary ? (
-                    <>
-                      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
-                      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[1])} lineWidthPx={signatureLineWidthPx} />
-                    </>
-                  ) : (
-                    <div className="sm:col-span-2">
-                      <SignatureField role="ครูที่ปรึกษา" nameLabel={advisorCombinedName} lineWidthPx={signatureLineWidthPx} />
-                    </div>
-                  )}
+  hasTwoAdvisors ? (
+    <>
+      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
+      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[1])} lineWidthPx={signatureLineWidthPx} />
+    </>
+  ) : (
+    <>
+      <div></div>
+      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
+    </>
+  )
+) : (
+  <div className="sm:col-span-2">
+    <SignatureField role="ครูที่ปรึกษา" nameLabel={advisorCombinedName} lineWidthPx={signatureLineWidthPx} />
+  </div>
+)}
                 </div>
                 <div className="h-8 print:h-6"></div>
                 <div className="h-8 print:h-6"></div>
