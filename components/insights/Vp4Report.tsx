@@ -675,8 +675,23 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
         );
       })}
 
-      <style jsx global>{`
+            <style jsx global>{`
+  /* โหลดฟอนต์: ใช้ฟอนต์ในเครื่องก่อน ถ้าไม่มีให้ใช้ไฟล์ในโปรเจกต์ (ดูหมายเหตุด้านล่าง) */
+  @font-face {
+    font-family: "TH Sarabun New";
+    src: local("TH Sarabun New"), local("THSarabunNew"), local("TH SarabunPSK"),
+         url("/fonts/THSarabunNew.ttf") format("truetype");
+    font-weight: normal;
+  }
+  @font-face {
+    font-family: "TH Sarabun New";
+    src: local("TH Sarabun New Bold"), local("THSarabunNew-Bold"), local("TH SarabunPSK Bold"),
+         url("/fonts/THSarabunNew-Bold.ttf") format("truetype");
+    font-weight: bold;
+  }
+
   .signature-grid { gap: 7rem; }
+
   @media print {
     @page { size: A4 portrait; margin: 8mm; }
 
@@ -684,6 +699,8 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
       background: #fff !important;
       height: auto !important;
       overflow: visible !important;
+      zoom: 1 !important;
+      transform: none !important;
     }
 
     /* ซ่อนทุกอย่าง (sidebar/header ของระบบ) แล้วโชว์เฉพาะใบเกรด */
@@ -695,14 +712,13 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
       width: 100% !important;
       margin: 0 !important;
       padding: 0 !important;
+      zoom: 1 !important;
+      transform: none !important;
     }
 
     .vp4-page {
       page-break-after: always;
       break-after: page;
-      page-break-inside: avoid;
-      break-inside: avoid;
-      font-size: 16px;
       padding: 4mm !important;
       margin: 0 !important;
       width: 100% !important;
@@ -711,19 +727,28 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
       border: 0 !important;
     }
     .vp4-page:last-child { page-break-after: auto; break-after: auto; }
+
+    /* บังคับ TH Sarabun New ขนาด 16pt ทุกตัวอักษร ไม่ย่อ */
+    .vp4-page, .vp4-page * {
+      font-family: "TH Sarabun New", "THSarabunNew", "TH SarabunPSK", sans-serif !important;
+      font-size: 16pt !important;
+      line-height: 1.1 !important;
+      letter-spacing: 0 !important;
+    }
+
+    /* ตราโรงเรียน 3 ซม. */
     .vp4-page img { height: 3cm !important; width: 3cm !important; margin-bottom: 2px !important; }
+
     .vp4-page .mb-3 { margin-bottom: 4px !important; }
     .vp4-page .mb-2 { margin-bottom: 2px !important; }
     .vp4-page .mt-3 { margin-top: 4px !important; }
     .vp4-page .mt-4 { margin-top: 6px !important; }
-    .vp4-page .h-8 { height: 10px !important; }
+    .vp4-page .h-8 { height: 8px !important; }
     .vp4-page .gap-6 { gap: 10px !important; }
-    .vp4-page .signature-grid { gap: 60px !important; }
-    .vp4-table { table-layout: fixed; width: 100%; }
-        .vp4-table th, .vp4-table td { font-size: 16px; padding: 2px 4px; line-height: 1.25; }
-    .vp4-th, .vp4-table th { font-weight: 900; }
-    .vp4-page, .vp4-page * { font-size: 16px !important; }
+    .vp4-page .signature-grid { gap: 40px !important; }
 
+    .vp4-table { table-layout: fixed; width: 100%; }
+    .vp4-table th, .vp4-table td { padding: 1px 4px !important; }
     .vp4-table th { font-weight: 900; }
   }
 `}</style>
