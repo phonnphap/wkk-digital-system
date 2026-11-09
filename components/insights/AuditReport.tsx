@@ -94,6 +94,7 @@ export default function AuditReport({
   const [onlyProblems, setOnlyProblems] = useState(true);
   const [skipFinal, setSkipFinal] = useState(false); // ไม่นับปลายภาค (เช่น ตรวจช่วงกลางภาค)
   const [excludeActivity, setExcludeActivity] = useState(true); // ไม่รวมวิชากิจกรรม (รหัส ก)
+  const [hideIssues, setHideIssues] = useState(false); // ซ่อนแท็บ/ส่วน 3. คะแนนผิดปกติ (เช่น เทอม 1 ที่ยังไม่มีปลายภาค)
 
   const levels = useMemo(() => {
     const m = new Map<string, AuditRoom[]>();
@@ -363,6 +364,10 @@ export default function AuditReport({
             <label className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
   <input type="checkbox" checked={excludeActivity} onChange={e => setExcludeActivity(e.target.checked)} /> ไม่รวมวิชากิจกรรม (รหัส ก)
 </label>
+<label className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
+  <input type="checkbox" checked={hideIssues}
+  onChange={e => { setHideIssues(e.target.checked); if (e.target.checked && view === "issues") setView("missing"); }} />ไม่แสดงคะแนนผิดปกติ
+</label>
             <button onClick={() => window.print()} className="ml-auto px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm">
               🖨️ พิมพ์รายงาน
             </button>
@@ -392,11 +397,11 @@ export default function AuditReport({
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
-              ["วิชา-ห้องที่ตรวจ", kpi.total, "text-slate-700"],
-              ["กรอกคะแนนยังไม่ครบ", kpi.incomplete, kpi.incomplete ? "text-amber-600" : "text-emerald-600"],
-              ["วิชาที่คะแนนเต็มไม่เท่ากันทุกห้อง", kpi.maxMismatch, kpi.maxMismatch ? "text-red-600" : "text-emerald-600"],
-              ["รายการคะแนนผิดปกติ", kpi.issues, kpi.issues ? "text-red-600" : "text-emerald-600"],
-            ].map(([l, v, c]) => (
+  ["วิชา-ห้องที่ตรวจ", kpi.total, "text-slate-700"],
+  ["กรอกคะแนนยังไม่ครบ", kpi.incomplete, kpi.incomplete ? "text-amber-600" : "text-emerald-600"],
+  ["วิชาที่คะแนนเต็มไม่เท่ากันทุกห้อง", kpi.maxMismatch, kpi.maxMismatch ? "text-red-600" : "text-emerald-600"],
+  ...(hideIssues ? [] : [["รายการคะแนนผิดปกติ", kpi.issues, kpi.issues ? "text-red-600" : "text-emerald-600"]]),
+].map(([l, v, c]) => (
               <div key={l as string} className="rounded-2xl border border-slate-200 bg-white p-3">
                 <p className="text-xs font-bold text-slate-500">{l}</p>
                 <p className={`text-2xl font-black ${c}`}>{v}</p>
@@ -406,10 +411,10 @@ export default function AuditReport({
           {kpi.failed > 0 && <p className="text-xs font-bold text-amber-600">⚠️ ดึงข้อมูลไม่สำเร็จ {kpi.failed} วิชา (แสดงเป็น "ดึงข้อมูลไม่ได้") ลองกดตรวจสอบใหม่</p>}
 
           <div className="print:hidden flex gap-2 flex-wrap">
-            {tab("missing", "📝 คะแนนที่ยังไม่กรอก")}
-            {tab("max", "⚖️ คะแนนเต็มแต่ละห้อง")}
-            {tab("issues", "🚨 คะแนนผิดปกติ")}
-          </div>
+  {tab("missing", "📝 คะแนนที่ยังไม่กรอก")}
+  {tab("max", "⚖️ คะแนนเต็มแต่ละห้อง")}
+  {!hideIssues && tab("issues", "🚨 คะแนนผิดปกติ")}
+</div>
 
           {groups.map((g, gi) => (
             <section key={g.key} className={`space-y-4 ${gi > 0 ? "print:break-before-page" : ""}`}>
@@ -429,7 +434,7 @@ export default function AuditReport({
                     </thead>
                     <tbody>
                       {g.subjectList
-                        .filter(s => !onlyProblems || s.list.some(incomplete) || s.list.some(a => a.failed) || s.list.length < g.rooms.length)
+                        .filter(s => !onlyProblems || s.list.some(incomplete) || s.list.some(a => a.failed))
                         .map(s => {
                           const lacking = g.rooms.filter(r => !s.list.some(a => a.room === r.room_name));
                           const bad = s.list.filter(a => incomplete(a)).map(a => a.room);
@@ -505,6 +510,8 @@ export default function AuditReport({
                 <p className="mt-1 text-[10px] text-slate-400 font-bold">ชิ้นงาน = ผลรวมคะแนนเต็มของชิ้นงานที่เปิดใช้ (ตามน้ำหนัก) · เทียบกับค่าที่พบมากที่สุดในสายชั้นเดียวกัน</p>
               </div>
 
+                 {!hideIssues && (
+  <div className={show("issues")}>     
               {/* 3) ผิดปกติ */}
               <div className={show("issues")}>
                 <h3 className="text-sm font-black text-slate-600 mb-2">3. คะแนนที่ผิดปกติ (เกินคะแนนเต็ม / ไม่ได้เกรด / ตั้งค่าผิด)</h3>
@@ -535,6 +542,8 @@ export default function AuditReport({
                   </div>
                 )}
               </div>
+             </div>
+             )}
             </section>
           ))}
         </>
