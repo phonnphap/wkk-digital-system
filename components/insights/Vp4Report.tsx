@@ -255,10 +255,10 @@ export default function Vp4Report({
   const showRemark = mode !== "primary2";
 
     const COL_WIDTHS: Record<typeof mode, string[]> = {
-    midterm:   ["9%", "38%", "10%", "8%", "11%", "11%", "13%"],
-    primary1:  ["8%", "33%", "8%", "6%", "8%", "8%", "10%", "12%", "7%"],
-    primary2:  ["8%", "34%", "9%", "7%", "9%", "9%", "12%", "12%"],
-    secondary: ["8%", "30%", "8%", "6%", "7%", "7%", "6%", "9%", "11%", "8%"],
+        midterm:   ["11%", "36%", "10%", "8%", "11%", "11%", "13%"],
+    primary1:  ["10%", "31%", "8%", "6%", "8%", "8%", "10%", "12%", "7%"],
+    primary2:  ["10%", "32%", "9%", "7%", "9%", "9%", "12%", "12%"],
+    secondary: ["10%", "28%", "8%", "6%", "7%", "7%", "6%", "9%", "11%", "8%"],
   };
 
   const [overallScores, setOverallScores] = useState<Record<string, { characteristic: string; readThinkWrite: string }>>({});
@@ -457,7 +457,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                       <th className={TH} colSpan={2}>คะแนนระหว่างเรียน</th>
                       <th className={TH} rowSpan={2}>หมายเหตุ</th>
                     </tr>
-                    <tr className="border text-slate-500">
+                    <tr className="bordertext-slate-500">
                       <th className={TH}>คะแนนเต็ม</th>
                       <th className={TH}>คะแนนที่ได้</th>
                     </tr>
@@ -474,7 +474,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                       <th className={TH} rowSpan={2}>อ่านคิด<br />วิเคราะห์เขียน</th>
                       <th className={TH} rowSpan={2}>หมายเหตุ</th>
                     </tr>
-                    <tr className="border text-slate-500">
+                    <tr className="border">
                       <th className={TH}>คะแนน</th>
                       <th className={TH}>สอบปกติ</th>
                       <th className={TH}>แก้ตัว</th>
@@ -509,8 +509,8 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                         <td className={`${TD} break-words`}>{sec.subject_name}</td>
                         <td className={`${TD} text-center`}>{subjectTypeLabel(sec)}</td>
                         <td className={`${TD} text-center`}>{sec.credit_hours ?? "-"}</td>
-                        <td className={`${TD} text-center font-black text-black`}>{fmtNum(collectOf(cell, sec.gradeRoundingMode).max)}</td>
-<td className={`${TD} text-center font-black text-black`}>{fmtNum(collectOf(cell, sec.gradeRoundingMode).got)}</td>
+                        <td className={`${TD} text-center`}>{fmtNum(collectOf(cell, sec.gradeRoundingMode).max)}</td>
+<td className={`${TD} text-center`}>{fmtNum(collectOf(cell, sec.gradeRoundingMode).got)}</td>
                         {idx === 0 && (
                           <td className={`${TD} align-top text-center text-red-600 text-base`} rowSpan={midtermSections.length}>
                             *คะแนนที่ได้เป็นคะแนน ณ วันที่ {formatThaiDate(scoreDateLocal)}
@@ -532,10 +532,10 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                           <td className={`${TD} break-words`}>{row.name}</td>
                           <td className={`${TD} text-center`}>พื้นฐาน</td>
                           <td className={`${TD} text-center`}>{unitSum || "-"}</td>
-                          <td className={`${TD} text-center font-black text-black`}>
+                          <td className={`${TD} text-center`}>
     {mode === "primary1" ? fmtNum(gc.max) : (combined ?? "-")}
 </td>
-<td className={`${TD} text-center font-black text-black`}>
+<td className={`${TD} text-center`}>
     {mode === "primary1" ? fmtNum(gc.got) : "-"}
 </td>
                           {mode === "secondary" && <td className={TD}></td>}
@@ -557,10 +557,10 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                         <td className={`${TD} break-words`}>{sec.subject_name}</td>
                         <td className={`${TD} text-center`}>{subjectTypeLabel(sec)}</td>
                         <td className={`${TD} text-center`}>{isActivity ? "-" : (unitValue ?? "-")}</td>
-                        <td className={`${TD} text-center font-black text-black`}>
+                        <td className={`${TD} text-center`}>
     {isActivity ? "-" : mode === "primary1" ? fmtNum(col.max) : (cell?.percentage != null ? Math.round(cell.percentage) : "-")}
 </td>
-<td className={`${TD} text-center font-black text-black`}>
+<td className={`${TD} text-center`}>
     {isActivity ? activityResult(attendMatrix[s.id]?.[sec.id]) : mode === "primary1" ? fmtNum(col.got) : (cell?.grade ?? "-")}
 </td>
                         {mode === "secondary" && <td className={TD}></td>}
@@ -768,12 +768,6 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
       word-break: normal !important;
       overflow-wrap: normal !important;
     }
-  }
-
-  /* ช่อง "คะแนนเต็ม" และ "คะแนนที่ได้": สีดำ ไม่ตัวหนา (ใช้ทั้งบนจอและตอนพิมพ์) */
-  .vp4-page .vp4-table td.text-black {
-    color: #000 !important;
-    font-weight: normal !important;
   }
 `}</style>
     </div>
