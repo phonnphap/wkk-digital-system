@@ -81,8 +81,8 @@ function Chip({ text, p }: { text: string; p: Prog }) {
 }
 
 export default function AuditReport({
-  rooms, semester, yearName, schoolName = "", excludeActivity = false,
-}: { rooms: AuditRoom[]; semester: number; yearName: string; schoolName?: string; excludeActivity?: boolean }) {
+  rooms, semester, yearName, schoolName = "",
+}: { rooms: AuditRoom[]; semester: number; yearName: string; schoolName?: string }) {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState("");
@@ -93,6 +93,7 @@ export default function AuditReport({
   const [subjectFilter, setSubjectFilter] = useState("all");
   const [onlyProblems, setOnlyProblems] = useState(true);
   const [skipFinal, setSkipFinal] = useState(false); // ไม่นับปลายภาค (เช่น ตรวจช่วงกลางภาค)
+  const [excludeActivity, setExcludeActivity] = useState(true); // ไม่รวมวิชากิจกรรม (รหัส ก)
 
   const levels = useMemo(() => {
     const m = new Map<string, AuditRoom[]>();
@@ -359,6 +360,9 @@ export default function AuditReport({
             <label className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
               <input type="checkbox" checked={skipFinal} onChange={e => setSkipFinal(e.target.checked)} /> ไม่นับปลายภาค
             </label>
+            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
+  <input type="checkbox" checked={excludeActivity} onChange={e => setExcludeActivity(e.target.checked)} /> ไม่รวมวิชากิจกรรม (รหัส ก)
+</label>
             <button onClick={() => window.print()} className="ml-auto px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm">
               🖨️ พิมพ์รายงาน
             </button>
@@ -383,7 +387,7 @@ export default function AuditReport({
           <div className="hidden print:block text-center mb-4">
             <p className="font-black text-lg">รายงานตรวจสอบการกรอกคะแนน {schoolName}</p>
             <p className="text-sm font-bold">ปีการศึกษา {yearName} เทอม {semester} · {levelFilter === "all" ? "ทุกสายชั้น" : `สายชั้น ${levelFilter}`}
-              {subjectFilter !== "all" ? ` · วิชา ${subjectOptions.find(s => s[0] === subjectFilter)?.[1] ?? ""}` : ""}{skipFinal ? " · ไม่นับปลายภาค" : ""} · ตรวจเมื่อ {ranAt}</p>
+              {subjectFilter !== "all" ? ` · วิชา ${subjectOptions.find(s => s[0] === subjectFilter)?.[1] ?? ""}` : ""}{skipFinal ? " · ไม่นับปลายภาค" : ""} {excludeActivity ? " · ไม่รวมวิชากิจกรรม" : ""}· ตรวจเมื่อ {ranAt}</p>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
