@@ -174,20 +174,17 @@ function InfoField({ label, value, grow = 1 }: { label: string; value: string; g
   );
 }
 
-function SignatureField({ role, nameLabel, lineWidthPx, gapBeforeName = true, gapBeforeSign = true }: { role: string; nameLabel?: string; lineWidthPx?: number; gapBeforeName?: boolean; gapBeforeSign?: boolean }) {
+function SignatureField({ role, nameLabel, lineWidthPx, gapBeforeName = true }: { role: string; nameLabel?: string; lineWidthPx?: number; gapBeforeName?: boolean }) {
   const w = lineWidthPx ?? SIGNATURE_LINE_WIDTH_PX;
   return (
-    <div className="inline-flex flex-col items-start text-left signature-field">
-      {gapBeforeSign && <span>&nbsp;</span>}
-      <div className="inline-flex items-baseline">
-        <span className="whitespace-nowrap">ลงชื่อ</span>
-        <div className="flex flex-col items-center mx-1" style={{ width: `${w}px` }}>
-          <span className="border-b-2 border-dotted border-gray-400 w-full text-center">&nbsp;</span>
-          {gapBeforeName && <span className="text-center">&nbsp;</span>}
-          <span className="text-center whitespace-nowrap">{nameLabel ? `(${nameLabel})` : "\u00A0"}</span>
-        </div>
-        <span className="whitespace-nowrap">{role}</span>
+    <div className="inline-flex items-baseline text-left signature-field">
+      <span className="whitespace-nowrap">ลงชื่อ</span>
+      <div className="flex flex-col items-center mx-1" style={{ width: `${w}px` }}>
+        <span className="border-b-2 border-dotted border-gray-400 w-full text-center">&nbsp;</span>
+        {gapBeforeName && <span className="text-center">&nbsp;</span>}
+        <span className="text-center whitespace-nowrap">{nameLabel ? `(${nameLabel})` : "\u00A0"}</span>
       </div>
+      <span className="whitespace-nowrap">{role}</span>
     </div>
   );
 }
@@ -460,7 +457,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                       <th className={TH} colSpan={2}>คะแนนระหว่างเรียน</th>
                       <th className={TH} rowSpan={2}>หมายเหตุ</th>
                     </tr>
-                    <tr className="bordertext-slate-500">
+                    <tr className="border">
                       <th className={TH}>คะแนนเต็ม</th>
                       <th className={TH}>คะแนนที่ได้</th>
                     </tr>
@@ -608,9 +605,10 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
               </div>
             )}
 
+                        <div className="h-8 print:h-6"></div>
             <div className="h-8 print:h-6"></div>
             <div className="h-8 print:h-6"></div>
-            <div className="h-8 print:h-6"></div>
+            <div>&nbsp;</div>
 
             {/* ลายเซ็น */}
             {mode === "midterm" ? (
