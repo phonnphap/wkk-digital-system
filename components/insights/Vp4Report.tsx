@@ -711,7 +711,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
       border: 0 !important;
     }
     .vp4-page:last-child { page-break-after: auto; break-after: auto; }
-    .vp4-page img { height: 60px !important; width: 60px !important; margin-bottom: 2px !important; }
+    .vp4-page img { height: 3cm !important; width: 3cm !important; margin-bottom: 2px !important; }
     .vp4-page .mb-3 { margin-bottom: 4px !important; }
     .vp4-page .mb-2 { margin-bottom: 2px !important; }
     .vp4-page .mt-3 { margin-top: 4px !important; }
@@ -720,7 +720,10 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
     .vp4-page .gap-6 { gap: 10px !important; }
     .vp4-page .signature-grid { gap: 60px !important; }
     .vp4-table { table-layout: fixed; width: 100%; }
-    .vp4-table th, .vp4-table td { font-size: 13px; padding: 2px 4px; line-height: 1.25; }
+        .vp4-table th, .vp4-table td { font-size: 16px; padding: 2px 4px; line-height: 1.25; }
+    .vp4-th, .vp4-table th { font-weight: 900; }
+    .vp4-page, .vp4-page * { font-size: 16px !important; }
+
     .vp4-table th { font-weight: 900; }
   }
 `}</style>
