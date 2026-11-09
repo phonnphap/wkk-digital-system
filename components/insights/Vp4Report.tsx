@@ -177,10 +177,10 @@ function InfoField({ label, value, grow = 1 }: { label: string; value: string; g
 function SignatureField({ role, nameLabel, lineWidthPx, gapBeforeName = true }: { role: string; nameLabel?: string; lineWidthPx?: number; gapBeforeName?: boolean }) {
   const w = lineWidthPx ?? SIGNATURE_LINE_WIDTH_PX;
   return (
-    <div className="inline-flex items-baseline text-left signature-field">
+    <div className="inline-flex items-baseline text-left signature-field text-black">
       <span className="whitespace-nowrap">ลงชื่อ</span>
       <div className="flex flex-col items-center mx-1" style={{ width: `${w}px` }}>
-        <span className="border-b-2 border-dotted border-gray-400 w-full text-center">&nbsp;</span>
+        <span className="border-b-2 border-dotted border-black w-full text-center">&nbsp;</span>
         {gapBeforeName && <span className="text-center">&nbsp;</span>}
         <span className="text-center whitespace-nowrap">{nameLabel ? `(${nameLabel})` : "\u00A0"}</span>
       </div>
