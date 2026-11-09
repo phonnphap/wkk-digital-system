@@ -353,6 +353,7 @@ const SCHEDULE_TEMPLATES = [
   {
     key: "kindergarten", label: "อนุบาล (อ.2–อ.3)",
     slots: [
+      { slot_number: 0, start_time: "08:00", end_time: "08:30", slot_label: "คาบ 0", is_break: false },
       { slot_number: 1, start_time: "08:30", end_time: "09:30", slot_label: "คาบ 1", is_break: false },
       { slot_number: 2, start_time: "09:30", end_time: "09:50", slot_label: "คาบ 2", is_break: false },
       { slot_number: 3, start_time: "09:50", end_time: "11:00", slot_label: "คาบ 3", is_break: false },
@@ -360,7 +361,7 @@ const SCHEDULE_TEMPLATES = [
       { slot_number: 0, start_time: "11:40", end_time: "12:30", slot_label: "พักกลางวัน", is_break: true },
       { slot_number: 0, start_time: "12:30", end_time: "14:00", slot_label: "นอนกลางวัน", is_break: true },
       { slot_number: 5, start_time: "14:00", end_time: "14:30", slot_label: "คาบ 5", is_break: false },
-      { slot_number: 0, start_time: "14:30", end_time: "15:00", slot_label: "คาบ 6", is_break: true },
+      { slot_number: 0, start_time: "14:30", end_time: "15:00", slot_label: "คาบ 6", is_break: false },
     ],
   },
   {
@@ -410,7 +411,8 @@ function buildRoomSlots(scheduleType: string | undefined, allDbSlots: any[]): an
   const type = scheduleType ?? "primary";
   const tmpl = SCHEDULE_TEMPLATES.find(t => t.key === type) ?? SCHEDULE_TEMPLATES[1];
   return tmpl.slots.map((tmplSlot, idx) => {
-    const dbSlot = allDbSlots.find(s => (s.start_time ?? "").slice(0, 5) === tmplSlot.start_time);
+    let dbSlot = allDbSlots.find(s => (s.start_time ?? "").slice(0, 5) === tmplSlot.start_time && s.schedule_type === type);
+    if (!dbSlot) dbSlot = allDbSlots.find(s => (s.start_time ?? "").slice(0, 5) === tmplSlot.start_time);
     if (dbSlot) {
       return { ...dbSlot, slot_label: tmplSlot.slot_label, is_break: tmplSlot.is_break, end_time: tmplSlot.end_time, slot_number: tmplSlot.slot_number };
     }
@@ -437,8 +439,12 @@ function enrichEntries(rawEntries: any[], classroomsMap: Record<string, any>, su
   return rawEntries.map(e => {
     const room = classroomsMap[e.classroom_id];
     const roomSlots = getRoomSlots(room?.schedule_type);
-    const slot = roomSlots.find((s: any) => s.id === e.time_slot_id)
-      ?? allTimeSlots.find((s: any) => s.id === e.time_slot_id) ?? null;
+    let slot = roomSlots.find((s: any) => s.id === e.time_slot_id);
+    if (!slot) {
+      const raw = allTimeSlots.find((s: any) => s.id === e.time_slot_id);
+      const start = (raw?.start_time ?? "").slice(0, 5);
+      slot = (start && roomSlots.find((s: any) => (s.start_time ?? "").slice(0, 5) === start)) || raw || null;
+    }
     const subject = subjectsMap[e.subject_id];
     return {
       ...e,
@@ -458,7 +464,23 @@ function enrichEntries(rawEntries: any[], classroomsMap: Record<string, any>, su
     };
   });
 }
-async function pushLeaveTeams(leaveId: string, event: "submitted" | "edited" | "cancelled") {
+
+async function fetchAllRows<T = any>(buildQuery: () => any): Promise<T[]> {
+  const pageSize = 1000;
+  let from = 0;
+  let all: T[] = [];
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all = all.concat(data as T[]);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+  async function pushLeaveTeams(leaveId: string, event: "submitted" | "edited" | "cancelled" | "substituted") {
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
@@ -2445,12 +2467,16 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
     const yearMap = Object.fromEntries(years.map(y => [y.id, y]));
     setCurrentAcademicYearId(cur?.id ?? null);
 
-    let entriesQuery = supabase.from("timetable_entries")
-      .select("id,academic_year_id,classroom_id,subject_id,teacher_id,day_of_week,time_slot_id,teacher_id_2,created_at");
-    if (yearIds.length) entriesQuery = entriesQuery.in("academic_year_id", yearIds);
+        // ❌ ลบ entriesQuery เดิม (let entriesQuery = ... / if (yearIds.length) ...)
 
-    const [entriesRes, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
-      entriesQuery,
+    const [entriesRaw, slotsRes, classroomsRes, subjectsRes] = await Promise.all([
+      fetchAllRows(() => {
+        let q = supabase.from("timetable_entries")
+          .select("id,academic_year_id,classroom_id,subject_id,teacher_id,day_of_week,time_slot_id,teacher_id_2,created_at")
+          .order("id");                                    // ต้อง order เพื่อให้แบ่งหน้าแล้วไม่ซ้ำ/ไม่ตก
+        if (yearIds.length) q = q.in("academic_year_id", yearIds);
+        return q;
+      }),
       supabase.from("time_slots").select("id,slot_number,start_time,end_time,slot_label,is_break,schedule_type").order("slot_number", { ascending: true }),
       supabase.from("classrooms").select("id,room_number,room_name,grade_group,schedule_type,homeroom_teacher_id,academic_year_id,split_by_semester"),
       supabase.from("subjects").select("id,subject_code,name_th"),
@@ -2472,7 +2498,7 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
     }));
     const subjectsMap = Object.fromEntries((subjectsRes.data || []).map((s: any) => [s.id, s]));
 
-    setTimetableEntries(enrichEntries(entriesRes.data || [], classroomsMap, subjectsMap, slots));
+        setTimetableEntries(enrichEntries(entriesRaw, classroomsMap, subjectsMap, slots));
     timetableLoadedRef.current = true;
   } catch (err) {
     console.error("[loadTimetableData] error:", err);
@@ -2497,13 +2523,14 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
       leaveId = data.id;
     }
 
-    // ลบของเดิม (กรณีแก้ไข) แล้วบันทึกใหม่
-    if(leaveId){
+        // ลบของเดิม (กรณีแก้ไข) แล้วบันทึกใหม่
+    if (leaveId) {
       await supabase.from("substitution_records").delete().eq("leave_request_id", leaveId);
-      if(substitute_assignments?.length){
+
+      if (substitute_assignments?.length) {
         const rows = substitute_assignments
-          .filter((a:any)=>a.substitute_teacher_id)
-          .map((a:any)=>({
+          .filter((a: any) => a.substitute_teacher_id)
+          .map((a: any) => ({
             timetable_entry_id: a.timetable_entry_id,
             substitute_date: a.substitute_date,
             original_teacher_id: user.id,
@@ -2519,14 +2546,20 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
             status: "assigned",
             note: a.mode === "auto" ? "จัดอัตโนมัติจากใบลา" : "แลกคาบแบบเจาะจงจากใบลา",
           }));
-                     if(rows.length){
-  const {error:subErr} = await (supabase.from("substitution_records") as any).insert(rows);
-  if(subErr) console.warn("[submitLeave] substitution_records insert error:", subErr.message);
-  else if(leavePayload.status !== "draft") await notifySwapAssignments(user, substitute_assignments, allTeachers);
-}
-      }
-    } 
-            if (leaveId && leavePayload.status === "pending") {
+
+        if (rows.length) {
+          const { error: subErr } = await (supabase.from("substitution_records") as any).insert(rows);
+          if (subErr) {
+            console.warn("[submitLeave] substitution_records insert error:", subErr.message);
+          } else if (leavePayload.status !== "draft") {
+            await notifySwapAssignments(user, substitute_assignments, allTeachers);
+            await pushLeaveTeams(leaveId, "substituted");
+          }
+        }
+      }   // ← ปิด if (substitute_assignments?.length)
+    }     // ← ปิด if (leaveId)
+
+    if (leaveId && leavePayload.status === "pending") {
       await pushLeaveTeams(leaveId, editRequest?.id ? "edited" : "submitted");
     }
     const isDraftSave = leavePayload.status === "draft";

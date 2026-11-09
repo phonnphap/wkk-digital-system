@@ -17,12 +17,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // ── จัดสอนแทน: หัวหน้าสาย/หัวหน้าหมวด/admin/ผอ./รองผอ. ──
+    // ── จัดสอนแทน: เจ้าของใบลา หรือ หัวหน้าสาย/หัวหน้าหมวด/admin/ผอ./รองผอ. ──
   if (event === "substituted") {
     const { data: me } = await admin.from("users").select("id,role,extra_roles").eq("email", user.email).maybeSingle();
+    const { data: leave } = await admin.from("leave_requests").select("user_id").eq("id", leaveId).maybeSingle();  // ★ เพิ่ม
+
     const roles: string[] = me?.extra_roles ?? [];
     const r = (me?.role ?? "").toLowerCase();
+    const isOwner = !!me && !!leave && leave.user_id === me.id;                                                  // ★ เพิ่ม
     const ok = !!me && (
+      isOwner ||                                                                                                   // ★ เพิ่ม
       roles.includes("grade_head") || roles.includes("dept_head") ||
       r.includes("admin") || r === "director" || r === "deputy_director"
     );
