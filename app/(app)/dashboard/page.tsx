@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   LayoutDashboard, UserCheck, CalendarDays, FileText,
-  Wrench, Car, Monitor, FolderOpen, FileEdit, Trophy, Calendar, RefreshCw, Users, LogOut, Bell, Settings,
+  Wrench, Car, Monitor, FolderOpen, FileEdit, Trophy, Calendar, RefreshCw, Users, LogOut, Bell, Settings, ClipboardList,
   User,GraduationCap,UploadCloud, MapPin   // ★ เพิ่มบรรทัดนี้
 } from "lucide-react";
 
@@ -677,6 +677,13 @@ function StatusBadge({ status }: { status: ItemStatus }) {
         { name: "ยืม-คืน อุปกรณ์ ICT", icon: <Monitor className="w-6 h-6" />, color: "bg-sky-600", path: "/ict-borrow", status: "wip"  as ItemStatus },
         { name: "แจ้งซ่อม (Helpdesk)", icon: <Wrench className="w-6 h-6" />, color: "bg-rose-600", path: "/repair", status: "live"  as ItemStatus },
         { name: "แผนผังโรงเรียน 3D", icon: <MapPin className="w-6 h-6" />, color: "bg-emerald-600", path: "/map3d", status: "beta" as ItemStatus },
+      ]
+    },
+    {
+      title: "🎓 งานรับนักเรียน",
+      items: [
+        { name: "จัดการรับสมัครนักเรียน", icon: <GraduationCap className="w-6 h-6" />, color: "bg-indigo-600", path: "/admission/admin", status: "beta" as ItemStatus },
+        { name: "หน้าสมัครเรียน (ลิงก์ให้ผู้ปกครอง)", icon: <ClipboardList className="w-6 h-6" />, color: "bg-teal-600", path: "/admission", status: "beta" as ItemStatus },
       ]
     }
   ];
