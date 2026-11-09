@@ -1116,8 +1116,9 @@ row["อัตราส่งตรงเวลา (%)"] = r.onTimeRate === null
   onChangeRawMidtermMax={setRawMidtermMax}   
   onChangeRawFinalMax={setRawFinalMax}       
   onSaveExamConfig={saveExamConfig}   
-  onToast={showToast} 
-  maskAssignmentScores={maskAssignmentScores}                        
+   onToast={showToast} 
+  maskAssignmentScores={maskAssignmentScores}
+  gradeRoundingMode={gradeRoundingMode}
 />
       ) : (
         <PodiumView rows={rows} hideScores={hideScores} onToggleHide={() => setHideScores(v => !v)} />
@@ -1148,8 +1149,9 @@ function GradeTable({
   useMidterm = false, formativeMaxScore = 0, midtermMaxScore = 0, finalMaxScore = 0,
   onReorderAssignments, rawMidtermMax, rawFinalMax, onChangeRawMidtermMax, onChangeRawFinalMax, onSaveExamConfig,
   onToast, onResetScore, onResetExamScore, onUpdateAssignmentWeight,
-  examLabels = { midterm: "กลางภาค", final: "ปลายภาค" },
+   examLabels = { midterm: "กลางภาค", final: "ปลายภาค" },
   maskAssignmentScores = false,
+  gradeRoundingMode = "truncate",
 }: {
   rows: ReturnType<typeof buildRowsType>;
   assignments: Assignment[];
@@ -1176,9 +1178,12 @@ function GradeTable({
   onResetScore: (studentId: string, assignmentId: string) => void;
   onResetExamScore: (studentId: string, examType: "midterm" | "final") => void;
   onUpdateAssignmentWeight: (assignmentId: string, weightPercent: number | null, allowWeight: boolean) => void;
-  examLabels?: { midterm: string; final: string };
+    examLabels?: { midterm: string; final: string };
   maskAssignmentScores?: boolean;
+  gradeRoundingMode?: "round_up" | "truncate";
 }) {
+  // ปัดคะแนนเก็บตามค่าตั้งค่ารายวิชา (ใช้เฉพาะตอนแสดงผล ไม่กระทบเกรด/คะแนนรวม)
+  const rd = (n: number) => (gradeRoundingMode === "round_up" ? Math.ceil(n - 1e-9) : Math.floor(n + 1e-9));
   const [activeCell, setActiveCell] = useState<ActiveCell>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
@@ -1396,7 +1401,7 @@ function GradeTable({
                 )}
                 <th className="px-3 py-3 text-center min-w-[90px] bg-indigo-50/70">
                   <p className="text-m font-black text-indigo-700">คะแนนเก็บ</p>
-                  <p className="text-[18px] text-indigo-300 font-bold">เต็ม {fmtScore(totalMaxScore + (useMidterm ? midtermMaxScore : 0))}</p>
+                                    <p className="text-[18px] text-indigo-300 font-bold">เต็ม {fmtScore(rd(totalMaxScore + (useMidterm ? midtermMaxScore : 0)))}</p>
                 </th>
                 <th className="px-3 py-3 text-center min-w-[90px] bg-orange-50/70">
                   <p className="text-m font-black text-orange-700">{examLabels.final}</p>
@@ -1574,8 +1579,8 @@ function GradeTable({
                       </td>
                     )}
                     <td className="text-center px-3 py-3">
-                      <span className="text-m font-black text-indigo-600">{fmtScore(r.formativeEarned)}</span>
-                      <span className="text-slate-400 font-bold text-sm">/{fmtScore(r.formativeMax)}</span>
+                                            <span className="text-m font-black text-indigo-600">{fmtScore(rd(r.formativeEarned))}</span>
+                      <span className="text-slate-400 font-bold text-sm">/{fmtScore(rd(r.formativeMax))}</span>
                     </td>
                     <td
                       className="text-center px-3 py-3"

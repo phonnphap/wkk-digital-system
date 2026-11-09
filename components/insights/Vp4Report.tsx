@@ -421,7 +421,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
 )}
 
             <div className="text-center mb-2">
-              <img src="/school-logo.png" alt="ตราโรงเรียน" className="h-24 w-24 mx-auto mb-1 object-contain" />
+              <img src="/school-logo.png" alt="ตราโรงเรียน" className="h-60 w-60 mx-auto mb-1 object-contain" />
               <p className="font-bold text-2xl">
                 {mode === "midterm" ? "แบบรายงานคะแนนระหว่างเรียนและเวลาเรียนประจำตัวนักเรียน" : "แบบรายงานประจำตัวนักเรียน"}
               </p>

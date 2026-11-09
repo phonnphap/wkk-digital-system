@@ -479,8 +479,8 @@ for (const c of sortedCriteria) {
 
 gMatrix[s.id][sec.id] = {
   grandTotal: displayTotal, percentage, grade, totalMax: displayMax,
-  collectScore: applyRounding(Math.round(collectScore * 100) / 100, sec.gradeRoundingMode),
-  collectMax: applyRounding(Math.round(collectMax * 100) / 100, sec.gradeRoundingMode),
+  collectScore: Math.round(collectScore * 100) / 100,
+  collectMax: Math.round(collectMax * 100) / 100,
 };
           });
         } catch { /* ข้ามวิชานี้ถ้าดึงไม่สำเร็จ */ }
