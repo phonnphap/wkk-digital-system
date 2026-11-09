@@ -165,13 +165,15 @@ const rosterId = rosterMap[sec.classroom_id] ?? sec.classroom_id;
             subjectTeacherName={subjectTeacherName}
             students={students}
             currentUserId={currentUserId}
-            readOnly
+             readOnly
   gradingMode={gradingCfg?.gradingMode}
   formativeMaxScore={gradingCfg?.formativeMaxScore}
   midtermMaxScore={gradingCfg?.midtermMaxScore}
   finalMaxScore={gradingCfg?.finalMaxScore}
   educationLevel={gradingCfg?.educationLevel}
   gradeRoundingMode={gradingCfg?.gradeRoundingMode}
+  showSpecialScores={gradingCfg?.showSpecialScores}
+  passThresholdPercent={gradingCfg?.passThresholdPercent}
 />
         )}
         {tab === "insights" && classroom && (

@@ -11,7 +11,7 @@ export type AuditRoom = { classroom_id: string; room_name: string; split?: boole
 type Status = "none" | "partial" | "complete" | "na";
 type Prog = { filled: number; expected: number; status: Status };
 type IssueType = "assign_over" | "exam_over" | "collect_over" | "total_over" | "pct_over" | "grade_missing" | "no_criteria" | "negative" | "config_sum";
-type Issue = { type: IssueType; student: string; detail: string };
+type Issue = { type: IssueType; student: string; detail: string; final?: boolean }; // final = ขึ้นกับคะแนนปลายภาค
 type MaxSet = { assign: number; mid: number; fin: number; collect: number; full: number };
 type SecAudit = {
   room: string; level: string; subjectCode: string; subjectName: string;
@@ -77,7 +77,7 @@ function compareMax(list: SecAudit[]) {
 }
 
 function Chip({ text, p }: { text: string; p: Prog }) {
-  return <div className={`rounded-lg px-2 py-1 text-[11px] font-bold whitespace-nowrap ${TONE[p.status]}`}>{text}</div>;
+  return <div className={`audit-chip rounded-lg px-2 py-1 text-[11px] font-bold whitespace-nowrap ${TONE[p.status]}`}>{text}</div>;
 }
 
 export default function AuditReport({
@@ -92,6 +92,7 @@ export default function AuditReport({
   const [levelFilter, setLevelFilter] = useState("all");
   const [subjectFilter, setSubjectFilter] = useState("all");
   const [onlyProblems, setOnlyProblems] = useState(true);
+  const [skipFinal, setSkipFinal] = useState(false); // ไม่นับปลายภาค (เช่น ตรวจช่วงกลางภาค)
 
   const levels = useMemo(() => {
     const m = new Map<string, AuditRoom[]>();
@@ -204,8 +205,8 @@ export default function AuditReport({
               .forEach(([label, raw, rawMax, cfg]) => {
                 if (raw == null) return;
                 const lim = rawMax && rawMax > 0 ? rawMax : cfg;
-                if (raw < 0) issues.push({ type: "negative", student: nameOf(s), detail: `${label} = ${raw}` });
-                else if (lim > 0 && raw > lim) issues.push({ type: "exam_over", student: nameOf(s), detail: `${label} ได้ ${raw}/${lim}` });
+                if (raw < 0) issues.push({ type: "negative", student: nameOf(s), detail: `${label} = ${raw}`, final: label === "ปลายภาค" });
+                else if (lim > 0 && raw > lim) issues.push({ type: "exam_over", student: nameOf(s), detail: `${label} ได้ ${raw}/${lim}`, final: label === "ปลายภาค" });
               });
 
             const subMap: Record<string, any> = {};
@@ -227,10 +228,10 @@ export default function AuditReport({
             if (collect > collectMax + 0.001)
               issues.push({ type: "collect_over", student: nameOf(s), detail: `คะแนนเก็บ ${r2(collect)}/${r2(collectMax)}` });
             if (grandTotal > fullMax + 0.001)
-              issues.push({ type: "total_over", student: nameOf(s), detail: `รวม ${r2(grandTotal)}/${r2(fullMax)}` });
-            if (pct > 100) issues.push({ type: "pct_over", student: nameOf(s), detail: `ร้อยละ ${r2(pct)}` });
+              issues.push({ type: "total_over", student: nameOf(s), detail: `รวม ${r2(grandTotal)}/${r2(fullMax)}`, final: true });
+            if (pct > 100) issues.push({ type: "pct_over", student: nameOf(s), detail: `ร้อยละ ${r2(pct)}`, final: true });
             if (grandTotal > 0 && sorted.length > 0 && !sorted.some(c => pct >= c.min_percent && pct <= c.max_percent))
-              issues.push({ type: "grade_missing", student: nameOf(s), detail: `ร้อยละ ${r2(pct)} ไม่ตรงช่วงเกรดใด` });
+              issues.push({ type: "grade_missing", student: nameOf(s), detail: `ร้อยละ ${r2(pct)} ไม่ตรงช่วงเกรดใด`, final: true });
           });
 
           const n = students.length;
@@ -260,15 +261,27 @@ export default function AuditReport({
     }
   }
 
+  // ── ไม่นับปลายภาค: ตัดปลายภาคออกจากความครบถ้วน คะแนนเต็ม และรายการผิดปกติที่ขึ้นกับปลายภาค ──
+  const adjusted = useMemo(() => {
+    const d = data ?? [];
+    if (!skipFinal) return d;
+    return d.map(a => ({
+      ...a,
+      fin: prog(0, 0),
+      max: { ...a.max, fin: 0, full: r2(a.max.full - a.max.fin) },
+      issues: a.issues.filter(i => !i.final),
+    }));
+  }, [data, skipFinal]);
+
   // ── กรอง + จัดกลุ่ม ──
   const subjectOptions = useMemo(() => {
     const m = new Map<string, string>();
-    (data ?? []).forEach(a => m.set(a.subjectCode, a.subjectName));
+    adjusted.forEach(a => m.set(a.subjectCode, a.subjectName));
     return Array.from(m.entries()).sort((a, b) => a[1].localeCompare(b[1], "th"));
-  }, [data]);
+  }, [adjusted]);
 
-  const filtered = useMemo(() => (data ?? []).filter(a =>
-    (levelFilter === "all" || a.level === levelFilter) && (subjectFilter === "all" || a.subjectCode === subjectFilter)), [data, levelFilter, subjectFilter]);
+  const filtered = useMemo(() => adjusted.filter(a =>
+    (levelFilter === "all" || a.level === levelFilter) && (subjectFilter === "all" || a.subjectCode === subjectFilter)), [adjusted, levelFilter, subjectFilter]);
 
   const groups = useMemo(() => levels
     .filter(l => levelFilter === "all" || l.key === levelFilter)
@@ -304,7 +317,25 @@ export default function AuditReport({
   );
 
   return (
-    <div className="space-y-4">
+    <div className="audit-root space-y-4">
+      <style jsx global>{`
+        @media print {
+          @page { size: A4 landscape; margin: 8mm; }
+          html, body { background: #fff !important; height: auto !important; overflow: visible !important; }
+          /* ซ่อนทุกอย่างของระบบ (เมนู/แถบนำทาง) แล้วโชว์เฉพาะรายงาน */
+          body * { visibility: hidden !important; }
+          .audit-root, .audit-root * { visibility: visible !important; }
+          .audit-root { position: absolute !important; left: 0; top: 0; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+          /* ให้ตารางพอดีความกว้างกระดาษ ไม่ต้องเลื่อนข้าง */
+          .audit-scroll { overflow: visible !important; border-radius: 0 !important; }
+          .audit-root table { width: 100% !important; table-layout: auto; font-size: 10px !important; }
+          .audit-root th, .audit-root td { min-width: 0 !important; padding: 2px 4px !important; line-height: 1.25; }
+          .audit-root .whitespace-nowrap { white-space: normal !important; }
+          .audit-chip { font-size: 9px !important; padding: 1px 3px !important; margin-bottom: 1px; }
+          .audit-root tr { break-inside: avoid; page-break-inside: avoid; }
+          .audit-root thead { display: table-header-group; }
+        }
+      `}</style>
       {/* ── แถบควบคุม (ไม่พิมพ์) ── */}
       <div className="print:hidden flex flex-wrap items-center gap-2">
         <button onClick={run} disabled={running}
@@ -323,6 +354,9 @@ export default function AuditReport({
             </select>
             <label className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
               <input type="checkbox" checked={onlyProblems} onChange={e => setOnlyProblems(e.target.checked)} /> แสดงเฉพาะที่มีปัญหา
+            </label>
+            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
+              <input type="checkbox" checked={skipFinal} onChange={e => setSkipFinal(e.target.checked)} /> ไม่นับปลายภาค
             </label>
             <button onClick={() => window.print()} className="ml-auto px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm">
               🖨️ พิมพ์รายงาน
@@ -348,7 +382,7 @@ export default function AuditReport({
           <div className="hidden print:block text-center mb-4">
             <p className="font-black text-lg">รายงานตรวจสอบการกรอกคะแนน {schoolName}</p>
             <p className="text-sm font-bold">ปีการศึกษา {yearName} เทอม {semester} · {levelFilter === "all" ? "ทุกสายชั้น" : `สายชั้น ${levelFilter}`}
-              {subjectFilter !== "all" ? ` · วิชา ${subjectOptions.find(s => s[0] === subjectFilter)?.[1] ?? ""}` : ""} · ตรวจเมื่อ {ranAt}</p>
+              {subjectFilter !== "all" ? ` · วิชา ${subjectOptions.find(s => s[0] === subjectFilter)?.[1] ?? ""}` : ""}{skipFinal ? " · ไม่นับปลายภาค" : ""} · ตรวจเมื่อ {ranAt}</p>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -378,8 +412,8 @@ export default function AuditReport({
 
               {/* 1) ยังไม่กรอก */}
               <div className={show("missing")}>
-                <h3 className="text-sm font-black text-slate-600 mb-2">1. การกรอกคะแนน — ชิ้นงาน / กลางภาค / ปลายภาค</h3>
-                <div className="overflow-auto rounded-2xl border border-slate-200 bg-white print:overflow-visible">
+                <h3 className="text-sm font-black text-slate-600 mb-2">1. การกรอกคะแนน — {skipFinal ? "ชิ้นงาน / กลางภาค" : "ชิ้นงาน / กลางภาค / ปลายภาค"}</h3>
+                <div className="audit-scroll overflow-auto rounded-2xl border border-slate-200 bg-white print:overflow-visible">
                   <table className="w-full border-collapse text-xs">
                     <thead className="bg-slate-50">
                       <tr>
@@ -406,7 +440,7 @@ export default function AuditReport({
                                   <td key={r.classroom_id} className="px-2 py-2 space-y-1">
                                     <Chip p={a.assign} text={a.assignmentCount === 0 ? "ยังไม่มีชิ้นงาน" : `ชิ้นงาน ${a.assignmentCount} · กรอก ${pct}%${a.emptyAssignments ? ` · ว่าง ${a.emptyAssignments}` : ""}`} />
                                     <Chip p={a.mid} text={a.mid.status === "na" ? "กลางภาค -" : `กลางภาค ${a.mid.filled}/${a.mid.expected}`} />
-                                    <Chip p={a.fin} text={a.fin.status === "na" ? "ปลายภาค -" : `ปลายภาค ${a.fin.filled}/${a.fin.expected}`} />
+                                    {!skipFinal && <Chip p={a.fin} text={a.fin.status === "na" ? "ปลายภาค -" : `ปลายภาค ${a.fin.filled}/${a.fin.expected}`} />}
                                   </td>
                                 );
                               })}
@@ -425,8 +459,8 @@ export default function AuditReport({
 
               {/* 2) คะแนนเต็ม */}
               <div className={show("max")}>
-                <h3 className="text-sm font-black text-slate-600 mb-2">2. คะแนนเต็มของแต่ละห้อง (ชิ้นงาน / กลางภาค / ปลายภาค)</h3>
-                <div className="overflow-auto rounded-2xl border border-slate-200 bg-white print:overflow-visible">
+                <h3 className="text-sm font-black text-slate-600 mb-2">2. คะแนนเต็มของแต่ละห้อง ({skipFinal ? "ชิ้นงาน / กลางภาค" : "ชิ้นงาน / กลางภาค / ปลายภาค"})</h3>
+                <div className="audit-scroll overflow-auto rounded-2xl border border-slate-200 bg-white print:overflow-visible">
                   <table className="w-full border-collapse text-xs">
                     <thead className="bg-slate-50">
                       <tr>
@@ -445,7 +479,7 @@ export default function AuditReport({
                             const off = s.devs.some(d => d.room === a.room);
                             return (
                               <td key={r.classroom_id} className={`px-2 py-2 text-center font-bold whitespace-nowrap ${off ? "bg-red-50 text-red-600" : "text-slate-600"}`}>
-                                {a.max.assign} / {a.max.mid} / {a.max.fin}
+                                {a.max.assign} / {a.max.mid}{skipFinal ? "" : ` / ${a.max.fin}`}
                               </td>
                             );
                           })}
@@ -472,7 +506,7 @@ export default function AuditReport({
                 {g.issueRows.length === 0 ? (
                   <p className="text-sm font-bold text-emerald-600">ไม่พบความผิดปกติ ✓</p>
                 ) : (
-                  <div className="overflow-auto rounded-2xl border border-slate-200 bg-white print:overflow-visible">
+                  <div className="audit-scroll overflow-auto rounded-2xl border border-slate-200 bg-white print:overflow-visible">
                     <table className="w-full border-collapse text-xs">
                       <thead className="bg-slate-50">
                         <tr>
