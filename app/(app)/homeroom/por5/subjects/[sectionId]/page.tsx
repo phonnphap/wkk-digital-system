@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import AttendanceOverviewTool from "@/components/attendance/AttendanceOverviewTool";
 import GradeOverviewTool from "@/components/attendance/GradeOverviewTool";
 import InsightsTool from "@/components/insights/InsightsTool";
+import { resolveRosterClassroomIds } from "@/lib/smartclass/rosterClassroom";
 
 const supabase = createClient();
 
@@ -22,6 +23,7 @@ export default function Por5SectionPage() {
   const router = useRouter();
   const params = useParams();
   const sectionId = params?.sectionId as string;
+  
 
   const [loading, setLoading] = useState(true);
   const [subject, setSubject] = useState<Subject | null>(null);
@@ -40,6 +42,8 @@ export default function Por5SectionPage() {
   finalMaxScore: number;
   educationLevel: "primary" | "secondary";
   gradeRoundingMode: "round_up" | "truncate";
+  showSpecialScores: boolean;
+  passThresholdPercent: number;
 } | null>(null);
 
   useEffect(() => {
@@ -57,26 +61,28 @@ export default function Por5SectionPage() {
       if (!sectionId) return;
       const { data: sec } = await supabase
   .from("subject_sections")
-  .select("id, classroom_id, teacher_id, join_code, subject_id, academic_year_id, formative_max_score, midterm_max_score, final_max_score, show_assignment_scores")
+  .select("id, classroom_id, teacher_id, join_code, subject_id, academic_year_id, formative_max_score, midterm_max_score, final_max_score, show_assignment_scores, show_special_scores")
   .eq("id", sectionId).maybeSingle();
       setSection(sec as SectionRow);
 
       if (sec) {
         const [{ data: subj }, { data: room }] = await Promise.all([
-          supabase.from("subjects").select("id, subject_code, name_th, grading_mode, grade_rounding_mode").eq("id", sec.subject_id).maybeSingle(),
+          supabase.from("subjects").select("id, subject_code, name_th, grading_mode, grade_rounding_mode, pass_threshold_percent").eq("id", sec.subject_id).maybeSingle(),
           supabase.from("classrooms").select("id, room_name, grade_group, homeroom_teacher_id").eq("id", sec.classroom_id).maybeSingle(),
         ]);
         setSubject(subj as Subject);
         setClassroom(room as Classroom);
         // ★ เพิ่ม: วางตรงนี้ (ต่อจาก setClassroom)
   setGradingCfg({
-    gradingMode: (subj as any)?.grading_mode ?? "numeric",
-    formativeMaxScore: (sec as any).formative_max_score ?? 70,
-    midtermMaxScore: (sec as any).midterm_max_score ?? 0,
-    finalMaxScore: (sec as any).final_max_score ?? 30,
-    educationLevel: /^ป/.test(room?.room_name ?? "") ? "primary" : "secondary",
-    gradeRoundingMode: (subj as any)?.grade_rounding_mode === "up" ? "round_up" : "truncate",
-  });
+  gradingMode: (subj as any)?.grading_mode ?? "numeric",
+  formativeMaxScore: (sec as any).formative_max_score ?? 70,
+  midtermMaxScore: (sec as any).midterm_max_score ?? 0,
+  finalMaxScore: (sec as any).final_max_score ?? 30,
+  educationLevel: /^ป/.test(room?.room_name ?? "") ? "primary" : "secondary",
+  gradeRoundingMode: (subj as any)?.grade_rounding_mode === "round_up" ? "round_up" : "truncate",
+  showSpecialScores: (sec as any).show_special_scores !== false,
+  passThresholdPercent: (subj as any)?.pass_threshold_percent ?? 50,
+});
 
         if (room?.homeroom_teacher_id) {
           const { data: t } = await supabase.from("users").select("full_name, first_name, last_name").eq("id", room.homeroom_teacher_id).maybeSingle();
@@ -90,11 +96,13 @@ export default function Por5SectionPage() {
           const { data: year } = await supabase.from("academic_years").select("year_name, semester").eq("id", sec.academic_year_id).maybeSingle();
           if (year) setAcademicYearLabel(`${year.year_name} ภาคเรียนที่ ${year.semester}`);
         }
+        const rosterMap = await resolveRosterClassroomIds(supabase, [sec.classroom_id]);
+const rosterId = rosterMap[sec.classroom_id] ?? sec.classroom_id;               
 
         const { data: studentsData } = await supabase
           .from("students")
           .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url")
-          .eq("classroom_id", sec.classroom_id).is("moved_out_at", null)
+          .eq("classroom_id", rosterId).is("moved_out_at", null)
           .order("seat_number");
         setStudents((studentsData ?? []) as Student[]);
       }

@@ -7,7 +7,8 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import InsightsTool from "@/components/insights/InsightsTool";
 import Vp4Report from "@/components/insights/Vp4Report";
-import AuditReport from "@/components/insights/AuditReport";
+import AuditReport, { isActiveStudent } from "@/components/insights/AuditReport";
+import { resolveRosterClassroomIds } from "@/lib/smartclass/rosterClassroom";
 
 const supabase = createClient();
 const ADMIN_ROLES = ["admin", "executive", "director", "deputy_director"];
@@ -16,7 +17,11 @@ type Classroom = {
   classroom_id: string; room_name: string;
   year_name?: string; semester?: number; split?: boolean;
 };
-type Student = { id: string; prefix?: string; first_name: string; last_name: string; nick_name?: string; seat_number: number; avatar_url?: string; student_code?: string };
+type Student = {
+  id: string; prefix?: string; first_name: string; last_name: string; nick_name?: string;
+  seat_number: number; avatar_url?: string; student_code?: string;
+  moved_out_at?: string | null; returned_at?: string | null;
+};
 type SectionInfo = {
   id: string; subject_id: string; subject_code: string; subject_name: string;
   subject_type: "basic" | "additional";
@@ -26,6 +31,7 @@ type SectionInfo = {
   formativeMaxScore?: number;
   midtermMaxScore?: number;
   finalMaxScore?: number; gradeRoundingMode?: "up" | "truncate";
+  showSpecialScores?: boolean;
 };
 
 type GradeCell = {
@@ -40,8 +46,14 @@ type DocKind = "final" | "midterm";
 function isActivitySubject(subjectCode: string): boolean {
   return /^ก/.test(subjectCode ?? "");
 }
-function applyRounding(value: number, mode: "up" | "truncate" = "truncate"): number {
-  return mode === "up" ? Math.ceil(value) : Math.floor(value);
+type RoundingMode = "up" | "truncate";
+// Smart Class เก็บเป็น "round_up" | "truncate" — แปลงให้เป็นโหมดภายในหน้านี้
+function normalizeRounding(v: unknown): RoundingMode {
+  return v === "round_up" || v === "up" ? "up" : "truncate";
+}
+function applyRounding(value: number, mode: RoundingMode = "truncate"): number {
+  // ±1e-9 กัน float error (เช่น 70.0000000001 ไม่ควรถูกปัดขึ้นเป็น 71)
+  return mode === "up" ? Math.ceil(value - 1e-9) : Math.floor(value + 1e-9);
 }
 function subjectRank(s: SectionInfo): number {
   if (isActivitySubject(s.subject_code)) return 2;
@@ -294,13 +306,16 @@ if (!savedHead) {
         }
       }
 
-      // B) ดึงสด
+           // B) ดึงสด
+      const rosterMap = await resolveRosterClassroomIds(supabase, [room.classroom_id]);
+      const rosterId = rosterMap[room.classroom_id] ?? room.classroom_id;
+
       const { data: studentsData } = await supabase
         .from("students")
-        .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url, student_code")
-        .eq("classroom_id", room.classroom_id)
+        .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url, student_code, moved_out_at, returned_at")
+        .eq("classroom_id", rosterId)
         .order("seat_number");
-      const studentRows = (studentsData ?? []) as Student[];
+      const studentRows = ((studentsData ?? []) as Student[]).filter(isActiveStudent);
       if (cancelled) return;
       setStudents(studentRows);
 
@@ -331,7 +346,7 @@ if (!savedHead) {
 
       const { data: sectionRows } = await supabase
         .from("subject_sections")
-        .select("id, subject_id, is_active, formative_max_score, midterm_max_score, final_max_score, subjects(subject_code, name_th, subject_type, hours_per_year, credit_hours, score_group_code, score_group_weight_percent, grading_mode, grade_rounding_mode)")
+        .select("id, subject_id, is_active, formative_max_score, midterm_max_score, final_max_score, show_special_scores, subjects(subject_code, name_th, subject_type, hours_per_year, credit_hours, score_group_code, score_group_weight_percent, grading_mode, grade_rounding_mode)")
         .eq("classroom_id", room.classroom_id)
         .eq("is_active", true);
 
@@ -345,14 +360,14 @@ if (!savedHead) {
           subject_name: r.subjects?.name_th ?? "ไม่ทราบชื่อวิชา",
           subject_type: r.subjects?.subject_type ?? "basic",
           hours_per_year: r.subjects?.hours_per_year ?? null,
+          showSpecialScores: r.show_special_scores !== false,
           credit_hours: r.subjects?.credit_hours ?? null,
           score_group_code: isActivity ? null : (r.subjects?.score_group_code ?? null),
           score_group_weight_percent: r.subjects?.score_group_weight_percent ?? 100,
           gradingMode: r.subjects?.grading_mode ?? "numeric",
-          formativeMaxScore: r.formative_max_score ?? 70,
           midtermMaxScore: r.midterm_max_score ?? 0,
           finalMaxScore: r.final_max_score ?? 30,
-          gradeRoundingMode: r.subjects?.grade_rounding_mode ?? "truncate",
+          gradeRoundingMode: normalizeRounding(r.subjects?.grade_rounding_mode),
         };
       }).sort((a: SectionInfo, b: SectionInfo) => {
         const ra = subjectRank(a), rb = subjectRank(b);
@@ -400,10 +415,8 @@ const assignments = (json.assignments ?? []).filter((a: any) => a.status !== "dr
           const rawFinalMax = json.rawFinalMaxScore ?? null;
 
           const usesComponentGrading = sec.gradingMode !== "pass_fail";
-          const formativeMaxScore = sec.formativeMaxScore ?? 70;
           const midtermMaxScore = sec.midtermMaxScore ?? 0;
           const finalMaxScore = sec.finalMaxScore ?? 30;
-          const useMidterm = midtermMaxScore > 0;
 
           const isWeighted = (a: any) => !!(a.allow_weight && a.weight_percent != null && (a.max_score ?? 0) > 0);
           const getAssignmentMaxContribution = (a: any) => (isWeighted(a) ? a.weight_percent : (a.max_score ?? 0));
@@ -418,61 +431,44 @@ const assignments = (json.assignments ?? []).filter((a: any) => a.status !== "dr
 
           const totalMaxScore = assignments.reduce((sum: number, a: any) => sum + getAssignmentMaxContribution(a), 0);
           const sortedCriteria = [...criteria].sort((a: any, b: any) => b.min_percent - a.min_percent);
+          const presetIds = new Set((json.presets ?? []).map((p: any) => p.id));
+const countSpecial = sec.showSpecialScores !== false;
 
           studentRows.forEach(s => {
             const subMap: Record<string, any> = {};
             submissions.filter((x: any) => x.student_id === s.id).forEach((x: any) => { subMap[x.assignment_id] = x; });
 
-            const weightedList = assignments.filter(isWeighted);
-            const unweightedList = assignments.filter((a: any) => !isWeighted(a));
-            const weightedMaxTotal = weightedList.reduce((s2: number, a: any) => s2 + (a.weight_percent ?? 0), 0);
-            const weightedEarnedTotal = weightedList.reduce((s2: number, a: any) => s2 + getAssignmentWeightedScore(a, subMap[a.id]?.score), 0);
-            const unweightedMaxTotal = unweightedList.reduce((s2: number, a: any) => s2 + (a.max_score ?? 0), 0);
-            const unweightedEarnedTotal = unweightedList.reduce((s2: number, a: any) => s2 + (subMap[a.id]?.score ?? 0), 0);
-            const assignmentTotal = weightedEarnedTotal + unweightedEarnedTotal;
+const assignmentTotal = assignments.reduce(
+  (sum: number, a: any) => sum + getAssignmentWeightedScore(a, subMap[a.id]?.score), 0);
 
-            const midtermRow = examScores.find((e: any) => e.student_id === s.id && e.exam_type === "midterm");
-            const finalRow = examScores.find((e: any) => e.student_id === s.id && e.exam_type === "final");
-            const midtermRaw = midtermRow?.raw_score ?? midtermRow?.score ?? null;
-            const finalRaw = finalRow?.raw_score ?? finalRow?.score ?? null;
-            const midtermScore = getExamWeightedScore(midtermRaw, midtermRow?.raw_max_score ?? rawMidtermMax, midtermMaxScore);
-            const finalScore = getExamWeightedScore(finalRaw, finalRow?.raw_max_score ?? rawFinalMax, finalMaxScore);
+const midtermRow = examScores.find((e: any) => e.student_id === s.id && e.exam_type === "midterm");
+const finalRow = examScores.find((e: any) => e.student_id === s.id && e.exam_type === "final");
+const midtermRaw = midtermRow?.raw_score ?? midtermRow?.score ?? null;
+const finalRaw = finalRow?.raw_score ?? finalRow?.score ?? null;
+const midtermScore = getExamWeightedScore(midtermRaw, midtermRow?.raw_max_score ?? rawMidtermMax, midtermMaxScore);
+const finalScore = getExamWeightedScore(finalRaw, finalRow?.raw_max_score ?? rawFinalMax, finalMaxScore);
 
-            const specialTotal = scoreEvents.filter((ev: any) => ev.student_id === s.id).reduce((s2: number, ev: any) => s2 + ev.points, 0);
+const specialTotal = countSpecial
+  ? scoreEvents.filter((ev: any) => ev.student_id === s.id && presetIds.has(ev.preset_id))
+      .reduce((s2: number, ev: any) => s2 + ev.points, 0)
+  : 0;
 
-            const remainingCapacity = Math.max(0, formativeMaxScore - weightedMaxTotal);
-            const scaledUnweighted = unweightedMaxTotal > 0 ? (unweightedEarnedTotal / unweightedMaxTotal) * remainingCapacity : 0;
-            const scaledFormative = weightedEarnedTotal + scaledUnweighted;
+const collectScore = usesComponentGrading ? assignmentTotal + midtermScore + specialTotal : assignmentTotal;
+const collectMax = usesComponentGrading ? totalMaxScore + midtermMaxScore : totalMaxScore;
+const beforeRound = usesComponentGrading ? collectScore + finalScore : assignmentTotal + specialTotal;
+const displayMax = usesComponentGrading ? collectMax + finalMaxScore : totalMaxScore;
 
-            const componentTotal = usesComponentGrading
-              ? scaledFormative + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0)
-              : null;
-            const rawPercentage = usesComponentGrading
-              ? (componentTotal ?? 0)
-              : (totalMaxScore > 0 ? (assignmentTotal / totalMaxScore) * 100 : 0);
-            const percentage = applyRounding(rawPercentage, sec.gradeRoundingMode);
-            let grade = "-";
-            for (const c of sortedCriteria) {
-              if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
-            }
+const raw2 = Math.round(beforeRound * 100) / 100;
+const displayTotal = raw2 % 1 !== 0 ? applyRounding(raw2, sec.gradeRoundingMode) : raw2;
+const percentage = displayMax > 0 ? (displayTotal / displayMax) * 100 : 0;
 
-            const examMaxTotal = usesComponentGrading
-              ? (useMidterm && midtermRaw !== null ? midtermMaxScore : 0) + (finalRaw !== null ? finalMaxScore : 0)
-              : 0;
-            const displayTotal = assignmentTotal + specialTotal + (useMidterm ? (midtermScore ?? 0) : 0) + (finalScore ?? 0);
-            const displayMax = usesComponentGrading ? totalMaxScore + examMaxTotal : totalMaxScore;
-            // ★ คะแนนเก็บ ให้ตรงกับคอลัมน์ "คะแนนเก็บ" ในหน้า Smart Class
-// = คะแนนงาน (ตามน้ำหนัก) + คะแนนพิเศษ + กลางภาค (ไม่รวมปลายภาค)
-const collectScore = usesComponentGrading
-  ? assignmentTotal + specialTotal + (useMidterm ? (midtermScore ?? 0) : 0)
-  : assignmentTotal;
-const collectMax = usesComponentGrading
-  ? totalMaxScore + (useMidterm ? midtermMaxScore : 0)
-  : totalMaxScore;
+let grade = "-";
+for (const c of sortedCriteria) {
+  if (percentage >= c.min_percent && percentage <= c.max_percent) { grade = c.grade; break; }
+}
 
-            gMatrix[s.id][sec.id] = {
-  grandTotal: applyRounding(displayTotal, sec.gradeRoundingMode),
-  percentage, grade, totalMax: displayMax,
+gMatrix[s.id][sec.id] = {
+  grandTotal: displayTotal, percentage, grade, totalMax: displayMax,
   collectScore: Math.round(collectScore * 100) / 100,
   collectMax: Math.round(collectMax * 100) / 100,
 };

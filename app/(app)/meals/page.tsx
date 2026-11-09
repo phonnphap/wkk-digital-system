@@ -23,6 +23,57 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 const post = (url: string, body: unknown) =>
   api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
+/** "" → null (ลบค่า) · ตัวเลขถูกต้อง → number · ไม่ถูกต้อง → undefined */
+function parseNum(raw: string): number | null | undefined {
+  const t = raw.trim().replace(",", ".");
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+type Measure = { weight: number | null; height: number | null };
+type SaveState = "idle" | "saving" | "saved" | "error";
+
+/** ช่องกรอก นน./สส. — เก็บข้อความที่พิมพ์ไว้เองในช่อง (ไม่ถูกรีเฟรชทับ) แล้วบันทึกอัตโนมัติเมื่อหยุดพิมพ์ / ออกจากช่อง / กด Enter */
+function MeasureInput({ col, value, onCommit }: { col: string; value: number | null; onCommit: (raw: string) => void }) {
+  const [text, setText] = useState(value == null ? "" : String(value));
+  const lastCommitted = useRef(text.trim());
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cb = useRef(onCommit);
+  cb.current = onCommit;
+
+  const commit = (t: string) => {
+    clearTimeout(timer.current);
+    if (t.trim() === lastCommitted.current) return;
+    lastCommitted.current = t.trim();
+    cb.current(t);
+  };
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  return (
+    <input
+      data-col={col}
+      value={text}
+      inputMode="decimal"
+      onChange={(e) => {
+        const t = e.target.value;
+        setText(t);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => commit(t), 700);
+      }}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        const els = Array.from(document.querySelectorAll<HTMLInputElement>(`input[data-col="${col}"]`));
+        const next = els[els.indexOf(e.currentTarget) + 1];
+        if (next) { next.focus(); next.select(); } else e.currentTarget.blur();
+      }}
+      className="w-full rounded border border-slate-200 px-0.5 text-center print:border-0"
+    />
+  );
+}
+
 export default function MealsPage() {
   const router = useRouter();
   const [classrooms, setClassrooms] = useState<ClassroomLite[]>([]);
@@ -31,23 +82,36 @@ export default function MealsPage() {
   const [month, setMonth] = useState(currentMonth());
   const [sheet, setSheet] = useState<SheetData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [err, setErr] = useState("");
   const [canReport, setCanReport] = useState(false);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [rev, setRev] = useState(0); // เพิ่มค่าเพื่อรีเซ็ตช่องกรอกเมื่อบันทึกไม่สำเร็จ
   const sheetRef = useRef<HTMLDivElement>(null);
   const countRef = useRef(0);
   const [signFor, setSignFor] = useState<{ type: "student" | "user"; id: string; name: string } | null>(null);
+
+  // ── ตัวช่วยกัน race: ผลโหลดเก่าที่ตอบกลับมาช้าจะถูกทิ้ง / ค่า นน.-สส. ที่ยังบันทึกไม่เสร็จจะถูกทับกลับไม่ได้ ──
+  const reqId = useRef(0);
+  const pending = useRef<Map<string, Measure>>(new Map());
+  const chain = useRef<Map<string, Promise<void>>>(new Map());
+  const inflight = useRef(0);
+  const failed = useRef(false);
+  const resyncTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pkey = (studentId: string) => `${classroomId}|${month}|${studentId}`;
 
   // อ่านค่าเริ่มต้นจาก URL (?classroomId=&month=&type=) + โหลดรายชื่อห้อง
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     if (q.get("month")) setMonth(q.get("month")!);
     if (q.get("type") === "milk") setType("milk");
+    const want = q.get("classroomId");
+    if (want) setClassroomId(want); // เริ่มโหลดตารางพร้อมกับรายชื่อห้องเลย (ไม่ต้องรอทีละขั้น)
     api<{ classrooms: ClassroomLite[]; canReport: boolean }>("/api/meals/sheet")
       .then(({ classrooms, canReport }) => {
         setCanReport(!!canReport);
         setClassrooms(classrooms);
-        const want = q.get("classroomId");
-        setClassroomId(classrooms.find((c) => c.id === want)?.id ?? classrooms[0]?.id ?? "");
+        setClassroomId((prev) => classrooms.find((c) => c.id === prev)?.id ?? classrooms[0]?.id ?? "");
         if (!classrooms.length) setLoading(false);
       })
       .catch((e) => { setErr(e.message); setLoading(false); });
@@ -78,20 +142,58 @@ export default function MealsPage() {
   const current = classrooms.find((c) => c.id === classroomId);
   useEffect(() => { if (current && !current.milk && type === "milk") setType("lunch"); }, [current, type]);
 
-  const load = useCallback(async (sync: boolean) => {
-    if (!classroomId) return;
+  // ทับค่า นน./สส. ที่ยังอยู่ระหว่างบันทึกลงบนข้อมูลที่เพิ่งโหลดมา
+  const withPending = useCallback((s: SheetData): SheetData => {
+    if (pending.current.size === 0) return s;
+    return {
+      ...s,
+      students: s.students.map((st) => {
+        const p = pending.current.get(`${classroomId}|${month}|${st.id}`);
+        return p ? { ...st, weight: p.weight, height: p.height } : st;
+      }),
+    };
+  }, [classroomId, month]);
+
+  const load = useCallback(async (sync: boolean): Promise<SheetData | null> => {
+    if (!classroomId) return null;
+    const id = ++reqId.current;
     setErr("");
+    if (sync) setSyncing(true);
     try {
       const qs = new URLSearchParams({ classroomId, month, type, ...(sync ? { sync: "1" } : {}) });
-      setSheet((await api<{ sheet: SheetData }>(`/api/meals/sheet?${qs}`)).sheet);
-    } catch (e) { setErr((e as Error).message); }
-    finally { setLoading(false); }
-  }, [classroomId, month, type]);
+      const { sheet: s } = await api<{ sheet: SheetData }>(`/api/meals/sheet?${qs}`);
+      if (id !== reqId.current) return null; // มีคำขอใหม่กว่าแล้ว
+      setSheet(withPending(s));
+      return s;
+    } catch (e) {
+      if (id === reqId.current) setErr((e as Error).message);
+      return null;
+    } finally {
+      if (id === reqId.current) setSyncing(false);
+    }
+  }, [classroomId, month, type, withPending]);
+  const loadRef = useRef(load);
+  loadRef.current = load;
 
-  useEffect(() => { if (classroomId) { setLoading(true); load(true); } }, [classroomId, month, type, load]);
+  // โหลดแบบ 2 จังหวะ: (1) ดึงข้อมูลที่บันทึกไว้มาแสดงทันที (2) ซิงค์กับเช็คชื่อโฮมรูมเบื้องหลัง
+  useEffect(() => {
+    if (!classroomId) return;
+    clearTimeout(resyncTimer.current);
+    let alive = true;
+    setLoading(true);
+    (async () => {
+      const quick = await load(false);
+      if (!alive) return;
+      setLoading(false);
+      if (quick && !quick.report.confirmed) await load(true); // เดือนที่ยืนยันแล้วไม่ต้องซิงค์ใหม่
+    })();
+    return () => { alive = false; };
+  }, [classroomId, month, type, load]);
+
+  useEffect(() => () => clearTimeout(resyncTimer.current), []);
 
   const locked = !!sheet?.report.confirmed;
-  const canEdit = !!sheet?.editable && !locked;
+  const canEdit = !!sheet?.editable && !locked && !loading;
 
   async function cycle(st: SheetStudent, day: number) {
     if (!sheet || !canEdit) return;
@@ -105,17 +207,51 @@ export default function MealsPage() {
       await load(false);
     } catch (e) { setErr((e as Error).message); }
   }
-  async function saveMeasure(st: SheetStudent, field: "weight" | "height", raw: string) {
-    const v = raw.trim() === "" ? null : Number(raw);
-    if (v === st[field]) return;
-    try {
-      await post("/api/meals/measurements", {
-        classroomId, month, studentId: st.id,
-        weight: field === "weight" ? v : st.weight, height: field === "height" ? v : st.height,
-      });
-      await load(true); // น้ำหนัก/ส่วนสูงเปลี่ยน → จัดแจกเพิ่มใหม่
-    } catch (e) { setErr((e as Error).message); }
+
+  /** บันทึก นน./สส. อัตโนมัติ: อัปเดตหน้าจอทันที → ส่งเข้าคิวต่อนักเรียน (เรียงลำดับ ไม่ทับกัน) → รวมผลคำนวณ "แจกเพิ่ม" ทีเดียวหลังหยุดแก้ */
+  function saveMeasure(st: SheetStudent, field: "weight" | "height", raw: string) {
+    if (!canEdit) return;
+    const v = parseNum(raw);
+    if (v === undefined) { setErr("กรอกน้ำหนัก/ส่วนสูงเป็นตัวเลขเท่านั้น"); setRev((r) => r + 1); return; }
+    const k = pkey(st.id);
+    const base: Measure = pending.current.get(k) ?? { weight: st.weight, height: st.height };
+    if (base[field] === v) return;
+    pending.current.set(k, { ...base, [field]: v });
+
+    setErr("");
+    reqId.current++; // ทิ้งผลโหลดเก่าที่ยังค้างอยู่ ไม่ให้ทับค่าที่เพิ่งกรอก
+    clearTimeout(resyncTimer.current);
+    setSheet((s) => s && { ...s, students: s.students.map((x) => (x.id === st.id ? { ...x, [field]: v } : x)) });
+    if (inflight.current === 0) failed.current = false;
+    inflight.current++;
+    setSaveState("saving");
+
+    const sentMonth = month, sentRoom = classroomId;
+    const job: Promise<void> = (chain.current.get(k) ?? Promise.resolve())
+      .then(async () => {
+        const cur = pending.current.get(k) ?? { weight: v, height: base.height };
+        await post("/api/meals/measurements", {
+          classroomId: sentRoom, month: sentMonth, studentId: st.id, weight: cur.weight, height: cur.height,
+        });
+      })
+      .catch((e) => { failed.current = true; setErr(`บันทึก ${st.name} ไม่สำเร็จ: ${(e as Error).message}`); });
+    chain.current.set(k, job);
+
+    job.finally(() => {
+      inflight.current--;
+      if (chain.current.get(k) === job) { chain.current.delete(k); pending.current.delete(k); }
+      if (inflight.current > 0) return;
+      if (failed.current) {
+        setSaveState("error");
+        setRev((r) => r + 1);
+        loadRef.current(false); // แสดงค่าจริงจากเซิร์ฟเวอร์
+      } else {
+        setSaveState("saved");
+        resyncTimer.current = setTimeout(() => loadRef.current(true), 1200); // คำนวณ "แจกเพิ่ม" ใหม่เบื้องหลัง
+      }
+    });
   }
+
   async function reportAction(action: "confirm" | "unconfirm") {
     if (action === "confirm" && !confirm("ยืนยันรายงานเดือนนี้? หลังยืนยันจะแก้ตารางไม่ได้จนกว่าจะปลดล็อก")) return;
     try { await post("/api/meals/report", { action, classroomId, month, type }); await load(false); }
@@ -216,7 +352,12 @@ export default function MealsPage() {
           <button onClick={() => setMonth(shiftMonth(month, 1))} className="rounded-lg bg-slate-100 px-2.5 py-1.5">›</button>
         </div>
 
-        <div className="ml-auto flex flex-wrap gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {saveState !== "idle" && (
+            <span className={`text-xs font-bold ${saveState === "error" ? "text-rose-600" : saveState === "saving" ? "text-slate-500" : "text-emerald-600"}`}>
+              {saveState === "saving" ? "กำลังบันทึก…" : saveState === "saved" ? "✓ บันทึกอัตโนมัติแล้ว" : "บันทึกไม่สำเร็จ"}
+            </span>
+          )}
           {canReport && (
             <Link href="/meals/report" className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700">
               <BarChart3 className="h-3.5 w-3.5" /> รายงานรวม
@@ -245,10 +386,11 @@ export default function MealsPage() {
       {err && <p className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 print:hidden">{err}</p>}
       {loading && <p className="text-sm text-slate-400">กำลังโหลด...</p>}
       {!loading && !sheet && !err && <p className="text-sm text-slate-400">ไม่พบห้องที่เปิดดูได้</p>}
+      {!loading && syncing && <p className="mb-2 text-xs text-slate-400 print:hidden">กำลังซิงค์กับเช็คชื่อโฮมรูม… (แก้ไขตารางได้ตามปกติ)</p>}
 
       {sheet && (
         <>
-          {(sheet.schoolDays.length === 0 || !!sheet.diag?.unmapped.length) && (
+          {!syncing && (sheet.schoolDays.length === 0 || !!sheet.diag?.unmapped.length) && (
             <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 print:hidden">
               {sheet.diag?.unmapped.length
                 ? `พบข้อมูลเช็คชื่อ ${sheet.diag.fetched} แถว (ตาราง ${sheet.diag.source}) แต่ไม่รู้จักค่าสถานะ: ${sheet.diag.unmapped.join(", ")} — แจ้งผู้พัฒนาเพื่อเพิ่มในฟังก์ชัน mapAttendance`
@@ -259,7 +401,7 @@ export default function MealsPage() {
           )}
           {canEdit && (
             <p className="mb-2 text-[11px] text-slate-400 print:hidden">
-              กดที่ช่องวันที่เพื่อแก้ ✓ → ล → ข → (กลับค่าอัตโนมัติ) · ตัวเลข <b>+n</b> คือได้รับแจกเพิ่ม · กรอก นน./สส. ปลายเดือนได้ในตาราง · คลิกขวาที่ช่องลายมือชื่อ นร. เพื่อรีเซ็ต
+              กดที่ช่องวันที่เพื่อแก้ ✓ → ล → ข → (กลับค่าอัตโนมัติ) · ตัวเลข <b>+n</b> คือได้รับแจกเพิ่ม · กรอก นน./สส. ได้เลย ระบบบันทึกอัตโนมัติ (กด Enter เพื่อลงแถวถัดไป) · คลิกขวาที่ช่องลายมือชื่อ นร. เพื่อรีเซ็ต
             </p>
           )}
 
@@ -331,14 +473,17 @@ export default function MealsPage() {
                     <td className={td}>{st.leave || ""}</td>
                     <td className={td}>{st.absent || ""}</td>
                     <td className={td}>{st.extra || ""}</td>
-                                        {(["weight", "height"] as const).map((f) => {
+                    {(["weight", "height"] as const).map((f) => {
                       const prev = f === "weight" ? st.prevWeight : st.prevHeight;
                       return (
                         <td key={f} className={td}>
                           {canEdit ? (
-                            <input defaultValue={st[f] ?? ""} key={`${st.id}-${f}-${st[f]}`} inputMode="decimal"
-                              onBlur={(e) => saveMeasure(st, f, e.target.value)}
-                              className="w-full rounded border border-slate-200 px-0.5 text-center print:border-0" />
+                            <MeasureInput
+                              key={`${classroomId}-${month}-${st.id}-${f}-${rev}`}
+                              col={f}
+                              value={st[f]}
+                              onCommit={(raw) => saveMeasure(st, f, raw)}
+                            />
                           ) : (st[f] ?? "")}
                           {prev != null && <div className="text-[8px] leading-none text-slate-400">ก่อน {prev}</div>}
                         </td>

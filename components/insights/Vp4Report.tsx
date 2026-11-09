@@ -11,8 +11,14 @@ function isActivitySubject(subjectCode: string): boolean {
   return /^ก/.test(subjectCode ?? "");
 }
 
-function applyRounding(value: number, mode: "up" | "truncate" = "truncate"): number {
-  return mode === "up" ? Math.ceil(value) : Math.floor(value);
+type RoundingMode = "up" | "truncate";
+// Smart Class เก็บเป็น "round_up" | "truncate" — แปลงให้เป็นโหมดภายในหน้านี้
+function normalizeRounding(v: unknown): RoundingMode {
+  return v === "round_up" || v === "up" ? "up" : "truncate";
+}
+function applyRounding(value: number, mode: RoundingMode = "truncate"): number {
+  // ±1e-9 กัน float error (เช่น 70.0000000001 ไม่ควรถูกปัดขึ้นเป็น 71)
+  return mode === "up" ? Math.ceil(value - 1e-9) : Math.floor(value + 1e-9);
 }
 
 function parseRoomName(roomName: string): { grade: string; room: string } {

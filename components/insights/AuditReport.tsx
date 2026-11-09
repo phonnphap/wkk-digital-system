@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { resolveRosterClassroomIds } from "@/lib/smartclass/rosterClassroom";
 
 const supabase = createClient();
 
@@ -36,6 +37,14 @@ const TONE: Record<Status, string> = {
   none: "bg-red-50 text-red-600",
   na: "bg-slate-50 text-slate-300",
 };
+
+// นร.ที่ย้ายออกอยู่ตอนนี้จะไม่ถูกนับในรายงาน (กติกาเดียวกับ isCurrentlyMovedOut ในหน้า students-overview)
+// moved_out_at มีค่า และ (ยังไม่เคยกลับเข้า หรือ returned_at < moved_out_at) = ย้ายออก · กลับเข้าเรียนแล้ว = นับตามปกติ
+export function isActiveStudent(s: { moved_out_at?: string | null; returned_at?: string | null }): boolean {
+  if (!s.moved_out_at) return true;
+  if (!s.returned_at) return false;
+  return s.returned_at >= s.moved_out_at; // yyyy-mm-dd เทียบเป็นสตริงได้
+}
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const prog = (filled: number, expected: number): Prog => ({
@@ -97,13 +106,15 @@ export default function AuditReport({
     try {
       const out: SecAudit[] = [];
       const roomInfo = new Map<string, { students: any[]; secs: any[] }>();
+      // ห้องมัธยม/ห้องแยกเทอมอาจดึงรายชื่อจากห้อง roster อื่น (เหมือนหน้า Smart Class)
+      const rosterMap = await resolveRosterClassroomIds(supabase, rooms.map(r => r.classroom_id));
 
       // 1) นักเรียน + วิชาของทุกห้อง (แยกทีละห้อง กันชน limit 1000 แถว)
       await pool(rooms, 6, async (r) => {
         const [{ data: stu }, { data: secs }] = await Promise.all([
-          supabase.from("students").select("id, prefix, first_name, last_name, seat_number").eq("classroom_id", r.classroom_id).order("seat_number"),
+          supabase.from("students").select("*").eq("classroom_id", rosterMap[r.classroom_id] ?? r.classroom_id).order("seat_number"),
           supabase.from("subject_sections")
-            .select("id, subject_id, formative_max_score, midterm_max_score, final_max_score, subjects(subject_code, name_th, grading_mode, grade_rounding_mode)")
+            .select("id, subject_id, formative_max_score, midterm_max_score, final_max_score, show_special_scores, subjects(subject_code, name_th, grading_mode, grade_rounding_mode)")
             .eq("classroom_id", r.classroom_id).eq("is_active", true),
         ]);
         let list = secs ?? [];
@@ -112,7 +123,7 @@ export default function AuditReport({
           const ids = new Set((tt ?? []).map((e: any) => e.subject_id));
           if (ids.size > 0) list = list.filter((s: any) => ids.has(s.subject_id) || /^ก/.test(s.subjects?.subject_code ?? ""));
         }
-        roomInfo.set(r.classroom_id, { students: stu ?? [], secs: list });
+        roomInfo.set(r.classroom_id, { students: (stu ?? []).filter(isActiveStudent), secs: list });
       });
 
       const jobs: { room: AuditRoom; sec: any }[] = [];
@@ -139,17 +150,21 @@ export default function AuditReport({
           const formCfg = sec.formative_max_score ?? 70;
           const midMax = sec.midterm_max_score ?? 0;
           const finMax = sec.final_max_score ?? 30;
-          const rounding = sec.subjects?.grade_rounding_mode ?? "truncate";
-          const round = (v: number) => (rounding === "up" ? Math.ceil(v) : Math.floor(v));
+          // Smart Class เก็บค่าเป็น "round_up" | "truncate" (ยอมรับ "up" ด้วย)
+          const roundUp = ["round_up", "up"].includes(sec.subjects?.grade_rounding_mode);
+          const round = (v: number) => (roundUp ? Math.ceil(v - 1e-9) : Math.floor(v + 1e-9)); // กัน float error เช่น 70.0000001
           const weighted = (a: any) => !!(a.allow_weight && a.weight_percent != null && (a.max_score ?? 0) > 0);
           const contrib = (a: any) => (weighted(a) ? a.weight_percent : (a.max_score ?? 0));
           const wScore = (a: any, raw: number | null | undefined) => (raw == null ? 0 : weighted(a) ? (raw / (a.max_score || 1)) * a.weight_percent : raw);
           const examW = (raw: number | null | undefined, rawMax: number | null | undefined, max: number) =>
             raw == null ? 0 : rawMax && rawMax > 0 ? (raw / rawMax) * max : raw;
           const totalMax = assignments.reduce((s: number, a: any) => s + contrib(a), 0);
-          const useMid = component && midMax > 0;
+          // ตรงกับ Smart Class: โหมดตัวเลขบวกกลางภาค+ปลายภาคเสมอ (ถ้าเต็ม 0 ก็บวก 0)
+          const useMid = component && midMax > 0;   // ใช้เฉพาะ "ต้องกรอกหรือไม่" ในตารางความครบถ้วน
           const useFin = component && finMax > 0;
-          const fullMax = totalMax + (useMid ? midMax : 0) + (useFin ? finMax : 0);
+          const fullMax = component ? totalMax + midMax + finMax : totalMax;
+          const countSpecial = sec.show_special_scores !== false;
+          const presetIds = new Set((json.presets ?? []).map((p: any) => p.id));
           const sorted = [...criteria].sort((a, b) => b.min_percent - a.min_percent);
           const issues: Issue[] = [];
           const sid = new Set(students.map(s => s.id));
@@ -195,29 +210,27 @@ export default function AuditReport({
 
             const subMap: Record<string, any> = {};
             mine.filter(x => x.student_id === s.id).forEach(x => { subMap[x.assignment_id] = x; });
-            const wList = assignments.filter(weighted), uList = assignments.filter((a: any) => !weighted(a));
-            const wMax = wList.reduce((t: number, a: any) => t + (a.weight_percent ?? 0), 0);
-            const wEarn = wList.reduce((t: number, a: any) => t + wScore(a, subMap[a.id]?.score), 0);
-            const uMax = uList.reduce((t: number, a: any) => t + (a.max_score ?? 0), 0);
-            const uEarn = uList.reduce((t: number, a: any) => t + (subMap[a.id]?.score ?? 0), 0);
-            const assignTotal = wEarn + uEarn;
-            const special = events.filter(ev => ev.student_id === s.id).reduce((t, ev) => t + ev.points, 0);
+            // ★ สูตรเดียวกับ GradeOverviewTool (Smart Class): คะแนนงานบวกตรงๆ ไม่ยืด/หดตามคะแนนเก็บที่ตั้งไว้
+            const assignTotal = assignments.reduce((t: number, a: any) => t + wScore(a, subMap[a.id]?.score), 0);
+            const special = countSpecial
+              ? events.filter(ev => ev.student_id === s.id && presetIds.has(ev.preset_id)).reduce((t, ev) => t + ev.points, 0)
+              : 0;
             const mS = examW(mRaw, mRow?.raw_max_score ?? json.rawMidtermMaxScore, midMax);
             const fS = examW(fRaw, fRow?.raw_max_score ?? json.rawFinalMaxScore, finMax);
-            const scaled = wEarn + (uMax > 0 ? (uEarn / uMax) * Math.max(0, formCfg - wMax) : 0);
-            const compTotal = scaled + (useMid ? mS : 0) + fS;
-            const pct = round(component ? compTotal : totalMax > 0 ? (assignTotal / totalMax) * 100 : 0);
-            const grandTotal = assignTotal + special + (useMid ? mS : 0) + fS;
-            const collect = component ? assignTotal + special + (useMid ? mS : 0) : assignTotal;
-            const collectMax = component ? totalMax + (useMid ? midMax : 0) : totalMax;
+            const collect = component ? assignTotal + mS + special : assignTotal;
+            const collectMax = component ? totalMax + midMax : totalMax;
+            const beforeRound = component ? collect + fS : assignTotal + special;
+            const raw2 = Math.round(beforeRound * 100) / 100;
+            const grandTotal = raw2 % 1 !== 0 ? round(raw2) : raw2;      // คะแนนรวมหลังปัดตามตั้งค่าวิชา
+            const pct = fullMax > 0 ? (grandTotal / fullMax) * 100 : 0;  // ไม่ปัดร้อยละ (เหมือน Smart Class)
 
             if (collect > collectMax + 0.001)
               issues.push({ type: "collect_over", student: nameOf(s), detail: `คะแนนเก็บ ${r2(collect)}/${r2(collectMax)}` });
             if (grandTotal > fullMax + 0.001)
               issues.push({ type: "total_over", student: nameOf(s), detail: `รวม ${r2(grandTotal)}/${r2(fullMax)}` });
-            if (pct > 100) issues.push({ type: "pct_over", student: nameOf(s), detail: `ร้อยละ ${pct}` });
+            if (pct > 100) issues.push({ type: "pct_over", student: nameOf(s), detail: `ร้อยละ ${r2(pct)}` });
             if (grandTotal > 0 && sorted.length > 0 && !sorted.some(c => pct >= c.min_percent && pct <= c.max_percent))
-              issues.push({ type: "grade_missing", student: nameOf(s), detail: `ร้อยละ ${pct} ไม่ตรงช่วงเกรดใด` });
+              issues.push({ type: "grade_missing", student: nameOf(s), detail: `ร้อยละ ${r2(pct)} ไม่ตรงช่วงเกรดใด` });
           });
 
           const n = students.length;
