@@ -81,8 +81,8 @@ function Chip({ text, p }: { text: string; p: Prog }) {
 }
 
 export default function AuditReport({
-  rooms, semester, yearName, schoolName = "",
-}: { rooms: AuditRoom[]; semester: number; yearName: string; schoolName?: string }) {
+  rooms, semester, yearName, schoolName = "", excludeActivity = false,
+}: { rooms: AuditRoom[]; semester: number; yearName: string; schoolName?: string; excludeActivity?: boolean }) {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState("");
@@ -262,8 +262,9 @@ export default function AuditReport({
   }
 
   // ── ไม่นับปลายภาค: ตัดปลายภาคออกจากความครบถ้วน คะแนนเต็ม และรายการผิดปกติที่ขึ้นกับปลายภาค ──
-  const adjusted = useMemo(() => {
-    const d = data ?? [];
+    const adjusted = useMemo(() => {
+    // ตัดวิชากิจกรรม (รหัสขึ้นต้นด้วย ก) ออกก่อน
+    const d = (data ?? []).filter(a => !(excludeActivity && /^ก/.test(a.subjectCode ?? "")));
     if (!skipFinal) return d;
     return d.map(a => ({
       ...a,
@@ -271,7 +272,7 @@ export default function AuditReport({
       max: { ...a.max, fin: 0, full: r2(a.max.full - a.max.fin) },
       issues: a.issues.filter(i => !i.final),
     }));
-  }, [data, skipFinal]);
+  }, [data, skipFinal, excludeActivity]);
 
   // ── กรอง + จัดกลุ่ม ──
   const subjectOptions = useMemo(() => {
