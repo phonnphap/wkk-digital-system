@@ -254,11 +254,11 @@ export default function Vp4Report({
     !isPrimary && docKind === "midterm" ? "midterm" : isPrimary ? (sem1 ? "primary1" : "primary2") : "secondary";
   const showRemark = mode !== "primary2";
 
-  const COL_WIDTHS: Record<typeof mode, string[]> = {
-    midterm:   ["8%", "32%", "11%", "9%", "12%", "12%", "16%"],
-    primary1:  ["7%", "26%", "9%", "7%", "8%", "9%", "11%", "13%", "10%"],
-    primary2:  ["8%", "28%", "10%", "8%", "10%", "10%", "13%", "13%"],
-    secondary: ["7%", "24%", "9%", "7%", "7%", "7%", "6%", "10%", "12%", "11%"],
+    const COL_WIDTHS: Record<typeof mode, string[]> = {
+    midterm:   ["9%", "38%", "10%", "8%", "11%", "11%", "13%"],
+    primary1:  ["8%", "33%", "8%", "6%", "8%", "8%", "10%", "12%", "7%"],
+    primary2:  ["8%", "34%", "9%", "7%", "9%", "9%", "12%", "12%"],
+    secondary: ["8%", "30%", "8%", "6%", "7%", "7%", "6%", "9%", "11%", "8%"],
   };
 
   const [overallScores, setOverallScores] = useState<Record<string, { characteristic: string; readThinkWrite: string }>>({});
@@ -694,7 +694,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
   .signature-grid { gap: 7rem; }
 
   @media print {
-    @page { size: A4 portrait; margin: 8mm; }
+        @page { size: A4 portrait; margin: 8mm 5mm; }
 
     html, body {
       background: #fff !important;
@@ -720,7 +720,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
     .vp4-page {
       page-break-after: always;
       break-after: page;
-      padding: 4mm !important;
+            padding: 4mm 2mm !important;
       margin: 0 !important;
       width: 100% !important;
       max-width: none !important;
@@ -753,10 +753,20 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
     .vp4-table th { font-weight: 900; }
 
     /* ในตารางทั้งหมด: TH Sarabun New 14pt (ชนะกฎ 16pt ของ .vp4-page * เพราะ specificity สูงกว่า) */
-    .vp4-page .vp4-table,
+        .vp4-page .vp4-table,
     .vp4-page .vp4-table * {
       font-family: "TH Sarabun New", "THSarabunNew", "TH SarabunPSK", sans-serif !important;
       font-size: 14pt !important;
+    }
+
+    /* รหัสวิชา/ชื่อรายวิชา ไม่ขึ้นบรรทัดใหม่ (เฉพาะตารางหลัก ไม่รวมตารางสรุปหน่วยกิต) */
+    .vp4-table.table-fixed tbody td:nth-child(1),
+    .vp4-table.table-fixed tbody td:nth-child(2),
+    .vp4-table.table-fixed thead tr:first-child th:nth-child(1),
+    .vp4-table.table-fixed thead tr:first-child th:nth-child(2) {
+      white-space: nowrap !important;
+      word-break: normal !important;
+      overflow-wrap: normal !important;
     }
   }
 
