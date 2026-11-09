@@ -177,22 +177,24 @@ export default function Por5SummaryPage() {
   const activeColumns = tab === "attendance" ? attendanceColumns : gradeColumns;
 
     function groupCombinedCell(studentId: string, members: SectionInfo[]) {
-    const cells = members.map(m => gradeMatrix[studentId]?.[m.id]);
-    if (cells.some(c => !c)) return null;
-    const totalWeight = members.reduce((s, m) => s + (m.score_group_weight_percent ?? 0), 0) || 100;
-    // ผลรวมถ่วงน้ำหนัก: ทั้งคะแนนที่ได้ และคะแนนเต็ม (เต็มก็ต้องถูกหารตามน้ำหนักเหมือนกัน)
-    const wsum = (pick: (c: GradeCell) => number) =>
-      members.reduce((sum, m, i) => sum + ((m.score_group_weight_percent ?? 0) / totalWeight) * pick(cells[i]!), 0);
-    const r2 = (n: number) => Math.round(n * 100) / 100;
-    const roundingMode = members[0]?.gradeRoundingMode ?? "truncate";
-    return {
-      parts: cells.map(c => c!.grandTotal),
-      combined: applyRounding(wsum(c => c.grandTotal), roundingMode),   // คะแนนรวมหลังสอบ (ปัดตามตั้งค่า)
-      combinedMax: r2(wsum(c => c.totalMax)),                            // เต็มของคะแนนรวมหลังสอบ
-      collect: r2(wsum(c => c.collectScore)),                            // คะแนนเก็บ
-      collectMax: r2(wsum(c => c.collectMax)),                           // เต็มของคะแนนเก็บ
-    };
-  }
+  const cells = members.map(m => gradeMatrix[studentId]?.[m.id]);
+  if (cells.some(c => !c)) return null;
+  const totalWeight = members.reduce((s, m) => s + (m.score_group_weight_percent ?? 0), 0) || 100;
+  const wsum = (pick: (c: GradeCell) => number) =>
+    members.reduce((sum, m, i) => sum + ((m.score_group_weight_percent ?? 0) / totalWeight) * pick(cells[i]!), 0);
+
+  // ใช้โหมดปัดเศษของวิชาในกลุ่ม (ตั้งค่าไว้ที่รายวิชา: round_up → "up", truncate → "truncate")
+  const roundingMode = members[0]?.gradeRoundingMode ?? "truncate";
+  const rd = (n: number) => applyRounding(n, roundingMode);
+
+  return {
+    parts: cells.map(c => c!.grandTotal),
+    combined: rd(wsum(c => c.grandTotal)),      // คะแนนรวมหลังสอบ
+    combinedMax: rd(wsum(c => c.totalMax)),     // เต็มของคะแนนรวมหลังสอบ
+    collect: rd(wsum(c => c.collectScore)),     // คะแนนเก็บ
+    collectMax: rd(wsum(c => c.collectMax)),    // เต็มของคะแนนเก็บ
+  };
+}
 
   // ── โหลดห้อง + ปี/เทอมของแต่ละห้อง ──
   useEffect(() => {
@@ -477,8 +479,8 @@ for (const c of sortedCriteria) {
 
 gMatrix[s.id][sec.id] = {
   grandTotal: displayTotal, percentage, grade, totalMax: displayMax,
-  collectScore: Math.round(collectScore * 100) / 100,
-  collectMax: Math.round(collectMax * 100) / 100,
+  collectScore: applyRounding(Math.round(collectScore * 100) / 100, sec.gradeRoundingMode),
+  collectMax: applyRounding(Math.round(collectMax * 100) / 100, sec.gradeRoundingMode),
 };
           });
         } catch { /* ข้ามวิชานี้ถ้าดึงไม่สำเร็จ */ }
@@ -554,12 +556,12 @@ gMatrix[s.id][sec.id] = {
           if (col.kind === "single") {
             const cell = gradeMatrix[s.id]?.[col.section.id];
             row[col.label] = !cell ? "-"
-              : useCollect ? `${fmt(cell.collectScore)}/${fmt(cell.collectMax)}`
+              : useCollect ? `${applyRounding(cell.collectScore, col.section.gradeRoundingMode)}/${applyRounding(cell.collectMax, col.section.gradeRoundingMode)}`
               : `${cell.grandTotal}/${cell.totalMax} (${cell.grade})`;
           } else if (col.kind === "groupMember") {
             const cell = gradeMatrix[s.id]?.[col.section.id];
             row[col.label] = !cell ? "-"
-              : useCollect ? `${fmt(cell.collectScore)}/${fmt(cell.collectMax)}`
+              : useCollect ? `${applyRounding(cell.collectScore, col.section.gradeRoundingMode)}/${applyRounding(cell.collectMax, col.section.gradeRoundingMode)}`
               : `${cell.grandTotal}/${cell.totalMax}`;
           } else if (col.kind === "groupCombined") {
             const g = groupCombinedCell(s.id, col.members);
@@ -843,8 +845,8 @@ gMatrix[s.id][sec.id] = {
                             {cell ? (
                               <div className="flex flex-col items-center">
                                 <span className="text-base font-black text-slate-700">
-                                  {useCollect ? fmt(cell.collectScore) : cell.grandTotal}
-                                  <span className="text-slate-400 font-bold text-sm">/{useCollect ? fmt(cell.collectMax) : cell.totalMax}</span>
+                                  {useCollect ? applyRounding(cell.collectScore, col.section.gradeRoundingMode) : cell.grandTotal}
+                                  <span className="text-slate-400 font-bold text-sm">/{useCollect ? applyRounding(cell.collectMax, col.section.gradeRoundingMode) : cell.totalMax}</span>
                                 </span>
                                 {/* เทอม 1 ยังไม่มีปลายภาค เกรดจึงไม่แสดง */}
                                 {col.kind === "single" && !useCollect && <span className="text-sm font-black text-fuchsia-500">{cell.grade}</span>}

@@ -106,12 +106,12 @@ function groupCombinedScore(
   }, 0);
   return applyRounding(combined, members[0]?.gradeRoundingMode ?? "truncate");
 }
-// คะแนนเก็บ: เต็ม / ที่ได้ (ใช้ในแบบรายงานเทอม 1 ระดับประถม)
-function collectOf(cell?: GradeCell): { max: number | null; got: number | null } {
+// คะแนนเก็บ: เต็ม / ที่ได้ — ปัดตามค่าตั้งค่ารายวิชา
+function collectOf(cell?: GradeCell, mode: RoundingMode = "truncate"): { max: number | null; got: number | null } {
   if (!cell) return { max: null, got: null };
   return {
-    max: cell.collectMax ?? null,
-    got: cell.collectScore ?? null,
+    max: cell.collectMax != null ? applyRounding(cell.collectMax, mode) : null,
+    got: cell.collectScore != null ? applyRounding(cell.collectScore, mode) : null,
   };
 }
 
@@ -120,14 +120,17 @@ function groupCollect(
   studentId: string,
   members: SectionInfo[]
 ): { max: number | null; got: number | null } {
-  const parts = members.map(m => collectOf(gradeMatrix[studentId]?.[m.id]));
-  if (parts.some(p => p.max === null || p.got === null)) return { max: null, got: null };
-  // ถ่วงน้ำหนักตาม % ของแต่ละวิชาในกลุ่ม ทั้งคะแนนที่ได้และคะแนนเต็ม
+  // ใช้ค่าดิบ (ไม่ปัด) ของแต่ละวิชา แล้วค่อยถ่วงน้ำหนัก และปัดครั้งเดียวตอนท้าย
+  const cells = members.map(m => gradeMatrix[studentId]?.[m.id]);
+  if (cells.some(c => !c || c.collectMax == null || c.collectScore == null)) return { max: null, got: null };
   const totalWeight = members.reduce((s, m) => s + (m.score_group_weight_percent ?? 0), 0) || 100;
-  const wsum = (pick: (p: { max: number | null; got: number | null }) => number) =>
-    members.reduce((s, m, i) => s + ((m.score_group_weight_percent ?? 0) / totalWeight) * pick(parts[i]), 0);
-  const r2 = (n: number) => Math.round(n * 100) / 100;
-  return { max: r2(wsum(p => p.max as number)), got: r2(wsum(p => p.got as number)) };
+  const wsum = (pick: (c: GradeCell) => number) =>
+    members.reduce((s, m, i) => s + ((m.score_group_weight_percent ?? 0) / totalWeight) * pick(cells[i]!), 0);
+  const mode = members[0]?.gradeRoundingMode ?? "truncate";
+  return {
+    max: applyRounding(wsum(c => c.collectMax as number), mode),
+    got: applyRounding(wsum(c => c.collectScore as number), mode),
+  };
 }
 
 function formatFullName(a?: AdvisorInfo): string {
@@ -505,8 +508,8 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                         <td className={`${TD} break-words`}>{sec.subject_name}</td>
                         <td className={`${TD} text-center`}>{subjectTypeLabel(sec)}</td>
                         <td className={`${TD} text-center`}>{sec.credit_hours ?? "-"}</td>
-                        <td className={`${TD} text-center font-black text-black`}>{fmtNum(cell?.collectMax ?? null)}</td>
-                        <td className={`${TD} text-center font-black text-black`}>{fmtNum(cell?.collectScore ?? null)}</td>
+                        <td className={`${TD} text-center font-black text-black`}>{fmtNum(collectOf(cell, sec.gradeRoundingMode).max)}</td>
+<td className={`${TD} text-center font-black text-black`}>{fmtNum(collectOf(cell, sec.gradeRoundingMode).got)}</td>
                         {idx === 0 && (
                           <td className={`${TD} align-top text-center text-red-600 text-base`} rowSpan={midtermSections.length}>
                             *คะแนนที่ได้เป็นคะแนน ณ วันที่ {formatThaiDate(scoreDateLocal)}
@@ -544,7 +547,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
 
                     const sec = row.section;
                     const cell = gradeMatrix[s.id]?.[sec.id];
-                    const col = collectOf(cell);
+                    const col = collectOf(cell, sec.gradeRoundingMode);
                     const isActivity = isActivitySubject(sec.subject_code);
                     const unitValue = isPrimary ? sec.hours_per_year : sec.credit_hours;
                     return (
@@ -699,7 +702,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
       break-after: page;
       page-break-inside: avoid;
       break-inside: avoid;
-      font-size: 14px;
+      font-size: 16px;
       padding: 4mm !important;
       margin: 0 !important;
       width: 100% !important;
