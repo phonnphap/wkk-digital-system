@@ -174,13 +174,14 @@ function InfoField({ label, value, grow = 1 }: { label: string; value: string; g
   );
 }
 
-function SignatureField({ role, nameLabel, lineWidthPx }: { role: string; nameLabel?: string; lineWidthPx?: number }) {
+function SignatureField({ role, nameLabel, lineWidthPx, gapBeforeName = false }: { role: string; nameLabel?: string; lineWidthPx?: number; gapBeforeName?: boolean }) {
   const w = lineWidthPx ?? SIGNATURE_LINE_WIDTH_PX;
   return (
     <div className="inline-flex items-baseline text-left signature-field">
       <span className="whitespace-nowrap">ลงชื่อ</span>
       <div className="flex flex-col items-center mx-1" style={{ width: `${w}px` }}>
         <span className="border-b-2 border-dotted border-gray-400 w-full text-center">&nbsp;</span>
+        {gapBeforeName && <span className="text-center">&nbsp;</span>}
         <span className="text-center whitespace-nowrap">{nameLabel ? `(${nameLabel})` : "\u00A0"}</span>
       </div>
       <span className="whitespace-nowrap">{role}</span>
@@ -666,7 +667,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                       lineWidthPx={signatureLineWidthPx}
                     />
                     <div className="h-8 print:h-6"></div>
-                    <SignatureField role="ผู้ปกครอง" nameLabel="........................................." lineWidthPx={signatureLineWidthPx} />
+                    <SignatureField role="ผู้ปกครอง" nameLabel="........................................." lineWidthPx={signatureLineWidthPx} gapBeforeName />
                   </div>
                 </div>
               </>
@@ -747,9 +748,22 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
     .vp4-page .gap-6 { gap: 10px !important; }
     .vp4-page .signature-grid { gap: 40px !important; }
 
-    .vp4-table { table-layout: fixed; width: 100%; }
+        .vp4-table { table-layout: fixed; width: 100%; }
     .vp4-table th, .vp4-table td { padding: 1px 4px !important; }
     .vp4-table th { font-weight: 900; }
+
+    /* ในตารางทั้งหมด: TH Sarabun New 14pt (ชนะกฎ 16pt ของ .vp4-page * เพราะ specificity สูงกว่า) */
+    .vp4-page .vp4-table,
+    .vp4-page .vp4-table * {
+      font-family: "TH Sarabun New", "THSarabunNew", "TH SarabunPSK", sans-serif !important;
+      font-size: 14pt !important;
+    }
+  }
+
+  /* ช่อง "คะแนนเต็ม" และ "คะแนนที่ได้": สีดำ ไม่ตัวหนา (ใช้ทั้งบนจอและตอนพิมพ์) */
+  .vp4-page .vp4-table td.text-black {
+    color: #000 !important;
+    font-weight: normal !important;
   }
 `}</style>
     </div>
