@@ -174,17 +174,20 @@ function InfoField({ label, value, grow = 1 }: { label: string; value: string; g
   );
 }
 
-function SignatureField({ role, nameLabel, lineWidthPx, gapBeforeName = false }: { role: string; nameLabel?: string; lineWidthPx?: number; gapBeforeName?: boolean }) {
+function SignatureField({ role, nameLabel, lineWidthPx, gapBeforeName = true, gapBeforeSign = true }: { role: string; nameLabel?: string; lineWidthPx?: number; gapBeforeName?: boolean; gapBeforeSign?: boolean }) {
   const w = lineWidthPx ?? SIGNATURE_LINE_WIDTH_PX;
   return (
-    <div className="inline-flex items-baseline text-left signature-field">
-      <span className="whitespace-nowrap">ลงชื่อ</span>
-      <div className="flex flex-col items-center mx-1" style={{ width: `${w}px` }}>
-        <span className="border-b-2 border-dotted border-gray-400 w-full text-center">&nbsp;</span>
-        {gapBeforeName && <span className="text-center">&nbsp;</span>}
-        <span className="text-center whitespace-nowrap">{nameLabel ? `(${nameLabel})` : "\u00A0"}</span>
+    <div className="inline-flex flex-col items-start text-left signature-field">
+      {gapBeforeSign && <span>&nbsp;</span>}
+      <div className="inline-flex items-baseline">
+        <span className="whitespace-nowrap">ลงชื่อ</span>
+        <div className="flex flex-col items-center mx-1" style={{ width: `${w}px` }}>
+          <span className="border-b-2 border-dotted border-gray-400 w-full text-center">&nbsp;</span>
+          {gapBeforeName && <span className="text-center">&nbsp;</span>}
+          <span className="text-center whitespace-nowrap">{nameLabel ? `(${nameLabel})` : "\u00A0"}</span>
+        </div>
+        <span className="whitespace-nowrap">{role}</span>
       </div>
-      <span className="whitespace-nowrap">{role}</span>
     </div>
   );
 }
@@ -254,11 +257,11 @@ export default function Vp4Report({
     !isPrimary && docKind === "midterm" ? "midterm" : isPrimary ? (sem1 ? "primary1" : "primary2") : "secondary";
   const showRemark = mode !== "primary2";
 
-    const COL_WIDTHS: Record<typeof mode, string[]> = {
-        midterm:   ["11%", "36%", "10%", "8%", "11%", "11%", "13%"],
-    primary1:  ["10%", "31%", "8%", "6%", "8%", "8%", "10%", "12%", "7%"],
+        const COL_WIDTHS: Record<typeof mode, string[]> = {
+    midterm:   ["10%", "34%", "10%", "8%", "11%", "11%", "16%"],
+    primary1:  ["10%", "29%", "8%", "6%", "8%", "8%", "10%", "11%", "10%"],
     primary2:  ["10%", "32%", "9%", "7%", "9%", "9%", "12%", "12%"],
-    secondary: ["10%", "28%", "8%", "6%", "7%", "7%", "6%", "9%", "11%", "8%"],
+    secondary: ["10%", "26%", "8%", "6%", "7%", "7%", "6%", "9%", "11%", "10%"],
   };
 
   const [overallScores, setOverallScores] = useState<Record<string, { characteristic: string; readThinkWrite: string }>>({});
@@ -492,7 +495,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                       <th className={TH} rowSpan={2}>อ่านคิด<br />วิเคราะห์เขียน</th>
                       {showRemark && <th className={TH} rowSpan={2}>หมายเหตุ</th>}
                     </tr>
-                    <tr className="border text-slate-500">
+                    <tr className="border">
                       <th className={TH}>{mode === "primary1" ? "คะแนนเต็ม" : "คะแนนที่ได้"}</th>
                       <th className={TH}>{mode === "primary1" ? "คะแนนที่ได้" : "ผลการเรียน"}</th>
                     </tr>
@@ -769,7 +772,15 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
       overflow-wrap: normal !important;
     }
   }
+      /* ตัวอักษรทุกเซลล์ในตารางเป็นสีดำ ตัวหนาเฉพาะหัวตาราง */
+  .vp4-page .vp4-table th,
+  .vp4-page .vp4-table td {
+    color: #000 !important;
+  }
+  .vp4-page .vp4-table td { font-weight: normal !important; }
 `}</style>
     </div>
+    
   );
+  
 }
