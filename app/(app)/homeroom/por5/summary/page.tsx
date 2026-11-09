@@ -59,7 +59,7 @@ function subjectRank(s: SectionInfo): number {
   if (isActivitySubject(s.subject_code)) return 2;
   return s.subject_type === "basic" ? 0 : 1;
 }
-
+const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 // ห้อง ม.* หรือห้องที่แยกเทอมแล้ว = มี classroom คนละ id ต่อเทอม
 function isSplitRoom(c: Classroom) {
   return c.room_name.trim().startsWith("ม") || !!c.split;
@@ -138,7 +138,9 @@ export default function Por5SummaryPage() {
 
   const level = selectedClassroom ? detectLevel(selectedClassroom.room_name) : "primary";
   // ประถมมีแต่ใบเกรด; มัธยมเลือก ใบเกรด/แบบวัดผล 4 (มิดเทอม) ได้
-  const kind: DocKind = level === "secondary" ? docKind : "final";
+    const kind: DocKind = level === "secondary" ? docKind : "final";
+  // เทอม 1 ระดับประถม: ตารางแสดง "คะแนนเก็บ / เต็มคะแนนเก็บ" แทนคะแนนรวมหลังสอบ
+  const useCollect = level === "primary" && semester === 1;
   const lockable =
     !!selectedClassroom &&
     ((level === "primary" && semester === 1) || (level === "secondary" && kind === "midterm"));
@@ -174,16 +176,22 @@ export default function Por5SummaryPage() {
 
   const activeColumns = tab === "attendance" ? attendanceColumns : gradeColumns;
 
-  function groupCombinedCell(studentId: string, members: SectionInfo[]) {
+    function groupCombinedCell(studentId: string, members: SectionInfo[]) {
     const cells = members.map(m => gradeMatrix[studentId]?.[m.id]);
     if (cells.some(c => !c)) return null;
     const totalWeight = members.reduce((s, m) => s + (m.score_group_weight_percent ?? 0), 0) || 100;
-    const combined = members.reduce((sum, m, i) => {
-      const w = (m.score_group_weight_percent ?? 0) / totalWeight;
-      return sum + w * (cells[i]!.grandTotal);
-    }, 0);
+    // ผลรวมถ่วงน้ำหนัก: ทั้งคะแนนที่ได้ และคะแนนเต็ม (เต็มก็ต้องถูกหารตามน้ำหนักเหมือนกัน)
+    const wsum = (pick: (c: GradeCell) => number) =>
+      members.reduce((sum, m, i) => sum + ((m.score_group_weight_percent ?? 0) / totalWeight) * pick(cells[i]!), 0);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
     const roundingMode = members[0]?.gradeRoundingMode ?? "truncate";
-    return { parts: cells.map(c => c!.grandTotal), combined: applyRounding(combined, roundingMode) };
+    return {
+      parts: cells.map(c => c!.grandTotal),
+      combined: applyRounding(wsum(c => c.grandTotal), roundingMode),   // คะแนนรวมหลังสอบ (ปัดตามตั้งค่า)
+      combinedMax: r2(wsum(c => c.totalMax)),                            // เต็มของคะแนนรวมหลังสอบ
+      collect: r2(wsum(c => c.collectScore)),                            // คะแนนเก็บ
+      collectMax: r2(wsum(c => c.collectMax)),                           // เต็มของคะแนนเก็บ
+    };
   }
 
   // ── โหลดห้อง + ปี/เทอมของแต่ละห้อง ──
@@ -542,16 +550,22 @@ gMatrix[s.id][sec.id] = {
           "เลขที่": s.seat_number,
           "ชื่อ-นามสกุล": `${s.prefix ?? ""}${s.first_name} ${s.last_name}`.trim(),
         };
-        gradeColumns.forEach(col => {
+               gradeColumns.forEach(col => {
           if (col.kind === "single") {
             const cell = gradeMatrix[s.id]?.[col.section.id];
-            row[col.label] = cell ? `${cell.grandTotal} (${cell.grade})` : "-";
+            row[col.label] = !cell ? "-"
+              : useCollect ? `${fmt(cell.collectScore)}/${fmt(cell.collectMax)}`
+              : `${cell.grandTotal}/${cell.totalMax} (${cell.grade})`;
           } else if (col.kind === "groupMember") {
             const cell = gradeMatrix[s.id]?.[col.section.id];
-            row[col.label] = cell ? `${cell.grandTotal}` : "-";
+            row[col.label] = !cell ? "-"
+              : useCollect ? `${fmt(cell.collectScore)}/${fmt(cell.collectMax)}`
+              : `${cell.grandTotal}/${cell.totalMax}`;
           } else if (col.kind === "groupCombined") {
             const g = groupCombinedCell(s.id, col.members);
-            row[`${col.label} (รวม)`] = g ? `${g.combined}` : "-";
+            row[`${col.label} (รวม)`] = !g ? "-"
+              : useCollect ? `${fmt(g.collect)}/${fmt(g.collectMax)}`
+              : `${g.combined}/${fmt(g.combinedMax)}`;
           }
         });
         return row;
@@ -730,9 +744,9 @@ gMatrix[s.id][sec.id] = {
                 : "เทอม 1 ยังไม่ล็อก — ใบเกรดนี้จะเปลี่ยนตามคะแนนปัจจุบัน ควรล็อกก่อนเริ่มกรอกคะแนนเทอม 2"}
             </p>
           )}
-          {notInTimetable.length > 0 && (
-            <p className="mb-3 text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 print:hidden">
-              ⚠️ วิชาต่อไปนี้มี Smart Class แต่ไม่อยู่ในตารางสอนเทอม {semester} จึงไม่แสดงในใบ: {notInTimetable.join(", ")}
+                    {useCollect && tab === "grades" && (
+            <p className="mb-3 text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 print:hidden">
+              ℹ️ เทอม 1 แสดง "คะแนนเก็บ / คะแนนเต็มของคะแนนเก็บ" (ตรงกับช่องคะแนนเก็บใน Smart Class) · วิชารวมกลุ่มแสดงคะแนนที่ถ่วงน้ำหนักแล้ว
             </p>
           )}
 
@@ -809,12 +823,15 @@ gMatrix[s.id][sec.id] = {
                           );
                         }
 
-                        if (col.kind === "groupCombined") {
+                                                if (col.kind === "groupCombined") {
                           const g = groupCombinedCell(s.id, col.members);
                           return (
                             <td key={col.key} className={`text-center px-3 py-3 ${colors.cell}`}>
                               {g ? (
-                                <span className="inline-flex px-2 py-1 rounded-full text-base font-black bg-fuchsia-50 text-fuchsia-600">{g.combined}</span>
+                                <span className="inline-flex px-2 py-1 rounded-full text-base font-black bg-fuchsia-50 text-fuchsia-600">
+                                  {useCollect ? fmt(g.collect) : g.combined}
+                                  <span className="text-fuchsia-300 font-bold text-sm">/{useCollect ? fmt(g.collectMax) : fmt(g.combinedMax)}</span>
+                                </span>
                               ) : <span className="text-slate-300 text-sm">-</span>}
                             </td>
                           );
@@ -826,9 +843,11 @@ gMatrix[s.id][sec.id] = {
                             {cell ? (
                               <div className="flex flex-col items-center">
                                 <span className="text-base font-black text-slate-700">
-                                  {cell.grandTotal}<span className="text-slate-400 font-bold text-sm">/{cell.totalMax}</span>
+                                  {useCollect ? fmt(cell.collectScore) : cell.grandTotal}
+                                  <span className="text-slate-400 font-bold text-sm">/{useCollect ? fmt(cell.collectMax) : cell.totalMax}</span>
                                 </span>
-                                {col.kind === "single" && <span className="text-sm font-black text-fuchsia-500">{cell.grade}</span>}
+                                {/* เทอม 1 ยังไม่มีปลายภาค เกรดจึงไม่แสดง */}
+                                {col.kind === "single" && !useCollect && <span className="text-sm font-black text-fuchsia-500">{cell.grade}</span>}
                               </div>
                             ) : <span className="text-slate-300 text-sm">-</span>}
                           </td>

@@ -10,6 +10,7 @@ type Student = {
 function isActivitySubject(subjectCode: string): boolean {
   return /^ก/.test(subjectCode ?? "");
 }
+const fmtNum = (n: number | null) => (n === null ? "-" : Number.isInteger(n) ? String(n) : n.toFixed(2));
 
 type RoundingMode = "up" | "truncate";
 // Smart Class เก็บเป็น "round_up" | "truncate" — แปลงให้เป็นโหมดภายในหน้านี้
@@ -121,10 +122,12 @@ function groupCollect(
 ): { max: number | null; got: number | null } {
   const parts = members.map(m => collectOf(gradeMatrix[studentId]?.[m.id]));
   if (parts.some(p => p.max === null || p.got === null)) return { max: null, got: null };
-  return {
-    max: parts.reduce((s, p) => s + (p.max as number), 0),
-    got: parts.reduce((s, p) => s + (p.got as number), 0),
-  };
+  // ถ่วงน้ำหนักตาม % ของแต่ละวิชาในกลุ่ม ทั้งคะแนนที่ได้และคะแนนเต็ม
+  const totalWeight = members.reduce((s, m) => s + (m.score_group_weight_percent ?? 0), 0) || 100;
+  const wsum = (pick: (p: { max: number | null; got: number | null }) => number) =>
+    members.reduce((s, m, i) => s + ((m.score_group_weight_percent ?? 0) / totalWeight) * pick(parts[i]), 0);
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  return { max: r2(wsum(p => p.max as number)), got: r2(wsum(p => p.got as number)) };
 }
 
 function formatFullName(a?: AdvisorInfo): string {
@@ -502,8 +505,8 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                         <td className={`${TD} break-words`}>{sec.subject_name}</td>
                         <td className={`${TD} text-center`}>{subjectTypeLabel(sec)}</td>
                         <td className={`${TD} text-center`}>{sec.credit_hours ?? "-"}</td>
-                        <td className={`${TD} text-center font-black text-black`}>{cell?.totalMax ?? "-"}</td>
-                        <td className={`${TD} text-center font-black text-black`}>{cell?.grandTotal ?? "-"}</td>
+                        <td className={`${TD} text-center font-black text-black`}>{fmtNum(cell?.collectMax ?? null)}</td>
+                        <td className={`${TD} text-center font-black text-black`}>{fmtNum(cell?.collectScore ?? null)}</td>
                         {idx === 0 && (
                           <td className={`${TD} align-top text-center text-red-600 text-base`} rowSpan={midtermSections.length}>
                             *คะแนนที่ได้เป็นคะแนน ณ วันที่ {formatThaiDate(scoreDateLocal)}
@@ -526,10 +529,10 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                           <td className={`${TD} text-center`}>พื้นฐาน</td>
                           <td className={`${TD} text-center`}>{unitSum || "-"}</td>
                           <td className={`${TD} text-center font-black text-black`}>
-  {mode === "primary1" ? (gc.max ?? "-") : (combined ?? "-")}
+    {mode === "primary1" ? fmtNum(gc.max) : (combined ?? "-")}
 </td>
 <td className={`${TD} text-center font-black text-black`}>
-  {mode === "primary1" ? (gc.got ?? "-") : "-"}
+    {mode === "primary1" ? fmtNum(gc.got) : "-"}
 </td>
                           {mode === "secondary" && <td className={TD}></td>}
                           <td className={`${TD} text-center`}>{overall?.characteristic ?? "-"}</td>
@@ -551,10 +554,10 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                         <td className={`${TD} text-center`}>{subjectTypeLabel(sec)}</td>
                         <td className={`${TD} text-center`}>{isActivity ? "-" : (unitValue ?? "-")}</td>
                         <td className={`${TD} text-center font-black text-black`}>
-  {isActivity ? "-" : mode === "primary1" ? (col.max ?? "-") : (cell?.percentage != null ? Math.round(cell.percentage) : "-")}
+    {isActivity ? "-" : mode === "primary1" ? fmtNum(col.max) : (cell?.percentage != null ? Math.round(cell.percentage) : "-")}
 </td>
 <td className={`${TD} text-center font-black text-black`}>
-  {isActivity ? activityResult(attendMatrix[s.id]?.[sec.id]) : mode === "primary1" ? (col.got ?? "-") : (cell?.grade ?? "-")}
+    {isActivity ? activityResult(attendMatrix[s.id]?.[sec.id]) : mode === "primary1" ? fmtNum(col.got) : (cell?.grade ?? "-")}
 </td>
                         {mode === "secondary" && <td className={TD}></td>}
                         <td className={`${TD} text-center`}>{overall?.characteristic ?? "-"}</td>
