@@ -328,44 +328,44 @@ useEffect(() => {
         ]);
 
         setStatus("2/3 กำลังโหลดโมเดลตรวจจับการกระพริบตา");
-        try {
-          const { FaceLandmarker, FilesetResolver } = await import('@mediapipe/tasks-vision');
-          const vision = await FilesetResolver.forVisionTasks(
-            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-          );
-          let landmarker;
-          try {
-            // ลอง GPU (เร็วกว่า) ก่อน ถ้าอุปกรณ์/เบราว์เซอร์ไม่รองรับค่อย fallback เป็น CPU
-            landmarker = await FaceLandmarker.createFromOptions(vision, {
-              baseOptions: {
-                modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-                delegate: "GPU",
-              },
-              outputFaceBlendshapes: true,
-              outputFacialTransformationMatrixes: false,
-              runningMode: "VIDEO",
-              numFaces: 1,
-            });
-          } catch {
-            landmarker = await FaceLandmarker.createFromOptions(vision, {
-              baseOptions: {
-                modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-                delegate: "CPU",
-              },
-              outputFaceBlendshapes: true,
-              outputFacialTransformationMatrixes: false,
-              runningMode: "VIDEO",
-              numFaces: 1,
-            });
-          }
-          mediaPipeRef.current = landmarker;
-        } catch (mpErr) {
-          // ถ้าโหลด MediaPipe ไม่สำเร็จ (เช่น เน็ตหลุดตอนโหลด CDN) ระบบยังใช้งานได้
-          // แต่จะข้ามขั้นกระพริบตาไม่ได้ — แจ้งผู้ใช้ให้รีเฟรชแทนที่จะปล่อยให้ค้าง
-          console.error('MediaPipe load error:', mpErr);
-          setStatus("โหลดโมเดลตรวจจับการกระพริบตาไม่สำเร็จ กรุณารีเฟรชหน้านี้");
-          return;
-        }
+try {
+  const { FaceLandmarker, FilesetResolver } = await import('@mediapipe/tasks-vision');
+
+  // ชี้ไปที่ไฟล์ในโปรเจกต์เราเอง (public/mediapipe/wasm)
+  const vision = await FilesetResolver.forVisionTasks("/mediapipe/wasm");
+
+  const create = (delegate: "GPU" | "CPU") =>
+    FaceLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: "/mediapipe/face_landmarker.task",
+        delegate,
+      },
+      outputFaceBlendshapes: true,
+      outputFacialTransformationMatrixes: false,
+      runningMode: "VIDEO",
+      numFaces: 1,
+    });
+
+  // กัน GPU ค้างบนมือถือบางรุ่น: ถ้าเกิน 8 วินาที ให้ใช้ CPU แทน
+  const withTimeout = <T,>(p: Promise<T>, ms: number) =>
+    Promise.race([
+      p,
+      new Promise<T>((_, rej) => setTimeout(() => rej(new Error("timeout")), ms)),
+    ]);
+
+  let landmarker;
+  try {
+    landmarker = await withTimeout(create("GPU"), 8000);
+  } catch {
+    landmarker = await create("CPU");
+  }
+  mediaPipeRef.current = landmarker;
+} catch (mpErr: any) {
+  console.error('MediaPipe load error:', mpErr);
+  // แสดงสาเหตุจริงบนจอ จะได้ debug บนมือถือได้โดยไม่ต้องเปิด console
+  setStatus("โหลดโมเดลตรวจจับการกระพริบตาไม่สำเร็จ: " + (mpErr?.message || String(mpErr)));
+  return;
+}
 
         setStatus("3/3 กำลังโหลดฐานข้อมูลใบหน้า");
         const { data, error } = await supabase
