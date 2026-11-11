@@ -35,7 +35,7 @@
     "next": "^16.2.7",
     "postcss": "^8.4.49",
     "puppeteer": "^25.2.1",
-    "puppeteer-core": "^25.2.1",
+    "puppeteer-core": "^25.17.0",
     "qrcode.react": "^4.2.0",
     "react": "latest",
     "react-barcode": "^1.6.1",

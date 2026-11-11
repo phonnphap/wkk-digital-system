@@ -28,6 +28,35 @@ const APPROVER_EMAILS  = [APPROVER_1_EMAIL, APPROVER_2_EMAIL, APPROVER_3_EMAIL];
 const OD_ATTACH_FOLDER = "ใบลา_เอกสารแนบ";
 const OD_LEAVE_FOLDER  = "ใบลา";
 const OD_LEAVE_UNSIGNED_FOLDER = "ใบลา_ไม่มีลายเซน";   // ★ ใส่คู่กับ OD_LEAVE_FOLDER ด้านบน
+// ปีงบ 1 = 1 ก.ค.–30 ก.ย.  |  ปีงบ 2 = 1 ต.ค.–30 เม.ย. (ปีถัดไป)
+// หมายเหตุ: OneDrive ใช้ "/" ในชื่อโฟลเดอร์ไม่ได้ จึงใช้ "ปีงบ 1-2569" แทน "ปีงบ 1/2569"
+function leaveTermFolder(base: string, startDate: string): string {
+  const [y, m] = (startDate || "").split("-").map(Number);
+  if (!y || !m) return base;
+  if (m >= 7 && m <= 9)  return `${base}/ปีงบ 1-${y + 543}`;
+  if (m >= 10)           return `${base}/ปีงบ 2-${y + 543}`;
+  if (m >= 1 && m <= 4)  return `${base}/ปีงบ 2-${y - 1 + 543}`;
+  return base; // พ.ค.–มิ.ย. ไม่อยู่ในรอบ เก็บไว้ที่โฟลเดอร์หลัก
+}
+
+// ── โลโก้: ฝังเป็น data URI เพื่อให้ PDF ที่สร้างฝั่งเซิร์ฟเวอร์เห็นรูป (path แบบ /school-logo.png ใช้ไม่ได้นอกเว็บ) ──
+const LOGO_DATA: { school?: string; official?: string } = {};
+async function urlToDataUri(url: string): Promise<string | undefined> {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return undefined;
+    const b = await r.blob();
+    return await new Promise<string>(res => {
+      const fr = new FileReader();
+      fr.onloadend = () => res(fr.result as string);
+      fr.readAsDataURL(b);
+    });
+  } catch { return undefined; }
+}
+async function preloadLogos() {
+  if (!LOGO_DATA.school)   LOGO_DATA.school   = await urlToDataUri("/school-logo.png");
+  if (!LOGO_DATA.official) LOGO_DATA.official = await urlToDataUri("/images1.jpg");
+}
 
 // ─── helpers ──────────────────────────────────────────────
 function toThaiDate(iso: string) {
@@ -683,46 +712,39 @@ async function uploadLeavePDF(
   const yyyyBE = d.getFullYear() + 543;
   const fileNameBase = `${dd}${mm}${yyyyBE}_${(teacherInfo.first_name || "").trim()}_${(teacherInfo.last_name || "").trim()}`;
 
-  try {
-    const pdfRes = await fetch("/api/generate-leave-pdf", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html }),
-    });
-    if (pdfRes.ok) {
-      const pdfBlob = await pdfRes.blob();
-      const uniquePath = await findAvailableLeavePath(folder, fileNameBase, "pdf");
-      const fd = new FormData();
-      fd.append("file", pdfBlob, uniquePath.split("/").pop()!);
-      fd.append("path", uniquePath);
-      await fetch("/api/upload-onedrive", { method: "POST", body: fd });
-      return;
-    }
-    const errJson = await pdfRes.json().catch(() => ({ fallback: true }));
-    if (!errJson.fallback) throw new Error(errJson.error);
-  } catch (e) {
-    console.warn("[uploadLeavePDF] PDF API failed, uploading HTML:", folder, e);
-  }
+  const pdfRes = await fetch("/api/generate-leave-pdf", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ html, format: "A4", landscape: false }),
+  });
+  if (!pdfRes.ok) throw new Error(`generate-leave-pdf HTTP ${pdfRes.status}`);
+  const pdfBlob = await pdfRes.blob();
 
-  const uniquePath = await findAvailableLeavePath(folder, fileNameBase, "html");
+  const uniquePath = await findAvailableLeavePath(folder, fileNameBase, "pdf");
   const fd = new FormData();
-  fd.append("file", new Blob([html], { type: "text/html;charset=utf-8" }), uniquePath.split("/").pop()!);
+  fd.append("file", pdfBlob, uniquePath.split("/").pop()!);
   fd.append("path", uniquePath);
-  await fetch("/api/upload-onedrive", { method: "POST", body: fd });
+  const up = await fetch("/api/upload-onedrive", { method: "POST", body: fd });
+  if (!up.ok) throw new Error(`upload-onedrive HTTP ${up.status}`);
 }
 
 /** อนุมัติครบ → อัปโหลดฉบับมีลายเซ็น (ใบลา/) + ฉบับไม่มีลายเซ็น (ใบลา_ไม่มีลายเซน/) */
 async function uploadApprovedLeaveBothVersions(
   leaveData: any, reqUser: any, approverSigs: any[],
   docUrl: string | undefined, stats: LeaveStats, startDate: string
-): Promise<void> {
+): Promise<number> {
+  await preloadLogos();
   const teacher = { first_name: reqUser?.first_name, last_name: reqUser?.last_name };
-  const signedHtml   = buildLeaveHTML(leaveData, reqUser?.signature_url || "", approverSigs, docUrl, stats);
-  const unsignedHtml = buildLeaveHTML(leaveData, "", approverSigs, docUrl, stats, true);
+  const requesterSig = leaveData.requesterSig || reqUser?.signature_url || "";
+  // ทั้งสองฉบับใช้ลายเซนผู้ลา + โลโก้ + สถิติเหมือนกัน ต่างกันที่ลายเซนผู้อนุมัติ 1/2/3 เท่านั้น
+  const signedHtml   = buildLeaveHTML(leaveData, requesterSig, approverSigs, docUrl, stats);
+  const unsignedHtml = buildLeaveHTML(leaveData, requesterSig, approverSigs, docUrl, stats, true);
   const results = await Promise.allSettled([
-    uploadLeavePDF(signedHtml,   teacher, startDate, OD_LEAVE_FOLDER),
-    uploadLeavePDF(unsignedHtml, teacher, startDate, OD_LEAVE_UNSIGNED_FOLDER),
+    uploadLeavePDF(signedHtml,   teacher, startDate, leaveTermFolder(OD_LEAVE_FOLDER, startDate)),
+    uploadLeavePDF(unsignedHtml, teacher, startDate, leaveTermFolder(OD_LEAVE_UNSIGNED_FOLDER, startDate)),
   ]);
-  results.forEach((r, i) => { if (r.status === "rejected") console.warn("[uploadApprovedLeaveBothVersions]", i, r.reason); });
+  let failed = 0;
+  results.forEach((r, i) => { if (r.status === "rejected") { failed++; console.warn("[uploadApprovedLeaveBothVersions]", i, r.reason); } });
+  return failed;
 }
 
 // ══════════════════════════════════════════════════════════
@@ -736,10 +758,9 @@ function buildLeaveHTML(
   leaveStats?: LeaveStats,
   hideSignatures = false            // ★ เพิ่ม
 ): string {
-  if (hideSignatures) {
-    signatureUrl = "";
-    approverSignatures = approverSignatures?.map(a => ({ ...a, signature_url: undefined }));
-  }
+   if (hideSignatures) {
+  approverSignatures = approverSignatures?.map(a => ({ ...a, signature_url: undefined, approved_at: undefined }));
+}
   const docDate = data.createdAt ? new Date(data.createdAt) : new Date();
   const thDay   = docDate.getDate();
   const thMonth = docDate.toLocaleDateString("th-TH",{ month:"long", timeZone:"Asia/Bangkok" });
@@ -890,7 +911,7 @@ function buildLeaveHTML(
   // ── ส่วนหัวเอกสาร: ต่างกันระหว่าง "ใบลา" กับ "บันทึกข้อความไปราชการ" ──
   const headerHtml = isOfficial ? `
     <div style="position:relative;min-height:64px;margin-bottom:4px">
-      <img src="/images.jpg" style="position:absolute;left:0;top:0;width:62px;height:62px;object-fit:contain" onerror="this.style.display='none'"/>
+      <img src="${LOGO_DATA.official ?? "/images1.jpg"}" style="position:absolute;left:0;top:0;width:62px;height:62px;object-fit:contain" onerror="this.style.display='none'"/>
       <div style="font-size:16pt;font-weight:900;text-align:center;padding-top:8px">บันทึกข้อความ</div>
     </div>
     <div style="height:6px"></div>
@@ -908,7 +929,7 @@ function buildLeaveHTML(
     <div style="margin-bottom:10px;font-size:11pt">เรียน ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
   ` : `
     <div style="text-align:center;margin-bottom:4px">
-      <img src="/school-logo.png" style="width:125px;height:125px;object-fit:contain" onerror="this.style.display='none'"/>
+      <img src="${LOGO_DATA.school ?? "/school-logo.png"}" style="width:125px;height:125px;object-fit:contain" onerror="this.style.display='none'"/>
     </div>
     <div style="font-size:14.5pt;font-weight:900;text-align:center;margin:3px 0">แบบใบลาป่วย ลากิจส่วนตัว ลาคลอดบุตร</div>
     <div style="height:10px"></div>
@@ -1395,30 +1416,68 @@ function TeacherSearchSelect({ teachers, value, onChange, placeholder = "— เ
     </div>
   );
 }
+const BACKFILL_FROM = "2026-07-01";   // 1 ก.ค. 2569
+const BACKFILL_TO   = "2027-04-30";   // 30 เม.ย. 2570
+
+async function deleteHtmlInFolder(folder: string) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch("/api/delete-onedrive", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+    body: JSON.stringify({ folder, extension: ".html" }),
+  });
+  return res.json().catch(() => ({ ok: false }));
+}
+
+async function backfillLeavePdfs(onProgress: (msg: string) => void) {
+  onProgress("🗑️ ลบไฟล์ .html เดิม...");
+  const a = await deleteHtmlInFolder(OD_LEAVE_FOLDER);
+  const b = await deleteHtmlInFolder(OD_LEAVE_UNSIGNED_FOLDER);
+  onProgress(`ลบแล้ว ใบลา ${a.deleted ?? 0} ไฟล์ · ไม่มีลายเซน ${b.deleted ?? 0} ไฟล์`);
+
+  const { data } = await supabase.from("leave_requests").select("id,start_date")
+    .eq("status", "approved").gte("start_date", BACKFILL_FROM).lte("start_date", BACKFILL_TO)
+    .order("start_date", { ascending: true });
+  const list = data ?? [];
+  let ok = 0, fail = 0;
+  for (let i = 0; i < list.length; i++) {
+    onProgress(`📄 สร้าง PDF ${i + 1}/${list.length}`);
+    try { await generateApprovedPdfFor(list[i].id); ok++; }
+    catch (e) { fail++; console.warn("[backfill]", list[i].id, e); }
+  }
+  onProgress(`✅ เสร็จ สำเร็จ ${ok} · ไม่สำเร็จ ${fail}`);
+}
 async function generateApprovedPdfFor(leaveId: string) {
-  const { data: req } = await supabase.from("leave_requests").select("*").eq("id", leaveId).maybeSingle();
-  if (!req || req.status !== "approved") return;
-  const { data: reqUser } = await supabase.from("users")
-    .select("id,title,first_name,last_name,position,phone,signature_url").eq("id", req.user_id).maybeSingle();
+  const { data: reqRow } = await supabase.from("leave_requests").select("*").eq("id", leaveId).maybeSingle();
+  const r: any = reqRow;
+  if (!r || r.status !== "approved") return;
+
+  const { data: reqUserRow } = await supabase.from("users")
+    .select("id,title,first_name,last_name,position,phone,signature_url").eq("id", r.user_id).maybeSingle();
+  const reqUser: any = reqUserRow;
 
   const leaveData = {
     fullName: fullName(reqUser), position: reqUser?.position,
-    leaveType: req.leave_type, leaveTypeName: LEAVE_TYPE_CONFIG[req.leave_type as LeaveType]?.label ?? "",
-    otherLeaveName: req.other_leave_name, startDate: req.start_date, endDate: req.end_date,
-    days: req.days_count, halfDay: req.half_day, reason: req.reason,
-    phone: reqUser?.phone, contactInfo: req.contact_info,
+    leaveType: r.leave_type, leaveTypeName: LEAVE_TYPE_CONFIG[r.leave_type as LeaveType]?.label ?? "",
+    otherLeaveName: r.other_leave_name, startDate: r.start_date, endDate: r.end_date,
+    days: r.days_count, halfDay: r.half_day, reason: r.reason,
+    phone: reqUser?.phone, contactInfo: r.contact_info,
+    createdAt: r.created_at,
+    requesterSig: r.signature_url || reqUser?.signature_url || "",
   };
   const approverSigs = [
-    { name:"นางสาวพรรษา แก้วใหญ่", position:"ครู ตรวจสอบสถิติการลา", signature_url:req.approver_1_signature, approved_at:req.approver_1_approved_at },
-    { name:"นางสาวฐิติมา กาบแก้ว", position:"รองผู้อำนวยการกลุ่มบริหารงานบุคคล", signature_url:req.approver_2_signature, approved_at:req.approver_2_approved_at },
-    { name:"นายธนณัฐ ศิระวงษ์", position:"ผู้อำนวยการโรงเรียนวัดเขียนเขต", signature_url:req.approver_3_signature, approved_at:req.approver_3_approved_at },
+    { name: "นางสาวพรรษา แก้วใหญ่", position: "ครู ตรวจสอบสถิติการลา", signature_url: r.approver_1_signature, approved_at: r.approver_1_approved_at },
+    { name: "นางสาวฐิติมา กาบแก้ว", position: "รองผู้อำนวยการกลุ่มบริหารงานบุคคล", signature_url: r.approver_2_signature, approved_at: r.approver_2_approved_at },
+    { name: "นายธนณัฐ ศิระวงษ์", position: "ผู้อำนวยการโรงเรียนวัดเขียนเขต", signature_url: r.approver_3_signature, approved_at: r.approver_3_approved_at },
   ];
-    const [stats, docUrl] = await Promise.all([
-    loadLeaveStats(req.user_id, req.id, req.start_date),
-    resolveAttachmentUrl(req.document_path, req.document_url),
+  const [stats, docUrl] = await Promise.all([
+    loadLeaveStats(r.user_id, r.id, r.start_date),
+    resolveAttachmentUrl(r.document_path, r.document_url),
   ]);
-  await uploadApprovedLeaveBothVersions(leaveData, reqUser, approverSigs, docUrl ?? undefined, stats, req.start_date);
+  const failed = await uploadApprovedLeaveBothVersions(leaveData, reqUser, approverSigs, docUrl ?? undefined, stats, r.start_date);
+  if (failed > 0) throw new Error("upload failed");
 }
+
 
 // ══════════════════════════════════════════════════════════
 // ── SpecificSwapModal — แลกคาบแบบเจาะจง ──────────────────
@@ -3083,6 +3142,7 @@ async function searchLeaveRequestsByName(query: string, usersMap: Record<string,
   if (error || !data) return [];
   return attachUsers(data, usersMap);
 }
+
 // ══════════════════════════════════════════════════════════
 // ── AdminDashboard ─────────────────────────────────────────
 // ══════════════════════════════════════════════════════════
@@ -3101,7 +3161,10 @@ function AdminDashboard({ user, canApprove }: { user:UserProfile; canApprove:boo
   const [viewModal,  setViewModal]  = useState<any|null>(null);
   const [rejectModal,setRejectModal]= useState<{id:string;slot:1|2|3}|null>(null);
   const [gradeLevelsMap, setGradeLevelsMap] = useState<Record<string,string>>({});
+  const [backfillMsg, setBackfillMsg] = useState("");
   const isSuperAdmin = user.email?.toLowerCase() === ADMIN_EMAIL;
+
+
 
 async function adminDeleteLeave(id: string) {
   if (!confirm("⚠️ ลบใบลานี้ถาวร?\nรวมรายการสอนแทนที่ผูกไว้ ข้อมูลกู้คืนไม่ได้")) return;
@@ -3208,6 +3271,8 @@ useEffect(() => {
     if (data) setGradeLevelsMap(Object.fromEntries(data.map((g:any)=>[g.id, g.name])));
   });
 },[]);
+
+
   useEffect(()=>{if(viewModal){const updated=requests.find(r=>r.id===viewModal.id);if(updated)setViewModal(updated);}},[requests]);
   useEffect(()=>{if(user.signature_url)setApproverSigUrl(user.signature_url);},[user.signature_url]);
 
@@ -3268,8 +3333,9 @@ useEffect(() => {
     otherLeaveName: (req as any).other_leave_name,
     startDate: req.start_date, endDate: req.end_date,
     days: req.days_count, halfDay: (req as any).half_day,
-    reason: req.reason, phone: reqUser?.phone, contactInfo: (req as any).contact_info,
-    createdAt: (req as any).created_at,          // ★ ให้วันที่บนใบเป็นวันที่ยื่น ไม่ใช่วันที่อนุมัติ
+    reason: req.reason,     phone: reqUser?.phone, contactInfo: req.contact_info,
+    createdAt: req.created_at,
+    requesterSig: req.signature_url || reqUser?.signature_url || "",
   };
   const approverSigs = [
     { name: "นางสาวพรรษา แก้วใหญ่", position: "ครู ตรวจสอบสถิติการลา",
@@ -3373,6 +3439,20 @@ const allGrades = ["all", ...uniqueGrades];
       <button onClick={()=>setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold">✕</button>
     )}
   </div>
+
+  {isSuperAdmin && (
+    <div className="space-y-1">
+      <button
+        onClick={async () => {
+          if (!confirm("ลบ .html ทั้งหมดในโฟลเดอร์ใบลา/ใบลา_ไม่มีลายเซน แล้วสร้าง PDF ย้อนหลังใหม่?")) return;
+          await backfillLeavePdfs(m => setBackfillMsg(m));
+        }}
+        className="px-4 py-2 rounded-xl border-2 border-indigo-200 bg-indigo-50 text-indigo-700 text-sm font-black">
+        🔁 สร้าง PDF ย้อนหลัง (ปีงบ 1–2/2569)
+      </button>
+      {backfillMsg && <p className="text-xs font-bold text-slate-500">{backfillMsg}</p>}
+    </div>
+  )}
 
   {searchQuery.trim() && (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
