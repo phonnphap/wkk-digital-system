@@ -116,6 +116,8 @@ export default function AuditReport({
   const [data, setData] = useState<SecAudit[] | null>(null);
   const [ranAt, setRanAt] = useState("");
   const [view, setView] = useState<"missing" | "max" | "issues">("missing");
+  // เช็กลิสต์ส่วนของรายงานที่จะแสดง/พิมพ์ (ติ๊กออก = ซ่อนทั้งส่วน ทั้งบนจอและตอนพิมพ์)
+  const [showSec, setShowSec] = useState<Record<"missing" | "max" | "issues", boolean>>({ missing: true, max: true, issues: true });
   const [levelFilter, setLevelFilter] = useState("all");
   const [subjectFilter, setSubjectFilter] = useState("all");
   const [onlyProblems, setOnlyProblems] = useState(true);
@@ -376,10 +378,12 @@ export default function AuditReport({
     };
   }, [filtered, groups, hidden]);
 
-  const show = (v: typeof view) => (view === v ? "" : "hidden print:block");
+  // แท็บที่กำลังดู: ถ้าส่วนนั้นถูกซ่อน ให้ย้ายไปส่วนแรกที่ยังแสดงอยู่
+  const curView: typeof view = showSec[view] ? view : (["missing", "max", "issues"] as const).find(k => showSec[k]) ?? view;
+  const show = (v: typeof view) => (!showSec[v] ? "hidden print:hidden" : curView === v ? "" : "hidden print:block");
   const tab = (v: typeof view, label: string) => (
     <button onClick={() => setView(v)}
-      className={`px-4 py-2 rounded-xl font-black text-sm ${view === v ? "bg-blue-600 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>{label}</button>
+      className={`px-4 py-2 rounded-xl font-black text-sm ${curView === v ? "bg-blue-600 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>{label}</button>
   );
 
   return (
@@ -477,10 +481,18 @@ export default function AuditReport({
           </div>
           {kpi.failed > 0 && <p className="text-xs font-bold text-amber-600">⚠️ ดึงข้อมูลไม่สำเร็จ {kpi.failed} วิชา (แสดงเป็น "ดึงข้อมูลไม่ได้") ลองกดตรวจสอบใหม่</p>}
 
+          <div className="print:hidden flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2">
+            <span className="text-xs font-black text-slate-500">ส่วนที่แสดง/พิมพ์ในรายงาน:</span>
+            {([["missing", "1. ยังไม่กรอกคะแนน"], ["max", "2. คะแนนเต็มแต่ละห้อง"], ["issues", "3. คะแนนที่ผิดปกติ"]] as const).map(([k, label]) => (
+              <label key={k} className="flex items-center gap-1.5 text-xs font-bold text-slate-600 cursor-pointer">
+                <input type="checkbox" checked={showSec[k]} onChange={e => setShowSec(p => ({ ...p, [k]: e.target.checked }))} /> {label}
+              </label>
+            ))}
+          </div>
           <div className="print:hidden flex gap-2 flex-wrap">
-            {tab("missing", "📝 คะแนนที่ยังไม่กรอก")}
-            {tab("max", "⚖️ คะแนนเต็มแต่ละห้อง")}
-            {tab("issues", "🚨 คะแนนผิดปกติ")}
+            {showSec.missing && tab("missing", "📝 คะแนนที่ยังไม่กรอก")}
+            {showSec.max && tab("max", "⚖️ คะแนนเต็มแต่ละห้อง")}
+            {showSec.issues && tab("issues", "🚨 คะแนนผิดปกติ")}
           </div>
 
           {groups.map((g, gi) => (
