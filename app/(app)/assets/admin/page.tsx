@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase, useAssetRole, ASSET_SELECT, STATUSES, ZONES, inputCls, type Asset } from "@/lib/assets";
 
-type U = { auth_id: string; full_name: string | null; role: string | null };
+type U = { auth_id: string; first_name: string | null; last_name: string | null; title?: string | null; role: string | null };
+const USER_COLS = "auth_id,first_name,last_name,title,role";
+const nm = (u: U) => `${u.title ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.trim();
 
 export default function AssetAdminPage() {
   const router = useRouter();
@@ -23,14 +25,27 @@ export default function AssetAdminPage() {
     const { data } = await supabase.from("asset_managers").select("auth_id");
     const ids = (data ?? []).map((r: { auth_id: string }) => r.auth_id);
     if (!ids.length) return setMgrs([]);
-    const u = await supabase.from("users").select("auth_id,full_name,role").in("auth_id", ids);
+    const u = await supabase.from("users").select(USER_COLS).in("auth_id", ids);
     setMgrs((u.data as U[]) ?? []);
   }
   async function search() {
-    const { data } = await supabase.from("users").select("auth_id,full_name,role").ilike("full_name", `%${q}%`).limit(8);
+    const parts = q.trim().replace(/[,()]/g, " ").split(/\s+/).filter(Boolean);
+    if (!parts.length) return;
+    // ครูที่ยังไม่เคยล็อกอินจะไม่มี auth_id จึงเพิ่มเป็นผู้ดูแลไม่ได้
+    let qb: any = supabase.from("users").select(USER_COLS).not("auth_id", "is", null).limit(8);
+    qb = parts.length > 1
+      ? qb.ilike("first_name", `%${parts[0]}%`).ilike("last_name", `%${parts[1]}%`)
+      : qb.or(`first_name.ilike.%${parts[0]}%,last_name.ilike.%${parts[0]}%`);
+    const { data, error } = await qb;
+    if (error) return alert("ค้นหาไม่สำเร็จ: " + error.message);
+    if (!data?.length) alert("ไม่พบชื่อนี้ (ครูต้องเคยล็อกอินเข้าระบบอย่างน้อย 1 ครั้ง)");
     setFound((data as U[]) ?? []);
   }
-  const addMgr = async (id: string) => { await supabase.from("asset_managers").insert({ auth_id: id }); setFound([]); setQ(""); loadMgrs(); };
+  const addMgr = async (id: string) => {
+    const { error } = await supabase.from("asset_managers").insert({ auth_id: id });
+    if (error) return alert("เพิ่มไม่สำเร็จ: " + error.message + "\n(ต้องล็อกอินด้วยบัญชีที่ role = admin ในตาราง users)");
+    setFound([]); setQ(""); loadMgrs();
+  };
   const delMgr = async (id: string) => { await supabase.from("asset_managers").delete().eq("auth_id", id); loadMgrs(); };
   async function addCat() {
     if (!cat.code || !cat.name) return;
@@ -83,9 +98,9 @@ export default function AssetAdminPage() {
           {role === "admin" && (
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <h2 className="text-sm font-bold text-slate-700">ผู้ดูแลโครงการ</h2>
-              <ul className="mt-2 space-y-1">{mgrs.map((m) => <li key={m.auth_id} className="flex justify-between text-sm"><span>{m.full_name}</span><button onClick={() => delMgr(m.auth_id)} className="text-rose-600">ลบ</button></li>)}</ul>
+              <ul className="mt-2 space-y-1">{mgrs.map((m) => <li key={m.auth_id} className="flex justify-between text-sm"><span>{nm(m)}</span><button onClick={() => delMgr(m.auth_id)} className="text-rose-600">ลบ</button></li>)}</ul>
               <div className="mt-2 flex gap-2"><input className={inputCls} placeholder="ค้นชื่อครู" value={q} onChange={(e) => setQ(e.target.value)} /><button onClick={search} className="shrink-0 rounded-xl border border-slate-200 px-4 text-sm font-semibold">ค้นหา</button></div>
-              {found.map((u) => <button key={u.auth_id} onClick={() => addMgr(u.auth_id)} className="mt-1 block w-full rounded-lg bg-slate-50 px-3 py-1.5 text-left text-sm hover:bg-blue-50">＋ {u.full_name}</button>)}
+              {found.map((u) => <button key={u.auth_id} onClick={() => addMgr(u.auth_id)} className="mt-1 block w-full rounded-lg bg-slate-50 px-3 py-1.5 text-left text-sm hover:bg-blue-50">＋ {nm(u)}</button>)}
             </div>
           )}
         </div>
