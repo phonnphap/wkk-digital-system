@@ -45,6 +45,8 @@ const STATUS_CONFIG: Record<Status, { label: string; emoji: string; dot: string;
 };
 const STATUS_ORDER: Status[] = ["present", "late", "excused", "leave", "absent"]; // มา-สาย-ไปกิจกรรม-ลา-ขาด
 
+
+
 const REASON_CONFIG: Record<SwapReason, { label: string; emoji: string }> = {
   makeup: { label: "เรียนชดเชย", emoji: "📚" },
   emergency: { label: "สลับคาบฉุกเฉิน", emoji: "🚨" },
@@ -134,6 +136,7 @@ export default function AttendanceTool({
   const [swapError, setSwapError] = useState("");
 
   const reqRef = useRef(0);
+  const studentIdsKey = useMemo(() => students.map(s => s.id).join(","), [students]);
 
   /* ---------------- โหลดข้อมูลทั้งเดือน ---------------- */
   const loadMonth = useCallback(async () => {
@@ -212,21 +215,32 @@ export default function AttendanceTool({
     await holidayJob;
     Object.values(pByDate).forEach(l => l.sort((a, b) => (a.slot_number ?? 0) - (b.slot_number ?? 0)));
 
-    // โฮมรูมทั้งเดือน (สำหรับปุ่มดึงจากโฮมรูม)
-    const hr: Record<string, Record<string, Status>> = {};
-    if (classroomId) {
-      try {
-        const { data } = await supabase
-          .from("attendance_records")
-          .select("student_id, status, attendance_date")
-          .eq("classroom_id", classroomId)
-          .gte("attendance_date", dates[0])
-          .lte("attendance_date", dates[dates.length - 1]);
-        (data ?? []).forEach((r: any) => {
-          (hr[r.attendance_date] ??= {})[r.student_id] = r.status;
-        });
-      } catch { /* ข้าม */ }
+    // โฮมรูมทั้งเดือน: ดึงด้วย student_id (ไม่ผูกกับ classroom ของเทอมใดเทอมหนึ่ง) + แบ่งหน้ากัน 1,000 แถว
+const hr: Record<string, Record<string, Status>> = {};
+const ids = studentIdsKey ? studentIdsKey.split(",") : [];
+if (ids.length > 0) {
+  try {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("attendance_records")
+        .select("student_id, status, attendance_date")
+        .in("student_id", ids)
+        .gte("attendance_date", dates[0])
+        .lte("attendance_date", dates[dates.length - 1])
+        .order("attendance_date")
+        .order("student_id")
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      (data ?? []).forEach((r: any) => {
+        (hr[r.attendance_date] ??= {})[r.student_id] = r.status;
+      });
+      if (!data || data.length < PAGE) break;
     }
+  } catch (e) {
+    console.error("โหลดโฮมรูมไม่สำเร็จ:", e);
+  }
+}
 
     if (token !== reqRef.current) return; // มีการโหลดใหม่ทับแล้ว
     setPeriodsByDate(pByDate);
@@ -237,7 +251,7 @@ export default function AttendanceTool({
     setHomeroom(hr);
     setDirty(new Set());
     setLoading(false);
-  }, [sectionId, classroomId, month]);
+ }, [sectionId, studentIdsKey, month]);
 
   useEffect(() => { loadMonth(); }, [loadMonth]);
 
@@ -877,8 +891,7 @@ const isLocked = useCallback(
                 </div>
                 <div className="space-y-1 border-t border-slate-100 mt-2 pt-2">
                   {classroomId && (
-                    <button
-                      onClick={() => { pullFromReference(menuCol); setMenu(null); }}
+                    <button onClick={() => { pullFromReference(menuCol); setMenu(null); }}
                       className="w-full text-left px-3 py-2 rounded-xl text-m font-black text-blue-700 bg-blue-50 hover:bg-blue-100"
                     >
                       📥 ดึงจาก{referenceLabel}

@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     if (!section) return NextResponse.json({ error: "ไม่พบวิชานี้" }, { status: 404 });
 
     // 2) คำนวณ day_of_week จากวันที่
-    const dow = new Date(`${attendance_date}T12:00:00Z`).getDay();
+    const dow = new Date(`${attendance_date}T12:00:00Z`).getUTCDay(); // เดิม getDay()
 
     // 3) หา timetable_entries ปกติที่ตรงกับห้อง+วิชา+ครู+วันในสัปดาห์นั้น
     const { data: normalEntries, error: ttErr } = await admin

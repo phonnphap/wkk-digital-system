@@ -433,46 +433,57 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
   // หมายเหตุ: ต้องมี foreign key จาก attendance_records.student_id -> students.id
   // ให้ Supabase join ตาราง students(gender) ได้ ถ้ายังไม่มีให้เพิ่ม FK ก่อน
     useEffect(() => {
-    if (!roomIds.length) { setDayStats([]); return; }
+  if (!roomIds.length) { setDayStats([]); return; }
+  let cancelled = false;
+
+  (async () => {
     const start = getMonthStartISO(date);
     const end = getNextMonthStartISO(date);
+    type Row = { status: AttendanceStatus; attendance_date: string; students: { gender: string | null } | { gender: string | null }[] | null };
 
-    supabase
-      .from("attendance_records")
-      .select("status, attendance_date, students(gender)")
-      .in("classroom_id", roomIds)
-      .gte("attendance_date", start)
-      .lt("attendance_date", end)
-      .then(({ data, error }) => {
-        if (error) {
-          console.error("month stats error:", error);
-          setDayStats([]);
-          return;
-        }
-        type Row = { status: AttendanceStatus; attendance_date: string; students: { gender: string | null } | { gender: string | null }[] | null };
-        const rows = (data ?? []) as unknown as Row[];
+    const rows: Row[] = [];
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("attendance_records")
+        .select("status, attendance_date, students(gender)")
+        .in("classroom_id", roomIds)
+        .gte("attendance_date", start)
+        .lt("attendance_date", end)
+        .order("attendance_date")
+        .order("student_id")
+        .range(from, from + PAGE - 1);
+      if (error) {
+        console.error("month stats error:", error);
+        if (!cancelled) setDayStats([]);
+        return;
+      }
+      rows.push(...((data ?? []) as unknown as Row[]));
+      if (!data || data.length < PAGE) break;
+    }
+    if (cancelled) return;
 
-        const byDate = new Map<string, { male: number; female: number; total: number }>();
-        rows.forEach((r) => {
-          const attended = r.status === "present" || r.status === "late";
-          if (!attended) return;
-          const genderInfo = Array.isArray(r.students) ? r.students[0] : r.students;
-          const g = genderInfo?.gender;
-          const cur = byDate.get(r.attendance_date) ?? { male: 0, female: 0, total: 0 };
-          if (g === "male") cur.male += 1;
-          else if (g === "female") cur.female += 1;
-          cur.total += 1;
-          byDate.set(r.attendance_date, cur);
-        });
+    const byDate = new Map<string, { male: number; female: number; total: number }>();
+    rows.forEach((r) => {
+      if (r.status !== "present" && r.status !== "late") return;
+      const genderInfo = Array.isArray(r.students) ? r.students[0] : r.students;
+      const g = genderInfo?.gender;
+      const cur = byDate.get(r.attendance_date) ?? { male: 0, female: 0, total: 0 };
+      if (g === "male") cur.male += 1;
+      else if (g === "female") cur.female += 1;
+      cur.total += 1;
+      byDate.set(r.attendance_date, cur);
+    });
 
-        const days: DayStat[] = getDaysInMonth(date).map((iso) => {
-          const d = byDate.get(iso) ?? { male: 0, female: 0, total: 0 };
-          return { date: iso, presentMale: d.male, presentFemale: d.female, presentTotal: d.total };
-        });
-        setDayStats(days);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomKey, date]);
+    setDayStats(getDaysInMonth(date).map((iso) => {
+      const d = byDate.get(iso) ?? { male: 0, female: 0, total: 0 };
+      return { date: iso, presentMale: d.male, presentFemale: d.female, presentTotal: d.total };
+    }));
+  })();
+
+  return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [roomKey, date]);
 
   // จำนวนนักเรียนทั้งหมดในห้อง แยกชาย/หญิง ("นักเรียนเต็ม")
   const enrolledCounts = useMemo(() => {

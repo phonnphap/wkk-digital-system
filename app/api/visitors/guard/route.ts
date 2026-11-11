@@ -50,17 +50,18 @@ export async function POST(req: Request) {
       photo_path, photo_url: null, check_out_at: null,
     }).select("id").single();
     if (error || !data) return bad("บันทึกไม่สำเร็จ: " + (error?.message ?? ""), 500);
-    await notifyVisitor(data.id);
-    return NextResponse.json({ ok: true });
+    const notify = await notifyVisitor(data.id);
+return NextResponse.json({ ok: true, notify });
   }
 
   // ปุ่มต่าง ๆ: confirm / reject / checkout
   const { action, id } = await req.json().catch(() => ({}));
   if (typeof id !== "string") return bad("ไม่พบ id");
+  let notifyResult: any = null;
   if (action === "confirm") {
     const { error } = await db.from("visitors").update({ status: "inside", check_in_at: now }).eq("id", id);
     if (error) return bad(error.message, 500);
-    await notifyVisitor(id);
+    notifyResult = await notifyVisitor(id);
   } else if (action === "reject") {
     await db.from("visitors").update({ status: "rejected" }).eq("id", id);
   } else if (action === "checkout") {

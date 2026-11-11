@@ -28,6 +28,14 @@ async function downscale(file: File, max = 1600): Promise<Blob> {
 const KEY = "guard_key";
 const gKey = () => (typeof window === "undefined" ? "" : localStorage.getItem(KEY) ?? "");
 
+function notifyMsg(j: any): string {
+  const n = j?.notify;
+  if (!n) return "";
+  if (!n.ok) return "⚠️ ส่ง Teams ไม่สำเร็จ: " + (n.reason ?? "ไม่ทราบสาเหตุ");
+  if (n.reason) return "⚠️ " + n.reason;
+  return "";
+}
+
 async function api(body?: any, form?: FormData) {
   const headers: Record<string, string> = { "x-guard-key": gKey() };
   let init: RequestInit = { headers };
@@ -82,9 +90,15 @@ export default function GuardPage() {
     setMode("home"); setTarget(null); setName(""); setPlate("");
     setPhoto(null); setPreview(""); setMsg("");
   }
-  function flash(m: string) { setMsg(m); setTimeout(() => setMsg(""), 3000); }
+  function flash(m: string, ms = 3000) { setMsg(m); setTimeout(() => setMsg(""), ms); }
 
-  async function confirmPending(v: Visitor) { await api({ action: "confirm", id: v.id }); flash(`✅ ให้เข้า: ${v.full_name}`); load(); }
+  async function confirmPending(v: Visitor) {
+  const j = await api({ action: "confirm", id: v.id });
+  const w = notifyMsg(j);
+reset();
+flash(w || "✅ บันทึกเข้าเรียบร้อย", w ? 10000 : 3000);
+load();
+}
   async function rejectPending(v: Visitor) { await api({ action: "reject", id: v.id }); load(); }
   async function checkout(v: Visitor) { await api({ action: "checkout", id: v.id }); flash(`🚪 ออกแล้ว: ${v.full_name}`); load(); }
 

@@ -113,6 +113,16 @@ function isMentorEntry(
   return !!e && !!e.teacher_id && !!e.teacher_id_2 && traineeIds.has(e.teacher_id);
 }
 
+// ★ อีเมลที่ให้สิทธิ์เทียบเท่า หน.สายชั้น (ไม่ต้องแก้ role ใน DB)
+// gradeLabel = ชั้นที่จัดตารางได้ · gradeLevelId (ไม่บังคับ) = id ของสายใน grade_levels
+// ถ้าไม่ใส่ gradeLevelId ระบบจะหาจากชื่อสายที่มี gradeLabel อยู่ในชื่อ
+const GRADE_HEAD_OVERRIDES: Record<string, { gradeLabel: string; gradeLevelId?: string }> = {
+  "kanda@khienkhet.ac.th": { gradeLabel: "ป.6" },
+};
+function getGradeHeadOverride(email?: string | null) {
+  return GRADE_HEAD_OVERRIDES[(email ?? "").toLowerCase()];
+}
+
 type TimeSlot   = { id: string; slot_number: number; start_time: string; end_time: string; slot_label?: string; is_break: boolean; schedule_type?: string };
 type Subject = { id: string; subject_code: string; name_th: string; subject_group?: string; periods_per_week?: number };
 type Teacher = {
@@ -652,11 +662,13 @@ async function fetchAllRows<T = any>(query: any): Promise<T[]> {
   }
   return all;
 }
-function LockedPeriodsModal({ lockedPeriods, academicYearId, onClose, onReload }: {
+function LockedPeriodsModal({ lockedPeriods, academicYearId, allowedGrades, onClose, onReload }: {
   lockedPeriods: { id: string; grade_label: string; day_of_week: number; slot_label: string; label: string }[];
-  academicYearId: string; onClose: () => void; onReload: () => Promise<void>;
+  academicYearId: string; allowedGrades?: string[];
+  onClose: () => void; onReload: () => Promise<void>;
 }) {
-  const [grade, setGrade] = useState(SCHEDULABLE_GRADE_LABELS[0]);
+  const gradeOptions = allowedGrades ?? SCHEDULABLE_GRADE_LABELS;
+const [grade, setGrade] = useState(gradeOptions[0]);
   const [day, setDay] = useState(1);
   const [slotLabel, setSlotLabel] = useState("");
   const [label, setLabel] = useState("");
@@ -691,7 +703,7 @@ function LockedPeriodsModal({ lockedPeriods, academicYearId, onClose, onReload }
         <div className="p-5 space-y-3 overflow-y-auto flex-1">
           <div className="grid grid-cols-2 gap-2">
             <select value={grade} onChange={e => { setGrade(e.target.value); setSlotLabel(""); }} className={inp}>
-              {SCHEDULABLE_GRADE_LABELS.map(g => <option key={g} value={g}>{g}</option>)}
+              {gradeOptions.map(g => <option key={g} value={g}>{g}</option>)}
             </select>
             <select value={day} onChange={e => setDay(Number(e.target.value))} className={inp}>
               {DAYS.map((d, i) => <option key={d} value={i + 1}>{d}</option>)}
@@ -720,9 +732,10 @@ function LockedPeriodsModal({ lockedPeriods, academicYearId, onClose, onReload }
     </div>
   );
 }
-function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjects, teachers,
+function BatchAutoArrangeModal({ gradeLabel: initialGrade, allowedGrades, classroomsAll, subjects, teachers,
   entries, allTimeSlots, lockedPeriods, onClose, onArrange }: {
   gradeLabel?: string;
+  allowedGrades?: string[];
   classroomsAll: Classroom[];
   subjects: Subject[]; teachers: Teacher[];
   entries: TimetableEntry[]; allTimeSlots: TimeSlot[];
@@ -730,7 +743,10 @@ function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjec
   onClose: () => void;
   onArrange: (jobs: { classroom: Classroom; subjectId: string; teacherId: string; teacherId2?: string; assignments: { day_of_week: number; time_slot: TimeSlot }[] }[]) => Promise<void>;
 }) {
-  const [grade, setGrade] = useState(initialGrade ?? SCHEDULABLE_GRADE_LABELS[0]);
+  const gradeOptions = allowedGrades ?? SCHEDULABLE_GRADE_LABELS;
+  const [grade, setGrade] = useState(
+  initialGrade && gradeOptions.includes(initialGrade) ? initialGrade : gradeOptions[0]
+);
   const gradeRooms = classroomsAll
     .filter(c => getClassroomGradeLabel(c) === grade)
     .sort((a, b) => (a.room_number ?? 0) - (b.room_number ?? 0));
@@ -812,7 +828,7 @@ function BatchAutoArrangeModal({ gradeLabel: initialGrade, classroomsAll, subjec
           <div>
             <label className="block text-xs font-black text-slate-500 uppercase mb-1.5">ชั้น *</label>
             <select value={grade} onChange={e => { setGrade(e.target.value); setSelectedRoomIds([]); setJobs([]); setPreview(null); }} className={inp}>
-              {SCHEDULABLE_GRADE_LABELS.map(g => <option key={g} value={g}>{g}</option>)}
+              {gradeOptions.map(g => <option key={g} value={g}>{g}</option>)}
             </select>
           </div>
 
@@ -2323,7 +2339,6 @@ const loadClubs = useCallback(async () => {
   if (!selectedYear) return;
   const selRow = academicYearsRaw.find(y => y.id === selectedYear);
   const yearIds = selRow ? academicYearsRaw.filter(y => y.year_name === selRow.year_name).map(y => y.id) : [selectedYear];
-
   const [{ data: periodsData }, { data: clubsData }] = await Promise.all([
     supabase.from("club_periods").select("*").in("academic_year_id", yearIds),
     supabase.from("clubs").select("*").in("academic_year_id", yearIds),
@@ -2365,6 +2380,23 @@ useEffect(() => {
     setGradeLevelNames(map);
   })();
 }, []);
+
+useEffect(() => {
+  if (!user) return;
+  const cfg = getGradeHeadOverride(user.email);
+  if (!cfg) return;
+  const id = cfg.gradeLevelId
+    ?? Object.entries(gradeLevelNames).find(([, name]) => name.includes(cfg.gradeLabel))?.[0];
+  if (!id) return; // ยังโหลดชื่อสายไม่เสร็จ หรือหาไม่เจอ
+  const already = user.extra_roles?.includes("grade_head") && user.grade_level === id && user.can_arrange_schedule;
+  if (already) return;
+  setUser({
+    ...user,
+    extra_roles: [...new Set([...(user.extra_roles ?? []), "grade_head"])],
+    grade_level: id,
+    can_arrange_schedule: true,
+  });
+}, [gradeLevelNames, user]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const gradeLevelName = (v?: string | null): string => {
@@ -3518,8 +3550,11 @@ if (sRoom && isYearlyRoom(sRoom)) {
   if (!user)   return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><p className="text-red-500 font-black">❌ กรุณาเข้าสู่ระบบก่อน</p></div>;
 
   const isAdmin           = isAdminRole(user.role);
-  const canManageGradeSchedule = isAdmin || ((user.extra_roles ?? []).includes("grade_head") && !!user.can_arrange_schedule);
-  const isApprover        = APPROVER_ROLES.includes(user.role) || isAdminRole(user.role);
+const canManageGradeSchedule = isAdmin || ((user.extra_roles ?? []).includes("grade_head") && !!user.can_arrange_schedule);
+const isApprover        = APPROVER_ROLES.includes(user.role) || isApproverUser(user);
+const gradeHeadOverride = getGradeHeadOverride(user.email);
+const allowedGrades: string[] | undefined =
+  !isAdmin && gradeHeadOverride ? [gradeHeadOverride.gradeLabel] : undefined;
   const canEditDirect     = isAdmin;
   const selectedClassroom = classrooms.find(c => c.id === selectedRoom);
   const roomEntries       = entries.filter(e => e.classroom_id === selectedRoom);
@@ -3843,6 +3878,7 @@ const totalScheduledPeriods = dashEntries.length;
   <BatchAutoArrangeModal
     gradeLabel={selectedClassroom ? getClassroomGradeLabel(selectedClassroom) : undefined}
     classroomsAll={classrooms}
+    allowedGrades={allowedGrades}
     subjects={subjects} teachers={teachers}
     entries={filterEntriesBySemester(entries, allClassrooms, selectedSemester, academicYearsRaw)}
     allTimeSlots={timeSlots} lockedPeriods={lockedPeriods}
@@ -3875,7 +3911,7 @@ const totalScheduledPeriods = dashEntries.length;
   </div>
 )}
 {showLockedPeriods && (
-  <LockedPeriodsModal lockedPeriods={lockedPeriods} academicYearId={selectedYear} onClose={() => setShowLockedPeriods(false)} onReload={loadLockedPeriods} />
+  <LockedPeriodsModal lockedPeriods={lockedPeriods} allowedGrades={allowedGrades} academicYearId={selectedYear} onClose={() => setShowLockedPeriods(false)} onReload={loadLockedPeriods} />
 )}
 {showAddSubjectRequest && (
   <AddSubjectRequestModal

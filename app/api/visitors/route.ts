@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 import { adminClient } from "@/lib/visitor-server";
 
 const ADMIN_TARGETS = [
-  "ผู้อำนวยการ", "รองผู้อำนวยการ", "ฝ่ายวิชาการ", "ฝ่ายบุคคล",
-  "ฝ่ายงบประมาณ/การเงิน", "ฝ่ายบริหารทั่วไป", "ธุรการ", "ห้องพยาบาล",
+  "ผู้อำนวยการ", "ฝ่ายวิชาการ", "ฝ่ายบุคคล",
+  "ฝ่ายงบประมาณ/การเงิน", "ฝ่ายบริหารทั่วไป", "ห้องพยาบาล",
 ];
 const GRADE_ORDER = ["อ.2","อ.3","ป.1","ป.2","ป.3","ป.4","ป.5","ป.6","ม.1","ม.2","ม.3","ม.4","ม.5","ม.6"];
 const gi = (g: string) => { const i = GRADE_ORDER.indexOf(g); return i === -1 ? 999 : i; };
@@ -20,8 +20,10 @@ export async function GET() {
   const { data } = await q;
 
   const seen = new Set<string>();
-  const rooms: { id: string; label: string; grade: string }[] = [];
-  (data ?? []).forEach((c: any) => {
+const rooms: { id: string; label: string; grade: string }[] = [];
+const sorted = [...(data ?? [])].sort((a: any, b: any) =>
+  (b.academic_year_id === cur?.id ? 1 : 0) - (a.academic_year_id === cur?.id ? 1 : 0));
+sorted.forEach((c: any) => {
     const grade = (c.grade_group ?? "").split("/")[0].trim();
     const rn = (c.room_name ?? "").trim();
     const label = rn.includes(grade) ? rn : `${grade} ${rn}`.trim();
