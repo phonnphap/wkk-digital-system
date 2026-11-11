@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { resolveRosterClassroomIds } from "@/lib/smartclass/rosterClassroom";
 
@@ -16,6 +16,7 @@ type MaxSet = { assign: number; mid: number; fin: number; collect: number; full:
 type SecAudit = {
   room: string; level: string; subjectCode: string; subjectName: string;
   studentCount: number; assignmentCount: number; emptyAssignments: number;
+  hours: number | null; credit: number | null; stype: "basic" | "additional" | "activity"; // โครงสร้างเวลาเรียนของวิชา
   assign: Prog; mid: Prog; fin: Prog; max: MaxSet; issues: Issue[]; failed?: boolean;
 };
 
@@ -76,6 +77,32 @@ function compareMax(list: SecAudit[]) {
   return devs;
 }
 
+// ชม./ปี และหน่วยกิตของวิชา (รวมทุกห้องในสายชั้น) + ตรวจว่าแต่ละห้องตรงกันไหม
+function hoursInfo(list: SecAudit[]) {
+  const hours = Array.from(new Set(list.map(a => a.hours).filter(h => h != null))) as number[];
+  const credit = Array.from(new Set(list.map(a => a.credit).filter(c => c != null))) as number[];
+  return { hours, credit, mismatch: hours.length > 1 || credit.length > 1, missing: hours.length === 0 };
+}
+
+function SubjectCell({ name, code, info, hidden, onToggle }: {
+  name: string; code: string; info: ReturnType<typeof hoursInfo>; hidden: boolean; onToggle: () => void;
+}) {
+  return (
+    <td className="px-3 py-2 font-bold text-slate-700 min-w-[160px]">
+      <label className="flex items-start gap-1.5 cursor-pointer" title="ติ๊กเพื่อซ่อนวิชานี้จากรายงาน (เช่น วิชาที่ไม่ได้บังคับกรอกคะแนน)">
+        <input type="checkbox" className="mt-1 print:hidden" checked={hidden} onChange={onToggle} />
+        <span>{name}</span>
+      </label>
+      <span className="block text-[10px] text-slate-400">{code}</span>
+      <span className={`block text-[10px] ${info.mismatch ? "text-red-600" : info.missing ? "text-amber-600" : "text-slate-500"}`}>
+        {info.missing ? "ไม่ระบุ ชม./ปี" : `${info.hours.join(" / ")} ชม./ปี`}
+        {info.credit.length > 0 ? ` · ${info.credit.join(" / ")} นก.` : ""}
+        {info.mismatch ? " (แต่ละห้องไม่ตรงกัน)" : ""}
+      </span>
+    </td>
+  );
+}
+
 function Chip({ text, p }: { text: string; p: Prog }) {
   return <div className={`audit-chip rounded-lg px-2 py-1 text-[11px] font-bold whitespace-nowrap ${TONE[p.status]}`}>{text}</div>;
 }
@@ -92,9 +119,22 @@ export default function AuditReport({
   const [levelFilter, setLevelFilter] = useState("all");
   const [subjectFilter, setSubjectFilter] = useState("all");
   const [onlyProblems, setOnlyProblems] = useState(true);
+  // ซ่อนวิชาที่ไม่ได้บังคับกรอกคะแนน (จำไว้ในเบราว์เซอร์ แยกตามปี/เทอม)
+  const hiddenKey = `audit-hidden-${yearName}-${semester}`;
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [showHidden, setShowHidden] = useState(false);
+  useEffect(() => {
+    try { const v = localStorage.getItem(hiddenKey); setHidden(new Set(v ? JSON.parse(v) : [])); }
+    catch { setHidden(new Set()); }
+  }, [hiddenKey]);
+  function saveHidden(n: Set<string>) {
+    try { localStorage.setItem(hiddenKey, JSON.stringify(Array.from(n))); } catch {}
+  }
+  function toggleHidden(code: string) {
+    setHidden(prev => { const n = new Set(prev); if (n.has(code)) n.delete(code); else n.add(code); saveHidden(n); return n; });
+  }
+  function clearHidden() { const n = new Set<string>(); setHidden(n); saveHidden(n); setShowHidden(false); }
   const [skipFinal, setSkipFinal] = useState(false); // ไม่นับปลายภาค (เช่น ตรวจช่วงกลางภาค)
-  const [excludeActivity, setExcludeActivity] = useState(true); // ไม่รวมวิชากิจกรรม (รหัส ก)
-  const [hideIssues, setHideIssues] = useState(false); // ซ่อนแท็บ/ส่วน 3. คะแนนผิดปกติ (เช่น เทอม 1 ที่ยังไม่มีปลายภาค)
 
   const levels = useMemo(() => {
     const m = new Map<string, AuditRoom[]>();
@@ -117,7 +157,7 @@ export default function AuditReport({
         const [{ data: stu }, { data: secs }] = await Promise.all([
           supabase.from("students").select("*").eq("classroom_id", rosterMap[r.classroom_id] ?? r.classroom_id).order("seat_number"),
           supabase.from("subject_sections")
-            .select("id, subject_id, formative_max_score, midterm_max_score, final_max_score, show_special_scores, subjects(subject_code, name_th, grading_mode, grade_rounding_mode)")
+            .select("id, subject_id, formative_max_score, midterm_max_score, final_max_score, show_special_scores, subjects(subject_code, name_th, subject_type, hours_per_year, credit_hours, grading_mode, grade_rounding_mode)")
             .eq("classroom_id", r.classroom_id).eq("is_active", true),
         ]);
         let list = secs ?? [];
@@ -140,6 +180,8 @@ export default function AuditReport({
         const base = {
           room: room.room_name, level: levelKey(room.room_name),
           subjectCode: code, subjectName: sec.subjects?.name_th ?? "ไม่ทราบชื่อวิชา", studentCount: students.length,
+          hours: sec.subjects?.hours_per_year ?? null, credit: sec.subjects?.credit_hours ?? null,
+          stype: (/^ก/.test(code) ? "activity" : sec.subjects?.subject_type === "additional" ? "additional" : "basic") as "basic" | "additional" | "activity",
         };
         try {
           const res = await fetch(`/api/subject-grades/summary?subject_section_id=${sec.id}`);
@@ -264,9 +306,8 @@ export default function AuditReport({
   }
 
   // ── ไม่นับปลายภาค: ตัดปลายภาคออกจากความครบถ้วน คะแนนเต็ม และรายการผิดปกติที่ขึ้นกับปลายภาค ──
-    const adjusted = useMemo(() => {
-    // ตัดวิชากิจกรรม (รหัสขึ้นต้นด้วย ก) ออกก่อน
-    const d = (data ?? []).filter(a => !(excludeActivity && /^ก/.test(a.subjectCode ?? "")));
+  const adjusted = useMemo(() => {
+    const d = data ?? [];
     if (!skipFinal) return d;
     return d.map(a => ({
       ...a,
@@ -274,7 +315,7 @@ export default function AuditReport({
       max: { ...a.max, fin: 0, full: r2(a.max.full - a.max.fin) },
       issues: a.issues.filter(i => !i.final),
     }));
-  }, [data, skipFinal, excludeActivity]);
+  }, [data, skipFinal]);
 
   // ── กรอง + จัดกลุ่ม ──
   const subjectOptions = useMemo(() => {
@@ -284,7 +325,8 @@ export default function AuditReport({
   }, [adjusted]);
 
   const filtered = useMemo(() => adjusted.filter(a =>
-    (levelFilter === "all" || a.level === levelFilter) && (subjectFilter === "all" || a.subjectCode === subjectFilter)), [adjusted, levelFilter, subjectFilter]);
+    (levelFilter === "all" || a.level === levelFilter) && (subjectFilter === "all" || a.subjectCode === subjectFilter) &&
+    (showHidden || !hidden.has(a.subjectCode))), [adjusted, levelFilter, subjectFilter, hidden, showHidden]);
 
   const groups = useMemo(() => levels
     .filter(l => levelFilter === "all" || l.key === levelFilter)
@@ -293,7 +335,7 @@ export default function AuditReport({
       const subjects = new Map<string, SecAudit[]>();
       secs.forEach(a => subjects.set(a.subjectCode, [...(subjects.get(a.subjectCode) ?? []), a]));
       const subjectList = Array.from(subjects.entries())
-        .map(([code, list]) => ({ code, name: list[0].subjectName, list, devs: compareMax(list) }))
+        .map(([code, list]) => ({ code, name: list[0].subjectName, list, devs: compareMax(list), info: hoursInfo(list), hidden: hidden.has(code) }))
         .sort((a, b) => a.name.localeCompare(b.name, "th"));
       // รวมรายการผิดปกติเป็นกลุ่ม ห้อง+วิชา+ประเภท
       const issueRows: { room: string; subject: string; type: IssueType; items: Issue[] }[] = [];
@@ -302,16 +344,26 @@ export default function AuditReport({
         a.issues.forEach(i => byType.set(i.type, [...(byType.get(i.type) ?? []), i]));
         byType.forEach((items, type) => issueRows.push({ room: a.room, subject: `${a.subjectCode} ${a.subjectName}`, type, items }));
       });
-      return { ...l, subjectList, issueRows };
-    }).filter(g => g.subjectList.length > 0 || levelFilter !== "all"), [levels, filtered, levelFilter]);
+      // สรุปโครงสร้างเวลาเรียนของสายชั้น (นับเฉพาะวิชาที่ไม่ได้ซ่อน วิชาละครั้ง)
+      const hs = { basic: 0, additional: 0, activity: 0, subjects: 0, missing: 0 };
+      subjectList.filter(x => !x.hidden).forEach(x => {
+        hs.subjects++;
+        if (x.info.missing) { hs.missing++; return; }
+        hs[x.list[0].stype] += x.info.hours[0];
+      });
+      return { ...l, subjectList, issueRows, hs };
+    }).filter(g => g.subjectList.length > 0 || levelFilter !== "all"), [levels, filtered, levelFilter, hidden]);
 
-  const kpi = useMemo(() => ({
-    total: filtered.length,
-    incomplete: filtered.filter(incomplete).length,
-    maxMismatch: groups.reduce((n, g) => n + g.subjectList.filter(s => s.devs.length > 0).length, 0),
-    issues: filtered.reduce((n, a) => n + a.issues.length, 0),
-    failed: filtered.filter(a => a.failed).length,
-  }), [filtered, groups]);
+  const kpi = useMemo(() => {
+    const vis = filtered.filter(a => !hidden.has(a.subjectCode));
+    return {
+      total: vis.length,
+      incomplete: vis.filter(incomplete).length,
+      maxMismatch: groups.reduce((n, g) => n + g.subjectList.filter(s => !s.hidden && s.devs.length > 0).length, 0),
+      issues: vis.reduce((n, a) => n + a.issues.length, 0),
+      failed: vis.filter(a => a.failed).length,
+    };
+  }, [filtered, groups, hidden]);
 
   const show = (v: typeof view) => (view === v ? "" : "hidden print:block");
   const tab = (v: typeof view, label: string) => (
@@ -361,13 +413,14 @@ export default function AuditReport({
             <label className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
               <input type="checkbox" checked={skipFinal} onChange={e => setSkipFinal(e.target.checked)} /> ไม่นับปลายภาค
             </label>
-            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
-  <input type="checkbox" checked={excludeActivity} onChange={e => setExcludeActivity(e.target.checked)} /> ไม่รวมวิชากิจกรรม (รหัส ก)
-</label>
-<label className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
-  <input type="checkbox" checked={hideIssues}
-  onChange={e => { setHideIssues(e.target.checked); if (e.target.checked && view === "issues") setView("missing"); }} />ไม่แสดงคะแนนผิดปกติ
-</label>
+            {hidden.size > 0 && (
+              <>
+                <label className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
+                  <input type="checkbox" checked={showHidden} onChange={e => setShowHidden(e.target.checked)} /> แสดงวิชาที่ซ่อน ({hidden.size})
+                </label>
+                <button onClick={clearHidden} className="text-xs font-black text-blue-600 underline">ยกเลิกซ่อนทั้งหมด</button>
+              </>
+            )}
             <button onClick={() => window.print()} className="ml-auto px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-sm">
               🖨️ พิมพ์รายงาน
             </button>
@@ -392,16 +445,16 @@ export default function AuditReport({
           <div className="hidden print:block text-center mb-4">
             <p className="font-black text-lg">รายงานตรวจสอบการกรอกคะแนน {schoolName}</p>
             <p className="text-sm font-bold">ปีการศึกษา {yearName} เทอม {semester} · {levelFilter === "all" ? "ทุกสายชั้น" : `สายชั้น ${levelFilter}`}
-              {subjectFilter !== "all" ? ` · วิชา ${subjectOptions.find(s => s[0] === subjectFilter)?.[1] ?? ""}` : ""}{skipFinal ? " · ไม่นับปลายภาค" : ""} {excludeActivity ? " · ไม่รวมวิชากิจกรรม" : ""}· ตรวจเมื่อ {ranAt}</p>
+              {subjectFilter !== "all" ? ` · วิชา ${subjectOptions.find(s => s[0] === subjectFilter)?.[1] ?? ""}` : ""}{skipFinal ? " · ไม่นับปลายภาค" : ""}{hidden.size > 0 ? ` · ไม่รวม ${hidden.size} วิชาที่ซ่อน` : ""} · ตรวจเมื่อ {ranAt}</p>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
-  ["วิชา-ห้องที่ตรวจ", kpi.total, "text-slate-700"],
-  ["กรอกคะแนนยังไม่ครบ", kpi.incomplete, kpi.incomplete ? "text-amber-600" : "text-emerald-600"],
-  ["วิชาที่คะแนนเต็มไม่เท่ากันทุกห้อง", kpi.maxMismatch, kpi.maxMismatch ? "text-red-600" : "text-emerald-600"],
-  ...(hideIssues ? [] : [["รายการคะแนนผิดปกติ", kpi.issues, kpi.issues ? "text-red-600" : "text-emerald-600"]]),
-].map(([l, v, c]) => (
+              ["วิชา-ห้องที่ตรวจ", kpi.total, "text-slate-700"],
+              ["กรอกคะแนนยังไม่ครบ", kpi.incomplete, kpi.incomplete ? "text-amber-600" : "text-emerald-600"],
+              ["วิชาที่คะแนนเต็มไม่เท่ากันทุกห้อง", kpi.maxMismatch, kpi.maxMismatch ? "text-red-600" : "text-emerald-600"],
+              ["รายการคะแนนผิดปกติ", kpi.issues, kpi.issues ? "text-red-600" : "text-emerald-600"],
+            ].map(([l, v, c]) => (
               <div key={l as string} className="rounded-2xl border border-slate-200 bg-white p-3">
                 <p className="text-xs font-bold text-slate-500">{l}</p>
                 <p className={`text-2xl font-black ${c}`}>{v}</p>
@@ -411,14 +464,19 @@ export default function AuditReport({
           {kpi.failed > 0 && <p className="text-xs font-bold text-amber-600">⚠️ ดึงข้อมูลไม่สำเร็จ {kpi.failed} วิชา (แสดงเป็น "ดึงข้อมูลไม่ได้") ลองกดตรวจสอบใหม่</p>}
 
           <div className="print:hidden flex gap-2 flex-wrap">
-  {tab("missing", "📝 คะแนนที่ยังไม่กรอก")}
-  {tab("max", "⚖️ คะแนนเต็มแต่ละห้อง")}
-  {!hideIssues && tab("issues", "🚨 คะแนนผิดปกติ")}
-</div>
+            {tab("missing", "📝 คะแนนที่ยังไม่กรอก")}
+            {tab("max", "⚖️ คะแนนเต็มแต่ละห้อง")}
+            {tab("issues", "🚨 คะแนนผิดปกติ")}
+          </div>
 
           {groups.map((g, gi) => (
             <section key={g.key} className={`space-y-4 ${gi > 0 ? "print:break-before-page" : ""}`}>
               <h2 className="text-lg font-black text-slate-800 border-b-2 border-slate-200 pb-1">สายชั้น {g.key} <span className="text-sm text-slate-400">({g.rooms.length} ห้อง)</span></h2>
+              <p className="text-xs font-bold text-slate-500 -mt-2">
+                โครงสร้างเวลาเรียน {g.hs.subjects} วิชา: พื้นฐาน {g.hs.basic} · เพิ่มเติม {g.hs.additional} · กิจกรรม {g.hs.activity} ·
+                รวม <span className="text-slate-700">{g.hs.basic + g.hs.additional + g.hs.activity} ชม./ปี</span>
+                {g.hs.missing > 0 && <span className="text-amber-600"> (ไม่ระบุ ชม./ปี {g.hs.missing} วิชา)</span>}
+              </p>
 
               {/* 1) ยังไม่กรอก */}
               <div className={show("missing")}>
@@ -434,13 +492,13 @@ export default function AuditReport({
                     </thead>
                     <tbody>
                       {g.subjectList
-                        .filter(s => !onlyProblems || s.list.some(incomplete) || s.list.some(a => a.failed))
+                        .filter(s => !onlyProblems || s.list.some(incomplete) || s.list.some(a => a.failed) || s.list.length < g.rooms.length)
                         .map(s => {
                           const lacking = g.rooms.filter(r => !s.list.some(a => a.room === r.room_name));
                           const bad = s.list.filter(a => incomplete(a)).map(a => a.room);
                           return (
-                            <tr key={s.code} className="border-t border-slate-100 align-top">
-                              <td className="px-3 py-2 font-bold text-slate-700 min-w-[160px]">{s.name}<span className="block text-[10px] text-slate-400">{s.code}</span></td>
+                            <tr key={s.code} className={`border-t border-slate-100 align-top ${s.hidden ? "opacity-40 print:hidden" : ""}`}>
+                              <SubjectCell name={s.name} code={s.code} info={s.info} hidden={s.hidden} onToggle={() => toggleHidden(s.code)} />
                               {g.rooms.map(r => {
                                 const a = s.list.find(x => x.room === r.room_name);
                                 if (!a) return <td key={r.classroom_id} className="px-2 py-2 text-center text-slate-300 font-bold">ไม่มีวิชา</td>;
@@ -481,8 +539,8 @@ export default function AuditReport({
                     </thead>
                     <tbody>
                       {g.subjectList.filter(s => !onlyProblems || s.devs.length > 0).map(s => (
-                        <tr key={s.code} className="border-t border-slate-100 align-top">
-                          <td className="px-3 py-2 font-bold text-slate-700 min-w-[160px]">{s.name}<span className="block text-[10px] text-slate-400">{s.code}</span></td>
+                        <tr key={s.code} className={`border-t border-slate-100 align-top ${s.hidden ? "opacity-40 print:hidden" : ""}`}>
+                          <SubjectCell name={s.name} code={s.code} info={s.info} hidden={s.hidden} onToggle={() => toggleHidden(s.code)} />
                           {g.rooms.map(r => {
                             const a = s.list.find(x => x.room === r.room_name);
                             if (!a) return <td key={r.classroom_id} className="px-2 py-2 text-center text-slate-300">-</td>;
@@ -510,8 +568,6 @@ export default function AuditReport({
                 <p className="mt-1 text-[10px] text-slate-400 font-bold">ชิ้นงาน = ผลรวมคะแนนเต็มของชิ้นงานที่เปิดใช้ (ตามน้ำหนัก) · เทียบกับค่าที่พบมากที่สุดในสายชั้นเดียวกัน</p>
               </div>
 
-                 {!hideIssues && (
-  <div className={show("issues")}>     
               {/* 3) ผิดปกติ */}
               <div className={show("issues")}>
                 <h3 className="text-sm font-black text-slate-600 mb-2">3. คะแนนที่ผิดปกติ (เกินคะแนนเต็ม / ไม่ได้เกรด / ตั้งค่าผิด)</h3>
@@ -542,8 +598,6 @@ export default function AuditReport({
                   </div>
                 )}
               </div>
-             </div>
-             )}
             </section>
           ))}
         </>
