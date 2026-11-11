@@ -123,6 +123,16 @@ export default function AuditReport({
   const hiddenKey = `audit-hidden-${yearName}-${semester}`;
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [showHidden, setShowHidden] = useState(false);
+  // ซ่อนวิชากิจกรรม (รหัสวิชาขึ้นต้นด้วย "ก") ทั้งหมดในครั้งเดียว
+  const activityKey = `audit-hide-activity-${yearName}-${semester}`;
+  const [hideActivity, setHideActivity] = useState(false);
+  useEffect(() => {
+    try { setHideActivity(localStorage.getItem(activityKey) === "1"); } catch { setHideActivity(false); }
+  }, [activityKey]);
+  function toggleHideActivity(v: boolean) {
+    setHideActivity(v);
+    try { localStorage.setItem(activityKey, v ? "1" : "0"); } catch {}
+  }
   useEffect(() => {
     try { const v = localStorage.getItem(hiddenKey); setHidden(new Set(v ? JSON.parse(v) : [])); }
     catch { setHidden(new Set()); }
@@ -326,7 +336,8 @@ export default function AuditReport({
 
   const filtered = useMemo(() => adjusted.filter(a =>
     (levelFilter === "all" || a.level === levelFilter) && (subjectFilter === "all" || a.subjectCode === subjectFilter) &&
-    (showHidden || !hidden.has(a.subjectCode))), [adjusted, levelFilter, subjectFilter, hidden, showHidden]);
+    (showHidden || !hidden.has(a.subjectCode)) &&
+    (!hideActivity || !/^ก/.test(a.subjectCode))), [adjusted, levelFilter, subjectFilter, hidden, showHidden, hideActivity]);
 
   const groups = useMemo(() => levels
     .filter(l => levelFilter === "all" || l.key === levelFilter)
@@ -338,11 +349,11 @@ export default function AuditReport({
         .map(([code, list]) => ({ code, name: list[0].subjectName, list, devs: compareMax(list), info: hoursInfo(list), hidden: hidden.has(code) }))
         .sort((a, b) => a.name.localeCompare(b.name, "th"));
       // รวมรายการผิดปกติเป็นกลุ่ม ห้อง+วิชา+ประเภท
-      const issueRows: { room: string; subject: string; type: IssueType; items: Issue[] }[] = [];
+      const issueRows: { room: string; code: string; subject: string; type: IssueType; items: Issue[] }[] = [];
       secs.forEach(a => {
         const byType = new Map<IssueType, Issue[]>();
         a.issues.forEach(i => byType.set(i.type, [...(byType.get(i.type) ?? []), i]));
-        byType.forEach((items, type) => issueRows.push({ room: a.room, subject: `${a.subjectCode} ${a.subjectName}`, type, items }));
+        byType.forEach((items, type) => issueRows.push({ room: a.room, code: a.subjectCode, subject: `${a.subjectCode} ${a.subjectName}`, type, items }));
       });
       // สรุปโครงสร้างเวลาเรียนของสายชั้น (นับเฉพาะวิชาที่ไม่ได้ซ่อน วิชาละครั้ง)
       const hs = { basic: 0, additional: 0, activity: 0, subjects: 0, missing: 0 };
@@ -410,6 +421,9 @@ export default function AuditReport({
             <label className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
               <input type="checkbox" checked={onlyProblems} onChange={e => setOnlyProblems(e.target.checked)} /> แสดงเฉพาะที่มีปัญหา
             </label>
+            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-600" title="ซ่อนวิชาที่รหัสขึ้นต้นด้วย ก">
+              <input type="checkbox" checked={hideActivity} onChange={e => toggleHideActivity(e.target.checked)} /> ซ่อนวิชากิจกรรม (รหัส ก)
+            </label>
             <label className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
               <input type="checkbox" checked={skipFinal} onChange={e => setSkipFinal(e.target.checked)} /> ไม่นับปลายภาค
             </label>
@@ -445,7 +459,7 @@ export default function AuditReport({
           <div className="hidden print:block text-center mb-4">
             <p className="font-black text-lg">รายงานตรวจสอบการกรอกคะแนน {schoolName}</p>
             <p className="text-sm font-bold">ปีการศึกษา {yearName} เทอม {semester} · {levelFilter === "all" ? "ทุกสายชั้น" : `สายชั้น ${levelFilter}`}
-              {subjectFilter !== "all" ? ` · วิชา ${subjectOptions.find(s => s[0] === subjectFilter)?.[1] ?? ""}` : ""}{skipFinal ? " · ไม่นับปลายภาค" : ""}{hidden.size > 0 ? ` · ไม่รวม ${hidden.size} วิชาที่ซ่อน` : ""} · ตรวจเมื่อ {ranAt}</p>
+              {subjectFilter !== "all" ? ` · วิชา ${subjectOptions.find(s => s[0] === subjectFilter)?.[1] ?? ""}` : ""}{skipFinal ? " · ไม่นับปลายภาค" : ""}{hidden.size > 0 ? ` · ไม่รวม ${hidden.size} วิชาที่ซ่อน` : ""}{hideActivity ? " · ไม่รวมวิชากิจกรรม" : ""} · ตรวจเมื่อ {ranAt}</p>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -583,9 +597,14 @@ export default function AuditReport({
                       </thead>
                       <tbody>
                         {g.issueRows.sort((a, b) => a.room.localeCompare(b.room, "th", { numeric: true }) || a.subject.localeCompare(b.subject, "th")).map((r, i) => (
-                          <tr key={i} className="border-t border-slate-100 align-top">
+                          <tr key={i} className={`border-t border-slate-100 align-top ${hidden.has(r.code) ? "opacity-40 print:hidden" : ""}`}>
                             <td className="px-3 py-2 font-bold whitespace-nowrap">{r.room}</td>
-                            <td className="px-3 py-2 font-bold text-slate-700">{r.subject}</td>
+                            <td className="px-3 py-2 font-bold text-slate-700">
+                              <label className="flex items-start gap-1.5 cursor-pointer" title="ติ๊กเพื่อซ่อนวิชานี้จากรายงาน (ซ่อนทุกตาราง)">
+                                <input type="checkbox" className="mt-1 print:hidden" checked={hidden.has(r.code)} onChange={() => toggleHidden(r.code)} />
+                                <span>{r.subject}</span>
+                              </label>
+                            </td>
                             <td className="px-3 py-2 font-bold text-red-600">{ISSUE_LABEL[r.type]}</td>
                             <td className="px-3 py-2 font-black">{r.items.length}</td>
                             <td className="px-3 py-2 text-slate-600">
