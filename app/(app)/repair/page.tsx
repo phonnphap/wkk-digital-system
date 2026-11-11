@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { format } from "date-fns";
 import { th } from "date-fns/locale";
+import AssetPicker from "@/app/assets/_components/AssetPicker";
 
 const supabase = createClient();
 
@@ -65,7 +66,8 @@ const PRIORITY_CFG: Record<string,{label:string;color:string}> = {
 };
 const BULB_CATEGORY = "เปลี่ยนหลอดไฟ";
 const INTERNET_CATEGORY = "เครือข่ายอินเตอร์เน็ต";
-const CATEGORIES = ["ระบบไฟฟ้า", BULB_CATEGORY, "ระบบประปา","ประตู/หน้าต่าง","พื้น/ฝ้า/ผนัง","เฟอร์นิเจอร์","คอมพิวเตอร์/อุปกรณ์", INTERNET_CATEGORY,"ห้องน้ำ","อื่นๆ"];
+const ASSET_CATEGORY = "ซ่อมครุภัณฑ์";
+const CATEGORIES = ["ระบบไฟฟ้า", BULB_CATEGORY, "ระบบประปา","ประตู/หน้าต่าง","พื้น/ฝ้า/ผนัง","เฟอร์นิเจอร์","คอมพิวเตอร์/อุปกรณ์", INTERNET_CATEGORY, ASSET_CATEGORY, "ห้องน้ำ","อื่นๆ"];
 
 // ★ บัญชีที่แก้ไข/สร้างบันทึกข้อความได้
 const MEMO_EDITOR_EMAILS = ["general@khienkhet.ac.th"];
@@ -510,12 +512,24 @@ function RepairFormModal({ existing, buildings, currentUser,  onSave, onClose }:
   const [saving,      setSaving]     = useState(false);
   const [errors,      setErrors]     = useState<Record<string,boolean>>({});
   const fileRef = useRef<HTMLInputElement>(null);
+  const [assetId, setAssetId] = useState<string>((existing as any)?.asset_id ?? "");
+useEffect(() => {
+  if (existing) return;
+  const id = new URLSearchParams(window.location.search).get("asset");
+  if (!id) return;
+  supabase.from("assets").select("id,name,asset_locations(name)").eq("id", id).maybeSingle().then(({ data }: any) => {
+    if (!data) return;
+    setAssetId(data.id); setCategory(ASSET_CATEGORY);
+    setTitle(t => t || `ซ่อม ${data.name}`); setRoom(r => r || data.asset_locations?.name || "");
+  });
+}, []);
 
   const validate = () => {
     const e: Record<string,boolean> = {};
     if (!title.trim()) e.title = true;
     if (!buildingId) e.buildingId = true;
     if (!category) e.category = true;
+    if (category === ASSET_CATEGORY && !assetId) e.assetId = true;
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -587,6 +601,7 @@ function RepairFormModal({ existing, buildings, currentUser,  onSave, onClose }:
     const payload = {
   title: title.trim(), description: desc.trim(), building_id: buildingId,
   room: room.trim(), category, priority, photo_urls: imageUrls,
+  asset_id: category === ASSET_CATEGORY ? (assetId || null) : null,
   reporter_id: existing?.reporter_id ?? currentUser.id,   // ★ แก้รายการเดิม = คงผู้แจ้งเดิม
   status: existing?.status ?? "pending",
       // ★ assigned_user_ids (jsonb array คอลัมน์ใหม่) เก็บผู้รับมอบหมายทุกคน
@@ -600,6 +615,8 @@ function RepairFormModal({ existing, buildings, currentUser,  onSave, onClose }:
     } else {
       const { data: created, error } = await supabase.from("repair_requests").insert([payload]).select("id").single();
       if (error) { alert("❌ แจ้งซ่อมไม่สำเร็จ: " + error.message); setSaving(false); return; }
+      if (category === ASSET_CATEGORY && assetId)
+  await supabase.rpc("update_asset_status", { p_asset: assetId, p_status: "broken", p_condition: null, p_note: `แจ้งซ่อม: ${title.trim()}` });
       const { data: { session } } = await supabase.auth.getSession();
       fetch("/api/repair-notify", {
         method: "POST",
@@ -665,6 +682,12 @@ function RepairFormModal({ existing, buildings, currentUser,  onSave, onClose }:
             </div>
           </div>
           <div>
+            {category === ASSET_CATEGORY && (
+  <div>
+    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ครุภัณฑ์ที่ชำรุด <span className="text-red-400">*</span></label>
+    <AssetPicker value={assetId} onChange={setAssetId} error={errors.assetId} />
+  </div>
+)}
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">รายละเอียด</label>
             <textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={3}
               placeholder="อธิบายปัญหาเพิ่มเติม..." className={iCls()+" resize-none"} />
@@ -935,6 +958,13 @@ const handleAcknowledge = async () => {
     }).eq("id", request.id);
     setSaving(false);
     if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); return; }
+    const aid = (request as any).asset_id as string | undefined;
+if (aid && status !== request.status && (status === "in_progress" || status === "completed")) {
+  await supabase.rpc("update_asset_status", {
+    p_asset: aid, p_status: status === "completed" ? "active" : "repairing", p_condition: null,
+    p_note: status === "completed" ? "ซ่อมเสร็จแล้ว" : "อยู่ระหว่างซ่อม",
+  });
+}
     onUpdate();
   };
 
@@ -969,6 +999,11 @@ const handleAcknowledge = async () => {
             <p>📅 {thaiDate(request.created_at)}</p>
           </div>
           {request.description && <p className="text-sm text-slate-600 bg-slate-50 rounded-xl px-4 py-3">{request.description}</p>}
+          {(request as any).asset_id && (
+  <a href={`/assets/${(request as any).asset_id}`} className="block text-sm font-bold text-blue-600 bg-blue-50 rounded-xl px-4 py-3">
+    🏷️ ดูข้อมูลครุภัณฑ์ที่แจ้งซ่อม (รหัส / ประวัติ)
+  </a>
+)}
           <div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
               รูปภาพที่แนบ {(request.photo_urls??[]).length > 0 ? `(${request.photo_urls!.length} รูป)` : ""}
