@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { format } from "date-fns";
 import { th } from "date-fns/locale";
-import AssetPicker from "@/app/assets/_components/AssetPicker";
+import AssetPicker from "../assets/_components/AssetPicker";
 
 const supabase = createClient();
 
