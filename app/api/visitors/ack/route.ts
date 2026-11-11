@@ -3,6 +3,7 @@
 // ใช้ 2 ขั้นเพื่อกัน Teams/เบราว์เซอร์ prefetch ลิงก์แล้วบันทึกเองโดยไม่ได้กด
 import { createClient } from "@supabase/supabase-js";
 import { verifyAck } from "@/lib/visitors/ackToken";
+import { refreshVisitorCards } from "@/lib/visitor-server";
 
 export const dynamic = "force-dynamic";
 
@@ -38,5 +39,6 @@ export async function POST(req: Request) {
   const { id, ok } = params(req);
   if (!ok) return page("<h2>ลิงก์ไม่ถูกต้อง</h2>", 400);
   await admin().from("visitors").update({ acknowledged_at: new Date().toISOString() }).eq("id", id).is("acknowledged_at", null);
+  await refreshVisitorCards(id).catch(e => console.warn("[ack refresh]", e));   // ต้อง await ไม่งั้น serverless อาจตัดก่อนส่ง
   return page(`<div style="font-size:48px">✅</div><h2>บันทึกการรับทราบแล้ว</h2><p>ขอบคุณครับ/ค่ะ</p>`);
 }

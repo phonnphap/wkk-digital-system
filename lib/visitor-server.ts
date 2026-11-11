@@ -38,6 +38,37 @@ const ADMIN_TARGET_EMAILS: Record<string, string[]> = {
   "ห้องพยาบาล": ["maneewan@khienkhet.ac.th"],
 };
 
+const dash = (s?: string | null) => (s && s.trim() ? s : "ไม่ระบุ");   // อย่าใช้ "-" เพราะ Teams แสดงเป็นจุด •
+
+/** รูปหน้า (เฉพาะโหมดไม่มีบัตร) เป็นลิงก์ชั่วคราว 24 ชม. — bucket ยังเป็น private */
+async function photoUrlOf(v: any): Promise<string | null> {
+  if (!v.photo_path) return null;
+  const { data } = await adminClient().storage.from("visitor-photos").createSignedUrl(v.photo_path, 60 * 60 * 24);
+  return data?.signedUrl ?? null;
+}
+
+function visitorCard(v: any, o: { ackUrl: string; photoUrl: string | null }) {
+  const acked = !!v.acknowledged_at;
+  const body: any[] = [
+    tb(acked ? "✅ รับทราบแล้ว" : "🚪 มีผู้มาติดต่อที่โรงเรียน",
+      { weight: "Bolder", size: "Large", color: acked ? "Good" : "Accent" }),
+  ];
+  if (o.photoUrl) {
+    body.push({ type: "Image", url: o.photoUrl, size: "Large", altText: "รูปผู้มาติดต่อ", horizontalAlignment: "Center" });
+  }
+  body.push(facts([
+    ["ชื่อ", dash(v.full_name)],
+    ["มาติดต่อ", dash(v.target_label ?? v.contact_person)],
+    ["เรื่อง", dash(v.purpose)],
+    ["ทะเบียนรถ", dash(v.car_plate)],
+    ["เวลาเข้า", fmtTime(v.check_in_at)],
+  ]));
+  if (acked) body.push(tb(`รับทราบเมื่อ ${fmtTime(v.acknowledged_at)}`, { isSubtle: true, size: "Small" }));
+  // รับทราบแล้ว → ไม่มีปุ่มอีก
+  return wrapCard(body, !acked && o.ackUrl ? [openUrl("✅ รับทราบ", o.ackUrl, "positive")] : [],
+    "ผู้มาติดต่อ · โรงเรียนวัดเขียนเขต");
+}
+
 export async function notifyVisitor(visitorId: string): Promise<NotifyResult> {
   // ใช้ Flow ตัวเดียวกับระบบลาได้เลย ถ้าไม่ได้สร้าง Flow แยก
   const url = process.env.TEAMS_VISITOR_WEBHOOK_URL || process.env.TEAMS_LEAVE_WEBHOOK_URL;
@@ -78,16 +109,7 @@ export async function notifyVisitor(visitorId: string): Promise<NotifyResult> {
   try { ackUrl = `${SITE}/api/visitors/ack?id=${v.id}&t=${signAck(v.id)}`; }
   catch (e) { console.warn("[notifyVisitor] signAck:", e); }
 
-  const card = wrapCard([
-    tb("🚪 มีผู้มาติดต่อที่โรงเรียน", { weight: "Bolder", size: "Large", color: "Accent" }),
-    facts([
-      ["ชื่อ", v.full_name ?? "-"],
-      ["มาติดต่อ", v.target_label ?? v.contact_person ?? "-"],
-      ["เรื่อง", v.purpose || "-"],
-      ["ทะเบียนรถ", v.car_plate || "-"],
-      ["เวลาเข้า", fmtTime(v.check_in_at)],
-    ]),
-  ], ackUrl ? [openUrl("✅ รับทราบ", ackUrl, "positive")] : [], "ผู้มาติดต่อ · โรงเรียนวัดเขียนเขต");
+    const card = visitorCard(v, { ackUrl, photoUrl: await photoUrlOf(v) });
 
   const errors = (await Promise.all(recipients.map(async r => {
     try {
@@ -95,7 +117,14 @@ export async function notifyVisitor(visitorId: string): Promise<NotifyResult> {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "create", to: r.email, card }),
       });
-      return res.ok ? null : `${r.email}: HTTP ${res.status} ${(await res.text().catch(() => "")).slice(0, 100)}`;
+      if (!res.ok) return `${r.email}: HTTP ${res.status} ${(await res.text().catch(() => "")).slice(0, 100)}`;
+      const j = await res.json().catch(() => null);
+      if (j?.messageId) {
+        await db.from("visitor_teams_messages").upsert({
+          visitor_id: v.id, email: r.email.toLowerCase(), message_id: j.messageId, updated_at: new Date().toISOString(),
+        });
+      } else console.warn("[notifyVisitor] Flow ไม่ส่ง messageId กลับมา — จะอัปเดตการ์ดไม่ได้", r.email);
+      return null;
     } catch (e: any) { return `${r.email}: ${e.message}`; }
   }))).filter(Boolean) as string[];
 
@@ -105,6 +134,25 @@ export async function notifyVisitor(visitorId: string): Promise<NotifyResult> {
     ok: true, sent: recipients.length - errors.length,
     reason: errors.length ? "ส่งไม่ถึงบางคน: " + errors.join("; ") : undefined,
   };
+}
+
+/** ครูกดรับทราบแล้ว → แก้การ์ดเดิมของครูทุกคนให้เป็น "รับทราบแล้ว" และเอาปุ่มออก */
+export async function refreshVisitorCards(visitorId: string) {
+  const url = process.env.TEAMS_VISITOR_WEBHOOK_URL || process.env.TEAMS_LEAVE_WEBHOOK_URL;
+  if (!url) return;
+  const db = adminClient();
+  const { data: v } = await db.from("visitors").select("*").eq("id", visitorId).maybeSingle();
+  if (!v) return;
+  const { data: msgs } = await db.from("visitor_teams_messages").select("email,message_id").eq("visitor_id", visitorId);
+  if (!msgs?.length) return;
+  const card = visitorCard(v, { ackUrl: "", photoUrl: await photoUrlOf(v) });
+  await Promise.allSettled(msgs.map(async (m: any) => {
+    const res = await fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "update", to: m.email, messageId: m.message_id, card }),
+    });
+    if (!res.ok) console.warn("[refreshVisitorCards]", m.email, res.status);
+  }));
 }
 
 /** ผ่านถ้าส่งรหัส รปภ. ถูก (x-guard-key) หรือเป็นผู้ใช้ที่ล็อกอิน */
