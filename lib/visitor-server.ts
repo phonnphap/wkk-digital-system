@@ -120,9 +120,12 @@ export async function notifyVisitor(visitorId: string): Promise<NotifyResult> {
       if (!res.ok) return `${r.email}: HTTP ${res.status} ${(await res.text().catch(() => "")).slice(0, 100)}`;
       const j = await res.json().catch(() => null);
       if (j?.messageId) {
-        await db.from("visitor_teams_messages").upsert({
-          visitor_id: v.id, email: r.email.toLowerCase(), message_id: j.messageId, updated_at: new Date().toISOString(),
+              if (j?.messageId) {
+        const { error: saveErr } = await db.from("visitor_teams_messages").upsert({
+          visitor_id: v.id, email: r.email, message_id: j.messageId, updated_at: new Date().toISOString(),
         });
+        if (saveErr) console.warn("[notifyVisitor] บันทึก messageId ไม่สำเร็จ:", saveErr.message);
+      } else console.warn("[notifyVisitor] Flow ไม่ส่ง messageId กลับมา", r.email, JSON.stringify(j));
       } else console.warn("[notifyVisitor] Flow ไม่ส่ง messageId กลับมา — จะอัปเดตการ์ดไม่ได้", r.email);
       return null;
     } catch (e: any) { return `${r.email}: ${e.message}`; }
@@ -143,15 +146,17 @@ export async function refreshVisitorCards(visitorId: string) {
   const db = adminClient();
   const { data: v } = await db.from("visitors").select("*").eq("id", visitorId).maybeSingle();
   if (!v) return;
-  const { data: msgs } = await db.from("visitor_teams_messages").select("email,message_id").eq("visitor_id", visitorId);
-  if (!msgs?.length) return;
+   const { data: msgs, error: qErr } = await db.from("visitor_teams_messages").select("email,message_id").eq("visitor_id", visitorId);
+  if (qErr) { console.warn("[refreshVisitorCards] อ่านตารางไม่ได้:", qErr.message); return; }
+  if (!msgs?.length) { console.warn("[refreshVisitorCards] ไม่มี messageId ของผู้มาติดต่อนี้ — การ์ดจะอัปเดตไม่ได้", visitorId); return; }
   const card = visitorCard(v, { ackUrl: "", photoUrl: await photoUrlOf(v) });
   await Promise.allSettled(msgs.map(async (m: any) => {
     const res = await fetch(url, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "update", to: m.email, messageId: m.message_id, card }),
     });
-    if (!res.ok) console.warn("[refreshVisitorCards]", m.email, res.status);
+    const t = await res.text().catch(() => "");
+    console.warn("[refreshVisitorCards]", m.email, res.status, t.slice(0, 200));
   }));
 }
 

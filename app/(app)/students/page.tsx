@@ -472,7 +472,7 @@ export default function StudentsPage() {
                 <p className="text-sm text-slate-600">
                   ย้าย{" "}
                   <span className="font-bold text-slate-800">
-                    {movingOutStudent.prefix ?? ""}
+                    {getDisplayPrefix(movingOutStudent.gender, movingOutStudent.birth_date, movingOutStudent.prefix)}
                     {movingOutStudent.first_name} {movingOutStudent.last_name}
                   </span>{" "}
                   ออกจากห้องเรียน

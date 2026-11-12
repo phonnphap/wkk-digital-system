@@ -31,9 +31,10 @@ export function getAutoPrefix(
   birthDateStr?: string | null
 ): string | null {
   const age = calculateAge(birthDateStr);
-  if (age === null || !gender) return null;
-  if (gender === "male") return age >= 15 ? "นาย" : "เด็กชาย";
-  if (gender === "female") return age >= 15 ? "นางสาว" : "เด็กหญิง";
+    if (age === null || !gender) return null;
+  const g = gender.trim().toLowerCase();
+  if (g === "male" || g === "m" || g === "ชาย") return age >= 15 ? "นาย" : "เด็กชาย";
+  if (g === "female" || g === "f" || g === "หญิง") return age >= 15 ? "นางสาว" : "เด็กหญิง";
   return null;
 }
 

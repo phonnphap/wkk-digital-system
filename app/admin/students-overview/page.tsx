@@ -24,6 +24,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Home, ArrowLeft, Users, Search, Loader2, X, User, LogOut, LogIn, Undo2 } from "lucide-react";
+import { getDisplayPrefix } from "@/lib/student-prefix";
 
 const supabase = createClient();
 
@@ -106,7 +107,9 @@ type StudentRow = {
   prefix: string | null;
   first_name: string | null;
   last_name: string | null;
-  gender: string | null;
+    gender: string | null;
+  birth_date: string | null;
+  // ★ ฟิลด์ "ย้ายออก"
   // ★ ฟิลด์ "ย้ายออก" — null = ยังเรียนอยู่, มีค่า = ย้ายออกแล้ว (แต่ยังคงแสดงในหน้านี้)
   moved_out_at: string | null;
   moved_out_by_name: string | null;
@@ -216,8 +219,11 @@ function StudentDetailModal({ studentId, roomName, termLabel, onClose }: {
     return { known: knownRows, unknown: unknownRows };
   }, [row]);
 
+    const shownPrefix = row
+    ? getDisplayPrefix(row.gender as string | null, row.birth_date as string | null, row.prefix as string | null) ?? ""
+    : "";
   const displayName = row
-    ? `${(row.prefix as string) ?? ""}${(row.first_name as string) ?? ""} ${(row.last_name as string) ?? ""}`.trim()
+    ? `${shownPrefix}${(row.first_name as string) ?? ""} ${(row.last_name as string) ?? ""}`.trim()
     : "";
 
   const movedOutAt = row?.moved_out_at as string | null | undefined;
@@ -284,8 +290,10 @@ const movedOutNow = !!row && isCurrentlyMovedOut({
     <div key={key} className={key === "address" ? "col-span-2" : ""}>
       <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{FIELD_LABELS[key]}</p>
       <p className="mt-0.5 text-sm font-semibold text-slate-700 break-words">
-        {key === "returned_academic_year_id"
+          {key === "returned_academic_year_id"
           ? (termLabel.get(value as string) ?? "—")
+          : key === "prefix"
+          ? (shownPrefix || "—")
           : formatFieldValue(key, value)}
       </p>
     </div>
@@ -338,7 +346,7 @@ function StudentActionDialog({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
-  const name = `${student.prefix ?? ""}${student.first_name ?? ""} ${student.last_name ?? ""}`.trim();
+    const name = `${getDisplayPrefix(student.gender, student.birth_date, student.prefix) ?? ""}${student.first_name ?? ""} ${student.last_name ?? ""}`.trim();
 
   const submit = async () => {
     setSaving(true);
@@ -453,12 +461,13 @@ const termLabel = useMemo(
   supabase.from("classrooms").select("id, room_name").order("room_name"),
   fetchAllRows<{
     id: string; classroom_id: string; student_code: string | null;
-    prefix: string | null; first_name: string | null; last_name: string | null; gender: string | null;
+       prefix: string | null; first_name: string | null; last_name: string | null; gender: string | null;
+    birth_date: string | null;
     moved_out_at: string | null; moved_out_by_name: string | null;
     returned_at: string | null; returned_academic_year_id: string | null;
   }>(
     "students",
-    "id, classroom_id, student_code, prefix, first_name, last_name, gender, moved_out_at, moved_out_by_name, returned_at, returned_academic_year_id"
+        "id, classroom_id, student_code, prefix, first_name, last_name, gender, birth_date, moved_out_at, moved_out_by_name, returned_at, returned_academic_year_id"
   ),
   supabase.from("academic_years").select("id, year_name, semester, start_date, end_date"),
 ]);
@@ -525,7 +534,7 @@ const termLabel = useMemo(
       })
       .filter((s) => {
         if (!q) return true;
-        const fullName = `${s.prefix ?? ""}${s.first_name ?? ""} ${s.last_name ?? ""}`.toLowerCase();
+        const fullName = `${getDisplayPrefix(s.gender, s.birth_date, s.prefix) ?? ""}${s.first_name ?? ""} ${s.last_name ?? ""}`.toLowerCase();
         const code = (s.student_code ?? "").toLowerCase();
         return fullName.includes(q) || code.includes(q);
       })
@@ -694,7 +703,7 @@ const returnedCount = useMemo(
   return (
     <tr key={s.id} className={`border-t border-slate-50 hover:bg-slate-50/60 ${movedOut ? "bg-amber-50/40" : ""}`}>
       <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{s.student_code ?? "-"}</td>
-<td className="px-4 py-2.5 text-slate-500">{s.prefix ?? "-"}</td>
+<td className="px-4 py-2.5 text-slate-500">{getDisplayPrefix(s.gender, s.birth_date, s.prefix) || "-"}</td>
 <td className="px-4 py-2.5">
   <button
     onClick={() => setViewingStudent(s)}
