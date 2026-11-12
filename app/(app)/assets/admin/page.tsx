@@ -75,7 +75,8 @@ export default function AssetAdminPage() {
         <button onClick={exportCsv} className="ml-auto rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold">⬇️ ส่งออก CSV (เปิดใน Excel)</button>
         <Link href="/assets/report" className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">ทะเบียนคุม / PDF</Link>
         {canManage && <Link href="/assets/import" className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">นำเข้าจาก Excel</Link>}
-        {canManage && <Link href="/assets/categories" className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">หมวดหมู่</Link>}</div>
+        {canManage && <Link href="/assets/categories" className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">หมวดหมู่</Link>}
+        {canManage && <Link href="/assets/room-files" className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">ไฟล์เช็กลิสต์ห้อง</Link>}</div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-4"><p className="text-3xl font-black">{rows.length}</p><p className="text-sm text-slate-500">ครุภัณฑ์ทั้งหมด</p></div>

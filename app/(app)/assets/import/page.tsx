@@ -8,8 +8,27 @@ const COLS: Record<string, string> = { "รหัสเดิม": "code", "ช�
 const rev = (o: Record<string, { text: string } | string>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [typeof v === "string" ? v : v.text, k]));
 const STATUS_TH = rev(STATUSES); const COND_TH = rev(CONDITIONS);
 
+// เลขเดิมหลายเลข: คั่นด้วย , ; หรือขึ้นบรรทัดใหม่ และเขียนเป็นช่วงได้ เช่น ขข 010564–010586/69
+function expandCodes(s: string): string[] {
+  const out: string[] = [];
+  for (const tok of s.split(/[,;\n]+/).map((t) => t.trim()).filter(Boolean)) {
+    const p = tok.split(/\s*(?:–|—|ถึง)\s*/);
+    if (p.length === 2) {
+      const yy = p[1].match(/\/\s*(\d{2})\s*$/)?.[1];
+      const a = p[0].replace(/\/\s*\d{2}\s*$/, "").replace(/\D/g, ""), b = p[1].replace(/\/.*$/, "").replace(/\D/g, "");
+      if (yy && a.length === b.length && Number(b) >= Number(a) && Number(b) - Number(a) < 500) {
+        for (let n = Number(a); n <= Number(b); n++) out.push(`ขข ${String(n).padStart(a.length, "0")}/${yy}`);
+        continue;
+      }
+    }
+    out.push(tok);
+  }
+  return out;
+}
+
 export default function ImportPage() {
   const role = useAssetRole();
+  const [files, setFiles] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, string>[]>([]); const [res, setRes] = useState<{ row_no: number; ok: boolean; msg: string }[]>([]); const [busy, setBusy] = useState(false);
 
   function template() {
@@ -20,6 +39,30 @@ export default function ImportPage() {
     const f = e.target.files?.[0]; if (!f) return; setRes([]);
     const wb = XLSX.read(await f.arrayBuffer()); const raw = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets[wb.SheetNames[0]], { raw: false, defval: "" });
     setRows(raw.map((r) => { const o: Record<string, string> = {}; for (const [th, k] of Object.entries(COLS)) o[k] = String(r[th] ?? "").trim(); o.status = STATUS_TH[o.status] ?? o.status; o.condition = COND_TH[o.condition] ?? o.condition; return o; }).filter((o) => o.name));
+  }
+  // นำเข้าไฟล์เช็กลิสต์ประจำห้อง (เลือกได้หลายไฟล์): อ่านเฉพาะแถวที่เลือก "มี"
+  async function onChecklists(e: React.ChangeEvent<HTMLInputElement>) {
+    setRes([]); const all: Record<string, string>[] = []; const info: string[] = [];
+    const blank = Object.fromEntries([...Object.values(COLS), "note"].map((k) => [k, ""]));
+    for (const f of Array.from(e.target.files ?? [])) {
+      const ws = XLSX.read(await f.arrayBuffer()).Sheets["เช็กลิสต์"];
+      if (!ws) { info.push(`${f.name}: ไม่ใช่ไฟล์เช็กลิสต์`); continue; }
+      const a = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, raw: false, defval: "" });
+      const room = String(a[3]?.[1] ?? "").trim(); let n = 0, bad = 0;
+      for (const r of a.slice(7)) {
+        const [, name, has, qty, codes, st, cond, note, typ, cat] = r.map((x) => String(x ?? "").trim());
+        if (has !== "มี" || !name) continue;
+        const category = cat || (typ ? `${typ.slice(0, 2)}:${name}` : "");
+        if (!category) { bad++; continue; }
+        const list = expandCodes(codes); const total = Math.max(Number(qty) || 0, list.length, 1);
+        const base = { ...blank, name, category, location: room, status: STATUS_TH[st] ?? "", condition: COND_TH[cond] ?? "", note };
+        list.forEach((c) => all.push({ ...base, code: c, qty: "1" }));
+        if (total > list.length) all.push({ ...base, code: "", qty: String(total - list.length) });
+        n += total;
+      }
+      info.push(`${room || f.name}: ${n} ชิ้น${bad ? ` (ข้าม ${bad} แถวที่ไม่ได้เลือกประเภท)` : ""}`);
+    }
+    setRows(all); setFiles(info);
   }
   async function run() {
     setBusy(true); const out: typeof res = [];
@@ -43,6 +86,12 @@ export default function ImportPage() {
         <li>วันที่ใช้รูปแบบ 2024-05-20 (ปี ค.ศ.-เดือน-วัน) สถานะ/สภาพเว้นว่างได้</li>
       </ol>
       <input type="file" accept=".xlsx,.xls,.csv" onChange={onFile} className="mt-4 block text-sm" />
+      <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm">
+        <p className="font-bold text-slate-700">หรือ นำเข้าไฟล์เช็กลิสต์ประจำห้อง (เลือกได้หลายไฟล์พร้อมกัน)</p>
+        <p className="text-xs text-slate-500">นำเข้าเฉพาะแถวที่เลือก “มี” — ห้ามนำเข้าไฟล์ห้องเดิมซ้ำ เพราะรายการที่ไม่มีเลขจะถูกสร้างซ้ำ</p>
+        <input type="file" multiple accept=".xlsx" onChange={onChecklists} className="mt-2 block text-sm" />
+        {files.length > 0 && <ul className="mt-2 list-disc pl-5 text-xs text-slate-600">{files.map((f) => <li key={f}>{f}</li>)}</ul>}
+      </div>
       {rows.length > 0 && !res.length && <div className="mt-4"><p className="text-sm font-bold">พบ {rows.length} แถว</p><button onClick={run} disabled={busy} className="mt-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">{busy ? "กำลังนำเข้า..." : "ยืนยันนำเข้า"}</button></div>}
       {res.length > 0 && <div className="mt-4"><p className="text-sm font-bold text-emerald-700">สำเร็จ {res.length - bad.length} แถว</p>
         {bad.length > 0 && <><p className="mt-1 text-sm font-bold text-rose-600">ไม่สำเร็จ {bad.length} แถว (แก้ไฟล์แล้วนำเข้าเฉพาะแถวเหล่านี้)</p>
