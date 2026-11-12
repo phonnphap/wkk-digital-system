@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getDisplayPrefix } from "@/lib/student-prefix";
 
 type Student = {
-  id: string; prefix?: string; first_name: string; last_name: string;
+  id: string; prefix?: string; gender?: string | null; birth_date?: string | null;
+  first_name: string; last_name: string;
   seat_number: number; student_code?: string;
 };
 
@@ -387,7 +389,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
           </button>
           {students.map(s => (
             <button key={s.id} onClick={() => setSelectedStudentId(s.id)}
-              title={`${s.prefix ?? ""}${s.first_name} ${s.last_name}`}
+            title={`${getDisplayPrefix(s.gender, s.birth_date, s.prefix)}${s.first_name} ${s.last_name}`}
               className={`w-9 h-9 rounded-lg text-base font-black ${selectedStudentId === s.id ? "bg-blue-600 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
               {s.seat_number}
             </button>
@@ -436,7 +438,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
             </div>
 
             <div className="flex flex-wrap items-baseline gap-4 text-xl mb-3 w-full print:mb-1">
-              <InfoField label="ชื่อ" value={`${s.prefix ?? ""}${s.first_name} ${s.last_name}`} grow={3} />
+              <InfoField label="ชื่อ" value={`${getDisplayPrefix(s.gender, s.birth_date, s.prefix)}${s.first_name} ${s.last_name}`} grow={3} />
               <InfoField label="เลขประจำตัว" value={s.student_code ?? "-"} grow={2} />
               <InfoField label="ห้อง" value={roomParts.room} grow={1} />
               <InfoField label="เลขที่" value={String(s.seat_number)} grow={1} />

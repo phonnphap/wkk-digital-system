@@ -12,6 +12,7 @@ import GradeOverviewTool from "@/components/attendance/GradeOverviewTool";
 import InsightsTool from "@/components/insights/InsightsTool";
 import ReportsHubTool from "@/components/reports/ReportsHubTool";
 import { resolveRosterClassroomIds } from "@/lib/smartclass/rosterClassroom";
+import { withDisplayPrefix } from "@/lib/student-prefix";
 
 const supabase = createClient();
 // สถานะที่ถือว่า "ไม่มาเรียน" (สาย = มา) แก้ตามต้องการได้ เช่นเอา "excused" ออกถ้าไปกิจกรรมยังให้คะแนนได้
@@ -52,7 +53,7 @@ type SectionRow = {
   show_special_scores?: boolean;
   show_assignment_scores?: boolean;
 };
-type Student = { id: string; prefix?: string; first_name: string; last_name: string; nick_name?: string; seat_number: number; avatar_url?: string };
+type Student = { id: string; prefix?: string; gender?: string | null; birth_date?: string | null; first_name: string; last_name: string; nick_name?: string; seat_number: number; avatar_url?: string };
 type ScorePreset = { id: string; label: string; points: number; emoji: string; sort_order: number };
 
 type TabKey = "roster" | "attendance" | "random" | "tools";
@@ -1825,20 +1826,6 @@ function GroupingBox({ students }: { students: Student[] }) {
     </div>
   );
 }
-function getAutoPrefix(gender: "male" | "female", birthDate: string | null): string {
-  if (!birthDate) return gender === "male" ? "เด็กชาย" : "เด็กหญิง"; // ไม่มีวันเกิด ให้ default เป็นเด็ก
-
-  const dob = new Date(birthDate);
-  const today = new Date();
-  let age = today.getFullYear() - dob.getFullYear();
-  const passedBirthdayThisYear =
-    today.getMonth() > dob.getMonth() ||
-    (today.getMonth() === dob.getMonth() && today.getDate() >= dob.getDate());
-  if (!passedBirthdayThisYear) age--;
-
-  if (gender === "male") return age >= 15 ? "นาย" : "เด็กชาย";
-  return age >= 15 ? "นางสาว" : "เด็กหญิง";
-}
 
 /* แถบเครื่องมือ: จัดเป็นแถวเดียว 3 ช่อง เลือกกดเครื่องมือไหนก็ได้
    - จับเวลา: เปิดวิดเจ็ตลอย (FloatingTimer) ที่หน้าเพจหลัก ใช้ต่อได้แม้สลับแท็บ/เมนูอื่น
@@ -2911,11 +2898,11 @@ const [{ data: subj }, { data: room }] = await Promise.all([
 
   const { data: studentsData, error: stuErr } = await supabase
     .from("students")
-    .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url")
+        .select("id, prefix, gender, birth_date, first_name, last_name, nick_name, seat_number, avatar_url")
     .eq("classroom_id", rosterId).is("moved_out_at", null)
     .order("seat_number");
   if (stuErr) console.error("โหลดนักเรียนไม่สำเร็จ:", stuErr);
-  setStudents((studentsData ?? []) as Student[]);
+  setStudents(((studentsData ?? []) as Student[]).map(s => withDisplayPrefix(s)));
 }
 
       if (sec?.id) {

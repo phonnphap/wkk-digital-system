@@ -9,6 +9,7 @@ import InsightsTool from "@/components/insights/InsightsTool";
 import Vp4Report from "@/components/insights/Vp4Report";
 import AuditReport, { isActiveStudent } from "@/components/insights/AuditReport";
 import { resolveRosterClassroomIds } from "@/lib/smartclass/rosterClassroom";
+import { withDisplayPrefix } from "@/lib/student-prefix";
 
 const supabase = createClient();
 const ADMIN_ROLES = ["admin", "executive", "director", "deputy_director"];
@@ -18,7 +19,8 @@ type Classroom = {
   year_name?: string; semester?: number; split?: boolean;
 };
 type Student = {
-  id: string; prefix?: string; first_name: string; last_name: string; nick_name?: string;
+  id: string; prefix?: string; gender?: string | null; birth_date?: string | null;
+  first_name: string; last_name: string; nick_name?: string;
   seat_number: number; avatar_url?: string; student_code?: string;
   moved_out_at?: string | null; returned_at?: string | null;
 };
@@ -298,7 +300,7 @@ export default function Por5SummaryPage() {
         if (cancelled) return;
         if (snap) {
           const p: any = snap.payload;
-          setStudents(p.students ?? []);
+                    setStudents(((p.students ?? []) as Student[]).map(s => withDisplayPrefix(s)));
           setSections(p.sections ?? []);
           setGroupNames(p.groupNames ?? {});
           setGradeMatrix(p.gradeMatrix ?? {});
@@ -322,10 +324,12 @@ if (!savedHead) {
 
       const { data: studentsData } = await supabase
         .from("students")
-        .select("id, prefix, first_name, last_name, nick_name, seat_number, avatar_url, student_code, moved_out_at, returned_at")
+                .select("id, prefix, gender, birth_date, first_name, last_name, nick_name, seat_number, avatar_url, student_code, moved_out_at, returned_at")
         .eq("classroom_id", rosterId)
         .order("seat_number");
-      const studentRows = ((studentsData ?? []) as Student[]).filter(isActiveStudent);
+      const studentRows = ((studentsData ?? []) as Student[])
+        .filter(isActiveStudent)
+        .map(s => withDisplayPrefix(s));
       if (cancelled) return;
       setStudents(studentRows);
 
@@ -804,7 +808,7 @@ gMatrix[s.id][sec.id] = {
                   {students.map(s => (
                     <tr key={s.id} className="border-t border-slate-100 hover:bg-sky-50/60">
                       <td className="px-5 py-3 sticky left-0 z-10 bg-sky-50">
-                        <p className="text-base font-black text-slate-700 whitespace-nowrap">{s.prefix}{s.first_name} {s.last_name}</p>
+                        <p className="text-base font-black text-slate-700 whitespace-nowrap">{s.prefix ?? ""}{s.first_name} {s.last_name}</p>
                         <p className="text-sm text-slate-500 font-bold">เลขที่ {s.seat_number}</p>
                       </td>
                       {activeColumns.map(col => {

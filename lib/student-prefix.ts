@@ -51,3 +51,10 @@ export function getDisplayPrefix(
 ): string {
   return getAutoPrefix(gender, birthDateStr) ?? storedPrefix ?? "";
 }
+
+/** ใช้หลังดึงนักเรียนจาก DB: แทนที่ prefix ด้วยค่าที่คำนวณจากเพศ+อายุ (component ลูกที่อ่าน s.prefix จะถูกต้องทันที) */
+export function withDisplayPrefix<
+  T extends { prefix?: string | null; gender?: string | null; birth_date?: string | null }
+>(s: T): T {
+  return { ...s, prefix: getDisplayPrefix(s.gender, s.birth_date, s.prefix) };
+}
