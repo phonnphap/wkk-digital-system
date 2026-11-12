@@ -300,7 +300,18 @@ export default function Por5SummaryPage() {
         if (cancelled) return;
         if (snap) {
           const p: any = snap.payload;
-                    setStudents(((p.students ?? []) as Student[]).map(s => withDisplayPrefix(s)));
+                    const snapStudents = (p.students ?? []) as Student[];
+          setStudents(snapStudents.map(s => withDisplayPrefix(s)));
+          // เติม gender/birth_date จากฐานข้อมูลสำหรับ snapshot เก่าที่ไม่มีฟิลด์นี้
+          if (snapStudents.some(s => !s.gender || !s.birth_date)) {
+            const ids = snapStudents.map(s => s.id);
+            supabase.from("students").select("id, gender, birth_date, prefix").in("id", ids)
+              .then(({ data }) => {
+                if (cancelled || !data) return;
+                const byId = new Map(data.map((d: any) => [d.id, d]));
+                setStudents(snapStudents.map(s => withDisplayPrefix({ ...s, ...(byId.get(s.id) ?? {}) })));
+              });
+          }
           setSections(p.sections ?? []);
           setGroupNames(p.groupNames ?? {});
           setGradeMatrix(p.gradeMatrix ?? {});
