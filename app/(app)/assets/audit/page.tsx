@@ -2,14 +2,14 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Scanner } from "@yudiel/react-qr-scanner";
-import { supabase, useAssetRole, ASSET_SELECT, inputCls, type Asset } from "@/lib/assets";
+import { supabase, useAssetRole, ASSET_SELECT, inputCls, useMyRooms, roomKey, type Asset } from "@/lib/assets";
 
 type Audit = { id: string; name: string; closed_at: string | null };
 type Loc = { id: number; name: string };
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 export default function AuditPage() {
-  const role = useAssetRole(); const staff = role === "admin" || role === "manager";
+  const myRooms = useMyRooms(); const role = useAssetRole(); const staff = role === "admin" || role === "manager";
   const [audits, setAudits] = useState<Audit[]>([]); const [auditId, setAuditId] = useState("");
   const [assets, setAssets] = useState<Asset[]>([]); const [locs, setLocs] = useState<Loc[]>([]);
   const [checked, setChecked] = useState<Set<string>>(new Set()); const [locId, setLocId] = useState("");
@@ -59,6 +59,7 @@ export default function AuditPage() {
         {staff && open && <button onClick={close} className="shrink-0 rounded-xl border border-rose-200 px-3 text-sm font-semibold text-rose-600">ปิดรอบ</button>}
       </div>
       {audit && (<>
+        {myRooms.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{locs.filter((l) => myRooms.map(roomKey).includes(roomKey(l.name))).map((l) => <button key={l.id} onClick={() => setLocId(String(l.id))} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">🏫 {l.name}</button>)}</div>}
         <select className={`${inputCls} mt-3`} value={locId} onChange={(e) => setLocId(e.target.value)}><option value="">เลือกห้องที่กำลังตรวจ</option>{locs.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select>
         {locId && <>
           <p className="mt-3 text-sm font-bold text-slate-700">ตรวจแล้ว {room.filter((a) => checked.has(a.id)).length} / {room.length} ชิ้น</p>

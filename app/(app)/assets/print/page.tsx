@@ -20,6 +20,10 @@ function PrintInner() {
     q.then(({ data }: { data: Asset[] | null }) => setItems(data ?? []));
   }, [sp]);
 
+  async function markAttached() {
+    const { error } = await supabase.rpc("mark_stickers", { p_ids: items.map((i) => i.id), p_val: true });
+    alert(error ? error.message : "บันทึกแล้วว่าติดสติกเกอร์ครบ ✅");
+  }
   return (
     <div className="p-4">
       <style>{`@media print{.no-print{display:none!important}@page{size:A4;margin:8mm}}`}</style>
@@ -29,6 +33,7 @@ function PrintInner() {
           <option value="both">QR + บาร์โค้ด</option><option value="qr">QR อย่างเดียว</option>
         </select>
         <button onClick={() => window.print()} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white">🖨️ พิมพ์</button>
+        <button onClick={markAttached} className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700">✅ ติดสติกเกอร์แล้ว</button>
       </div>
       <div className="flex flex-wrap gap-[2mm]">
         {items.map((a) => (

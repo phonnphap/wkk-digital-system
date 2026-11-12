@@ -738,10 +738,14 @@ async function uploadApprovedLeaveBothVersions(
   // ทั้งสองฉบับใช้ลายเซนผู้ลา + โลโก้ + สถิติเหมือนกัน ต่างกันที่ลายเซนผู้อนุมัติ 1/2/3 เท่านั้น
   const signedHtml   = buildLeaveHTML(leaveData, requesterSig, approverSigs, docUrl, stats);
   const unsignedHtml = buildLeaveHTML(leaveData, requesterSig, approverSigs, docUrl, stats, true);
-  const results = await Promise.allSettled([
-    uploadLeavePDF(signedHtml,   teacher, startDate, leaveTermFolder(OD_LEAVE_FOLDER, startDate)),
-    uploadLeavePDF(unsignedHtml, teacher, startDate, leaveTermFolder(OD_LEAVE_UNSIGNED_FOLDER, startDate)),
-  ]);
+  const results: PromiseSettledResult<void>[] = [];
+for (const job of [
+  () => uploadLeavePDF(signedHtml,   teacher, startDate, leaveTermFolder(OD_LEAVE_FOLDER, startDate)),
+  () => uploadLeavePDF(unsignedHtml, teacher, startDate, leaveTermFolder(OD_LEAVE_UNSIGNED_FOLDER, startDate)),
+]) {
+  try { await job(); results.push({ status: "fulfilled", value: undefined }); }
+  catch (reason) { results.push({ status: "rejected", reason }); }
+}
   let failed = 0;
   results.forEach((r, i) => { if (r.status === "rejected") { failed++; console.warn("[uploadApprovedLeaveBothVersions]", i, r.reason); } });
   return failed;

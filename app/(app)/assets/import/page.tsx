@@ -4,7 +4,7 @@ import Link from "next/link";
 import * as XLSX from "xlsx";
 import { supabase, useAssetRole, STATUSES, CONDITIONS } from "@/lib/assets";
 
-const COLS: Record<string, string> = { "รหัสเดิม": "code", "ชื่อครุภัณฑ์": "name", "รหัสหมวด": "category", "ห้อง/สถานที่": "location", "ยี่ห้อ": "brand", "รุ่น": "model", "เลขเครื่อง": "serial", "ราคา": "price", "วันที่ได้มา": "acquired", "แหล่งที่มา": "source", "ปีงบ(2หลัก)": "fy", "สถานะ": "status", "สภาพ": "condition" };
+const COLS: Record<string, string> = { "รหัสเดิม": "code", "ชื่อครุภัณฑ์": "name", "รหัสหมวด": "category", "ห้อง/สถานที่": "location", "ยี่ห้อ": "brand", "รุ่น": "model", "เลขเครื่อง": "serial", "ราคา": "price", "วันที่ได้มา": "acquired", "แหล่งที่มา": "source", "จำนวน": "qty", "ปีงบ(2หลัก)": "fy", "สถานะ": "status", "สภาพ": "condition" };
 const rev = (o: Record<string, { text: string } | string>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [typeof v === "string" ? v : v.text, k]));
 const STATUS_TH = rev(STATUSES); const COND_TH = rev(CONDITIONS);
 
@@ -13,7 +13,7 @@ export default function ImportPage() {
   const [rows, setRows] = useState<Record<string, string>[]>([]); const [res, setRes] = useState<{ row_no: number; ok: boolean; msg: string }[]>([]); const [busy, setBusy] = useState(false);
 
   function template() {
-    const ws = XLSX.utils.aoa_to_sheet([Object.keys(COLS), ["", "โต๊ะนักเรียน", "04-06", "ป.1/1", "", "", "", "850", "2024-05-20", "เงินอุดหนุน", "", "ใช้งานอยู่", "ดี"]]);
+    const ws = XLSX.utils.aoa_to_sheet([Object.keys(COLS), ["", "โต๊ะนักเรียน", "04-06", "ป.1/1", "", "", "", "850", "2024-05-20", "เงินอุดหนุน", "15", "", "ใช้งานอยู่", "ดี"]]);
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "นำเข้า"); XLSX.writeFile(wb, "แม่แบบนำเข้าครุภัณฑ์.xlsx");
   }
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -39,7 +39,7 @@ export default function ImportPage() {
       <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-slate-600">
         <li><button onClick={template} className="font-semibold text-blue-600">ดาวน์โหลดแม่แบบ</button> แล้วกรอกข้อมูล</li>
         <li>ชื่อห้องต้องตรงกับในระบบ เช่น ป.1/1 และรหัสหมวดต้องมีอยู่แล้ว (เพิ่มที่หน้าภาพรวม)</li>
-        <li>ถ้ามี “รหัสเดิม” ระบบใช้รหัสนั้น ถ้าเว้นว่างระบบสร้างรหัสใหม่ให้</li>
+        <li>ถ้ามี “รหัสเดิม” ระบบใช้รหัสนั้น ถ้าเว้นว่างระบบสร้างรหัสใหม่ให้ (ใส่ “จำนวน” ได้ เช่น 15 ชุดที่ยังไม่มีเลข) รับเลขเดิมหลายรูปแบบ เช่น ขข 010564/69</li>
         <li>วันที่ใช้รูปแบบ 2024-05-20 (ปี ค.ศ.-เดือน-วัน) สถานะ/สภาพเว้นว่างได้</li>
       </ol>
       <input type="file" accept=".xlsx,.xls,.csv" onChange={onFile} className="mt-4 block text-sm" />

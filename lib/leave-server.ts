@@ -585,3 +585,23 @@ export async function applyApproval(leaveId: string, slot: 1 | 2, action: "appro
   await notifyLeaveTeams(leaveId, action === "approved" ? "approved" : "rejected", slot, reason);
   return { fullyApproved: updates.status === "approved" };
 }
+
+// ───────────── แจ้งเตือนซ้ำผู้อนุมัติที่ยังค้าง ─────────────
+export async function remindLeaveApprover(leaveId: string, slot: 1 | 2 | 3) {
+  const url = process.env.TEAMS_LEAVE_WEBHOOK_URL;
+  if (!url) throw new Error("ไม่มี TEAMS_LEAVE_WEBHOOK_URL");
+  const c = await loadCtx(leaveId, "submitted", slot);
+  if (!c || c.req.status !== "pending") return;
+
+  const waitDays = Math.floor((Date.now() - new Date(c.req.created_at).getTime()) / 86400000);
+  const card = wrapCard([
+    tb(`🔔 เตือน: ใบลารอคุณอนุมัติ (ลำดับ ${slot})`, { weight: "Bolder", size: "Large", color: "Warning" }),
+    tb(`ยื่นมาแล้ว ${waitDays} วัน · ขั้นตอนอนุมัติ: ${c.progress}`, { weight: "Bolder" }),
+    facts(baseFacts(c, false)),
+    tb("กรุณากดอนุมัติจากการ์ดเดิมที่ได้รับก่อนหน้า หรือเปิดในระบบ", { isSubtle: true, size: "Small" }),
+  ], [openUrl("เปิดในระบบ", `${SITE}/leave`)]);
+
+  // ส่งเป็นข้อความใหม่ (เสียงเตือนดัง) และไม่เก็บ messageId ทับการ์ดหลัก
+  const r = await callFlow(url, { action: "create", to: APPROVER_EMAILS[slot], card });
+  if (!r) throw new Error("ส่ง Teams ไม่สำเร็จ");
+}

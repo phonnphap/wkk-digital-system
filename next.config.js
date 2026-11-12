@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {},
+  serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core"],
   images: {
     remotePatterns: [
       {
