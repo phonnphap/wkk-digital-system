@@ -1,3 +1,4 @@
+// 📁 วางที่: app/api/admission/upload/route.ts  [ไฟล์เดิมจากรอบก่อน (ไม่เปลี่ยน)]
 import { NextResponse } from "next/server";
 import { db, graphToken, odUrl, safe, limited, clientIp } from "@/lib/admission-server";
 import { DOCS, folderFor } from "@/lib/admission-config";

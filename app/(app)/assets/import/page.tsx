@@ -13,7 +13,7 @@ export default function ImportPage() {
   const [rows, setRows] = useState<Record<string, string>[]>([]); const [res, setRes] = useState<{ row_no: number; ok: boolean; msg: string }[]>([]); const [busy, setBusy] = useState(false);
 
   function template() {
-    const ws = XLSX.utils.aoa_to_sheet([Object.keys(COLS), ["", "โต๊ะนักเรียน", "04-06", "ป.1/1", "", "", "", "850", "2024-05-20", "เงินอุดหนุน", "15", "", "ใช้งานอยู่", "ดี"]]);
+    const ws = XLSX.utils.aoa_to_sheet([Object.keys(COLS), ["", "โต๊ะนักเรียน", "02-01", "ป.1/1", "", "", "", "850", "2024-05-20", "เงินอุดหนุน", "15", "", "ใช้งานอยู่", "ดี"]]);
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "นำเข้า"); XLSX.writeFile(wb, "แม่แบบนำเข้าครุภัณฑ์.xlsx");
   }
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {

@@ -1,3 +1,4 @@
+// 📁 วางที่: lib/admission-server.ts  [ไฟล์เดิมจากรอบก่อน (ไม่เปลี่ยน)]
 import { createClient } from "@supabase/supabase-js";
 
 export const db = createClient(

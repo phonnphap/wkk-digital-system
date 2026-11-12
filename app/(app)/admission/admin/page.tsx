@@ -1,9 +1,11 @@
+// 📁 วางที่: app/admission/admin/page.tsx  [ทับของเดิม (หน้าเจ้าหน้าที่ /admission/admin)]
 "use client";
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { LEVELS, PROGRAMS, ZONES, STATUS, RESULT, SUBJECTS, DOCS, docsFor, type Level } from "@/lib/admission-config";
+import { LEVELS, PROGRAMS, ZONES, STATUS, RESULT, SUBJECTS, DOCS, docsFor, ctxOf, type Level, type Program } from "@/lib/admission-config";
+import { useAddresses } from "@/lib/thai-address";
 
 const sb = createClient();
 const box = "bg-white border border-slate-200 rounded-2xl";
@@ -17,30 +19,55 @@ const Badge = ({ cfg }: { cfg: { label: string; cls: string } }) =>
 export default function AdmissionAdmin() {
   const [year, setYear] = useState(new Date().getFullYear() + 544); // ปีการศึกษาถัดไป (พ.ศ.)
   const [level, setLevel] = useState<Level>("m1");
-  const [tab, setTab] = useState<"apps" | "scores" | "round">("apps");
+  const [tab, setTab] = useState<"apps" | "scores" | "round" | "zone">("apps");
   const [apps, setApps] = useState<any[]>([]);
-  const [round, setRound] = useState<any>(null);
+  const [rounds, setRounds] = useState<any[]>([]);
+  const [prog, setProg] = useState<Program>("regular");
+  const [draft, setDraft] = useState<any>({});
   const [q, setQ] = useState("");
   const [st, setSt] = useState("all");
   const [sel_, setSel] = useState<any>(null);
   const [note, setNote] = useState("");
   const [csv, setCsv] = useState("");
-  const [quotas, setQuotas] = useState<Record<string, string>>({});
   const [reserve, setReserve] = useState("10");
 
   const load = useCallback(async () => {
     const [a, r] = await Promise.all([
       sb.from("admission_applications").select("*,admission_documents(*)").eq("academic_year", year).eq("level", level).order("application_no"),
-      sb.from("admission_rounds").select("*").eq("academic_year", year).eq("level", level).maybeSingle(),
+      sb.from("admission_rounds").select("*").eq("academic_year", year).eq("level", level),
     ]);
     const rows = a.data ?? [];
-    setApps(rows); setRound(r.data);
+    setApps(rows); setRounds(r.data ?? []);
     setSel((s: any) => (s ? rows.find((x: any) => x.id === s.id) ?? null : null));
   }, [year, level]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setNote(sel_?.fix_note ?? ""); }, [sel_?.id]); // eslint-disable-line
 
-  const missing = (a: any) => docsFor(a.level, a.zone).filter((d) => d.required && !a.admission_documents.some((x: any) => x.doc_type === d.key));
+  const round = rounds.find((r) => r.program === prog);
+  useEffect(() => { setDraft(round ? { ...round } : {}); }, [rounds, prog]); // eslint-disable-line
+
+  // ── เขตพื้นที่บริการ ──
+  const addrRows = useAddresses();
+  const [areas, setAreas] = useState<any[]>([]);
+  const [zp, setZp] = useState(""); const [za, setZa] = useState(""); const [zd, setZd] = useState(""); const [zv, setZv] = useState("");
+  const provinces = useMemo(() => Array.from(new Set(addrRows.map((r) => r[2]))), [addrRows]);
+  const amphoes = useMemo(() => Array.from(new Set(addrRows.filter((r) => r[2] === zp).map((r) => r[1]))), [addrRows, zp]);
+  const districts = useMemo(() => Array.from(new Set(addrRows.filter((r) => r[2] === zp && r[1] === za).map((r) => r[0]))), [addrRows, zp, za]);
+  const loadAreas = useCallback(async () => {
+    const { data } = await sb.from("admission_zone_areas").select("*").order("province").order("amphoe").order("district");
+    setAreas(data ?? []);
+  }, []);
+  useEffect(() => { loadAreas(); }, [loadAreas]);
+  async function addArea() {
+    const ds = zd === "*" ? districts : zd ? [zd] : [];
+    if (!zp || !za || !ds.length) return alert("เลือกจังหวัด อำเภอ และตำบลให้ครบ");
+    const { error } = await sb.from("admission_zone_areas").upsert(ds.map((d) => ({ province: zp, amphoe: za, district: d, village_nos: zv.trim() || null })), { onConflict: "province,amphoe,district" });
+    if (error) alert(error.message); else { setZd(""); loadAreas(); }
+  }
+  async function delArea(id: string) { await sb.from("admission_zone_areas").delete().eq("id", id); loadAreas(); }
+  async function setVillages(id: string, v: string) { await sb.from("admission_zone_areas").update({ village_nos: v.trim() || null }).eq("id", id); loadAreas(); }
+
+  const missing = (a: any) => docsFor(ctxOf(a)).filter((d) => d.required && !a.admission_documents.some((x: any) => x.doc_type === d.key));
   const list = useMemo(() => apps.filter((a) =>
     (st === "all" || a.status === st) &&
     (!q || `${a.application_no} ${a.first_name} ${a.last_name} ${a.idcard} ${a.exam_no ?? ""}`.includes(q.trim()))), [apps, q, st]);
@@ -99,7 +126,8 @@ export default function AdmissionAdmin() {
     const jobs: any[] = [];
     for (const [g, rows] of Object.entries(groups)) {
       rows.sort((a, b) => b.exam_total - a.exam_total);
-      const quota = Number(quotas[g] ?? 0), rsv = Number(reserve);
+      const rr = rounds.find((x) => x.program === g.split("|")[0]);
+      const quota = Number((g.endsWith("|in") ? rr?.quota_in : rr?.quota_out) ?? 0), rsv = Number(reserve);
       rows.forEach((a) => {
         const rank = rows.findIndex((x) => x.exam_total === a.exam_total) + 1; // คะแนนเท่ากัน = อันดับเท่ากัน
         jobs.push(sb.from("admission_applications").update({ exam_rank: rank, result: rank <= quota ? "pass" : rank <= quota + rsv ? "reserve" : "fail" }).eq("id", a.id));
@@ -108,11 +136,27 @@ export default function AdmissionAdmin() {
     await Promise.all(jobs); load();
   }
 
-  // ── รอบรับสมัคร ──
-  async function saveRound(patch: any) {
-    const r = { academic_year: year, level, is_open: false, scores_published: false, results_published: false, ...round, ...patch };
-    const { error } = await sb.from("admission_rounds").upsert(r, { onConflict: "academic_year,level" });
-    if (error) alert(error.message); else load();
+  // ── ตั้งค่ารอบ (แยกตาม ระดับ x ห้อง) ──
+  const D = (k: string, label: string, type = "text", span = "") => (
+    <label className={`text-sm font-bold text-slate-600 ${span}`}>{label}
+      <input type={type} step={type === "number" ? "any" : undefined}
+        value={type === "datetime-local" ? toLocalInput(draft[k]) : draft[k] ?? ""}
+        onChange={(e) => { const v = e.target.value; setDraft((d: any) => ({ ...d, [k]: v === "" ? null : type === "number" ? Number(v) : type === "datetime-local" ? new Date(v).toISOString() : v })); }}
+        className="w-full mt-1 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-medium" /></label>
+  );
+  async function saveDraft() {
+    const clean: any = { is_open: false, scores_published: false, results_published: false, enforce_rules: true, ...draft, academic_year: year, level, program: prog };
+    delete clean.id;
+    const { error } = await sb.from("admission_rounds").upsert(clean, { onConflict: "academic_year,level,program" });
+    if (error) alert(error.message); else { alert("บันทึกแล้ว"); load(); }
+  }
+  async function copyToOthers() {
+    if (!confirm(`คัดลอกเกณฑ์/วันที่/กำหนดการ/ข้อความ ของ ${PROGRAMS[prog]} ไปยังห้องอื่นของ ${LEVELS[level].label} ทั้งหมด?\n(ไม่แตะสวิตช์เปิดรับ/ประกาศ และจำนวนรับ)`)) return;
+    const keys = ["open_at", "close_at", "min_age", "max_age", "age_ref_date", "min_gpa", "enforce_rules", "exam_date", "scores_announce_at", "results_announce_at", "report_start", "report_end", "note"];
+    const base = Object.fromEntries(keys.map((k) => [k, draft[k] ?? null]));
+    const rows = (Object.keys(PROGRAMS) as Program[]).filter((p) => p !== prog).map((p) => ({ ...base, academic_year: year, level, program: p }));
+    const { error } = await sb.from("admission_rounds").upsert(rows, { onConflict: "academic_year,level,program" });
+    if (error) alert(error.message); else { alert("คัดลอกแล้ว"); load(); }
   }
 
   return (
@@ -135,7 +179,7 @@ export default function AdmissionAdmin() {
         </div>
 
         <div className="flex gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
-          {([["apps", "📋 ใบสมัคร/ตรวจเอกสาร"], ["scores", "📊 คะแนนสอบ/ผล"], ["round", "⚙️ เปิด-ปิดรอบ/ประกาศ"]] as const).map(([k, l]) => (
+          {([["apps", "📋 ใบสมัคร/ตรวจเอกสาร"], ["scores", "📊 คะแนนสอบ/ผล"], ["round", "⚙️ ตั้งค่ารอบ/เกณฑ์/กำหนดการ"], ["zone", "🗺️ เขตพื้นที่บริการ"]] as const).map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} className={`flex-1 py-2.5 rounded-xl text-sm font-black ${tab === k ? "bg-white shadow border border-slate-200 text-slate-800" : "text-slate-500"}`}>{l}</button>
           ))}
         </div>
@@ -185,14 +229,15 @@ export default function AdmissionAdmin() {
             <div className={`${box} p-5 space-y-3`}>
               <p className="font-black text-slate-700">3) กำหนดจำนวนรับ แล้วคำนวณอันดับ/ผล</p>
               <div className="grid sm:grid-cols-3 gap-2">
-                {Object.entries(PROGRAMS).flatMap(([p, pl]) => Object.entries(ZONES).map(([z, zl]) => (
-                  <label key={`${p}|${z}`} className="text-xs font-bold text-slate-500">{pl} · {zl} รับกี่คน
-                    <input type="number" min={0} value={quotas[`${p}|${z}`] ?? ""} onChange={(e) => setQuotas((s) => ({ ...s, [`${p}|${z}`]: e.target.value }))} className="w-full mt-1 border-2 border-slate-200 rounded-lg px-2 py-1.5 text-sm" /></label>
-                )))}
+                {Object.entries(PROGRAMS).flatMap(([p, pl]) => Object.entries(ZONES).map(([z, zl]) => {
+                  const r = rounds.find((x) => x.program === p); const q = z === "in" ? r?.quota_in : r?.quota_out;
+                  return <div key={`${p}|${z}`} className="text-xs font-bold text-slate-500 bg-slate-50 rounded-lg p-2">{pl} · {zl} รับ <b className="text-slate-800 text-sm">{q ?? "—"}</b> คน</div>;
+                }))}
               </div>
+              <p className="text-xs text-slate-400">จำนวนรับตั้งที่แท็บ “ตั้งค่ารอบ/เกณฑ์/กำหนดการ” (แยกตามห้อง)</p>
               <label className="text-xs font-bold text-slate-500 block">จำนวนตัวสำรองต่อกลุ่ม <input type="number" min={0} value={reserve} onChange={(e) => setReserve(e.target.value)} className="w-20 ml-2 border-2 border-slate-200 rounded-lg px-2 py-1 text-sm" /></label>
               <button onClick={computeResults} className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-black">คำนวณอันดับและผล</button>
-              <p className="text-xs text-slate-400">คะแนนเท่ากันจะได้อันดับเดียวกัน · ผลจะยังไม่แสดงต่อผู้สมัครจนกว่าจะกดประกาศที่แท็บ “เปิด-ปิดรอบ/ประกาศ”</p>
+              <p className="text-xs text-slate-400">คะแนนเท่ากันจะได้อันดับเดียวกัน · ผลจะยังไม่แสดงต่อผู้สมัครจนกว่าจะกดประกาศที่แท็บ “ตั้งค่ารอบ/เกณฑ์/กำหนดการ” (หรือรอตามเวลาประกาศที่ตั้งไว้)</p>
             </div>
             <div className={`${box} overflow-x-auto`}>
               <table className="w-full text-sm">
@@ -210,18 +255,80 @@ export default function AdmissionAdmin() {
         )}
 
         {tab === "round" && (
-          <div className={`${box} p-5 space-y-4`}>
-            <p className="font-black text-slate-700">รอบรับสมัคร {LEVELS[level].label} ปี {year} {!round && <span className="text-xs text-amber-600">(ยังไม่ได้สร้าง — กดบันทึกเพื่อสร้าง)</span>}</p>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <label className="text-sm font-bold text-slate-600">เปิดรับสมัครตั้งแต่<input type="datetime-local" defaultValue={toLocalInput(round?.open_at)} key={"o" + round?.open_at} onBlur={(e) => saveRound({ open_at: e.target.value ? new Date(e.target.value).toISOString() : null })} className="w-full mt-1 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm" /></label>
-              <label className="text-sm font-bold text-slate-600">ปิดรับสมัคร<input type="datetime-local" defaultValue={toLocalInput(round?.close_at)} key={"c" + round?.close_at} onBlur={(e) => saveRound({ close_at: e.target.value ? new Date(e.target.value).toISOString() : null })} className="w-full mt-1 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm" /></label>
+          <div className="space-y-4">
+            <div className="flex gap-2 flex-wrap items-center">
+              {(Object.keys(PROGRAMS) as Program[]).map((p) => {
+                const r = rounds.find((x) => x.program === p);
+                return <button key={p} onClick={() => setProg(p)} className={`px-4 py-2.5 rounded-xl border-2 text-sm font-black ${prog === p ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-slate-200 text-slate-600"}`}>{PROGRAMS[p]} {r ? (r.is_open ? "🟢" : "⚪") : "➕"}</button>;
+              })}
+              <span className="text-xs text-slate-400">แต่ละห้องตั้งวันรับสมัคร เกณฑ์ และวันประกาศไม่เหมือนกันได้</span>
             </div>
-            <label className="text-sm font-bold text-slate-600 block">ข้อความประกาศถึงผู้สมัคร
-              <textarea defaultValue={round?.note ?? ""} key={"n" + round?.note} rows={2} onBlur={(e) => saveRound({ note: e.target.value || null })} className="w-full mt-1 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm" /></label>
-            <div className="flex gap-2 flex-wrap">
-              {([["is_open", "เปิดรับสมัคร"], ["scores_published", "ประกาศคะแนน"], ["results_published", "ประกาศผลผ่าน/ไม่ผ่าน"]] as const).map(([k, l]) => (
-                <button key={k} onClick={() => saveRound({ [k]: !round?.[k] })} className={`px-4 py-2.5 rounded-xl border-2 text-sm font-black ${round?.[k] ? "bg-green-500 border-green-500 text-white" : "bg-white border-slate-200 text-slate-600"}`}>{round?.[k] ? "✅ " : "⬜ "}{l}</button>
-              ))}
+            <div className={`${box} p-5 space-y-5`}>
+              <p className="font-black text-slate-700">{LEVELS[level].label} · {PROGRAMS[prog]} · ปีการศึกษา {year} {!round && <span className="text-xs text-amber-600">(ยังไม่ได้สร้าง — กดบันทึกเพื่อสร้าง)</span>}</p>
+
+              <div><p className="text-xs font-black text-slate-500 mb-2">📅 ช่วงรับสมัคร</p>
+                <div className="grid sm:grid-cols-2 gap-3">{D("open_at", "เปิดรับสมัครตั้งแต่", "datetime-local")}{D("close_at", "ปิดรับสมัคร", "datetime-local")}</div></div>
+
+              <div><p className="text-xs font-black text-slate-500 mb-2">✅ เกณฑ์ผู้สมัคร (เว้นว่าง = ไม่จำกัด)</p>
+                <div className="grid sm:grid-cols-4 gap-3">
+                  {D("min_age", "อายุขั้นต่ำ (ปีบริบูรณ์) เช่น 6", "number")}{D("max_age", "อายุสูงสุด (ปี)", "number")}
+                  {D("age_ref_date", "นับอายุ ณ วันที่", "date")}{D("min_gpa", "เกรดเฉลี่ยขั้นต่ำ เช่น 2.50", "number")}
+                </div>
+                <p className="text-xs text-slate-400 mt-1">ถ้าไม่ระบุ “นับอายุ ณ วันที่” ระบบใช้ 16 พ.ค. ของปีที่เปิดภาคเรียน</p>
+                <button onClick={() => setDraft((d: any) => ({ ...d, enforce_rules: d.enforce_rules === false }))} className={`mt-2 px-4 py-2 rounded-xl border-2 text-xs font-black ${draft.enforce_rules === false ? "bg-white border-slate-200 text-slate-600" : "bg-red-50 border-red-300 text-red-700"}`}>
+                  {draft.enforce_rules === false ? "⬜ ไม่ผ่านเกณฑ์: เตือนเฉยๆ แต่ยังสมัครได้" : "🚫 ไม่ผ่านเกณฑ์: ห้ามสมัคร (ระบบเตือนและบล็อกการส่ง)"}</button></div>
+
+              <div><p className="text-xs font-black text-slate-500 mb-2">👥 จำนวนรับ</p>
+                <div className="grid sm:grid-cols-4 gap-3">{D("quota_in", "ในเขต (คน)", "number")}{D("quota_out", "นอกเขต (คน)", "number")}</div></div>
+
+              <div><p className="text-xs font-black text-slate-500 mb-2">🗓️ กำหนดการ (แสดงให้ผู้สมัครเห็น)</p>
+                <div className="grid sm:grid-cols-3 gap-3">
+                  {D("exam_date", "วันสอบ", "date")}{D("scores_announce_at", "ประกาศคะแนน (ถึงเวลานี้ระบบเปิดดูอัตโนมัติ)", "datetime-local")}{D("results_announce_at", "ประกาศผล (ถึงเวลานี้ระบบเปิดดูอัตโนมัติ)", "datetime-local")}
+                  {D("report_start", "รายงานตัว เริ่ม", "date")}{D("report_end", "รายงานตัว สิ้นสุด", "date")}
+                </div></div>
+
+              <label className="text-sm font-bold text-slate-600 block">ข้อความประกาศถึงผู้สมัคร
+                <textarea value={draft.note ?? ""} onChange={(e) => setDraft((d: any) => ({ ...d, note: e.target.value || null }))} rows={2} className="w-full mt-1 border-2 border-slate-200 rounded-xl px-3 py-2 text-sm" /></label>
+
+              <div className="flex gap-2 flex-wrap">
+                {([["is_open", "เปิดรับสมัคร"], ["scores_published", "ประกาศคะแนนทันที"], ["results_published", "ประกาศผลทันที"]] as const).map(([k, l]) => (
+                  <button key={k} onClick={() => setDraft((d: any) => ({ ...d, [k]: !d[k] }))} className={`px-4 py-2.5 rounded-xl border-2 text-sm font-black ${draft[k] ? "bg-green-500 border-green-500 text-white" : "bg-white border-slate-200 text-slate-600"}`}>{draft[k] ? "✅ " : "⬜ "}{l}</button>
+                ))}
+              </div>
+              <div className="flex gap-2 flex-wrap pt-1 border-t border-slate-100">
+                <button onClick={saveDraft} className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm">💾 บันทึกการตั้งค่า {PROGRAMS[prog]}</button>
+                <button onClick={copyToOthers} className="px-4 py-3 rounded-xl border-2 border-indigo-200 text-indigo-700 font-black text-sm">คัดลอกเกณฑ์/กำหนดการไปห้องอื่นของ {LEVELS[level].label}</button>
+              </div>
+              <p className="text-xs text-slate-400">การประกาศ: ผู้สมัครเห็นคะแนน/ผลเมื่อ “กดประกาศทันที” หรือ “ถึงเวลาที่ตั้งไว้” อย่างใดอย่างหนึ่ง</p>
+            </div>
+          </div>
+        )}
+
+        {tab === "zone" && (
+          <div className="space-y-4">
+            <div className={`${box} p-5 space-y-3`}>
+              <p className="font-black text-slate-700">เพิ่มพื้นที่ที่ถือว่า “ในเขตบริการ”</p>
+              <p className="text-xs text-slate-400">ใช้กับทุกระดับชั้น · ถ้ายังไม่เพิ่มพื้นที่ใดเลย ระบบจะไม่ตรวจเขต (ใครเลือกในเขตก็ได้) · ผู้สมัครที่ที่อยู่ไม่อยู่ในรายการนี้ จะถูกแจ้งให้สมัครแบบนอกเขต</p>
+              <div className="grid sm:grid-cols-4 gap-2">
+                <select value={zp} onChange={(e) => { setZp(e.target.value); setZa(""); setZd(""); }} className={sel}><option value="">จังหวัด...</option>{provinces.map((p) => <option key={p}>{p}</option>)}</select>
+                <select value={za} onChange={(e) => { setZa(e.target.value); setZd(""); }} className={sel} disabled={!zp}><option value="">อำเภอ...</option>{amphoes.map((p) => <option key={p}>{p}</option>)}</select>
+                <select value={zd} onChange={(e) => setZd(e.target.value)} className={sel} disabled={!za}><option value="">ตำบล...</option>{districts.length > 1 && <option value="*">★ ทุกตำบลในอำเภอนี้</option>}{districts.map((p) => <option key={p}>{p}</option>)}</select>
+                <input value={zv} onChange={(e) => setZv(e.target.value)} placeholder="เฉพาะหมู่ที่ เช่น 1,2,5 (ว่าง=ทุกหมู่)" className="border-2 border-slate-200 rounded-xl px-3 py-2 text-sm" />
+              </div>
+              <button onClick={addArea} className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-black">+ เพิ่มพื้นที่</button>
+            </div>
+            <div className={`${box} overflow-x-auto`}>
+              <table className="w-full text-sm">
+                <thead><tr className="bg-slate-50 border-b text-slate-600 text-left"><th className="px-4 py-3">ตำบล</th><th className="px-3 py-3">อำเภอ</th><th className="px-3 py-3">จังหวัด</th><th className="px-3 py-3">เฉพาะหมู่ที่</th><th className="px-3 py-3" /></tr></thead>
+                <tbody className="divide-y divide-slate-100">
+                  {areas.map((a) => (
+                    <tr key={a.id}><td className="px-4 py-2 font-bold">{a.district}</td><td className="px-3 py-2">{a.amphoe}</td><td className="px-3 py-2">{a.province}</td>
+                      <td className="px-3 py-2"><input defaultValue={a.village_nos ?? ""} key={a.id + a.village_nos} placeholder="ทุกหมู่" onBlur={(e) => e.target.value.trim() !== (a.village_nos ?? "") && setVillages(a.id, e.target.value)} className="w-32 border-2 border-slate-200 rounded-lg px-2 py-1 text-xs" /></td>
+                      <td className="px-3 py-2 text-right"><button onClick={() => delArea(a.id)} className="text-xs font-black text-red-600 border border-red-200 rounded-lg px-2 py-1">ลบ</button></td></tr>
+                  ))}
+                  {areas.length === 0 && <tr><td colSpan={5} className="text-center py-8 text-slate-400">ยังไม่ได้ตั้งค่าเขตพื้นที่บริการ</td></tr>}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
@@ -246,7 +353,7 @@ export default function AdmissionAdmin() {
 
               <div className="space-y-1.5">
                 <p className="font-black text-slate-700">เอกสาร</p>
-                {docsFor(sel_.level, sel_.zone).map((d) => {
+                {docsFor(ctxOf(sel_)).map((d) => {
                   const x = sel_.admission_documents.find((y: any) => y.doc_type === d.key);
                   if (!x && !d.required) return null;
                   return (

@@ -31,6 +31,7 @@ export default function CategoriesPage() {
     <div className="mx-auto w-full max-w-2xl px-4 py-6">
       <Link href="/assets/admin" className="text-sm text-slate-500">← ภาพรวม</Link>
       <h1 className="mt-2 text-lg font-bold text-slate-800">หมวดหมู่ครุภัณฑ์ / วัสดุ</h1>
+      <Link href="/assets/ledger" className="mt-1 inline-block text-sm font-semibold text-blue-600">🖨️ พิมพ์สารบัญตามสมุดทะเบียนคุมทรัพย์สิน</Link>
       <p className="mt-1 text-sm text-slate-500">ครุภัณฑ์ใช้รหัส “ประเภท-ชนิด” เช่น 04-06 (ได้เลข ขข-04-06-01/69) ส่วนวัสดุใช้รหัส เช่น ว.สน (ได้เลข ว.สน-001/69)</p>
       <div className="mt-3 grid gap-2 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-[100px_1fr_110px_auto]">
         <input className={inputCls} placeholder="04-06" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} />

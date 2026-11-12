@@ -1,3 +1,4 @@
+// 📁 วางที่: app/api/admission/file/route.ts  [ไฟล์เดิมจากรอบก่อน (ไม่เปลี่ยน)]
 import { NextResponse } from "next/server";
 import { requireAdmin, graphToken, odUrl } from "@/lib/admission-server";
 import { ODRIVE_ROOT } from "@/lib/admission-config";

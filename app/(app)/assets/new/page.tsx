@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, ZONES, CONDITIONS, inputCls } from "@/lib/assets";
+import ItemPicker from "../_components/ItemPicker";
 
 type Loc = { id: number; zone: string; name: string };
 type Cat = { code: string; name: string };
@@ -44,8 +45,8 @@ export default function NewAssetPage() {
       <p className="mt-1 text-sm text-slate-500">ไม่ต้องกรอกรหัส ระบบสร้างให้อัตโนมัติเมื่อกดบันทึก</p>
       <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-2">
         <div className="sm:col-span-2"><L t="ชื่อครุภัณฑ์ *"><input className={inputCls} value={f.name} onChange={set("name")} placeholder="เช่น โต๊ะนักเรียน" /></L></div>
-        <L t="หมวดหมู่ *"><select className={inputCls} value={f.category} onChange={set("category")}><option value="">เลือก</option>{cats.map((c) => <option key={c.code} value={c.code}>{c.code} {c.name}</option>)}</select></L>
-        <L t="จำนวนที่ลงทะเบียน (ชิ้น)"><input type="number" min={1} max={100} className={inputCls} value={f.qty} onChange={set("qty")} /></L>
+        <div className="sm:col-span-2"><L t="รายการครุภัณฑ์ * (เลือกประเภท แล้วค้นหา/กดเลือก)"><ItemPicker value={f.category} onChange={(c, n) => setF((p) => ({ ...p, category: c, name: c ? (p.name || n) : p.name }))} /></L></div>
+        <div className="sm:col-span-2"><L t="จำนวนที่ลงทะเบียน (ชิ้น)"><input type="number" min={1} max={100} className={inputCls} value={f.qty} onChange={set("qty")} /></L></div>
         <L t="พื้นที่ *"><select className={inputCls} value={zone} onChange={(e) => { setZone(e.target.value); setF({ ...f, location: "" }); }}><option value="">เลือก</option>{Object.entries(ZONES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></L>
         <L t="ห้อง / สถานที่ *"><select className={inputCls} value={f.location} onChange={set("location")} disabled={!zone}><option value="">เลือก</option>{roomOptions.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></L>
         <L t="ยี่ห้อ"><input className={inputCls} value={f.brand} onChange={set("brand")} /></L>
