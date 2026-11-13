@@ -2,11 +2,11 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/assets";
 
-type P = { id: string; asset_code: string; name: string; asset_locations?: { name: string } | null };
-const SEL = "id,asset_code,name,asset_locations(name)";
+type P = { id: string; asset_code: string; name: string; asset_locations?: { name: string; building_id?: string | null } | null };
+const SEL = "id,asset_code,name,asset_locations(name,building_id)";
 
 // ช่องค้นหา/เลือกครุภัณฑ์ ใช้ในฟอร์มแจ้งซ่อม
-export default function AssetPicker({ value, onChange, error }: { value: string; onChange: (id: string) => void; error?: boolean }) {
+export default function AssetPicker({ value, onChange, error }: { value: string; onChange: (id: string, buildingId?: string | null) => void; error?: boolean }) {
   const [sel, setSel] = useState<P | null>(null); const [q, setQ] = useState(""); const [res, setRes] = useState<P[]>([]);
 
   useEffect(() => {
@@ -36,7 +36,7 @@ export default function AssetPicker({ value, onChange, error }: { value: string;
       {res.length > 0 && (
         <div className="absolute left-0 right-0 top-full z-10 mt-1 overflow-hidden rounded-xl border-2 border-blue-200 bg-white shadow-lg">
           {res.map((a) => (
-            <button type="button" key={a.id} onClick={() => { setSel(a); onChange(a.id); setQ(""); setRes([]); }}
+            <button type="button" key={a.id} onClick={() => { setSel(a); onChange(a.id, a.asset_locations?.building_id); setQ(""); setRes([]); }}
               className="block w-full border-b border-slate-100 px-4 py-2.5 text-left text-sm last:border-0 hover:bg-blue-50">
               <b>{a.name}</b> <span className="font-mono text-xs text-slate-500">{a.asset_code}</span>
               <span className="text-xs text-slate-400"> · {a.asset_locations?.name}</span>

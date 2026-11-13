@@ -15,7 +15,7 @@ function L({ t, children }: { t: string; children: React.ReactNode }) {
 export default function NewAssetPage() {
   const router = useRouter();
   const [locs, setLocs] = useState<Loc[]>([]); const [cats, setCats] = useState<Cat[]>([]);
-  const [zone, setZone] = useState(""); const [f, setF] = useState(empty);
+  const [zone, setZone] = useState(""); const [f, setF] = useState(empty); const [fy, setFy] = useState("");
   const [saving, setSaving] = useState(false); const [err, setErr] = useState("");
   const set = (k: keyof typeof empty) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
 
@@ -23,6 +23,7 @@ export default function NewAssetPage() {
     supabase.from("asset_locations").select("id,zone,name").order("sort").then(({ data }: { data: Loc[] | null }) => setLocs(data ?? []));
     supabase.from("asset_categories").select("code,name").order("code").then(({ data }: { data: Cat[] | null }) => setCats(data ?? []));
   }, []);
+  useEffect(() => { supabase.from("asset_settings").select("value").eq("key", "fiscal_year").maybeSingle().then(({ data }: { data: { value: string } | null }) => data && setFy(data.value)); }, []);
   const roomOptions = useMemo(() => locs.filter((l) => l.zone === zone), [locs, zone]);
 
   async function save() {
@@ -32,7 +33,7 @@ export default function NewAssetPage() {
       p_name: f.name.trim(), p_category: f.category, p_location: Number(f.location),
       p_brand: f.brand || null, p_model: f.model || null, p_serial: f.serial || null,
       p_acquired: f.acquired || null, p_price: f.price ? Number(f.price) : null, p_source: f.source || null,
-      p_condition: f.condition, p_qty: Number(f.qty) || 1,
+      p_condition: f.condition, p_qty: Number(f.qty) || 1, p_fy: /^\d{2}$/.test(fy) ? fy : null,
     });
     setSaving(false);
     if (error) return setErr(error.message);
@@ -46,7 +47,8 @@ export default function NewAssetPage() {
       <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-2">
         <div className="sm:col-span-2"><L t="ชื่อครุภัณฑ์ *"><input className={inputCls} value={f.name} onChange={set("name")} placeholder="เช่น โต๊ะนักเรียน" /></L></div>
         <div className="sm:col-span-2"><L t="รายการครุภัณฑ์ * (เลือกประเภท แล้วค้นหา/กดเลือก)"><ItemPicker value={f.category} onChange={(c, n) => setF((p) => ({ ...p, category: c, name: c ? (p.name || n) : p.name }))} /></L></div>
-        <div className="sm:col-span-2"><L t="จำนวนที่ลงทะเบียน (ชิ้น)"><input type="number" min={1} max={100} className={inputCls} value={f.qty} onChange={set("qty")} /></L></div>
+        <div><L t="จำนวนที่ลงทะเบียน (ชิ้น)"><input type="number" min={1} max={100} className={inputCls} value={f.qty} onChange={set("qty")} /></L></div>
+        <div><L t="ปีท้ายเลข (เช่น 69 = ย้อนหลัง, 70 = ได้มาใหม่)"><input inputMode="numeric" maxLength={2} className={inputCls} value={fy} onChange={(e) => setFy(e.target.value.replace(/\D/g, ""))} /></L></div>
         <L t="พื้นที่ *"><select className={inputCls} value={zone} onChange={(e) => { setZone(e.target.value); setF({ ...f, location: "" }); }}><option value="">เลือก</option>{Object.entries(ZONES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></L>
         <L t="ห้อง / สถานที่ *"><select className={inputCls} value={f.location} onChange={set("location")} disabled={!zone}><option value="">เลือก</option>{roomOptions.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></L>
         <L t="ยี่ห้อ"><input className={inputCls} value={f.brand} onChange={set("brand")} /></L>

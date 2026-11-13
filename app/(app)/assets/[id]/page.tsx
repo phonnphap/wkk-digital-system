@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { supabase, useAssetRole, ASSET_SELECT, STATUSES, CONDITIONS, inputCls, type Asset } from "@/lib/assets";
+import { supabase, useAssetRole, ASSET_SELECT, STATUSES, CONDITIONS, inputCls, locLabel, type Asset } from "@/lib/assets";
 import PhotoUploader from "../_components/PhotoUploader";
 
 type Log = { id: number; status: string; condition: string; note: string | null; at: string };
@@ -38,7 +38,7 @@ export default function AssetDetailPage() {
 
   const staff = role === "admin" || role === "manager";
   const rows: [string, string | number | null | undefined][] = [
-    ["ห้อง/สถานที่", a.asset_locations?.name], ["หมวดหมู่", `${a.category_code} ${a.asset_categories?.name ?? ""}`],
+    ["ห้อง/สถานที่", locLabel(a.asset_locations)], ["หมวดหมู่", `${a.category_code} ${a.asset_categories?.name ?? ""}`],
     ["ยี่ห้อ / รุ่น", [a.brand, a.model].filter(Boolean).join(" / ")], ["เลขเครื่อง", a.serial_no],
     ["วันที่ได้มา", a.acquired_date], ["ราคา", a.price ? `${a.price.toLocaleString()} บาท` : null], ["แหล่งที่มา", a.source], ["หมายเหตุ", a.note],
   ];

@@ -22,7 +22,7 @@ export const OTHER_ITEMS: [string, string][] = [
 const STATUS_LIST = '"ใช้งานอยู่,ชำรุดรอซ่อม,ส่งซ่อม,รอจำหน่าย,สูญหาย"';
 const COND_LIST = '"ดี,พอใช้,ควรปรับปรุง"';
 const TYPE_LIST = '"01 สำนักงาน,02 การศึกษา,03 ยานพาหนะ,04 การเกษตร,05 ก่อสร้าง,06 ไฟฟ้า-วิทยุ,07 โฆษณา,08 วิทยาศาสตร์-การแพทย์,09 งานบ้านงานครัว,10 กีฬา,11 สำรวจ,12 ดนตรี-นาฏศิลป์,13 คอมพิวเตอร์,14 สนาม"';
-export const fiscalYearBE = (d = new Date()) => d.getFullYear() + 543 + (d.getMonth() >= 9 ? 1 : 0);
+export const fiscalYearBE = () => 2569; // ปีที่ใช้ในเลขครุภัณฑ์ (/69) แก้ตรงนี้เมื่อขึ้นปีใหม่
 
 const line = { style: "thin" as const, color: { argb: "FF94A3B8" } };
 const box = { top: line, left: line, bottom: line, right: line };

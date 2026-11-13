@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import { supabase, useAssetRole, STATUSES, CONDITIONS } from "@/lib/assets";
@@ -28,7 +28,8 @@ function expandCodes(s: string): string[] {
 
 export default function ImportPage() {
   const role = useAssetRole();
-  const [files, setFiles] = useState<string[]>([]);
+  const [files, setFiles] = useState<string[]>([]); const [fyDef, setFyDef] = useState("");
+  useEffect(() => { supabase.from("asset_settings").select("value").eq("key", "fiscal_year").maybeSingle().then(({ data }: { data: { value: string } | null }) => data && setFyDef(data.value)); }, []);
   const [rows, setRows] = useState<Record<string, string>[]>([]); const [res, setRes] = useState<{ row_no: number; ok: boolean; msg: string }[]>([]); const [busy, setBusy] = useState(false);
 
   function template() {
@@ -55,7 +56,7 @@ export default function ImportPage() {
         const category = cat || (typ ? `${typ.slice(0, 2)}:${name}` : "");
         if (!category) { bad++; continue; }
         const list = expandCodes(codes); const total = Math.max(Number(qty) || 0, list.length, 1);
-        const base = { ...blank, name, category, location: room, status: STATUS_TH[st] ?? "", condition: COND_TH[cond] ?? "", note };
+        const base = { ...blank, fy: fyDef, name, category, location: room, status: STATUS_TH[st] ?? "", condition: COND_TH[cond] ?? "", note };
         list.forEach((c) => all.push({ ...base, code: c, qty: "1" }));
         if (total > list.length) all.push({ ...base, code: "", qty: String(total - list.length) });
         n += total;
@@ -89,6 +90,7 @@ export default function ImportPage() {
       <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm">
         <p className="font-bold text-slate-700">หรือ นำเข้าไฟล์เช็กลิสต์ประจำห้อง (เลือกได้หลายไฟล์พร้อมกัน)</p>
         <p className="text-xs text-slate-500">นำเข้าเฉพาะแถวที่เลือก “มี” — ห้ามนำเข้าไฟล์ห้องเดิมซ้ำ เพราะรายการที่ไม่มีเลขจะถูกสร้างซ้ำ</p>
+        <label className="mt-2 block text-xs font-bold text-slate-600">ปีท้ายเลขที่ระบบออกให้ (เช่น 69 = ย้อนหลัง, 70 = ได้มาใหม่) <input inputMode="numeric" maxLength={2} value={fyDef} onChange={(e) => setFyDef(e.target.value.replace(/\D/g, ""))} className="ml-1 w-16 rounded-lg border border-slate-300 px-2 py-1" /></label>
         <input type="file" multiple accept=".xlsx" onChange={onChecklists} className="mt-2 block text-sm" />
         {files.length > 0 && <ul className="mt-2 list-disc pl-5 text-xs text-slate-600">{files.map((f) => <li key={f}>{f}</li>)}</ul>}
       </div>

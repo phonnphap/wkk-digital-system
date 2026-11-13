@@ -9,9 +9,9 @@ export type Asset = {
   id: string; asset_code: string; name: string; category_code: string; location_id: number;
   brand?: string | null; model?: string | null; serial_no?: string | null; acquired_date?: string | null;
   price?: number | null; source?: string | null; status: string; condition: string; note?: string | null; photo_url?: string | null; sticker_attached?: boolean;
-  created_at: string; asset_locations?: { name: string; zone: string } | null; asset_categories?: { name: string } | null;
+  created_at: string; asset_locations?: { name: string; zone: string; floor?: number | null; classroom_id?: string | null; buildings?: { name: string } | null } | null; asset_categories?: { name: string } | null;
 };
-export const ASSET_SELECT = "*, asset_locations(name,zone), asset_categories(name)";
+export const ASSET_SELECT = "*, asset_locations(name,zone,floor,classroom_id,buildings(name)), asset_categories(name)";
 export const STATUSES: Record<string, { text: string; cls: string }> = {
   active: { text: "ใช้งานอยู่", cls: "bg-emerald-100 text-emerald-700" },
   broken: { text: "ชำรุดรอซ่อม", cls: "bg-amber-100 text-amber-700" },
@@ -42,10 +42,21 @@ export const roomKey = (s: string) => s.replace(/\s|ห้อง/g, "");
 export function useMyRooms() {
   const [names, setNames] = useState<string[]>([]);
   useEffect(() => {
-    supabase.rpc("get_my_classrooms").then(({ data }: { data: { room_name: string }[] | null }) => setNames((data ?? []).map((r) => r.room_name)));
+    (async () => {
+      const { data } = await supabase.rpc("get_my_classrooms");
+      const rows = (data ?? []) as { classroom_id: string; room_name: string }[];
+      const ids = rows.map((r) => r.classroom_id); let linked: string[] = [];
+      if (ids.length) { // ห้องที่ผูก classroom_id ไว้ ตรงกับครูประจำชั้นแน่นอน แม้ชื่อต่างกัน
+        const l = await supabase.from("asset_locations").select("name").in("classroom_id", ids);
+        linked = ((l.data ?? []) as { name: string }[]).map((x) => x.name);
+      }
+      setNames([...new Set([...rows.map((r) => r.room_name), ...linked])]);
+    })();
   }, []);
   return names;
 }
+
+export const locLabel = (l?: Asset["asset_locations"]) => (l ? [l.buildings?.name, l.floor ? `ชั้น ${l.floor}` : null, l.name].filter(Boolean).join(" · ") : "");
 
 // ย่อรหัสเป็นช่วง: ขข-04-06-01,02,03,07/69 → "ขข-04-06-01–03, 07/69"
 export function codeRanges(codes: string[]): string {
