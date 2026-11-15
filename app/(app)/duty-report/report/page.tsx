@@ -56,6 +56,23 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
   return R * c;
 }
 
+// ★ ข้อมูลการลาของครู 1 คนในวันที่เลือก
+type LeaveInfo = { status: string; leave_type: string; half_day: string | null };
+
+// ★ ลาครึ่งวัน: เช้า = ช่วงก่อน 12:00, บ่าย = 12:00 เป็นต้นไป
+function leaveAppliesToSlot(l: LeaveInfo | undefined, startTime: string): boolean {
+  if (!l) return false;
+  const hour = Number((startTime ?? "").slice(0, 2));
+  if (l.half_day === "morning") return hour < 12;
+  if (l.half_day === "afternoon") return hour >= 12;
+  return true;
+}
+
+function leaveBadgeText(l: LeaveInfo): string {
+  const base = l.leave_type === "official" ? "ไปราชการ" : "ลา";
+  return l.status === "pending" ? `${base} (รออนุมัติ)` : base;
+}
+
 export default function DutyDailyReportPage() {
   const router = useRouter();
   const [date, setDate] = useState(todayISO());
@@ -65,6 +82,7 @@ export default function DutyDailyReportPage() {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [points, setPoints] = useState<PointView[]>([]);
   const [headToday, setHeadToday] = useState<{ head?: Teacher; deputy?: Teacher }>({});
+  const [leaveByTeacher, setLeaveByTeacher] = useState<Record<string, LeaveInfo>>({});
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -135,6 +153,23 @@ export default function DutyDailyReportPage() {
       if (r.role === "deputy") headMap.deputy = r.teacher;
     });
     setHeadToday(headMap);
+        // ★ ครูที่ลา/ไปราชการในวันที่เลือก (รออนุมัติ + อนุมัติแล้ว)
+    const { data: leaveData, error: leaveErr } = await supabase
+      .from("leave_requests")
+      .select("user_id, leave_type, status, half_day")
+      .in("status", ["pending", "approved"])
+      .lte("start_date", date)
+      .gte("end_date", date);
+    if (leaveErr) console.warn("[duty-report] โหลดข้อมูลการลาไม่สำเร็จ:", leaveErr.message);
+    const leaveMap: Record<string, LeaveInfo> = {};
+    (leaveData ?? []).forEach((l: any) => {
+      const prev = leaveMap[l.user_id];
+      // ถ้ามีหลายใบ ให้ใบที่อนุมัติแล้วสำคัญกว่าใบที่รออนุมัติ
+      if (!prev || (prev.status !== "approved" && l.status === "approved")) {
+        leaveMap[l.user_id] = { status: l.status, leave_type: l.leave_type, half_day: l.half_day ?? null };
+      }
+    });
+    setLeaveByTeacher(leaveMap);
 
     // จุดเวร + ช่วงเวลาของวันนี้ + พิกัด/รัศมีของจุดเวร
     const { data: pointRows, error: pointErr } = await supabase
@@ -354,13 +389,39 @@ export default function DutyDailyReportPage() {
                   <div className="mt-3 space-y-2">
                     {p.slots.map((s) => {
                       const done = s.log?.status === "done";
-                      const names = s.assignments.map((a) => teacherName(a.teacher)).filter(Boolean).join(", ");
+                      const nameItems = s.assignments.map((a) => {
+  const l = leaveByTeacher[a.teacher_id];
+  return {
+    id: a.teacher_id,
+    name: teacherName(a.teacher),
+    leave: leaveAppliesToSlot(l, s.start_time) ? l : undefined,
+  };
+});
+const allOnLeave = nameItems.length > 0 && nameItems.every((n) => n.leave);
                       const gpsStatus = s.log?.gps_status as string | undefined;
                       return (
-                        <div key={s.id} className={`flex flex-col gap-2 rounded-2xl px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${done ? "bg-emerald-50" : "bg-slate-50"}`}>
+                        <div key={s.id} className={`flex flex-col gap-2 rounded-2xl px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${done ? "bg-emerald-50" : allOnLeave ? "bg-rose-50" : "bg-slate-50"}`}>
                           <div className="min-w-0 flex-1">
                             <p className="text-xs font-bold text-slate-500">{timeShort(s.start_time)} - {timeShort(s.end_time)} น.</p>
-                            <p className="truncate text-sm text-slate-700">{names || "ยังไม่มีผู้รับผิดชอบ"}</p>
+                            <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm text-slate-700">
+  {nameItems.length === 0 ? "ยังไม่มีผู้รับผิดชอบ" : nameItems.map((n, i) => (
+    <span key={n.id} className="inline-flex items-center gap-1">
+      <span className={n.leave ? "text-slate-400 line-through" : ""}>
+        {n.name}{i < nameItems.length - 1 ? "," : ""}
+      </span>
+      {n.leave && (
+        <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">
+          {leaveBadgeText(n.leave)}
+        </span>
+      )}
+    </span>
+  ))}
+</p>
+{allOnLeave && !done && (
+  <p className="mt-0.5 flex items-center gap-1 text-xs font-semibold text-rose-600">
+    <AlertTriangle className="h-3 w-3" /> ผู้รับผิดชอบลาทั้งหมด — ต้องหาผู้มาเวรแทน
+  </p>
+)}
                             {done && (
                               <p className="mt-0.5 text-xs font-semibold text-emerald-600">
                                 ✓ {s.log?.signer ? teacherName(s.log.signer) : ""} เซ็นแล้ว เวลา {s.log?.signed_at ? new Date(s.log.signed_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" }) : ""} น.
@@ -410,6 +471,7 @@ export default function DutyDailyReportPage() {
             slot={signModalTarget.slot}
             teachers={teachers}
             myUserId={myUserId}
+            leaveByTeacher={leaveByTeacher}
             canOverrideSigner={canManageDuty || isHeadToday}
             onClose={() => setSignModalTarget(null)}
             onSave={handleSaveSign}
@@ -535,11 +597,11 @@ function SignaturePad({
 }
 
 function SignModal({
-  point, slot, teachers, myUserId, canOverrideSigner, onClose, onSave, onUndo, onDone,
+  point, slot, teachers, myUserId, canOverrideSigner, leaveByTeacher, onClose, onSave, onUndo, onDone,
 }: {
   point: PointView; slot: SlotView; teachers: Teacher[];
   myUserId: string;
-  canOverrideSigner: boolean;
+  canOverrideSigner: boolean; leaveByTeacher: Record<string, LeaveInfo>;
   onClose: () => void;
   onSave: (point: PointView, slot: SlotView, signerId: string, photoFile: File | null, note: string, existingPhotoUrl: string | null, gps: GpsResult | null, signatureFile: File | null, existingSignatureUrl: string | null) => Promise<void>;
   onUndo: (slot: SlotView) => Promise<void>;
@@ -547,8 +609,10 @@ function SignModal({
 }) {
   const assignedIds = new Set(slot.assignments.map((a) => a.teacher_id));
   // ★ ค่าเริ่มต้น: ถ้าเคยเซ็นแล้วใช้คนเดิม, ไม่งั้น auto-fill เป็นคนที่ล็อกอินอยู่, ถ้าไม่มีค่อย fallback ไปคนแรกที่ถูกมอบหมาย
- const firstAssignedId = [...slot.assignments]
-  .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))[0]?.teacher_id;
+ const sortedAssigned = [...slot.assignments].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+const firstAssignedId =
+  sortedAssigned.find((a) => !leaveAppliesToSlot(leaveByTeacher[a.teacher_id], slot.start_time))?.teacher_id
+  ?? sortedAssigned[0]?.teacher_id;
 const [signerId, setSignerId] = useState(slot.log?.signed_by ?? firstAssignedId ?? myUserId ?? "");
 const [signatureFile, setSignatureFile] = useState<File | null>(null);
   const [note, setNote] = useState(slot.log?.note ?? "");
@@ -559,15 +623,19 @@ const [signatureFile, setSignatureFile] = useState<File | null>(null);
   const [showCamera, setShowCamera] = useState(false);
 
 const signerOptions: SignerOption[] = useMemo(() => {
+  const withLeave = (id: string, name: string) => {
+    const l = leaveByTeacher[id];
+    return leaveAppliesToSlot(l, slot.start_time) ? `${name} (${leaveBadgeText(l)})` : name;
+  };
   const assigned: SignerOption[] = slot.assignments.map((a) => ({
-    id: a.teacher_id, label: teacherName(a.teacher), group: "ผู้ถูกมอบหมายจุดนี้",
+    id: a.teacher_id, label: withLeave(a.teacher_id, teacherName(a.teacher)), group: "ผู้ถูกมอบหมายจุดนี้",
   }));
   const others: SignerOption[] = teachers
     .filter((t) => !assignedIds.has(t.id) && !isBlockedRole((t as any).role))
-    .map((t) => ({ id: t.id, label: teacherName(t), group: "ครูท่านอื่น (กรณีสับเปลี่ยน)" }));
+    .map((t) => ({ id: t.id, label: withLeave(t.id, teacherName(t)), group: "ครูท่านอื่น (กรณีสับเปลี่ยน)" }));
   return [...assigned, ...others];
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [teachers, slot.assignments]);
+}, [teachers, slot.assignments, leaveByTeacher]);
 
   // ★ ดึงตำแหน่ง GPS ทันทีที่เปิด modal แล้วเทียบระยะกับพิกัดจุดเวร
   const [gps, setGps] = useState<GpsResult | null>(null);
