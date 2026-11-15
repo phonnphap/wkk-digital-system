@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase, useAssetRole } from "@/lib/assets";
 
-type Loc = { id: number; zone: string; name: string };
+type Loc = { id: number; zone: string; name: string; floor: number | null; buildings: { name: string } | null };
 type Res = { name: string; state: "wait" | "ok" | "err"; url?: string; msg?: string };
 const ACCOUNT = "finance@khienkhet.ac.th", FOLDER = "WKK_Asset_Rooms";
 const MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -11,7 +11,7 @@ const MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 // สร้างไฟล์เช็กลิสต์ทุกห้องแล้วอัปโหลดเข้า OneDrive ของ finance@ ผ่าน /api/upload-onedrive เดิม (รันครั้งเดียวพอ)
 export default function RoomFilesPage() {
   const role = useAssetRole(); const [locs, setLocs] = useState<Loc[]>([]); const [res, setRes] = useState<Res[]>([]); const [busy, setBusy] = useState(false);
-  useEffect(() => { supabase.from("asset_locations").select("id,zone,name").order("sort").then(({ data }: { data: Loc[] | null }) => setLocs(data ?? [])); }, []);
+  useEffect(() => { supabase.from("asset_locations").select("id,zone,name,floor,buildings(name)").order("sort").then(({ data }: { data: Loc[] | null }) => setLocs(data ?? [])); }, []);
   if (role && role !== "admin" && role !== "manager") return <p className="p-6 text-sm text-slate-500">เฉพาะแอดมินและผู้ดูแลโครงการ</p>;
 
   async function run() {
@@ -22,7 +22,8 @@ export default function RoomFilesPage() {
     for (let i = 0; i < locs.length; i++) {
       const l = locs[i];
       try {
-        const wb = await buildRoomWorkbook(l.name, ["kindergarten", "primary", "secondary"].includes(l.zone) ? "classroom" : "other");
+        const place = [l.buildings?.name, l.floor ? `ชั้น ${l.floor}` : null].filter(Boolean).join(" · ");
+        const wb = await buildRoomWorkbook(l.name, ["kindergarten", "primary", "secondary"].includes(l.zone) ? "classroom" : "other", place);
         const fileName = `${l.name.replace(/\//g, "-")}.xlsx`;
         const fd = new FormData();
         fd.append("file", new File([await wb.xlsx.writeBuffer()], fileName, { type: MIME }));

@@ -12,6 +12,8 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { Share2, Copy, Settings2, Lock } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Zap } from "lucide-react";
+import LateReportPanel from "@/components/LateReportPanel";
+import LateReportApprovals from "@/components/LateReportApprovals";
 
 const supabase = createClient();
 
@@ -840,6 +842,7 @@ async function regenerateToken() {
                 )}
               </div>
             </div>
+            <LateReportPanel canCreate={isDutyToday || myRole === "admin"} />
 
             {summaryByRoom.length > 0 && (
               <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
@@ -904,6 +907,7 @@ async function regenerateToken() {
             )}
           </div>
         </div>
+        <LateReportApprovals />
 
         {/* ── โมดัลกล้องสแกน ─────────────────────────────────── */}
         {scannerOpen && (

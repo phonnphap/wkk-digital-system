@@ -29,7 +29,7 @@ const box = { top: line, left: line, bottom: line, right: line };
 const fill = (argb: string) => ({ type: "pattern" as const, pattern: "solid" as const, fgColor: { argb } });
 
 // ไฟล์เช็กลิสต์ประจำห้อง: ชีต "เช็กลิสต์" — ห้องอยู่ที่ B4, หัวตารางแถว 6, ตัวอย่างแถว 7, รายการเริ่มแถว 8 (ตัวนำเข้าอ่านตามตำแหน่งนี้ อย่าย้าย)
-export async function buildRoomWorkbook(room: string, kind: RoomKind = "classroom"): Promise<ExcelJS.Workbook> {
+export async function buildRoomWorkbook(room: string, kind: RoomKind = "classroom", place = ""): Promise<ExcelJS.Workbook> {
   const items = kind === "classroom" ? CLASSROOM_ITEMS : OTHER_ITEMS;
   const FIRST = 8, EXTRA = 8, last = FIRST + items.length + EXTRA - 1;
   const wb = new ExcelJS.Workbook(); wb.creator = SCHOOL;
@@ -45,6 +45,7 @@ export async function buildRoomWorkbook(room: string, kind: RoomKind = "classroo
     "④ เลือกสถานะและสภาพ (ถ้าเว้นว่าง = ใช้งานอยู่ / ดี)   ⑤ ของที่ไม่มีในรายการ ให้เพิ่มที่แถวว่างท้ายตาราง: พิมพ์ชื่อ แล้วเลือก “ประเภท”   ดูแถว “ตย.” เป็นตัวอย่าง" });
   ws.getCell("A4").value = "ห้อง:"; ws.getCell("A4").font = { bold: true };
   Object.assign(ws.getCell("B4"), { value: room, font: { bold: true, size: 13 } });
+  if (place) { ws.getCell("A5").value = "อาคาร:"; ws.getCell("A5").font = { bold: true }; ws.getCell("B5").value = place; }
 
   const head = ["ที่", "รายการครุภัณฑ์", "มี / ไม่มี", "จำนวน", "เลขครุภัณฑ์เดิม (ถ้ามี)", "สถานะ", "สภาพ", "หมายเหตุ", "ประเภท (เฉพาะรายการที่เพิ่มเอง)", "รหัสหมวด (ระบบ)"];
   head.forEach((h, i) => Object.assign(ws.getRow(6).getCell(i + 1), { value: h, font: { bold: true, color: { argb: "FFFFFFFF" } }, fill: fill("FF1E40AF"), border: box, alignment: { horizontal: "center", vertical: "middle", wrapText: true } }));
