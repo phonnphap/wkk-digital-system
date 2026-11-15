@@ -25,6 +25,7 @@ type DutyLogWithGps = DutyLog & {
   checkin_lat?: number | null;
   checkin_lng?: number | null;
   checkin_accuracy?: number | null;
+  signature_url?: string | null;
 };
 type SlotView = DutyTimeSlot & { assignments: (DutyAssignment & { teacher?: Teacher })[]; log?: DutyLogWithGps };
 type PointView = DutyPoint & {
@@ -169,7 +170,7 @@ export default function DutyDailyReportPage() {
     if (slotIds.length > 0) {
       const { data: logData, error: logErr } = await supabase
         .from("duty_daily_logs")
-        .select("id, log_date, time_slot_id, status, signed_by, signed_at, photo_url, note, gps_status, distance_meters, signer:users!duty_daily_logs_signed_by_fkey(id, title, first_name, last_name)")
+        .select("id, log_date, time_slot_id, status, signed_by, signed_at, photo_url, signature_url, note, gps_status, distance_meters, signer:users!duty_daily_logs_signed_by_fkey(id, title, first_name, last_name)")
         .eq("log_date", date)
         .in("time_slot_id", slotIds);
       if (logErr) console.warn("[duty-report] โหลดบันทึกการเซ็นไม่สำเร็จ:", logErr.message);
@@ -196,27 +197,33 @@ export default function DutyDailyReportPage() {
   const totalSlots = visiblePoints.reduce((sum, p) => sum + p.slots.length, 0);
   const doneSlots = visiblePoints.reduce((sum, p) => sum + p.slots.filter((s) => s.log?.status === "done").length, 0);
 
+    async function uploadToDrive(file: File, point: PointView, suffix = "") {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("dayThai", THAI_DOW[dow]);
+    fd.append("date", date);
+    fd.append("pointLabel", `${point.point_number}-${point.title}${suffix}`);
+    const res = await fetch("/api/duty-photo-upload", { method: "POST", body: fd });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? "อัปโหลดไฟล์ไม่สำเร็จ");
+    return json.webUrl as string;
+  }
+
   async function handleSaveSign(
     point: PointView, slot: SlotView, signerId: string, photoFile: File | null,
-    note: string, existingPhotoUrl: string | null, gps: GpsResult | null
+    note: string, existingPhotoUrl: string | null, gps: GpsResult | null,
+    signatureFile: File | null, existingSignatureUrl: string | null
   ) {
     let photo_url = existingPhotoUrl;
-    if (photoFile) {
-      const fd = new FormData();
-      fd.append("file", photoFile);
-      fd.append("dayThai", THAI_DOW[dow]);
-      fd.append("date", date);
-      fd.append("pointLabel", `${point.point_number}-${point.title}`);
-      const res = await fetch("/api/duty-photo-upload", { method: "POST", body: fd });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "อัปโหลดรูปไม่สำเร็จ");
-      photo_url = json.webUrl;
-    }
+    if (photoFile) photo_url = await uploadToDrive(photoFile, point);
+
+    let signature_url = existingSignatureUrl;
+    if (signatureFile) signature_url = await uploadToDrive(signatureFile, point, "-ลายเซ็น");
 
     const { error } = await supabase.from("duty_daily_logs").upsert(
       {
         log_date: date, time_slot_id: slot.id, status: "done", signed_by: signerId,
-        signed_at: new Date().toISOString(), photo_url, note: note || null,
+        signed_at: new Date().toISOString(), photo_url, signature_url, note: note || null,
         checkin_lat: gps?.lat ?? null,
         checkin_lng: gps?.lng ?? null,
         checkin_accuracy: gps?.accuracy ?? null,
@@ -422,6 +429,110 @@ export default function DutyDailyReportPage() {
     </div>
   );
 }
+// ★ ช่องเซ็นสดด้วยนิ้ว/เมาส์/ปากกา
+function SignaturePad({
+  onChange, hasExisting,
+}: {
+  onChange: (file: File | null) => void;
+  hasExisting: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawing = useRef(false);
+  const last = useRef<{ x: number; y: number } | null>(null);
+  const [hasInk, setHasInk] = useState(false);
+
+  function setupCanvas() {
+    const c = canvasRef.current;
+    if (!c) return;
+    const ratio = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    c.width = rect.width * ratio;
+    c.height = rect.height * ratio;
+    const ctx = c.getContext("2d")!;
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#0f172a";
+  }
+
+  useEffect(() => { setupCanvas(); }, []);
+
+  function pos(e: React.PointerEvent<HTMLCanvasElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  function down(e: React.PointerEvent<HTMLCanvasElement>) {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drawing.current = true;
+    last.current = pos(e);
+    // จุดเดียว (แตะ) ให้เห็นเป็นจุด
+    const ctx = e.currentTarget.getContext("2d")!;
+    ctx.beginPath();
+    ctx.moveTo(last.current.x, last.current.y);
+    ctx.lineTo(last.current.x + 0.01, last.current.y + 0.01);
+    ctx.stroke();
+  }
+
+  function move(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!drawing.current || !last.current) return;
+    const p = pos(e);
+    const ctx = e.currentTarget.getContext("2d")!;
+    ctx.beginPath();
+    ctx.moveTo(last.current.x, last.current.y);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    last.current = p;
+  }
+
+  function up() {
+    if (!drawing.current) return;
+    drawing.current = false;
+    last.current = null;
+    setHasInk(true);
+    canvasRef.current?.toBlob((b) => {
+      if (b) onChange(new File([b], `signature-${Date.now()}.png`, { type: "image/png" }));
+    }, "image/png");
+  }
+
+  function clear() {
+    setupCanvas();
+    setHasInk(false);
+    onChange(null);
+  }
+
+  return (
+    <div className="mt-1">
+      <div className="relative overflow-hidden rounded-2xl border-2 border-dashed border-slate-200 bg-white">
+        <canvas
+          ref={canvasRef}
+          onPointerDown={down}
+          onPointerMove={move}
+          onPointerUp={up}
+          onPointerCancel={up}
+          style={{ touchAction: "none" }}
+          className="h-32 w-full cursor-crosshair"
+        />
+        {!hasInk && (
+          <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-300">
+            เซ็นชื่อตรงนี้
+          </p>
+        )}
+      </div>
+      <div className="mt-1 flex items-center justify-between">
+        <p className="text-[11px] text-slate-400">
+          {hasExisting && !hasInk ? "มีลายเซ็นที่บันทึกไว้แล้ว (เซ็นใหม่เพื่อแทนที่)" : ""}
+        </p>
+        <button type="button" onClick={clear} className="text-xs font-semibold text-slate-500 hover:text-rose-500">
+          ล้างลายเซ็น
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function SignModal({
   point, slot, teachers, myUserId, canOverrideSigner, onClose, onSave, onUndo, onDone,
@@ -430,19 +541,33 @@ function SignModal({
   myUserId: string;
   canOverrideSigner: boolean;
   onClose: () => void;
-  onSave: (point: PointView, slot: SlotView, signerId: string, photoFile: File | null, note: string, existingPhotoUrl: string | null, gps: GpsResult | null) => Promise<void>;
+  onSave: (point: PointView, slot: SlotView, signerId: string, photoFile: File | null, note: string, existingPhotoUrl: string | null, gps: GpsResult | null, signatureFile: File | null, existingSignatureUrl: string | null) => Promise<void>;
   onUndo: (slot: SlotView) => Promise<void>;
   onDone: () => void;
 }) {
   const assignedIds = new Set(slot.assignments.map((a) => a.teacher_id));
   // ★ ค่าเริ่มต้น: ถ้าเคยเซ็นแล้วใช้คนเดิม, ไม่งั้น auto-fill เป็นคนที่ล็อกอินอยู่, ถ้าไม่มีค่อย fallback ไปคนแรกที่ถูกมอบหมาย
-  const [signerId, setSignerId] = useState(slot.log?.signed_by ?? myUserId ?? slot.assignments[0]?.teacher_id ?? "");
-  const myTeacher = teachers.find((t) => t.id === myUserId) ?? slot.assignments.find((a) => a.teacher_id === myUserId)?.teacher ?? null;
+ const firstAssignedId = [...slot.assignments]
+  .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))[0]?.teacher_id;
+const [signerId, setSignerId] = useState(slot.log?.signed_by ?? firstAssignedId ?? myUserId ?? "");
+const [signatureFile, setSignatureFile] = useState<File | null>(null);
   const [note, setNote] = useState(slot.log?.note ?? "");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>(slot.log?.photo_url ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [showCamera, setShowCamera] = useState(false);
+
+const signerOptions: SignerOption[] = useMemo(() => {
+  const assigned: SignerOption[] = slot.assignments.map((a) => ({
+    id: a.teacher_id, label: teacherName(a.teacher), group: "ผู้ถูกมอบหมายจุดนี้",
+  }));
+  const others: SignerOption[] = teachers
+    .filter((t) => !assignedIds.has(t.id) && !isBlockedRole((t as any).role))
+    .map((t) => ({ id: t.id, label: teacherName(t), group: "ครูท่านอื่น (กรณีสับเปลี่ยน)" }));
+  return [...assigned, ...others];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [teachers, slot.assignments]);
 
   // ★ ดึงตำแหน่ง GPS ทันทีที่เปิด modal แล้วเทียบระยะกับพิกัดจุดเวร
   const [gps, setGps] = useState<GpsResult | null>(null);
@@ -475,19 +600,19 @@ function SignModal({
     );
   }, [point.latitude, point.longitude, point.radius_meters]);
 
-  function onPickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPhotoFile(file);
-    setPhotoPreview(URL.createObjectURL(file));
-  }
+  function handleCaptured(file: File) {
+  setPhotoFile(file);
+  setPhotoPreview(URL.createObjectURL(file));
+  setShowCamera(false);
+}
 
   async function submit() {
     if (!signerId) { setError("กรุณาเลือกผู้เซ็นชื่อ"); return; }
+    if (!signatureFile && !slot.log?.signature_url) { setError("กรุณาลงลายเซ็น"); return; }
     if (!photoFile && !slot.log?.photo_url) { setError("กรุณาแนบรูปถ่ายหน้างาน"); return; }
     setSaving(true); setError("");
     try {
-      await onSave(point, slot, signerId, photoFile, note, slot.log?.photo_url ?? null, gps);
+      await onSave(point, slot, signerId, photoFile, note, slot.log?.photo_url ?? null, gps, signatureFile, slot.log?.signature_url ?? null);
       onDone(); onClose();
     } catch (e: any) {
       setError(e.message ?? "บันทึกไม่สำเร็จ");
@@ -526,42 +651,37 @@ function SignModal({
         </div>
 
                 <div className="mt-4">
-          <label className="text-xs font-bold text-slate-500">ผู้เซ็นชื่อ</label>
-          {canOverrideSigner ? (
-            <select value={signerId} onChange={(e) => setSignerId(e.target.value)} className="mt-1 w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm">
-              <option value="">-- เลือกครูผู้เซ็นชื่อ --</option>
-              {slot.assignments.length > 0 && (
-                <optgroup label="ผู้ถูกมอบหมายจุดนี้">
-                  {slot.assignments.map((a) => (
-                    <option key={a.teacher_id} value={a.teacher_id}>{teacherName(a.teacher)}</option>
-                  ))}
-                </optgroup>
-              )}
-              <optgroup label="ครูท่านอื่น (กรณีสับเปลี่ยน)">
-                {teachers.filter((t) => !assignedIds.has(t.id)).map((t) => (
-                  <option key={t.id} value={t.id}>{teacherName(t)}</option>
-                ))}
-              </optgroup>
-            </select>
-          ) : (
-            <div className="mt-1 flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-              {myTeacher ? teacherName(myTeacher) : "ไม่พบชื่อผู้ใช้งาน — กรุณาติดต่อแอดมิน"}
-            </div>
-          )}
-        </div>
+  <label className="text-xs font-bold text-slate-500">ผู้เซ็นชื่อ</label>
+  <SignerCombobox
+    options={signerOptions}
+    value={signerId}
+    onChange={setSignerId}
+    fallbackLabel={slot.log?.signer ? teacherName(slot.log.signer) : undefined}
+  />
+</div>
+
+<div className="mt-4">
+  <label className="text-xs font-bold text-slate-500">ลายเซ็น *</label>
+  <SignaturePad onChange={setSignatureFile} hasExisting={!!slot.log?.signature_url} />
+</div>
 
         <div className="mt-4">
-          <label className="text-xs font-bold text-slate-500">ถ่ายรูปหน้างาน *</label>
-          <label className="mt-1 flex cursor-pointer items-center gap-3 rounded-2xl border-2 border-dashed border-slate-200 px-4 py-3 hover:border-indigo-300">
-            <Camera className="h-5 w-5 text-indigo-500" />
-            <span className="text-sm text-slate-500">แตะเพื่อถ่ายรูป/เลือกรูป</span>
-            <input type="file" accept="image/*" capture="environment" onChange={onPickPhoto} className="hidden" />
-          </label>
-          {photoPreview && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={photoPreview} alt="ตัวอย่างรูป" className="mt-2 h-40 w-full rounded-2xl object-cover" />
-          )}
-        </div>
+  <label className="text-xs font-bold text-slate-500">ถ่ายรูปหน้างาน *</label>
+  <button
+    type="button"
+    onClick={() => setShowCamera(true)}
+    className="mt-1 flex w-full items-center gap-3 rounded-2xl border-2 border-dashed border-slate-200 px-4 py-3 text-left hover:border-indigo-300"
+  >
+    <Camera className="h-5 w-5 text-indigo-500" />
+    <span className="text-sm text-slate-500">{photoPreview ? "แตะเพื่อถ่ายรูปใหม่" : "แตะเพื่อเปิดกล้องถ่ายรูป"}</span>
+  </button>
+  {photoPreview && (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={photoPreview} alt="ตัวอย่างรูป" className="mt-2 h-40 w-full rounded-2xl object-cover" />
+  )}
+</div>
+
+{showCamera && <CameraCapture onCapture={handleCaptured} onClose={() => setShowCamera(false)} />}
 
         <div className="mt-4">
           <label className="text-xs font-bold text-slate-500">หมายเหตุ (ถ้ามี)</label>
@@ -652,6 +772,142 @@ function PointGpsModal({
         <button onClick={submit} disabled={saving} className="mt-6 w-full rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md disabled:opacity-50">
           {saving ? "กำลังบันทึก..." : "บันทึกพิกัด"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ★ role ที่ไม่ต้องแสดงในรายชื่อผู้เซ็นชื่อ (เทียบแบบไม่สนตัวพิมพ์ และ _ - เท่ากับช่องว่าง)
+const BLOCKED_ROLE_KEYWORDS = ["admin staff", "ผู้บริหาร"];
+function isBlockedRole(role?: string | null) {
+  const r = (role ?? "").toLowerCase().replace(/[_-]/g, " ");
+  return BLOCKED_ROLE_KEYWORDS.some((k) => r.includes(k));
+}
+
+type SignerOption = { id: string; label: string; group: string };
+
+// ★ ช่องเลือกครูแบบพิมพ์ค้นหาได้
+function SignerCombobox({
+  options, value, onChange, fallbackLabel,
+}: {
+  options: SignerOption[];
+  value: string;
+  onChange: (id: string) => void;
+  fallbackLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const selected = options.find((o) => o.id === value);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
+  }, [options, query]);
+  const groups = Array.from(new Set(filtered.map((o) => o.group)));
+
+  return (
+    <div ref={wrapRef} className="relative mt-1">
+      <input
+        type="text"
+        value={open ? query : selected?.label ?? fallbackLabel ?? ""}
+        placeholder="-- พิมพ์ค้นหาชื่อครู --"
+        onFocus={() => { setOpen(true); setQuery(""); }}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm"
+      />
+      {open && (
+        <div className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+          {filtered.length === 0 && <p className="px-3 py-2 text-xs text-slate-400">ไม่พบรายชื่อที่ค้นหา</p>}
+          {groups.map((g) => (
+            <div key={g}>
+              <p className="bg-slate-50 px-3 py-1 text-[11px] font-bold text-slate-400">{g}</p>
+              {filtered.filter((o) => o.group === g).map((o) => (
+                <button
+                  type="button"
+                  key={o.id}
+                  onClick={() => { onChange(o.id); setOpen(false); setQuery(""); }}
+                  className={`block w-full px-3 py-2 text-left text-sm hover:bg-indigo-50 ${o.id === value ? "font-semibold text-indigo-600" : "text-slate-700"}`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ★ เปิดกล้องสดเท่านั้น (ไม่มีทางเลือกไฟล์จากเครื่อง)
+function CameraCapture({ onCapture, onClose }: { onCapture: (file: File) => void; onClose: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [facing, setFacing] = useState<"environment" | "user">("environment");
+  const [ready, setReady] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setReady(false);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setErr("อุปกรณ์/เบราว์เซอร์นี้ไม่รองรับการเปิดกล้อง (ต้องใช้งานผ่าน HTTPS)");
+      return;
+    }
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false })
+      .then((stream) => {
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+      })
+      .catch((e) => setErr("เปิดกล้องไม่สำเร็จ: " + (e?.message ?? "กรุณาอนุญาตการใช้กล้องในเบราว์เซอร์")));
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    };
+  }, [facing]);
+
+  function snap() {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return;
+    const c = document.createElement("canvas");
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    c.getContext("2d")!.drawImage(v, 0, 0);
+    c.toBlob((b) => {
+      if (!b) return;
+      onCapture(new File([b], `duty-${Date.now()}.jpg`, { type: "image/jpeg" }));
+    }, "image/jpeg", 0.85);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex flex-col bg-black">
+      <div className="relative flex-1">
+        {err ? (
+          <p className="p-6 text-center text-sm font-semibold text-rose-300">{err}</p>
+        ) : (
+          <video ref={videoRef} playsInline muted onLoadedMetadata={() => setReady(true)} className="h-full w-full object-contain" />
+        )}
+      </div>
+      <div className="flex items-center justify-between px-6 py-5">
+        <button type="button" onClick={onClose} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white">ปิด</button>
+        <button type="button" onClick={snap} disabled={!ready || !!err} aria-label="ถ่ายรูป"
+          className="h-16 w-16 rounded-full border-4 border-white bg-white/90 disabled:opacity-40" />
+        <button type="button" onClick={() => setFacing((f) => (f === "environment" ? "user" : "environment"))}
+          className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white">สลับกล้อง</button>
       </div>
     </div>
   );
