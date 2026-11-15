@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import {
   LayoutDashboard, UserCheck, CalendarDays, FileText, Wrench, Car, Monitor,
   FolderOpen, Trophy, Calendar, RefreshCw, Users, LogOut, Settings, User,
-  GraduationCap, UploadCloud, MapPin,
+  GraduationCap, UploadCloud, MapPin, Boxes,
+  ClipboardList,
 } from "lucide-react";
 
 export type ItemStatus = "live" | "beta" | "wip" | undefined;
@@ -54,9 +55,17 @@ export const MENU_GROUPS: MenuGroup[] = [
       { name: "จองรถ & ห้องประชุม", path: "/booking", icon: <Car className={ic} /> },
       { name: "ยืม-คืน อุปกรณ์ ICT", path: "/ict-borrow", icon: <Monitor className={ic} />, status: "wip" },
       { name: "แจ้งซ่อม (Helpdesk)", path: "/repair", icon: <Wrench className={ic} />, status: "beta" },
+      { name: "ทะเบียนครุภัณฑ์" , path: "/assets", icon: <Boxes className="w-6 h-6" />, status: "beta"},
       { name: "แผนผังโรงเรียน 3D", path: "/map3d", icon: <MapPin className={ic} />, status: "beta" },
     ],
   },
+  {
+      title: "🎓 งานรับนักเรียน",
+      items: [
+        { name: "จัดการรับสมัครนักเรียน", path: "/admission/admin", icon: <GraduationCap className="w-6 h-6" />, status: "beta" as ItemStatus },
+        { name: "หน้าสมัครเรียน (ลิงก์ให้ผู้ปกครอง)", path: "/admission", icon: <ClipboardList className="w-6 h-6" />, status: "beta" as ItemStatus },
+      ]
+    },
   {
     title: "ผู้ดูแลระบบ",
     items: [
