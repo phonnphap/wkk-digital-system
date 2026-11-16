@@ -45,6 +45,10 @@ export async function POST() {
   if (!approvers?.length) return err("ยังไม่ได้ตั้งค่าผู้อนุมัติ (late_report_approvers)", 500);
   const { data: users } = await db.from("users").select("*").in("id", approvers.map((a: any) => a.approver_id));
 
+  // ขั้นที่รออนุมัติจริง = ขั้นแรกที่ไม่ใช่ auto_follow (เช่น รองผู้อำนวยการ) — ขั้นอื่นที่ auto_follow จะถูกอนุมัติตามเมื่อขั้นนี้อนุมัติ
+  const firstManual = approvers.findIndex((a: any) => !a.auto_follow);
+  const pendingIdx = firstManual === -1 ? 0 : firstManual;
+
   const { data: report, error } = await db.from("late_reports").insert({
     report_date: today, reporter_id: me.id, reporter_name: personName(me),
     reporter_signature_path: me.signature_path, rows, total,
@@ -56,7 +60,7 @@ export async function POST() {
       report_id: report.id, step: a.step, step_label: a.step_label,
       approver_id: a.approver_id, approver_position: a.position_title,
       approver_name: personName(users?.find((u: any) => u.id === a.approver_id) ?? {}),
-      status: i === 0 ? "pending" : "waiting",
+      status: i === pendingIdx ? "pending" : "waiting",
       auto_follow: !!a.auto_follow,
     }))
   );

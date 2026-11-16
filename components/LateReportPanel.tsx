@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { FileText, Send, Printer, CheckCircle2, XCircle, Clock, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { bangkokToday } from "@/lib/late-report/rows";
+import SignatureCard from "@/components/visitors/SignatureCard";
 
 const supabase = createClient();
 
@@ -100,6 +101,7 @@ export default function LateReportPanel({ canCreate }: { canCreate: boolean }) {
           )}
         </div>
       )}
+      <SignatureCard />
     </div>
   );
 }

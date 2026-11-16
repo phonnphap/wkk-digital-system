@@ -11,13 +11,7 @@ const MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 // สร้างไฟล์เช็กลิสต์ทุกห้องแล้วอัปโหลดเข้า OneDrive ของ finance@ ผ่าน /api/upload-onedrive เดิม (รันครั้งเดียวพอ)
 export default function RoomFilesPage() {
   const role = useAssetRole(); const [locs, setLocs] = useState<Loc[]>([]); const [res, setRes] = useState<Res[]>([]); const [busy, setBusy] = useState(false);
-  useEffect(() => {
-  supabase
-    .from("asset_locations")
-    .select("id,zone,name,floor,buildings(name)")
-    .order("sort")
-    .then(({ data }) => setLocs((data ?? []) as unknown as Loc[]));
-}, []);
+  useEffect(() => { supabase.from("asset_locations").select("id,zone,name,floor,buildings(name)").order("sort").then(({ data }) => setLocs((data ?? []) as unknown as Loc[])); }, []);
   if (role && role !== "admin" && role !== "manager") return <p className="p-6 text-sm text-slate-500">เฉพาะแอดมินและผู้ดูแลโครงการ</p>;
 
   async function run() {

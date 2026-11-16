@@ -14,6 +14,11 @@ export const personName = (u: any) =>
 
 export async function getSig(db: SupabaseClient, p?: string | null) {
   if (!p) return null;
+  // ★ ลายเซนจากระบบลาเก็บเป็น data URL ใน users.signature_url — ถอดรหัสใช้ตรง ๆ
+  if (p.startsWith("data:image")) {
+    const b64 = p.split(",")[1] ?? "";
+    return b64 ? new Uint8Array(Buffer.from(b64, "base64")) : null;
+  }
   const { data } = await db.storage.from("signatures").download(p);
   return data ? new Uint8Array(await data.arrayBuffer()) : null;
 }
