@@ -109,6 +109,19 @@ async function fetchGradeHead(classroomId: string): Promise<string> {
   if (!head) return "";
   return `${head.title ?? ""}${head.first_name ?? ""} ${head.last_name ?? ""}`.trim();
 }
+async function fetchAdvisors(classroomId: string): Promise<AdvisorInfo[]> {
+  const { data: row } = await supabase.from("classrooms")
+    .select("homeroom_teacher_id, homeroom_teacher_2_id").eq("id", classroomId).maybeSingle();
+  const ids = [row?.homeroom_teacher_id, row?.homeroom_teacher_2_id].filter((v): v is string => !!v);
+  if (!ids.length) return EMPTY_ADVISORS;
+  const { data } = await supabase.from("users").select("id, title, first_name, last_name").in("id", ids);
+  const m: Record<string, AdvisorInfo> = {};
+  (data ?? []).forEach((t: any) => { m[t.id] = { prefix: t.title ?? "", first_name: t.first_name ?? "", last_name: t.last_name ?? "" }; });
+  return [
+    (row?.homeroom_teacher_id && m[row.homeroom_teacher_id]) || { first_name: "", last_name: "" },
+    (row?.homeroom_teacher_2_id && m[row.homeroom_teacher_2_id]) || { first_name: "", last_name: "" },
+  ];
+}
 
 export default function Por5SummaryPage() {
   const router = useRouter();
@@ -316,7 +329,7 @@ export default function Por5SummaryPage() {
           setGroupNames(p.groupNames ?? {});
           setGradeMatrix(p.gradeMatrix ?? {});
           setAttendMatrix(p.attendMatrix ?? {});
-          if (p.advisors) setAdvisors(p.advisors);
+          fetchAdvisors(room.classroom_id).then(a => { if (!cancelled) setAdvisors(a); });
           // ถ้า snapshot เก่าไม่มีชื่อ (ล็อกไว้ก่อนมีระบบนี้) ให้ดึงสดมาเติม
 const savedHead: string = p.gradeHeadName || "";
 setGradeHeadName(savedHead);

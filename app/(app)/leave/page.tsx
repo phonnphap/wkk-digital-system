@@ -58,6 +58,19 @@ async function preloadLogos() {
   if (!LOGO_DATA.official) LOGO_DATA.official = await urlToDataUri("/images1.jpg");
 }
 
+async function shrinkDataUrl(src?: string, maxW = 500): Promise<string | undefined> {
+  if (!src || !src.startsWith("data:image")) return src;
+  try {
+    const img = new Image();
+    await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(); img.src = src; });
+    if (img.width <= maxW) return src;
+    const c = document.createElement("canvas");
+    c.width = maxW; c.height = Math.round(img.height * (maxW / img.width));
+    c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL("image/png");
+  } catch { return src; }
+}
+
 // ─── helpers ──────────────────────────────────────────────
 function toThaiDate(iso: string) {
   if (!iso) return "";
@@ -734,7 +747,10 @@ async function uploadApprovedLeaveBothVersions(
 ): Promise<number> {
   await preloadLogos();
   const teacher = { first_name: reqUser?.first_name, last_name: reqUser?.last_name };
-  const requesterSig = leaveData.requesterSig || reqUser?.signature_url || "";
+    const requesterSig = (await shrinkDataUrl(leaveData.requesterSig || reqUser?.signature_url || "")) ?? "";
+  approverSigs = await Promise.all(
+    approverSigs.map(async a => ({ ...a, signature_url: await shrinkDataUrl(a.signature_url) }))
+  );
   // ทั้งสองฉบับใช้ลายเซนผู้ลา + โลโก้ + สถิติเหมือนกัน ต่างกันที่ลายเซนผู้อนุมัติ 1/2/3 เท่านั้น
   const signedHtml   = buildLeaveHTML(leaveData, requesterSig, approverSigs, docUrl, stats);
   const unsignedHtml = buildLeaveHTML(leaveData, requesterSig, approverSigs, docUrl, stats, true);
@@ -3778,6 +3794,7 @@ export default function LeavePage(){
   const [savedSignature,setSavedSignature]=useState("");
   const [loading,setLoading]=useState(true);
 
+
   useEffect(()=>{
     (async()=>{
       const {data:{user:authUser}}=await supabase.auth.getUser();
@@ -3787,6 +3804,7 @@ export default function LeavePage(){
         const email=authUser.email||authUser.user_metadata?.email||"";
         if(email){const res=await supabase.from("users").select("id,title,first_name,last_name,email,role,position,signature_url,grade_level,phone").eq("email",email).maybeSingle();data=res.data;if(data)await supabase.from("users").update({auth_id:authUser.id}).eq("id",data.id);}
       }
+  
       if(data){const profile:UserProfile={...data,full_name:(data as any).full_name||`${data.title??""} ${data.first_name??""} ${data.last_name??""}`.replace(/\s+/g," ").trim()};setUser(profile);if(data.signature_url)setSavedSignature(data.signature_url);}
       const {data:teachers}=await supabase.from("users").select("id,title,first_name,last_name,position,email,role,grade_level,extra_roles").order("first_name");
       setAllTeachers((teachers as UserProfile[])||[]);
@@ -3799,6 +3817,7 @@ export default function LeavePage(){
   },[]);
   useEffect(() => {
   if (!user || !APPROVER_EMAILS.includes(user.email)) return;
+   if (!user || ![...APPROVER_EMAILS, ADMIN_EMAIL].includes(user.email?.toLowerCase())) return;
   const id = new URLSearchParams(window.location.search).get("finalize");
   if (!id) return;
   window.history.replaceState(null, "", "/leave");   // ล้างพารามิเตอร์ กันรีเฟรชแล้วอัปโหลดซ้ำ
