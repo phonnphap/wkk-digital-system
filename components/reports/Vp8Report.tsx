@@ -213,9 +213,11 @@ const DB = {
 
 function userDisplayName(u: any): string {
   if (!u) return "";
+  // title = คำนำหน้า (นาย/นาง/นางสาว/ครู ฯลฯ) ต่อกับชื่อ-นามสกุล
+  const base = `${u.title ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.trim();
+  if (base) return base;
   const full = u.full_name ?? u.name ?? u.display_name;
-  if (full) return String(full).trim();
-  return `${u.prefix ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.trim();
+  return full ? String(full).trim() : "";
 }
 
 // extra_roles เป็น array หรือข้อความก็ใช้ได้
@@ -337,9 +339,13 @@ useEffect(() => {
         const { data: d } = await supabase.from(DB.deptTable).select("*").eq("id", deptId).maybeSingle();
         deptName = d?.name ?? d?.name_th ?? d?.title ?? "";
 
-        // 5) หน.กลุ่มสาระ = คนในกลุ่มสาระเดียวกันที่ extra_roles มี subject_dept_head
-        const { data: mates } = await supabase.from(DB.usersTable).select("*").eq("department_id", deptId);
-        head = userDisplayName((mates ?? []).find((m: any) => hasRole(m, DB.headRole)));
+                // 5) หน.กลุ่มสาระ = department_id เดียวกับครูรายวิชา + extra_roles มี subject_dept_head
+        const { data: mates } = await supabase
+          .from(DB.usersTable)
+          .select("*")
+          .eq("department_id", deptId);
+        const headUser = (mates ?? []).find((m: any) => hasRole(m, DB.headRole));
+        head = userDisplayName(headUser);
       }
 
       if (!active) return;
