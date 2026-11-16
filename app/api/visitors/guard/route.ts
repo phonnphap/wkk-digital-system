@@ -25,9 +25,12 @@ export async function POST(req: Request) {
     const form = await req.formData();
     let d: any;
     try { d = JSON.parse(String(form.get("data") ?? "{}")); } catch { return bad("ข้อมูลไม่ถูกต้อง"); }
-    const { name, plate, mode, target } = d;
+    const { name, plate, mode, target, purpose, student_id, student_name } = d;
     if (!target?.label) return bad("กรุณาเลือกห้อง/ฝ่าย");
     if (mode !== "id" && mode !== "face") return bad("โหมดไม่ถูกต้อง");
+    if (!String(purpose ?? "").trim()) return bad("กรุณาระบุเรื่องที่มาติดต่อ");
+if (target.type === "class" && !String(student_name ?? "").trim()) return bad("กรุณาเลือกนักเรียนที่มาพบ");
+if (mode === "face" && !String(name ?? "").trim()) return bad("กรุณาพิมพ์ชื่อผู้ปกครอง");
 
     let photo_path: string | null = null;
     const photo = form.get("photo") as File | null;
@@ -44,6 +47,9 @@ export async function POST(req: Request) {
       full_name: String(name ?? "").trim() || "ผู้ปกครอง (ไม่ระบุชื่อ)",
       car_plate: String(plate ?? "").trim() || null,
       contact_person: target.label,
+      purpose: String(purpose).trim().slice(0, 300),
+student_id: student_id ?? null,
+student_name: student_name ?? null,
       target_type: target.type, target_classroom_id: target.classroom_id ?? null, target_label: target.label,
       source: mode === "id" ? "guard_id" : "guard_face",
       status: "inside", check_in_at: now,

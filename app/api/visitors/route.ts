@@ -20,10 +20,10 @@ export async function GET() {
   const { data } = await q;
 
   const seen = new Set<string>();
-const rooms: { id: string; label: string; grade: string }[] = [];
-const sorted = [...(data ?? [])].sort((a: any, b: any) =>
-  (b.academic_year_id === cur?.id ? 1 : 0) - (a.academic_year_id === cur?.id ? 1 : 0));
-sorted.forEach((c: any) => {
+  const rooms: { id: string; label: string; grade: string }[] = [];
+  const sorted = [...(data ?? [])].sort((a: any, b: any) =>
+    (b.academic_year_id === cur?.id ? 1 : 0) - (a.academic_year_id === cur?.id ? 1 : 0));
+  sorted.forEach((c: any) => {
     const grade = (c.grade_group ?? "").split("/")[0].trim();
     const rn = (c.room_name ?? "").trim();
     const label = rn.includes(grade) ? rn : `${grade} ${rn}`.trim();
@@ -44,6 +44,12 @@ export async function POST(req: Request) {
   if (!full_name) return NextResponse.json({ ok: false, error: "กรุณากรอกชื่อ-นามสกุล" }, { status: 400 });
   if (b.target_type !== "class" && b.target_type !== "admin")
     return NextResponse.json({ ok: false, error: "กรุณาเลือกชั้นเรียนหรือฝ่ายที่มาติดต่อ" }, { status: 400 });
+
+  const purpose = String(b.purpose ?? "").trim().slice(0, 300);
+  if (!purpose) return NextResponse.json({ ok: false, error: "กรุณาระบุเรื่องที่มาติดต่อ" }, { status: 400 });
+  const student_name = String(b.student_name ?? "").trim().slice(0, 100);
+  if (b.target_type === "class" && !student_name)
+    return NextResponse.json({ ok: false, error: "กรุณาระบุชื่อนักเรียนที่มาพบ" }, { status: 400 });
 
   const db = adminClient();
 
@@ -71,7 +77,8 @@ export async function POST(req: Request) {
     full_name,
     phone: String(b.phone ?? "").trim().slice(0, 20) || null,
     car_plate: String(b.car_plate ?? "").trim().slice(0, 30) || null,
-    purpose: String(b.purpose ?? "").trim().slice(0, 300) || null,
+    purpose,
+    student_name: student_name || null,
     contact_person: target_label,
     target_type: b.target_type, target_classroom_id, target_label,
     source: "self", status: "pending",

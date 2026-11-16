@@ -1,7 +1,7 @@
 // path: app/api/visitors/students/route.ts
 // รายชื่อนักเรียน + ชื่อเล่นของห้องที่เลือก — รปภ. (PIN) หรือผู้ใช้ที่ล็อกอินเท่านั้น
 import { NextResponse } from "next/server";
-import { adminDb } from "@/lib/parcels/server";
+import { adminDb } from "@/lib/parcel-server";
 import { guardOrUser } from "@/lib/visitors/guard-auth";
 
 export async function GET(req: Request) {

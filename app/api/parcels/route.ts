@@ -1,15 +1,14 @@
 // path: app/api/parcels/route.ts
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { adminDb, getHomeroomTeachers, notifyTeams } from "@/lib/parcels/server";
+import { adminClient } from "@/lib/visitor-server";
+import { notifyParcel } from "@/lib/parcel-server";
 import { guardOrUser } from "@/lib/visitors/guard-auth";
 
 const err = (error: string, status = 400) => NextResponse.json({ ok: false, error }, { status });
-const WEEK = 60 * 60 * 24 * 7;
-
 const auth = (req: Request) => guardOrUser(req); // รปภ. (PIN) หรือผู้ใช้ที่ล็อกอิน
 
-// รับฝากของ: รูป + ห้อง + นักเรียน → เก็บ → แจ้งครูประจำชั้นใน Teams
+// รับฝากของ: รูป + ห้อง + นักเรียน → เก็บ → แจ้งครูประจำชั้นใน Teams (วิธีเดียวกับผู้มาติดต่อ)
 export async function POST(req: Request) {
   const me = await auth(req);
   if (!me) return err("Unauthorized", 401);
@@ -28,7 +27,7 @@ export async function POST(req: Request) {
   if (!classroomId || !classroomLabel) return err("กรุณาเลือกชั้น/ห้อง");
   if (!studentName) return err("กรุณาเลือกชื่อนักเรียน");
 
-  const db = adminDb();
+  const db = adminClient();
   const day = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
   const key = `${day}/${randomUUID()}.jpg`;
   const { error: upErr } = await db.storage.from("parcels").upload(key, Buffer.from(await photo.arrayBuffer()), {
@@ -40,43 +39,28 @@ export async function POST(req: Request) {
     created_by: me.id, classroom_id: classroomId, classroom_label: classroomLabel,
     student_id: studentId, student_name: studentName, sender_name: senderName,
     description, photo_path: key,
-  }).select("id, created_at").single();
+  }).select("id").single();
   if (error || !parcel) return err("บันทึกไม่สำเร็จ: " + error?.message, 500);
 
-  // แจ้งครูประจำชั้น (พลาดก็ไม่ทำให้การบันทึกล้ม — เก็บ error ไว้ให้ รปภ. เห็น)
-  const teachers = await getHomeroomTeachers(db, classroomId);
-  const { data: signed } = await db.storage.from("parcels").createSignedUrl(key, WEEK);
-  const time = new Date(parcel.created_at).toLocaleString("th-TH", {
-    timeZone: "Asia/Bangkok", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
-  }) + " น.";
-
-  let sent = 0;
-  const errors: string[] = [];
-  for (const t of teachers) {
-    try {
-      await notifyTeams({
-        teacher_email: t.email, teacher_name: t.name,
-        student_name: studentName, classroom: classroomLabel,
-        description: description ?? "(ดูรูปแนบ)", sender_name: senderName ?? "-",
-        photo_url: signed?.signedUrl ?? "", time,
-      });
-      sent++;
-    } catch (e: any) { errors.push(`${t.email}: ${e.message}`); }
-  }
+  // แจ้งครูประจำชั้น (พลาดก็ไม่ทำให้การบันทึกล้ม — เก็บเหตุผลไว้ให้ รปภ. เห็น)
+  const notify = await notifyParcel(parcel.id);
   await db.from("parcels").update({
-    notified_at: sent ? new Date().toISOString() : null,
-    notify_error: teachers.length === 0 ? "ไม่พบครูประจำชั้น/อีเมล" : errors.join("; ") || null,
+    notified_at: notify.ok ? new Date().toISOString() : null,
+    notify_error: notify.ok ? (notify.reason ?? null) : (notify.reason ?? "แจ้งไม่สำเร็จ"),
   }).eq("id", parcel.id);
 
-  return NextResponse.json({ ok: true, teachers: teachers.length, notified: sent,
-    warning: teachers.length === 0 ? "ไม่พบครูประจำชั้นของห้องนี้ ระบบบันทึกแล้วแต่ยังไม่ได้แจ้ง" :
-             sent < teachers.length ? "แจ้งครูได้ไม่ครบทุกคน" : null });
+  return NextResponse.json({
+    ok: true,
+    teachers: notify.sent ?? 0,
+    notified: notify.ok ? (notify.sent ?? 0) : 0,
+    warning: notify.reason ?? null,
+  });
 }
 
 // รายการของที่ยังรอรับ
 export async function GET(req: Request) {
   if (!(await auth(req))) return err("Unauthorized", 401);
-  const db = adminDb();
+  const db = adminClient();
   const { data } = await db.from("parcels").select("*").eq("status", "waiting")
     .order("created_at", { ascending: false }).limit(30);
   const rows = data ?? [];
@@ -93,6 +77,6 @@ export async function PATCH(req: Request) {
   if (!(await auth(req))) return err("Unauthorized", 401);
   const { id } = await req.json();
   if (!id) return err("ไม่พบรายการ");
-  await adminDb().from("parcels").update({ status: "picked_up", picked_up_at: new Date().toISOString() }).eq("id", id);
+  await adminClient().from("parcels").update({ status: "picked_up", picked_up_at: new Date().toISOString() }).eq("id", id);
   return NextResponse.json({ ok: true });
 }

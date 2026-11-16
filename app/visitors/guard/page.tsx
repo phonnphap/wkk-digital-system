@@ -138,6 +138,7 @@ export default function GuardPage() {
     if (!purpose.trim()) return setMsg("⚠️ กรุณาระบุเรื่องที่มาติดต่อ");
     if (mode === "id" && !name.trim() && !plate.trim()) return setMsg("⚠️ กรุณาถ่ายบัตร/ทะเบียน หรือพิมพ์ชื่อ");
     if (mode === "face" && !photo) return setMsg("⚠️ กรุณาถ่ายรูปหน้าผู้ปกครอง");
+    if (mode === "face" && !name.trim()) return setMsg("⚠️ กรุณาพิมพ์ชื่อ-นามสกุลผู้ปกครอง");
     setBusy(true); setMsg("");
     try {
       const fd = new FormData();
@@ -231,6 +232,11 @@ export default function GuardPage() {
               {ocrBusy ? "⏳ กำลังอ่าน..." : preview || name || plate ? "📷 ถ่ายใหม่" : "📷 เปิดกล้อง"}
             </button>
             {mode === "face" && preview && <img src={preview} alt="" className="max-h-64 w-full rounded-2xl object-contain bg-white" />}
+
+            {mode === "face" && (
+              <input value={name} onChange={e => setName(e.target.value)} placeholder="ชื่อ-นามสกุลผู้ปกครอง *"
+                className="w-full rounded-2xl border-4 border-slate-300 px-5 py-5 text-2xl" />
+            )}
 
             {mode === "id" && (
               <div className="space-y-3">
