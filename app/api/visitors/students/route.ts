@@ -1,5 +1,5 @@
 // path: app/api/visitors/students/route.ts
-// รายชื่อนักเรียน + ชื่อเล่นของห้องที่เลือก — รปภ. (PIN) หรือผู้ใช้ที่ล็อกอินเท่านั้น
+// รายชื่อนักเรียน + ชื่อเล่นของห้องที่เลือก — รปภ. (ใส่ PIN แล้ว) หรือผู้ใช้ที่ล็อกอินเท่านั้น
 import { NextResponse } from "next/server";
 import { adminClient } from "@/lib/visitor-server";
 import { guardOrUser } from "@/lib/visitors/guard-auth";
@@ -10,7 +10,6 @@ export async function GET(req: Request) {
   const classroomId = new URL(req.url).searchParams.get("classroom_id");
   if (!classroomId) return NextResponse.json({ students: [] });
 
-  // service role เพราะ รปภ. ไม่ได้ล็อกอิน — คืนเฉพาะฟิลด์ที่จำเป็น
   const { data, error } = await adminClient()
     .from("students")
     .select("id, seat_number, prefix, first_name, last_name, nick_name, gender, birth_date")
