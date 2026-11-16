@@ -190,6 +190,16 @@ function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
+// ค่าเริ่มต้นภาคเรียน/ปีการศึกษา (ใช้เมื่อ props ไม่ได้ส่งมา) — ภาค 1: พ.ค.–ต.ค., ภาค 2: พ.ย.–เม.ย.
+function defaultTerm() {
+  const d = new Date();
+  const m = d.getMonth() + 1;
+  const be = d.getFullYear() + 543;
+  if (m >= 5 && m <= 10) return { semester: "1", year: String(be) };
+  if (m >= 11) return { semester: "2", year: String(be) };
+  return { semester: "2", year: String(be - 1) };
+}
+
 function dots(text: string | number | undefined | null, w = "min-w-[90px]") {
   return (
     <span className={`inline-block border-b border-dotted border-black px-1 text-center ${w}`}>
@@ -200,7 +210,8 @@ function dots(text: string | number | undefined | null, w = "min-w-[90px]") {
 
 export default function Vp8Report({
   sectionId, subjectCode, subjectTitle, classroomLabel, students, currentUserId, readOnly,
-  subjectTeacherNameFallback, semester, academicYearLabel, learningArea,
+  subjectTeacherNameFallback, subjectTeacherNames, headOfAreaName, areaHeads,   // ← เพิ่ม 3 ตัว
+  semester, academicYearLabel, learningArea,
   midtermMaxScore = 0, finalMaxScore = 30, gradeRoundingMode = "truncate", showSpecialScores = true,
   logoUrl = "/logo.png", schoolName = "โรงเรียนวัดเขียนเขต",
   principalName = "นายธนณัฐ  ศิระวงษ์", principalTitle = "ผู้อำนวยการโรงเรียนวัดเขียนเขต",
@@ -214,6 +225,9 @@ export default function Vp8Report({
   currentUserId?: string;
   readOnly?: boolean;
   subjectTeacherNameFallback?: string;
+  subjectTeacherNames?: string[];                 // รายชื่อครูผู้สอนทั้งหมดของวิชา/ห้องนี้ (1–2 คน)
+  headOfAreaName?: string;                        // ชื่อ หน.กลุ่มสาระ (ถ้าส่งตรงมาจะใช้ค่านี้ก่อน)
+  areaHeads?: Record<string, string>;             // map: ชื่อกลุ่มสาระ -> ชื่อ หน.กลุ่มสาระ
   semester?: number | string;
   academicYearLabel?: string;
   learningArea?: string;
@@ -233,13 +247,61 @@ export default function Vp8Report({
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [teacherName, setTeacherName] = useState(subjectTeacherNameFallback ?? "");
+  const term = useMemo(defaultTerm, []);
+const [semesterV, setSemesterV] = useState(String(semester ?? term.semester));
+const [yearV, setYearV] = useState(academicYearLabel ?? term.year);
+const [areaV, setAreaV] = useState(learningArea ?? "");
+const [teacher1, setTeacher1] = useState("");
+const [teacher2, setTeacher2] = useState("");
+const [headName, setHeadName] = useState("");
+
+// ซิงก์ค่าอัตโนมัติจาก props (ครูแก้เองต่อได้)
+useEffect(() => { setSemesterV(String(semester ?? term.semester)); }, [semester, term]);
+useEffect(() => { setYearV(academicYearLabel ?? term.year); }, [academicYearLabel, term]);
+useEffect(() => { setAreaV(learningArea ?? ""); }, [learningArea]);
+
+const teachersKey = (subjectTeacherNames ?? []).join("|");
+useEffect(() => {
+  const list = (subjectTeacherNames ?? []).map(n => n?.trim()).filter(Boolean) as string[];
+  if (list.length === 0 && subjectTeacherNameFallback) list.push(subjectTeacherNameFallback);
+  setTeacher1(list[0] ?? "");
+  setTeacher2(list[1] ?? "");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [teachersKey, subjectTeacherNameFallback]);
+
+useEffect(() => {
+  setHeadName(headOfAreaName ?? areaHeads?.[areaV] ?? "");
+}, [headOfAreaName, areaHeads, areaV]);
+
+const teacherNames = [teacher1, teacher2].map(t => t.trim()).filter(Boolean);
   const [logoOk, setLogoOk] = useState(true);
   const [detecting, setDetecting] = useState(false);
   const [preview, setPreview] = useState<AutoPreview | null>(null);
   const [autoInfo, setAutoInfo] = useState<Record<string, string>>({}); // student_id -> เหตุผลที่ระบบตรวจพบ
 
   const sorted = useMemo(() => [...students].sort((a, b) => a.seat_number - b.seat_number), [students]);
+    /* ----- ดึงเลขประจำตัวนักเรียน (ถ้า props ไม่มี student_code) ----- */
+  const [codeMap, setCodeMap] = useState<Record<string, string>>({});
+  const idsKey = students.filter(s => !s.student_code).map(s => s.id).join(",");
+
+  useEffect(() => {
+    if (!idsKey) return;
+    let active = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from("students")          // ← ถ้าตารางนักเรียนชื่ออื่น แก้ตรงนี้
+        .select("*")
+        .in("id", idsKey.split(","));
+      if (!active || error || !data) return;
+      const map: Record<string, string> = {};
+      data.forEach((r: any) => {
+        const code = r.student_code ?? r.student_number ?? r.student_no ?? r.student_id_number ?? r.code;
+        if (code) map[r.id] = String(code);
+      });
+      setCodeMap(map);
+    })();
+    return () => { active = false; };
+  }, [idsKey]);
 
   /* ----- โหลดข้อมูลทั้ง 3 รอบ ----- */
   useEffect(() => {
@@ -410,11 +472,6 @@ export default function Vp8Report({
                 ติ๊กนักเรียนที่ไม่ผ่านในรอบ "{ROUNDS.find(r => r.key === round)?.label}" แล้วเลือกผล (0 / ร / มส)
               </p>
               <div className="flex items-center gap-2">
-                <label className="text-m font-bold text-slate-500 flex items-center gap-1">
-                  ครูผู้สอน
-                  <input value={teacherName} onChange={e => setTeacherName(e.target.value)}
-                    className="border-2 border-slate-200 rounded-lg px-2 py-1 font-bold w-48" />
-                </label>
                 {round === "announce" && (
                   <button onClick={runAutoDetect} disabled={detecting}
                     className="px-3 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 font-black text-[14px] disabled:opacity-50">
@@ -434,7 +491,25 @@ export default function Vp8Report({
                   </button>
                 )}
               </div>
-            </div>
+              </div>
+              <div className="grid gap-2 mb-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
+  {[
+    ["ภาคเรียนที่", semesterV, setSemesterV],
+    ["ปีการศึกษา", yearV, setYearV],
+    ["กลุ่มสาระฯ", areaV, setAreaV],
+    ["ครูผู้สอนคนที่ 1", teacher1, setTeacher1],
+    ["ครูผู้สอนคนที่ 2 (ถ้ามี)", teacher2, setTeacher2],
+    ["หัวหน้ากลุ่มสาระฯ", headName, setHeadName],
+  ].map(([label, val, set]: any) => (
+    <label key={label} className="text-m font-bold text-slate-500 flex flex-col gap-0.5">
+      {label}
+      <input value={val} onChange={e => set(e.target.value)}
+        className="border-2 border-slate-200 rounded-lg px-2 py-1 font-bold" />
+    </label>
+  ))}
+</div>
+            
+            
 
             {preview && (
               <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/40 p-3 mb-3">
@@ -533,16 +608,16 @@ export default function Vp8Report({
             )}
             <p className="font-black text-[19px]">{schoolName}</p>
             <p className="text-[18px] font-bold mt-1">
-              แบบส่งรายชื่อนักเรียนที่สอบไม่ผ่าน &nbsp; ภาคเรียนที่ {dots(semester, "min-w-[70px]")}
-              &nbsp; ปีการศึกษา {dots(academicYearLabel, "min-w-[110px]")}
-            </p>
-            <p className="text-[18px] font-bold mt-1">
-              รหัสวิชา {dots(subjectCode, "min-w-[70px]")} ชื่อวิชา {dots(subjectTitle, "min-w-[150px]")}
-              กลุ่มสาระการเรียนรู้ {dots(learningArea, "min-w-[180px]")}
-            </p>
-            <p className="text-[18px] font-bold mt-1">
-              ชื่อครูผู้สอน {dots(teacherName, "min-w-[240px]")}
-            </p>
+  แบบส่งรายชื่อนักเรียนที่สอบไม่ผ่าน &nbsp; ภาคเรียนที่ {dots(semesterV, "min-w-[70px]")}
+  &nbsp; ปีการศึกษา {dots(yearV, "min-w-[110px]")}
+</p>
+<p className="text-[18px] font-bold mt-1">
+  รหัสวิชา {dots(subjectCode, "min-w-[70px]")} ชื่อวิชา {dots(subjectTitle, "min-w-[150px]")}
+  กลุ่มสาระการเรียนรู้ {dots(areaV, "min-w-[180px]")}
+</p>
+<p className="text-[18px] font-bold mt-1">
+  ชื่อครูผู้สอน {dots(teacherNames.join(" , "), "min-w-[240px]")}
+</p>
           </div>
         </div>
 
@@ -563,7 +638,7 @@ export default function Vp8Report({
               <tr key={s.id}>
                 <td className="border border-slate-400 text-center py-1.5 font-bold">{i + 1}</td>
                 <td className="border border-slate-400 text-center py-1.5 font-bold">{s.seat_number}</td>
-                <td className="border border-slate-400 text-center py-1.5 font-bold">{s.student_code ?? ""}</td>
+                <td className="border border-slate-400 text-center py-1.5 font-bold">{s.student_code || codeMap[s.id] || ""}</td>
                 <td className="border border-slate-400 px-2 py-1.5 font-bold">{s.prefix ?? ""}{s.first_name} {s.last_name}</td>
                 <td className="border border-slate-400 text-center py-1.5 font-bold">{roomLabel}</td>
                 <td className="border border-slate-400 text-center py-1.5 font-black">{current[s.id]}</td>
@@ -584,23 +659,33 @@ export default function Vp8Report({
         </p>
 
         {/* ลายเซ็น */}
-        <div className="mt-6 grid grid-cols-2 gap-6 text-[18px] font-bold vp8-avoid">
-          <div>
-            <p>ลงชื่อ{dots("", "min-w-[160px]")}ครูประจำวิชา</p>
-            <p className="pl-10">({dots(teacherName, "min-w-[170px]")})</p>
-          </div>
-          <div>
-            <p>ลงชื่อ{dots("", "min-w-[160px]")}หัวหน้ากลุ่มสาระฯ</p>
-            <p className="pl-10">({dots("", "min-w-[170px]")})</p>
-          </div>
-        </div>
-        <div className="mt-8 text-[18px] font-bold vp8-avoid" style={{ marginLeft: "18%" }}>
-          <p>ลงชื่อ{dots("", "min-w-[200px]")}</p>
-          <p className="pl-6">({principalName})</p>
-          <p>{principalTitle}</p>
-        </div>
-      </div>
+<div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-6 text-[18px] font-bold vp8-avoid">
+  {/* แถว 1: ครูคนที่ 1 | หน.กลุ่มสาระฯ */}
+  <div>
+    <p>ลงชื่อ{dots("", "min-w-[160px]")}ครูประจำวิชา</p>
+    <p className="pl-10">({dots(teacher1, "min-w-[170px]")})</p>
+  </div>
+  <div>
+    <p>ลงชื่อ{dots("", "min-w-[160px]")}หัวหน้ากลุ่มสาระฯ</p>
+    <p className="pl-10">({dots(headName, "min-w-[170px]")})</p>
+  </div>
 
+  {/* แถว 2: ครูคนที่ 2 (แยกอยู่ด้านล่าง ไม่รวมกับคนแรก) */}
+  {teacher2.trim() && (
+    <div>
+      <p>ลงชื่อ{dots("", "min-w-[160px]")}ครูประจำวิชา</p>
+      <p className="pl-10">({dots(teacher2, "min-w-[170px]")})</p>
+    </div>
+  )}
+</div>
+
+{/* ผอ. อยู่กึ่งกลางหน้า */}
+<div className="mt-8 text-[18px] font-bold vp8-avoid flex flex-col items-center text-center">
+  <p>ลงชื่อ{dots("", "min-w-[200px]")}</p>
+  <p>({principalName})</p>
+  <p>{principalTitle}</p>
+</div>
+</div>
       <style jsx global>{`
         @media print {
           @page { size: A4 portrait; margin: 12mm; }
