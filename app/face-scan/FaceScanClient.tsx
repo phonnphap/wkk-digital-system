@@ -868,7 +868,7 @@ stopVideo();
             {currentDateTime.time || "00:00:00"}
           </div>
           <div className="text-[#6E6E73] mt-2 font-medium text-base sm:text-lg">
-            วัน{currentDateTime.date || "กำลังโหลด..."}
+            {currentDateTime.date || "กำลังโหลด..."}
           </div>
         </div>
 

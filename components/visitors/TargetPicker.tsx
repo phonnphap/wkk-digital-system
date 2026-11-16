@@ -6,8 +6,8 @@ export type Targets = { rooms: { id: string; label: string; grade: string }[]; a
 export type Target = { type: "class" | "admin"; classroom_id?: string; label: string } | null;
 
 export default function TargetPicker({
-  targets, value, onChange, big = false,
-}: { targets: Targets; value: Target; onChange: (t: Target) => void; big?: boolean }) {
+  targets, value, onChange, big = false, classOnly = false,
+}: { targets: Targets; value: Target; onChange: (t: Target) => void; big?: boolean; classOnly?: boolean }) {
   const [tab, setTab] = useState<"class" | "admin">(value?.type ?? "class");
   const [grade, setGrade] = useState<string>("");
   const grades = Array.from(new Set(targets.rooms.map(r => r.grade)));

@@ -10,6 +10,20 @@ const nextConfig = {
     ],
   },
 
+// ★ เพิ่ม: บังคับแนบไฟล์ Chromium (โฟลเดอร์ bin) เข้า function ที่สร้าง PDF
+  outputFileTracingIncludes: {
+    "/api/generate-leave-pdf": ["./node_modules/@sparticuz/chromium/bin/**"],
+  },
+
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co',
+      },
+    ],
+  },
+
   // อนุญาตให้เว็บ Wix ของโรงเรียนฝังหน้าแผนที่ได้
   async headers() {
     return [
