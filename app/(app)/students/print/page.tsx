@@ -8,6 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { QRCodeSVG } from "qrcode.react"; // ★ ต้องติดตั้ง: npm install qrcode.react
 import { ArrowLeft, Printer, CheckSquare, Square } from "lucide-react";
+import { getDisplayPrefix } from "@/lib/student-prefix";
 
 const supabase = createClient();
 
@@ -31,6 +32,8 @@ type Student = {
   prefix: string | null;
   first_name: string;
   last_name: string;
+   gender: string | null;      // ★ เพิ่ม
+  birth_date: string | null;  // ★ เพิ่ม
 };
 
 // ★ เหมือนกับ formatClassLabel ใน student-portal เพื่อให้ป้ายชั้นเรียนตรงกัน
@@ -104,7 +107,7 @@ function PrintStudentCardsContent() {
         .single(),
       supabase
         .from("students")
-        .select("id, seat_number, student_code, prefix, first_name, last_name")
+        .select("id, seat_number, student_code, prefix, first_name, last_name, gender, birth_date")
         .eq("classroom_id", classroomId).is("moved_out_at", null)
         .order("seat_number"),
     ]).then(([classroomRes, studentsRes]) => {
@@ -233,8 +236,8 @@ function PrintStudentCardsContent() {
                     className="h-4 w-4 rounded accent-indigo-600"
                   />
                   <span className="text-sm font-medium text-slate-700">
-                    {s.seat_number ?? "-"}. {s.prefix ?? ""}
-                    {s.first_name} {s.last_name}
+                    {s.seat_number ?? "-"}. {getDisplayPrefix(s.gender, s.birth_date, s.prefix)}
+{s.first_name} {s.last_name}
                     {isDobMode && !s.student_code && (
                       <span className="ml-1 text-rose-500">(ไม่มีรหัส นร.)</span>
                     )}
@@ -250,9 +253,10 @@ function PrintStudentCardsContent() {
       <div className="hidden print:block">
         <div className="print-grid">
           {printList.map((s) => {
-            const url = cardUrl(s);
-            return (
-              <div key={s.id} className="student-card">
+  const url = cardUrl(s);
+  const fullName = `${getDisplayPrefix(s.gender, s.birth_date, s.prefix)}${s.first_name} ${s.last_name}`;
+  return (
+    <div key={s.id} className="student-card">
                 <div className="student-card-header">
                   <img src={SCHOOL_LOGO} alt="" className="student-card-logo" />
                   <span className="student-card-school">{SCHOOL_NAME}</span>
@@ -263,12 +267,11 @@ function PrintStudentCardsContent() {
                   </div>
                   <div className="student-card-info">
                     <p
-                      className="student-card-name"
-                      style={{ fontSize: `${nameFontSizePt(`${s.prefix ?? ""}${s.first_name} ${s.last_name}`)}pt` }}
-                    >
-                      {s.prefix ?? ""}
-                      {s.first_name} {s.last_name}
-                    </p>
+        className="student-card-name"
+        style={{ fontSize: `${nameFontSizePt(fullName)}pt` }}
+      >
+        {fullName}
+      </p>
                     <p className="student-card-meta">{classLabel}</p>
                     <p className="student-card-meta">เลขที่ {s.seat_number ?? "-"}</p>
                   </div>

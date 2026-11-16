@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Save, Home, ArrowLeft, Calendar, TrendingUp, Users } from "lucide-react";
 import { fetchHolidayMap, isHoliday, HolidayMap } from "@/lib/holidays";
 import { parseGrade } from "@/lib/meals/shared";
+import { getDisplayPrefix } from "@/lib/student-prefix";
 
 const supabase = createClient();
 
@@ -42,6 +43,7 @@ type Student = {
   last_name: string;
   nick_name: string | null;
   gender: string | null; // "male" | "female" | null
+  birth_date: string | null; 
 };
 
 type AttendanceStatus = "present" | "absent" | "leave" | "late";
@@ -392,7 +394,7 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
       try {
         const studentsRes = await supabase
           .from("students")
-          .select("id, seat_number, prefix, first_name, last_name, nick_name, gender")
+          .select("id, seat_number, prefix, first_name, last_name, nick_name, gender, birth_date")
           .in("classroom_id", roomIds)
           .is("moved_out_at", null)
           .order("seat_number");
@@ -731,7 +733,7 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
                             key={s.id}
                             className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200"
                           >
-                            {s.seat_number}. {s.prefix ?? ""}{s.first_name} {s.last_name}
+                            {s.seat_number}. {getDisplayPrefix(s.gender, s.birth_date, s.prefix)}{s.first_name} {s.last_name}
                           </span>
                         ))}
                       </div>
@@ -760,7 +762,7 @@ const isDateLocked = isWeekendSelected || !!todayHoliday;
                           {s.seat_number}
                         </span>
                         <p className="truncate text-sm font-semibold text-slate-800">
-                          {s.prefix ?? ""}{s.first_name} {s.last_name}
+                          {getDisplayPrefix(s.gender, s.birth_date, s.prefix)}{s.first_name} {s.last_name}
                           {s.nick_name && <span className="ml-1 font-normal text-slate-400">({s.nick_name})</span>}
                         </p>
                       </div>

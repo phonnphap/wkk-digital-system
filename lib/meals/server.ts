@@ -6,6 +6,7 @@ import {
   type CellStatus, type ClassroomLite, type MealType, type SheetData, type SheetStudent,
 } from "./shared";
 import { planExtras, type DayInput } from "./distribute";
+import { getDisplayPrefix } from "@/lib/student-prefix";
 
 // ════════════════════════════════════════════════════════════════════════════
 // ★ จุดเดียวที่ต้องปรับให้ตรงกับ schema จริงของโรงเรียน (ชื่อตาราง/คอลัมน์)
@@ -19,6 +20,8 @@ export const STUDENTS = {
   prefix: "prefix",
   first: "first_name",
   last: "last_name",
+   gender: "gender",        // ★ เพิ่ม
+  birth: "birth_date",
 };
 const ATTENDANCE = {
   table: "attendance_records", // หน้าเช็คชื่อโฮมรูมบันทึกลงตารางนี้ (recorded_source = 'homeroom')
@@ -210,17 +213,17 @@ async function loadStudents(a: Actor, classroomId: string): Promise<StudentRow[]
   if (hit) return hit;
   const ids = (await groupOf(a, classroomId))?.ids ?? [classroomId]; // ★ นักเรียนทุกเทอมของห้องนี้
   const { data, error } = await a.service
-    .from(STUDENTS.table)
-    .select(`id:${STUDENTS.id}, no:${STUDENTS.no}, prefix:${STUDENTS.prefix}, first:${STUDENTS.first}, last:${STUDENTS.last}`)
-    .in(STUDENTS.classroom, ids)
-    .is("moved_out_at", null)
-    .order(STUDENTS.no, { ascending: true });
-  if (error) throw new Error(error.message);
-  const rows: StudentRow[] = (data ?? []).map((s: any) => ({
-    id: s.id,
-    no: s.no ?? null,
-    name: `${s.prefix ?? ""}${s.first ?? ""} ${s.last ?? ""}`.trim(),
-  }));
+  .from(STUDENTS.table)
+  .select(`id:${STUDENTS.id}, no:${STUDENTS.no}, prefix:${STUDENTS.prefix}, first:${STUDENTS.first}, last:${STUDENTS.last}, gender:${STUDENTS.gender}, birth:${STUDENTS.birth}`)
+  .in(STUDENTS.classroom, ids)
+  .is("moved_out_at", null)
+  .order(STUDENTS.no, { ascending: true });
+if (error) throw new Error(error.message);
+const rows: StudentRow[] = (data ?? []).map((s: any) => ({
+  id: s.id,
+  no: s.no ?? null,
+  name: `${getDisplayPrefix(s.gender ?? null, s.birth ?? null, s.prefix ?? null) ?? ""}${s.first ?? ""} ${s.last ?? ""}`.trim(),
+}));
   (a.cache.students ??= new Map()).set(classroomId, rows);
   return rows;
 }
