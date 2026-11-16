@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { FolderOpen, FileText, CheckCircle2, XCircle, Printer, Loader2 } from "lucide-react";
 import { FOLDERS, thaiDate, type ReportRow } from "@/lib/late-report/rows";
+import { authHeaders, openAuthedPdf } from "@/lib/visitors/client-auth";
 
 const supabase = createClient();
 
@@ -47,7 +48,7 @@ export default function LateReportApprovals() {
     if (action === "reject" && !comments[r.id]?.trim()) { alert("กรุณาระบุเหตุผลที่ไม่อนุมัติ"); return; }
     setBusy(r.id);
     const res = await fetch(`/api/late-report/${r.id}/approve`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { ...(await authHeaders()), "Content-Type": "application/json" },
       body: JSON.stringify({ action, comment: comments[r.id] ?? "" }),
     });
     const j = await res.json().catch(() => ({}));
@@ -68,10 +69,10 @@ export default function LateReportApprovals() {
             <div key={r.id} className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-amber-200">
               <p className="text-m font-bold text-slate-800">{thaiDate(r.report_date)} · มาสายรวม {r.total} คน</p>
               <p className="text-[16px] text-slate-400">ผู้รายงาน: {r.reporter_name}</p>
-              <a href={`/api/late-report/${r.id}/pdf?variant=unsigned`} target="_blank"
+              <button type="button" onClick={() => openAuthedPdf(`/api/late-report/${r.id}/pdf?variant=unsigned`)}
                 className="mt-2 inline-flex items-center gap-1 text-[16px] font-semibold text-indigo-500 hover:underline">
                 <Printer className="h-4 w-4" /> เปิดดูเอกสาร
-              </a>
+              </button>
               <textarea
                 value={comments[r.id] ?? ""} onChange={(e) => setComments({ ...comments, [r.id]: e.target.value })}
                 placeholder="ความเห็น (ไม่บังคับ — ถ้าไม่อนุมัติต้องระบุเหตุผล)" rows={2}
@@ -102,12 +103,12 @@ export default function LateReportApprovals() {
             <div className="mt-3 max-h-[28rem] space-y-1.5 overflow-y-auto">
               {approved.length === 0 && <p className="py-4 text-center text-m text-slate-400">ยังไม่มีไฟล์</p>}
               {approved.map((r) => (
-                <a key={r.id} href={`/api/late-report/${r.id}/pdf?variant=${v}`} target="_blank"
+                <button type="button" key={r.id} onClick={() => openAuthedPdf(`/api/late-report/${r.id}/pdf?variant=${v}`)}
                   className="flex items-center gap-2 rounded-2xl bg-slate-50 px-3 py-2.5 text-[16px] text-slate-700 hover:bg-indigo-50">
                   <FileText className="h-4 w-4 shrink-0 text-rose-500" />
                   <span className="truncate">{FOLDERS[v].label}_{r.report_date}.pdf</span>
                   <span className="ml-auto shrink-0 text-slate-400">{r.total} คน</span>
-                </a>
+                </button>
               ))}
             </div>
           </div>

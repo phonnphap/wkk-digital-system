@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server"; // ★ server client (cookie-based) ของโปรเจกต์
+import { getMe } from "@/lib/visitors/admin-auth"; // รับทั้ง Bearer token และ cookie
 import { admin, personName } from "@/lib/late-report/server";
 import { buildReportRows, bangkokToday } from "@/lib/late-report/rows";
 
 const LATE_DUTY_POINT_ID = "c93c2d7b-0084-4606-93f5-6433d26e7246";
 const err = (error: string, status: number) => NextResponse.json({ error }, { status });
 
-export async function POST() {
-  const sb = await createClient();
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) return err("ยังไม่ได้เข้าสู่ระบบ", 401);
+export async function POST(req: Request) {
+  const who = await getMe(req);
+  if (!who) return err("ยังไม่ได้เข้าสู่ระบบ", 401);
 
   const db = admin();
-  const { data: me } = await db.from("users").select("*").eq("auth_id", user.id).maybeSingle();
+  const { data: me } = await db.from("users").select("*").eq("id", who.id).maybeSingle();
   if (!me) return err("ไม่พบข้อมูลผู้ใช้", 403);
 
   const today = bangkokToday();
@@ -25,7 +24,7 @@ export async function POST() {
     const ids: string[] = [...(duty?.morning_teachers ?? []), ...(duty?.afternoon_teachers ?? [])];
     if (!ids.includes(me.id)) return err("เฉพาะครูเวรจับสายของวันนี้เท่านั้นที่สร้างรายงานได้", 403);
   }
-  if (!me.signature_path) return err("ยังไม่มีลายเซนของคุณในระบบ กรุณาอัปโหลดลายเซนก่อน", 400);
+  if (!me.signature_url) return err("ยังไม่มีลายเซนของคุณในระบบ กรุณาเซ็นลายเซนก่อน (ใช้ลายเซนเดียวกับระบบลา)", 400);
 
   const { data: existing } = await db.from("late_reports").select("id,status").eq("report_date", today).maybeSingle();
   if (existing && existing.status !== "rejected") return err("วันนี้มีรายงานที่ส่งแล้ว", 409);
@@ -51,7 +50,7 @@ export async function POST() {
 
   const { data: report, error } = await db.from("late_reports").insert({
     report_date: today, reporter_id: me.id, reporter_name: personName(me),
-    reporter_signature_path: me.signature_path, rows, total,
+    reporter_signature_path: me.signature_url, rows, total,
   }).select().single();
   if (error || !report) return err("สร้างรายงานไม่สำเร็จ: " + error?.message, 500);
 

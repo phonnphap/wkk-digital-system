@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getMe } from "@/lib/visitors/admin-auth";
 import { admin, finalizeReport } from "@/lib/late-report/server";
 
 const err = (error: string, status: number) => NextResponse.json({ error }, { status });
@@ -9,12 +9,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { action, comment } = await req.json();
   if (action !== "approve" && action !== "reject") return err("action ไม่ถูกต้อง", 400);
 
-  const sb = await createClient();
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) return err("ยังไม่ได้เข้าสู่ระบบ", 401);
+  const who = await getMe(req);
+  if (!who) return err("ยังไม่ได้เข้าสู่ระบบ", 401);
 
   const db = admin();
-  const { data: me } = await db.from("users").select("*").eq("auth_id", user.id).maybeSingle();
+  const { data: me } = await db.from("users").select("*").eq("id", who.id).maybeSingle();
   if (!me) return err("ไม่พบข้อมูลผู้ใช้", 403);
 
   const { data: steps } = await db.from("late_report_steps").select("*").eq("report_id", id).order("step");
