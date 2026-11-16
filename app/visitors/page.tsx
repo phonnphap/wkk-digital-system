@@ -1,4 +1,4 @@
-// path ในโปรเจกต์: app/visitors/page.tsx (แทนที่ไฟล์เดิม)
+// path ในโปรเจกต์: app/(app)/visitors/page.tsx  หรือ app/visitors/page.tsx (แทนที่ไฟล์เดิม — ใช้ตำแหน่งเดียวกับไฟล์ที่มีอยู่)
 "use client";
 
 import { useEffect, useState } from "react";
@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Home, ArrowLeft, UserCheck, Camera, LogOut, Phone, Clock, QrCode, BarChart3, Loader2, CheckCircle2, Bell } from "lucide-react";
 import Link from "next/link";
+import ParcelsPanel from "@/components/visitors/ParcelsPanel";
+import VisitorPhoto from "@/components/visitors/VisitorPhoto";
+import { useIsAdmin } from "@/lib/visitors/client-auth";
 
 const supabase = createClient();
 const DASHBOARD_PATH = "/dashboard";
@@ -17,6 +20,8 @@ type Visitor = {
   contact_person: string | null;
   purpose: string | null;
   photo_url: string | null;
+  photo_path?: string | null;          // ★ รูปหน้า (โหมดถ่ายหน้าของ รปภ.) — เห็นเฉพาะแอดมิน
+  student_name?: string | null;        // ★ นักเรียนที่มาพบ
   check_in_at: string | null;
   check_out_at: string | null;
   created_at: string;
@@ -25,9 +30,14 @@ type Visitor = {
   notified_at: string | null;
   ack_at: string | null;
   ack_by: string | null;
+  acknowledged_at?: string | null;     // ★ ชื่อคอลัมน์ที่หน้าป้อมยามใช้ — รองรับทั้งสองชื่อ
+  acknowledged_by?: string | null;
 };
 
 type Ocr = { status: "running" | "done" | "error"; name: string; plate: string };
+
+const ackAtOf = (v: Visitor) => v.acknowledged_at ?? v.ack_at;
+const ackByOf = (v: Visitor) => v.acknowledged_by ?? v.ack_by;
 
 function timeThai(iso: string) {
   return new Date(iso).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
@@ -56,6 +66,7 @@ function startOfTodayBangkokISO() {
 
 export default function VisitorsPage() {
   const router = useRouter();
+  const isAdmin = useIsAdmin();
   const [pending, setPending] = useState<Visitor[]>([]);
   const [inside, setInside] = useState<Visitor[]>([]);
   const [today, setToday] = useState<Visitor[]>([]);
@@ -199,7 +210,7 @@ export default function VisitorsPage() {
           checkedOutToday.length
       )
     : 0;
-  const notAcked = inside.filter((v) => v.notified_at && !v.ack_at).length;
+  const notAcked = inside.filter((v) => v.notified_at && !ackAtOf(v)).length;
   const stats = [
     { label: "ผู้มาติดต่อวันนี้", value: today.length, unit: "คน", color: "text-indigo-600" },
     { label: "อยู่ในโรงเรียนตอนนี้", value: inside.length, unit: "คน", color: "text-teal-600" },
@@ -281,6 +292,7 @@ export default function VisitorsPage() {
                           </span>
                         )}
                       </p>
+                      {v.student_name && <p className="text-xs font-semibold text-indigo-600">มาพบ: {v.student_name}</p>}
                       {v.purpose && <p className="text-xs text-slate-500">เรื่อง: {v.purpose}</p>}
 
                       <label className="flex cursor-pointer items-center gap-3 rounded-2xl border-2 border-dashed border-amber-300 bg-white px-4 py-3">
@@ -347,36 +359,50 @@ export default function VisitorsPage() {
               ) : inside.length === 0 ? (
                 <p className="py-6 text-center text-sm text-slate-400">ไม่มีบุคคลภายนอกอยู่ในโรงเรียนขณะนี้</p>
               ) : (
-                inside.map((v) => (
-                  <div key={v.id} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-slate-800">{v.id_name || v.full_name}</p>
-                      <p className="truncate text-xs text-slate-400">
-                        {v.contact_person && `ติดต่อ ${v.contact_person} · `}
-                        เข้า {v.check_in_at ? timeThai(v.check_in_at) : "-"} น.
-                        {v.plate && ` · ทะเบียน ${v.plate}`}
-                      </p>
-                      {v.ack_at ? (
-                        <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
-                          <CheckCircle2 className="h-3.5 w-3.5" /> ครู{v.ack_by} รับทราบแล้ว {timeThai(v.ack_at)} น.
-                        </p>
-                      ) : v.notified_at ? (
-                        <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-amber-600">
-                          <Bell className="h-3.5 w-3.5" /> แจ้งครูแล้ว รอรับทราบ
-                        </p>
-                      ) : null}
+                inside.map((v) => {
+                  const ackAt = ackAtOf(v);
+                  return (
+                    <div key={v.id} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                        {/* ★ รูปหน้าผู้มาติดต่อ — แสดงเฉพาะแอดมิน และเฉพาะคนที่ รปภ. ถ่ายหน้าไว้ */}
+                        {v.photo_path && <VisitorPhoto visitorId={v.id} isAdmin={isAdmin} />}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-slate-800">{v.id_name || v.full_name}</p>
+                          <p className="truncate text-xs text-slate-400">
+                            {v.contact_person && `ติดต่อ ${v.contact_person} · `}
+                            เข้า {v.check_in_at ? timeThai(v.check_in_at) : "-"} น.
+                            {v.plate && ` · ทะเบียน ${v.plate}`}
+                          </p>
+                          {v.student_name && <p className="truncate text-xs font-semibold text-indigo-600">มาพบ: {v.student_name}</p>}
+                          {v.purpose && <p className="truncate text-xs text-slate-400">เรื่อง: {v.purpose}</p>}
+                          {ackAt ? (
+                            <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
+                              <CheckCircle2 className="h-3.5 w-3.5" /> ครู{ackByOf(v)} รับทราบแล้ว {timeThai(ackAt)} น.
+                            </p>
+                          ) : v.notified_at ? (
+                            <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-amber-600">
+                              <Bell className="h-3.5 w-3.5" /> แจ้งครูแล้ว รอรับทราบ
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleCheckOut(v.id)}
+                        className="flex shrink-0 items-center gap-1 rounded-xl bg-rose-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-600"
+                      >
+                        <LogOut className="h-3.5 w-3.5" /> เช็คเอาท์
+                      </button>
                     </div>
-                    <button
-                      onClick={() => handleCheckOut(v.id)}
-                      className="flex shrink-0 items-center gap-1 rounded-xl bg-rose-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-600"
-                    >
-                      <LogOut className="h-3.5 w-3.5" /> เช็คเอาท์
-                    </button>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
+        </div>
+
+        {/* ★ รับฝากของ */}
+        <div className="mt-5">
+          <ParcelsPanel isAdmin={isAdmin} />
         </div>
       </div>
     </div>
