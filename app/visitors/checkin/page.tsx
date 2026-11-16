@@ -87,15 +87,31 @@ setDone(true);
 
         <p className="pt-1 text-sm font-bold text-slate-600">มาติดต่อ <span className="text-rose-500">*</span></p>
         <TargetPicker targets={targets} value={target} onChange={setTarget} />
-        {target?.type === "class" && (
-  <input required value={form.student_name}
-    onChange={e => setForm(f => ({ ...f, student_name: e.target.value }))}
-    placeholder="ชื่อนักเรียนที่มาพบ *" className={inputCls} />
+        {target?.type !== "admin" && (
+  <div>
+    <input
+      required
+      value={form.student_name}
+      onChange={e => setForm(f => ({ ...f, student_name: e.target.value }))}
+      placeholder="ชื่อนักเรียนที่มาพบ *"
+      className={inputCls}
+    />
+    <p className="mt-1 px-2 text-xs text-slate-400">ตัวอย่าง: ด.ช.สมชาย ใจดี</p>
+  </div>
 )}
-<textarea required value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))}
-  placeholder="เรื่องที่มาติดต่อ *" rows={2} className={inputCls} />
 
-        <textarea value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))} placeholder="เรื่องที่มาติดต่อ" rows={2} className={inputCls} />
+<div>
+  <textarea
+    required
+    value={form.purpose}
+    onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))}
+    placeholder="เรื่องที่มาติดต่อ *"
+    rows={2}
+    className={inputCls}
+  />
+  <p className="mt-1 px-2 text-xs text-slate-400">ตัวอย่าง: มาส่งยา / ขอรับนักเรียนกลับก่อนเวลา / ส่งเอกสาร</p>
+</div>
+        
         {/* honeypot กันบอท — คนจริงจะไม่เห็น */}
         <input tabIndex={-1} autoComplete="off" value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} className="hidden" aria-hidden />
 
