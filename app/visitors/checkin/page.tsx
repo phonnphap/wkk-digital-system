@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { UserCheck, CheckCircle2 } from "lucide-react";
 import TargetPicker, { Target, Targets } from "@/components/visitors/TargetPicker";
 
-const EMPTY = { full_name: "", phone: "", car_plate: "", purpose: "", website: "" };
+const EMPTY = { full_name: "", phone: "", car_plate: "", purpose: "", student_name: "", website: "" };
 const inputCls = "w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-base outline-none focus:border-teal-400";
 
 export default function VisitorCheckinPage() {
@@ -15,6 +15,7 @@ export default function VisitorCheckinPage() {
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [done, setDone] = useState(false);
+  const [submittedAt, setSubmittedAt] = useState("");
 
   useEffect(() => {
     fetch("/api/visitors").then(r => r.json()).then(setTargets).catch(() => setErrorMsg("โหลดรายชื่อห้องไม่สำเร็จ กรุณาแจ้ง รปภ."));
@@ -24,6 +25,8 @@ export default function VisitorCheckinPage() {
     e.preventDefault();
     if (!form.full_name.trim()) return setErrorMsg("กรุณากรอกชื่อ-นามสกุล");
     if (!target) return setErrorMsg("กรุณาเลือกชั้นเรียนหรือฝ่ายที่มาติดต่อ");
+    if (!form.purpose.trim()) return setErrorMsg("กรุณาระบุเรื่องที่มาติดต่อ");
+if (target.type === "class" && !form.student_name.trim()) return setErrorMsg("กรุณาพิมพ์ชื่อนักเรียนที่มาพบ");
     setSaving(true); setErrorMsg("");
     try {
       const res = await fetch("/api/visitors", {
@@ -32,7 +35,13 @@ export default function VisitorCheckinPage() {
       });
       const json = await res.json();
       if (!json.ok) { setErrorMsg(json.error ?? "ส่งข้อมูลไม่สำเร็จ"); setSaving(false); return; }
-      setDone(true);
+      setSubmittedAt(
+  new Date().toLocaleString("th-TH", {
+    timeZone: "Asia/Bangkok", day: "numeric", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  }) + " น."
+);
+setDone(true);
     } catch { setErrorMsg("ส่งข้อมูลไม่สำเร็จ กรุณาลองใหม่"); }
     setSaving(false);
   }
@@ -46,10 +55,15 @@ export default function VisitorCheckinPage() {
           <CheckCircle2 className="mx-auto h-14 w-14 text-emerald-500" />
           <h1 className="mt-4 text-xl font-extrabold text-slate-800">ส่งข้อมูลเรียบร้อย</h1>
           <p className="mt-2 text-sm text-slate-500">กรุณาแสดงหน้านี้ให้ รปภ. ที่ป้อมยาม เพื่อยืนยันการเข้า</p>
-          <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-3 text-left text-sm">
-            <p className="font-semibold text-slate-700">{form.full_name}</p>
-            <p className="text-slate-400">ติดต่อ: {target?.label}</p>
-          </div>
+          <div className="mt-5 space-y-2 rounded-2xl bg-slate-50 px-4 py-3 text-left text-sm">
+  <p className="text-base font-extrabold text-slate-800">{form.full_name}</p>
+  <SummaryRow label="เวลา" value={submittedAt} />
+  <SummaryRow label="ติดต่อ" value={target?.label} />
+  <SummaryRow label="เรื่อง" value={form.purpose} />
+  <SummaryRow label="เบอร์โทร" value={form.phone} />
+  <SummaryRow label="ทะเบียนรถ" value={form.car_plate} />
+  <SummaryRow label="นักเรียน" value={form.student_name} />
+</div>
           <button onClick={() => { setForm(EMPTY); setTarget(null); setDone(false); }}
             className="mt-6 w-full rounded-2xl bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-600">กรอกข้อมูลใหม่</button>
         </div>
@@ -73,6 +87,13 @@ export default function VisitorCheckinPage() {
 
         <p className="pt-1 text-sm font-bold text-slate-600">มาติดต่อ <span className="text-rose-500">*</span></p>
         <TargetPicker targets={targets} value={target} onChange={setTarget} />
+        {target?.type === "class" && (
+  <input required value={form.student_name}
+    onChange={e => setForm(f => ({ ...f, student_name: e.target.value }))}
+    placeholder="ชื่อนักเรียนที่มาพบ *" className={inputCls} />
+)}
+<textarea required value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))}
+  placeholder="เรื่องที่มาติดต่อ *" rows={2} className={inputCls} />
 
         <textarea value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))} placeholder="เรื่องที่มาติดต่อ" rows={2} className={inputCls} />
         {/* honeypot กันบอท — คนจริงจะไม่เห็น */}
@@ -83,6 +104,16 @@ export default function VisitorCheckinPage() {
           {saving ? "กำลังส่งข้อมูล..." : "ส่งข้อมูล"}
         </button>
       </form>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value?: string | null }) {
+  if (!value?.trim()) return null;
+  return (
+    <div className="flex gap-2">
+      <span className="w-20 shrink-0 text-slate-400">{label}</span>
+      <span className="font-semibold text-slate-700">{value}</span>
     </div>
   );
 }

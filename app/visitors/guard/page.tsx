@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import TargetPicker, { Target, Targets } from "@/components/visitors/TargetPicker";
+import StudentPicker, { PickedStudent } from "@/components/visitors/StudentPicker";
 
 type Visitor = {
   id: string; full_name: string; phone?: string | null; car_plate?: string | null;
