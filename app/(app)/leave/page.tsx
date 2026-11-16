@@ -3815,14 +3815,16 @@ export default function LeavePage(){
       setLoading(false);
     })();
   },[]);
-  useEffect(() => {
-  if (!user || !APPROVER_EMAILS.includes(user.email)) return;
-   if (!user || ![...APPROVER_EMAILS, ADMIN_EMAIL].includes(user.email?.toLowerCase())) return;
-  const id = new URLSearchParams(window.location.search).get("finalize");
-  if (!id) return;
-  window.history.replaceState(null, "", "/leave");   // ล้างพารามิเตอร์ กันรีเฟรชแล้วอัปโหลดซ้ำ
-  generateApprovedPdfFor(id).catch(e => console.warn("[finalize pdf]", e));
-}, [user]);
+    useEffect(() => {
+    if (!user || ![...APPROVER_EMAILS, ADMIN_EMAIL].includes(user.email?.toLowerCase())) return;
+    const id = new URLSearchParams(window.location.search).get("finalize");
+    if (!id) return;
+    window.history.replaceState(null, "", "/leave");
+    alert("⏳ กำลังสร้าง PDF ใบลา กรุณารอสักครู่ (กด OK แล้วรอประมาณ 10–20 วินาที)");
+    generateApprovedPdfFor(id)
+      .then(() => alert("✅ สร้าง PDF ใบลาเรียบร้อย"))
+      .catch(e => alert("❌ สร้างไม่สำเร็จ: " + (e?.message ?? e)));
+  }, [user]);
 
   if(loading)return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-blue-500 font-black text-lg animate-pulse">กำลังโหลดระบบ...</div></div>;
   if(!user)return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-red-500 font-black">❌ กรุณาเข้าสู่ระบบก่อน</div></div>;
