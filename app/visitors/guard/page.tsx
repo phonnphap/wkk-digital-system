@@ -2,12 +2,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import TargetPicker, { Target, Targets } from "@/components/visitors/TargetPicker";
 import StudentPicker, { PickedStudent } from "@/components/visitors/StudentPicker";
 
 type Visitor = {
   id: string; full_name: string; phone?: string | null; car_plate?: string | null;
   target_label?: string | null; purpose?: string | null; source?: string | null;
+  student_name?: string | null;
   status: string; check_in_at?: string | null; created_at?: string;
   acknowledged_at?: string | null;
 };
@@ -53,6 +55,8 @@ export default function GuardPage() {
   const [mode, setMode] = useState<Mode>("home");
   const [targets, setTargets] = useState<Targets>({ rooms: [], admins: [] });
   const [target, setTarget] = useState<Target>(null);
+  const [student, setStudent] = useState<PickedStudent>(null);
+  const [purpose, setPurpose] = useState("");
   const [name, setName] = useState("");
   const [plate, setPlate] = useState("");
   const [photo, setPhoto] = useState<Blob | null>(null);
@@ -73,33 +77,33 @@ export default function GuardPage() {
     } catch (e: any) { if (e.message === "401") setAuthed(false); }
   }, []);
 
- useEffect(() => {
-  // ถ้าเปิดผ่านลิงก์ที่มี ?k=รหัส ให้จำรหัสไว้ แล้วลบรหัสออกจากแถบที่อยู่
-  const k = new URLSearchParams(window.location.search).get("k");
-  if (k) {
-    localStorage.setItem(KEY, k);
-    window.history.replaceState({}, "", window.location.pathname);
-  }
-  fetch("/api/visitors").then(r => r.json()).then(setTargets).catch(() => {});
-  load();
-  const t = setInterval(load, 15_000);
-  return () => clearInterval(t);
-}, [load]);
+  useEffect(() => {
+    // ถ้าเปิดผ่านลิงก์ที่มี ?k=รหัส ให้จำรหัสไว้ แล้วลบรหัสออกจากแถบที่อยู่
+    const k = new URLSearchParams(window.location.search).get("k");
+    if (k) {
+      localStorage.setItem(KEY, k);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    fetch("/api/visitors").then(r => r.json()).then(setTargets).catch(() => {});
+    load();
+    const t = setInterval(load, 15_000);
+    return () => clearInterval(t);
+  }, [load]);
 
   function reset() {
     if (preview) URL.revokeObjectURL(preview);
-    setMode("home"); setTarget(null); setName(""); setPlate("");
+    setMode("home"); setTarget(null); setStudent(null); setPurpose(""); setName(""); setPlate("");
     setPhoto(null); setPreview(""); setMsg("");
   }
   function flash(m: string, ms = 3000) { setMsg(m); setTimeout(() => setMsg(""), ms); }
 
   async function confirmPending(v: Visitor) {
-  const j = await api({ action: "confirm", id: v.id });
-  const w = notifyMsg(j);
-reset();
-flash(w || "✅ บันทึกเข้าเรียบร้อย", w ? 10000 : 3000);
-load();
-}
+    const j = await api({ action: "confirm", id: v.id });
+    const w = notifyMsg(j);
+    reset();
+    flash(w || "✅ บันทึกเข้าเรียบร้อย", w ? 10000 : 3000);
+    load();
+  }
   async function rejectPending(v: Visitor) { await api({ action: "reject", id: v.id }); load(); }
   async function checkout(v: Visitor) { await api({ action: "checkout", id: v.id }); flash(`🚪 ออกแล้ว: ${v.full_name}`); load(); }
 
@@ -130,12 +134,19 @@ load();
 
   async function saveWalkin() {
     if (!target) return setMsg("⚠️ กรุณาเลือกห้อง/ฝ่ายที่มาติดต่อ");
+    if (target.type === "class" && !student) return setMsg("⚠️ กรุณากดเลือกนักเรียนที่มาพบ");
+    if (!purpose.trim()) return setMsg("⚠️ กรุณาระบุเรื่องที่มาติดต่อ");
     if (mode === "id" && !name.trim() && !plate.trim()) return setMsg("⚠️ กรุณาถ่ายบัตร/ทะเบียน หรือพิมพ์ชื่อ");
     if (mode === "face" && !photo) return setMsg("⚠️ กรุณาถ่ายรูปหน้าผู้ปกครอง");
     setBusy(true); setMsg("");
     try {
       const fd = new FormData();
-      fd.append("data", JSON.stringify({ name, plate, mode, target }));
+      fd.append("data", JSON.stringify({
+        name, plate, mode, target,
+        purpose: purpose.trim(),
+        student_id: student?.id ?? null,
+        student_name: student?.name ?? null,
+      }));
       if (mode === "face" && photo) fd.append("photo", photo, "p.jpg");
       const j = await api(undefined, fd);
       if (!j.ok) { setBusy(false); return setMsg("❌ " + (j.error ?? "บันทึกไม่สำเร็จ")); }
@@ -168,6 +179,7 @@ load();
           <>
             <button onClick={() => setMode("id")} className={`${bigBtn} bg-sky-600 py-8 text-3xl text-white`}>📷 ถ่ายบัตร / ทะเบียนรถ</button>
             <button onClick={() => setMode("face")} className={`${bigBtn} bg-violet-600 py-8 text-3xl text-white`}>🧑 ไม่มีบัตร — เลือกห้อง + ถ่ายหน้า</button>
+            <Link href="/visitors/parcels" className={`${bigBtn} block bg-amber-500 py-8 text-center text-3xl text-white`}>📦 แจ้งฝากของ</Link>
 
             {pending.length > 0 && (
               <section className="space-y-4">
@@ -176,8 +188,9 @@ load();
                   <div key={v.id} className="rounded-3xl border-4 border-amber-300 bg-white p-5">
                     <p className="text-3xl font-black text-slate-800">{v.full_name}</p>
                     <p className="mt-1 text-2xl font-bold text-teal-700">ติดต่อ: {v.target_label}</p>
+                    {v.student_name && <p className="text-2xl font-bold text-indigo-600">มาพบ: {v.student_name}</p>}
                     {v.car_plate && <p className="text-2xl text-slate-600">🚗 {v.car_plate}</p>}
-                    {v.purpose && <p className="text-xl text-slate-500">{v.purpose}</p>}
+                    {v.purpose && <p className="text-xl text-slate-500">เรื่อง: {v.purpose}</p>}
                     <div className="mt-4 grid grid-cols-3 gap-3">
                       <button onClick={() => confirmPending(v)} className={`${bigBtn} col-span-2 bg-green-600 py-7 text-3xl text-white`}>✅ ให้เข้า</button>
                       <button onClick={() => rejectPending(v)} className={`${bigBtn} bg-red-500 py-7 text-2xl text-white`}>✖ ไม่</button>
@@ -194,6 +207,7 @@ load();
                 <div key={v.id} className="rounded-3xl border-4 border-green-300 bg-white p-5">
                   <p className="text-3xl font-black text-slate-800">{v.full_name}</p>
                   <p className="text-2xl font-bold text-teal-700">ติดต่อ: {v.target_label} · เข้า {timeTH(v.check_in_at)}</p>
+                  {v.student_name && <p className="text-2xl font-bold text-indigo-600">มาพบ: {v.student_name}</p>}
                   {v.car_plate && <p className="text-2xl text-slate-600">🚗 {v.car_plate}</p>}
                   <p className={`mt-1 text-xl font-bold ${v.acknowledged_at ? "text-green-600" : "text-slate-400"}`}>
                     {v.acknowledged_at ? `✔ ครูรับทราบแล้ว ${timeTH(v.acknowledged_at)}` : "⏳ รอครูรับทราบ"}
@@ -226,8 +240,19 @@ load();
               </div>
             )}
 
-            <h3 className="text-2xl font-black">มาติดต่อ</h3>
-            <TargetPicker targets={targets} value={target} onChange={setTarget} big />
+            <h3 className="text-2xl font-black">มาติดต่อ <span className="text-rose-500">*</span></h3>
+            <TargetPicker targets={targets} value={target} onChange={t => { setTarget(t); setStudent(null); }} big />
+
+            {target?.type === "class" && target.classroom_id && (
+              <StudentPicker big classroomId={target.classroom_id} value={student} onChange={setStudent} />
+            )}
+
+            <div>
+              <h3 className="text-2xl font-black">เรื่องที่มาติดต่อ <span className="text-rose-500">*</span></h3>
+              <textarea value={purpose} onChange={e => setPurpose(e.target.value)} rows={2}
+                placeholder="เช่น มาส่งยา / ขอรับนักเรียนกลับ / ส่งเอกสาร"
+                className="mt-2 w-full rounded-2xl border-4 border-slate-300 px-5 py-4 text-2xl" />
+            </div>
 
             <button onClick={saveWalkin} disabled={busy} className={`${bigBtn} bg-green-600 py-9 text-4xl text-white`}>
               {busy ? "⏳ กำลังบันทึก..." : "✅ บันทึก — ให้เข้า"}

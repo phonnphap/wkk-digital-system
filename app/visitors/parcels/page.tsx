@@ -1,12 +1,15 @@
-// path: app/parcels/page.tsx  (หน้า รปภ. รับฝากของ — ต้องล็อกอิน)
+// path: app/visitors/parcels/page.tsx  (หน้า รปภ. รับฝากของ — ใช้ PIN เดียวกับหน้าป้อมยาม)
+// ★ ต้องอยู่นอกกลุ่ม (app) เพราะ รปภ. ไม่ได้ล็อกอิน
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Camera, Send, Loader2, CheckCircle2, Package, RotateCcw } from "lucide-react";
 import TargetPicker, { Target, Targets } from "@/components/visitors/TargetPicker";
 import StudentPicker, { PickedStudent } from "@/components/visitors/StudentPicker";
 
 const CHIPS = ["อาหาร/ขนม", "เสื้อผ้า/ชุดพละ", "หนังสือ/อุปกรณ์การเรียน", "ยา", "กระเป๋า/ของใช้"];
+const gh = (): Record<string, string> => ({ "x-guard-key": localStorage.getItem("guard_key") ?? "" });
 const inputCls = "w-full rounded-2xl border-2 border-slate-200 px-4 py-4 text-xl outline-none focus:border-teal-400";
 
 async function shrink(file: File, max = 1280): Promise<Blob> {
@@ -38,7 +41,7 @@ export default function ParcelsPage() {
   const [waiting, setWaiting] = useState<Parcel[]>([]);
 
   const loadWaiting = () =>
-    fetch("/api/parcels").then((r) => r.json()).then((j) => setWaiting(j.parcels ?? [])).catch(() => {});
+    fetch("/api/parcels", { headers: gh() }).then((r) => r.json()).then((j) => setWaiting(j.parcels ?? [])).catch(() => {});
 
   useEffect(() => {
     fetch("/api/visitors").then((r) => r.json()).then(setTargets).catch(() => setErrorMsg("โหลดรายชื่อห้องไม่สำเร็จ"));
@@ -74,9 +77,10 @@ export default function ParcelsPage() {
     fd.append("description", desc);
     fd.append("sender_name", sender);
     try {
-      const res = await fetch("/api/parcels", { method: "POST", body: fd });
+      const res = await fetch("/api/parcels", { method: "POST", headers: gh(), body: fd });
       const j = await res.json();
-      if (!j.ok) setErrorMsg(j.error ?? "ส่งไม่สำเร็จ");
+      if (res.status === 401) setErrorMsg("หมดสิทธิ์ใช้งาน กรุณากลับไปเข้ารหัสที่หน้าป้อมยามอีกครั้ง");
+      else if (!j.ok) setErrorMsg(j.error ?? "ส่งไม่สำเร็จ");
       else { setResult(j); loadWaiting(); }
     } catch { setErrorMsg("ส่งไม่สำเร็จ กรุณาลองใหม่"); }
     setSending(false);
@@ -84,7 +88,7 @@ export default function ParcelsPage() {
 
   async function handOver(id: string) {
     if (!confirm("ยืนยันว่าส่งมอบของให้นักเรียน/ผู้ปกครองแล้ว?")) return;
-    await fetch("/api/parcels", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+    await fetch("/api/parcels", { method: "PATCH", headers: { ...gh(), "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
     loadWaiting();
   }
 
@@ -112,6 +116,7 @@ export default function ParcelsPage() {
   return (
     <div className={bg}>
       <div className="mx-auto w-full max-w-2xl space-y-4">
+        <Link href="/visitors/guard" className="inline-block rounded-2xl bg-white px-5 py-3 text-xl font-black text-slate-700 shadow">← กลับป้อมยาม</Link>
         <h1 className="flex items-center gap-2 text-2xl font-extrabold text-slate-800">
           <Package className="h-7 w-7 text-teal-500" /> รับฝากของให้นักเรียน
         </h1>

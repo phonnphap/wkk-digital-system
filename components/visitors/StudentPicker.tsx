@@ -19,7 +19,9 @@ export default function StudentPicker({
 
   useEffect(() => {
     setLoading(true); setQ(""); onChange(null);
-    fetch(`/api/visitors/students?classroom_id=${classroomId}`)
+    fetch(`/api/visitors/students?classroom_id=${classroomId}`, {
+      headers: { "x-guard-key": localStorage.getItem("guard_key") ?? "" },
+    })
       .then((r) => r.json())
       .then((j) => setList(j.students ?? []))
       .catch(() => setList([]))

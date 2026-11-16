@@ -1,24 +1,17 @@
 // path: app/api/parcels/route.ts
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { createClient } from "@/lib/supabase/server";
 import { adminDb, getHomeroomTeachers, notifyTeams } from "@/lib/parcels/server";
+import { guardOrUser } from "@/lib/visitors/guard-auth";
 
 const err = (error: string, status = 400) => NextResponse.json({ ok: false, error }, { status });
 const WEEK = 60 * 60 * 24 * 7;
 
-async function auth() {
-  const sb = await createClient();
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) return null;
-  // TODO: จำกัด role (เช่น รปภ./admin) ได้ที่นี่ถ้าต้องการ
-  const { data: me } = await adminDb().from("users").select("id, role").eq("auth_id", user.id).maybeSingle();
-  return me;
-}
+const auth = (req: Request) => guardOrUser(req); // รปภ. (PIN) หรือผู้ใช้ที่ล็อกอิน
 
 // รับฝากของ: รูป + ห้อง + นักเรียน → เก็บ → แจ้งครูประจำชั้นใน Teams
 export async function POST(req: Request) {
-  const me = await auth();
+  const me = await auth(req);
   if (!me) return err("Unauthorized", 401);
 
   const fd = await req.formData();
@@ -81,8 +74,8 @@ export async function POST(req: Request) {
 }
 
 // รายการของที่ยังรอรับ
-export async function GET() {
-  if (!(await auth())) return err("Unauthorized", 401);
+export async function GET(req: Request) {
+  if (!(await auth(req))) return err("Unauthorized", 401);
   const db = adminDb();
   const { data } = await db.from("parcels").select("*").eq("status", "waiting")
     .order("created_at", { ascending: false }).limit(30);
@@ -97,7 +90,7 @@ export async function GET() {
 
 // ส่งมอบแล้ว
 export async function PATCH(req: Request) {
-  if (!(await auth())) return err("Unauthorized", 401);
+  if (!(await auth(req))) return err("Unauthorized", 401);
   const { id } = await req.json();
   if (!id) return err("ไม่พบรายการ");
   await adminDb().from("parcels").update({ status: "picked_up", picked_up_at: new Date().toISOString() }).eq("id", id);
