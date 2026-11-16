@@ -200,6 +200,31 @@ function defaultTerm() {
   return { semester: "2", year: String(be - 1) };
 }
 
+/* ===== ตั้งชื่อตาราง/คอลัมน์ที่นี่ที่เดียว (แก้ให้ตรงกับ Supabase จริง) ===== */
+const DB = {
+  sectionsTable: "subject_sections",   // ตารางที่ sectionId ชี้ไป
+  sectionTeacherCol: "teacher_id",     // คอลัมน์ครูผู้สอนในตารางนั้น
+  sectionCodeCol: "subject_code",      // คอลัมน์รหัสวิชา
+  sectionRoomCol: "classroom_id",      // ใช้แยกห้อง (ถ้าไม่มีค่านี้จะข้ามเอง)
+  usersTable: "users",
+  deptTable: "departments",            // ตารางกลุ่มสาระ (อ้างด้วย users.department_id)
+  headRole: "subject_dept_head",       // ค่าใน users.extra_roles ของ หน.กลุ่มสาระ
+};
+
+function userDisplayName(u: any): string {
+  if (!u) return "";
+  const full = u.full_name ?? u.name ?? u.display_name;
+  if (full) return String(full).trim();
+  return `${u.prefix ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`.trim();
+}
+
+// extra_roles เป็น array หรือข้อความก็ใช้ได้
+function hasRole(u: any, role: string): boolean {
+  const r = u?.extra_roles;
+  if (!r) return false;
+  return Array.isArray(r) ? r.includes(role) : String(r).includes(role);
+}
+
 function dots(text: string | number | undefined | null, w = "min-w-[90px]") {
   return (
     <span className={`inline-block border-b border-dotted border-black px-1 text-center ${w}`}>
@@ -270,8 +295,64 @@ useEffect(() => {
 }, [teachersKey, subjectTeacherNameFallback]);
 
 useEffect(() => {
-  setHeadName(headOfAreaName ?? areaHeads?.[areaV] ?? "");
+  const v = headOfAreaName ?? areaHeads?.[areaV];
+  if (v) setHeadName(v);   // มีค่าจาก props เท่านั้นถึงจะตั้ง ไม่เช่นนั้นปล่อยให้ค่าจาก DB อยู่
 }, [headOfAreaName, areaHeads, areaV]);
+
+/* ----- ดึงครู 2 คน + กลุ่มสาระ + หน.กลุ่มสาระ จาก DB ----- */
+useEffect(() => {
+  let active = true;
+  (async () => {
+    try {
+      // 1) section ปัจจุบัน → ครูคนที่ 1
+      const { data: sec } = await supabase
+        .from(DB.sectionsTable).select("*").eq("id", sectionId).maybeSingle();
+      const t1Id: string | null = sec?.[DB.sectionTeacherCol] ?? null;
+
+      // 2) section อื่นที่รหัสวิชาเดียวกัน (ห้องเดียวกัน) → ครูคนที่ 2
+      let t2Id: string | null = null;
+      if (sec) {
+        let q = supabase.from(DB.sectionsTable).select("*")
+          .eq(DB.sectionCodeCol, sec[DB.sectionCodeCol] ?? subjectCode)
+          .neq("id", sectionId);
+        if (sec[DB.sectionRoomCol] != null) q = q.eq(DB.sectionRoomCol, sec[DB.sectionRoomCol]);
+        const { data: others } = await q;
+        t2Id = (others ?? [])
+          .map((o: any) => o[DB.sectionTeacherCol])
+          .find((id: string | null) => id && id !== t1Id) ?? null;
+      }
+
+      // 3) ข้อมูลครูจากตาราง users
+      const ids = [t1Id, t2Id].filter(Boolean) as string[];
+      if (ids.length === 0) return;
+      const { data: us } = await supabase.from(DB.usersTable).select("*").in("id", ids);
+      const u1 = us?.find((u: any) => u.id === t1Id);
+      const u2 = us?.find((u: any) => u.id === t2Id);
+
+      // 4) กลุ่มสาระ = department_id ของครู
+      const deptId = u1?.department_id ?? u2?.department_id ?? null;
+      let deptName = "";
+      let head = "";
+      if (deptId) {
+        const { data: d } = await supabase.from(DB.deptTable).select("*").eq("id", deptId).maybeSingle();
+        deptName = d?.name ?? d?.name_th ?? d?.title ?? "";
+
+        // 5) หน.กลุ่มสาระ = คนในกลุ่มสาระเดียวกันที่ extra_roles มี subject_dept_head
+        const { data: mates } = await supabase.from(DB.usersTable).select("*").eq("department_id", deptId);
+        head = userDisplayName((mates ?? []).find((m: any) => hasRole(m, DB.headRole)));
+      }
+
+      if (!active) return;
+      if (u1) setTeacher1(userDisplayName(u1));
+      if (u2) setTeacher2(userDisplayName(u2));
+      if (deptName) setAreaV(deptName);
+      if (head) setHeadName(head);
+    } catch {
+      /* ดึงไม่ได้ก็ใช้ค่าจาก props / กรอกเอง */
+    }
+  })();
+  return () => { active = false; };
+}, [sectionId, subjectCode]);
 
 const teacherNames = [teacher1, teacher2].map(t => t.trim()).filter(Boolean);
   const [logoOk, setLogoOk] = useState(true);
