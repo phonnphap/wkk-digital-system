@@ -2253,6 +2253,15 @@ const handleAdminSwapRespond = async (id: string, action: "accepted" | "rejected
     await pushSwap(id, action);
   await loadData();
 };
+// ★ แอดมินย้อนสถานะคำขอที่อนุมัติ/ปฏิเสธผิด กลับเป็น "รออนุมัติ"
+const handleAdminSwapRevert = async (id: string) => {
+  if (!confirm("ย้อนคำขอนี้กลับเป็น 'รออนุมัติ' ใช่หรือไม่?")) return;
+  const { error } = await supabase.from("class_swap_requests")
+    .update({ status: "pending", responded_at: null })
+    .eq("id", id);
+  if (error) { alert("❌ " + error.message); return; }
+  await loadData();
+};
 // ★ ลบคำขอแลกคาบที่ยกเลิกแล้วออกจาก Supabase ถาวร
 const handleSwapDeletePermanent = async (id: string) => {
   if (!confirm("⚠️ ลบคำขอแลกคาบนี้ถาวร?\nข้อมูลจะหายไปจากฐานข้อมูลทันทีและกู้คืนไม่ได้")) return;
@@ -2606,10 +2615,17 @@ const adminFilteredSwaps = useMemo(() => {
     )}
   </div>
 ) : isSpecificAdmin ? (
-  <button onClick={() => setEditingSwapDate(r)}
-    className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold border border-blue-200 shrink-0">
-    ✏️ แก้ไข
-  </button>
+  <div className="flex gap-2 shrink-0">
+    {(r.status === "accepted" || r.status === "rejected") && (
+      <button onClick={() => handleAdminSwapRevert(r.id)}
+        className="px-3 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold border border-amber-300">
+        ↩️ คืนเป็นรออนุมัติ
+      </button>
+    )}<button onClick={() => setEditingSwapDate(r)}
+      className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold border border-blue-200">
+      ✏️ แก้ไข
+    </button>
+  </div>
 ) : r.status === "cancelled" ? (
   <button onClick={() => handleSwapDeletePermanent(r.id)}
     className="px-3 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold border border-red-300 shrink-0">

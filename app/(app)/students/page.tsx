@@ -32,6 +32,27 @@ type Classroom = {
   room_number?: number;
 };
 
+type RoomGroup = Classroom & { classroom_ids: string[]; main_id: string };
+
+function groupClassrooms(list: Classroom[]): RoomGroup[] {
+  const map = new Map<string, RoomGroup>();
+  for (const c of list) {
+    const key = c.room_name.trim();
+    const g = map.get(key);
+    if (g) g.classroom_ids.push(c.classroom_id);
+    else
+      map.set(key, {
+        ...c,
+        room_name: key,
+        classroom_ids: [c.classroom_id],
+        main_id: c.classroom_id, // ค่าเริ่มต้น จะถูกแทนด้วย student_room_id ด้านล่าง
+      });
+  }
+  return [...map.values()].sort((a, b) =>
+    a.room_name.localeCompare(b.room_name, "th", { numeric: true })
+  );
+}
+
 type Student = {
   id: string;
   seat_number: number | null;
@@ -80,8 +101,8 @@ function todayStr(): string {
 
 export default function StudentsPage() {
   const router = useRouter();
-  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
-  const [selectedClass, setSelectedClass] = useState<Classroom | null>(null);
+  const [classrooms, setClassrooms] = useState<RoomGroup[]>([]);
+const [selectedClass, setSelectedClass] = useState<RoomGroup | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -114,55 +135,53 @@ export default function StudentsPage() {
 
   useEffect(() => {
     supabase.rpc("get_my_classrooms").then(({ data }: { data: Classroom[] | null }) => {
-      setClassrooms(data ?? []);
-      if (data?.length) setSelectedClass(data[0]);
-    });
+  const groups = groupClassrooms(data ?? []);
+  setClassrooms(groups);
+  if (groups.length) setSelectedClass(groups[0]);
+});
   }, []);
 
-  // ★ ดึงชื่อครูประจำชั้นคนปัจจุบัน สำหรับบันทึกลง moved_out_by_name
   // (ไม่รู้ชื่อคอลัมน์ full name ที่แน่ชัดในตาราง users จึงลองไล่หลายคอลัมน์ที่เป็นไปได้ ก่อน fallback เป็น email)
   useEffect(() => {
-    (async () => {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) return;
-      setCurrentAuthId(authUser.id);
-      const { data: profile } = await supabase
-        .from("users")
-        .select("*")
-        .eq("auth_id", authUser.id)
-        .maybeSingle();
-      const p = (profile ?? {}) as Record<string, unknown>;
-      const name =
-        (p.full_name as string) ||
-        (p.display_name as string) ||
-        ([p.first_name, p.last_name].filter(Boolean).join(" ") || null) ||
-        (p.name as string) ||
-        authUser.email ||
-        "ครูประจำชั้น";
-      setTeacherDisplayName(name);
-    })();
-  }, []);
+  (async () => {
+    const { data } = await supabase.rpc("get_my_classrooms");
+    const groups = groupClassrooms((data as Classroom[]) ?? []);
+
+    // หา "ห้องหลัก" ที่นักเรียนผูกอยู่ จากคอลัมน์ student_room_id
+    const allIds = groups.flatMap((g) => g.classroom_ids);
+    if (allIds.length) {
+      const { data: rows } = await supabase
+        .from("classrooms")
+        .select("id, student_room_id")
+        .in("id", allIds);
+      const mainOf = new Map<string, string>(
+        (rows ?? []).map((r: { id: string; student_room_id: string | null }) => [
+          r.id,
+          r.student_room_id ?? r.id,
+        ])
+      );
+      for (const g of groups) {
+        g.main_id = mainOf.get(g.classroom_ids[0]) ?? g.classroom_ids[0];
+      }
+    }
+
+    setClassrooms(groups);
+    if (groups.length) setSelectedClass(groups[0]);
+  })();
+}, []);
 
   function loadStudents(cid: string) {
-    setLoading(true);
-    supabase
-      .from("students")
-      .select(
-        "id, seat_number, student_code, prefix, first_name, last_name, nick_name, birth_date, gender, guardian_name, guardian_relation, guardian_phone, address, avatar_url"
-      )
-      .eq("classroom_id", cid)
-      // ★ ซ่อนนักเรียนที่ย้ายออกไปแล้วจากหน้าครูประจำชั้น (soft-deleted)
-      .is("moved_out_at", null)
-      .order("seat_number")
-      .then(({ data }: { data: Student[] | null }) => {
-        setStudents(data ?? []);
-        setLoading(false);
-      });
-  }
-
+  setLoading(true);
+  supabase
+    .rpc("get_classroom_students", { cid })
+    .then(({ data }: { data: Student[] | null }) => {
+      setStudents(data ?? []);
+      setLoading(false);
+    });
+}
   useEffect(() => {
     if (!selectedClass) return;
-    loadStudents(selectedClass.classroom_id);
+    loadStudents(selectedClass.main_id);
   }, [selectedClass]);
 
   function openAddForm() {
@@ -204,13 +223,12 @@ export default function StudentsPage() {
     }
     setSaving(true);
     setSaveError("");
-    const cid = selectedClass.classroom_id;
     const payload = {
       ...form,
-      seat_number: form.seat_number ? Number(form.seat_number) : null,
-      birth_date: form.birth_date || null,
-      classroom_id: cid,
-    };
+  seat_number: form.seat_number ? Number(form.seat_number) : null,
+  birth_date: form.birth_date || null,
+  ...(editingId ? {} : { classroom_id: selectedClass.main_id }),
+};
 
     // ✅ เพิ่ม .select() เพื่อตรวจสอบว่ามีแถวถูกบันทึก/แก้ไขจริงกี่แถว
     // (เดิม: ถ้า RLS ของตาราง students ไม่อนุญาตให้แก้ไขแถวนี้ Supabase จะไม่โยน error
@@ -253,7 +271,7 @@ export default function StudentsPage() {
     }
 
     setShowForm(false);
-    loadStudents(cid);
+loadStudents(selectedClass.main_id);
   }
 
   // ★ เปิด modal กรอกวันที่ย้ายออก (แทนการลบจริงแบบเดิม)
@@ -298,13 +316,13 @@ export default function StudentsPage() {
     }
 
     setMovingOutStudent(null);
-    if (selectedClass) loadStudents(selectedClass.classroom_id);
+    if (selectedClass) loadStudents(selectedClass.main_id);
   }
 
   // ★ ไปหน้าพิมพ์การ์ดนักเรียนของห้องที่เลือกอยู่
   function goToPrintCards() {
     if (!selectedClass) return;
-    router.push(`/students/print?classroom=${selectedClass.classroom_id}`);
+    router.push(`/students/print?classroom=${selectedClass.main_id}`);
   }
 
   return (
@@ -357,18 +375,15 @@ export default function StudentsPage() {
         {classrooms.length > 1 && (
           <div className="mt-5 max-w-xs">
             <select
-              className="w-full rounded-2xl border-2 border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
-              value={selectedClass?.classroom_id ?? ""}
-              onChange={(e) =>
-                setSelectedClass(classrooms.find((c) => c.classroom_id === e.target.value) ?? null)
-              }
-            >
-              {classrooms.map((c) => (
-                <option key={c.classroom_id} value={c.classroom_id}>
-                  {c.room_name}
-                </option>
-              ))}
-            </select>
+  value={selectedClass?.main_id ?? ""}
+  onChange={(e) =>
+    setSelectedClass(classrooms.find((c) => c.main_id === e.target.value) ?? null)
+  }
+>
+  {classrooms.map((c) => (
+    <option key={c.main_id} value={c.main_id}>{c.room_name}</option>
+  ))}
+</select>
           </div>
         )}
 
