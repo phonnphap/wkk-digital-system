@@ -191,7 +191,7 @@ export default function LateReportPanel(_props: { canCreate?: boolean }) {
           )}
         </div>
       )}
-      <SignatureCard />
+      {elig && !isAdmin && <SignatureCard />}
     </div>
   );
 }

@@ -143,6 +143,40 @@ if (roomIds.length > 0) {
   }
   const counts: Record<string, number> = {};
   allStudents.forEach(s => { counts[s.classroom_id] = (counts[s.classroom_id] ?? 0) + 1; });
+
+  // ★ แก้บั๊ก: ห้องเทอม 2 (ป.4-6, ม.1-6) ไม่มีรายชื่อของตัวเอง → ยืมจำนวนจากห้องเทอม 1
+  //   หาห้องต้นทางจาก previous_section_id ของ section เทอม 2 (ถ้าไม่เจอใช้ชื่อห้องเดียวกันแทน)
+  const emptyIds = new Set(roomIds.filter((id: string) => !counts[id]));
+  if (emptyIds.size > 0) {
+    const secs: { id: string; classroom_id: string; previous_section_id: string | null }[] = [];
+    let sFrom = 0;
+    while (true) {
+      const { data: sp, error: sErr } = await supabase.from("subject_sections")
+        .select("id, classroom_id, previous_section_id").eq("is_active", true)
+        .range(sFrom, sFrom + 999);
+      if (sErr || !sp || sp.length === 0) break;
+      secs.push(...(sp as any[]));
+      if (sp.length < 1000) break;
+      sFrom += 1000;
+    }
+    const secRoom = new Map(secs.map(s => [s.id, s.classroom_id]));
+    const sourceOf: Record<string, string> = {};
+    secs.forEach(s => {
+      if (!s.previous_section_id || !emptyIds.has(s.classroom_id)) return;
+      const src = secRoom.get(s.previous_section_id);
+      if (src && src !== s.classroom_id && (counts[src] ?? 0) > 0) sourceOf[s.classroom_id] = src;
+    });
+    // สำรอง: ห้องชื่อเดียวกันที่มีรายชื่อ
+    const byName = new Map<string, string>();
+    ((rooms ?? []) as any[]).forEach(r => {
+      if (r.room_name && (counts[r.id] ?? 0) > 0) byName.set(r.room_name.trim(), r.id);
+    });
+    ((rooms ?? []) as any[]).forEach(r => {
+      if (!emptyIds.has(r.id)) return;
+      const src = sourceOf[r.id] ?? (r.room_name ? byName.get(r.room_name.trim()) : undefined);
+      if (src) counts[r.id] = counts[src];
+    });
+  }
   setStudentCounts(counts);
 }
 } else {

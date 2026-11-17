@@ -74,8 +74,24 @@ export async function lateDutyLookup(db: SupabaseClient, date: string): Promise<
       if (await tryQuery(col, db.from("duty_time_slots").select("*").in(col, aIds))) break;
     }
   }
+  // ถ้า duty_assignments ไม่มีแถวของวัน (ตารางเวรจริงอาจเก็บวัน/จุดไว้ที่ duty_time_slots เอง) → ค้นด้วยคอลัมน์วันที่ + จุดเวร
   if (!slots.length) {
-    await tryQuery("duty_date+duty_point_id", db.from("duty_time_slots").select("*").eq("duty_date", date).in("duty_point_id", [...pointIds]));
+    const cols: string[] = debug.timeSlotColumns ?? [];
+    const dateCol = cols.find((c) => /^(duty_|slot_|assign(ed|ment)_)?date$/.test(c)) ?? cols.find((c) => /date/.test(c) && !/created|updated/.test(c));
+    const pointCol = cols.find((c) => /point_id$/.test(c));
+    const dowCol = cols.find((c) => /^(day_of_week|weekday|dow)$/.test(c));
+    debug.guessedColumns = { dateCol: dateCol ?? null, pointCol: pointCol ?? null, dowCol: dowCol ?? null };
+    const pts = [...pointIds];
+    const d = new Date(`${date}T00:00:00+07:00`);
+    const dow = new Date(d.getTime() + 7 * 3600_000).getUTCDay();   // 0=อาทิตย์ … 6=เสาร์
+    const dows = [...new Set([dow, dow === 0 ? 7 : dow])];
+    if (pointCol && dateCol) {
+      await tryQuery(`${dateCol}+${pointCol}`, db.from("duty_time_slots").select("*").eq(dateCol, date).in(pointCol, pts));
+    } else if (pointCol && dowCol) {
+      await tryQuery(`${dowCol}+${pointCol}`, db.from("duty_time_slots").select("*").in(dowCol, dows).in(pointCol, pts));
+    } else if (pointCol) {
+      await tryQuery(`${pointCol} only`, db.from("duty_time_slots").select("*").in(pointCol, pts));
+    }
   }
   debug.timeSlotAttempts = attempts;
   debug.timeSlotsFound = slots.length;

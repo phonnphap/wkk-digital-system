@@ -11,6 +11,7 @@ type Entity = {
   type: "subject" | "classroom";
   classroomId: string;
   accessMode: string;
+  previousSectionId?: string | null;
 };
 
 type Student = {
@@ -40,6 +41,50 @@ function getAutoPrefix(gender: string | null, birthDateStr: string | null): stri
 
 function studentFullLabel(s: Student) {
   return `${s.seat_number}. ${getAutoPrefix(s.gender, s.birth_date)}${s.first_name} ${s.last_name}`;
+}
+
+// ★ แก้บั๊ก: ห้องเรียนเทอม 2 (ป.4-6, ม.1-6) ถูกสร้างแยกจากเทอม 1 และไม่มีรายชื่อ นร.
+//   จึงต้องไปดึงรายชื่อจากห้องเทอม 1 แทน โดยไล่ตาม previous_section_id (หรือชื่อห้องเดียวกัน)
+async function loadStudentsForClassroom(
+  classroomId: string,
+  prevSectionId?: string | null
+): Promise<Student[]> {
+  const COLS = "id, first_name, last_name, seat_number, gender, birth_date";
+  const fetchStudents = async (cid: string) => {
+    const { data } = await supabase.from("students").select(COLS)
+      .eq("classroom_id", cid).is("moved_out_at", null).order("seat_number");
+    return (data ?? []) as Student[];
+  };
+
+  // 1) ห้องนี้มีรายชื่อเอง → ใช้เลย
+  let list = await fetchStudents(classroomId);
+  if (list.length > 0) return list;
+
+  // 2) ไล่ตาม section เทอมก่อนหน้า
+  let prev = prevSectionId ?? null;
+  for (let hop = 0; prev && hop < 5; hop++) {
+    const { data: ps } = await supabase.from("subject_sections")
+      .select("classroom_id, previous_section_id").eq("id", prev).maybeSingle();
+    if (!ps) break;
+    if (ps.classroom_id && ps.classroom_id !== classroomId) {
+      list = await fetchStudents(ps.classroom_id);
+      if (list.length > 0) return list;
+    }
+    prev = ps.previous_section_id ?? null;
+  }
+
+  // 3) สำรอง: ห้องที่ชื่อเดียวกันและมีรายชื่อ
+  const { data: me } = await supabase.from("classrooms")
+    .select("room_name").eq("id", classroomId).maybeSingle();
+  if (me?.room_name) {
+    const { data: sibs } = await supabase.from("classrooms")
+      .select("id").eq("room_name", me.room_name).neq("id", classroomId);
+    for (const sb of (sibs ?? []) as { id: string }[]) {
+      list = await fetchStudents(sb.id);
+      if (list.length > 0) return list;
+    }
+  }
+  return [];
 }
 
 export default function JoinPage() {
@@ -88,14 +133,14 @@ export default function JoinPage() {
       // 1) ลองหาเป็น "โค้ดรายวิชา" ก่อน (ของเดิม)
       const { data: sec } = await supabase
         .from("subject_sections")
-        .select("id, classroom_id, student_access_mode, student_portal_enabled")
+        .select("id, classroom_id, student_access_mode, student_portal_enabled, previous_section_id")
         .eq("join_code", joinCode)
         .maybeSingle();
 
       let resolvedEntity: Entity | null = null;
 
       if (sec && sec.student_portal_enabled) {
-        resolvedEntity = { type: "subject", classroomId: sec.classroom_id, accessMode: sec.student_access_mode };
+        resolvedEntity = { type: "subject", classroomId: sec.classroom_id, accessMode: sec.student_access_mode, previousSectionId: sec.previous_section_id };
       } else {
         // 2) ไม่เจอ → ลองหาเป็น "โค้ดห้องเรียน" (โค้ดหลัก จากครูประจำชั้น)
         const { data: cls } = await supabase
@@ -118,12 +163,8 @@ export default function JoinPage() {
       setEntity(resolvedEntity);
 
       if (resolvedEntity.accessMode !== "id_and_dob") {
-        const { data: list } = await supabase
-          .from("students")
-          .select("id, first_name, last_name, seat_number, gender, birth_date") // ★ เพิ่ม gender, birth_date เพื่อคำนวณคำนำหน้า
-          .eq("classroom_id", resolvedEntity.classroomId)
-          .order("seat_number");
-        setStudents(list ?? []);
+        const list = await loadStudentsForClassroom(resolvedEntity.classroomId, resolvedEntity.previousSectionId);
+        setStudents(list);
       }
       setLoading(false);
     })();

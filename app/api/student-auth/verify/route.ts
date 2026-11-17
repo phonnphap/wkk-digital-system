@@ -9,6 +9,54 @@ type ResolvedEntity = {
   sectionId: string | null; // non-null only when type === "subject"
 };
 
+// ★ แก้บั๊ก: ห้องเทอม 2 (ป.4-6, ม.1-6) ไม่มีรายชื่อ นร. ของตัวเอง (รายชื่ออยู่ห้องเทอม 1)
+//   ใช้ตรรกะเดียวกับหน้า join: ถ้าห้องนี้ไม่มี นร. ให้หาห้องต้นทางจาก previous_section_id
+//   (ไล่ได้สูงสุด 5 ชั้น) แล้วสำรองด้วยห้องชื่อเดียวกันที่มี นร. คืนค่าเป็นรายการ classroom id ที่ยอมรับได้
+async function resolveAllowedClassroomIds(
+  supabase: any,
+  classroomId: string,
+  sectionId: string | null
+): Promise<string[]> {
+  const hasStudents = async (cid: string) => {
+    const { count } = await supabase
+      .from("students")
+      .select("id", { count: "exact", head: true })
+      .eq("classroom_id", cid)
+      .is("moved_out_at", null);
+    return (count ?? 0) > 0;
+  };
+
+  if (await hasStudents(classroomId)) return [classroomId];
+
+  // 1) ไล่ตาม section เทอมก่อนหน้า
+  if (sectionId) {
+    const { data: start } = await supabase
+      .from("subject_sections").select("previous_section_id").eq("id", sectionId).maybeSingle();
+    let prev: string | null = start?.previous_section_id ?? null;
+    for (let hop = 0; prev && hop < 5; hop++) {
+      const { data: ps } = await supabase
+        .from("subject_sections").select("classroom_id, previous_section_id").eq("id", prev).maybeSingle();
+      if (!ps) break;
+      if (ps.classroom_id && ps.classroom_id !== classroomId && (await hasStudents(ps.classroom_id))) {
+        return [classroomId, ps.classroom_id];
+      }
+      prev = ps.previous_section_id ?? null;
+    }
+  }
+
+  // 2) สำรอง: ห้องชื่อเดียวกันที่มีรายชื่อ
+  const { data: me } = await supabase
+    .from("classrooms").select("room_name").eq("id", classroomId).maybeSingle();
+  if (me?.room_name) {
+    const { data: sibs } = await supabase
+      .from("classrooms").select("id").eq("room_name", me.room_name).neq("id", classroomId);
+    for (const sb of (sibs ?? []) as { id: string }[]) {
+      if (await hasStudents(sb.id)) return [classroomId, sb.id];
+    }
+  }
+  return [classroomId];
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -72,6 +120,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "รูปแบบการเข้าใช้งานไม่ถูกต้อง" }, { status: 400 });
     }
 
+    const allowedClassroomIds = await resolveAllowedClassroomIds(supabase, entity.classroomId, entity.sectionId);
+
     let matchedId: string | null = null;
 
     if (mode === "name_only") {
@@ -82,7 +132,7 @@ export async function POST(req: NextRequest) {
         .from("students")
         .select("id")
         .eq("id", student_id)
-        .eq("classroom_id", entity.classroomId)
+        .in("classroom_id", allowedClassroomIds)
         .is("moved_out_at", null)
         .maybeSingle();
       if (error) console.error("[verify] name_only error:", error);
@@ -97,7 +147,7 @@ export async function POST(req: NextRequest) {
         .from("students")
         .select("id")
         .eq("id", student_id)
-        .eq("classroom_id", entity.classroomId)
+        .in("classroom_id", allowedClassroomIds)
         .eq("student_code", student_code)
         .maybeSingle();
       if (error) console.error("[verify] name_and_id error:", error);
@@ -111,7 +161,7 @@ export async function POST(req: NextRequest) {
       const { data: s, error } = await supabase
         .from("students")
         .select("id")
-        .eq("classroom_id", entity.classroomId)
+        .in("classroom_id", allowedClassroomIds)
         .eq("student_code", student_code)
         .eq("birth_date", birth_date)
         .maybeSingle();
