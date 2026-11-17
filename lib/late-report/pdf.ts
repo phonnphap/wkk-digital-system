@@ -79,12 +79,16 @@ export async function renderMemo(d: MemoData, variant: Variant): Promise<Uint8Ar
     page.drawImage(im, { x: cx - (im.width * s) / 2, y: baseY, width: im.width * s, height: im.height * s });
   }
 
-  // ── หัวบันทึกข้อความ ──
+  // ── หัวบันทึกข้อความ ── ตราครุฑมุมซ้ายบน (ไฟล์ public/images.jpg — เปลี่ยนได้ด้วย env GARUDA_FILE เช่น images/krut.png)
   try {
-    const file = process.env.GARUDA_FILE || "images.jpg";   // public/images/<ไฟล์ตราครุฑ>
-    const buf = await loadPublicFile(`images/${file}`);
-    const g = /\.png$/i.test(file) ? await pdf.embedPng(buf) : await pdf.embedJpg(buf);
-    page.drawImage(g, { x: M, y: y - 44, width: 46, height: 46 * (g.height / g.width) });
+    const candidates = [process.env.GARUDA_FILE, "images.jpg", "images/images.jpg"].filter(Boolean) as string[];
+    let buf: Buffer | null = null; let file = "";
+    for (const f of candidates) { try { buf = await loadPublicFile(f); file = f; break; } catch { /* ลองไฟล์ถัดไป */ } }
+    if (buf) {
+      const g = /\.png$/i.test(file) ? await pdf.embedPng(buf) : await pdf.embedJpg(buf);
+      const gw = 56;
+      page.drawImage(g, { x: M, y: y - 52, width: gw, height: gw * (g.height / g.width) });
+    }
   } catch { /* ไม่พบตราครุฑก็ข้าม */ }
   y -= 30;
   centerAt("บันทึกข้อความ", W / 2, 28, bold);
@@ -106,16 +110,17 @@ export async function renderMemo(d: MemoData, variant: Variant): Promise<Uint8Ar
   wrap(body, font, 16, W - 2 * M - 40).forEach((ln, i) => { text(ln, M + (i === 0 ? 40 : 0)); y -= 17; });
   y -= 6;
 
-  // ── ตาราง ──
-  const cols = [38, 215, 90, W - 2 * M - 343]; // ที่ | สายชั้น | จำนวน/คน | หมายเหตุ
-  const RH = 14.5;
-  const drawRow = (cells: string[], f: PDFFont, size = 15) => {
+  // ── ตาราง ── ฟอนต์ 16 / เส้นบางสีเทาอ่อน / ช่องสูงพอดีตัวอักษร
+  const cols = [40, 213, 95, W - 2 * M - 348]; // ที่ | สายชั้น | จำนวน/คน | หมายเหตุ
+  const RH = 21, TS = 16;
+  const lineCol = rgb(0.62, 0.62, 0.62);
+  const drawRow = (cells: string[], f: PDFFont) => {
     ensure(RH + 4);
     let x = M;
     cells.forEach((c, i) => {
-      page.drawRectangle({ x, y: y - 4, width: cols[i], height: RH, borderColor: ink, borderWidth: 0.7 });
-      if (i === 1) page.drawText(c, { x: x + 6, y, size, font: f, color: ink });
-      else page.drawText(c, { x: x + cols[i] / 2 - f.widthOfTextAtSize(c, size) / 2, y, size, font: f, color: ink });
+      page.drawRectangle({ x, y: y - 6, width: cols[i], height: RH, borderColor: lineCol, borderWidth: 0.5 });
+      if (i === 1) page.drawText(c, { x: x + 7, y, size: TS, font: f, color: ink });
+      else page.drawText(c, { x: x + cols[i] / 2 - f.widthOfTextAtSize(c, TS) / 2, y, size: TS, font: f, color: ink });
       x += cols[i];
     });
     y -= RH;
@@ -125,36 +130,41 @@ export async function renderMemo(d: MemoData, variant: Variant): Promise<Uint8Ar
     drawRow([toThaiDigits(i + 1), toThaiDigits(r.label), r.count ? toThaiDigits(r.count) : "-", ""], font)
   );
   drawRow(["", "รวม", toThaiDigits(d.total), ""], bold);
-  y -= 16;
 
-  // ── ลายเซนครูผู้รายงาน (มีทั้ง 2 แบบ) ──
-  ensure(100);
+  // ── ลงชื่อ: เว้นที่ด้านบนให้ลายเซนไม่ทับตัวอักษร (ลายเซนวางบนเส้นประ สูงไม่เกิน 34) ──
+  const SIG_GAP = 44;                 // ระยะจากบรรทัดบนถึงบรรทัด "ลงชื่อ"
+  const WEEKDAYS = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+  const weekday = WEEKDAYS[new Date(`${d.reportDate}T00:00:00Z`).getUTCDay()];
   const cx = 400;
-  text("ลงชื่อ", cx - 70); await drawSignature(d.reporter.signature, cx + 5, y - 4); dotted(cx - 40, cx + 70);
-  y -= 18; centerAt(`( ${d.reporter.name} )`, cx + 15); y -= 17;
-  centerAt("ครูเวรรับสายประจำวัน", cx + 15); y -= 24;
 
-  // ── ความเห็นผู้บังคับบัญชา ──
-  for (const s of d.steps) {
-    ensure(78);
-    const approved = variant === "signed" && s.status === "approved";
-    text(s.label, M, 16, bold);
-    let ly = y - 17;
-    const comment = approved ? s.comment?.trim() : "";
-    if (comment) {
-      wrap(comment, font, 15, 250).slice(0, 3).forEach((ln) => { page.drawText(ln, { x: M + 8, y: ly, size: 15, font, color: ink }); ly -= 15; });
-    } else {
-      for (let k = 0; k < 2; k++) { dotted(M + 8, 290, ly - 2); ly -= 17; }
-    }
-    // ฝั่งขวา: ลงชื่อ / (ชื่อ) / ตำแหน่ง
+  y -= 14;
+  ensure(SIG_GAP + 70);
+  y -= SIG_GAP;
+  text("ลงชื่อ", cx - 70); await drawSignature(d.reporter.signature, cx + 5, y - 1); dotted(cx - 40, cx + 70);
+  y -= 19; centerAt(`( ${d.reporter.name} )`, cx + 15); y -= 18;
+  centerAt(`ครูเวรจับสายประจำวัน${weekday}`, cx + 15); y -= 30;
+
+  // ── ความเห็นผู้บังคับบัญชา — ทุกตำแหน่งมีความเห็น "ทราบ" ──
+  for (const s2 of d.steps) {
+    ensure(SIG_GAP + 100);
+    const approved = variant === "signed" && s2.status === "approved";
+    text(s2.label, M, 16, bold);
+    const top = y;
+    // ความเห็น (ซ้าย)
+    const comment = (approved && s2.comment?.trim()) || "ทราบ";
+    let ly = top - 20;
+    wrap(comment, font, 16, 250).slice(0, 3).forEach((ln) => { page.drawText(ln, { x: M + 10, y: ly, size: 16, font, color: ink }); ly -= 18; });
+    dotted(M + 10, 290, ly + 14);
+    // ลงชื่อ (ขวา) เว้นที่ด้านบนให้ลายเซน
     const sx = 400;
+    y = top - SIG_GAP;
     text("ลงชื่อ", sx - 70);
-    if (approved) await drawSignature(s.signature, sx + 5, y - 6);
+    if (approved) await drawSignature(s2.signature, sx + 5, y - 1);
     dotted(sx - 40, sx + 70);
-    y -= 18; centerAt(`( ${s.name} )`, sx + 15, 15);
-    y -= 15; centerAt(`ตำแหน่ง ${s.position}`, sx + 15, 14);
-    if (approved && s.actedAt) { y -= 14; centerAt(toThaiDigits(thaiDate(s.actedAt.slice(0, 10))), sx + 15, 13); }
-    y = Math.min(y, ly) - 10;
+    y -= 19; centerAt(`( ${s2.name} )`, sx + 15, 16);
+    y -= 17; centerAt(`ตำแหน่ง ${s2.position}`, sx + 15, 15);
+    if (approved && s2.actedAt) { y -= 16; centerAt(toThaiDigits(thaiDate(s2.actedAt.slice(0, 10))), sx + 15, 14); }
+    y = Math.min(y, ly) - 22;
   }
 
   return pdf.save();
