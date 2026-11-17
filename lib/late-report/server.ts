@@ -10,7 +10,7 @@ export const admin = () =>
 
 // ★ ปรับให้ตรงกับคอลัมน์ชื่อใน users ของคุณ
 export const personName = (u: any) =>
-  (u.full_name ?? `${u.prefix ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`).trim();
+  (u.full_name ?? `${u.prefix ?? u.title ?? ""}${u.first_name ?? ""} ${u.last_name ?? ""}`).trim() || u.email || "";
 
 export async function getSig(db: SupabaseClient, p?: string | null) {
   if (!p) return null;

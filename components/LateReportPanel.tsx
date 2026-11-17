@@ -11,7 +11,7 @@ const supabase = createClient();
 
 type Step = { step: number; step_label: string; status: string; approver_name: string };
 type Report = { id: string; status: string; total: number; reject_reason: string | null; reporter_name: string; late_report_steps: Step[] };
-type Elig = { date: string; isAdmin: boolean; isDuty: boolean; canCreate: boolean; teachers: { id: string; name: string; hasSignature: boolean }[] };
+type Elig = { date: string; isAdmin: boolean; isDuty: boolean; canCreate: boolean; teachers: { id: string; name: string; hasSignature: boolean }[]; debug?: any };
 
 // วางใต้ปุ่มหัวเพจ:  <LateReportPanel />   (สิทธิ์ตรวจฝั่ง server — ไม่ต้องส่ง canCreate แล้ว)
 export default function LateReportPanel(_props: { canCreate?: boolean }) {
@@ -58,6 +58,20 @@ export default function LateReportPanel(_props: { canCreate?: boolean }) {
     load(date);
   }
 
+  async function cancelReport() {
+    if (!report) return;
+    const warn = report.status === "approved"
+      ? "รายงานนี้อนุมัติครบแล้ว!\nยกเลิกจะลบรายงานและไฟล์ PDF ใน Supabase (ไฟล์ที่ส่งขึ้น Google Drive ต้องลบเอง)\n\nยืนยันยกเลิก?"
+      : "ยืนยันยกเลิกรายงานนี้? ผู้อนุมัติจะไม่เห็นรายการนี้อีก และสามารถสร้างใหม่ได้";
+    if (!confirm(warn)) return;
+    setBusy(true);
+    const res = await fetch(`/api/late-report/${report.id}/cancel`, { method: "POST", headers: await authHeaders() });
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) { alert(j.error ?? "ยกเลิกไม่สำเร็จ"); return; }
+    load(date);
+  }
+
   const steps = [...(report?.late_report_steps ?? [])].sort((a, b) => a.step - b.step);
   const icon = (s: string) =>
     s === "approved" ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
@@ -92,7 +106,13 @@ export default function LateReportPanel(_props: { canCreate?: boolean }) {
             <div className="rounded-xl bg-slate-50 px-3 py-2 text-[16px]">
               <p className="font-bold text-slate-600">ครูเวรจับสาย {date === today ? "วันนี้" : thaiDate(date)}</p>
               {elig!.teachers.length === 0 ? (
-                <p className="text-rose-600">ไม่พบครูเวรในตารางเวรของวันนี้</p>
+                <>
+                  <p className="text-rose-600">ไม่พบครูเวรในตารางเวรของวันที่นี้</p>
+                  <details className="mt-1 text-[14px] text-slate-500">
+                    <summary className="cursor-pointer font-semibold text-indigo-600">ดูรายละเอียดการตรวจเวร (ส่งให้ผู้พัฒนา)</summary>
+                    <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-white p-2">{JSON.stringify(elig!.debug, null, 2)}</pre>
+                  </details>
+                </>
               ) : elig!.teachers.length === 1 ? (
                 <p className={teacher?.hasSignature ? "text-slate-700" : "text-rose-600"}>
                   {teacher?.name} {teacher?.hasSignature ? "· มีลายเซน ✓" : "· ยังไม่มีลายเซน ✗ (ให้ครูท่านนี้เซ็นก่อน)"}
@@ -110,7 +130,7 @@ export default function LateReportPanel(_props: { canCreate?: boolean }) {
 
           {report && (
             <div className="space-y-1.5">
-              <p className="text-[16px] text-slate-500">ผู้รายงาน: <span className="font-semibold text-slate-700">{report.reporter_name}</span> · มาสายรวม {report.total} คน</p>
+              <p className="text-[16px] text-slate-500">ผู้รายงาน: <span className="font-semibold text-slate-700">{report.reporter_name || "-"}</span> · มาสายรวม {report.total} คน</p>
               {steps.map((s) => (
                 <div key={s.step} className="flex items-center gap-2 text-[16px] text-slate-600">
                   {icon(s.status)} <span className="truncate">{s.step_label.replace("ความเห็น", "")}</span>
@@ -142,6 +162,12 @@ export default function LateReportPanel(_props: { canCreate?: boolean }) {
               <button type="button" onClick={() => openAuthedPdf(`/api/late-report/${report.id}/pdf?variant=unsigned`)}
                 className="flex items-center gap-1.5 rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50">
                 <Printer className="h-4 w-4" /> ปริ้นท์ (ไม่มีลายเซนผู้อนุมัติ)
+              </button>
+            )}
+            {report && isAdmin && (
+              <button type="button" onClick={cancelReport} disabled={busy}
+                className="flex items-center gap-1.5 rounded-2xl border-2 border-rose-200 px-4 py-3 text-sm font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">
+                <XCircle className="h-4 w-4" /> ยกเลิกรายงานนี้ (แอดมิน)
               </button>
             )}
             {report?.status === "approved" && (

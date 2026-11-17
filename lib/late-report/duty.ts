@@ -68,7 +68,9 @@ export async function lateDutyLookup(db: SupabaseClient, date: string): Promise<
     return false;
   };
   if (aIds.length) {
-    for (const col of ["duty_assignment_id", "assignment_id", "duty_id"]) {
+    const fromProbe: string[] = (debug.timeSlotColumns ?? []).filter((c: string) => /_id$/.test(c) && c !== "id");
+    const cols = [...new Set(["duty_assignment_id", "assignment_id", "duty_id", ...fromProbe])];
+    for (const col of cols) {
       if (await tryQuery(col, db.from("duty_time_slots").select("*").in(col, aIds))) break;
     }
   }
