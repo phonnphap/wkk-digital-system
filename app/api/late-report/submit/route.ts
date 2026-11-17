@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { getMe } from "@/lib/visitors/admin-auth"; // รับทั้ง Bearer token และ cookie
 import { admin, personName } from "@/lib/late-report/server";
+import { lateDutyTeacherIds } from "@/lib/late-report/duty";
 import { buildReportRows, bangkokToday } from "@/lib/late-report/rows";
 
-const LATE_DUTY_POINT_ID = "c93c2d7b-0084-4606-93f5-6433d26e7246";
 const err = (error: string, status: number) => NextResponse.json({ error }, { status });
 
 export async function POST(req: Request) {
@@ -14,20 +14,36 @@ export async function POST(req: Request) {
   const { data: me } = await db.from("users").select("*").eq("id", who.id).maybeSingle();
   if (!me) return err("ไม่พบข้อมูลผู้ใช้", 403);
 
+  const body = await req.json().catch(() => ({}));
   const today = bangkokToday();
+  const isAdmin = me.role === "admin";
 
-  // ต้องเป็นครูเวรจุด "ดูแลนักเรียนมาสาย" ของวันนี้ (admin ข้ามได้)
-  if (me.role !== "admin") {
-    const { data: duty } = await db.from("duty_assignments")
-      .select("morning_teachers, afternoon_teachers")
-      .eq("duty_date", today).eq("duty_point_id", LATE_DUTY_POINT_ID).maybeSingle();
-    const ids: string[] = [...(duty?.morning_teachers ?? []), ...(duty?.afternoon_teachers ?? [])];
-    if (!ids.includes(me.id)) return err("เฉพาะครูเวรจับสายของวันนี้เท่านั้นที่สร้างรายงานได้", 403);
+  // แอดมินเลือกวันที่ (รวมย้อนหลัง) ได้ — ครูทั่วไปสร้างได้เฉพาะวันนี้
+  let date = today;
+  if (isAdmin && typeof body?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
+    if (body.date > today) return err("เลือกวันที่ในอนาคตไม่ได้", 400);
+    date = body.date;
   }
-  if (!me.signature_url) return err("ยังไม่มีลายเซนของคุณในระบบ กรุณาเซ็นลายเซนก่อน (ใช้ลายเซนเดียวกับระบบลา)", 400);
 
-  const { data: existing } = await db.from("late_reports").select("id,status").eq("report_date", today).maybeSingle();
-  if (existing && existing.status !== "rejected") return err("วันนี้มีรายงานที่ส่งแล้ว", 409);
+  const dutyIds = await lateDutyTeacherIds(db, date);
+
+  // ผู้รายงาน: ครูทั่วไป = ตัวเอง (ต้องเป็นเวรวันนี้) / แอดมิน = ครูเวรจับสายของวันนั้น (ใช้ชื่อ+ลายเซนของครูเวร)
+  let reporter: any;
+  if (isAdmin) {
+    if (!dutyIds.length) return err(`ไม่พบครูเวรจับสายของวันที่ ${date} ในตารางเวร`, 400);
+    const { data: ts } = await db.from("users").select("*").in("id", dutyIds);
+    const ordered = dutyIds.map((id) => (ts ?? []).find((t: any) => t.id === id)).filter(Boolean) as any[];
+    reporter = (body?.reporter_id && ordered.find((t) => t.id === body.reporter_id)) || ordered[0];
+    if (!reporter) return err("ไม่พบข้อมูลครูเวรจับสาย", 400);
+  } else {
+    if (!dutyIds.includes(me.id)) return err("เฉพาะครูเวรจับสายของวันนี้เท่านั้นที่สร้างรายงานได้", 403);
+    reporter = me;
+  }
+  if (!reporter.signature_url)
+    return err(`${personName(reporter)} ยังไม่มีลายเซนในระบบ กรุณาให้ครูท่านนี้เซ็นลายเซนก่อน (ใช้ลายเซนเดียวกับระบบลา)`, 400);
+
+  const { data: existing } = await db.from("late_reports").select("id,status").eq("report_date", date).maybeSingle();
+  if (existing && existing.status !== "rejected") return err("วันที่นี้มีรายงานที่ส่งแล้ว", 409);
   if (existing) await db.from("late_reports").delete().eq("id", existing.id); // ถูกตีกลับ → สร้างใหม่
 
   // นับยอดฝั่ง server (กันแก้ตัวเลขจาก client)
@@ -35,7 +51,7 @@ export async function POST(req: Request) {
     db.from("classrooms").select("room_name, grade_group"),
     db.from("attendance_records")
       .select("student:students(classroom:classrooms(room_name, grade_group))")
-      .eq("attendance_date", today).eq("status", "late"),
+      .eq("attendance_date", date).eq("status", "late"),
   ]);
   const late = (lateRaw ?? []).map((r: any) => r.student?.classroom).filter(Boolean);
   const { rows, total } = buildReportRows(rooms ?? [], late);
@@ -49,8 +65,8 @@ export async function POST(req: Request) {
   const pendingIdx = firstManual === -1 ? 0 : firstManual;
 
   const { data: report, error } = await db.from("late_reports").insert({
-    report_date: today, reporter_id: me.id, reporter_name: personName(me),
-    reporter_signature_path: me.signature_url, rows, total,
+    report_date: date, reporter_id: reporter.id, reporter_name: personName(reporter),
+    reporter_signature_path: reporter.signature_url, rows, total,
   }).select().single();
   if (error || !report) return err("สร้างรายงานไม่สำเร็จ: " + error?.message, 500);
 
@@ -65,6 +81,6 @@ export async function POST(req: Request) {
   );
   if (e2) { await db.from("late_reports").delete().eq("id", report.id); return err("สร้างขั้นอนุมัติไม่สำเร็จ: " + e2.message, 500); }
 
-  // TODO: ส่งแจ้งเตือนถึง approvers[0].approver_id ที่นี่ (ถ้ามีระบบ notifications อยู่แล้ว)
-  return NextResponse.json({ id: report.id, total });
+  // TODO: ส่งแจ้งเตือนถึง approvers[pendingIdx].approver_id ที่นี่ (ถ้ามีระบบ notifications อยู่แล้ว)
+  return NextResponse.json({ id: report.id, total, date, reporter: personName(reporter) });
 }
