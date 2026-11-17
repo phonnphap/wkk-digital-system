@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStudentSession } from "@/lib/studentAuth";
+import { studentOwnsSection } from "@/lib/smartclass/sectionAccess";
 
 // GET /api/student-portal/subject-attendance/summary?subject_section_id=xxx&student_id=xxx
 // เวอร์ชันฝั่งนักเรียนของ /api/subject-attendance/summary (ของครู)
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest) {
 
     const { data: section, error: sectionErr } = await admin
       .from("subject_sections")
-      .select("id, classroom_id, subject_id")
+      .select("id, classroom_id, subject_id, previous_section_id")
       .eq("id", subject_section_id)
       .maybeSingle();
     if (sectionErr) throw sectionErr;
@@ -59,7 +60,8 @@ export async function GET(req: NextRequest) {
     }
 
     // ★ กันนักเรียนสวม subject_section_id ของห้องอื่นที่ตัวเองไม่ได้เรียน
-    if (section.classroom_id !== student.classroom_id) {
+    // ★ แก้: section เทอม 2 อยู่คนละห้องกับ นร. (ห้องเทอม 1) → ตรวจผ่าน previous_section_id
+    if (!(await studentOwnsSection(admin, student.classroom_id, section))) {
       return NextResponse.json({ error: "ไม่มีสิทธิ์เข้าถึงข้อมูลนี้" }, { status: 403 });
     }
 

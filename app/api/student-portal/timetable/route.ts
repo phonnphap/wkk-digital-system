@@ -96,23 +96,57 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const { data: sections, error: sectionsErr } = await supabaseAdmin
-  .from("subject_sections")
-  .select(`
-    id, subject_id, classroom_id, student_portal_enabled,
+  // ★ แก้: ห้องเทอม 2 (ป.4-6, ม.1-6) ถูกสร้างแยกจากเทอม 1 และ นร. ยังสังกัดห้องเทอม 1
+  //   จึงต้องรวม section เทอม 2 ที่สืบมาจาก section ของห้อง นร. (ผ่าน previous_section_id) ด้วย
+  const requestedSectionId = searchParams.get("section_id"); // หน้าวิชาส่งมา เพื่อให้เปิดลิงก์เทอมเก่าได้
+  const SEC_SELECT = `
+    id, subject_id, classroom_id, previous_section_id, student_portal_enabled,
     grading_structure, formative_max_score, midterm_max_score, final_max_score,
     show_assignment_scores, show_special_scores,
     subject:subjects ( id, subject_code, name_th, grading_mode, pass_threshold_percent )
-  `)
-  .eq("classroom_id", student.classroom_id)
-  .eq("student_portal_enabled", true);
+  `;
+
+  const { data: ownSections, error: sectionsErr } = await supabaseAdmin
+    .from("subject_sections")
+    .select(SEC_SELECT)
+    .eq("classroom_id", student.classroom_id);
 
   if (sectionsErr) {
     console.error("[timetable] sections query error:", sectionsErr);
     return NextResponse.json({ error: "ดึงตารางเรียนไม่สำเร็จ" }, { status: 500 });
   }
 
-  const sectionList = sections ?? [];
+  let candidates: any[] = [...(ownSections ?? [])];
+  let frontier: string[] = candidates.map((x) => x.id);
+  for (let hop = 0; hop < 3 && frontier.length > 0; hop++) {
+    const { data: next, error: nextErr } = await supabaseAdmin
+      .from("subject_sections")
+      .select(SEC_SELECT)
+      .in("previous_section_id", frontier)
+      .eq("is_active", true);
+    if (nextErr) {
+      console.error("[timetable] descendant sections query error:", nextErr);
+      break;
+    }
+    const fresh = (next ?? []).filter((n: any) => !candidates.some((c) => c.id === n.id));
+    candidates = candidates.concat(fresh);
+    frontier = fresh.map((n: any) => n.id);
+  }
+
+  const enabledSections = candidates.filter((x) => x.student_portal_enabled);
+  // section เทอมเก่าที่ถูกแทนด้วย section เทอมใหม่ (คนละห้อง) ซ่อนไว้ ไม่ให้วิชาซ้ำในตารางเรียน
+  // (ยกเว้นหน้าวิชาที่ขอ section นั้นโดยตรง)
+  const byId = new Map(candidates.map((x) => [x.id, x]));
+  const supersededIds = new Set<string>();
+  enabledSections.forEach((x) => {
+    const parent = x.previous_section_id ? byId.get(x.previous_section_id) : null;
+    if (parent && parent.classroom_id !== x.classroom_id) supersededIds.add(parent.id);
+  });
+  const sections = enabledSections.filter(
+    (x) => !supersededIds.has(x.id) || x.id === requestedSectionId
+  );
+
+  const sectionList = sections;
     const commonInfo = {
     student: {
       id: student.id,
@@ -138,7 +172,7 @@ export async function GET(req: NextRequest) {
   const { data: entries, error: entriesErr } = await supabaseAdmin
     .from("timetable_entries")
     .select("id, classroom_id, subject_id, day_of_week, time_slot_id")
-    .eq("classroom_id", student.classroom_id);
+    .in("classroom_id", [...new Set([student.classroom_id, ...sectionList.map((x: any) => x.classroom_id)])]);
 
   if (entriesErr) {
     console.error("[timetable] entries query error:", entriesErr);
@@ -173,7 +207,7 @@ export async function GET(req: NextRequest) {
   show_assignment_scores: sec.show_assignment_scores,
   show_special_scores: sec.show_special_scores,
   timetable_entries: entryList
-    .filter((e) => e.subject_id === sec.subject_id)
+    .filter((e) => e.subject_id === sec.subject_id && e.classroom_id === sec.classroom_id)
     .map((e) => {
         const slot = slotMap.get(e.time_slot_id);
         return {

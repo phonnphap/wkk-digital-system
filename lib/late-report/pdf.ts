@@ -1,8 +1,21 @@
 import { PDFDocument, PDFFont, PDFPage, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { ReportRow, Variant, thaiDate, toThaiDigits } from "./rows";
+
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://system.khienkhet.ac.th").replace(/\/$/, "");
+
+/** โหลดไฟล์จาก public/<rel> — ลองอ่านจากดิสก์ก่อน ถ้าไม่มี (เช่นบน Vercel) ดึงจาก URL ของเว็บเอง */
+async function loadPublicFile(rel: string): Promise<Buffer> {
+  try { return await readFile(path.join(process.cwd(), "public", rel)); } catch { /* ลองวิธีถัดไป */ }
+  try {
+    const res = await fetch(`${SITE_URL}/${rel}`);
+    const ct = res.headers.get("content-type") ?? "";
+    if (res.ok && !ct.includes("text/html")) return Buffer.from(await res.arrayBuffer());
+  } catch { /* ตกไปข้อความ error ด้านล่าง */ }
+  throw new Error(`ไม่พบไฟล์ public/${rel} — ตรวจว่าวางไฟล์ไว้ที่ public/${rel} และ push ขึ้นแล้ว (ชื่อไฟล์ต้องตรงทุกตัวอักษร ไม่มีเว้นวรรค)`);
+}
 
 export const SCHOOL = "โรงเรียนวัดเขียนเขต";
 export const DEPT = "กลุ่มบริหารทั่วไป";
@@ -36,9 +49,14 @@ function wrap(t: string, f: PDFFont, size: number, maxW: number) {
 export async function renderMemo(d: MemoData, variant: Variant): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
-  const dir = path.join(process.cwd(), "public", "fonts");
-  const font = await pdf.embedFont(await readFile(path.join(dir, "THSarabunNew.ttf")), { subset: true });
-  const bold = await pdf.embedFont(await readFile(path.join(dir, "THSarabunNew-Bold.ttf")), { subset: true });
+  // ใช้คู่ THSarabun.ttf + THSarabun-Bold.ttf ก่อน (ชุดที่มีอยู่ใน public/fonts) ถ้าไม่มีค่อยลองชื่อ THSarabunNew
+  const loadFirst = async (rels: string[]) => {
+    let last: any;
+    for (const r of rels) { try { return await loadPublicFile(r); } catch (e) { last = e; } }
+    throw last;
+  };
+  const font = await pdf.embedFont(await loadFirst(["fonts/THSarabun.ttf", "fonts/THSarabunNew.ttf"]), { subset: true });
+  const bold = await pdf.embedFont(await loadFirst(["fonts/THSarabun-Bold.ttf", "fonts/THSarabunNew-Bold.ttf"]), { subset: true });
 
   let page: PDFPage = pdf.addPage([W, H]);
   let y = H - 44;
@@ -63,14 +81,10 @@ export async function renderMemo(d: MemoData, variant: Variant): Promise<Uint8Ar
 
   // ── หัวบันทึกข้อความ ──
   try {
-    const imgDir = path.join(process.cwd(), "public", "images");
-    const file = process.env.GARUDA_FILE ??
-      (await readdir(imgDir)).find((f) => /garuda|krut|ครุฑ/i.test(f) && /\.(jpe?g|png)$/i.test(f));
-    if (file) {
-      const buf = await readFile(path.join(imgDir, file));
-      const g = /\.png$/i.test(file) ? await pdf.embedPng(buf) : await pdf.embedJpg(buf);
-      page.drawImage(g, { x: M, y: y - 44, width: 46, height: 46 * (g.height / g.width) });
-    }
+    const file = process.env.GARUDA_FILE || "images.jpg";   // public/images/<ไฟล์ตราครุฑ>
+    const buf = await loadPublicFile(`images/${file}`);
+    const g = /\.png$/i.test(file) ? await pdf.embedPng(buf) : await pdf.embedJpg(buf);
+    page.drawImage(g, { x: M, y: y - 44, width: 46, height: 46 * (g.height / g.width) });
   } catch { /* ไม่พบตราครุฑก็ข้าม */ }
   y -= 30;
   centerAt("บันทึกข้อความ", W / 2, 28, bold);

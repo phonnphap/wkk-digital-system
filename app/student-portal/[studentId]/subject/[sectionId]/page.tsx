@@ -226,7 +226,7 @@ export default function StudentPortalSubjectPage() {
 const fetchSubjectInfo = useCallback(async () => {
   if (!sectionId) return;
   try {
-    const res = await fetch(`/api/student-portal/timetable?student_id=${studentId}`);
+    const res = await fetch(`/api/student-portal/timetable?student_id=${studentId}&section_id=${sectionId}`);
     if (!res.ok) return;
     const data = await res.json();
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin"; // ★ เพิ่ม: bypass RLS เฉพาะตารางที่ต้องใช้ Supabase Auth
 import { getStudentSession } from "@/lib/studentAuth";
+import { studentOwnsSection } from "@/lib/smartclass/sectionAccess";
 
 export async function GET(req: NextRequest) {
   const session = await getStudentSession();
@@ -36,12 +37,18 @@ export async function GET(req: NextRequest) {
 
     // ★ แก้ไข: เพิ่ม student_submit_enabled เข้า select ด้วย (เดิม select แค่ allow_late_submission)
   // เพื่อให้ฝั่งนักเรียนรู้ว่าครูปิดการส่งงานทั้งวิชาไว้หรือไม่ (คนละสวิตช์กับ "ส่งย้อนหลัง")
-      const { data: section } = await supabase
+  // ★ แก้: section เทอม 2 อยู่คนละห้องกับ นร. (ห้องเทอม 1) → ตรวจผ่าน previous_section_id
+  //   และใช้ admin client เพราะ subject_sections ติด RLS (สิทธิ์ นร. เช็คไว้แล้วด้านบน)
+  const adminForAccess = createAdminClient();
+  const { data: sectionRaw } = await adminForAccess
     .from("subject_sections")
-    .select("id, allow_late_submission, student_submit_enabled, show_assignment_scores")   // ★ เพิ่ม
+    .select("id, classroom_id, previous_section_id, allow_late_submission, student_submit_enabled, show_assignment_scores")
     .eq("id", sectionId)
-    .eq("classroom_id", student.classroom_id)
     .maybeSingle();
+  const section =
+    sectionRaw && (await studentOwnsSection(adminForAccess, student.classroom_id, sectionRaw))
+      ? sectionRaw
+      : null;
 
   if (!section) {
     return NextResponse.json({ error: "ไม่พบวิชาของนักเรียนคนนี้" }, { status: 404 });

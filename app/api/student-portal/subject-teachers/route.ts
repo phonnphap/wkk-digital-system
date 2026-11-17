@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStudentSession } from "@/lib/studentAuth";
+import { studentOwnsSection } from "@/lib/smartclass/sectionAccess";
 
 export async function GET(req: NextRequest) {
   const session = await getStudentSession();
@@ -30,13 +31,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "ไม่พบข้อมูลนักเรียน" }, { status: 404 });
   }
 
+  // ★ แก้: section เทอม 2 อยู่คนละห้องกับ นร. (ห้องเทอม 1) → ตรวจผ่าน previous_section_id
   const { data: section } = await admin
     .from("subject_sections")
-    .select("id, teacher_id, co_teacher_id")
+    .select("id, classroom_id, previous_section_id, teacher_id, co_teacher_id")
     .eq("id", sectionId)
-    .eq("classroom_id", student.classroom_id)
     .maybeSingle();
-  if (!section) {
+  if (!section || !(await studentOwnsSection(admin, student.classroom_id, section))) {
     return NextResponse.json({ error: "ไม่พบวิชาของนักเรียนคนนี้" }, { status: 404 });
   }
 
