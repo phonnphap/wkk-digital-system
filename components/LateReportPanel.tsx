@@ -11,7 +11,7 @@ const supabase = createClient();
 
 type Step = { step: number; step_label: string; status: string; approver_name: string };
 type Report = { id: string; status: string; total: number; reject_reason: string | null; reporter_name: string; late_report_steps: Step[] };
-type Elig = { date: string; isAdmin: boolean; isDuty: boolean; canCreate: boolean; teachers: { id: string; name: string; hasSignature: boolean }[]; debug?: any };
+type Elig = { date: string; isAdmin: boolean; isDuty: boolean; canCreate: boolean; teachers: { id: string; name: string; hasSignature: boolean }[]; debug?: any; ver?: string };
 
 // วางใต้ปุ่มหัวเพจ:  <LateReportPanel />   (สิทธิ์ตรวจฝั่ง server — ไม่ต้องส่ง canCreate แล้ว)
 export default function LateReportPanel(_props: { canCreate?: boolean }) {
@@ -110,7 +110,10 @@ export default function LateReportPanel(_props: { canCreate?: boolean }) {
                   <p className="text-rose-600">ไม่พบครูเวรในตารางเวรของวันที่นี้</p>
                   <details className="mt-1 text-[14px] text-slate-500">
                     <summary className="cursor-pointer font-semibold text-indigo-600">ดูรายละเอียดการตรวจเวร (ส่งให้ผู้พัฒนา)</summary>
-                    <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-white p-2">{JSON.stringify(elig!.debug, null, 2)}</pre>
+                    <p className="mt-1 font-bold">
+                      รุ่นโค้ดฝั่งเซิร์ฟเวอร์: {elig!.ver ?? "เก่า ❌ (ยังไม่ได้วาง eligibility/route.ts และ duty.ts ตัวล่าสุด)"}
+                    </p>
+                    <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-white p-2">{elig!.debug ? JSON.stringify(elig!.debug, null, 2) : "(ไม่มีข้อมูลวินิจฉัย)"}</pre>
                   </details>
                 </>
               ) : elig!.teachers.length === 1 ? (
