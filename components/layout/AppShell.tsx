@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -30,6 +30,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [hovered, setHovered] = useState(false);
 
   // จำสถานะย่อ/ขยายไว้ข้ามหน้าและข้ามการเปิดเบราว์เซอร์
   useEffect(() => {
@@ -37,6 +38,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       setCollapsed(window.localStorage.getItem(COLLAPSE_KEY) === "1");
     } catch {}
   }, []);
+  
 
   function toggleCollapsed() {
     setCollapsed((v) => {
@@ -47,6 +49,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   // ปิด drawer มือถือเมื่อเปลี่ยนหน้า
   useEffect(() => setMobileOpen(false), [pathname]);
+  // ย่อ sidebar อัตโนมัติเมื่อเปลี่ยนหน้า (จอคอม)
+const isFirstRender = useRef(true);
+useEffect(() => {
+  if (isFirstRender.current) { isFirstRender.current = false; return; }
+  setCollapsed(true);
+}, [pathname]);
 
   // ดึงสิทธิ์ผู้ใช้เพื่อแสดงกลุ่มเมนูผู้ดูแลระบบ
   useEffect(() => {
@@ -159,12 +167,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen bg-slate-50 overflow-hidden">
       {/* Desktop sidebar */}
       <aside
-        className={`hidden lg:flex flex-col bg-white border-r border-slate-200 shrink-0 transition-[width] duration-200 ${
-          collapsed ? "w-[72px]" : "w-64"
-        }`}
-      >
-        <SidebarBody showLabel={!collapsed} />
-      </aside>
+  onMouseEnter={() => setHovered(true)}
+  onMouseLeave={() => setHovered(false)}
+  className={`hidden lg:flex flex-col bg-white border-r border-slate-200 shrink-0 transition-[width] duration-200 ${
+    collapsed && !hovered ? "w-[72px]" : "w-64"
+  }`}
+>
+  <SidebarBody showLabel={!collapsed || hovered} />
+</aside>
 
       {/* Mobile drawer */}
       {mobileOpen && (
