@@ -8,7 +8,6 @@ import Vp2Report from "./Vp2Report";
 import Vp3Report from "./Vp3Report";
 import Vp7Report from "./Vp7Report";
 import Vp8Report from "./Vp8Report";
-import Vp9Report from "./Vp9Report";
 
 type Student = { id: string; prefix?: string; first_name: string; last_name: string; seat_number: number };
 
@@ -21,7 +20,7 @@ const CHARACTERISTICS_ITEMS = [
   { key: "7", label: "รักความเป็นไทย" }, { key: "8", label: "มีจิตสาธารณะ" },
 ];
 
-type ReportKey = "vp2" | "vp3" | "vp7" | "vp71" | "vp8" | "vp9" | "vp15" | "readThinkWrite" | "characteristics";
+type ReportKey = "vp2" | "vp3" | "vp7" | "vp71" | "vp8" | "vp15" | "readThinkWrite" | "characteristics";
 
 const REPORT_CARDS: { key: ReportKey; label: string; icon: string; desc: string }[] = [
   { key: "readThinkWrite", label: "ประเมินอ่าน-คิด-เขียน", icon: "📖", desc: "ให้คะแนน 3 หัวข้อ ข้อละ 0-3 คะแนน พร้อมสรุปผ่าน/ไม่ผ่านอัตโนมัติ" },
@@ -31,7 +30,6 @@ const REPORT_CARDS: { key: ReportKey; label: string; icon: string; desc: string 
   { key: "vp7", label: "วผ.7 (ประกาศผลคะแนน + ผลการเรียน)", icon: "🏁", desc: "สรุปคะแนนหน่วยการเรียน/กลางภาค/ปลายภาค พร้อมตัดเกรดอัตโนมัติ พิมพ์ประกาศได้" },
   { key: "vp71", label: "วผ.7.1 (แผนวัดและประเมินผล)", icon: "📋", desc: "กรอกหน่วยการเรียนรู้+ตัวชี้วัด ใช้ร่วมกันทุกครูที่สอนวิชานี้" },
   { key: "vp8", label: "วผ.8 (ส่งรายชื่อนักเรียนที่สอบไม่ผ่าน)", icon: "📌", desc: "บันทึกรายชื่อนักเรียนติด 0 / ร / มส แยก 3 รอบ: ประกาศผลสอบ, สอบซ่อมครั้งที่ 1 และ 2 พิมพ์ส่งได้" },
-  { key: "vp9", label: "วผ.9 (สรุปนักเรียนติด 0, ร, มส ทั้งห้อง)", icon: "🗂️", desc: "สรุปรายห้องจาก วผ.8 ทุกรายวิชา แยก 3 รอบ พร้อมสร้างหนังสือแจ้งผู้ปกครอง (ผ่านทุกวิชา / ติด 0 ร มส)" },
   { key: "vp15", label: "วผ.15 (สรุปผลสัมฤทธิ์รายวิชา)", icon: "📊", desc: "สรุปจำนวนนักเรียนตามระดับผลการเรียนของวิชาเดียวกันทุกห้อง — ดู/พิมพ์ได้ทุกคน" },
 ];
 
@@ -116,16 +114,6 @@ classroomLabel={classroomLabel}
       />
     );
   }
-  if (active === "vp9") {
-  return (
-    <Vp9Report
-      sectionId={sectionId}
-      classroomLabel={classroomLabel ?? ""}
-      students={students}
-      onBack={() => setActive(null)}
-    />
-  );
-}
   if (active === "vp2") {
   return (
     <Vp2Report

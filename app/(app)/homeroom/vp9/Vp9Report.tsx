@@ -153,7 +153,7 @@ export default function Vp9Report({
   classroomId, sectionId, classroomLabel, students,
   semester, academicYearLabel,
   homeroomTeacherNames, levelHeadName,
-  logoUrl = "/logo.png", garudaUrl = "/images1.jpg",
+  logoUrl = "/logo.png", garudaUrl = "/images.jpg",
   schoolName = "โรงเรียนวัดเขียนเขต",
   addressLines = ["ตำบลบึงยี่โถ  อำเภอธัญบุรี", "จังหวัดปทุมธานี  12130"],
   phone = "0-2533-1239", fax = "0-2533-1454",

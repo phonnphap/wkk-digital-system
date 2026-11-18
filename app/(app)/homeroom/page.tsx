@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   Users, ClipboardCheck, NotebookPen, UtensilsCrossed,
   UserCheck, FileEdit, Home, HeartHandshake, ArrowRight,
-  FileText, KeyRound, Copy, QrCode,
+  FileText, KeyRound, Copy, QrCode, ClipboardList,
   type LucideIcon,
 } from "lucide-react";
 
@@ -43,6 +43,7 @@ const SUBMENUS: SubMenuItem[] = [
   { key: "reading_writing", name: "ประเมินการอ่าน-เขียน", desc: "บันทึกความสามารถอ่าน-เขียนรายบุคคล", icon: FileEdit, color: "bg-sky-500", path: "/reading_writing", status: "live" },
   { key: "behavior", name: "บันทึกพฤติกรรม", desc: "บันทึกความดี / บันทึกความประพฤติ", icon: HeartHandshake, color: "bg-rose-500", path: "/behavior", status: "live" },
   { key: "home_visit", name: "เยี่ยมบ้าน", desc: "บันทึกข้อมูลการเยี่ยมบ้านนักเรียน", icon: Home, color: "bg-teal-600", path: "/home_visit", status: "in_progress" },
+  { key: "vp9", name: "วผ.9", desc: "สรุปนักเรียนติด 0, ร, มส ทั้งห้อง · พร้อมหนังสือแจ้งผู้ปกครอง", icon: ClipboardList, color: "bg-fuchsia-600", path: "/homeroom/vp9", status: "live" },
   { key: "por5", name: "ปพ.5/ วผ.4", desc: "รายวิชา · สรุปผลคะแนน/การมาเรียน/เชิงลึกของทุกวิชา", icon: FileText, color: "bg-cyan-600", path: "/homeroom/por5", status: "live" },
 ];
 
