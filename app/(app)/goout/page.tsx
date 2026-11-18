@@ -599,7 +599,7 @@ function OutForm({ user, allTeachers, heads, savedSignature, editData, entries, 
             {[
               { n: 1, t: "หัวหน้าสายชั้น", s: heads.length ? heads.map(displayName).join(", ") : "ไม่มีหัวหน้าสายชั้น — ข้ามขั้นตอนนี้" },
               { n: 2, t: "รอง ผอ.ฝ่ายบุคคล", s: "น.ส.ฐิติมา กาบแก้ว" },
-              { n: 3, t: "ผู้อำนวยการ", s: "นายธนณัฐ ศิระวงษ์ (อนุมัติอัตโนมัติพร้อมรอง ผอ.)" },
+              { n: 3, t: "ผู้อำนวยการ", s: "นายธนณัฐ ศิระวงษ์" },
             ].map((a, i) => (
               <div key={a.n} className="flex items-center gap-2 flex-1 min-w-[170px]">
                 <div className="flex-1 bg-teal-50 border border-teal-100 rounded-2xl px-3 py-2.5">
