@@ -45,6 +45,19 @@ export async function loadMemoData(db: SupabaseClient, id: string) {
 }
 
 /** อนุมัติครบ → สร้าง PDF 2 แบบ เก็บใน bucket late-reports (signed/ และ unsigned/) */
+/** ส่งฉบับ "ไม่มีลายเซนผู้อนุมัติ" ขึ้น OneDrive ทันทีที่สร้างรายงาน (ให้ธุรการปริ้นท์ไปเซ็นสดได้) — คืนข้อความ error หรือ null */
+export async function uploadUnsignedToOneDrive(db: SupabaseClient, id: string): Promise<string | null> {
+  try {
+    const { report, data } = await loadMemoData(db, id);
+    const bytes = await renderMemo(data, "unsigned");
+    await uploadToOneDrive(FOLDERS.unsigned.label, oneDriveFileName(report.report_date), bytes);
+    return null;
+  } catch (e: any) {
+    console.error("[late-report] unsigned onedrive upload failed:", e);
+    return String(e?.message ?? e);
+  }
+}
+
 export async function finalizeReport(db: SupabaseClient, id: string) {
   const { report, data } = await loadMemoData(db, id);
   const paths: Record<string, string> = {};

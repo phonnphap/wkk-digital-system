@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getStudentSession } from "@/lib/studentAuth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getRelatedClassroomIds } from "@/lib/smartclass/sectionAccess";
 
 // ★ เพิ่มใหม่: คำนวณคำนำหน้าจากอายุจริง (วันเกิด+เพศ) แทนค่า prefix ที่บันทึกไว้ในตาราง
 // ชาย อายุ >= 15 = "นาย" / น้อยกว่า = "เด็กชาย" ・ หญิง อายุ >= 15 = "นางสาว" / น้อยกว่า = "เด็กหญิง"
@@ -97,14 +98,17 @@ export async function GET(req: NextRequest) {
   }
 
   // ★ แก้: ห้องเทอม 2 (ป.4-6, ม.1-6) ถูกสร้างแยกจากเทอม 1 และ นร. ยังสังกัดห้องเทอม 1
-  //   จึงต้องรวม section เทอม 2 ที่สืบมาจาก section ของห้อง นร. (ผ่าน previous_section_id) ด้วย
-  const requestedSectionId = searchParams.get("section_id"); // หน้าวิชาส่งมา เพื่อให้เปิดลิงก์เทอมเก่าได้
+  //   จึงรวม section จาก (1) ห้องของ นร. (2) ห้องอื่นที่ชื่อห้องเดียวกัน (3) section ที่สืบมาจากสองกลุ่มนั้น
+  //   (previous_section_id) ส่งกลับทั้งเทอม 1 และ 2 พร้อมฟิลด์ semester ให้หน้าเว็บแยกตารางเอง
   const SEC_SELECT = `
-    id, subject_id, classroom_id, previous_section_id, student_portal_enabled,
+    id, subject_id, classroom_id, previous_section_id, semester, student_portal_enabled,
     grading_structure, formative_max_score, midterm_max_score, final_max_score,
     show_assignment_scores, show_special_scores,
     subject:subjects ( id, subject_code, name_th, grading_mode, pass_threshold_percent )
   `;
+
+  const relatedClassroomIds = await getRelatedClassroomIds(supabaseAdmin, student.classroom_id);
+  const otherClassroomIds = relatedClassroomIds.filter((id) => id !== student.classroom_id);
 
   const { data: ownSections, error: sectionsErr } = await supabaseAdmin
     .from("subject_sections")
@@ -117,6 +121,17 @@ export async function GET(req: NextRequest) {
   }
 
   let candidates: any[] = [...(ownSections ?? [])];
+
+  if (otherClassroomIds.length > 0) {
+    const { data: otherSections, error: otherErr } = await supabaseAdmin
+      .from("subject_sections")
+      .select(SEC_SELECT)
+      .in("classroom_id", otherClassroomIds)
+      .eq("is_active", true);
+    if (otherErr) console.error("[timetable] sibling sections query error:", otherErr);
+    candidates = candidates.concat(otherSections ?? []);
+  }
+
   let frontier: string[] = candidates.map((x) => x.id);
   for (let hop = 0; hop < 3 && frontier.length > 0; hop++) {
     const { data: next, error: nextErr } = await supabaseAdmin
@@ -133,19 +148,7 @@ export async function GET(req: NextRequest) {
     frontier = fresh.map((n: any) => n.id);
   }
 
-  const enabledSections = candidates.filter((x) => x.student_portal_enabled);
-  // section เทอมเก่าที่ถูกแทนด้วย section เทอมใหม่ (คนละห้อง) ซ่อนไว้ ไม่ให้วิชาซ้ำในตารางเรียน
-  // (ยกเว้นหน้าวิชาที่ขอ section นั้นโดยตรง)
-  const byId = new Map(candidates.map((x) => [x.id, x]));
-  const supersededIds = new Set<string>();
-  enabledSections.forEach((x) => {
-    const parent = x.previous_section_id ? byId.get(x.previous_section_id) : null;
-    if (parent && parent.classroom_id !== x.classroom_id) supersededIds.add(parent.id);
-  });
-  const sections = enabledSections.filter(
-    (x) => !supersededIds.has(x.id) || x.id === requestedSectionId
-  );
-
+  const sections = candidates.filter((x) => x.student_portal_enabled);
   const sectionList = sections;
     const commonInfo = {
     student: {
@@ -199,6 +202,8 @@ export async function GET(req: NextRequest) {
 
   const result = sectionList.map((sec: any) => ({
   id: sec.id,
+  classroom_id: sec.classroom_id,
+  semester: sec.semester ?? null,
   subject: sec.subject ?? null,
   grading_structure: sec.grading_structure,
   formative_max_score: sec.formative_max_score,

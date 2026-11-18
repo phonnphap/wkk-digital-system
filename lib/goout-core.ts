@@ -557,13 +557,30 @@ export async function notifySubstitutes(r: any, requester: UserProfile, duties: 
 // ═══════════════════════════════════════════════════════════
 // ฟอร์มพิมพ์ (ตามต้นฉบับ formgoout.docx)
 // ═══════════════════════════════════════════════════════════
+// ── ตราโรงเรียน: ฝังเป็น data URI เพราะหน้าต่างพิมพ์/iframe เป็น about:blank ใช้ path แบบ /images1.jpg ตรงๆ ไม่ได้ ──
+export const LOGO: { data?: string } = {};
+export async function preloadLogo(): Promise<string | undefined> {
+  if (LOGO.data) return LOGO.data;
+  try {
+    const res = await fetch("/images1.jpg");
+    if (!res.ok) return undefined;
+    const blob = await res.blob();
+    LOGO.data = await new Promise<string>(resolve => {
+      const fr = new FileReader();
+      fr.onloadend = () => resolve(fr.result as string);
+      fr.readAsDataURL(blob);
+    });
+  } catch { /* ไม่มีโลโก้ก็พิมพ์ต่อได้ */ }
+  return LOGO.data;
+}
+
 export type OpinionData = { status?: string | null; name?: string; position?: string; signature?: string | null; at?: string | null; note?: string | null };
 export type FormData = {
   fullName: string; position: string; createdAt?: string;
   purpose: string; destination: string; start: string; end: string; hours: number;
   rows: { cls: string; period: string; task: string; subName: string }[];
   requesterSig?: string;
-  op1?: OpinionData; op2?: OpinionData;
+  op1?: OpinionData; op2?: OpinionData; op3?: OpinionData;
   actualOut?: string | null; actualBack?: string | null; actualMinutes?: number | null;
 };
 
@@ -572,30 +589,40 @@ export function buildGooutHTML(d: FormData): string {
   const day = doc.toLocaleDateString("th-TH", { day: "numeric", ...TZ });
   const month = doc.toLocaleDateString("th-TH", { month: "long", ...TZ });
   const year = doc.getFullYear() + 543;
+
+  // dl = ช่องจุดไข่ปลาขนาดคงที่ (ตัวเลข/เวลา) · ut = ข้อความยาวไหลต่อบรรทัดเดียวกันและตัดบรรทัดได้
   const dl = (v: string, w = 80, center = false) =>
     `<span class="dl" style="min-width:${w}px;${center ? "text-align:center;" : ""}">&nbsp;${esc(v)}&nbsp;</span>`;
+  const ut = (v: string, emptyW = 200) => (v && v.trim() ? `<span class="ut">${esc(v)}</span>` : dl("", emptyW));
+
+  // บล็อกลงชื่อ: ลายเซ็น / เส้นจุด / ชื่อ อยู่แกนกลางเดียวกันเป๊ะ (คอลัมน์ซ้าย-ขวาเท่ากัน)
+  const signBlock = (o: { sig?: string | null; name?: string; lines?: string[]; trailing?: string; width?: number }) => `
+    <div class="sb" ${o.width ? `style="width:${o.width}px"` : ""}>
+      <div class="sbl">ลงชื่อ</div>
+      <div class="sbm">${o.sig ? `<img src="${o.sig}" alt="ลายเซ็น"/>` : ""}</div>
+      <div class="sbr">${o.trailing ?? ""}</div>
+      <div class="sbn">(${o.name ? esc(o.name) : "............................"})</div>
+      ${(o.lines ?? []).map(l => `<div class="sbn">${l}</div>`).join("")}
+    </div>`;
 
   const hasDuty = d.rows.length > 0;
   const dutyHtml = hasDuty
     ? d.rows.map((r, i) => `
       <div class="duty">
-        <div>${i + 1}. ชั้น ${dl(r.cls, 90, true)} คาบที่ ${dl(r.period, 50, true)} งานที่มอบหมาย ${dl(r.task, 300)}</div>
-        <div style="padding-left:18px;margin-top:4px">ผู้สอนแทน ${dl(r.subName, 260)} ลงชื่อผู้สอนแทน ${dl("", 150)}</div>
+        <div class="ln">${i + 1}. ชั้น ${dl(r.cls, 90, true)} คาบที่ ${dl(r.period, 50, true)} งานที่มอบหมาย ${ut(r.task, 260)}</div>
+        <div class="ln" style="padding-left:18px">ผู้สอนแทน ${ut(r.subName, 220)} ลงชื่อผู้สอนแทน ${dl("", 150)}</div>
       </div>`).join("")
     : "";
 
-  const box = (title: string, o?: OpinionData, defaultName = "", defaultPos = "") => {
+  const box = (title: string, o: OpinionData | undefined, defName: string, defPos: string, lead = "เห็นควร") => {
     const ok = o?.status === "approved", no = o?.status === "rejected";
-    const sig = ok && o?.signature ? `<img src="${o.signature}" style="max-height:40px;max-width:150px;object-fit:contain"/>` : "";
+    const at = o?.at ? esc(toThaiDateLong(o.at)) : "........................";
     return `<div class="box">
       <div class="bt">${title}</div>
-      <div style="margin-bottom:6px">เห็นควร &nbsp;<span class="chk">${ok ? "✓" : ""}</span> อนุญาต &nbsp;&nbsp;<span class="chk">${no ? "✓" : ""}</span> ไม่อนุญาต</div>
-      <div style="margin-bottom:4px">เนื่องจาก ${dl(no ? (o?.note ?? "") : (ok ? (o?.note ?? "") : ""), 170)}</div>
-      <div class="sg">${sig}</div>
-      <div style="text-align:center;line-height:1.55">
-        ลงชื่อ ${dl("", 20)}<br>(${esc(o?.name || defaultName)})<br>${esc(o?.position || defaultPos)}<br>
-        วันที่ ${o?.at ? esc(toThaiDateLong(o.at)) : "........................"}
-      </div></div>`;
+      <div style="margin-bottom:4px">${lead ? lead + " &nbsp;" : ""}<span style="white-space:nowrap"><span class="chk">${ok ? "✓" : ""}</span>อนุญาต</span> &nbsp;<span style="white-space:nowrap"><span class="chk">${no ? "✓" : ""}</span>ไม่อนุญาต</span></div>
+      <div style="margin-bottom:6px">เนื่องจาก ${dl(ok || no ? (o?.note ?? "") : "", 170)}</div>
+      ${signBlock({ sig: ok ? o?.signature : null, name: o?.name || defName, lines: [esc(o?.position || defPos), `วันที่ ${at}`] })}
+    </div>`;
   };
 
   const actual = d.actualOut || d.actualBack ? `
@@ -603,43 +630,54 @@ export function buildGooutHTML(d: FormData): string {
       กลับถึงโรงเรียนเวลา ${dl(d.actualBack ? toClock(d.actualBack) : "", 50, true)} น.
       รวม ${dl(d.actualMinutes != null ? fmtMinutes(d.actualMinutes) : "", 90, true)}</div>` : "";
 
+  const logo = LOGO.data ?? "/images1.jpg";
+
   return `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:210mm;font-family:'Sarabun',Arial,sans-serif;font-size:12.5pt;color:#000;background:#fff}
-.page{padding:14mm 18mm 10mm;line-height:1.75}
+html,body{width:210mm;font-family:'Sarabun',Arial,sans-serif;font-size:12pt;color:#000;background:#fff}
+.page{padding:7mm 16mm 6mm;line-height:1.55}
 .dl{display:inline-block;border-bottom:1px dotted #444;font-weight:500}
+.ut{text-decoration:underline dotted #444;text-decoration-thickness:1px;text-underline-offset:5px;font-weight:500;padding:0 4px}
+.ln{line-height:1.85}
 .chk{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border:1.5px solid #000;margin-right:3px;font-size:10pt;vertical-align:middle}
-.t1{text-align:center;font-weight:900;font-size:14.5pt}.t2{text-align:center;font-weight:700;font-size:13pt;margin-bottom:10px}
-.box{border:1px solid #666;border-radius:4px;padding:8px 12px;flex:1;font-size:11.5pt}
-.bt{font-weight:700;text-align:center;margin-bottom:6px}
-.sg{height:42px;display:flex;align-items:flex-end;justify-content:center;margin-top:4px}
-.duty{margin:6px 0 8px 22px}
-.actual{margin-top:12px;padding:6px 10px;border:1px dashed #888;border-radius:4px;font-size:11pt}
+.t1{text-align:center;font-weight:900;font-size:14.5pt}.t2{text-align:center;font-weight:700;font-size:13pt;margin-bottom:8px}
+.row{display:flex;gap:8px;align-items:stretch}
+.box{border:1px solid #666;border-radius:4px;padding:6px 7px;flex:1;min-width:0;font-size:10pt;line-height:1.5;page-break-inside:avoid}
+.box .sb{grid-template-columns:1fr 96px 1fr;column-gap:3px}
+.box .sbm img{max-width:92px}
+.box .sbn{white-space:normal}
+.bt{font-weight:700;text-align:center;margin-bottom:5px;min-height:3em;display:flex;align-items:center;justify-content:center}
+.duty{margin:4px 0 6px 22px}
+.sb{display:grid;grid-template-columns:1fr 160px 1fr;align-items:end;column-gap:6px;line-height:1.6}
+.sbl{text-align:right;white-space:nowrap}
+.sbm{height:38px;border-bottom:1px dotted #444;display:flex;align-items:flex-end;justify-content:center}
+.sbm img{max-height:36px;max-width:156px;object-fit:contain}
+.sbr{text-align:left;white-space:nowrap}
+.sbn{grid-column:1/-1;text-align:center;white-space:nowrap}
+.actual{margin-top:10px;padding:6px 10px;border:1px dashed #888;border-radius:4px;font-size:11pt}
 @page{size:A4;margin:0}
 </style></head><body><div class="page">
+<div style="text-align:center;margin-bottom:4px"><img src="${logo}" alt="ตราโรงเรียน" style="width:3cm;height:3cm;object-fit:contain" onerror="this.style.display='none'"/></div>
 <div class="t1">แบบขออนุญาตออกนอกบริเวณโรงเรียนในเวลาราชการของครูและบุคลากร</div>
 <div class="t2">กรณีไม่เกิน 3 ชั่วโมง</div>
 <div style="text-align:right">เขียนที่ โรงเรียนวัดเขียนเขต<br>วันที่ ${dl(day, 36, true)} เดือน ${dl(month, 100, true)} พ.ศ. ${dl(String(year), 56, true)}</div>
-<div style="margin-top:8px"><b>เรื่อง</b> ขออนุญาตออกนอกบริเวณโรงเรียน</div>
+<div style="margin-top:6px"><b>เรื่อง</b> ขออนุญาตออกนอกบริเวณโรงเรียน</div>
 <div><b>เรียน</b> ผู้อำนวยการโรงเรียนวัดเขียนเขต</div>
-<div style="margin-top:8px;padding-left:40px">ข้าพเจ้า ${dl(d.fullName, 230)} ตำแหน่ง ${dl(d.position, 180)}</div>
-<div>ขออนุญาตออกนอกบริเวณโรงเรียน เพื่อ ${dl(d.purpose, 400)}</div>
-<div>ระหว่างเวลา ${dl(d.start, 56, true)} น. ถึง เวลา ${dl(d.end, 56, true)} น. รวม ${dl(fmtHours(d.hours), 50, true)} ชั่วโมง สถานที่ไป ${dl(d.destination, 220)}</div>
-<div style="margin-top:6px"><b>ภาระงาน</b> &nbsp;&nbsp;<span class="chk">${hasDuty ? "✓" : ""}</span> มี &nbsp;&nbsp;&nbsp;<span class="chk">${hasDuty ? "" : "✓"}</span> ไม่มี</div>
+<div class="ln" style="margin-top:6px;padding-left:40px">ข้าพเจ้า ${dl(d.fullName, 230)} ตำแหน่ง ${dl(d.position, 180)}</div>
+<div class="ln">ขออนุญาตออกนอกบริเวณโรงเรียน เพื่อ ${ut(d.purpose, 300)}</div>
+<div class="ln">ระหว่างเวลา ${dl(d.start, 56, true)} น. ถึง เวลา ${dl(d.end, 56, true)} น. รวม ${dl(fmtHours(d.hours), 50, true)} ชั่วโมง สถานที่ไป ${ut(d.destination, 200)}</div>
+<div style="margin-top:4px"><b>ภาระงาน</b> &nbsp;&nbsp;<span class="chk">${hasDuty ? "✓" : ""}</span> มี &nbsp;&nbsp;&nbsp;<span class="chk">${hasDuty ? "" : "✓"}</span> ไม่มี</div>
 ${dutyHtml}
-<div style="text-align:right;padding-right:6%;margin-top:14px">
-  <div style="display:inline-flex;flex-direction:column;align-items:center;width:260px">
-    <div style="height:46px;display:flex;align-items:flex-end;justify-content:center">${d.requesterSig ? `<img src="${d.requesterSig}" style="max-height:46px;max-width:170px;object-fit:contain"/>` : ""}</div>
-    <div>ลงชื่อ ${dl("", 90)} ผู้ขออนุญาต</div>
-    <div>(${esc(d.fullName)})</div>
-  </div>
+<div style="display:flex;justify-content:flex-end;padding-right:5%;margin-top:6px">
+  ${signBlock({ sig: d.requesterSig, name: d.fullName, trailing: "ผู้ขออนุญาต", width: 380 })}
 </div>
-<div style="font-size:11pt;margin:6px 0 10px"><b>หมายเหตุ</b> ให้ผู้บริหารฯ อนุญาตก่อนออกนอกบริเวณโรงเรียน</div>
-<div style="display:flex;gap:14px">
+<div style="font-size:11pt;margin:6px 0 8px"><b>หมายเหตุ</b> ให้ผู้บริหารฯ อนุญาตก่อนออกนอกบริเวณโรงเรียน</div>
+<div class="row">
   ${box("ความเห็นของหัวหน้าสายชั้น", d.op1, "", "หัวหน้าสายชั้น")}
   ${box("ความเห็นของรองผู้อำนวยการกลุ่มบริหารงานบุคคล", d.op2, APPROVER_2_NAME, APPROVER_2_POSITION)}
+  ${box("ความเห็นของผู้อำนวยการโรงเรียน", d.op3, APPROVER_3_NAME, APPROVER_3_POSITION, "เห็นควร")}
 </div>
 ${actual}
 </div></body></html>`;

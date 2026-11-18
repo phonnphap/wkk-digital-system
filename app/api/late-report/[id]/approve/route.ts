@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getMe } from "@/lib/visitors/admin-auth";
 import { admin, finalizeReport } from "@/lib/late-report/server";
 
+export const maxDuration = 60;
 const err = (error: string, status: number) => NextResponse.json({ error }, { status });
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {

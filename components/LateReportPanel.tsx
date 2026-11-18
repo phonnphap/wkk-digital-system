@@ -54,7 +54,12 @@ export default function LateReportPanel(_props: { canCreate?: boolean }) {
     const j = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) { alert(j.error ?? "ส่งรายงานไม่สำเร็จ"); return; }
-    alert(`✅ ส่งรายงานแล้ว (ผู้รายงาน: ${j.reporter ?? "-"}) รอรองผู้อำนวยการอนุมัติ`);
+    const head = j.status === "approved"
+      ? `✅ ส่งรายงานแล้ว (ผู้รายงาน: ${j.reporter ?? "-"}) และอนุมัติครบทั้ง 3 ตำแหน่งอัตโนมัติ`
+      : `✅ ส่งรายงานแล้ว (ผู้รายงาน: ${j.reporter ?? "-"}) รอผู้อนุมัติ`;
+    alert(head + (j.note ? `\n\n⚠️ ${j.note}` : "") +
+      (j.upload_warning ? `\n\n⚠️ ส่งไฟล์ขึ้น OneDrive ไม่สำเร็จ:\n${j.upload_warning}`
+        : j.status === "approved" ? "\n\nไฟล์ทั้ง 2 ฉบับถูกส่งขึ้น OneDrive แล้ว" : "\n\nไฟล์ฉบับไม่มีลายเซนผู้อนุมัติถูกส่งขึ้น OneDrive แล้ว"));
     load(date);
   }
 

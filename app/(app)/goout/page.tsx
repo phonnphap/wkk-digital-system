@@ -15,7 +15,7 @@ import {
   loadTimetableBundle, findAffectedEntries, buildDuties, isCovered, normalizeDuties,
   loadSubMeta, candidatesForDuty, autoAssign, syncSubstitutions, dutyRows,
   notifySubmitted, notifyApproved, notifyRejected, notifyCancelled, notifySubstitutes, pushOutTeams,
-  buildGooutHTML,
+  buildGooutHTML, preloadLogo, LOGO,
 } from "@/lib/goout-core";
 
 const supabase = createClient();
@@ -191,6 +191,13 @@ function useTimetable() {
     setLoading(false);
   }, []);
   return { entries: state?.entries ?? [], academicYearId: state?.academicYearId ?? null, loading, ensure };
+}
+
+/** โหลดตราโรงเรียนเป็น data URI (ใช้ในพรีวิว/พิมพ์ ซึ่งเป็น about:blank) แล้วคืนค่าเพื่อให้ฟอร์มสร้างใหม่ */
+function useLogo() {
+  const [logo, setLogo] = useState<string | undefined>(LOGO.data);
+  useEffect(() => { if (!LOGO.data) preloadLogo().then(setLogo); }, []);
+  return logo;
 }
 
 const EMPTY_META: SubMeta = { onLeave: new Set(), busy: [] };
@@ -445,6 +452,7 @@ function OutForm({ user, allTeachers, heads, savedSignature, editData, entries, 
   const [sending, setSending] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const touch = (k: string) => setTouched(t => ({ ...t, [k]: true }));
+  const logo = useLogo();
 
   const hours = start && end ? calcHours(start, end) : null;
   const over = hours !== null && hours > MAX_HOURS;
@@ -474,7 +482,8 @@ function OutForm({ user, allTeachers, heads, savedSignature, editData, entries, 
     purpose, destination, start, end, hours: hours ?? 0,
     rows: dutyRows(normalizeDuties(duties, meta), allTeachers, meta),
     requesterSig: sigUrl,
-  }), [user, editData, purpose, destination, start, end, hours, duties, meta, allTeachers, sigUrl]);
+    op1: { name: heads.map(displayName).join(" / "), position: "หัวหน้าสายชั้น" },
+  }), [user, editData, purpose, destination, start, end, hours, duties, meta, allTeachers, sigUrl, heads, logo]);
 
   function payload(status: "draft" | "pending") {
     return {
@@ -565,14 +574,15 @@ function OutForm({ user, allTeachers, heads, savedSignature, editData, entries, 
         <SectionCard n={2} title="เหตุผลและสถานที่">
           <div>
             <label className="block text-sm font-bold text-slate-600 mb-1">ขออนุญาตออกนอกบริเวณโรงเรียนเพื่อ <span className="text-red-500">*</span>
-              <span className="text-slate-400 font-normal ml-2">({purpose.length}/100)</span></label>
-            <textarea rows={2} value={purpose} onChange={e => e.target.value.length <= 100 && setPurpose(e.target.value)} onBlur={() => touch("purpose")}
+              <span className="text-slate-400 font-normal ml-2">({purpose.length}/150)</span></label>
+            <textarea rows={3} value={purpose} onChange={e => e.target.value.length <= 150 && setPurpose(e.target.value)} onBlur={() => touch("purpose")}
               placeholder="เช่น ไปธนาคาร / พบแพทย์ / ติดต่อราชการ" className={inp(err.purpose) + " resize-none"} />
             {err.purpose && <p className="text-red-500 text-xs mt-1">กรุณาระบุเหตุผล</p>}
           </div>
           <div>
-            <label className="block text-sm font-bold text-slate-600 mb-1">สถานที่ไป <span className="text-red-500">*</span></label>
-            <input value={destination} onChange={e => setDestination(e.target.value)} onBlur={() => touch("destination")} placeholder="เช่น ธนาคารกรุงไทย สาขาธัญบุรี" className={inp(err.destination)} />
+            <label className="block text-sm font-bold text-slate-600 mb-1">สถานที่ไป <span className="text-red-500">*</span>
+              <span className="text-slate-400 font-normal ml-2">({destination.length}/150)</span></label>
+            <input value={destination} maxLength={150} onChange={e => setDestination(e.target.value.slice(0, 150))} onBlur={() => touch("destination")} placeholder="เช่น ธนาคารกรุงไทย สาขาธัญบุรี" className={inp(err.destination)} />
             {err.destination && <p className="text-red-500 text-xs mt-1">กรุณาระบุสถานที่</p>}
           </div>
         </SectionCard>
@@ -626,13 +636,16 @@ function OutForm({ user, allTeachers, heads, savedSignature, editData, entries, 
 function buildFormFromRequest(r: any, teachers: UserProfile[], usersMap: Record<string, any>, meta?: SubMeta | null) {
   const u = r.user;
   const nm = (id?: string | null) => (id ? fullName(usersMap[id] ?? teachers.find(t => t.id === id)) : "");
+  // ยังไม่มีใครอนุมัติ → แสดงชื่อหัวหน้าสายชั้นของผู้ขอ (approver_1_id จะถูกบันทึกตอนกดอนุมัติ)
+  const headNames = gradeHeadsOf({ id: r.user_id, grade_level: u?.grade_level }, teachers).map(displayName).join(" / ");
   return buildGooutHTML({
     fullName: fullName(u), position: u?.position ?? "", createdAt: r.created_at,
     purpose: r.purpose, destination: r.destination,
     start: String(r.planned_start).slice(0, 5), end: String(r.planned_end).slice(0, 5), hours: Number(r.planned_hours),
     rows: dutyRows(r.duties ?? [], teachers, meta),
     requesterSig: r.signature_url || u?.signature_url || "",
-    op1: { status: r.approver_1_status, name: nm(r.approver_1_id), position: "หัวหน้าสายชั้น", signature: r.approver_1_signature, at: r.approver_1_at, note: r.approver_1_note?.startsWith("ไม่มีหัวหน้า") ? "" : r.approver_1_note },
+    op3: { status: r.approver_3_status, signature: r.approver_3_signature, at: r.approver_3_at, note: r.approver_3_note },
+    op1: { status: r.approver_1_status, name: nm(r.approver_1_id) || headNames, position: "หัวหน้าสายชั้น", signature: r.approver_1_signature, at: r.approver_1_at, note: r.approver_1_note?.startsWith("ไม่มีหัวหน้า") ? "" : r.approver_1_note },
     op2: { status: r.approver_2_status, signature: r.approver_2_signature, at: r.approver_2_at, note: r.approver_2_note },
     actualOut: r.actual_out_at, actualBack: r.actual_back_at, actualMinutes: r.actual_minutes,
   });
@@ -1294,6 +1307,7 @@ export default function GooutPage() {
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<"approve" | "my">("my");
 
+  useEffect(() => { preloadLogo(); }, []);
   useEffect(() => {
     (async () => {
       const { data: { user: au } } = await supabase.auth.getUser();
