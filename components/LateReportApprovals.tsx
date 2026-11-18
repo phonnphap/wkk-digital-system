@@ -15,7 +15,7 @@ type Report = {
 };
 
 // ฝังในหน้า late-checkin: กล่อง "รอฉันอนุมัติ" + 2 โฟลเดอร์เอกสาร
-export default function LateReportApprovals() {
+export default function LateReportApprovals({ showFolders = true, hideWhenEmpty = false }: { showFolders?: boolean; hideWhenEmpty?: boolean }) {
   const [meId, setMeId] = useState("");
   const [reports, setReports] = useState<Report[]>([]);
   const [comments, setComments] = useState<Record<string, string>>({});
@@ -54,8 +54,11 @@ export default function LateReportApprovals() {
     const j = await res.json().catch(() => ({}));
     setBusy("");
     if (!res.ok) alert(j.error ?? "ทำรายการไม่สำเร็จ");
+    else if (j.upload_warning) alert("อนุมัติครบแล้ว แต่ส่งไฟล์ขึ้น OneDrive ไม่สำเร็จ:\n" + j.upload_warning);
     load();
   }
+
+  if (hideWhenEmpty && inbox.length === 0 && !showFolders) return null;
 
   return (
     <div className="mt-8">
@@ -94,6 +97,7 @@ export default function LateReportApprovals() {
       </section>
 
       {/* ── 2 โฟลเดอร์ ── */}
+      {showFolders && (
       <section className="mt-8 grid gap-5 lg:grid-cols-2">
         {(["signed", "unsigned"] as const).map((v) => (
           <div key={v} className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
@@ -114,6 +118,7 @@ export default function LateReportApprovals() {
           </div>
         ))}
       </section>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { createClient as createSb, SupabaseClient } from "@supabase/supabase-js";
 import { renderMemo, MemoData } from "./pdf";
 import { FOLDERS } from "./rows";
-import { uploadToDrive } from "./drive";
+import { uploadToOneDrive, oneDriveFileName } from "./onedrive";
 
 export const admin = () =>
   createSb(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
@@ -48,17 +48,19 @@ export async function loadMemoData(db: SupabaseClient, id: string) {
 export async function finalizeReport(db: SupabaseClient, id: string) {
   const { report, data } = await loadMemoData(db, id);
   const paths: Record<string, string> = {};
+  const onedriveErrors: string[] = [];
   for (const v of ["signed", "unsigned"] as const) {
     const bytes = await renderMemo(data, v);
     const key = `${FOLDERS[v].prefix}/${report.report_date}.pdf`;
     const { error } = await db.storage.from("late-reports").upload(key, bytes, { contentType: "application/pdf", upsert: true });
     if (error) throw error;
     paths[v] = key;
-    // สำรองขึ้น Google Drive ของ general@khienkhet.ac.th (ถ้าตั้งค่า env ไว้) — พลาดก็ไม่ทำให้การอนุมัติล้ม
-    uploadToDrive(FOLDERS[v].label, `${FOLDERS[v].label}_${report.report_date}.pdf`, bytes)
-      .catch((e) => console.error("[late-report] drive upload failed:", e));
+    // ส่งขึ้น OneDrive ของ general@khienkhet.ac.th: รายงานจับสาย/16112569.pdf — พลาดก็ไม่ทำให้การอนุมัติล้ม (แต่แจ้งเตือน)
+    try { await uploadToOneDrive(FOLDERS[v].label, oneDriveFileName(report.report_date), bytes); }
+    catch (e: any) { console.error("[late-report] onedrive upload failed:", e); onedriveErrors.push(`${FOLDERS[v].label}: ${e?.message ?? e}`); }
   }
   await db.from("late_reports")
     .update({ signed_pdf_path: paths.signed, unsigned_pdf_path: paths.unsigned, finalized_at: new Date().toISOString() })
     .eq("id", id);
+  return { onedriveErrors };
 }
