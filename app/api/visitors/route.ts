@@ -21,7 +21,16 @@ export async function GET() {
 
   const seen = new Set<string>();
   const rooms: { id: string; label: string; grade: string }[] = [];
+      // นับนักเรียนต่อห้อง เพื่อเลือกแถวที่มีนักเรียนอยู่จริง (ห้องที่ซ้ำ 2 ปี/2 เทอม)
+  const counts: Record<string, number> = {};
+  for (let from = 0; ; from += 1000) {
+    const { data: st } = await db.from("students").select("classroom_id").order("id").range(from, from + 999);
+    if (!st?.length) break;
+    st.forEach((s: any) => { if (s.classroom_id) counts[s.classroom_id] = (counts[s.classroom_id] ?? 0) + 1; });
+    if (st.length < 1000) break;
+  }
   const sorted = [...(data ?? [])].sort((a: any, b: any) =>
+    (counts[b.id] ?? 0) - (counts[a.id] ?? 0) ||
     (b.academic_year_id === cur?.id ? 1 : 0) - (a.academic_year_id === cur?.id ? 1 : 0));
   sorted.forEach((c: any) => {
     const grade = (c.grade_group ?? "").split("/")[0].trim();
