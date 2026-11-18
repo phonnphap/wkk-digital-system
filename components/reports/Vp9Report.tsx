@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -150,10 +150,10 @@ function LetterShell(p: {
 const indent = { textIndent: "2.5cm" } as const;
 
 export default function Vp9Report({
-  classroomId, classroomLabel, students,
+  classroomId, sectionId, classroomLabel, students,
   semester, academicYearLabel,
   homeroomTeacherNames, levelHeadName,
-  logoUrl = "/logo.png", garudaUrl = "/garuda.png",
+  logoUrl = "/logo.png", garudaUrl = "/images.jpg",
   schoolName = "โรงเรียนวัดเขียนเขต",
   addressLines = ["ตำบลบึงยี่โถ  อำเภอธัญบุรี", "จังหวัดปทุมธานี  12130"],
   phone = "0-2533-1239", fax = "0-2533-1454",
@@ -163,7 +163,8 @@ export default function Vp9Report({
   principalName = "นายธนณัฐ  ศิระวงษ์", principalTitle = "ผู้อำนวยการโรงเรียนวัดเขียนเขต",
   onBack,
 }: {
-  classroomId: string;                 // ใช้ดึงทุกรายวิชา (subject_sections.classroom_id) ของห้องนี้
+  classroomId?: string;                // ใช้ดึงทุกรายวิชา (subject_sections.classroom_id) ของห้องนี้
+  sectionId?: string;                  // ถ้าไม่ส่ง classroomId จะหาห้องจาก section นี้ให้เอง
   classroomLabel: string;              // เช่น "ม.2/6"
   students: Student[];                 // นักเรียนทั้งห้อง
   semester?: number | string;
@@ -216,7 +217,14 @@ export default function Vp9Report({
       setLoading(true);
       setLoadError(null);
       try {
-        const secRes = await supabase.from(DB.sectionsTable).select("*").eq(DB.sectionRoomCol, classroomId);
+        let roomId = classroomId;
+        if (!roomId && sectionId) {
+          const cur = await supabase.from(DB.sectionsTable).select("*").eq("id", sectionId).maybeSingle();
+          if (cur.error) throw cur.error;
+          roomId = cur.data?.[DB.sectionRoomCol] ?? undefined;
+        }
+        if (!roomId) throw new Error("ไม่พบห้องเรียน (ส่ง classroomId หรือ sectionId)");
+        const secRes = await supabase.from(DB.sectionsTable).select("*").eq(DB.sectionRoomCol, roomId);
         if (secRes.error) throw secRes.error;
         const secs: any[] = secRes.data ?? [];
 
@@ -259,7 +267,7 @@ export default function Vp9Report({
       }
     })();
     return () => { active = false; };
-  }, [classroomId, reloadKey]);
+  }, [classroomId, sectionId, reloadKey]);
 
   const sorted = useMemo(() => [...students].sort((a, b) => a.seat_number - b.seat_number), [students]);
   const subjectByCode = useMemo(() => new Map(subjects.map(s => [s.code, s])), [subjects]);
@@ -310,7 +318,7 @@ export default function Vp9Report({
   };
   const nextTermText = semesterV === "1"
     ? `ในภาคเรียนที่ ๒ ปีการศึกษา ${thd(yearV)}`
-    : "ให้ทราบ";
+    : "";
 
   function failItems(studentId: string) {
     const byCode = current[studentId] ?? {};
@@ -335,7 +343,7 @@ export default function Vp9Report({
         <p style={indent}>
           โรงเรียนจึงขอแจ้งผลการตัดสินผลการเรียน สำหรับนักเรียนในความปกครองของท่าน ผลปรากฏว่า
           <b>มีผลการเรียนผ่านทุกรายวิชา</b> และทางโรงเรียนจะแจ้งผลการเรียนรายบุคคล
-          {semesterV === "1" ? ` ${nextTermText}` : "ให้ทราบ"} ต่อไป
+          {semesterV === "1" ? ` ${nextTermText}` : ""} ต่อไป
         </p>
         <p style={{ textIndent: "3cm" }} className="pt-2">จึงเรียนมาเพื่อโปรดทราบ</p>
       </LetterShell>
@@ -390,7 +398,7 @@ export default function Vp9Report({
             </div>
             <p style={indent}>
               ถ้านักเรียนไม่มาดำเนินการตามกำหนดเวลาดังกล่าว จะส่งผลให้ไม่ผ่านการตัดสินผลการเรียนรายวิชา
-              และทางโรงเรียนจะแจ้งผลการเรียนรายบุคคล{semesterV === "1" ? ` ${nextTermText}` : "ให้ทราบ"} ต่อไป
+              และทางโรงเรียนจะแจ้งผลการเรียนรายบุคคล{semesterV === "1" ? ` ${nextTermText}` : ""} ต่อไป
               ทางโรงเรียนหวังเป็นอย่างยิ่งว่าจะได้รับความร่วมมือเป็นอย่างดี
             </p>
           </>
@@ -558,7 +566,7 @@ export default function Vp9Report({
         ) : (
           <div className="vp9-print-area space-y-4 print:space-y-0">
             {letterList.map(s =>
-              view === "pass" ? <PassLetter key={s.id} s={s} /> : <FailLetter key={s.id} s={s} />
+              <Fragment key={s.id}>{view === "pass" ? PassLetter({ s }) : FailLetter({ s })}</Fragment>
             )}
           </div>
         )

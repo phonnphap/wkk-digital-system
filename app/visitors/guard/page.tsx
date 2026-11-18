@@ -29,6 +29,7 @@ async function downscale(file: File, max = 1600): Promise<Blob> {
 }
 
 const KEY = "guard_key";
+const ENABLE_OCR = false;   // true = เปิดปุ่ม "ถ่ายบัตร/ทะเบียน ให้ AI อ่าน" อีกครั้ง
 const gKey = () => (typeof window === "undefined" ? "" : localStorage.getItem(KEY) ?? "");
 
 function notifyMsg(j: any): string {
@@ -178,9 +179,15 @@ export default function GuardPage() {
       <div className="mx-auto max-w-2xl space-y-6 p-4">
         {mode === "home" && (
           <>
-            <button onClick={() => setMode("id")} className={`${bigBtn} bg-sky-600 py-8 text-3xl text-white`}>📷 ถ่ายบัตร / ทะเบียนรถ</button>
-            <button onClick={() => setMode("face")} className={`${bigBtn} bg-violet-600 py-8 text-3xl text-white`}>🧑 ไม่มีบัตร — เลือกห้อง + ถ่ายหน้า</button>
+           {ENABLE_OCR && (
+  <button onClick={() => setMode("id")} className={`${bigBtn} bg-sky-600 py-8 text-3xl text-white`}>🪪 สแกนบัตร / ทะเบียนรถ (AI)</button>
+)}
+<button onClick={() => setMode("face")} className={`${bigBtn} bg-violet-600 py-7 text-3xl leading-tight text-white`}>
+  📷 ลงทะเบียนผู้มาติดต่อ
+  <span className="mt-1 block text-xl font-bold opacity-90">ไม่มีบัตร-ถ่ายรูป</span>
+</button>
             <Link href="/visitors/parcels" className={`${bigBtn} block bg-amber-500 py-8 text-center text-3xl text-white`}>📦 แจ้งฝากของ</Link>
+            <Link href="/visitors/late" className={`${bigBtn} block bg-rose-600 py-8 text-center text-3xl text-white`}>⏰ แจ้งนักเรียนมาสาย</Link>
 
             {pending.length > 0 && (
               <section className="space-y-4">
@@ -223,9 +230,9 @@ export default function GuardPage() {
         {mode !== "home" && (
           <div className="space-y-5">
             <button onClick={reset} className="rounded-2xl bg-white px-6 py-4 text-2xl font-black text-slate-700 shadow">← กลับ</button>
-            <h2 className="text-3xl font-black">{mode === "id" ? "📷 ถ่ายบัตร / ทะเบียนรถ" : "🧑 ถ่ายรูปหน้าผู้ปกครอง"}</h2>
+            <h2 className="text-3xl font-black">{mode === "id" ? "🪪 สแกนบัตร / ทะเบียนรถ" : "📷 ถ่ายรูปผู้มาติดต่อ"}</h2>
 
-            <input ref={camRef} type="file" accept="image/*" capture={mode === "face" ? "user" : "environment"} className="hidden"
+            <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden"
               onChange={e => onPickPhoto(e.target.files?.[0])} />
             <button onClick={() => camRef.current?.click()} disabled={ocrBusy}
               className={`${bigBtn} bg-sky-600 py-8 text-3xl text-white`}>
@@ -234,9 +241,14 @@ export default function GuardPage() {
             {mode === "face" && preview && <img src={preview} alt="" className="max-h-64 w-full rounded-2xl object-contain bg-white" />}
 
             {mode === "face" && (
-              <input value={name} onChange={e => setName(e.target.value)} placeholder="ชื่อ-นามสกุลผู้ปกครอง *"
-                className="w-full rounded-2xl border-4 border-slate-300 px-5 py-5 text-2xl" />
-            )}
+  <div className="space-y-3">
+    <input value={name} onChange={e => setName(e.target.value)} placeholder="ชื่อ-นามสกุลผู้มาติดต่อ *"
+      className="w-full rounded-2xl border-4 border-slate-300 px-5 py-5 text-2xl" />
+    <input value={plate} onChange={e => setPlate(e.target.value)} placeholder="ทะเบียนรถ (ถ้ามี)"
+      className="w-full rounded-2xl border-4 border-slate-300 px-5 py-5 text-2xl" />
+    <p className="text-lg text-slate-500">รูปนี้จะถูกเก็บและส่งให้ครูผู้รับเรื่องดูใน Teams</p>
+  </div>
+)}
 
             {mode === "id" && (
               <div className="space-y-3">

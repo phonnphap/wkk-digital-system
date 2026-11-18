@@ -269,15 +269,32 @@ async function regenerateToken() {
   }, []);
 
   useEffect(() => {
-  supabase
-    .from("classrooms")
-    .select("classroom_id:id, room_name, room_number, grade_level:grade_group")
-    .order("grade_group")
-    .order("room_number")
-    .then(({ data, error }) => {
-      if (error) { console.warn("[late-checkin] โหลดห้องเรียนไม่สำเร็จ:", error.message); return; }
-      setClassrooms((data as unknown as Classroom[]) ?? []);
+  (async () => {
+    const { data, error } = await supabase
+      .from("classrooms")
+      .select("classroom_id:id, room_name, room_number, grade_level:grade_group")
+      .order("grade_group")
+      .order("room_number");
+    if (error) { console.warn("[late-checkin] โหลดห้องเรียนไม่สำเร็จ:", error.message); return; }
+
+    // นับนักเรียนต่อห้อง เพื่อเลือกแถวที่มีนักเรียนอยู่จริง
+    const counts: Record<string, number> = {};
+    for (let from = 0; ; from += 1000) {
+      const { data: st } = await supabase.from("students").select("classroom_id")
+        .is("moved_out_at", null).order("id").range(from, from + 999);
+      if (!st?.length) break;
+      st.forEach((s: any) => { if (s.classroom_id) counts[s.classroom_id] = (counts[s.classroom_id] ?? 0) + 1; });
+      if (st.length < 1000) break;
+    }
+
+    const best = new Map<string, Classroom>();
+    ((data as unknown as Classroom[]) ?? []).forEach((c) => {
+      const key = `${c.grade_level}|${(c.room_name ?? "").replace(/\s+/g, "")}`;
+      const old = best.get(key);
+      if (!old || (counts[c.classroom_id] ?? 0) > (counts[old.classroom_id] ?? 0)) best.set(key, c);
     });
+    setClassrooms([...best.values()]);
+  })();
 }, []);
 
   // ★ เรียงปุ่มระดับชั้นตามลำดับจริง: อนุบาล → ประถม → ม.ต้น → ม.ปลาย (แทนการเรียงตามลำดับที่เจอในข้อมูล)

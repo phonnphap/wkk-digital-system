@@ -31,10 +31,11 @@ export type NotifyResult = { ok: boolean; reason?: string; sent?: number };
 // ชื่อฝ่ายต้องตรงกับรายการ ADMIN_TARGETS ใน app/api/visitors/route.ts
 const ADMIN_TARGET_EMAILS: Record<string, string[]> = {
   "ผู้อำนวยการ": ["thananut@khienkhet.ac.th"],
-  "ฝ่ายวิชาการ": ["sattapol@khienkhet.ac.th"],
-  "ฝ่ายบุคคล": ["titima@khienkhet.ac.th"],
-  "ฝ่ายงบประมาณ/การเงิน": ["kamolphron@khienkhet.ac.th"],
-  "ฝ่ายบริหารทั่วไป": ["jariya@khienkhet.ac.th"],
+  "ฝ่ายวิชาการ": ["sattapol@khienkhet.ac.th", "porruthai@khienkhet.ac.th"],
+  "ฝ่ายบุคคล": ["titima@khienkhet.ac.th", "thidarat@khienkhet.ac.th"],
+  "ฝ่ายงบประมาณ/การเงิน": ["kamolphron@khienkhet.ac.th", "wasana@khienkhet.ac.th"],
+  "ฝ่ายบริหารทั่วไป": ["jariya@khienkhet.ac.th", "supattra@khienkhet.ac.th"],
+  "ฝ่ายทะเบียน/วัดผล": ["suwannee@khienkhet.ac.th"],
   "ห้องพยาบาล": ["maneewan@khienkhet.ac.th"],
 };
 

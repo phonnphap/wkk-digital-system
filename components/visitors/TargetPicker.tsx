@@ -7,10 +7,7 @@ export type Target = { type: "class" | "admin"; classroom_id?: string; label: st
 
 export default function TargetPicker({
   targets, value, onChange, big = false, classOnly = false,
-}: {
-  targets: Targets; value: Target; onChange: (t: Target) => void;
-  big?: boolean; classOnly?: boolean; // classOnly = ซ่อนแท็บ "ฝ่ายบริหาร"
-}) {
+}: { targets: Targets; value: Target; onChange: (t: Target) => void; big?: boolean; classOnly?: boolean }) {
   const [tab, setTab] = useState<"class" | "admin">(classOnly ? "class" : value?.type ?? "class");
   const [grade, setGrade] = useState<string>("");
   const grades = Array.from(new Set(targets.rooms.map(r => r.grade)));
@@ -20,12 +17,10 @@ export default function TargetPicker({
 
   return (
     <div className="space-y-3">
-      {!classOnly && (
-        <div className="grid grid-cols-2 gap-2">
-          <button type="button" onClick={() => setTab("class")} className={`rounded-2xl border-2 font-extrabold ${sz} ${tab === "class" ? on : off}`}>🏫 ชั้นเรียน</button>
-          <button type="button" onClick={() => setTab("admin")} className={`rounded-2xl border-2 font-extrabold ${sz} ${tab === "admin" ? on : off}`}>🏛️ ฝ่ายบริหาร</button>
-        </div>
-      )}
+      {!classOnly && <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={() => setTab("class")} className={`rounded-2xl border-2 font-extrabold ${sz} ${tab === "class" ? on : off}`}>🏫 ชั้นเรียน</button>
+        <button type="button" onClick={() => setTab("admin")} className={`rounded-2xl border-2 font-extrabold ${sz} ${tab === "admin" ? on : off}`}>🏛️ ฝ่ายบริหาร</button>
+      </div>}
 
       {tab === "class" && (
         <>
