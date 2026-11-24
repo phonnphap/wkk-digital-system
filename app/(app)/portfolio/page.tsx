@@ -7,10 +7,50 @@ import { createClient } from "@/lib/supabase/client";
 import {
   User, Phone, MessageCircle, GraduationCap, Pencil, X, Check,
   CalendarDays, Trophy, FolderOpen, FileText, AlertCircle, Send, Loader2,
-  ClipboardList, ArrowRight, Clock,
-} from "lucide-react";
+  ClipboardList, ArrowRight, Clock, CheckCircle2, XCircle, Inbox } from "lucide-react";
 import { fetchHolidayMap, isHoliday, HolidayMap } from "@/lib/holidays";
 import { useEffect, useState, useMemo, useRef } from "react";
+import { fetchTrainingRecords } from "@/lib/training-records";
+
+const ADMIN_ROLES = ["admin", "director", "deputy_director"];
+
+const CATEGORY_LABEL: Record<string, string> = {
+  edit_locked_field: "ขอแก้ไขข้อมูลที่ถูกล็อก",
+  bug_report: "แจ้งปัญหาการใช้งาน",
+  other: "อื่นๆ",
+};
+const REQUEST_STATUS: Record<string, { label: string; cls: string }> = {
+  pending:  { label: "รอดำเนินการ", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  approved: { label: "อนุมัติแล้ว", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  rejected: { label: "ไม่อนุมัติ",  cls: "bg-rose-50 text-rose-700 border-rose-200" },
+};
+
+// ใช้ร่วมกันทั้ง อบรม / รางวัล / สื่อการสอน
+type HistoryItem = { id: string; title: string; date: string | null; sub?: string | null };
+
+type SupportRequest = {
+  id: string;
+  user_id: string;
+  category: string;
+  subject: string;
+  message: string;
+  status: "pending" | "approved" | "rejected";
+  admin_reason: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  user?: { title: string | null; first_name: string | null; last_name: string | null } | null;
+};
+
+function thaiDateShort(s?: string | null) {
+  if (!s) return "—";
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+}
+// ใหม่ → เก่า
+function sortDesc<T extends { date: string | null }>(arr: T[]): T[] {
+  return [...arr].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+}
 
 function currentFiscalYear() {
   const now = new Date();
@@ -40,9 +80,6 @@ type Profile = {
 };
 
 type LeaveSummaryRow = { leave_type: string; total_days: number; used_days: number; remaining_days: number };
-type Training = { id: string; title: string; organizer: string | null; hours: number | null; training_date: string | null; certificate_url: string | null };
-type Award = { id: string; title: string; award_level: string | null; date_received: string | null; image_cover: string | null };
-type Material = { id: string; title: string; subject_group: string | null; created_at: string };
 type PendingTask = { id: string; label: string; path: string };
 
 // ── แถวข้อมูลการลงเวลาที่ "รวมแล้ว" จาก 2 แหล่ง:
@@ -741,9 +778,9 @@ export default function TeacherPortfolioPage() {
   const [selectedDay, setSelectedDay] = useState<string>(() => toDateInputValue(new Date()));
   const [leaveSummary, setLeaveSummary] = useState<LeaveSummaryRow[]>([]);
   const [leaveCount, setLeaveCount] = useState<{ used_count: number; remaining_count: number } | null>(null);
-  const [trainings, setTrainings] = useState<Training[]>([]);
-  const [awards, setAwards] = useState<Award[]>([]);
-  const [materials, setMaterials] = useState<Material[]>([]);
+  const [trainings, setTrainings] = useState<HistoryItem[]>([]);
+const [awards, setAwards] = useState<HistoryItem[]>([]);
+const [materials, setMaterials] = useState<HistoryItem[]>([]);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
   const [onLeaveDates, setOnLeaveDates] = useState<Set<string>>(new Set());
@@ -761,10 +798,50 @@ export default function TeacherPortfolioPage() {
   const [showSigPad, setShowSigPad] = useState(false);
   const [sigUrl, setSigUrl] = useState("");
   const [savingSig, setSavingSig] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+const [myRequests, setMyRequests] = useState<SupportRequest[]>([]);
+const [adminRequests, setAdminRequests] = useState<SupportRequest[]>([]);
 
   useEffect(() => {
     loadAll();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadMyRequests(userId: string) {
+  const { data } = await supabase
+    .from("support_requests")
+    .select("id,user_id,category,subject,message,status,admin_reason,created_at,reviewed_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  setMyRequests((data || []) as SupportRequest[]);
+}
+
+async function loadAdminRequests() {
+  const { data } = await supabase
+    .from("support_requests")
+    .select("id,user_id,category,subject,message,status,admin_reason,created_at,reviewed_at,user:users!user_id(title,first_name,last_name)")
+    .order("created_at", { ascending: false });
+  setAdminRequests((data || []) as unknown as SupportRequest[]);
+}
+
+async function reviewRequest(id: string, status: "approved" | "rejected", reason: string): Promise<boolean> {
+  if (!profile) return false;
+  if (status === "rejected" && !reason.trim()) {
+    alert("กรุณาระบุเหตุผลที่ไม่อนุมัติ");
+    return false;
+  }
+  const { error } = await supabase
+    .from("support_requests")
+    .update({
+      status,
+      admin_reason: reason.trim() || null,
+      reviewed_by: profile.id,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+  if (error) { alert("บันทึกผลไม่สำเร็จ: " + error.message); return false; }
+  await loadAdminRequests();
+  return true;
+}
 
   // ── แถวข้อมูลของ "วันที่เลือก" สำหรับมุมมองรายวัน ──
   const selectedDayRow = useMemo(() => {
@@ -948,23 +1025,27 @@ export default function TeacherPortfolioPage() {
       setForm(me as unknown as Profile);
       setSigUrl((me as any).signature_url ?? "");
 
-      supabase
-        .channel(`profile-${me.id}`)
-        .on(
-          "postgres_changes",
-          { event: "UPDATE", schema: "public", table: "users", filter: `id=eq.${me.id}` },
-          (payload) => {
-            setProfile(payload.new as Profile);
-            setSigUrl((payload.new as any).signature_url ?? "");
-          }
-        )
-        .subscribe();
+      const admin = ADMIN_ROLES.includes(me.role);
+setIsAdmin(admin);
+if (admin) {
+  await loadAdminRequests();
+  setLoading(false);
+  return;
+}
+await loadMyRequests(me.id);
+
+supabase
+  .channel(`support-${me.id}`)
+  .on("postgres_changes",
+    { event: "UPDATE", schema: "public", table: "support_requests", filter: `user_id=eq.${me.id}` },
+    () => loadMyRequests(me.id))
+  .subscribe();
 
       const fy = currentFiscalYear();
       const [
         { data: quotaRows },
         { data: countRow },
-        { data: tr },
+        trainingRecs,
         { data: aw },
         { data: mat },
         enrichedMap,
@@ -976,14 +1057,14 @@ export default function TeacherPortfolioPage() {
       ] = await Promise.all([
         supabase.from("v_leave_summary").select("leave_type,total_days,used_days,remaining_days").eq("user_id", me.id).eq("fiscal_year", fy),
         supabase.from("v_leave_count_summary").select("used_count,remaining_count").eq("user_id", me.id).eq("fiscal_year", fy).maybeSingle(),
-        supabase.from("trainings").select("id,title,organizer,hours,training_date,certificate_url").eq("user_id", me.id).order("training_date", { ascending: false }).limit(10),
-        supabase
-          .from("award_recipients")
-          .select("award:awards(id,title,award_level,date_received,image_cover)")
-          .eq("recipient_user_id", me.id)
-          .order("created_at", { ascending: false })
-          .limit(10),
-        supabase.from("teaching_materials").select("id,title,subject_group,created_at").eq("uploaded_by", me.id).order("created_at", { ascending: false }).limit(10),
+        fetchTrainingRecords(),
+          supabase.from("award_recipients")
+  .select("award:awards(id,title,award_level,date_received)")
+  .eq("recipient_user_id", me.id),
+       supabase.from("media_items")
+  .select("id,title,subject,registered_date")
+  .eq("owner_id", me.id)
+  .order("registered_date", { ascending: false }),
         fetchEnrichedAttendance(supabase, me.id, fy),
         fetchAttendanceTimes(supabase, me.id, fy),
         fetchApprovedLeaveDates(supabase, me.id),
@@ -993,10 +1074,25 @@ export default function TeacherPortfolioPage() {
       ]);
       setLeaveSummary(quotaRows || []);
       setLeaveCount(countRow || null);
-      setTrainings(tr || []);
-      const awardRows = (aw || []).map((r: any) => r.award).filter(Boolean) as Award[];
-      setAwards(awardRows);
-      setMaterials(mat || []);
+      setTrainings(sortDesc(
+  ((trainingRecs || []) as any[])
+    .filter((r) => r.user_id === me.id)
+    .map((r) => ({
+      id: r.id,
+      title: r.course_name,
+      date: r.start_date ?? null,
+      sub: [r.organizer, r.hours ? `${r.hours} ชม.` : null].filter(Boolean).join(" · ") || null,
+    }))
+));
+      setAwards(sortDesc(
+  ((aw || []) as any[]).map((r) => r.award).filter(Boolean)
+    .map((a: any) => ({ id: a.id, title: a.title, date: a.date_received ?? null, sub: a.award_level ?? null }))
+));
+      setMaterials(sortDesc(
+  ((mat || []) as any[]).map((m) => ({
+    id: m.id, title: m.title, date: m.registered_date ?? null, sub: m.subject ?? null,
+  }))
+));
       setAttendance(mergeAttendance(enrichedMap, timesMap));
       setOnLeaveDates(onLeaveSet || new Set());
       setApprovedPersonalLeaveDates(approvedPersonalLeaveSet || new Set());
@@ -1065,13 +1161,15 @@ export default function TeacherPortfolioPage() {
     if (!profile || !supportForm.subject.trim() || !supportForm.message.trim()) return;
     setSupportSending(true);
     const { error } = await supabase.from("support_requests").insert({
-      user_id: profile.id,
-      category: supportForm.category,
-      subject: supportForm.subject,
-      message: supportForm.message,
-    });
+  user_id: profile.id,
+  category: supportForm.category,
+  subject: supportForm.subject,
+  message: supportForm.message,
+  status: "pending",
+});
     setSupportSending(false);
     if (!error) {
+      await loadMyRequests(profile.id);
       setSupportSent(true);
       setSupportForm({ category: "edit_locked_field", subject: "", message: "" });
       setTimeout(() => {
@@ -1091,6 +1189,22 @@ export default function TeacherPortfolioPage() {
     );
   }
   if (!profile) return null;
+
+if (isAdmin) {
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800 font-sans antialiased">
+      <main className="w-full px-4 py-6 md:px-8 md:py-8 lg:px-12 lg:py-10 space-y-6 max-w-[1600px] mx-auto">
+        <div className="flex items-center gap-2">
+          <button onClick={() => router.push("/dashboard")}
+            className="w-9 h-9 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 flex items-center justify-center text-lg shadow-sm">🏠</button>
+          <span className="text-slate-300">/</span>
+          <span className="text-sm text-slate-800 font-extrabold">แจ้งเรื่อง / ขอแก้ไขข้อมูลถึงแอดมิน</span>
+        </div>
+        <AdminSupportInbox requests={adminRequests} onReview={reviewRequest} />
+      </main>
+    </div>
+  );
+}
 
   const checkInInfo = dayCheckInInfo(selectedDayRow, selectedOnLeave, selectedIsReligiousCeremony);
   const checkOutInfo = dayCheckOutInfo(selectedDayRow, selectedOnLeave, selectedIsReligiousCeremony);
@@ -1586,62 +1700,27 @@ export default function TeacherPortfolioPage() {
 
         {/* Trainings */}
         <SectionList
-          title="🎓 ประวัติการอบรม"
-          emptyText="ยังไม่มีประวัติการอบรม"
-          items={trainings}
-          renderItem={(t: Training) => (
-            <div key={t.id} className="flex items-center justify-between gap-3 py-3 border-b border-slate-50 last:border-0">
-              <div>
-                <p className="text-sm font-bold text-slate-800">{t.title}</p>
-                <p className="text-xs text-slate-400">
-                  {t.organizer || "—"}
-                  {t.hours ? ` · ${t.hours} ชม.` : ""}
-                </p>
-              </div>
-              {t.certificate_url && (
-                <a href={t.certificate_url} target="_blank" rel="noreferrer" className="text-xs font-bold text-blue-600 hover:underline shrink-0">
-                  ดูเกียรติบัตร →
-                </a>
-              )}
-            </div>
-          )}
-        />
+  title="🎓 ประวัติการอบรม (ล่าสุด → เก่า)"
+  emptyText="ยังไม่มีประวัติการอบรม"
+  items={trainings}
+  renderItem={(t: HistoryItem) => <HistoryRow key={t.id} item={t} tone="blue" />}
+/>
 
         {/* Awards */}
         <SectionList
-          title="🏆 รางวัลและความภาคภูมิใจ"
-          emptyText="ยังไม่มีรางวัลที่บันทึกไว้"
-          items={awards}
-          renderItem={(a: Award) => (
-            <div key={a.id} className="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
-              <div className="w-9 h-9 rounded-lg bg-yellow-100 text-yellow-600 flex items-center justify-center shrink-0">
-                <Trophy className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-slate-800">{a.title}</p>
-                <p className="text-xs text-slate-400">{a.award_level || "—"}</p>
-              </div>
-            </div>
-          )}
-        />
+  title="🏆 รางวัลและความภาคภูมิใจ (ล่าสุด → เก่า)"
+  emptyText="ยังไม่มีรางวัลที่บันทึกไว้"
+  items={awards}
+  renderItem={(a: HistoryItem) => <HistoryRow key={a.id} item={a} tone="yellow" />}
+/>
 
         {/* Teaching materials */}
         <SectionList
-          title="📁 สื่อการสอนที่นำส่ง"
-          emptyText="ยังไม่มีสื่อการสอนที่นำส่ง"
-          items={materials}
-          renderItem={(m: Material) => (
-            <div key={m.id} className="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
-              <div className="w-9 h-9 rounded-lg bg-cyan-100 text-cyan-600 flex items-center justify-center shrink-0">
-                <FolderOpen className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-slate-800">{m.title}</p>
-                <p className="text-xs text-slate-400">{m.subject_group || "—"}</p>
-              </div>
-            </div>
-          )}
-        />
+  title="📁 สื่อการสอนที่นำส่ง (ล่าสุด → เก่า)"
+  emptyText="ยังไม่มีสื่อการสอนที่นำส่ง"
+  items={materials}
+  renderItem={(m: HistoryItem) => <HistoryRow key={m.id} item={m} tone="cyan" />}
+/>
 
         {/* Support request to admin */}
         <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
@@ -1694,6 +1773,36 @@ export default function TeacherPortfolioPage() {
               </div>
             </div>
           )}
+<div className="space-y-2 pt-2 border-t border-slate-100">
+  <p className="text-xs font-bold text-slate-500">คำร้องของฉัน ({myRequests.length})</p>
+  {myRequests.length === 0 ? (
+    <p className="text-sm text-slate-400 text-center py-3">ยังไม่เคยส่งคำร้อง</p>
+  ) : (
+    myRequests.map((r) => {
+      const st = REQUEST_STATUS[r.status] ?? REQUEST_STATUS.pending;
+      return (
+        <div key={r.id} className="rounded-xl border border-slate-100 p-3 space-y-1.5">
+          <div className="flex items-start justify-between gap-2 flex-wrap">
+            <div>
+              <p className="text-sm font-bold text-slate-800">{r.subject}</p>
+              <p className="text-[11px] text-slate-400 font-bold">
+                {CATEGORY_LABEL[r.category] ?? r.category} · ส่งเมื่อ {thaiDateShort(r.created_at)}
+              </p>
+            </div>
+            <span className={`text-[11px] font-black px-2 py-1 rounded-lg border ${st.cls}`}>{st.label}</span>
+          </div>
+          <p className="text-xs text-slate-500 whitespace-pre-wrap">{r.message}</p>
+          {r.status !== "pending" && (
+            <div className={`text-xs font-bold rounded-lg px-3 py-2 ${r.status === "rejected" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>
+              {r.status === "rejected" ? "เหตุผลที่ไม่อนุมัติ" : "หมายเหตุจากแอดมิน"}: {r.admin_reason || "—"}
+              {r.reviewed_at && <span className="opacity-70"> · {thaiDateShort(r.reviewed_at)}</span>}
+            </div>
+          )}
+        </div>
+      );
+    })
+  )}
+</div>
         </div>
       </main>
     </div>
@@ -1811,6 +1920,118 @@ function SectionList<T>({
     <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
       <h3 className="text-sm font-extrabold text-slate-800 mb-2">{title}</h3>
       {items.length === 0 ? <p className="text-sm text-slate-400 py-4 text-center">{emptyText}</p> : <div>{items.map(renderItem)}</div>}
+    </div>
+  );
+}
+
+const TONE_ICON = {
+  blue: "bg-blue-100 text-blue-600",
+  yellow: "bg-yellow-100 text-yellow-600",
+  cyan: "bg-cyan-100 text-cyan-600",
+} as const;
+
+function HistoryRow({ item, tone }: { item: HistoryItem; tone: keyof typeof TONE_ICON }) {
+  return (
+    <div className="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
+      <div className={`shrink-0 w-24 text-center text-[11px] font-black rounded-lg py-1.5 ${TONE_ICON[tone]}`}>
+        {thaiDateShort(item.date)}
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-bold text-slate-800">{item.title}</p>
+        {item.sub && <p className="text-xs text-slate-400">{item.sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+function AdminSupportInbox({
+  requests,
+  onReview,
+}: {
+  requests: SupportRequest[];
+  onReview: (id: string, status: "approved" | "rejected", reason: string) => Promise<boolean>;
+}) {
+  const [tab, setTab] = useState<"pending" | "all">("pending");
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const pendingCount = requests.filter((r) => r.status === "pending").length;
+  const list = tab === "pending" ? requests.filter((r) => r.status === "pending") : requests;
+
+  async function act(id: string, status: "approved" | "rejected") {
+    setBusyId(id);
+    const ok = await onReview(id, status, reasons[id] ?? "");
+    if (ok) setReasons((m) => { const n = { ...m }; delete n[id]; return n; });
+    setBusyId(null);
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+          <Inbox className="w-4 h-4" /> แจ้งเรื่อง / ขอแก้ไขข้อมูลถึงแอดมิน
+        </h3>
+        <div className="flex gap-1.5 bg-slate-100 rounded-xl p-1">
+          {([["pending", `รอดำเนินการ (${pendingCount})`], ["all", `ทั้งหมด (${requests.length})`]] as const).map(([k, l]) => (
+            <button key={k} onClick={() => setTab(k)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold ${tab === k ? "bg-white shadow-sm text-blue-600" : "text-slate-500"}`}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {list.length === 0 ? (
+        <p className="text-sm text-slate-400 text-center py-8">ไม่มีรายการ</p>
+      ) : (
+        <div className="space-y-3">
+          {list.map((r) => {
+            const st = REQUEST_STATUS[r.status] ?? REQUEST_STATUS.pending;
+            const who = r.user ? `${r.user.title ?? ""}${r.user.first_name ?? ""} ${r.user.last_name ?? ""}`.trim() : "—";
+            return (
+              <div key={r.id} className="rounded-2xl border border-slate-100 p-4 space-y-2">
+                <div className="flex items-start justify-between gap-2 flex-wrap">
+                  <div>
+                    <p className="text-sm font-black text-slate-800">{r.subject}</p>
+                    <p className="text-[11px] text-slate-400 font-bold">
+                      👤 {who} · {CATEGORY_LABEL[r.category] ?? r.category} · {thaiDateShort(r.created_at)}
+                    </p>
+                  </div>
+                  <span className={`text-[11px] font-black px-2 py-1 rounded-lg border ${st.cls}`}>{st.label}</span>
+                </div>
+                <p className="text-sm text-slate-600 whitespace-pre-wrap bg-slate-50 rounded-xl px-3 py-2">{r.message}</p>
+
+                {r.status === "pending" ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={reasons[r.id] ?? ""}
+                      onChange={(e) => setReasons((m) => ({ ...m, [r.id]: e.target.value }))}
+                      placeholder="เหตุผล / หมายเหตุถึงครู (จำเป็นเมื่อไม่อนุมัติ)"
+                      rows={2}
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => act(r.id, "rejected")} disabled={busyId === r.id}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-rose-600 border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-50">
+                        <XCircle className="w-4 h-4" /> ไม่อนุมัติ
+                      </button>
+                      <button onClick={() => act(r.id, "approved")} disabled={busyId === r.id}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50">
+                        {busyId === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} อนุมัติ
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className={`text-xs font-bold rounded-lg px-3 py-2 ${r.status === "rejected" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>
+                    เหตุผล: {r.admin_reason || "—"}
+                    {r.reviewed_at && <span className="opacity-70"> · {thaiDateShort(r.reviewed_at)}</span>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

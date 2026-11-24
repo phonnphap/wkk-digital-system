@@ -46,7 +46,11 @@ const DB = {
   sectionsTable: "subject_sections",
   sectionCodeCol: "subject_code",
   sectionRoomCol: "classroom_id",                                   // คอลัมน์ผูกห้องเรียน
-  sectionTitleCols: ["subject_name", "subject_title", "title", "name"], // ลองอ่านตามลำดับ
+  sectionSubjectIdCol: "subject_id",                                   // section → ตารางวิชา
+  subjectsTable: "subjects",
+  subjectCodeCols: ["subject_code", "code"],
+  subjectTitleCols: ["name_th", "name", "title", "subject_name", "subject_title"],
+  sectionTitleCols: ["subject_name", "subject_title", "title", "name"], // สำรอง ถ้า section มีชื่อวิชาเอง
   sectionTypeCols: ["subject_type", "course_type", "category"],        // (ถ้ามี) พื้นฐาน/เพิ่มเติม
   failTable: "vp8_fail_records",
 };
@@ -204,12 +208,13 @@ export default function Vp9Report({
   }, [tKey]);
   useEffect(() => { if (levelHeadName) setHeadName(levelHeadName); }, [levelHeadName]);
 
-  /* ----- โหลดรายวิชาของห้อง + ผล วผ.8 ทุกรอบ ----- */
-  const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [matrix, setMatrix] = useState<Matrix>(emptyMatrix());
+  /* ----- โหลด section ของห้อง (+วิชา) และผล วผ.8 ทั้งหมด แล้วแยกตามเทอมในหน่วยความจำ ----- */
+  const [rawSecs, setRawSecs] = useState<any[]>([]);
+  const [rawRecs, setRawRecs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [termSel, setTermSel] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -224,50 +229,88 @@ export default function Vp9Report({
           roomId = cur.data?.[DB.sectionRoomCol] ?? undefined;
         }
         if (!roomId) throw new Error("ไม่พบห้องเรียน (ส่ง classroomId หรือ sectionId)");
-        const secRes = await supabase.from(DB.sectionsTable).select("*").eq(DB.sectionRoomCol, roomId);
+        // subjects(*) = ข้อมูลวิชา (รหัส/ชื่อ/ประเภท) ผ่าน subject_id เหมือนหน้า ปพ.5
+        const secRes = await supabase.from(DB.sectionsTable).select(`*, ${DB.subjectsTable}(*)`).eq(DB.sectionRoomCol, roomId);
         if (secRes.error) throw secRes.error;
         const secs: any[] = secRes.data ?? [];
-
-        const byCode = new Map<string, Subject>();
-        const codeOfSection = new Map<string, string>();
-        secs.forEach(sec => {
-          const code = String(sec[DB.sectionCodeCol] ?? "").trim();
-          if (!code) return;
-          codeOfSection.set(sec.id, code);
-          if (!byCode.has(code)) {
-            const title = pickFirst(sec, DB.sectionTitleCols) || code;
-            byCode.set(code, { code, title, kind: classifyKind(sec, code, title) });
-          }
-        });
-
-        const next = emptyMatrix();
-        const ids = secs.map(s => s.id);
-        if (ids.length > 0) {
+        let recs: any[] = [];
+        if (secs.length > 0) {
           const recRes = await supabase.from(DB.failTable)
             .select("round, student_id, result, subject_section_id")
-            .in("subject_section_id", ids);
+            .in("subject_section_id", secs.map(x => x.id));
           if (recRes.error) throw recRes.error;
-          (recRes.data ?? []).forEach((r: any) => {
-            const code = codeOfSection.get(r.subject_section_id);
-            const bucket = next[r.round as RoundKey];
-            if (!code || !bucket) return;
-            (bucket[r.student_id] ??= {})[code] = r.result as FailResult;
-          });
+          recs = recRes.data ?? [];
         }
         if (!active) return;
-        setSubjects([...byCode.values()].sort((a, b) => a.code.localeCompare(b.code, "th")));
-        setMatrix(next);
+        setRawSecs(secs);
+        setRawRecs(recs);
       } catch (e: any) {
         if (!active) return;
         setLoadError(e?.message ?? "unknown error");
-        setSubjects([]);
-        setMatrix(emptyMatrix());
+        setRawSecs([]);
+        setRawRecs([]);
       } finally {
         if (active) setLoading(false);
       }
     })();
     return () => { active = false; };
   }, [classroomId, sectionId, reloadKey]);
+
+  const subjectOf = (sec: any) => {
+    const j = sec?.[DB.subjectsTable];
+    return Array.isArray(j) ? j[0] : j;
+  };
+  const codeOfSec = (sec: any): string =>
+    String(sec?.[DB.sectionCodeCol] ?? "").trim() || pickFirst(subjectOf(sec), DB.subjectCodeCols);
+  // เทอมของ section: คอลัมน์ semester/term ใน section → ใน subjects → เลขท้ายรหัสวิชา (คี่=1, คู่=2 เช่น ท21101/ท21102)
+  const semesterOfSec = (sec: any): string => {
+    for (const src of [sec, subjectOf(sec)]) {
+      if (!src) continue;
+      for (const [k, v] of Object.entries(src)) {
+        if (/semester|(^|_)term(_|$)/i.test(k) && /^[12]$/.test(String(v))) return String(v);
+      }
+    }
+    const last = codeOfSec(sec).replace(/\D/g, "").slice(-1);
+    return last ? (Number(last) % 2 === 1 ? "1" : "2") : "";
+  };
+
+  const terms = useMemo(
+    () => [...new Set(rawSecs.map(semesterOfSec).filter(Boolean))].sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rawSecs]);
+  useEffect(() => {
+    if (terms.length === 0 || terms.includes(termSel)) return;
+    const pref = String(semester ?? term.semester);
+    setTermSel(terms.includes(pref) ? pref : terms[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terms]);
+  useEffect(() => { if (termSel) setSemesterV(termSel); }, [termSel]);
+
+  const { subjects, matrix } = useMemo(() => {
+    const secs = termSel && terms.length > 0 ? rawSecs.filter(x => semesterOfSec(x) === termSel) : rawSecs;
+    const byCode = new Map<string, Subject>();
+    const codeOfSection = new Map<string, string>();
+    secs.forEach(sec => {
+      const code = codeOfSec(sec);
+      if (!code) return;
+      codeOfSection.set(sec.id, code);
+      if (!byCode.has(code)) {
+        const subj = subjectOf(sec);
+        const title = pickFirst(subj, DB.subjectTitleCols) || pickFirst(sec, DB.sectionTitleCols) || code;
+        byCode.set(code, { code, title, kind: classifyKind({ ...(subj ?? {}), ...sec }, code, title) });
+      }
+    });
+    const next = emptyMatrix();
+    rawRecs.forEach((r: any) => {
+      const code = codeOfSection.get(r.subject_section_id);
+      const bucket = next[r.round as RoundKey];
+      if (!code || !bucket) return;
+      (bucket[r.student_id] ??= {})[code] = r.result as FailResult;
+    });
+    return { subjects: [...byCode.values()].sort((x, y) => x.code.localeCompare(y.code, "th")), matrix: next };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawSecs, rawRecs, termSel, terms]);
+  const codeProblem = rawSecs.length > 0 && rawSecs.every(x => !codeOfSec(x));
 
   const sorted = useMemo(() => [...students].sort((a, b) => a.seat_number - b.seat_number), [students]);
   const subjectByCode = useMemo(() => new Map(subjects.map(s => [s.code, s])), [subjects]);
@@ -289,6 +332,7 @@ export default function Vp9Report({
   const blankRows = Math.max(0, MIN_ROWS - failers.length);
   const totalOf = (s: Subject | null) => (s ? failers.filter(st => current[st.id]?.[s.code]).length : 0);
 
+  const sigTeachers = [teacher1, teacher2].map(t => t.trim()).filter(Boolean);
   const roomLabel = classroomLabel;
   const levelLabel = roomLabel.includes("/") ? roomLabel.split("/")[0] : roomLabel; // ม.2/6 → ม.2
   const roomNoPrefix = roomLabel.replace(/^ม\.?\s*/, "");                           // ม.2/6 → 2/6
@@ -460,6 +504,25 @@ export default function Vp9Report({
         <div className="rounded-xl border-2 border-rose-200 bg-rose-50 px-4 py-3 text-m font-bold text-rose-600 print:hidden">
           ⚠️ โหลดข้อมูลไม่ได้: {loadError}<br />
           (ตรวจชื่อตาราง/คอลัมน์ในออบเจ็กต์ <code>DB</code> ด้านบนไฟล์ให้ตรงกับ Supabase)
+        </div>
+      )}
+
+      {codeProblem && (
+        <div className="rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3 text-m font-bold text-amber-700 print:hidden">
+          ⚠️ พบ {rawSecs.length} section แต่อ่านรหัสวิชาไม่ได้ — ตรวจ DB.subjectCodeCols (ตาราง subjects)
+        </div>
+      )}
+
+      {terms.length > 1 && (
+        <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1 w-fit print:hidden">
+          {terms.map(t => (
+            <button key={t} onClick={() => setTermSel(t)}
+              className={`px-3 py-2 rounded-lg text-m font-black transition-colors ${
+                termSel === t ? "bg-indigo-500 text-white" : "text-slate-500 hover:bg-slate-50"
+              }`}>
+              เทอม {t}
+            </button>
+          ))}
         </div>
       )}
 
@@ -664,14 +727,17 @@ export default function Vp9Report({
 
           {/* ลายเซ็น */}
           <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-6 text-[18px] font-bold vp9-avoid">
-            <div className="text-center">
+            {/* ครูประจำชั้น 2 คน = ซ้าย/ขวา · คนเดียว = ยุบฝั่งซ้าย เหลือเฉพาะฝั่งขวา */}
+            {sigTeachers.length >= 2 && (
+              <div className="text-center">
+                <p>ลงชื่อ{dots("", "min-w-[160px]")}</p>
+                <p>({dots(sigTeachers[0], "min-w-[170px]")})</p>
+                <p>ครูประจำชั้น</p>
+              </div>
+            )}
+            <div className={`text-center ${sigTeachers.length >= 2 ? "" : "col-start-2"}`}>
               <p>ลงชื่อ{dots("", "min-w-[160px]")}</p>
-              <p>({dots(teacher1, "min-w-[170px]")})</p>
-              <p>ครูประจำชั้น</p>
-            </div>
-            <div className="text-center">
-              <p>ลงชื่อ{dots("", "min-w-[160px]")}</p>
-              <p>({dots(teacher2, "min-w-[170px]")})</p>
+              <p>({dots(sigTeachers.length >= 2 ? sigTeachers[1] : sigTeachers[0] ?? "", "min-w-[170px]")})</p>
               <p>ครูประจำชั้น</p>
             </div>
           </div>
