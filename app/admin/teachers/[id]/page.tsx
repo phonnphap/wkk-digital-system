@@ -559,6 +559,29 @@ async function fetchApprovedLeaveDates(supabase: any, userId: string): Promise<S
   }
 }
 
+async function fetchMyAwards(supabase: any, me: { id: string; first_name: string; last_name: string }) {
+  const sel = "recipient_user_id, recipient_name, award:awards(id,title,award_level,date_received)";
+
+  const byId = await supabase.from("award_recipients").select(sel).eq("recipient_user_id", me.id);
+  if (byId.error) console.error("awards by id:", byId.error.message);
+
+  const fn = (me.first_name || "").trim();
+  const ln = (me.last_name || "").trim();
+  let byName: any = { data: [] };
+  if (fn && ln) {
+    byName = await supabase.from("award_recipients").select(sel).ilike("recipient_name", `%${fn}%${ln}%`);
+    if (byName.error) console.error("awards by name:", byName.error.message);
+  }
+
+  const seen = new Set<string>();
+  return [...(byId.data || []), ...(byName.data || [])].filter((r: any) => {
+    const aid = r.award?.id;
+    if (!aid || seen.has(aid)) return false;
+    seen.add(aid);
+    return true;
+  });
+}
+
 // ── ★ ดึงวันที่ที่มีใบลา "ยื่นแล้วแต่ยังรออนุมัติ" — ใช้แยกออกจากกรณี "ไม่มีการส่งใบลาในระบบเลย"
 //    (ถ้ายื่นแล้วแต่ยังไม่อนุมัติ จะไม่ขึ้น "รอการส่งใบลาในระบบ") ──
 async function fetchPendingLeaveDates(supabase: any, userId: string): Promise<Set<string>> {
@@ -769,7 +792,7 @@ const [materials, setMaterials] = useState<HistoryItem[]>([]);
       { data: ls },
       { data: cnt },
       trainingRecs,
-      { data: aw },
+      aw,
       { data: mat },
       { data: sr },
       enrichedMap,
@@ -792,9 +815,7 @@ const [materials, setMaterials] = useState<HistoryItem[]>([]);
       supabase.from("v_leave_summary").select("leave_type,total_days,used_days,remaining_days").eq("user_id", id).eq("fiscal_year", fy),
       supabase.from("v_leave_count_summary").select("used_count,remaining_count").eq("user_id", id).eq("fiscal_year", fy).maybeSingle(),
       fetchTrainingRecords(),
-     supabase.from("award_recipients")
-    .select("award:awards(id,title,award_level,date_received)")
-    .eq("recipient_user_id", id),
+     fetchMyAwards(supabase, profile as any),
   supabase.from("media_items")
     .select("id,title,subject,registered_date")
     .eq("owner_id", id),
