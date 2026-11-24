@@ -8,8 +8,23 @@ import { createClient } from "@/lib/supabase/client";
 import { fetchHolidayMap, isHoliday, HolidayMap } from "@/lib/holidays";
 import {
   User, Search, GraduationCap, ArrowLeft, Loader2, Users, CheckCircle2, XCircle,
-  Clock, LogOut, LogIn, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, BarChart3, List,
-} from "lucide-react";
+  Clock, LogOut, LogIn, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, BarChart3, List,Award, Presentation } from "lucide-react";
+import { fetchTrainingRecords } from "@/lib/training-records";
+
+type AchRaw = {
+  trainings: { user_id: string; hours: number | string | null }[];
+  awards: { recipient_user_id: string }[];
+  media: { owner_id: string | null }[];
+};
+type AchStat = { teacher: TeacherRow; trainingCount: number; trainingHours: number; awards: number; media: number };
+type AchSortKey = "trainingHours" | "trainingCount" | "awards" | "media" | "name";
+const ACH_SORT_LABEL: Record<AchSortKey, string> = {
+  trainingHours: "ชั่วโมงอบรม",
+  trainingCount: "จำนวนรายการอบรม",
+  awards: "รางวัล",
+  media: "สื่อการสอน",
+  name: "ชื่อ",
+};
 
 const ADMIN_ROLES = ["director", "deputy_director", "admin"];
 const ADMIN_EMAILS = ["sumalin@khienkhet.ac.th"];
@@ -415,7 +430,6 @@ export default function AdminTeachersListPage() {
   const [gradeFilter, setGradeFilter] = useState<string>("all");
 
   // ── สถิติการลงเวลา ──
-  const [activeTab, setActiveTab] = useState<"list" | "stats">("list");
   const [period, setPeriod] = useState<Period>(() => currentPeriod(bangkokDateStr()));
   const [statsData, setStatsData] = useState<StatsRaw | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -423,6 +437,14 @@ export default function AdminTeachersListPage() {
   const [sortKey, setSortKey] = useState<SortKey>("late");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const statsReq = useRef(0);
+  const [activeTab, setActiveTab] = useState<"list" | "stats" | "summary">("list");
+
+// ── สรุปผลงาน ──
+const [achData, setAchData] = useState<AchRaw | null>(null);
+const [achLoading, setAchLoading] = useState(false);
+const [achError, setAchError] = useState<string | null>(null);
+const [achSortKey, setAchSortKey] = useState<AchSortKey>("trainingHours");
+const [achSortDir, setAchSortDir] = useState<SortDir>("desc");
 
   useEffect(() => {
     checkAccessAndLoad();
@@ -544,6 +566,28 @@ export default function AdminTeachersListPage() {
       if (reqId === statsReq.current) setStatsLoading(false);
     }
   }
+
+  useEffect(() => {
+  if (!allowed || activeTab !== "summary" || achData) return;
+  loadAchievements();
+}, [allowed, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+async function loadAchievements() {
+  setAchLoading(true);
+  setAchError(null);
+  try {
+    const [trainings, awards, media] = await Promise.all([
+      fetchTrainingRecords(),
+      fetchAllRows((from, to) => supabase.from("award_recipients").select("recipient_user_id").range(from, to)),
+      fetchAllRows((from, to) => supabase.from("media_items").select("owner_id").range(from, to)),
+    ]);
+    setAchData({ trainings: trainings as any[], awards, media });
+  } catch (e: any) {
+    setAchError(e?.message ?? "โหลดข้อมูลสรุปผลงานไม่สำเร็จ");
+  } finally {
+    setAchLoading(false);
+  }
+}
 
   // ── คำนวณสถิติรายคน โดยใช้เงื่อนไขเดียวกับหน้า portfolio ทุกประการ (มติ/ภารกิจ/ขออนุญาต/ลาครึ่งวัน ฯลฯ) ──
     const statsComputed = useMemo(() => {
@@ -682,6 +726,74 @@ export default function AdminTeachersListPage() {
     );
   }, [sortedStats]);
 
+  const achStats = useMemo<AchStat[]>(() => {
+  if (!achData) return [];
+  const tr = new Map<string, { count: number; hours: number }>();
+  for (const r of achData.trainings) {
+    const c = tr.get(r.user_id) ?? { count: 0, hours: 0 };
+    c.count += 1;
+    c.hours += Number(r.hours) || 0;
+    tr.set(r.user_id, c);
+  }
+  const aw = new Map<string, number>();
+  for (const r of achData.awards) aw.set(r.recipient_user_id, (aw.get(r.recipient_user_id) ?? 0) + 1);
+  const md = new Map<string, number>();
+  for (const r of achData.media) if (r.owner_id) md.set(r.owner_id, (md.get(r.owner_id) ?? 0) + 1);
+
+  return teachers.map((t) => ({
+    teacher: t,
+    trainingCount: tr.get(t.id)?.count ?? 0,
+    trainingHours: tr.get(t.id)?.hours ?? 0,
+    awards: aw.get(t.id) ?? 0,
+    media: md.get(t.id) ?? 0,
+  }));
+}, [achData, teachers]);
+
+// ใช้ตัวกรอง "ค้นหา" + "สายชั้น" ชุดเดียวกับทั้งหน้า → เลือกดูทีละสายชั้นได้
+const sortedAch = useMemo(() => {
+  const list = achStats.filter((s) => matchesFilters(s.teacher));
+  const dir = achSortDir === "desc" ? -1 : 1;
+  return list.sort((a, b) => {
+    if (achSortKey === "name") return (achSortDir === "asc" ? 1 : -1) * compareTeacherNames(a.teacher, b.teacher);
+    const diff = (a[achSortKey] - b[achSortKey]) * dir;
+    if (diff !== 0) return diff;
+    return compareTeacherNames(a.teacher, b.teacher);
+  });
+}, [achStats, search, gradeFilter, achSortKey, achSortDir]); // eslint-disable-line react-hooks/exhaustive-deps
+
+const achTotals = useMemo(
+  () => sortedAch.reduce(
+    (acc, s) => ({
+      trainingCount: acc.trainingCount + s.trainingCount,
+      trainingHours: acc.trainingHours + s.trainingHours,
+      awards: acc.awards + s.awards,
+      media: acc.media + s.media,
+    }),
+    { trainingCount: 0, trainingHours: 0, awards: 0, media: 0 }
+  ),
+  [sortedAch]
+);
+
+function handleAchSort(key: AchSortKey) {
+  if (key === achSortKey) setAchSortDir((d) => (d === "desc" ? "asc" : "desc"));
+  else { setAchSortKey(key); setAchSortDir(key === "name" ? "asc" : "desc"); }
+}
+
+function renderAchHeader(label: string, key: AchSortKey, align: "left" | "center" = "center") {
+  const active = achSortKey === key;
+  return (
+    <th className={`px-3 py-3 font-black text-xs ${align === "center" ? "text-center" : "text-left"}`}>
+      <button
+        onClick={() => handleAchSort(key)}
+        className={`inline-flex items-center gap-1 whitespace-nowrap hover:text-slate-800 ${active ? "text-blue-600" : "text-slate-500"}`}
+      >
+        {label}
+        {active ? (achSortDir === "desc" ? <ArrowDown className="w-3.5 h-3.5" /> : <ArrowUp className="w-3.5 h-3.5" />) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+      </button>
+    </th>
+  );
+}
+
   const stats = useMemo(() => {
     const total = teachers.length;
     const leaveCount = teachers.filter((t) => onLeaveToday.has(t.id)).length;
@@ -817,6 +929,7 @@ export default function AdminTeachersListPage() {
 
   const medals = ["🥇", "🥈", "🥉"];
   const showMedals = sortKey !== "name" && sortDir === "desc";
+  const showAchMedals = achSortKey !== "name" && achSortDir === "desc";
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-800 font-sans antialiased">
@@ -857,6 +970,14 @@ export default function AdminTeachersListPage() {
           >
             <BarChart3 className="w-4 h-4" /> สถิติการลงเวลา
           </button>
+          <button
+  onClick={() => setActiveTab("summary")}
+  className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
+    activeTab === "summary" ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:text-slate-800"
+  }`}
+>
+  <Award className="w-4 h-4" /> สรุปผลงาน
+</button>
         </div>
 
         {/* สรุปภาพรวม (แท็บรายชื่อ) */}
@@ -1124,6 +1245,145 @@ export default function AdminTeachersListPage() {
             )}
           </div>
         )}
+        {activeTab === "summary" && (
+  <div className="space-y-4">
+    {/* เรียงลำดับ */}
+    <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center gap-2">
+      <label className="text-xs font-black text-slate-400 shrink-0">เรียงตาม</label>
+      <select
+        value={achSortKey}
+        onChange={(e) => {
+          const k = e.target.value as AchSortKey;
+          setAchSortKey(k);
+          setAchSortDir(k === "name" ? "asc" : "desc");
+        }}
+        className="border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+      >
+        {(Object.keys(ACH_SORT_LABEL) as AchSortKey[]).map((k) => (
+          <option key={k} value={k}>{ACH_SORT_LABEL[k]}</option>
+        ))}
+      </select>
+      <button
+        onClick={() => setAchSortDir((d) => (d === "desc" ? "asc" : "desc"))}
+        className="inline-flex items-center gap-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-600 bg-white hover:bg-slate-50"
+      >
+        {achSortDir === "desc" ? <ArrowDown className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" />}
+        {achSortKey === "name" ? (achSortDir === "asc" ? "ก → ฮ" : "ฮ → ก") : achSortDir === "desc" ? "มาก → น้อย" : "น้อย → มาก"}
+      </button>
+    </div>
+
+    {achLoading ? (
+      <div className="flex flex-col items-center gap-2 py-20 text-slate-400">
+        <Loader2 className="w-6 h-6 animate-spin" />
+        <span className="text-xs font-bold">กำลังรวบรวมผลงาน...</span>
+      </div>
+    ) : achError ? (
+      <div className="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-5 text-sm font-bold">
+        <p>โหลดข้อมูลไม่สำเร็จ: {achError}</p>
+        <button onClick={loadAchievements} className="mt-2 text-blue-600 hover:underline">ลองอีกครั้ง</button>
+      </div>
+    ) : !achData ? null : (
+      <>
+        {/* การ์ดสรุปรวม (ตามตัวกรองที่เลือก) */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { label: "รายการอบรม", value: achTotals.trainingCount, unit: "รายการ", cls: "bg-blue-100 text-blue-700", Icon: GraduationCap },
+            { label: "ชั่วโมงอบรมรวม", value: achTotals.trainingHours, unit: "ชม.", cls: "bg-indigo-100 text-indigo-700", Icon: Clock },
+            { label: "รางวัลที่ภาคภูมิใจ", value: achTotals.awards, unit: "รายการ", cls: "bg-yellow-100 text-yellow-700", Icon: Award },
+            { label: "สื่อการสอน", value: achTotals.media, unit: "สื่อ", cls: "bg-cyan-100 text-cyan-700", Icon: Presentation },
+          ].map(({ label, value, unit, cls, Icon }) => (
+            <div key={label} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${cls}`}><Icon className="w-5 h-5" /></div>
+              <div>
+                <p className="text-xs font-bold text-slate-400">{label}</p>
+                <p className="text-xl font-black text-slate-800">
+                  {value.toLocaleString("th-TH")} <span className="text-xs font-bold text-slate-400">{unit}</span>
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-xs font-bold text-slate-500">
+          {gradeFilter === "all" ? "ทุกสายชั้น" : `สายชั้น ${gradeFilter}`} · แสดง {sortedAch.length} คน
+        </p>
+
+        {sortedAch.length === 0 ? (
+          <div className="text-center py-20 text-slate-400 text-sm">ไม่พบครูที่ตรงกับเงื่อนไข</div>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="text-center px-3 py-3 font-black text-slate-500 text-xs w-12">#</th>
+                    {renderAchHeader("ชื่อ", "name", "left")}
+                    <th className="text-left px-3 py-3 font-black text-slate-500 text-xs hidden md:table-cell">สายชั้น</th>
+                    {renderAchHeader("🎓 อบรม (รายการ)", "trainingCount")}
+                    {renderAchHeader("⏱️ อบรม (ชม.)", "trainingHours")}
+                    {renderAchHeader("🏆 รางวัล", "awards")}
+                    {renderAchHeader("📁 สื่อการสอน", "media")}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedAch.map((s, idx) => {
+                    const t = s.teacher;
+                    const topRow = showAchMedals && idx < 3 && s[achSortKey as Exclude<AchSortKey, "name">] > 0;
+                    const cell = (n: number, hl: boolean, tone: string, suffix = "") =>
+                      n === 0 ? <span className="text-slate-300 font-bold">0</span> : (
+                        <span className={`inline-block min-w-[2rem] px-2 py-0.5 rounded-lg text-sm font-black ${tone} ${hl ? "ring-2 ring-offset-1 ring-blue-300" : ""}`}>
+                          {n.toLocaleString("th-TH")}{suffix}
+                        </span>
+                      );
+                    return (
+                      <tr
+                        key={t.id}
+                        onClick={() => router.push(`/admin/teachers/${t.id}`)}
+                        className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 cursor-pointer transition-colors ${topRow ? "bg-amber-50/40" : ""}`}
+                      >
+                        <td className="px-3 py-3 text-center text-xs font-black text-slate-400">
+                          {topRow ? <span className="text-base">{medals[idx]}</span> : idx + 1}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center overflow-hidden shrink-0">
+                              {t.avatar_url ? <img src={t.avatar_url} alt="" className="w-full h-full object-cover" /> : <User className="w-4 h-4" />}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-extrabold text-slate-800 truncate">{t.title}{t.first_name} {t.last_name}</p>
+                              <p className="text-xs text-slate-400 truncate">{t.position || ROLE_LABEL[t.role ?? ""] || "—"}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 hidden md:table-cell">
+                          {t.grade_level?.name ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">
+                              <GraduationCap className="w-3 h-3" /> {t.grade_level.name}
+                            </span>
+                          ) : <span className="text-slate-300 text-xs">—</span>}
+                        </td>
+                        <td className="px-3 py-3 text-center">{cell(s.trainingCount, achSortKey === "trainingCount", "bg-blue-50 text-blue-700")}</td>
+                        <td className="px-3 py-3 text-center">{cell(s.trainingHours, achSortKey === "trainingHours", "bg-indigo-50 text-indigo-700")}</td>
+                        <td className="px-3 py-3 text-center">{cell(s.awards, achSortKey === "awards", "bg-yellow-50 text-yellow-700")}</td>
+                        <td className="px-3 py-3 text-center">{cell(s.media, achSortKey === "media", "bg-cyan-50 text-cyan-700")}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs text-slate-500 leading-relaxed space-y-1">
+          <p className="font-black text-slate-600">แหล่งข้อมูล</p>
+          <p>การอบรม = รายงานการอบรม (นับทุกรายการที่ครูบันทึก รวมชั่วโมง) · รางวัล = คลังเกียรติยศ (นับจากรายการที่ครูเป็นผู้ได้รับรางวัล) · สื่อการสอน = คลังสื่อการสอน (นับสื่อที่ครูเป็นผู้รับผิดชอบ)</p>
+          <p>ไม่จำกัดช่วงเวลา (นับสะสมทั้งหมด) · เลือกสายชั้นและค้นหาชื่อได้จากแถบตัวกรองด้านบน</p>
+        </div>
+      </>
+    )}
+  </div>
+)}
       </main>
     </div>
   );

@@ -197,6 +197,7 @@ export default function Vp9Report({
   const [teacher2, setTeacher2] = useState(homeroomTeacherNames?.[1] ?? "");
   const [headName, setHeadName] = useState(levelHeadName ?? "");
   const [logoOk, setLogoOk] = useState(true);
+  const [showAll, setShowAll] = useState(false); // แสดงนักเรียนทั้งห้องในตาราง
 
   useEffect(() => { setSemesterV(String(semester ?? term.semester)); }, [semester, term]);
   useEffect(() => { setYearV(academicYearLabel ?? term.year); }, [academicYearLabel, term]);
@@ -329,7 +330,9 @@ export default function Vp9Report({
   const basicCols = padTo(subjects.filter(s => s.kind === "basic"), noSubjects ? 10 : 1);
   const extraCols = padTo(subjects.filter(s => s.kind === "extra"), noSubjects ? 5 : 1);
   const allCols = [...basicCols, ...extraCols];
-  const blankRows = Math.max(0, MIN_ROWS - failers.length);
+  const tableRows = showAll ? sorted : failers;
+  const blankRows = Math.max(0, MIN_ROWS - tableRows.length);
+  const failCells = failers.reduce((n, st) => n + Object.keys(current[st.id] ?? {}).length, 0);
   const totalOf = (s: Subject | null) => (s ? failers.filter(st => current[st.id]?.[s.code]).length : 0);
 
   const sigTeachers = [teacher1, teacher2].map(t => t.trim()).filter(Boolean);
@@ -559,6 +562,13 @@ export default function Vp9Report({
               📄 ติด 0 / ร / มส · {roundInfo.label} ({failers.length} คน)
             </button>
           </div>
+          <label className="flex items-center gap-2 text-m font-bold text-slate-500">
+            <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} className="accent-fuchsia-500" />
+            แสดงนักเรียนทั้งห้องในตาราง (คนที่ไม่ติดจะเว้นช่องว่าง)
+          </label>
+          <p className="text-[12px] font-bold text-slate-400">
+            ตรวจข้อมูล: รายวิชาในเทอมนี้ {subjects.length} วิชา · ผล วผ.8 รอบนี้ {failCells} รายการ ({failers.length} คน)
+          </p>
           <p className="text-[12px] font-bold text-slate-400">
             ข้อมูลมาจากที่ครูประจำวิชาบันทึกใน วผ.8 ของทุกรายวิชาในห้องนี้ — ถ้ามีวิชาที่ครูยังไม่บันทึก รายชื่อจะยังไม่ครบ
           </p>
@@ -696,7 +706,7 @@ export default function Vp9Report({
               </tr>
             </thead>
             <tbody>
-              {failers.map((st, i) => (
+              {tableRows.map((st, i) => (
                 <tr key={st.id}>
                   <td className="border border-slate-400 text-center py-1.5 font-bold">{i + 1}</td>
                   <td className="border border-slate-400 px-2 py-1.5 font-bold whitespace-nowrap overflow-hidden">{nameOf(st)}</td>
@@ -709,7 +719,7 @@ export default function Vp9Report({
               ))}
               {Array.from({ length: blankRows }).map((_, i) => (
                 <tr key={`b${i}`}>
-                  <td className="border border-slate-400 text-center py-1.5 font-bold">{failers.length + i + 1}</td>
+                  <td className="border border-slate-400 text-center py-1.5 font-bold">{tableRows.length + i + 1}</td>
                   <td className="border border-slate-400 py-1.5">&nbsp;</td>
                   {allCols.map((_, c) => <td key={c} className="border border-slate-400 py-1.5">&nbsp;</td>)}
                 </tr>

@@ -24,8 +24,10 @@ const DB = {
   classroomsTable: "classrooms",   // ใช้หาครูประจำชั้นคนที่ 2
   classroomIdCol: "id",
   usersTable: "users",
-  levelHeadRole: "level_head",     // ★ ค่าใน users.extra_roles ของ "หัวหน้าสายชั้น" (ยืนยันค่าจริงอีกครั้ง)
+  gradeCol: "grade_level",         // สายชั้นของครู
+  gradeHeadRole: "grade_head",     // ค่าใน users.extra_roles ของ หัวหน้าสายชั้น
 };
+const ADMIN_ROLES = new Set(["admin", "director", "deputy_director"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function userDisplayName(u: any): string {
@@ -45,57 +47,76 @@ export default function HomeroomVp9Page() {
   const router = useRouter();
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [me, setMe] = useState<any>(null);
   const [studentsByRoom, setStudentsByRoom] = useState<Record<string, Student[]>>({});
-  const [myName, setMyName] = useState("");
+  const [loadingStudents, setLoadingStudents] = useState(false);
   const [info, setInfo] = useState<{ teachers: string[]; head: string }>({ teachers: [], head: "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 1) ห้องที่ดูได้ (เหมือนหน้า ปพ.5) + นักเรียนทุกห้อง + ชื่อครูที่ล็อกอิน
+  // 1) บทบาท → ห้องที่เห็น: แอดมิน/ผู้บริหาร = ทั้งโรงเรียน · ครูทั่วไป = เฉพาะห้องที่เป็นครูประจำชั้น
   useEffect(() => {
     (async () => {
-      const { classrooms: mine } = await getViewableClassrooms(supabase);
-      const seen = new Set<string>();
-      const list = (mine as Classroom[]).filter(c => (seen.has(c.classroom_id) ? false : (seen.add(c.classroom_id), true)));
-      setClassrooms(list);
-
-      const map: Record<string, Student[]> = {};
-      if (list.length > 0) {
-        const res = await supabase.from(DB.studentsTable).select("*")
-          .in(DB.studentRoomCol, list.map(c => c.classroom_id));
-        if (res.error) setError(res.error.message);
-        (res.data ?? []).forEach((r: any) => {
-          (map[r[DB.studentRoomCol]] ??= []).push({
-            id: r.id,
-            prefix: r.prefix ?? r.title ?? "",
-            first_name: r.first_name,
-            last_name: r.last_name,
-            seat_number: r.seat_number ?? r.number ?? 0,
-            student_code: r.student_code ?? r.student_number ?? r.student_no ?? undefined,
-          });
-        });
-      }
-      setStudentsByRoom(map);
-      const first = list.find(c => (map[c.classroom_id]?.length ?? 0) > 0) ?? list[0];
-      if (first) setSelected(first.classroom_id);
-      setLoading(false);
-    })();
-
-    (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data: profile } = await supabase.from(DB.usersTable).select("*").eq("auth_id", user.id).maybeSingle();
-      setMyName(userDisplayName(profile));
+      let profile: any = null;
+      if (user) {
+        const r = await supabase.from(DB.usersTable).select("*").eq("auth_id", user.id).maybeSingle();
+        profile = r.data;
+      }
+      setMe(profile);
+      const admin = !!profile?.role && ADMIN_ROLES.has(profile.role);
+      setIsAdmin(admin);
+
+      let raw: Classroom[] = [];
+      if (admin) {
+        const { classrooms: all } = await getViewableClassrooms(supabase);
+        raw = (all ?? []) as Classroom[];
+      } else {
+        const { data, error } = await supabase.rpc("get_my_classrooms");
+        if (error) setError(error.message);
+        raw = (data ?? []) as Classroom[];
+      }
+      const seen = new Set<string>();
+      const list = raw
+        .filter(c => (seen.has(c.classroom_id) ? false : (seen.add(c.classroom_id), true)))
+        .sort((a, b) => a.room_name.localeCompare(b.room_name, "th", { numeric: true }));
+      setClassrooms(list);
+      if (list[0]) setSelected(list[0].classroom_id);
+      setLoading(false);
     })();
   }, []);
 
+  // 2) นักเรียนของห้องที่เลือก (โหลดทีละห้อง — กันชนเพดาน 1,000 แถวของ Supabase ตอนแอดมินดูทั้งโรงเรียน)
+  useEffect(() => {
+    if (!selected || studentsByRoom[selected]) return;
+    let active = true;
+    (async () => {
+      setLoadingStudents(true);
+      const res = await supabase.from(DB.studentsTable).select("*").eq(DB.studentRoomCol, selected).limit(1000);
+      if (!active) return;
+      if (res.error) setError(res.error.message);
+      const rows: Student[] = (res.data ?? []).map((r: any) => ({
+        id: r.id,
+        prefix: r.prefix ?? r.title ?? "",
+        first_name: r.first_name,
+        last_name: r.last_name,
+        seat_number: r.seat_number ?? r.number ?? 0,
+        student_code: r.student_code ?? r.student_number ?? r.student_no ?? undefined,
+      }));
+      setStudentsByRoom(prev => ({ ...prev, [selected]: rows }));
+      setLoadingStudents(false);
+    })();
+    return () => { active = false; };
+  }, [selected, studentsByRoom]);
+
   const room = classrooms.find(c => c.classroom_id === selected);
   const students = useMemo(() => (selected ? studentsByRoom[selected] ?? [] : []), [selected, studentsByRoom]);
-  const levelLabel = room?.room_name.includes("/") ? room.room_name.split("/")[0] : room?.room_name ?? "";
+  const levelLabel = room?.room_name.includes("/") ? room.room_name.split("/")[0] : room?.room_name ?? ""; // ป.1/3 → ป.1
 
-  // 2) ครูประจำชั้นคนอื่น + หัวหน้าสายชั้น — ดึงไม่ได้ก็ปล่อยให้กรอกเอง
+  // 3) ครูประจำชั้นคนอื่น (จากแถวห้องเรียน) + หัวหน้าสายชั้น (grade_level เดียวกัน + extra_roles มี grade_head)
   useEffect(() => {
-    if (!selected) return;
+    if (!selected || !me) return;
     let active = true;
     (async () => {
       const teachers: string[] = [];
@@ -117,42 +138,65 @@ export default function HomeroomVp9Page() {
 
       try {
         const { data: all } = await supabase.from(DB.usersTable).select("*").not("extra_roles", "is", null);
-        let cands = (all ?? []).filter((u: any) => hasRole(u, DB.levelHeadRole));
-        if (cands.length > 1) {
-          const no = levelLabel.replace(/^ม\.?\s*/, "");
-          const byLevel = cands.filter((u: any) =>
-            Object.entries(u).some(([k, v]) => /level|grade/i.test(k) && v != null && [levelLabel, no].includes(String(v).trim())));
-          if (byLevel.length >= 1) cands = byLevel;
+        const heads = (all ?? []).filter((u: any) => hasRole(u, DB.gradeHeadRole));
+        const norm = (v: any) => String(v ?? "").trim();
+        const myGrade = !isAdmin ? norm(me[DB.gradeCol]) : "";
+        const no = levelLabel.replace(/^[^\d]*/, ""); // ป.1 → 1
+        let cands = myGrade ? heads.filter((u: any) => norm(u[DB.gradeCol]) === myGrade) : [];
+        if (cands.length === 0) {
+          // แอดมิน/ไม่มี grade ของตัวเอง → จับคู่จากชั้นของห้องที่เลือก
+          cands = heads.filter((u: any) => norm(u[DB.gradeCol]) === levelLabel);
+          if (cands.length === 0) cands = heads.filter((u: any) => norm(u[DB.gradeCol]) === no);
         }
-        if (cands.length === 1) head = userDisplayName(cands[0]);
+        if (cands.length >= 1) head = userDisplayName(cands[0]);
       } catch { /* ข้าม */ }
 
       if (!active) return;
       setInfo({ teachers, head });
     })();
     return () => { active = false; };
-  }, [selected, levelLabel]);
+  }, [selected, levelLabel, me, isAdmin]);
 
-  // ชื่อครูที่ล็อกอินอยู่ต้องอยู่ในรายการเสมอ (และอยู่คนแรก)
+  // ครูทั่วไป: ชื่อตัวเองอยู่คนแรก · แอดมิน: ใช้เฉพาะครูประจำชั้นของห้องที่เลือก (ไม่ใส่ชื่อแอดมิน)
   const teacherNames = useMemo(() => {
+    const myName = userDisplayName(me);
+    if (isAdmin) return info.teachers.slice(0, 2);
     const rest = info.teachers.filter(n => n !== myName);
     return (myName ? [myName, ...rest] : rest).slice(0, 2);
-  }, [info.teachers, myName]);
+  }, [info.teachers, me, isAdmin]);
+
+  // ชื่อห้องซ้ำ (เช่นคนละปี) → ต่อท้ายลำดับ ให้แยกออก
+  const optionLabel = (c: Classroom, i: number) => {
+    const dup = classrooms.filter(x => x.room_name === c.room_name);
+    return dup.length > 1 ? `${c.room_name} (${dup.indexOf(c) + 1})` : c.room_name;
+  };
 
   return (
     <div className="w-full px-4 sm:px-6 py-6 lg:px-8 space-y-4">
-      {/* สลับห้อง (เฉพาะกรณีดูได้หลายห้อง) — เทอม 1/2 สลับในหน้า วผ.9 เอง */}
       {classrooms.length > 1 && (
-        <div className="flex flex-wrap gap-2 print:hidden">
-          {classrooms.map(c => (
-            <button key={c.classroom_id} onClick={() => setSelected(c.classroom_id)}
-              className={`rounded-full px-4 py-1.5 text-sm font-bold ${
-                selected === c.classroom_id ? "bg-fuchsia-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}>
-              ห้อง {c.room_name}
-            </button>
-          ))}
-        </div>
+        isAdmin ? (
+          <label className="flex items-center gap-2 text-sm font-bold text-slate-500 print:hidden">
+            เลือกห้อง
+            <select value={selected ?? ""} onChange={e => setSelected(e.target.value)}
+              className="border-2 border-slate-200 rounded-lg px-3 py-1.5 font-bold text-slate-700 bg-white">
+              {classrooms.map((c, i) => (
+                <option key={c.classroom_id} value={c.classroom_id}>ห้อง {optionLabel(c, i)}</option>
+              ))}
+            </select>
+            <span className="text-slate-400 font-bold">({classrooms.length} ห้อง)</span>
+          </label>
+        ) : (
+          <div className="flex flex-wrap gap-2 print:hidden">
+            {classrooms.map((c, i) => (
+              <button key={c.classroom_id} onClick={() => setSelected(c.classroom_id)}
+                className={`rounded-full px-4 py-1.5 text-sm font-bold ${
+                  selected === c.classroom_id ? "bg-fuchsia-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}>
+                ห้อง {optionLabel(c, i)}
+              </button>
+            ))}
+          </div>
+        )
       )}
 
       {error && (
@@ -161,7 +205,7 @@ export default function HomeroomVp9Page() {
         </div>
       )}
 
-      {loading ? (
+      {loading || (selected && loadingStudents && !studentsByRoom[selected]) ? (
         <div className="text-center py-10 text-slate-300 font-bold">กำลังโหลด...</div>
       ) : !room ? (
         <div className="text-center py-10 text-slate-400 font-bold">ยังไม่พบห้องที่คุณเป็นครูประจำชั้น</div>

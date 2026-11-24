@@ -10,6 +10,19 @@ import {
   Trophy, FolderOpen, Loader2, ClipboardList, Clock, AlertCircle, FileText,
 } from "lucide-react";
 import { fetchHolidayMap, isHoliday, HolidayMap } from "@/lib/holidays";
+import { fetchTrainingRecords } from "@/lib/training-records";
+
+type HistoryItem = { id: string; title: string; date: string | null; sub?: string | null };
+
+function thaiDateShort(s?: string | null) {
+  if (!s) return "—";
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+}
+function sortDesc<T extends { date: string | null }>(arr: T[]): T[] {
+  return [...arr].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+}
 
 function currentFiscalYear() {
   const now = new Date();
@@ -733,16 +746,16 @@ export default function AdminTeacherDetailPage() {
 
   const [leaveSummary, setLeaveSummary] = useState<LeaveSummaryRow[]>([]);
   const [leaveCount, setLeaveCount] = useState<{ used_count: number; remaining_count: number } | null>(null);
-  const [trainings, setTrainings] = useState<Training[]>([]);
-  const [awards, setAwards] = useState<Award[]>([]);
-  const [materials, setMaterials] = useState<Material[]>([]);
+const [trainings, setTrainings] = useState<HistoryItem[]>([]);
+const [awards, setAwards] = useState<HistoryItem[]>([]);
+const [materials, setMaterials] = useState<HistoryItem[]>([]);
   const [supportRequests, setSupportRequests] = useState<SupportRequest[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
   const [onLeaveDates, setOnLeaveDates] = useState<Set<string>>(new Set());
   const [pendingLeaveDates, setPendingLeaveDates] = useState<Set<string>>(new Set());
   const [approvedPersonalLeaveDates, setApprovedPersonalLeaveDates] = useState<Set<string>>(new Set());
   const [holidayMap, setHolidayMap] = useState<HolidayMap>(new Map());
-
+  
   const todayStr = useMemo(() => toDateInputValue(new Date()), []);
 
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -755,7 +768,7 @@ export default function AdminTeacherDetailPage() {
       { data: p },
       { data: ls },
       { data: cnt },
-      { data: tr },
+      trainingRecs,
       { data: aw },
       { data: mat },
       { data: sr },
@@ -778,13 +791,13 @@ export default function AdminTeacherDetailPage() {
         .maybeSingle(),
       supabase.from("v_leave_summary").select("leave_type,total_days,used_days,remaining_days").eq("user_id", id).eq("fiscal_year", fy),
       supabase.from("v_leave_count_summary").select("used_count,remaining_count").eq("user_id", id).eq("fiscal_year", fy).maybeSingle(),
-      supabase.from("trainings").select("id,title,organizer,hours,training_date,certificate_url").eq("user_id", id).order("training_date", { ascending: false }),
-      supabase
-        .from("award_recipients")
-        .select("award:awards(id,title,award_level,date_received)")
-        .eq("recipient_user_id", id)
-        .order("created_at", { ascending: false }),
-      supabase.from("teaching_materials").select("id,title,subject_group,created_at").eq("uploaded_by", id).order("created_at", { ascending: false }),
+      fetchTrainingRecords(),
+     supabase.from("award_recipients")
+    .select("award:awards(id,title,award_level,date_received)")
+    .eq("recipient_user_id", id),
+  supabase.from("media_items")
+    .select("id,title,subject,registered_date")
+    .eq("owner_id", id),
       supabase.from("support_requests").select("id,subject,message,status,created_at").eq("user_id", id).order("created_at", { ascending: false }).limit(5),
       fetchEnrichedAttendance(supabase, id, fy),
       fetchAttendanceTimes(supabase, id, fy),
@@ -797,10 +810,26 @@ export default function AdminTeacherDetailPage() {
     setProfile((p as unknown as Profile) || null);
     setLeaveSummary(ls || []);
     setLeaveCount(cnt || null);
-    setTrainings(tr || []);
+    setTrainings(sortDesc(
+  ((trainingRecs || []) as any[])
+    .filter((r) => r.user_id === id)
+    .map((r) => ({
+      id: r.id,
+      title: r.course_name,
+      date: r.start_date ?? null,
+      sub: [r.organizer, r.hours ? `${r.hours} ชม.` : null].filter(Boolean).join(" · ") || null,
+    }))
+));
     const awardRows = (aw || []).map((r: any) => r.award).filter(Boolean) as Award[];
-    setAwards(awardRows);
-    setMaterials(mat || []);
+    setAwards(sortDesc(
+  ((aw || []) as any[]).map((r) => r.award).filter(Boolean)
+    .map((a: any) => ({ id: a.id, title: a.title, date: a.date_received ?? null, sub: a.award_level ?? null }))
+));
+    setMaterials(sortDesc(
+  ((mat || []) as any[]).map((m) => ({
+    id: m.id, title: m.title, date: m.registered_date ?? null, sub: m.subject ?? null,
+  }))
+));
     setSupportRequests(sr || []);
     setAttendance(mergeAttendance(enrichedMap, timesMap));
     setOnLeaveDates(onLeaveSet || new Set());
@@ -1319,59 +1348,27 @@ export default function AdminTeacherDetailPage() {
 
         {/* Trainings */}
         <SectionList
-          title="🎓 ประวัติการอบรม"
-          emptyText="ยังไม่มีประวัติการอบรม"
-          items={trainings}
-          renderItem={(t: Training) => (
-            <div key={t.id} className="flex items-center justify-between gap-3 py-3 border-b border-slate-50 last:border-0">
-              <div>
-                <p className="text-sm font-bold text-slate-800">{t.title}</p>
-                <p className="text-xs text-slate-400">{t.organizer || "—"}{t.hours ? ` · ${t.hours} ชม.` : ""}</p>
-              </div>
-              {t.certificate_url && (
-                <a href={t.certificate_url} target="_blank" rel="noreferrer" className="text-xs font-bold text-blue-600 hover:underline shrink-0">
-                  ดูเกียรติบัตร →
-                </a>
-              )}
-            </div>
-          )}
-        />
+  title={`🎓 ประวัติการอบรม (${trainings.length} รายการ · ${trainings.reduce((s, t) => s + (parseFloat((t.sub ?? "").match(/([\d.]+) ชม\./)?.[1] ?? "0") || 0), 0)} ชม.)`}
+  emptyText="ยังไม่มีประวัติการอบรม"
+  items={trainings}
+  renderItem={(t: HistoryItem) => <HistoryRow key={t.id} item={t} tone="blue" />}
+/>
 
         {/* Awards */}
         <SectionList
-          title="🏆 รางวัลและความภาคภูมิใจ"
-          emptyText="ยังไม่มีรางวัลที่บันทึกไว้"
-          items={awards}
-          renderItem={(a: Award) => (
-            <div key={a.id} className="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
-              <div className="w-9 h-9 rounded-lg bg-yellow-100 text-yellow-600 flex items-center justify-center shrink-0">
-                <Trophy className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-slate-800">{a.title}</p>
-                <p className="text-xs text-slate-400">{a.award_level || "—"}</p>
-              </div>
-            </div>
-          )}
-        />
+  title={`🏆 รางวัลและความภาคภูมิใจ (${awards.length} รายการ)`}
+  emptyText="ยังไม่มีรางวัลที่บันทึกไว้"
+  items={awards}
+  renderItem={(a: HistoryItem) => <HistoryRow key={a.id} item={a} tone="yellow" />}
+/>
 
         {/* Teaching materials */}
         <SectionList
-          title="📁 สื่อการสอนที่นำส่ง"
-          emptyText="ยังไม่มีสื่อการสอนที่นำส่ง"
-          items={materials}
-          renderItem={(m: Material) => (
-            <div key={m.id} className="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
-              <div className="w-9 h-9 rounded-lg bg-cyan-100 text-cyan-600 flex items-center justify-center shrink-0">
-                <FolderOpen className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-slate-800">{m.title}</p>
-                <p className="text-xs text-slate-400">{m.subject_group || "—"}</p>
-              </div>
-            </div>
-          )}
-        />
+  title={`📁 สื่อการสอนที่นำส่ง (${materials.length} สื่อ)`}
+  emptyText="ยังไม่มีสื่อการสอนที่นำส่ง"
+  items={materials}
+  renderItem={(m: HistoryItem) => <HistoryRow key={m.id} item={m} tone="cyan" />}
+/>
 
         {/* Support requests to admin */}
         {supportRequests.length > 0 && (
@@ -1424,6 +1421,26 @@ function SectionList<T>({
     <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
       <h3 className="text-sm font-extrabold text-slate-800 mb-2">{title}</h3>
       {items.length === 0 ? <p className="text-sm text-slate-400 py-4 text-center">{emptyText}</p> : <div>{items.map(renderItem)}</div>}
+    </div>
+  );
+}
+
+const TONE_ICON = {
+  blue: "bg-blue-100 text-blue-600",
+  yellow: "bg-yellow-100 text-yellow-600",
+  cyan: "bg-cyan-100 text-cyan-600",
+} as const;
+
+function HistoryRow({ item, tone }: { item: HistoryItem; tone: keyof typeof TONE_ICON }) {
+  return (
+    <div className="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
+      <div className={`shrink-0 w-24 text-center text-[11px] font-black rounded-lg py-1.5 ${TONE_ICON[tone]}`}>
+        {thaiDateShort(item.date)}
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-bold text-slate-800">{item.title}</p>
+        {item.sub && <p className="text-xs text-slate-400">{item.sub}</p>}
+      </div>
     </div>
   );
 }
