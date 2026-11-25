@@ -2305,6 +2305,254 @@ function TeacherConflictPanel({ groups, classrooms, allClassrooms, subjects, tea
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ── สอนชดเชย (Makeup Schedule) ────────────────────────────────────────────────
+// วางทั้งไฟล์นี้ไว้ใน page.tsx เหนือบรรทัด "// ── Main Page ──" (ห้าม export — Next.js page ห้ามมี export อื่นนอกจาก default)
+// ใช้ของที่มีอยู่แล้วในไฟล์: buildRoomSlots, DAYS, DAY_COLORS, SUBJECT_COLORS, displayName, formatTime, gradeGroupSortKey
+// ══════════════════════════════════════════════════════════════════════════════
+
+type MakeupSession = {
+  id: string;
+  date: string;                 // "YYYY-MM-DD" (ค.ศ.)
+  sourceDay: number;            // 1=จันทร์ … 5=ศุกร์ → วันนี้ใช้ "ตารางของวันไหน"
+  periods: "all" | string[];    // "all" = สอนทั้งวัน · หรือระบุ slot_label เช่น ["คาบ 1"]
+  startTime?: string;           // ใช้เมื่อเป็นคาบเช้าพิเศษ (แสดงแทนเวลาปกติ)
+  endTime?: string;
+  note: string;
+};
+
+// ★ แก้ตรงนี้ที่เดียวเมื่อกำหนดการเปลี่ยน
+const MAKEUP_SESSIONS: MakeupSession[] = [
+  { id: "m1", date: "2026-12-10", sourceDay: 1, periods: "all", note: "ชดเชยวันจันทร์ที่ 28 ธ.ค. 69 · ใช้ตารางวันจันทร์" },
+  { id: "m2", date: "2026-12-12", sourceDay: 2, periods: "all", note: "ชดเชยวันอังคารที่ 29 ธ.ค. 69 · ใช้ตารางวันอังคาร" },
+  ...["2026-12-18", "2026-12-21", "2026-12-22", "2026-12-23", "2026-12-24", "2026-12-25"].map((date, i): MakeupSession => ({
+    id: `m${3 + i}`, date, sourceDay: 3, periods: [`คาบ ${i + 1}`],
+    startTime: "07:30", endTime: "08:30",
+    note: `ชดเชยวันพุธที่ 30 ธ.ค. 69 · คาบ ${i + 1} ของวันพุธ`,
+  })),
+];
+
+const TH_WEEKDAYS = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+function thaiDate(iso: string) {
+  const d = new Date(iso + "T00:00:00");
+  return `วัน${TH_WEEKDAYS[d.getDay()]}ที่ ${d.getDate()} ${TH_MONTHS[d.getMonth()]} ${d.getFullYear() + 543}`;
+}
+
+// คืนรายการ "คาบ + entry" ของห้องนี้ ที่ต้องสอนในวันชดเชยนั้น
+function getRoomSessionCells(room: Classroom, session: Pick<MakeupSession, "sourceDay" | "periods">, entries: TimetableEntry[], timeSlots: TimeSlot[]) {
+  const startOf: Record<string, string> = {};
+  timeSlots.forEach(s => { startOf[s.id] = (s.start_time ?? "").slice(0, 5); });
+  const slots = buildRoomSlots(room.schedule_type, timeSlots).filter(s => !s.is_break);
+  const wanted = session.periods === "all" ? slots : slots.filter(s => (session.periods as string[]).includes(s.slot_label ?? ""));
+  return wanted.map(slot => {
+    const st = slot.start_time.slice(0, 5);
+    const entry = entries.find(e => e.classroom_id === room.id && e.day_of_week === session.sourceDay &&
+      (e.time_slot_id === slot.id || startOf[e.time_slot_id] === st));
+    return { slot, entry };
+  });
+}
+
+function MakeupSchedulePanel({ classrooms, entries, timeSlots, subjects, teachers }: {
+  classrooms: Classroom[]; entries: TimetableEntry[]; timeSlots: TimeSlot[]; subjects: Subject[]; teachers: Teacher[];
+}) {
+  const [mode, setMode] = useState<"school" | "room" | "teacher">("school");
+  const [sessionId, setSessionId] = useState(MAKEUP_SESSIONS[0].id);
+  const [roomId, setRoomId] = useState("");
+  const [teacherId, setTeacherId] = useState("");
+
+  const roomIdSet = new Set(classrooms.map(r => r.id));
+  const scopedEntries = entries.filter(e => roomIdSet.has(e.classroom_id));
+
+  const sortedRooms = [...classrooms].sort((a, b) => {
+    const ga = gradeGroupSortKey(a.grade_group), gb = gradeGroupSortKey(b.grade_group);
+    if (ga !== gb) return ga - gb;
+    return (a.grade_group ?? "").localeCompare(b.grade_group ?? "", "th", { numeric: true })
+      || (a.room_name ?? "").localeCompare(b.room_name ?? "", "th", { numeric: true });
+  });
+
+  const session = MAKEUP_SESSIONS.find(s => s.id === sessionId) ?? MAKEUP_SESSIONS[0];
+  const room = classrooms.find(c => c.id === roomId) ?? sortedRooms[0];
+  const subjectOf = (e: TimetableEntry) => subjects.find(s => s.id === e.subject_id) ?? (e as any).subject;
+  const teacherOf = (id?: string | null) => id ? (teachers.find(t => t.id === id) ?? null) : null;
+  const timeLabel = (s: MakeupSession, slot: TimeSlot) =>
+    s.startTime ? `${s.startTime}–${s.endTime}` : `${formatTime(slot.start_time)}–${formatTime(slot.end_time)}`;
+
+  // ⚠️ คาบของวันที่ถูกชดเชยแบบ "คาบเช้า" ที่ยังไม่มีวันรองรับ (เช่น ม.ต้น/ม.ปลาย มี 7 คาบ แต่มีวันชดเชยแค่ 6 วัน)
+  const morning = MAKEUP_SESSIONS.filter(s => s.periods !== "all");
+  const uncovered = (() => {
+    if (morning.length === 0) return [] as string[];
+    const covered = new Set(morning.flatMap(s => s.periods as string[]));
+    const out = new Set<string>();
+    classrooms.forEach(r => getRoomSessionCells(r, { sourceDay: morning[0].sourceDay, periods: "all" }, scopedEntries, timeSlots)
+      .forEach(({ slot, entry }) => { if (entry && !covered.has(slot.slot_label ?? "")) out.add(slot.slot_label ?? ""); }));
+    return [...out].sort();
+  })();
+
+  const sel = "bg-white border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:border-teal-400";
+
+  function Cell({ s, slot, entry }: { s: MakeupSession; slot: TimeSlot; entry?: TimetableEntry }) {
+    if (!entry) return <div className="rounded-lg border border-dashed border-slate-200 px-2 py-2 text-[10px] text-slate-300 text-center min-h-[64px]">ว่าง</div>;
+    const idx = Math.max(0, subjects.findIndex(x => x.id === entry.subject_id));
+    const c = SUBJECT_COLORS[idx % SUBJECT_COLORS.length];
+    const t1 = teacherOf(entry.teacher_id) ?? (entry as any).teacher;
+    const t2 = teacherOf(entry.teacher_id_2) ?? (entry as any).teacher2;
+    return (
+      <div className={`rounded-lg border-2 px-2 py-1.5 min-h-[64px] ${c.bg} ${c.border} ${c.text}`}>
+        <p className="text-[9px] font-bold opacity-60">{slot.slot_label} · {timeLabel(s, slot)}</p>
+        <p className="font-black text-[11px] leading-tight line-clamp-2">{(subjectOf(entry) as any)?.name_th ?? "—"}</p>
+        <p className="text-[10px] font-bold opacity-80 leading-tight">{displayName(t1)}{t2 ? ` + ${displayName(t2)}` : ""}</p>
+      </div>
+    );
+  }
+
+  function SessionHeader({ s }: { s: MakeupSession }) {
+    const dc = DAY_COLORS[s.sourceDay - 1];
+    return (
+      <div className={`${dc.header} rounded-t-2xl px-4 py-2.5`}>
+        <p className="font-black text-white text-sm">📆 {thaiDate(s.date)}</p>
+        <p className="text-white/80 text-xs">ใช้ตารางวัน{DAYS[s.sourceDay - 1]} · {s.periods === "all" ? "สอนทั้งวัน" : `${s.periods.join(", ")} (${s.startTime}–${s.endTime} น.)`}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between flex-wrap gap-3 print:hidden">
+        <div>
+          <h2 className="text-xl font-black text-slate-800">📆 ตารางสอนชดเชย</h2>
+          <p className="text-slate-400 text-sm">โรงเรียนหยุด 28 ธ.ค. 2569 – 3 ม.ค. 2570 · สอนชดเชยตามกำหนดด้านล่าง</p>
+        </div>
+        <div className="flex bg-slate-100 rounded-xl p-1 gap-0.5">
+          {([["school", "🏫 ทั้งโรงเรียน"], ["room", "🚪 รายห้อง"], ["teacher", "👤 รายครู"]] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setMode(k)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black ${mode === k ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {uncovered.length > 0 && (
+        <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl px-4 py-3 print:hidden">
+          <p className="text-amber-700 font-black text-sm">⚠️ ยังไม่มีวันชดเชยให้: {uncovered.join(", ")} ของวันพุธ</p>
+          <p className="text-amber-600 text-xs font-bold">ห้องที่มีคาบเหล่านี้ในวันพุธจะไม่ถูกแสดงในตารางชดเชย — แก้ MAKEUP_SESSIONS เพื่อเพิ่ม เช่น ให้วันสุดท้ายสอน 2 คาบ</p>
+        </div>
+      )}
+
+      {/* ── ทั้งโรงเรียน: เลือกวัน แล้วดูทุกห้อง ── */}
+      {mode === "school" && (
+        <>
+          <div className="flex gap-2 flex-wrap print:hidden">
+            {MAKEUP_SESSIONS.map(s => (
+              <button key={s.id} onClick={() => setSessionId(s.id)}
+                className={`px-3 py-2 rounded-xl border-2 text-xs font-black ${sessionId === s.id ? "bg-teal-600 border-teal-600 text-white" : "bg-white border-slate-200 text-slate-600"}`}>
+                {new Date(s.date + "T00:00:00").getDate()} {TH_MONTHS[new Date(s.date + "T00:00:00").getMonth()]}
+                <span className="font-bold opacity-70"> · {s.periods === "all" ? "ทั้งวัน" : s.periods[0]}</span>
+              </button>
+            ))}
+          </div>
+          {(() => {
+            const rows = sortedRooms
+              .map(r => ({ room: r, cells: getRoomSessionCells(r, session, scopedEntries, timeSlots) }))
+              .filter(r => r.cells.some(c => c.entry));
+            const maxCols = Math.max(1, ...rows.map(r => r.cells.length));
+            return (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <SessionHeader s={session} />
+                <p className="px-4 py-2 text-xs text-slate-500 bg-slate-50 border-b border-slate-100">{session.note} · {rows.length} ห้อง</p>
+                <div className="overflow-x-auto">
+                  <table className="border-collapse w-full" style={{ minWidth: `${120 + maxCols * 130}px` }}>
+                    <tbody>
+                      {rows.map(({ room: r, cells }) => (
+                        <tr key={r.id} className="border-b border-slate-100 align-top">
+                          <td className="px-2 py-2 w-28 bg-slate-50 border-r border-slate-200 sticky left-0">
+                            <p className="font-black text-xs text-slate-700">{r.room_name}</p>
+                            <p className="text-[10px] text-slate-400">{r.grade_group}</p>
+                          </td>
+                          {cells.map(({ slot, entry }) => (
+                            <td key={slot.id} className="p-1 border-r border-slate-100" style={{ minWidth: 130 }}>
+                              <Cell s={session} slot={slot} entry={entry} />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                      {rows.length === 0 && (
+                        <tr><td className="text-center text-slate-400 py-10 text-sm font-bold">ไม่มีคาบที่ต้องสอนชดเชยในวันนี้</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+        </>
+      )}
+
+      {/* ── รายห้อง: เลือกห้อง แล้วดูทุกวันชดเชย ── */}
+      {mode === "room" && room && (
+        <>
+          <select value={room.id} onChange={e => setRoomId(e.target.value)} className={sel + " print:hidden"}>
+            {sortedRooms.map(r => <option key={r.id} value={r.id}>{r.grade_group} {r.room_name}</option>)}
+          </select>
+          <h3 className="font-black text-slate-700">{room.grade_group} {room.room_name}</h3>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {MAKEUP_SESSIONS.map(s => {
+              const cells = getRoomSessionCells(room, s, scopedEntries, timeSlots);
+              if (!cells.some(c => c.entry)) return null;
+              return (
+                <div key={s.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  <SessionHeader s={s} />
+                  <div className="p-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {cells.map(({ slot, entry }) => <Cell key={slot.id} s={s} slot={slot} entry={entry} />)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* ── รายครู: เลือกครู แล้วดูว่าต้องไปสอนห้องไหนบ้าง ── */}
+      {mode === "teacher" && (
+        <>
+          <select value={teacherId} onChange={e => setTeacherId(e.target.value)} className={sel + " print:hidden min-w-[240px]"}>
+            <option value="">— เลือกครู —</option>
+            {[...teachers].sort((a, b) => displayName(a).localeCompare(displayName(b), "th")).map(t => <option key={t.id} value={t.id}>{displayName(t)}</option>)}
+          </select>
+          {!teacherId ? (
+            <div className="text-center py-12 text-slate-400 bg-white rounded-2xl border border-slate-200 text-sm font-bold">เลือกครูเพื่อดูตารางสอนชดเชย</div>
+          ) : (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              {MAKEUP_SESSIONS.map(s => {
+                const items = sortedRooms.flatMap(r => getRoomSessionCells(r, s, scopedEntries, timeSlots)
+                  .filter(({ entry }) => entry && (entry.teacher_id === teacherId || entry.teacher_id_2 === teacherId))
+                  .map(({ slot, entry }) => ({ room: r, slot, entry: entry! })))
+                  .sort((a, b) => a.slot.start_time.localeCompare(b.slot.start_time));
+                return (
+                  <div key={s.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <SessionHeader s={s} />
+                    <div className="p-3 space-y-2">
+                      {items.length === 0 ? <p className="text-center text-slate-300 text-xs font-bold py-3">ไม่มีสอน</p> : items.map(({ room: r, slot, entry }) => (
+                        <div key={`${r.id}-${slot.id}`} className="flex items-center gap-3 rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+                          <div className="w-24 shrink-0">
+                            <p className="text-xs font-black text-slate-600">{slot.slot_label}</p>
+                            <p className="text-[10px] text-slate-400">{timeLabel(s, slot)}</p>
+                          </div>
+                          <p className="flex-1 text-sm font-bold text-slate-800 truncate">{(subjectOf(entry) as any)?.name_th ?? "—"}</p>
+                          <span className="text-xs font-black text-teal-700 bg-teal-50 border border-teal-200 rounded-lg px-2 py-0.5 shrink-0">{r.room_name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ── Main Page ─────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 export default function SchedulePage() {
