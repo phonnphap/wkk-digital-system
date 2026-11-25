@@ -209,13 +209,13 @@ function timeRangesOverlapLv(aStart?: string|null, aEnd?: string|null, bStart?: 
 }
 
 // ★ ครูที่ "ว่างจริง" ในคาบนี้ — เทียบช่วงเวลาทับกัน (ไม่ใช่แค่ startKey ตรงกัน) เหมือนหน้าแลกคาบ/สอนแทน
-function getFreeTeachersForEntryLv(entry: any, timetableEntries: any[], allTeachers: UserProfile[], excludeId: string, dow: number): UserProfile[] {
+function getFreeTeachersForEntryLv(entry: any, timetableEntries: any[], allTeachers: UserProfile[], excludeId: string, dow: number, date: string): UserProfile[] {
   const busyIds = new Set(
     timetableEntries
       .filter((e: any) => e.day_of_week === dow && timeRangesOverlapLv(entry.start_time, entry.end_time, e.start_time, e.end_time))
       .flatMap((e: any) => [e.teacher_id, e.teacher_id_2].filter(Boolean))
   );
-  return allTeachers.filter(t => t.id !== excludeId && !busyIds.has(t.id) && isSelectableTeacherLv(t));
+  return allTeachers.filter(t => t.id !== excludeId && !busyIds.has(t.id) && isSelectableTeacherLv(t, date));
 }
 
 // ★ สายชั้นของครู อ้างอิงคอลัมน์ grade_level ตรงๆ — เหมือนหน้าแลกคาบ/สอนแทน
@@ -224,11 +224,18 @@ function sameGradeTeacherIdsLv(refTeacher: UserProfile | null | undefined, allTe
   return new Set(allTeachers.filter(t => t.grade_level && t.grade_level === refTeacher.grade_level).map(t => t.id));
 }
 // ★ กันโรล staff / admin ทุกชนิด (admin, admin_hr, admin_academic, admin_general ฯลฯ) / ผอ. / รองผอ. ออกจากตัวเลือกครูสอนแทน
-function isSelectableTeacherLv(t: UserProfile): boolean {
+// ★ ครูยังทำงานอยู่ในวันนั้นไหม (ไม่มี left_date = ยังอยู่ตลอด)
+function isActiveOnDate(t: { left_date?: string | null }, date?: string): boolean {
+  if (!t.left_date) return true;
+  if (!date) return false;
+  return date <= t.left_date;
+}
+
+function isSelectableTeacherLv(t: UserProfile, date?: string): boolean {
   const role = (t.role || "").toLowerCase();
   if (role === "staff" || role === "director" || role === "deputy_director") return false;
-  if (role.includes("admin")) return false;   // ครอบคลุม admin, admin_hr, admin_academic, admin_general ฯลฯ
-  return true;
+  if (role.includes("admin")) return false;
+  return isActiveOnDate(t, date);
 }
 // ★ หาครูอีกคนที่สอนคู่อยู่ในคาบเดียวกัน (นอกเหนือจาก user ที่กำลังลา)
 function coTeacherIdLv(entry: { teacher_id: string; teacher_id_2?: string | null }, excludeId: string): string | null {
@@ -311,7 +318,7 @@ function getSortedSubstituteCandidates(
   assignedCountMap: Record<string, number>,
   conflictIndex: Record<string, { slotNumber: number | null; absentTeacherId: string }[]>
 ): SortedCandidate[] {
-  const free = getFreeTeachersForEntryLv(entry, timetableEntries, allTeachers, excludeId, dow)
+  const free = getFreeTeachersForEntryLv(entry, timetableEntries, allTeachers, excludeId, dow, date)
     .filter(t => !onLeaveIds.has(t.id) && !preUsedIds.has(t.id));
   const sorted = sortCandidatesByPriority(free, entry, requesterTeacher ?? null, timetableEntries);
   return sorted
@@ -624,7 +631,7 @@ async function resolveAttachmentUrl(documentPath?: string | null, fallbackUrl?: 
 }
 
 // ─── Types ────────────────────────────────────────────────
-type UserProfile = { id:string; title?:string; first_name?:string; last_name?:string; full_name?:string; email:string; role:string; position?:string; signature_url?:string; grade_level?:string; phone?:string; extra_roles?:string[]; };
+type UserProfile = { id:string; title?:string; first_name?:string; last_name?:string; full_name?:string; email:string; role:string; position?:string; signature_url?:string; grade_level?:string; phone?:string; extra_roles?:string[]; left_date?:string|null; };
 type ApproverInfo = { id:string; full_name:string; position?:string; email?:string };
 type DutyOfficer  = { id:string; full_name:string; position?:string; email?:string };
 type LeaveStats = {
@@ -1893,7 +1900,7 @@ const busyIds = new Set(
 );
                   const onLeaveForRow = onLeaveByDateState[p.substitute_date] ?? new Set<string>();
                   const optionsRaw = allTeachers
-                    .filter(t => t.id !== user.id && !busyIds.has(t.id) && isSelectableTeacherLv(t) && !onLeaveForRow.has(t.id))
+                    .filter(t => t.id !== user.id && !busyIds.has(t.id) && isSelectableTeacherLv(t, p.substitute_date) && !onLeaveForRow.has(t.id))
                     // ★ ตัดครูที่สอนแทนคนอื่นอยู่แล้วในคาบเวลาเดียวกันนี้ออกจากตัวเลือกไปเลย
                     .filter(t => !statsFor(t.id, p.substitute_date, p.slot_number)?.conflict);
                   // ★ เรียง: ครูประจำชั้น -> สายชั้นคาบนี้ -> วิชาเดียวกัน -> สายชั้นผู้ลา -> ที่เหลือ
@@ -2076,6 +2083,7 @@ useEffect(()=>{
 
   async function handleSubmit(isDraft=false){
     setTouched({startDate:true,endDate:true,reason:true,otherName:true,tripDest:true,contactInfo:true});
+    if(!isDraft && user.left_date && startDate > user.left_date){alert("คุณพ้นสภาพการปฏิบัติงานแล้ว ไม่สามารถยื่นใบลาได้");return;}
     if(!isDraft&&!canSubmit){alert("กรุณากรอกข้อมูลให้ครบ");return;}
     if(!isDraft&&tooSoon){alert("ลากิจต้องยื่นล่วงหน้าอย่างน้อย 3 วัน");return;}
     if(!isDraft&&sickTooFarAhead){alert("ลาป่วยสามารถยื่นล่วงหน้าได้ไม่เกิน 1 วัน");return;}
@@ -2332,7 +2340,7 @@ const reasonFull = leaveType==="official"
       <label className="block text-sm font-bold text-slate-600 mb-1">ผู้ร่วมเดินทาง</label>
       {/* ★ กรอง role ที่มีคำว่า admin ออกจากรายชื่อผู้ร่วมเดินทาง */}
       <CompanionSelector
-        allTeachers={allTeachers.filter(t=>!(t.role||"").toLowerCase().includes("admin"))}
+        allTeachers={allTeachers.filter(t=>!(t.role||"").toLowerCase().includes("admin") && isActiveOnDate(t, startDate || undefined))}
         selected={companionIds}
         onChange={setCompanionIds}
       />
@@ -3806,7 +3814,7 @@ export default function LeavePage(){
       }
   
       if(data){const profile:UserProfile={...data,full_name:(data as any).full_name||`${data.title??""} ${data.first_name??""} ${data.last_name??""}`.replace(/\s+/g," ").trim()};setUser(profile);if(data.signature_url)setSavedSignature(data.signature_url);}
-      const {data:teachers}=await supabase.from("users").select("id,title,first_name,last_name,position,email,role,grade_level,extra_roles").order("first_name");
+      const {data:teachers}=await supabase.from("users").select("id,title,first_name,last_name,position,email,role,grade_level,extra_roles,left_date").order("first_name");
       setAllTeachers((teachers as UserProfile[])||[]);
       const approverEmails=[APPROVER_1_EMAIL,APPROVER_2_EMAIL,APPROVER_3_EMAIL];
       const approverList:ApproverInfo[]=[];

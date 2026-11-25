@@ -613,21 +613,33 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
             <div>&nbsp;</div>
 
             {/* ลายเซ็น */}
+                        {mode === "secondary" ? (
+              <div style={{ height: 8 }}></div>
+            ) : (
+              <>
+                <div className="h-8 print:h-6"></div>
+                <div className="h-8 print:h-6"></div>
+                <div className="h-8 print:h-6"></div>
+                <div>&nbsp;</div>
+              </>
+            )}
+
+            {/* ลายเซ็น */}
             {mode === "midterm" ? (
               <>
                 <div className="grid grid-cols-2 signature-grid text-xl">
-  {hasTwoAdvisors ? (
-    <>
-      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
-      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[1])} lineWidthPx={signatureLineWidthPx} />
-    </>
-  ) : (
-    <>
-      <div></div>
-      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
-    </>
-  )}
-</div>
+                  {hasTwoAdvisors ? (
+                    <>
+                      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
+                      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[1])} lineWidthPx={signatureLineWidthPx} />
+                    </>
+                  ) : (
+                    <>
+                      <div></div>
+                      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
+                    </>
+                  )}
+                </div>
                 <div className="h-8 print:h-6"></div>
                 <div className="grid grid-cols-2 signature-grid text-xl items-start">
                   <div><AttendanceBox pct={attendPct} /></div>
@@ -639,40 +651,40 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
               </>
             ) : (
               <>
-                <div className={`grid ${isPrimary ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"} signature-grid text-xl`}>
-                  {isPrimary ? (
-  hasTwoAdvisors ? (
-    <>
-      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
-      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[1])} lineWidthPx={signatureLineWidthPx} />
-    </>
-  ) : (
-    <>
-      <div></div>
-      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
-    </>
-  )
-) : (
-  <div className="sm:col-span-2">
-    <SignatureField role="ครูที่ปรึกษา" nameLabel={advisorCombinedName} lineWidthPx={signatureLineWidthPx} />
-  </div>
-)}
-                </div>
-                <div className="h-8 print:h-6"></div>
-                <div className="h-8 print:h-6"></div>
-                <div className="h-8 print:h-6"></div>
                 <div className="grid grid-cols-2 signature-grid text-xl">
-                  <div></div>
-                  <div className="flex flex-col gap-8 print:gap-4">
-                    <SignatureField
-                      role={isPrimary ? "ผู้อำนวยการโรงเรียน" : "ผู้บริหารสถานศึกษา"}
-                      nameLabel={directorName}
-                      lineWidthPx={signatureLineWidthPx}
-                    />
-                    <div className="h-8 print:h-6"></div>
-                    <SignatureField role="ผู้ปกครอง" nameLabel="........................................." lineWidthPx={signatureLineWidthPx} gapBeforeName />
-                  </div>
+                  {hasTwoAdvisors ? (
+                    <>
+                      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
+                      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[1])} lineWidthPx={signatureLineWidthPx} />
+                    </>
+                  ) : (
+                    <>
+                      <div></div>
+                      <SignatureField role="ครูที่ปรึกษา" nameLabel={formatFullName(advisors[0])} lineWidthPx={signatureLineWidthPx} />
+                    </>
+                  )}
                 </div>
+                <div className="h-8 print:h-6"></div>
+
+                {isPrimary ? (
+                  <>
+                    <div className="h-8 print:h-6"></div>
+                    <div className="h-8 print:h-6"></div>
+                    <div className="grid grid-cols-2 signature-grid text-xl">
+                      <div></div>
+                      <div className="flex flex-col gap-8 print:gap-4">
+                        <SignatureField role="ผู้อำนวยการโรงเรียน" nameLabel={directorName} lineWidthPx={signatureLineWidthPx} />
+                        <div className="h-8 print:h-6"></div>
+                        <SignatureField role="ผู้ปกครอง" nameLabel="........................................." lineWidthPx={signatureLineWidthPx} gapBeforeName />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="grid grid-cols-2 signature-grid text-xl items-start">
+                    <SignatureField role="ผู้ปกครอง" nameLabel="........................................." lineWidthPx={signatureLineWidthPx} gapBeforeName={false} />
+                    <SignatureField role="ผู้บริหารสถานศึกษา" nameLabel={directorName} lineWidthPx={signatureLineWidthPx} gapBeforeName={false} />
+                  </div>
+                )}
               </>
             )}
           </div>

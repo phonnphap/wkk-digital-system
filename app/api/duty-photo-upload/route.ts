@@ -62,7 +62,9 @@ export async function POST(req: NextRequest) {
     );
     const linkData = await linkRes.json();
 
-    return NextResponse.json({ webUrl: linkRes.ok ? linkData.link.webUrl : uploaded.webUrl });
+    return NextResponse.json({
+  webUrl: linkRes.ok && linkData?.link?.webUrl ? linkData.link.webUrl : uploaded.webUrl,
+});
   } catch (e: any) {
     return NextResponse.json({ error: e.message ?? "เกิดข้อผิดพลาด" }, { status: 500 });
   }

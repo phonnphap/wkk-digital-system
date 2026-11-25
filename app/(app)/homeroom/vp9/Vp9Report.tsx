@@ -91,6 +91,49 @@ function classifyKind(sec: any, code: string, title: string): SubjectKind {
   return "basic";
 }
 
+/* แปลงแถวตาราง students → Student (หาคำนำหน้าจากคอลัมน์ prefix/title ใดก็ได้ ไม่มีก็เดาจากเพศ + ระดับชั้น) */
+export function mapStudentRow(r: any, levelLabel = ""): Student {
+  const known = ["prefix", "prefix_th", "title_th", "name_prefix", "title", "salutation"]
+    .map(k => r?.[k]).find(v => typeof v === "string" && v.trim());
+  let prefix: string = known ? String(known).trim()
+    : String(Object.entries(r ?? {}).find(([k, v]) => /prefix|title/i.test(k) && typeof v === "string" && v.trim() && v.trim().length <= 12)?.[1] ?? "").trim();
+  if (!prefix) {
+    const g = String(r?.gender ?? r?.sex ?? "").trim().toLowerCase();
+    const male = ["m", "male", "ชาย", "1"].includes(g);
+    const female = ["f", "female", "หญิง", "2"].includes(g);
+    const upper = /^ม\.?\s*[456]/.test(levelLabel); // ม.4-6 ใช้ นาย/นางสาว
+    if (male) prefix = upper ? "นาย" : "เด็กชาย";
+    else if (female) prefix = upper ? "นางสาว" : "เด็กหญิง";
+  }
+  return {
+    id: r.id,
+    prefix,
+    first_name: r.first_name,
+    last_name: r.last_name,
+    seat_number: r.seat_number ?? r.number ?? 0,
+    student_code: r.student_code ?? r.student_number ?? r.student_no ?? undefined,
+  };
+}
+
+/* ช่องลายเซ็นใน วผ.9: ลายเซ็นซ้อนบนเส้นประ + ชื่อในวงเล็บ + ตำแหน่ง */
+function SigBlock({ name, sigUrl, role, w = "min-w-[170px]" }: { name: string; sigUrl?: string; role: string; w?: string }) {
+  const [ok, setOk] = useState(true);
+  return (
+    <div className="text-center">
+      <div className="relative inline-block">
+        {sigUrl && ok && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={sigUrl} alt="" onError={() => setOk(false)}
+            className="absolute object-contain" style={{ right: 0, bottom: 2, width: 170, height: "13mm" }} />
+        )}
+        <p style={{ paddingTop: "11mm" }}>ลงชื่อ{dots("", w)}</p>
+      </div>
+      <p>({dots(name, w)})</p>
+      <p>{role}</p>
+    </div>
+  );
+}
+
 function dots(text: string | number | undefined | null, w = "min-w-[90px]") {
   return (
     <span className={`inline-block border-b border-dotted border-black px-1 text-center ${w}`}>
@@ -115,7 +158,7 @@ function LetterShell(p: {
       style={{
         width: "210mm", maxWidth: "100%", margin: "0 auto", padding: "12mm 25mm", minHeight: "270mm",
         fontFamily: '"TH SarabunIT๙","TH Sarabun New","THSarabunNew","Sarabun",sans-serif',
-        fontSize: "16pt", lineHeight: 1.4, color: "#000",
+        fontSize: "16pt", lineHeight: 1.15, color: "#000",
       }}
     >
       {/* ตราครุฑกึ่งกลาง */}
@@ -139,8 +182,8 @@ function LetterShell(p: {
       <p style={{ marginLeft: "24%", width: "76%", textAlign: "center", marginTop: "3mm" }}>{p.dateText}</p>
 
       <div className="space-y-1" style={{ marginTop: "5mm" }}>
-        <div className="flex"><span style={{ width: "1.8cm" }} className="shrink-0">เรื่อง</span><span>{p.subject}</span></div>
-        <div className="flex"><span style={{ width: "1.8cm" }} className="shrink-0">เรียน</span><span>{p.to}</span></div>
+        <div className="flex"><span style={{ width: "1.35cm" }} className="shrink-0">เรื่อง</span><span>{p.subject}</span></div>
+        <div className="flex"><span style={{ width: "1.35cm" }} className="shrink-0">เรียน</span><span>{p.to}</span></div>
       </div>
 
       <div className="space-y-2" style={{ marginTop: "4mm" }}>{p.children}</div>
@@ -154,14 +197,13 @@ function LetterShell(p: {
             <img src={p.signatureUrl} alt="" onError={() => setSigOk(false)} style={{ maxHeight: "17mm" }} className="object-contain" />
           )}
         </div>
-        <p>( {p.principalName} )</p>
+        <p>({p.principalName})</p>
         <p>{p.principalTitle}</p>
       </div>
 
-      <div className="mt-auto pt-6" style={{ fontSize: "15pt" }}>
+      <div className="mt-auto pt-6">
         <p>{p.schoolName}</p>
-        <p>โทรศัพท์ {p.phone}</p>
-        <p>โทรสาร {p.fax}</p>
+        <p>โทร {p.phone} , โทรสาร.{p.fax}</p>
       </div>
     </div>
   );
@@ -172,13 +214,13 @@ const indent = { textIndent: "2.5cm" } as const;
 export default function Vp9Report({
   classroomId, sectionId, classroomLabel, students,
   semester, academicYearLabel,
-  homeroomTeacherNames, levelHeadName,
+  homeroomTeacherNames, homeroomTeacherSignatures, levelHeadName, levelHeadSignature,
   logoUrl = "/logo.png", garudaUrl = "/images.jpg", principalSignatureUrl = "",
   schoolName = "โรงเรียนวัดเขียนเขต",
   addressLines = ["ตำบลบึงยี่โถ  อำเภอธัญบุรี", "จังหวัดปทุมธานี  12130"],
   phone = "0-2533-1239", fax = "0-2533-1454",
   docNoPrefix = "ศธ.04087.029/",
-  examScopeText = "ชั้นมัธยมศึกษาปีที่ 1-6",
+  examScopeText,
   curriculumRevisionYear,
   principalName = "นายธนณัฐ  ศิระวงษ์", principalTitle = "ผู้อำนวยการโรงเรียนวัดเขียนเขต",
   onBack,
@@ -190,6 +232,8 @@ export default function Vp9Report({
   semester?: number | string;
   academicYearLabel?: string;
   homeroomTeacherNames?: string[];     // ครูประจำชั้น (1–2 คน)
+  homeroomTeacherSignatures?: string[]; // URL ลายเซ็นของครูแต่ละคน (ลำดับเดียวกับชื่อ)
+  levelHeadSignature?: string;         // URL ลายเซ็นหัวหน้าสายชั้น
   levelHeadName?: string;              // หัวหน้าสายชั้น
   logoUrl?: string;
   garudaUrl?: string;                  // ตราครุฑสำหรับหนังสือราชการ
@@ -340,14 +384,7 @@ export default function Vp9Report({
     (async () => {
       const res = await supabase.from(DB.studentsTable).select("*").in("id", missing);
       if (!active || res.error) return;
-      setExtraStudents((res.data ?? []).map((r: any): Student => ({
-        id: r.id,
-        prefix: r.prefix ?? r.title ?? "",
-        first_name: r.first_name,
-        last_name: r.last_name,
-        seat_number: r.seat_number ?? r.number ?? 0,
-        student_code: r.student_code ?? r.student_number ?? r.student_no ?? undefined,
-      })));
+      setExtraStudents((res.data ?? []).map((r: any) => mapStudentRow(r, classroomLabel)));
     })();
     return () => { active = false; };
   }, [rawRecs, students]);
@@ -377,6 +414,11 @@ export default function Vp9Report({
   const totalOf = (s: Subject | null) => (s ? failers.filter(st => current[st.id]?.[s.code]).length : 0);
 
   const sigTeachers = [teacher1, teacher2].map(t => t.trim()).filter(Boolean);
+  // ลายเซ็นแสดงเฉพาะเมื่อชื่อในช่องยังตรงกับชื่อที่ระบบดึงมา (ถ้าครูพิมพ์แก้ชื่อเอง จะไม่ใส่ลายเซ็นคนอื่นให้)
+  const sigOfTeacher = (name: string) => {
+    const i = (homeroomTeacherNames ?? []).findIndex(n => n?.trim() === name.trim());
+    return i >= 0 ? homeroomTeacherSignatures?.[i] : undefined;
+  };
   const roomLabel = classroomLabel;
   const levelLabel = roomLabel.includes("/") ? roomLabel.split("/")[0] : roomLabel; // ม.2/6 → ม.2
   const roomNoPrefix = roomLabel.replace(/^ม\.?\s*/, "");                           // ม.2/6 → 2/6
@@ -404,9 +446,14 @@ export default function Vp9Report({
     dateText: thd(dateText), garudaUrl, signatureUrl: principalSignatureUrl, schoolName, addressLines: addressLines.map(thd),
     phone: thd(phone), fax: thd(fax), principalName, principalTitle,
   };
+  const isPrimary = /^ป/.test(classroomLabel.trim());          // ป.x = ประถม · ม.x = มัธยม
+  const levelWord = isPrimary ? "ประถมศึกษา" : "มัธยมศึกษา";
+  const scopeText = examScopeText ?? `ชั้น${levelWord}ปีที่ 1-6`;
   const nextTermText = semesterV === "1"
     ? `ในภาคเรียนที่ ๒ ปีการศึกษา ${thd(yearV)}`
     : "";
+  // ย่อหน้าตามต้นแบบ: ย่อหน้าแรกเยื้อง ~2.2 ซม. ย่อหน้าอื่นเยื้องน้อยกว่า
+  const ind = (cm: number) => ({ textIndent: `${cm}cm` } as const);
 
   function failItems(studentId: string) {
     const byCode = current[studentId] ?? {};
@@ -424,16 +471,16 @@ export default function Vp9Report({
         subject={`แจ้งผลการตัดสินผลการเรียน  ภาคเรียนที่ ${thd(semesterV)}  ปีการศึกษา ${thd(yearV)}`}
         to={`ผู้ปกครองของ ${nameOf(s)} ชั้น ${thd(roomLabel)} เลขที่ ${thd(s.seat_number)}`}
       >
-        <p style={indent}>
+        <p style={ind(2.2)}>
           ด้วย{schoolName}กำหนดให้มีการวัดประเมินผลการเรียนปลายภาค ภาคเรียนที่ {thd(semesterV)} ประจำปีการศึกษา {thd(yearV)}{" "}
-          {thd(examScopeText)} ในวันที่ {fill(cfg.announce.held)} ไปแล้วนั้น
+          {thd(scopeText)} ในวันที่ {fill(cfg.announce.held)} ไปแล้วนั้น
         </p>
-        <p style={indent}>
+        <p style={ind(2.2)}>
           โรงเรียนจึงขอแจ้งผลการตัดสินผลการเรียน สำหรับนักเรียนในความปกครองของท่าน ผลปรากฏว่า
           <b>มีผลการเรียนผ่านทุกรายวิชา</b> และทางโรงเรียนจะแจ้งผลการเรียนรายบุคคล
           {semesterV === "1" ? ` ${nextTermText}` : ""} ต่อไป
         </p>
-        <p style={{ textIndent: "3cm" }} className="pt-2">จึงเรียนมาเพื่อโปรดทราบ</p>
+        <p style={{ ...ind(1.8), marginTop: "8mm" }}>จึงเรียนมาเพื่อโปรดทราบ</p>
       </LetterShell>
     );
   }
@@ -443,36 +490,39 @@ export default function Vp9Report({
     const c = cfg[round];
     const isFirst = round === "announce";
     const revYear = curriculumRevisionYear ?? yearV;
+    const kinds = items.map(it => thd(it.r)).join(", ");   // เช่น "๐, ร" — ตามที่นักเรียนคนนี้ติดจริง
     const subj = isFirst
-      ? `แจ้งผลการติด 0, ร, มส  ประจำภาคเรียนที่ ${thd(semesterV)}  ปีการศึกษา ${thd(yearV)}`
-      : `แจ้งผลการติด 0, ร, มส  หลัง${roundInfo.label}  ภาคเรียนที่ ${thd(semesterV)}  ปีการศึกษา ${thd(yearV)}`;
+      ? `แจ้งผลการติด ${kinds}  ประจำภาคเรียนที่ ${thd(semesterV)}  ปีการศึกษา ${thd(yearV)}`
+      : `แจ้งผลการติด ${kinds}  หลัง${roundInfo.label}  ภาคเรียนที่ ${thd(semesterV)}  ปีการศึกษา ${thd(yearV)}`;
     return (
       <LetterShell
         {...commonShell}
         docNo={thd(docNoFail)}
         subject={subj}
-        to={`ผู้ปกครองของ ${nameOf(s)} ชั้นมัธยมศึกษาปีที่ ${thd(roomNoPrefix)}`}
+        to={`ผู้ปกครองของ ${nameOf(s)} ชั้น${levelWord}ปีที่ ${thd(roomNoPrefix)}`}
       >
-        <p style={indent}>
+        <p style={ind(2.2)}>
           {isFirst
-            ? <>ด้วย{schoolName}กำหนดให้มีการวัดประเมินผล การสอบปลายภาค ภาคเรียนที่ {thd(semesterV)} ประจำปีการศึกษา {thd(yearV)} {thd(examScopeText)} ในวันที่ {fill(c.held)} ไปแล้วนั้น</>
-            : <>ด้วย{schoolName}กำหนดให้มี{roundInfo.label} ภาคเรียนที่ {thd(semesterV)} ประจำปีการศึกษา {thd(yearV)} {thd(examScopeText)} ในวันที่ {fill(c.held)} ไปแล้วนั้น</>}
+            ? <>ด้วย{schoolName}กำหนดให้มีการวัดประเมินผล การสอบปลายภาค ภาคเรียนที่ {thd(semesterV)} ประจำปีการศึกษา {thd(yearV)} {thd(scopeText)} ในวันที่ {fill(c.held)} ไปแล้วนั้น</>
+            : <>ด้วย{schoolName}กำหนดให้มี{roundInfo.label} ภาคเรียนที่ {thd(semesterV)} ประจำปีการศึกษา {thd(yearV)} {thd(scopeText)} ในวันที่ {fill(c.held)} ไปแล้วนั้น</>}
           {" "}โรงเรียนจึงขอแจ้งผลการตัดสินผลการเรียน
-          {isFirst ? " สำหรับนักเรียนที่มีผลการเรียน 0, ร, มส" : ` หลัง${roundInfo.label}`} ซึ่งนักเรียนในความปกครองของท่าน
-          {isFirst ? " " : " ยัง"}<b>มีผลการเรียนที่ไม่ผ่าน</b>ดังนี้
+          {isFirst ? ` สำหรับนักเรียนที่มีผลการเรียน ${kinds}` : ` หลัง${roundInfo.label}`} ซึ่งนักเรียนในความปกครองของท่าน{" "}
+          {isFirst ? "" : "ยัง"}<b>มีผลการเรียนที่ไม่ผ่าน</b>ดังนี้
         </p>
 
-        <div className="pl-[3cm] space-y-0.5">
+        <div style={{ paddingLeft: "2.8cm", paddingRight: "0.3cm" }}>
           {items.map((it, i) => (
-            <p key={it.r} style={{ textIndent: "-0.8cm", paddingLeft: "0.8cm" }}>
-              {thd(i + 1)}. ติด {it.r} จำนวน {thd(it.names.length)} รายวิชา ได้แก่ {it.names.join(", ")}
+            <p key={it.r} style={{ textIndent: "-0.9cm", paddingLeft: "0.9cm" }}>
+              {thd(i + 1)}. ติด {thd(it.r)} จำนวน {thd(it.names.length)} รายวิชา ได้แก่ {it.names.join(", ")}
             </p>
           ))}
         </div>
 
-        <p style={indent}>
+        <p style={ind(1.6)}>
           เพื่อให้เป็นไปตามระเบียบ{schoolName}ว่าด้วยการวัดและประเมินผลการเรียน ตามหลักสูตรแกนกลางการศึกษาขั้นพื้นฐาน
-          พุทธศักราช ๒๕๕๑ (ฉบับปรับปรุง พุทธศักราช {thd(revYear)}) ระดับมัธยมศึกษา{" "}
+          พุทธศักราช ๒๕๕๑ (ฉบับปรับปรุง พุทธศักราช {thd(revYear)}) ระดับ{levelWord}
+        </p>
+        <p style={ind(1.2)}>
           {roundInfo.next
             ? "จึงขอความร่วมมือผู้ปกครองได้กำกับดูแลติดตามนักเรียนในความปกครองของท่าน ให้ดำเนินการตามกำหนด ดังนี้"
             : "จึงขอความร่วมมือผู้ปกครองติดต่อฝ่ายวัดผลและประเมินผลของโรงเรียน เพื่อดำเนินการตามระเบียบต่อไป"}
@@ -480,11 +530,11 @@ export default function Vp9Report({
 
         {roundInfo.next && (
           <>
-            <div className="pl-[1.2cm] space-y-0.5">
-              <p className="flex"><span className="w-[7.5cm] shrink-0">- {roundInfo.next}</span><span>วันที่ {fill(c.nextExam)}</span></p>
-              <p className="flex"><span className="w-[7.5cm] shrink-0">- ประกาศผล{roundInfo.next}</span><span>วันที่ {fill(c.nextAnnounce)}</span></p>
+            <div style={{ paddingLeft: "2.2cm" }} className="space-y-0">
+              <p className="flex"><span style={{ width: "1.2cm" }} className="shrink-0">{thd(1)}.</span><span style={{ width: "6.6cm" }} className="shrink-0">{thd(roundInfo.next)}</span><span>วันที่ {fill(c.nextExam)}</span></p>
+              <p className="flex"><span style={{ width: "1.2cm" }} className="shrink-0">{thd(2)}.</span><span style={{ width: "6.6cm" }} className="shrink-0">ประกาศผล{thd(roundInfo.next)}</span><span>วันที่ {fill(c.nextAnnounce)}</span></p>
             </div>
-            <p style={indent}>
+            <p style={ind(1.7)}>
               ถ้านักเรียนไม่มาดำเนินการตามกำหนดเวลาดังกล่าว จะส่งผลให้ไม่ผ่านการตัดสินผลการเรียนรายวิชา
               และทางโรงเรียนจะแจ้งผลการเรียนรายบุคคล{semesterV === "1" ? ` ${nextTermText}` : ""} ต่อไป
               ทางโรงเรียนหวังเป็นอย่างยิ่งว่าจะได้รับความร่วมมือเป็นอย่างดี
@@ -492,9 +542,9 @@ export default function Vp9Report({
           </>
         )}
         {!roundInfo.next && (
-          <p style={indent}>ทางโรงเรียนหวังเป็นอย่างยิ่งว่าจะได้รับความร่วมมือเป็นอย่างดี</p>
+          <p style={ind(1.7)}>ทางโรงเรียนหวังเป็นอย่างยิ่งว่าจะได้รับความร่วมมือเป็นอย่างดี</p>
         )}
-        <p style={{ textIndent: "3cm" }} className="pt-2">จึงเรียนมาเพื่อโปรดทราบ และดำเนินการ</p>
+        <p style={{ ...ind(1.8), marginTop: "6mm" }}>จึงเรียนมาเพื่อโปรดทราบ และดำเนินการ</p>
       </LetterShell>
     );
   }
@@ -780,29 +830,23 @@ export default function Vp9Report({
           <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-6 text-[18px] font-bold vp9-avoid">
             {/* ครูประจำชั้น 2 คน = ซ้าย/ขวา · คนเดียว = ยุบฝั่งซ้าย เหลือเฉพาะฝั่งขวา */}
             {sigTeachers.length >= 2 && (
-              <div className="text-center">
-                <p>ลงชื่อ{dots("", "min-w-[160px]")}</p>
-                <p>({dots(sigTeachers[0], "min-w-[170px]")})</p>
-                <p>ครูประจำชั้น</p>
-              </div>
+              <SigBlock name={sigTeachers[0]} sigUrl={sigOfTeacher(sigTeachers[0])} role="ครูประจำชั้น" w="min-w-[170px]" />
             )}
-            <div className={`text-center ${sigTeachers.length >= 2 ? "" : "col-start-2"}`}>
-              <p>ลงชื่อ{dots("", "min-w-[160px]")}</p>
-              <p>({dots(sigTeachers.length >= 2 ? sigTeachers[1] : sigTeachers[0] ?? "", "min-w-[170px]")})</p>
-              <p>ครูประจำชั้น</p>
+            <div className={sigTeachers.length >= 2 ? "" : "col-start-2"}>
+              <SigBlock
+                name={sigTeachers.length >= 2 ? sigTeachers[1] : sigTeachers[0] ?? ""}
+                sigUrl={sigOfTeacher(sigTeachers.length >= 2 ? sigTeachers[1] : sigTeachers[0] ?? "")}
+                role="ครูประจำชั้น" w="min-w-[170px]" />
             </div>
           </div>
 
           <div className="mt-6 text-[18px] font-bold vp9-avoid flex flex-col items-center text-center">
-            <p>ลงชื่อ{dots("", "min-w-[200px]")}</p>
-            <p>({dots(headName, "min-w-[200px]")})</p>
-            <p>หัวหน้าสายชั้น {levelLabel}</p>
+            <SigBlock name={headName} sigUrl={headName.trim() && headName.trim() === (levelHeadName ?? "").trim() ? levelHeadSignature : undefined}
+              role={`หัวหน้าสายชั้น ${levelLabel}`} w="min-w-[200px]" />
           </div>
 
           <div className="mt-8 text-[18px] font-bold vp9-avoid flex flex-col items-center text-center">
-            <p>ลงชื่อ{dots("", "min-w-[200px]")}</p>
-            <p>({principalName})</p>
-            <p>{principalTitle}</p>
+            <SigBlock name={principalName} sigUrl={principalSignatureUrl} role={principalTitle} w="min-w-[200px]" />
           </div>
         </div>
       )}

@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getViewableClassrooms } from "@/lib/classrooms/getViewableClassrooms";
-import Vp9Report from "./Vp9Report";
+import Vp9Report, { mapStudentRow } from "./Vp9Report";
 
 const supabase = createClient();
 
@@ -27,7 +27,8 @@ const DB = {
   gradeCol: "grade_level",         // สายชั้นของครู
   gradeHeadRole: "grade_head",     // ค่าใน users.extra_roles ของ หัวหน้าสายชั้น
   principalEmail: "thananut@khienkhet.ac.th", // ผอ. — ดึงลายเซ็นจากแถว users ของอีเมลนี้
-  signatureBucket: "signatures",   // ★ bucket ใน Storage (ใช้เฉพาะเมื่อค่าลายเซ็นเป็น path ไม่ใช่ URL) — แก้ให้ตรงของจริง
+  signatureBucket: "signatures",
+  signatureBucketGuesses: ["user-signatures", "user_signatures", "teacher-signatures", "signature", "avatars", "public"],   // ★ bucket ใน Storage (ใช้เฉพาะเมื่อค่าลายเซ็นเป็น path ไม่ใช่ URL) — แก้ให้ตรงของจริง
 };
 const ADMIN_ROLES = new Set(["admin", "director", "deputy_director"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -45,6 +46,25 @@ function hasRole(u: any, role: string): boolean {
   return Array.isArray(r) ? r.includes(role) : String(r).includes(role);
 }
 
+/* หาลายเซ็นจากแถว users: คอลัมน์ที่ชื่อมี signature → URL / data URI / path ใน Storage */
+async function signatureOf(row: any): Promise<{ url: string; keys: string[] }> {
+  const keys = row ? Object.keys(row) : [];
+  if (!row) return { url: "", keys };
+  const key = keys.find(k => /signature|sign_?(url|img|image|path)/i.test(k) && typeof row[k] === "string" && row[k].trim());
+  if (!key) return { url: "", keys };
+  const v: string = row[key].trim();
+  if (/^(https?:|data:|\/)/.test(v)) return { url: v, keys };
+  const path = v.replace(/^\/+/, "");
+  for (const b of [DB.signatureBucket, ...DB.signatureBucketGuesses]) {
+    const rel = path.startsWith(b + "/") ? path.slice(b.length + 1) : path;
+    try {
+      const r = await supabase.storage.from(b).createSignedUrl(rel, 3600);
+      if (r.data?.signedUrl) return { url: r.data.signedUrl, keys };
+    } catch { /* ลอง bucket ถัดไป */ }
+  }
+  return { url: supabase.storage.from(DB.signatureBucket).getPublicUrl(path).data.publicUrl, keys };
+}
+
 export default function HomeroomVp9Page() {
   const router = useRouter();
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
@@ -55,7 +75,9 @@ export default function HomeroomVp9Page() {
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [termOf, setTermOf] = useState<Record<string, string>>({}); // classroom_id -> เทอม (เฉพาะห้องชื่อซ้ำ)
   const [signatureUrl, setSignatureUrl] = useState("");
-  const [info, setInfo] = useState<{ teachers: string[]; head: string }>({ teachers: [], head: "" });
+  const [info, setInfo] = useState<{ teachers: { name: string; sig: string }[]; head: { name: string; sig: string } }>({ teachers: [], head: { name: "", sig: "" } });
+  const [mySig, setMySig] = useState("");
+  const [sigNote, setSigNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,22 +113,24 @@ export default function HomeroomVp9Page() {
     })();
   }, []);
 
-  // 1.1) ลายเซ็น ผอ. จากตาราง users (คอลัมน์ที่ชื่อมี signature) — เป็น URL / data URI / path ใน Storage ก็ได้
+  // 1.1) ลายเซ็น ผอ. จากตาราง users (อีเมล ผอ.)
   useEffect(() => {
     (async () => {
       try {
-        const { data } = await supabase.from(DB.usersTable).select("*").eq("email", DB.principalEmail).maybeSingle();
-        if (!data) return;
-        const key = Object.keys(data).find(k => /signature|sign_?(url|img|image)/i.test(k) && typeof (data as any)[k] === "string" && (data as any)[k]);
-        if (!key) return;
-        const v: string = (data as any)[key];
-        if (/^(https?:|data:|\/)/.test(v)) { setSignatureUrl(v); return; }
-        const path = v.replace(/^\/+/, "");
-        const signed = await supabase.storage.from(DB.signatureBucket).createSignedUrl(path, 3600);
-        setSignatureUrl(signed.data?.signedUrl ?? supabase.storage.from(DB.signatureBucket).getPublicUrl(path).data.publicUrl);
-      } catch { /* ไม่มีลายเซ็นก็เว้นที่ว่างให้เซ็นมือ */ }
+        const { data, error } = await supabase.from(DB.usersTable).select("*").eq("email", DB.principalEmail).maybeSingle();
+        if (error || !data) { setSigNote(`ลายเซ็น ผอ.: อ่านแถว users ของ ${DB.principalEmail} ไม่ได้ (${error?.message ?? "ไม่พบแถว/สิทธิ์ไม่พอ"})`); return; }
+        const { url, keys } = await signatureOf(data);
+        if (url) { setSignatureUrl(url); setSigNote(""); }
+        else setSigNote(`ลายเซ็น ผอ.: ไม่พบคอลัมน์ลายเซ็นในแถว users — คอลัมน์ที่มี: ${keys.join(", ")}`);
+      } catch (e: any) { setSigNote(`ลายเซ็น ผอ.: ${e?.message ?? "error"}`); }
     })();
   }, []);
+
+  // 1.2) ลายเซ็นของผู้ใช้ที่ล็อกอิน (ครูประจำชั้น)
+  useEffect(() => {
+    if (!me) return;
+    signatureOf(me).then(r => setMySig(r.url)).catch(() => {});
+  }, [me]);
 
   // 2) นักเรียนของห้องที่เลือก (โหลดทีละห้อง — กันชนเพดาน 1,000 แถวของ Supabase ตอนแอดมินดูทั้งโรงเรียน)
   //    ห้องชื่อเดียวกันหลายแถว (คนละเทอม) ถ้าแถวนี้ไม่มีนักเรียนผูกอยู่ → ใช้รายชื่อจากแถวพี่น้องของห้องเดียวกัน
@@ -126,14 +150,7 @@ export default function HomeroomVp9Page() {
       const seenIds = new Set<string>();
       const rows: Student[] = (res.data ?? [])
         .filter((r: any) => (seenIds.has(r.id) ? false : (seenIds.add(r.id), true)))
-        .map((r: any) => ({
-          id: r.id,
-          prefix: r.prefix ?? r.title ?? "",
-          first_name: r.first_name,
-          last_name: r.last_name,
-          seat_number: r.seat_number ?? r.number ?? 0,
-          student_code: r.student_code ?? r.student_number ?? r.student_no ?? undefined,
-        }));
+        .map((r: any) => mapStudentRow(r, cur?.room_name ?? ""));
       setStudentsByRoom(prev => ({ ...prev, [selected]: rows }));
       setLoadingStudents(false);
     })();
@@ -185,8 +202,8 @@ export default function HomeroomVp9Page() {
     if (!selected || !me) return;
     let active = true;
     (async () => {
-      const teachers: string[] = [];
-      let head = "";
+      const teachers: { name: string; sig: string }[] = [];
+      let head = { name: "", sig: "" };
       try {
         const { data: cr } = await supabase.from(DB.classroomsTable).select("*").eq(DB.classroomIdCol, selected).maybeSingle();
         const ids = new Set<string>();
@@ -198,7 +215,10 @@ export default function HomeroomVp9Page() {
         }
         if (ids.size > 0) {
           const { data: us } = await supabase.from(DB.usersTable).select("*").in("id", [...ids]);
-          (us ?? []).forEach((u: any) => { const n = userDisplayName(u); if (n && !teachers.includes(n)) teachers.push(n); });
+          for (const u of (us ?? []) as any[]) {
+            const n = userDisplayName(u);
+            if (n && !teachers.some(t => t.name === n)) teachers.push({ name: n, sig: (await signatureOf(u)).url });
+          }
         }
       } catch { /* ข้าม */ }
 
@@ -214,7 +234,7 @@ export default function HomeroomVp9Page() {
           cands = heads.filter((u: any) => norm(u[DB.gradeCol]) === levelLabel);
           if (cands.length === 0) cands = heads.filter((u: any) => norm(u[DB.gradeCol]) === no);
         }
-        if (cands.length >= 1) head = userDisplayName(cands[0]);
+        if (cands.length >= 1) head = { name: userDisplayName(cands[0]), sig: (await signatureOf(cands[0])).url };
       } catch { /* ข้าม */ }
 
       if (!active) return;
@@ -224,12 +244,13 @@ export default function HomeroomVp9Page() {
   }, [selected, levelLabel, me, isAdmin]);
 
   // ครูทั่วไป: ชื่อตัวเองอยู่คนแรก · แอดมิน: ใช้เฉพาะครูประจำชั้นของห้องที่เลือก (ไม่ใส่ชื่อแอดมิน)
-  const teacherNames = useMemo(() => {
+  const teacherInfos = useMemo(() => {
     const myName = userDisplayName(me);
     if (isAdmin) return info.teachers.slice(0, 2);
-    const rest = info.teachers.filter(n => n !== myName);
-    return (myName ? [myName, ...rest] : rest).slice(0, 2);
-  }, [info.teachers, me, isAdmin]);
+    const rest = info.teachers.filter(t => t.name !== myName);
+    const mine = info.teachers.find(t => t.name === myName);
+    return (myName ? [{ name: myName, sig: mySig || mine?.sig || "" }, ...rest] : rest).slice(0, 2);
+  }, [info.teachers, me, isAdmin, mySig]);
 
   // ชื่อห้องซ้ำ → ต่อท้าย "(เทอม N)" ตามข้อมูลจริง · ยังระบุเทอมไม่ได้ → ต่อท้ายลำดับ
   const optionLabel = (c: Classroom, _i: number) => {
@@ -270,6 +291,12 @@ export default function HomeroomVp9Page() {
         )
       )}
 
+      {sigNote && (
+        <div className="rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-700 print:hidden">
+          ⚠️ {sigNote}
+        </div>
+      )}
+
       {error && (
         <div className="rounded-xl border-2 border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-600 print:hidden">
           ⚠️ {error}
@@ -286,8 +313,10 @@ export default function HomeroomVp9Page() {
           classroomId={room.classroom_id}
           classroomLabel={room.room_name}
           students={students}
-          homeroomTeacherNames={teacherNames}
-          levelHeadName={info.head}
+          homeroomTeacherNames={teacherInfos.map(t => t.name)}
+          homeroomTeacherSignatures={teacherInfos.map(t => t.sig)}
+          levelHeadName={info.head.name}
+          levelHeadSignature={info.head.sig}
           principalSignatureUrl={signatureUrl}
           onBack={() => router.push("/homeroom")}
         />

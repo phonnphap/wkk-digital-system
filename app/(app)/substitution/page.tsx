@@ -16,7 +16,7 @@ const ADMIN_ROLES = ["admin", "director", "deputy_director", "grade_head"];
 interface User {
   id: string; first_name: string; last_name: string;
   title?: string; role: string; position?: string; academic_level?: string;
-  grade_level?: string; email?: string; extra_roles?: string[];
+  grade_level?: string; email?: string; extra_roles?: string[]; left_date?: string | null;
 }
 interface TimeSlot {
   id: string; slot_number: number; start_time: string; end_time: string;
@@ -124,8 +124,10 @@ function coTeacherId(entry: { teacher_id: string; teacher_id_2?: string | null }
 
 // ★ กันโรล staff/admin หลุดเข้ามาในรายชื่อครู (กันไว้อีกชั้น เผื่อ query หลักไม่ครอบคลุม)
 const EXCLUDED_TEACHER_ROLES = ["staff", "admin", "admin_hr", "director", "deputy_director", "admin_academic", "admin_general"];
-function isSelectableTeacher(t: User): boolean {
-  return !EXCLUDED_TEACHER_ROLES.includes(t.role);
+function isSelectableTeacher(t: User, date?: string): boolean {
+  if (EXCLUDED_TEACHER_ROLES.includes(t.role)) return false;
+  if (t.left_date && (!date || date > t.left_date)) return false;
+  return true;
 }
 
 const thCollator = new Intl.Collator("th");
@@ -173,7 +175,7 @@ function computeFreeTeachersForEntry(
       busyIds.add(sw.target_teacher_id);
     }
   });
-  return allTeachers.filter(t => t.id !== excludeId && !busyIds.has(t.id) && isSelectableTeacher(t));
+  return allTeachers.filter(t => t.id !== excludeId && !busyIds.has(t.id) && isSelectableTeacher(t, date));
 }
 
 const STATUS_SWAP: Record<string,{label:string;cls:string}> = {
@@ -1667,7 +1669,7 @@ const scored = pool.map(t => ({ t, load: computeTotalLoadForDay(t.id, dow, date,
             <div>
   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">ครูที่ลา *</label>
   <TeacherSearchSelect
-    teachers={selectableTeachers.filter(isSelectableTeacher)}
+    teachers={selectableTeachers.filter(t => isSelectableTeacher(t, startDate))}
     value={absentTeacherId}
     onChange={setAbsentTeacherId}
     placeholder="— เลือกครู —"
@@ -1831,7 +1833,7 @@ function EditSubModal({ record, allEntries, teachers, swapRequests, subRecords, 
   );
   
   const rawCandidates = useMemo(() => {
-    if (!entry) return teachers.filter(isSelectableTeacher);
+    if (!entry) return teachers.filter(t => isSelectableTeacher(t, record.substitute_date));
     const free = computeFreeTeachersForEntry(entry, record.substitute_date, dayEntries, teachers, record.absent_teacher_id, swapRequests);
     // เผื่อครูคนเดิมไม่โผล่ในลิสต์ว่าง (เช่นถูกจัดสอนแทนที่อื่นซ้อนพอดี) ให้ใส่กลับเข้าไปด้วยเสมอ
     if (record.substitute_teacher_id && !free.some(t => t.id === record.substitute_teacher_id)) {
@@ -2082,7 +2084,7 @@ useEffect(() => {
   // ★ รายชื่อครูที่เลือกได้ในโหมด "จัดอัตโนมัติ" — admin เลือกได้ทุกคน, หัวหน้าสายเลือกได้แค่สายชั้นตัวเอง
   const manualAssignTeachers = useMemo(() => {
     if (!user) return [];
-      const base = teachers.filter(isSelectableTeacher);
+      const base = teachers.filter(t => !EXCLUDED_TEACHER_ROLES.includes(t.role));
     if (isAdmin) return base;
       const roles = user.extra_roles ?? [];
     if (roles.includes("grade_head") && user.grade_level) {
@@ -2141,7 +2143,7 @@ const [editingSwapDate, setEditingSwapDate] = useState<SwapRequest | null>(null)
 
     // Teachers
 const { data: tch, error: tchErr } = await supabase.from("users")
-  .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email,extra_roles")
+  .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email,extra_roles,left_date")
   .in("role", ["homeroom_teacher","subject_teacher"])
   .order("first_name");
 
@@ -2149,7 +2151,7 @@ if (tchErr) {
   console.error("[SubstitutionPage] โหลด teachers ไม่สำเร็จ:", tchErr.code, tchErr.message, tchErr.details);
   // fallback: ลองใหม่แบบไม่มี extra_roles เผื่อคอลัมน์นี้ยังไม่มีในตาราง users
   const { data: tchFallback, error: tchErr2 } = await supabase.from("users")
-    .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email")
+    .select("id,first_name,last_name,title,role,position,academic_level,grade_level,email,left_date")
     .in("role", ["teacher","homeroom_teacher","subject_teacher"])
     .order("first_name");
   if (tchErr2) {

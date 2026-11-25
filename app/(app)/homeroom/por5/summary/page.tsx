@@ -742,12 +742,6 @@ gMatrix[s.id][sec.id] = {
                 </div>
               )}
 
-              {level === "secondary" && kind === "midterm" && (
-                <input value={gradeHeadName} onChange={e => setGradeHeadName(e.target.value)} disabled={!!snapshotInfo}
-                  placeholder="ชื่อหัวหน้าสายชั้น (เช่น นายธนวัฒน์ ภู่เทศวิเศษพงศ์)"
-                  className="border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold w-80 disabled:bg-slate-50" />
-              )}
-
               {lockable && (
                 snapshotInfo ? (
                   <>

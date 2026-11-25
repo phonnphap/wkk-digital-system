@@ -114,19 +114,23 @@ function extractGradeNumber(label?: string): string {
   return nums && nums.length > 0 ? nums[0] : "";
 }
 
-// ★ ตรวจว่าชื่อระดับชั้น (จากตาราง grade_levels.name) เป็นระดับ "มัธยม" หรือไม่
-// ป้องกันปัญหาเดิม: จับคำว่า "ม" เฉยๆ จะ match ผิดกับ "ประถม" (ป.3) เพราะคำว่า "ประถม" ก็มีตัว ม อยู่ด้วย
-function isSecondaryLevelName(name: string): boolean {
-  const trimmed = name.trim();
-  if (trimmed.includes("ประถม")) return false; // กันชนกับคำว่า ป.3 ที่มีตัว ม ปนอยู่ในคำว่า "ประถม"
-  return trimmed.includes("มัธยม") || /^ม\.?\s*\d/.test(trimmed);
+type LevelWord = "อนุบาล" | "ประถมศึกษา" | "มัธยมศึกษา";
+
+// ★ ตรวจระดับชั้นจากข้อความ รองรับทั้งคำเต็มและตัวย่อ (อ.2 / ป.2 / ม.2)
+// คืน null ถ้าอ่านไม่ออก (เช่น มีแต่ตัวเลข) แทนการเดาเป็นมัธยม
+function detectLevel(text?: string | null): LevelWord | null {
+  if (!text) return null;
+  const t = text.trim();
+  // ต้องเช็ค "ประถม" ก่อน "มัธยม" เสมอ เพราะคำว่า ประถม มีตัว ม ปนอยู่
+  if (t.includes("อนุบาล") || /(?:^|[^ก-๙])อ\s*\.?\s*\d/.test(t)) return "อนุบาล";
+  if (t.includes("ประถม") || /(?:^|[^ก-๙])ป\s*\.?\s*\d/.test(t)) return "ประถมศึกษา";
+  if (t.includes("มัธยม") || /(?:^|[^ก-๙])ม\s*\.?\s*\d/.test(t)) return "มัธยมศึกษา";
+  return null;
 }
-// ★ ใช้แทน isSecondaryLevelName เดิม — รองรับทุกระดับชั้น ไม่ใช่แค่มัธยม
+
+// ★ ใช้แสดงผลในเอกสาร (ถ้าไม่รู้ระดับ ให้ใช้มัธยมศึกษาเป็นค่าเริ่มต้นเหมือนเดิม)
 function getGradeLevelWord(classroomLabel?: string): string {
-  if (!classroomLabel) return "มัธยมศึกษา";
-  if (classroomLabel.includes("อนุบาล")) return "อนุบาล";
-  if (classroomLabel.includes("ประถม")) return "ประถมศึกษา";
-  return "มัธยมศึกษา";
+  return detectLevel(classroomLabel) ?? "มัธยมศึกษา";
 }
 
 function SignatureField({
@@ -203,6 +207,7 @@ export default function Vp3Report({
   const currentMonthTh = THAI_MONTHS[now.getMonth()];
   const currentYearBE = now.getFullYear() + 543;
   const currentLevelWord = useMemo(() => getGradeLevelWord(classroomLabel), [classroomLabel]);
+  const currentLevelKey = useMemo(() => detectLevel(classroomLabel), [classroomLabel]);
 
   // ★ เลขชั้นปีล้วนๆ (ไม่มีเลขห้อง) ใช้แสดงในตำแหน่งหัวหน้าสายชั้น เช่น "3" ไม่ใช่ "3/6"
   const gradeNumberOnly = useMemo(() => extractGradeNumber(classroomLabel), [classroomLabel]);
@@ -271,8 +276,10 @@ export default function Vp3Report({
     : gradeLevelRel?.name;
   if (!gradeName) return false;
 
-  // ★ เทียบ "คำระดับชั้น" ให้ตรงกับห้องเรียนปัจจุบัน (ประถม/มัธยม/อนุบาล) แทนที่จะบังคับเฉพาะมัธยม
-  if (getGradeLevelWord(gradeName) !== currentLevelWord) return false;
+  // ★ ต้องกรองระดับ อ/ป/ม ให้ตรงกับห้องปัจจุบัน
+  const headLevel = detectLevel(gradeName);
+  if (!headLevel) return false;                                   // อ่านระดับของหัวหน้าสายไม่ออก -> ตัดทิ้ง
+  if (currentLevelKey && headLevel !== currentLevelKey) return false; // ป.2 ≠ ม.2
 
   const gradeNameNumbers = gradeName.match(/\d+/g);
   return gradeNameNumbers?.includes(gradeNumberOnly) ?? false;
@@ -281,7 +288,7 @@ export default function Vp3Report({
             if (head) {
               setGradeHeadName(buildNameWithTitle(head as any));
             } else {
-              console.warn("[Vp3Report] ไม่พบหัวหน้าสายชั้นมัธยมที่ตรงกับชั้น", gradeNumberOnly);
+              console.warn("[Vp3Report] ไม่พบหัวหน้าสายชั้น", currentLevelWord, "ปีที่", gradeNumberOnly);
             }
           }
         }
@@ -313,7 +320,7 @@ export default function Vp3Report({
         setLoading(false);
       }
     })();
-  }, [sectionId, subjectId, academicYearId, classroomLabel, students, gradeNumberOnly]);
+  }, [sectionId, subjectId, academicYearId, classroomLabel, students, gradeNumberOnly, currentLevelKey]);
 
   const belowThresholdStudents = useMemo(() => {
     const total = attendanceDates.length;

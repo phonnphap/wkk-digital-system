@@ -233,16 +233,16 @@ export default function DutyDailyReportPage() {
   const doneSlots = visiblePoints.reduce((sum, p) => sum + p.slots.filter((s) => s.log?.status === "done").length, 0);
 
     async function uploadToDrive(file: File, point: PointView, suffix = "") {
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("dayThai", THAI_DOW[dow]);
-    fd.append("date", date);
-    fd.append("pointLabel", `${point.point_number}-${point.title}${suffix}`);
-    const res = await fetch("/api/duty-photo-upload", { method: "POST", body: fd });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error ?? "อัปโหลดไฟล์ไม่สำเร็จ");
-    return json.webUrl as string;
-  }
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("dayThai", THAI_DOW[dow]);
+  fd.append("date", date);
+  fd.append("pointLabel", `${point.point_number}-${point.title}${suffix}`);
+  const res = await fetch("/api/duty-photo-upload", { method: "POST", body: fd });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error ?? "อัปโหลดไฟล์ไม่สำเร็จ");
+  return json.webUrl as string;
+}
 
   async function handleSaveSign(
     point: PointView, slot: SlotView, signerId: string, photoFile: File | null,
@@ -435,16 +435,16 @@ const allOnLeave = nameItems.length > 0 && nameItems.every((n) => n.leave);
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
                             {done && s.log?.photo_url && (
-                              <a
-                                href={s.log.photo_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-500 ring-1 ring-indigo-200 hover:bg-indigo-100"
-                                title="ดูรูปที่บันทึกไว้บน OneDrive"
-                              >
-                                <Camera className="h-4.5 w-4.5" />
-                              </a>
-                            )}
+  <a
+    href={s.log.photo_url}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-500 ring-1 ring-indigo-200 hover:bg-indigo-100"
+    title="ดูรูปที่บันทึกไว้บน OneDrive"
+  >
+    <Camera className="h-4.5 w-4.5" />
+  </a>
+)}
                             <button
                               onClick={() => setSignModalTarget({ point: p, slot: s })}
                               className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${

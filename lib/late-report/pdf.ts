@@ -151,10 +151,12 @@ export async function renderMemo(d: MemoData, variant: Variant): Promise<Uint8Ar
     text(s2.label, M, 16, bold);
     const top = y;
     // ความเห็น (ซ้าย)
-    const comment = (approved && s2.comment?.trim()) || "ทราบ";
+    const comment = approved
+  ? (s2.comment?.trim() || "ทราบ")
+  : (variant === "unsigned" ? "" : "ทราบ");
     let ly = top - 20;
     wrap(comment, font, 16, 250).slice(0, 3).forEach((ln) => { page.drawText(ln, { x: M + 10, y: ly, size: 16, font, color: ink }); ly -= 18; });
-    dotted(M + 10, 290, ly + 14);
+    dotted(M + 10, 290, comment ? ly + 14 : top - 22);
     // ลงชื่อ (ขวา) เว้นที่ด้านบนให้ลายเซน
     const sx = 400;
     y = top - SIG_GAP;
