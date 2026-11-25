@@ -53,6 +53,7 @@ const DB = {
   sectionTitleCols: ["subject_name", "subject_title", "title", "name"], // สำรอง ถ้า section มีชื่อวิชาเอง
   sectionTypeCols: ["subject_type", "course_type", "category"],        // (ถ้ามี) พื้นฐาน/เพิ่มเติม
   failTable: "vp8_fail_records",
+  studentsTable: "students",
 };
 
 /* ===== helpers ===== */
@@ -103,46 +104,61 @@ function dots(text: string | number | undefined | null, w = "min-w-[90px]") {
    ========================================================================= */
 function LetterShell(p: {
   docNo: string; dateText: string; subject: string; to: string;
-  garudaUrl: string; schoolName: string; addressLines: string[]; phone: string; fax: string;
+  garudaUrl: string; signatureUrl: string; schoolName: string; addressLines: string[]; phone: string; fax: string;
   principalName: string; principalTitle: string; children: ReactNode;
 }) {
   const [garudaOk, setGarudaOk] = useState(true);
+  const [sigOk, setSigOk] = useState(true);
   return (
     <div
-      className="vp9-letter flex flex-col bg-white border border-slate-200 rounded-xl px-12 py-8 print:border-0 print:rounded-none print:p-0"
-      style={{ minHeight: "270mm", fontFamily: '"TH Sarabun New","TH SarabunIT๙","Sarabun",sans-serif', fontSize: 21, lineHeight: 1.45 }}
+      className="vp9-letter flex flex-col bg-white border border-slate-200 rounded-xl print:border-0 print:rounded-none"
+      style={{
+        width: "210mm", maxWidth: "100%", margin: "0 auto", padding: "12mm 25mm", minHeight: "270mm",
+        fontFamily: '"TH SarabunIT๙","TH Sarabun New","THSarabunNew","Sarabun",sans-serif',
+        fontSize: "16pt", lineHeight: 1.4, color: "#000",
+      }}
     >
-      <div className="text-center h-[84px]">
+      {/* ตราครุฑกึ่งกลาง */}
+      <div className="text-center" style={{ height: "28mm" }}>
         {garudaOk && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={p.garudaUrl} alt="" onError={() => setGarudaOk(false)} className="h-[84px] mx-auto object-contain" />
+          <img src={p.garudaUrl} alt="" onError={() => setGarudaOk(false)} style={{ height: "28mm" }} className="mx-auto object-contain" />
         )}
       </div>
 
-      <div className="flex justify-between items-start mt-1">
+      {/* ที่ ... (ซ้าย) · ที่อยู่โรงเรียน (ขวา — ชิดขอบขวา ตามต้นแบบ) */}
+      <div className="flex justify-between items-start" style={{ marginTop: "-4mm" }}>
         <p>ที่ {p.docNo}</p>
-        <div className="w-[55%]">
+        <div className="whitespace-nowrap" style={{ width: "30%" }}>
           <p>{p.schoolName} &nbsp; สพฐ.</p>
           {p.addressLines.map((l, i) => <p key={i}>{l}</p>)}
-          <p className="mt-3">{p.dateText}</p>
         </div>
       </div>
 
-      <div className="mt-3 space-y-1">
-        <div className="flex"><span className="w-[2.2cm] shrink-0">เรื่อง</span><span>{p.subject}</span></div>
-        <div className="flex"><span className="w-[2.2cm] shrink-0">เรียน</span><span>{p.to}</span></div>
+      {/* วันที่ — กึ่งกลางที่ราว 62% ของความกว้างเนื้อหา */}
+      <p style={{ marginLeft: "24%", width: "76%", textAlign: "center", marginTop: "3mm" }}>{p.dateText}</p>
+
+      <div className="space-y-1" style={{ marginTop: "5mm" }}>
+        <div className="flex"><span style={{ width: "1.8cm" }} className="shrink-0">เรื่อง</span><span>{p.subject}</span></div>
+        <div className="flex"><span style={{ width: "1.8cm" }} className="shrink-0">เรียน</span><span>{p.to}</span></div>
       </div>
 
-      <div className="mt-3 space-y-2">{p.children}</div>
+      <div className="space-y-2" style={{ marginTop: "4mm" }}>{p.children}</div>
 
-      <div className="mt-6 ml-auto w-[60%] text-center">
+      {/* ขอแสดงความนับถือ + ลายเซ็น ผอ. */}
+      <div className="text-center" style={{ marginTop: "10mm", marginLeft: "30%", width: "70%" }}>
         <p>ขอแสดงความนับถือ</p>
-        <div className="h-16" />
-        <p>({p.principalName})</p>
+        <div style={{ height: "17mm" }} className="flex items-center justify-center">
+          {sigOk && p.signatureUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={p.signatureUrl} alt="" onError={() => setSigOk(false)} style={{ maxHeight: "17mm" }} className="object-contain" />
+          )}
+        </div>
+        <p>( {p.principalName} )</p>
         <p>{p.principalTitle}</p>
       </div>
 
-      <div className="mt-auto pt-6 text-[19px]">
+      <div className="mt-auto pt-6" style={{ fontSize: "15pt" }}>
         <p>{p.schoolName}</p>
         <p>โทรศัพท์ {p.phone}</p>
         <p>โทรสาร {p.fax}</p>
@@ -157,7 +173,7 @@ export default function Vp9Report({
   classroomId, sectionId, classroomLabel, students,
   semester, academicYearLabel,
   homeroomTeacherNames, levelHeadName,
-  logoUrl = "/logo.png", garudaUrl = "/images.jpg",
+  logoUrl = "/logo.png", garudaUrl = "/images.jpg", principalSignatureUrl = "",
   schoolName = "โรงเรียนวัดเขียนเขต",
   addressLines = ["ตำบลบึงยี่โถ  อำเภอธัญบุรี", "จังหวัดปทุมธานี  12130"],
   phone = "0-2533-1239", fax = "0-2533-1454",
@@ -177,6 +193,7 @@ export default function Vp9Report({
   levelHeadName?: string;              // หัวหน้าสายชั้น
   logoUrl?: string;
   garudaUrl?: string;                  // ตราครุฑสำหรับหนังสือราชการ
+  principalSignatureUrl?: string;      // URL ลายเซ็น ผอ. (page.tsx ดึงจาก users ให้) แสดงในหนังสือแจ้งผู้ปกครอง
   schoolName?: string;
   addressLines?: string[];
   phone?: string;
@@ -313,7 +330,31 @@ export default function Vp9Report({
   }, [rawSecs, rawRecs, termSel, terms]);
   const codeProblem = rawSecs.length > 0 && rawSecs.every(x => !codeOfSec(x));
 
-  const sorted = useMemo(() => [...students].sort((a, b) => a.seat_number - b.seat_number), [students]);
+  // นักเรียนที่มีผล วผ.8 แต่ไม่อยู่ในรายชื่อห้องที่ส่งมา (เช่น เทอมนี้ยังไม่ผูกนักเรียนกับห้อง) → ดึงชื่อจากตาราง students ตาม id
+  const [extraStudents, setExtraStudents] = useState<Student[]>([]);
+  useEffect(() => {
+    const have = new Set(students.map(x => x.id));
+    const missing = [...new Set(rawRecs.map((r: any) => r.student_id as string))].filter(id => id && !have.has(id));
+    if (missing.length === 0) { setExtraStudents([]); return; }
+    let active = true;
+    (async () => {
+      const res = await supabase.from(DB.studentsTable).select("*").in("id", missing);
+      if (!active || res.error) return;
+      setExtraStudents((res.data ?? []).map((r: any): Student => ({
+        id: r.id,
+        prefix: r.prefix ?? r.title ?? "",
+        first_name: r.first_name,
+        last_name: r.last_name,
+        seat_number: r.seat_number ?? r.number ?? 0,
+        student_code: r.student_code ?? r.student_number ?? r.student_no ?? undefined,
+      })));
+    })();
+    return () => { active = false; };
+  }, [rawRecs, students]);
+
+  const sorted = useMemo(
+    () => [...students, ...extraStudents].sort((a, b) => a.seat_number - b.seat_number),
+    [students, extraStudents]);
   const subjectByCode = useMemo(() => new Map(subjects.map(s => [s.code, s])), [subjects]);
 
   const current = matrix[round];
@@ -360,7 +401,7 @@ export default function Vp9Report({
   const letterList = pickId === "all" ? letterRecipients : letterRecipients.filter(s => s.id === pickId);
 
   const commonShell = {
-    dateText: thd(dateText), garudaUrl, schoolName, addressLines: addressLines.map(thd),
+    dateText: thd(dateText), garudaUrl, signatureUrl: principalSignatureUrl, schoolName, addressLines: addressLines.map(thd),
     phone: thd(phone), fax: thd(fax), principalName, principalTitle,
   };
   const nextTermText = semesterV === "1"
@@ -379,7 +420,7 @@ export default function Vp9Report({
     return (
       <LetterShell
         {...commonShell}
-        docNo={docNoPass}
+        docNo={thd(docNoPass)}
         subject={`แจ้งผลการตัดสินผลการเรียน  ภาคเรียนที่ ${thd(semesterV)}  ปีการศึกษา ${thd(yearV)}`}
         to={`ผู้ปกครองของ ${nameOf(s)} ชั้น ${thd(roomLabel)} เลขที่ ${thd(s.seat_number)}`}
       >
@@ -408,7 +449,7 @@ export default function Vp9Report({
     return (
       <LetterShell
         {...commonShell}
-        docNo={docNoFail}
+        docNo={thd(docNoFail)}
         subject={subj}
         to={`ผู้ปกครองของ ${nameOf(s)} ชั้นมัธยมศึกษาปีที่ ${thd(roomNoPrefix)}`}
       >
@@ -567,7 +608,7 @@ export default function Vp9Report({
             แสดงนักเรียนทั้งห้องในตาราง (คนที่ไม่ติดจะเว้นช่องว่าง)
           </label>
           <p className="text-[12px] font-bold text-slate-400">
-            ตรวจข้อมูล: รายวิชาในเทอมนี้ {subjects.length} วิชา · ผล วผ.8 รอบนี้ {failCells} รายการ ({failers.length} คน)
+            ตรวจข้อมูล: รายวิชาในเทอมนี้ {subjects.length} วิชา · ที่ครูบันทึกไว้ใน วผ.8 รอบนี้ {Object.keys(current).length} คน / {failCells} รายการ
           </p>
           <p className="text-[12px] font-bold text-slate-400">
             ข้อมูลมาจากที่ครูประจำวิชาบันทึกใน วผ.8 ของทุกรายวิชาในห้องนี้ — ถ้ามีวิชาที่ครูยังไม่บันทึก รายชื่อจะยังไม่ครบ
@@ -775,7 +816,7 @@ export default function Vp9Report({
           .vp9-table th, .vp9-table td { border: 1px solid #000 !important; color: #000 !important; background: #fff !important; }
           .vp9-table tr { break-inside: avoid; }
           .vp9-avoid { break-inside: avoid; }
-          .vp9-letter { break-after: page; page-break-after: always; min-height: 270mm; color: #000; }
+          .vp9-letter { break-after: page; page-break-after: always; min-height: 270mm; color: #000; width: auto !important; max-width: none !important; margin: 0 !important; padding: 0 13mm !important; }
           .vp9-letter:last-child { break-after: auto; page-break-after: auto; }
         }
       `}</style>

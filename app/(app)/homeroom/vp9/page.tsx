@@ -26,6 +26,8 @@ const DB = {
   usersTable: "users",
   gradeCol: "grade_level",         // สายชั้นของครู
   gradeHeadRole: "grade_head",     // ค่าใน users.extra_roles ของ หัวหน้าสายชั้น
+  principalEmail: "thananut@khienkhet.ac.th", // ผอ. — ดึงลายเซ็นจากแถว users ของอีเมลนี้
+  signatureBucket: "signatures",   // ★ bucket ใน Storage (ใช้เฉพาะเมื่อค่าลายเซ็นเป็น path ไม่ใช่ URL) — แก้ให้ตรงของจริง
 };
 const ADMIN_ROLES = new Set(["admin", "director", "deputy_director"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -51,6 +53,8 @@ export default function HomeroomVp9Page() {
   const [me, setMe] = useState<any>(null);
   const [studentsByRoom, setStudentsByRoom] = useState<Record<string, Student[]>>({});
   const [loadingStudents, setLoadingStudents] = useState(false);
+  const [termOf, setTermOf] = useState<Record<string, string>>({}); // classroom_id -> เทอม (เฉพาะห้องชื่อซ้ำ)
+  const [signatureUrl, setSignatureUrl] = useState("");
   const [info, setInfo] = useState<{ teachers: string[]; head: string }>({ teachers: [], head: "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -87,28 +91,90 @@ export default function HomeroomVp9Page() {
     })();
   }, []);
 
+  // 1.1) ลายเซ็น ผอ. จากตาราง users (คอลัมน์ที่ชื่อมี signature) — เป็น URL / data URI / path ใน Storage ก็ได้
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await supabase.from(DB.usersTable).select("*").eq("email", DB.principalEmail).maybeSingle();
+        if (!data) return;
+        const key = Object.keys(data).find(k => /signature|sign_?(url|img|image)/i.test(k) && typeof (data as any)[k] === "string" && (data as any)[k]);
+        if (!key) return;
+        const v: string = (data as any)[key];
+        if (/^(https?:|data:|\/)/.test(v)) { setSignatureUrl(v); return; }
+        const path = v.replace(/^\/+/, "");
+        const signed = await supabase.storage.from(DB.signatureBucket).createSignedUrl(path, 3600);
+        setSignatureUrl(signed.data?.signedUrl ?? supabase.storage.from(DB.signatureBucket).getPublicUrl(path).data.publicUrl);
+      } catch { /* ไม่มีลายเซ็นก็เว้นที่ว่างให้เซ็นมือ */ }
+    })();
+  }, []);
+
   // 2) นักเรียนของห้องที่เลือก (โหลดทีละห้อง — กันชนเพดาน 1,000 แถวของ Supabase ตอนแอดมินดูทั้งโรงเรียน)
+  //    ห้องชื่อเดียวกันหลายแถว (คนละเทอม) ถ้าแถวนี้ไม่มีนักเรียนผูกอยู่ → ใช้รายชื่อจากแถวพี่น้องของห้องเดียวกัน
   useEffect(() => {
     if (!selected || studentsByRoom[selected]) return;
     let active = true;
     (async () => {
       setLoadingStudents(true);
-      const res = await supabase.from(DB.studentsTable).select("*").eq(DB.studentRoomCol, selected).limit(1000);
+      const cur = classrooms.find(c => c.classroom_id === selected);
+      const sibIds = classrooms.filter(c => c.room_name === cur?.room_name && c.classroom_id !== selected).map(c => c.classroom_id);
+      let res = await supabase.from(DB.studentsTable).select("*").eq(DB.studentRoomCol, selected).limit(1000);
+      if (!res.error && (res.data ?? []).length === 0 && sibIds.length > 0) {
+        res = await supabase.from(DB.studentsTable).select("*").in(DB.studentRoomCol, sibIds).limit(1000);
+      }
       if (!active) return;
       if (res.error) setError(res.error.message);
-      const rows: Student[] = (res.data ?? []).map((r: any) => ({
-        id: r.id,
-        prefix: r.prefix ?? r.title ?? "",
-        first_name: r.first_name,
-        last_name: r.last_name,
-        seat_number: r.seat_number ?? r.number ?? 0,
-        student_code: r.student_code ?? r.student_number ?? r.student_no ?? undefined,
-      }));
+      const seenIds = new Set<string>();
+      const rows: Student[] = (res.data ?? [])
+        .filter((r: any) => (seenIds.has(r.id) ? false : (seenIds.add(r.id), true)))
+        .map((r: any) => ({
+          id: r.id,
+          prefix: r.prefix ?? r.title ?? "",
+          first_name: r.first_name,
+          last_name: r.last_name,
+          seat_number: r.seat_number ?? r.number ?? 0,
+          student_code: r.student_code ?? r.student_number ?? r.student_no ?? undefined,
+        }));
       setStudentsByRoom(prev => ({ ...prev, [selected]: rows }));
       setLoadingStudents(false);
     })();
     return () => { active = false; };
-  }, [selected, studentsByRoom]);
+  }, [selected, studentsByRoom, classrooms]);
+
+  // 2.1) ห้องชื่อซ้ำ → หาว่าแถวไหนคือเทอมไหน: คอลัมน์ semester/term ของห้อง → ไม่มีก็ดูเลขท้ายรหัสวิชาของ section (คี่=1, คู่=2)
+  useEffect(() => {
+    const cur = classrooms.find(c => c.classroom_id === selected);
+    if (!cur) return;
+    const group = classrooms.filter(c => c.room_name === cur.room_name);
+    if (group.length < 2) return;
+    let active = true;
+    (async () => {
+      const ids = group.map(g => g.classroom_id);
+      const out: Record<string, string> = {};
+      try {
+        const cr = await supabase.from(DB.classroomsTable).select("*").in(DB.classroomIdCol, ids);
+        (cr.data ?? []).forEach((r: any) => {
+          for (const [k, v] of Object.entries(r)) {
+            if (/semester|(^|_)term(_|$)/i.test(k) && /^[12]$/.test(String(v))) { out[r[DB.classroomIdCol]] = String(v); break; }
+          }
+        });
+        const need = ids.filter(id => !out[id]);
+        if (need.length > 0) {
+          const sr = await supabase.from("subject_sections").select("classroom_id, subjects(subject_code)").in("classroom_id", need);
+          const tally: Record<string, { 1: number; 2: number }> = {};
+          (sr.data ?? []).forEach((x: any) => {
+            const subj = Array.isArray(x.subjects) ? x.subjects[0] : x.subjects;
+            const last = String(subj?.subject_code ?? "").replace(/\D/g, "").slice(-1);
+            if (!last) return;
+            const t = Number(last) % 2 === 1 ? 1 : 2;
+            (tally[x.classroom_id] ??= { 1: 0, 2: 0 })[t]++;
+          });
+          need.forEach(id => { const t = tally[id]; if (t && t[1] !== t[2]) out[id] = t[1] > t[2] ? "1" : "2"; });
+        }
+      } catch { /* ใช้ลำดับ (1)(2) แทน */ }
+      if (active) setTermOf(prev => ({ ...prev, ...out }));
+    })();
+    return () => { active = false; };
+  }, [selected, classrooms]);
 
   const room = classrooms.find(c => c.classroom_id === selected);
   const students = useMemo(() => (selected ? studentsByRoom[selected] ?? [] : []), [selected, studentsByRoom]);
@@ -165,11 +231,16 @@ export default function HomeroomVp9Page() {
     return (myName ? [myName, ...rest] : rest).slice(0, 2);
   }, [info.teachers, me, isAdmin]);
 
-  // ชื่อห้องซ้ำ (เช่นคนละปี) → ต่อท้ายลำดับ ให้แยกออก
-  const optionLabel = (c: Classroom, i: number) => {
+  // ชื่อห้องซ้ำ → ต่อท้าย "(เทอม N)" ตามข้อมูลจริง · ยังระบุเทอมไม่ได้ → ต่อท้ายลำดับ
+  const optionLabel = (c: Classroom, _i: number) => {
     const dup = classrooms.filter(x => x.room_name === c.room_name);
-    return dup.length > 1 ? `${c.room_name} (${dup.indexOf(c) + 1})` : c.room_name;
+    if (dup.length < 2) return c.room_name;
+    const t = termOf[c.classroom_id];
+    return t ? `${c.room_name} (เทอม ${t})` : `${c.room_name} (${dup.indexOf(c) + 1})`;
   };
+  const shownRooms = useMemo(() => [...classrooms].sort((a, b) =>
+    a.room_name.localeCompare(b.room_name, "th", { numeric: true }) ||
+    (termOf[a.classroom_id] ?? "9").localeCompare(termOf[b.classroom_id] ?? "9")), [classrooms, termOf]);
 
   return (
     <div className="w-full px-4 sm:px-6 py-6 lg:px-8 space-y-4">
@@ -179,7 +250,7 @@ export default function HomeroomVp9Page() {
             เลือกห้อง
             <select value={selected ?? ""} onChange={e => setSelected(e.target.value)}
               className="border-2 border-slate-200 rounded-lg px-3 py-1.5 font-bold text-slate-700 bg-white">
-              {classrooms.map((c, i) => (
+              {shownRooms.map((c, i) => (
                 <option key={c.classroom_id} value={c.classroom_id}>ห้อง {optionLabel(c, i)}</option>
               ))}
             </select>
@@ -187,7 +258,7 @@ export default function HomeroomVp9Page() {
           </label>
         ) : (
           <div className="flex flex-wrap gap-2 print:hidden">
-            {classrooms.map((c, i) => (
+            {shownRooms.map((c, i) => (
               <button key={c.classroom_id} onClick={() => setSelected(c.classroom_id)}
                 className={`rounded-full px-4 py-1.5 text-sm font-bold ${
                   selected === c.classroom_id ? "bg-fuchsia-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -217,6 +288,7 @@ export default function HomeroomVp9Page() {
           students={students}
           homeroomTeacherNames={teacherNames}
           levelHeadName={info.head}
+          principalSignatureUrl={signatureUrl}
           onBack={() => router.push("/homeroom")}
         />
       )}
