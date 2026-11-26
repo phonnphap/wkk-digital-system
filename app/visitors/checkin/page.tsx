@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { UserCheck, CheckCircle2 } from "lucide-react";
 import TargetPicker, { Target, Targets } from "@/components/visitors/TargetPicker";
+import TeacherFinder from "@/components/visitors/TeacherFinder";
 
 const EMPTY = { full_name: "", phone: "", car_plate: "", purpose: "", student_name: "", website: "" };
 const inputCls = "w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-base outline-none focus:border-teal-400";
@@ -16,6 +17,7 @@ export default function VisitorCheckinPage() {
   const [errorMsg, setErrorMsg] = useState("");
   const [done, setDone] = useState(false);
   const [submittedAt, setSubmittedAt] = useState("");
+  const [showFinder, setShowFinder] = useState(false);
 
   useEffect(() => {
     fetch("/api/visitors").then(r => r.json()).then(setTargets).catch(() => setErrorMsg("โหลดรายชื่อห้องไม่สำเร็จ กรุณาแจ้ง รปภ."));
@@ -70,10 +72,10 @@ setDone(true);
       </div>
     );
   }
-
   return (
-    <div className={bg + " py-8"}>
-      <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-3 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-100">
+  <div className={bg + " py-8"}>
+    <div className="w-full max-w-sm space-y-4">
+      <form onSubmit={handleSubmit} className="w-full space-y-3 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-100">
         <p className="flex items-center gap-1.5 text-base font-extrabold text-slate-800">
           <UserCheck className="h-5 w-5 text-teal-500" /> ลงทะเบียนเข้าโรงเรียน
         </p>
@@ -120,8 +122,25 @@ setDone(true);
           {saving ? "กำลังส่งข้อมูล..." : "ส่งข้อมูล"}
         </button>
       </form>
+    <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-100">
+        <button type="button" onClick={() => setShowFinder(v => !v)}
+          className="w-full rounded-2xl bg-indigo-50 px-4 py-3 text-base font-bold text-indigo-700">
+          👩‍🏫 {showFinder ? "ซ่อน" : "ติดต่อครู / ค้นหาครูประจำชั้น"}
+        </button>
+        {showFinder && (
+          <div className="mt-4">
+            <TeacherFinder
+              big={false}
+              defaultName={form.full_name}
+              defaultPurpose={form.purpose}
+              defaultStudent={form.student_name}
+            />
+          </div>
+        )}
+      </div>
     </div>
-  );
+  </div>
+);
 }
 
 function SummaryRow({ label, value }: { label: string; value?: string | null }) {

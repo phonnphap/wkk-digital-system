@@ -651,7 +651,7 @@ function StatusBadge({ status }: { status: ItemStatus }) {
       items: [
         { name: "ประวัติส่วนตัวและสถิติการปฏิบัติงาน", icon: <User className="w-6 h-6" />, color: "bg-sky-500", path: "/portfolio", status: "live" as ItemStatus },
         { name: "ใบลา/ไปราชการ", icon: <CalendarDays className="w-6 h-6" />, color: "bg-blue-500", path: "/leave", status: "live" as ItemStatus },
-        { name: "ขอออกนอกโรงเรียน", icon: <LogOut className="w-6 h-6" />, color: "bg-amber-500", path: "/goout" },
+        { name: "ขอออกนอกโรงเรียน", icon: <LogOut className="w-6 h-6" />, color: "bg-amber-500", path: "/goout", status: "live" as ItemStatus },
         { name: "เลขเกียรติบัตร/คำสั่ง/บันทึก", icon: <FileText className="w-6 h-6" />, color: "bg-indigo-500", path: "/document-reg" },
         { name: "รายงานการอบรมรายบุคคล", icon: <FolderOpen className="w-6 h-6" />, color: "bg-violet-500", path: "/training", status: "live" as ItemStatus },
         { name: "คลังเกียรติยศและผลงาน", icon: <Trophy className="w-6 h-6" />, color: "bg-yellow-500", path: "/honor/awards", status: "live" as ItemStatus },        
@@ -695,6 +695,7 @@ function StatusBadge({ status }: { status: ItemStatus }) {
     { name: "ปฏิทินงาน", icon: "🗓️", bg: "bg-indigo-50 border-indigo-100 text-indigo-700", path: "/calendar", status: "live" as ItemStatus },
     { name: "เช็คชื่อนักเรียน", icon: "📋", bg: "bg-emerald-50 border-emerald-100 text-emerald-700", path: "/attendance", status: "live" as ItemStatus },
     { name: "ยื่นใบลา", icon: "📅", bg: "bg-amber-50 border-amber-100 text-amber-700", path: "/leave", status: "live" as ItemStatus },
+    { name: "ขอออกนอกโรงเรียน", icon: "🚪", bg: "bg-orange-50 border-orange-100 text-orange-700", path: "/goout", status: "live" as ItemStatus },
     { name: "แจ้งซ่อม", icon: "🔧", bg: "bg-rose-50 border-rose-100 text-rose-700", path: "/repair", status: "live" as ItemStatus },
   ];
 

@@ -30,7 +30,7 @@ export const MENU_GROUPS: MenuGroup[] = [
     items: [
       { name: "ประวัติส่วนตัวและสถิติ", path: "/portfolio", icon: <User className={ic} />, status: "live" },
       { name: "ใบลา/ไปราชการ", path: "/leave", icon: <CalendarDays className={ic} />, status: "live" },
-      //{ name: "ขอออกนอกโรงเรียน", path: "/goout", icon: <LogOut className={ic} /> },
+      { name: "ขอออกนอกโรงเรียน", path: "/goout", icon: <LogOut className={ic} />, status: "live" },
       //{ name: "เลขเกียรติบัตร/คำสั่ง", path: "/document-reg", icon: <FileText className={ic} /> },
       { name: "รายงานการอบรม", path: "/training", icon: <FolderOpen className={ic} />, status: "live" },
       { name: "คลังเกียรติยศและผลงาน", path: "/honor/awards", icon: <Trophy className={ic} />, status: "live" },
