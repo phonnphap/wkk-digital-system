@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   LayoutDashboard, UserCheck, CalendarDays, FileText,
   Wrench, Car, Monitor, FolderOpen, FileEdit, Trophy, Calendar, RefreshCw, Users, LogOut, Bell, Settings, ClipboardList,
-  User,GraduationCap,UploadCloud, MapPin, Boxes   // ★ เพิ่มบรรทัดนี้
+  User,GraduationCap,UploadCloud, MapPin, Boxes, DoorOpen   // ★ เพิ่มบรรทัดนี้
 } from "lucide-react";
 
 // ══════════════════════════════════════════════════════════
@@ -673,7 +673,8 @@ function StatusBadge({ status }: { status: ItemStatus }) {
       title: "🛠️ ระบบสนับสนุนและยานพาหนะ",
       items: [
         { name: "รายงานเวรประจำวัน", icon: <Calendar className="w-6 h-6" />, color: "bg-orange-500", path: "/duty-report", status: "live"  as ItemStatus },
-        { name: "จองรถ & ห้องประชุม", icon: <Car className="w-6 h-6" />, color: "bg-blue-600", path: "/room-booking" },
+        { name: "จองห้องประชุม", icon: <DoorOpen className="w-6 h-6" />, color: "bg-indigo-600", path: "/room-booking", status: "beta" as ItemStatus },
+{ name: "จองรถราชการ", icon: <Car className="w-6 h-6" />, color: "bg-blue-600", path: "/vehicle-booking", status: "beta" as ItemStatus },
         { name: "ยืม-คืน อุปกรณ์ ICT", icon: <Monitor className="w-6 h-6" />, color: "bg-sky-600", path: "/ict-borrow", status: "wip"  as ItemStatus },
         { name: "แจ้งซ่อม (Helpdesk)", icon: <Wrench className="w-6 h-6" />, color: "bg-rose-600", path: "/repair", status: "live"  as ItemStatus },
         { name: "ทะเบียนครุภัณฑ์", icon: <Boxes className="w-6 h-6" />, color: "bg-lime-600", path: "/assets", status: "beta" as ItemStatus },
@@ -695,7 +696,6 @@ function StatusBadge({ status }: { status: ItemStatus }) {
     { name: "เช็คชื่อนักเรียน", icon: "📋", bg: "bg-emerald-50 border-emerald-100 text-emerald-700", path: "/attendance", status: "live" as ItemStatus },
     { name: "ยื่นใบลา", icon: "📅", bg: "bg-amber-50 border-amber-100 text-amber-700", path: "/leave", status: "live" as ItemStatus },
     { name: "แจ้งซ่อม", icon: "🔧", bg: "bg-rose-50 border-rose-100 text-rose-700", path: "/repair", status: "live" as ItemStatus },
-    { name: "จองรถ/ห้องประชุม", icon: "🚌", bg: "bg-cyan-50 border-cyan-100 text-cyan-700", path: "/booking" },
   ];
 
   {/* Legend */}
