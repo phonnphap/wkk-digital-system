@@ -607,10 +607,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
               </div>
             )}
 
-                        <div className="h-8 print:h-6"></div>
-            <div className="h-8 print:h-6"></div>
-            <div className="h-8 print:h-6"></div>
-            <div>&nbsp;</div>
+                        <div style={{ height: 4 }}></div>
 
             {/* ลายเซ็น */}
                         {mode === "secondary" ? (

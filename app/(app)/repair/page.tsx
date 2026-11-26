@@ -837,10 +837,10 @@ function ResponsibilityPanel({ buildings, managers, routes, allUsers }: {
         </div>;
 
   return (
-    <div className="max-w-4xl mx-auto p-4 sm:p-5 space-y-5">
+    <div className="w-full p-2 sm:p-3 space-y-4">
       <div className="bg-white rounded-2xl border border-slate-200 p-5">
         <h3 className="font-bold text-slate-800 mb-3">สิทธิ์ตามบทบาท</h3>
-        <div className="grid sm:grid-cols-2 gap-3 text-sm">
+        <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 text-sm">
           {[
             ["ผู้แจ้ง (ครูทั่วไป)", "แจ้งซ่อม ดูรายการทั้งโรงเรียน แก้ไข/ลบได้เฉพาะรายการของตัวเองที่ยังไม่มีผู้รับเรื่อง"],
             ["ผู้รับเรื่องตามสาย", "กด “รับเรื่อง” เปลี่ยนสถานะ และบันทึกงบประมาณของรายการที่ได้รับมอบหมาย"],
@@ -913,7 +913,8 @@ function DetailModal({ request, allUsers, currentUserId, isAdmin, isProjManager,
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const buildingRepairIds: string[] = (request.building as any)?.repair_user_ids ?? [];
-  const assignableUsers = buildingRepairIds.length > 0 ? allUsers.filter(u => buildingRepairIds.includes(u.id)) : allUsers;
+  const notAdmin = (u: User) => !(u.role ?? "").toLowerCase().includes("admin") || assignedIds.includes(u.id);
+  const assignableUsers = (buildingRepairIds.length > 0 ? allUsers.filter(u => buildingRepairIds.includes(u.id)) : allUsers).filter(notAdmin);
   const inspectorIds: string[] = (request.building as any)?.inspector_user_ids ?? [];
   const inspectorUsers = allUsers.filter(u => inspectorIds.includes(u.id));
   const assignees = allUsers.filter(u => assignedIds.includes(u.id));
@@ -948,8 +949,6 @@ function DetailModal({ request, allUsers, currentUserId, isAdmin, isProjManager,
     const j = await res.json();
     setSaving(false);
     if (!j.ok) { alert(j.error); return; }
-    // ★ ถ้า /api/repair-ack ส่ง Teams เองอยู่แล้ว ให้ลบบรรทัดนี้ออกเพื่อไม่ให้แจ้งซ้ำ
-    pushRepairTeams(request.id, "acknowledged");
     onUpdate();
   };
 
@@ -1029,7 +1028,7 @@ function DetailModal({ request, allUsers, currentUserId, isAdmin, isProjManager,
           <div className="grid grid-cols-3 gap-2">
             {request.photo_urls!.map((url,i)=>(
               <img key={i} src={url} alt="" onClick={()=>setLightboxUrl(url)}
-                className="w-full h-24 object-cover rounded-xl border border-slate-200 cursor-pointer hover:brightness-90 transition" />
+                className="w-full h-24 object-cover rounded-xl border border-slate-200 cursor-pointer hover:brightness-90 transition" loading="lazy" decoding="async" />
             ))}
           </div>
         ) : <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">📷 ไม่มีรูปภาพแนบ</p>}
@@ -1157,7 +1156,7 @@ function RequestCard({ r, allUsers, onOpen }: { r: RepairRequest; allUsers: User
           <div className="flex items-center gap-2 shrink-0">
             {(r.photo_urls ?? []).length > 0 && (
               <div className="flex -space-x-2">
-                {r.photo_urls!.slice(0,3).map((url,i)=><img key={i} src={url} alt="" className="w-8 h-8 object-cover rounded-lg border-2 border-white" />)}
+                {r.photo_urls!.slice(0,3).map((url,i)=><img key={i} src={url} alt="" className="w-8 h-8 object-cover rounded-lg border-2 border-white" loading="lazy" decoding="async" />)}
                 {r.photo_urls!.length > 3 && <span className="w-8 h-8 rounded-lg border-2 border-white bg-slate-100 text-[10px] font-bold text-slate-500 flex items-center justify-center">+{r.photo_urls!.length-3}</span>}
               </div>
             )}
@@ -1194,6 +1193,8 @@ export default function Page() {
   const [showMemo,     setShowMemo]    = useState(false);
   const [detailReq,    setDetailReq]   = useState<RepairRequest|null>(null);
   const [routes, setRoutes] = useState<RepairRoute[]>([]);
+  const [shown, setShown] = useState(30);   // ★ แสดงทีละ 30 รายการ
+  useEffect(()=>{ setShown(30); },[query,filterStatus,filterBldg,onlyMyBuildings]);
 
   const isAdmin       = useMemo(()=>ADMIN_ROLES.includes(user?.role??""),[user]);
   const isProjManager = useMemo(()=>managers.some(m=>m.user_id===user?.id),[managers,user]);
@@ -1226,34 +1227,40 @@ export default function Page() {
     init();
   },[]);
 
+  const REQ_COLS = "id,title,description,building_id,room,category,status,priority,photo_urls,reporter_id,assigned_to,assigned_user_ids,estimated_cost,budget_source,asset_id,created_at,updated_at,completed_at";
+
+  // ★ ยิงทุก query พร้อมกัน และอัปเดตหน้าจอทันทีที่แต่ละส่วนมาถึง (รายการแจ้งซ่อมขึ้นก่อน ไม่ต้องรอส่วนอื่น)
+  //   ไม่ดึง signature_url ของผู้ใช้ทุกคน (เป็น base64 ก้อนใหญ่ ทำให้ช้า) — ดึงเฉพาะของ ผอ. ตอนเปิดบันทึกข้อความ
   const loadData=useCallback(async()=>{
     if (!user) return;
-    const {data:blds}=await supabase.from("buildings").select("*").order("name");
-    setBuildings((blds??[]) as Building[]);
-    const {data:usrs}=await supabase.from("users")
-      .select("id,first_name,last_name,title,role,position,signature_url").order("first_name");
-    setAllUsers((usrs??[]) as User[]);
-    const dir=(usrs??[]).find((u:any)=>u.role==="director") as User|undefined;
-    setDirector(dir);
-    const { data: rt } = await supabase.from("repair_category_routes").select("*");
-    setRoutes((rt ?? []) as RepairRoute[]);
-    // repair_project_managers มี FK ไป users 2 เส้น → ดึงแยกแล้ว join ใน JS
-    const {data:mgrRows, error:mgrErr}=await supabase.from("repair_project_managers").select("*");
-    if (mgrErr) console.error("[repair] โหลด repair_project_managers ไม่สำเร็จ:", mgrErr.message);
-    const mgrUserIds = [...new Set((mgrRows??[]).map((m:any)=>m.user_id).filter(Boolean))];
-    let mgrUserMap: Record<string,User> = {};
-    if (mgrUserIds.length > 0) {
-      const {data:mgrUsers} = await supabase.from("users")
-        .select("id,first_name,last_name,title,role").in("id", mgrUserIds);
-      (mgrUsers??[]).forEach((u:any)=>{ mgrUserMap[u.id]=u; });
-    }
-    setManagers(((mgrRows??[]) as any[]).map(m=>({ ...m, user: mgrUserMap[m.user_id] })) as ProjectManager[]);
-    const {data:rqs}=await supabase.from("repair_requests")
-      .select(`*,reporter:users!reporter_id(id,first_name,last_name,title),
-        building:buildings(id,name,repair_user_ids,inspector_user_ids)`)
-      .order("created_at",{ascending:false}).limit(300);
-    setRequests((rqs??[]) as unknown as RepairRequest[]);
+    const pReq = supabase.from("repair_requests")
+      .select(`${REQ_COLS},reporter:users!reporter_id(id,first_name,last_name,title),building:buildings(id,name,repair_user_ids,inspector_user_ids)`)
+      .order("created_at",{ascending:false}).limit(300)
+      .then(({data})=>setRequests((data??[]) as unknown as RepairRequest[]));
+    const pBld = supabase.from("buildings").select("id,name,description,repair_user_ids,inspector_user_ids").order("name")
+      .then(({data})=>setBuildings((data??[]) as Building[]));
+    const pRoutes = supabase.from("repair_category_routes").select("id,category,user_id")
+      .then(({data})=>setRoutes((data??[]) as RepairRoute[]));
+    const pPeople = Promise.all([
+      supabase.from("users").select("id,first_name,last_name,title,role,position").order("first_name"),
+      supabase.from("repair_project_managers").select("*"),
+    ]).then(([u,m])=>{
+      const users=(u.data??[]) as User[];
+      setAllUsers(users);
+      if (m.error) console.error("[repair] โหลด repair_project_managers ไม่สำเร็จ:", m.error.message);
+      const uMap: Record<string,User> = Object.fromEntries(users.map(x=>[x.id,x]));
+      setManagers(((m.data??[]) as any[]).map(x=>({ ...x, user: uMap[x.user_id] })) as ProjectManager[]);
+    });
+    await Promise.all([pReq,pBld,pRoutes,pPeople]);
   },[user]);
+
+  // ★ ดึงข้อมูล ผอ. (รวมลายเซ็น) เฉพาะตอนเปิดหน้าบันทึกข้อความ
+  useEffect(()=>{
+    if (!showMemo || director) return;
+    supabase.from("users").select("id,first_name,last_name,title,role,position,signature_url")
+      .eq("role","director").limit(1).maybeSingle()
+      .then(({data})=>{ if (data) setDirector(data as User); });
+  },[showMemo,director]);
 
   useEffect(()=>{if(!loading&&user) loadData();},[loading,user,loadData]);
 
@@ -1320,7 +1327,7 @@ export default function Page() {
     <div className="min-h-screen bg-slate-100/70 flex flex-col" style={{fontFamily:"'Sarabun','Noto Sans Thai',sans-serif"}}>
       {/* ── Header ── */}
       <header className="bg-gradient-to-br from-orange-500 to-amber-500 text-white shrink-0">
-        <div className="max-w-5xl mx-auto px-4 sm:px-5 pt-4 pb-5">
+        <div className="w-full px-3 sm:px-4 pt-4 pb-5">
           <div className="flex items-center gap-3">
             <button onClick={()=>router.push("/dashboard")} aria-label="กลับหน้าหลัก"
               className="w-10 h-10 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-lg shrink-0 transition">🏠</button>
@@ -1349,7 +1356,7 @@ export default function Page() {
 
       {/* ── Tabs ── */}
       <nav className="bg-white border-b border-slate-200 shrink-0 sticky top-0 z-20">
-        <div className="max-w-5xl mx-auto flex overflow-x-auto px-2">
+        <div className="w-full flex overflow-x-auto px-1">
           {tabs.map(([k,l])=>(
             <button key={k} onClick={()=>setTab(k)}
               className={`px-4 sm:px-5 py-3.5 text-sm font-bold border-b-[3px] whitespace-nowrap transition
@@ -1363,7 +1370,7 @@ export default function Page() {
       <main className="flex-1">
         {/* ── Dashboard ── */}
         {tab==="dashboard" && canSeeAll && (
-          <div className="max-w-5xl mx-auto p-4 sm:p-5 space-y-5">
+          <div className="w-full p-2 sm:p-3 space-y-4">
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-slate-100"><h3 className="font-bold text-slate-800">สรุปรายอาคาร</h3></div>
               <div className="overflow-x-auto">
@@ -1419,7 +1426,7 @@ export default function Page() {
 
         {/* ── List ── */}
         {tab==="list" && (
-          <div className="max-w-4xl mx-auto p-4 sm:p-5 space-y-4">
+          <div className="w-full p-2 sm:p-3 space-y-3">
             <div className="bg-white rounded-2xl border border-slate-200 p-3 sm:p-4 space-y-3">
               <div className="flex flex-col sm:flex-row gap-2">
                 <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="🔍 ค้นหาหัวข้อ ห้อง ผู้แจ้ง..." className={inputCls()} />
@@ -1458,16 +1465,21 @@ export default function Page() {
                 )}
               </div>
             ) : (
-              <div className="space-y-3">
-                {visibleRequests.map(r=><RequestCard key={r.id} r={r} allUsers={allUsers} onOpen={()=>setDetailReq(r)} />)}
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                {visibleRequests.slice(0, shown).map(r=><RequestCard key={r.id} r={r} allUsers={allUsers} onOpen={()=>setDetailReq(r)} />)}
               </div>
+            )}
+            {visibleRequests.length > shown && (
+              <button onClick={()=>setShown(n=>n+30)} className="w-full py-3 rounded-xl bg-white border border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50">
+                แสดงเพิ่ม (เหลืออีก {visibleRequests.length - shown} รายการ)
+              </button>
             )}
           </div>
         )}
 
         {/* ── Mine ── */}
         {tab==="mine" && (
-          <div className="max-w-3xl mx-auto p-4 sm:p-5 space-y-4">
+          <div className="w-full p-2 sm:p-3 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-slate-800">รายการแจ้งซ่อมของฉัน ({myRequests.length})</h2>
               <button onClick={()=>setShowForm(true)} className={btnPrimary}>+ แจ้งซ่อม</button>
@@ -1478,7 +1490,7 @@ export default function Page() {
                 <p className="text-sm">คุณยังไม่เคยแจ้งซ่อม — กด “+ แจ้งซ่อม” เพื่อเริ่มต้น</p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                 {myRequests.map(r=><RequestCard key={r.id} r={r} allUsers={allUsers} onOpen={()=>setDetailReq(r)} />)}
               </div>
             )}
