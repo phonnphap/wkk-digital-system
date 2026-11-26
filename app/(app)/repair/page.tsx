@@ -5,7 +5,6 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { format } from "date-fns";
-import { th } from "date-fns/locale";
 import AssetPicker from "../assets/_components/AssetPicker";
 
 const supabase = createClient();
@@ -40,6 +39,10 @@ function fullName(u?: User | null) {
   if (!u) return "—";
   return `${u.title ?? ""} ${u.first_name} ${u.last_name}`.trim();
 }
+function initials(u?: User | null) {
+  if (!u) return "?";
+  return (u.first_name?.[0] ?? "") + (u.last_name?.[0] ?? "");
+}
 function thaiDate(s?: string) {
   if (!s) return "—";
   const d = new Date(s);
@@ -51,18 +54,33 @@ function thaiDateFull(s?: string) {
   const months = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
   return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()+543}`;
 }
+// ★ เวลาแบบ "เมื่อ X ชม.ที่แล้ว" ให้อ่านง่ายในรายการ
+function ago(s?: string) {
+  if (!s) return "";
+  const mins = Math.floor((Date.now() - new Date(s).getTime()) / 60000);
+  if (mins < 1) return "เมื่อสักครู่";
+  if (mins < 60) return `${mins} นาทีที่แล้ว`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} ชม.ที่แล้ว`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days} วันที่แล้ว`;
+  return thaiDate(s);
+}
+function assignedIdsOf(r: RepairRequest): string[] {
+  return ((r as any).assigned_user_ids as string[] | undefined) ?? (r.assigned_to ? [r.assigned_to] : []);
+}
 
-// ★ แก้: 'resolved' -> 'completed' ให้ตรงกับ enum ค่าจริงใน DB (pending, in_progress, completed, cancelled)
-const STATUS_CFG: Record<string,{label:string;color:string;bg:string;border:string}> = {
-  pending:     { label:"รอดำเนินการ", color:"#92400e", bg:"#fef3c7", border:"#fcd34d" },
-  in_progress: { label:"กำลังซ่อม",  color:"#1e40af", bg:"#dbeafe", border:"#93c5fd" },
-  completed:   { label:"เสร็จแล้ว",  color:"#065f46", bg:"#d1fae5", border:"#6ee7b7" },
-  cancelled:   { label:"ยกเลิก",     color:"#6b7280", bg:"#f3f4f6", border:"#d1d5db" },
+// 'completed' ตรงกับ enum จริงใน DB (pending, in_progress, completed, cancelled)
+const STATUS_CFG: Record<string,{label:string;color:string;bg:string;border:string;dot:string;icon:string}> = {
+  pending:     { label:"รอดำเนินการ", color:"#92400e", bg:"#fef3c7", border:"#fcd34d", dot:"#f59e0b", icon:"⏳" },
+  in_progress: { label:"กำลังซ่อม",  color:"#1e40af", bg:"#dbeafe", border:"#93c5fd", dot:"#3b82f6", icon:"🔧" },
+  completed:   { label:"เสร็จแล้ว",  color:"#065f46", bg:"#d1fae5", border:"#6ee7b7", dot:"#10b981", icon:"✅" },
+  cancelled:   { label:"ยกเลิก",     color:"#6b7280", bg:"#f3f4f6", border:"#d1d5db", dot:"#9ca3af", icon:"🚫" },
 };
-const PRIORITY_CFG: Record<string,{label:string;color:string}> = {
-  low:    { label:"ต่ำ",    color:"#6b7280" },
-  medium: { label:"ปานกลาง",color:"#d97706" },
-  high:   { label:"เร่งด่วน",color:"#dc2626" },
+const PRIORITY_CFG: Record<string,{label:string;color:string;bg:string}> = {
+  low:    { label:"ต่ำ",      color:"#475569", bg:"#f1f5f9" },
+  medium: { label:"ปานกลาง",  color:"#b45309", bg:"#fef3c7" },
+  high:   { label:"เร่งด่วน",  color:"#b91c1c", bg:"#fee2e2" },
 };
 const BULB_CATEGORY = "เปลี่ยนหลอดไฟ";
 const INTERNET_CATEGORY = "เครือข่ายอินเตอร์เน็ต";
@@ -72,7 +90,7 @@ const CATEGORIES = ["ระบบไฟฟ้า", BULB_CATEGORY, "ระบบ�
 // ★ บัญชีที่แก้ไข/สร้างบันทึกข้อความได้
 const MEMO_EDITOR_EMAILS = ["general@khienkhet.ac.th"];
 
-// ★ หาผู้รับเรื่องตามสาย: เน็ต -> 2 คนที่กำหนด / หลอดไฟ -> ครูประจำตึก / อื่นๆ -> หน.โครงการ
+// ★ หาผู้รับเรื่องตามสาย: หมวดที่ตั้งสายไว้ -> คนที่กำหนด / หลอดไฟ -> ครูประจำตึก / อื่นๆ -> หน.โครงการ
 function resolveRecipients(category: string|undefined, building: Building|undefined|null,
   managers: ProjectManager[], allUsers: User[], routes: RepairRoute[]): User[] {
   const byIds = (ids: string[]) => allUsers.filter(u => ids.includes(u.id));
@@ -83,6 +101,21 @@ function resolveRecipients(category: string|undefined, building: Building|undefi
     if (t.length) return t;
   }
   return byIds(managers.map(m => m.user_id));
+}
+
+// ★ แจ้งเตือน Teams — ใช้รูปแบบเดียวกับ pushLeaveTeams ในระบบใบลา
+//   (ส่ง Bearer token + id ของรายการ ให้ฝั่งเซิร์ฟเวอร์ดึงข้อมูลและยิงเข้า Teams เอง)
+type RepairEvent = "submitted" | "edited" | "acknowledged" | "assigned" | "status_changed" | "completed";
+async function pushRepairTeams(requestId: string, event: RepairEvent, extra?: { note?: string; status?: string }) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await fetch("/api/repair-notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ requestId, event, ...extra }),
+    });
+  } catch (e) { console.warn("[pushRepairTeams]", e); }
 }
 
 // ★ แปลงเลขอารบิกในสตริงให้เป็นเลขไทยล้วน (ใช้เฉพาะข้อความเนื้อหาในบันทึกข้อความ ห้ามใช้กับ CSS/สี)
@@ -116,7 +149,6 @@ function bahttext(num: number): string {
   let text = "";
   if (intPart === "0") text = "ศูนย์บาท";
   else {
-    // ตัดเป็นช่วงล้าน
     let millions: string[] = [];
     let remain = intPart;
     while (remain.length > 6) {
@@ -132,8 +164,7 @@ function bahttext(num: number): string {
   return text;
 }
 
-// ── PDF Generator ─────────────────────────────────────────────────────────────
-// ★ เขียนใหม่ทั้งหมดให้ตรงกับเทมเพลตราชการ "บันทึกข้อความแจ้งซ่อมสายชั้น" ตามตัวอย่างที่แนบ
+// ── PDF Generator (บันทึกข้อความ) — คงเดิมทั้งหมด ──────────────────────────────
 function generateMemoHTML(params: {
   items: { no:number; title:string; detail:string; amount:number; photos:string[] }[];
   subject: string;
@@ -162,14 +193,11 @@ function generateMemoHTML(params: {
     `<div style="margin:2px 0">${toThaiDigits(i+1)}. ${it.title}${it.detail ? ` (${it.detail})` : ""} จำนวน ${it.amount ? toThaiDigits(it.amount.toLocaleString("th-TH")) : "…………"} บาท</div>`
   ).join("");
 
-  // ★ กล่อง "ตรวจเสนอ" เป็นรายการคงที่ตามแบบฟอร์มราชการจริง (เอาส่วนเลือกได้มากกว่า 1 ตำแหน่งออกแล้ว)
-  //   เพิ่มหัวข้อ "ตรวจเสนอ" ที่มุมบนของกล่อง ให้ตรงกับเอกสารต้นฉบับ (เดิมขาดหายไป)
   const routingBoxes = `<div style="font-weight:bold;margin-bottom:4px">ตรวจเสนอ</div>` +
     ROUTING_LABELS.map(label => `
     <div style="margin:3px 0">.................... ${label}</div>`).join("") +
     `<div style="margin:3px 0">....................</div>`;
 
-  // ★ หน้าที่ 2: ภาพแนบตามรายการที่เลือก พร้อมชื่อรายการด้านล่างภาพ
   const photoEntries = items.flatMap(it => (it.photos ?? []).map(url => ({ url, title: it.title })));
   const photosPageHTML = photoEntries.length > 0
     ? `<div style="page-break-before:always;">
@@ -190,9 +218,6 @@ function generateMemoHTML(params: {
   return `<!DOCTYPE html><html><head>
   <meta charset="UTF-8">
   <style>
-    /* ★ ใช้ฟอนต์ TH Sarabun New ตัวจริงจาก public/fonts/THSarabunNew.ttf ผ่าน @font-face
-       แทนการพึ่งฟอนต์ที่ติดตั้งในเครื่อง หรือฟอนต์ทดแทนจาก Google Fonts — รับประกันว่าหน้าตาตรงกับต้นฉบับ 100%
-       ไม่ระบุ font-weight:bold แยกไฟล์ (ไม่มีไฟล์ตัวหนาให้) เบราว์เซอร์จะ synthesize ตัวหนาเองสำหรับ <b>/bold */
     @font-face {
       font-family: 'TH Sarabun New';
       src: url('${fontUrl}') format('truetype');
@@ -293,7 +318,6 @@ function generateMemoHTML(params: {
     ${photosPageHTML}
     <script>
       window.onload = () => {
-        // ★ รอให้ฟอนต์ TH Sarabun New โหลดเสร็จก่อนค่อยเปิดหน้าต่างพิมพ์ กัน print ด้วยฟอนต์ fallback
         if (document.fonts && document.fonts.ready) {
           document.fonts.ready.then(() => window.print());
         } else {
@@ -303,6 +327,69 @@ function generateMemoHTML(params: {
     <\/script>
   </body></html>`;
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── UI primitives (ใช้ร่วมกันทุก modal เพื่อให้หน้าตาเป็นแบบเดียวกัน) ───────────
+// ══════════════════════════════════════════════════════════════════════════════
+const inputCls = (err?: boolean) =>
+  `w-full rounded-xl border px-3.5 py-2.5 text-sm text-slate-800 bg-white placeholder:text-slate-400 outline-none transition
+   focus:ring-4 ${err ? "border-red-300 bg-red-50/60 focus:ring-red-100" : "border-slate-200 focus:border-orange-400 focus:ring-orange-100"}`;
+
+function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
+  return (
+    <label className="block text-[13px] font-semibold text-slate-600 mb-1.5">
+      {children}{required && <span className="text-red-500 ml-0.5">*</span>}
+    </label>
+  );
+}
+
+function Avatar({ user, size = 28 }: { user?: User | null; size?: number }) {
+  return (
+    <span className="inline-flex items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-amber-500 text-white font-bold shrink-0"
+      style={{ width: size, height: size, fontSize: size * 0.4 }}>
+      {initials(user)}
+    </span>
+  );
+}
+
+function StatusPill({ status }: { status: string }) {
+  const c = STATUS_CFG[status] ?? STATUS_CFG.pending;
+  return (
+    <span style={{ background: c.bg, color: c.color, borderColor: c.border }}
+      className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border whitespace-nowrap">
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: c.dot }} />{c.label}
+    </span>
+  );
+}
+
+function PriorityTag({ priority }: { priority?: string }) {
+  if (!priority || !PRIORITY_CFG[priority]) return null;
+  const p = PRIORITY_CFG[priority];
+  return <span className="text-[11px] font-bold px-2 py-0.5 rounded-md" style={{ color: p.color, background: p.bg }}>{p.label}</span>;
+}
+
+function ModalShell({ title, onClose, children, footer, wide }: {
+  title: React.ReactNode; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; wide?: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-sm sm:p-4" onClick={onClose}>
+      <div className={`bg-white w-full ${wide ? "sm:max-w-2xl" : "sm:max-w-lg"} rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col max-h-[92vh]`}
+        onClick={e => e.stopPropagation()}>
+        <div className="px-5 sm:px-6 py-4 flex items-center justify-between shrink-0 border-b border-slate-100">
+          <h3 className="font-bold text-slate-800 text-[17px]">{title}</h3>
+          <button onClick={onClose} aria-label="ปิด"
+            className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 transition">✕</button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-5 sm:px-6 py-5 space-y-4">{children}</div>
+        {footer && <div className="px-5 sm:px-6 py-4 border-t border-slate-100 flex gap-2 justify-end shrink-0 bg-slate-50/80 sm:rounded-b-3xl">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+const btnGhost = "px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-sm font-semibold hover:bg-slate-50 transition";
+const btnPrimary = "px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold disabled:opacity-50 transition shadow-sm";
+const btnBlue = "px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold disabled:opacity-50 transition shadow-sm";
 
 // ── MemoModal ─────────────────────────────────────────────────────────────────
 const ROUTING_LABELS = [
@@ -326,50 +413,27 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
   const [selected, setSelected] = useState<Record<string,boolean>>(
     () => Object.fromEntries(requests.map(r => [r.id, true]))
   );
-  // ★ จำนวนเงินต่อรายการ — ดึงจาก estimated_cost ที่บันทึกไว้แล้ว (ถ้ามี) ให้แก้ต่อได้ตอนสร้างบันทึก
   const [amounts, setAmounts] = useState<Record<string,string>>(
     () => Object.fromEntries(requests.map(r => [r.id, (r as any).estimated_cost != null ? String((r as any).estimated_cost) : ""]))
   );
   const checkedCount = Object.values(selected).filter(Boolean).length;
-  const totalAmount = requests
-    .filter(r => selected[r.id])
-    .reduce((sum, r) => sum + (Number(amounts[r.id]) || 0), 0);
-  const attachmentCount = requests
-    .filter(r => selected[r.id])
-    .reduce((sum, r) => sum + (r.photo_urls?.length ?? 0), 0);
+  const totalAmount = requests.filter(r => selected[r.id]).reduce((sum, r) => sum + (Number(amounts[r.id]) || 0), 0);
+  const attachmentCount = requests.filter(r => selected[r.id]).reduce((sum, r) => sum + (r.photo_urls?.length ?? 0), 0);
 
   const handlePrint = () => {
-    const items = requests
-      .filter(r => selected[r.id])
-      .map((r,i) => ({
-        no: i+1,
-        title: r.title,
-        detail: [r.building?.name, r.room].filter(Boolean).join(" · "),
-        amount: Number(amounts[r.id]) || 0,
-        photos: r.photo_urls ?? [],
-      }));
+    const items = requests.filter(r => selected[r.id]).map((r,i) => ({
+      no: i+1, title: r.title,
+      detail: [r.building?.name, r.room].filter(Boolean).join(" · "),
+      amount: Number(amounts[r.id]) || 0, photos: r.photo_urls ?? [],
+    }));
     if (items.length === 0) { alert("กรุณาเลือกรายการอย่างน้อย 1 รายการ"); return; }
-    // ★ ใช้ origin ของหน้าปัจจุบันประกอบ URL ตราครุฑ (public/images.jpg) และฟอนต์ TH Sarabun New
-    //   (public/fonts/THSarabunNew.ttf) กันปัญหา relative path ในหน้าต่างที่เปิดใหม่
     const logoUrl = typeof window !== "undefined" ? `${window.location.origin}/images.jpg` : "/images.jpg";
     const fontUrl = typeof window !== "undefined" ? `${window.location.origin}/fonts/THSarabunNew.ttf` : "/fonts/THSarabunNew.ttf";
     const html = generateMemoHTML({
-      items,
-      subject,
-      reporterName: fullName(currentUser),
-      reporterPosition,
-      gradeLevel,
-      budgetSource,
-      totalAmount,
-      attachmentCount,
-      directorName: fullName(director),
-      directorSignUrl: director?.signature_url ?? "",
-      creatorSignUrl: currentUser.signature_url ?? "",
-      dateStr: thaiDateFull(memoDate),
-      memoNo,
-      department,
-      logoUrl,
-      fontUrl,
+      items, subject, reporterName: fullName(currentUser), reporterPosition, gradeLevel, budgetSource,
+      totalAmount, attachmentCount, directorName: fullName(director),
+      directorSignUrl: director?.signature_url ?? "", creatorSignUrl: currentUser.signature_url ?? "",
+      dateStr: thaiDateFull(memoDate), memoNo, department, logoUrl, fontUrl,
     });
     const w = window.open("","_blank","width=900,height=780");
     if (!w) return;
@@ -378,128 +442,79 @@ function MemoModal({ requests, buildings, currentUser, director, onClose }: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh]"
-        onClick={e=>e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
-          <h3 className="font-bold text-slate-800 text-base">📄 สร้างบันทึกข้อความแจ้งซ่อม</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">✕</button>
+    <ModalShell wide title="📄 สร้างบันทึกข้อความแจ้งซ่อม" onClose={onClose}
+      footer={<>
+        <button onClick={onClose} className={btnGhost}>ยกเลิก</button>
+        <button onClick={handlePrint} disabled={checkedCount===0} className={btnBlue}>🖨️ พิมพ์บันทึกข้อความ ({checkedCount} รายการ)</button>
+      </>}>
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label>เลขที่หนังสือ</Label>
+          <input type="text" value={memoNo} onChange={e=>setMemoNo(e.target.value)} placeholder="เช่น ศธ 04002/2569-001" className={inputCls()} /></div>
+        <div><Label>วันที่</Label>
+          <input type="date" value={memoDate} onChange={e=>setMemoDate(e.target.value)} className={inputCls()} /></div>
+      </div>
+      <div><Label>ส่วนราชการ</Label><input type="text" value={department} onChange={e=>setDepartment(e.target.value)} className={inputCls()} /></div>
+      <div><Label>เรื่อง</Label><input type="text" value={subject} onChange={e=>setSubject(e.target.value)} className={inputCls()} /></div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label>ระดับชั้น/ห้อง</Label>
+          <input type="text" value={gradeLevel} onChange={e=>setGradeLevel(e.target.value)} placeholder="เช่น ม.2/3" className={inputCls()} /></div>
+        <div><Label>ตำแหน่งผู้เสนอ</Label>
+          <input type="text" value={reporterPosition} onChange={e=>setReporterPosition(e.target.value)} placeholder="เช่น หัวหน้าสายชั้น ม.2" className={inputCls()} /></div>
+      </div>
+      <div><Label>แหล่งงบประมาณ</Label>
+        <input type="text" value={budgetSource} onChange={e=>setBudgetSource(e.target.value)} placeholder="เช่น งบประมาณรายได้สถานศึกษา / งบดำเนินงาน" className={inputCls()} /></div>
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <Label>เลือกรายการที่ต้องการรวม ({checkedCount}/{requests.length})</Label>
+          <div className="flex gap-3 -mt-1.5">
+            <button onClick={()=>setSelected(Object.fromEntries(requests.map(r=>[r.id,true])))} className="text-xs text-orange-600 font-bold hover:underline">เลือกทั้งหมด</button>
+            <button onClick={()=>setSelected(Object.fromEntries(requests.map(r=>[r.id,false])))} className="text-xs text-slate-400 font-bold hover:underline">ล้าง</button>
+          </div>
         </div>
-        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">เลขที่หนังสือ</label>
-              <input type="text" value={memoNo} onChange={e=>setMemoNo(e.target.value)}
-                placeholder="เช่น ศธ 04002/2569-001"
-                className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">วันที่</label>
-              <input type="date" value={memoDate} onChange={e=>setMemoDate(e.target.value)}
-                className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ส่วนราชการ</label>
-            <input type="text" value={department} onChange={e=>setDepartment(e.target.value)}
-              className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">เรื่อง</label>
-            <input type="text" value={subject} onChange={e=>setSubject(e.target.value)}
-              className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ระดับชั้น/ห้อง</label>
-              <input type="text" value={gradeLevel} onChange={e=>setGradeLevel(e.target.value)}
-                placeholder="เช่น ม.2/3" className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ตำแหน่งผู้เสนอ</label>
-              <input type="text" value={reporterPosition} onChange={e=>setReporterPosition(e.target.value)}
-                placeholder="เช่น หัวหน้าสายชั้น ม.2" className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">แหล่งงบประมาณ</label>
-            <input type="text" value={budgetSource} onChange={e=>setBudgetSource(e.target.value)}
-              placeholder="เช่น งบประมาณรายได้สถานศึกษา / งบดำเนินงาน"
-              className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                เลือกรายการที่ต้องการรวม ({checkedCount}/{requests.length})
-              </label>
-              <div className="flex gap-2">
-                <button onClick={()=>setSelected(Object.fromEntries(requests.map(r=>[r.id,true])))}
-                  className="text-xs text-blue-500 font-bold hover:underline">เลือกทั้งหมด</button>
-                <button onClick={()=>setSelected(Object.fromEntries(requests.map(r=>[r.id,false])))}
-                  className="text-xs text-slate-400 font-bold hover:underline">ล้าง</button>
-              </div>
-            </div>
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-              {requests.map((r,i) => (
-                <div key={r.id} className={`p-3 rounded-xl border-2 transition-all
-                  ${selected[r.id] ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50"}`}>
-                  <label className="flex items-start gap-3 cursor-pointer">
-                    <input type="checkbox" checked={!!selected[r.id]}
-                      onChange={e=>setSelected(prev=>({...prev,[r.id]:e.target.checked}))}
-                      className="mt-0.5 w-4 h-4 accent-blue-600 shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold text-slate-800 text-sm">{i+1}. {r.title}</div>
-                      <div className="text-xs text-slate-400 mt-0.5">
-                        {r.building?.name ?? "—"}{r.room ? ` · ${r.room}` : ""}
-                        {r.photo_urls?.length ? ` · 📷 ${r.photo_urls.length} รูป` : ""}
-                      </div>
-                    </div>
-                  </label>
-                  {selected[r.id] && (
-                    <div className="mt-2 ml-7 flex items-center gap-2">
-                      <span className="text-xs text-slate-400 shrink-0">จำนวนเงิน (บาท)</span>
-                      <input type="number" value={amounts[r.id] ?? ""} onChange={e=>setAmounts(prev=>({...prev,[r.id]:e.target.value}))}
-                        placeholder="0" className="w-32 border-2 border-blue-200 rounded-lg px-2 py-1 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-                    </div>
-                  )}
+        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+          {requests.length === 0 && <p className="text-sm text-slate-400 text-center py-6 bg-slate-50 rounded-xl">ไม่มีรายการที่ยังไม่เสร็จ</p>}
+          {requests.map((r,i) => (
+            <div key={r.id} className={`p-3 rounded-xl border transition ${selected[r.id] ? "border-orange-300 bg-orange-50/60" : "border-slate-200 bg-slate-50"}`}>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" checked={!!selected[r.id]} onChange={e=>setSelected(prev=>({...prev,[r.id]:e.target.checked}))}
+                  className="mt-0.5 w-4 h-4 accent-orange-500 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-slate-800 text-sm">{i+1}. {r.title}</div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {r.building?.name ?? "—"}{r.room ? ` · ${r.room}` : ""}{r.photo_urls?.length ? ` · 📷 ${r.photo_urls.length} รูป` : ""}
+                  </div>
                 </div>
-              ))}
+              </label>
+              {selected[r.id] && (
+                <div className="mt-2 ml-7 flex items-center gap-2">
+                  <span className="text-xs text-slate-500 shrink-0">จำนวนเงิน (บาท)</span>
+                  <input type="number" value={amounts[r.id] ?? ""} onChange={e=>setAmounts(prev=>({...prev,[r.id]:e.target.value}))}
+                    placeholder="0" className={inputCls() + " !w-32 !py-1.5"} />
+                </div>
+              )}
             </div>
-          </div>
-
-          <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-700 flex items-center justify-between">
-            <span className="font-bold">รวมเป็นเงินทั้งสิ้น</span>
-            <span className="font-black text-base">{totalAmount.toLocaleString("th-TH")} บาท</span>
-          </div>
-
-          <div className="bg-slate-50 rounded-xl px-4 py-3 text-sm text-slate-600">
-            <p className="font-bold mb-1">ข้อมูลผู้อนุมัติ</p>
-            <p>ผู้อำนวยการ: {fullName(director) || "นายธนณัฐ  ศิระวงษ์"}</p>
-            <p className="text-xs text-slate-400 mt-1">📎 จำนวนภาพแนบรวม: {attachmentCount} รูป (นับอัตโนมัติจากรายการที่เลือก)</p>
-          </div>
-        </div>
-        <div className="px-6 py-4 border-t border-slate-100 flex gap-2 justify-end shrink-0 bg-slate-50 rounded-b-2xl">
-          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 text-sm">ยกเลิก</button>
-          <button onClick={handlePrint} disabled={checkedCount===0}
-            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold disabled:opacity-50 flex items-center gap-2">
-            🖨️ พิมพ์บันทึกข้อความ ({checkedCount} รายการ)
-          </button>
+          ))}
         </div>
       </div>
-    </div>
+
+      <div className="rounded-xl bg-orange-50 border border-orange-100 px-4 py-3 flex items-center justify-between">
+        <span className="font-semibold text-orange-800 text-sm">รวมเป็นเงินทั้งสิ้น</span>
+        <span className="font-black text-lg text-orange-700">{totalAmount.toLocaleString("th-TH")} บาท</span>
+      </div>
+      <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+        <p className="font-semibold mb-0.5">ผู้อนุมัติ</p>
+        <p>ผู้อำนวยการ: {director ? fullName(director) : "นายธนณัฐ  ศิระวงษ์"}</p>
+        <p className="text-xs text-slate-400 mt-1">📎 ภาพแนบรวม {attachmentCount} รูป (นับอัตโนมัติจากรายการที่เลือก)</p>
+      </div>
+    </ModalShell>
   );
 }
 
 // ── RepairFormModal ───────────────────────────────────────────────────────────
-function RepairFormModal({ existing, buildings, currentUser,  onSave, onClose }: {
+function RepairFormModal({ existing, buildings, currentUser, onSave, onClose }: {
   existing?: RepairRequest|null; buildings: Building[];
-  currentUser: User; 
-  onSave: () => void; onClose: () => void;
+  currentUser: User; onSave: () => void; onClose: () => void;
 }) {
   const [title,       setTitle]      = useState(existing?.title ?? "");
   const [desc,        setDesc]       = useState(existing?.description ?? "");
@@ -508,21 +523,24 @@ function RepairFormModal({ existing, buildings, currentUser,  onSave, onClose }:
   const [category,    setCategory]   = useState(existing?.category ?? "");
   const [priority,    setPriority]   = useState(existing?.priority ?? "medium");
   const [imageUrls,   setImageUrls]  = useState<string[]>(existing?.photo_urls ?? []);
+  const [pending,     setPending]    = useState<string[]>([]);   // ★ รูปที่กำลังอัปโหลด (พรีวิวชั่วคราว)
   const [uploading,   setUploading]  = useState(false);
   const [saving,      setSaving]     = useState(false);
   const [errors,      setErrors]     = useState<Record<string,boolean>>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const [assetId, setAssetId] = useState<string>((existing as any)?.asset_id ?? "");
-useEffect(() => {
-  if (existing) return;
-  const id = new URLSearchParams(window.location.search).get("asset");
-  if (!id) return;
-  supabase.from("assets").select("id,name,asset_locations(name)").eq("id", id).maybeSingle().then(({ data }: any) => {
-    if (!data) return;
-    setAssetId(data.id); setCategory(ASSET_CATEGORY);
-    setTitle(t => t || `ซ่อม ${data.name}`); setRoom(r => r || data.asset_locations?.name || "");
-  });
-}, []);
+  const MAX_IMAGES = 4;
+
+  useEffect(() => {
+    if (existing) return;
+    const id = new URLSearchParams(window.location.search).get("asset");
+    if (!id) return;
+    supabase.from("assets").select("id,name,asset_locations(name)").eq("id", id).maybeSingle().then(({ data }: any) => {
+      if (!data) return;
+      setAssetId(data.id); setCategory(ASSET_CATEGORY);
+      setTitle(t => t || `ซ่อม ${data.name}`); setRoom(r => r || data.asset_locations?.name || "");
+    });
+  }, []);
 
   const validate = () => {
     const e: Record<string,boolean> = {};
@@ -534,13 +552,9 @@ useEffect(() => {
     return Object.keys(e).length === 0;
   };
 
-  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
-  const MAX_IMAGES = 4;
-
   const handleUpload = async (ev: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(ev.target.files ?? []);
     if (!files.length) return;
-
     const remaining = MAX_IMAGES - imageUrls.length;
     if (remaining <= 0) { alert(`อัปโหลดได้สูงสุด ${MAX_IMAGES} รูป`); return; }
     const toUpload = files.slice(0, remaining);
@@ -550,11 +564,12 @@ useEffect(() => {
     for (const file of toUpload) {
       if (file.size > 10*1024*1024) { alert(`${file.name} ขนาดเกิน 10MB`); continue; }
 
-      const reader = new FileReader();
-      reader.onload = e => {
-        if (e.target?.result) setImagePreviews(prev => [...prev, e.target!.result as string]);
-      };
-      reader.readAsDataURL(file);
+      const preview = await new Promise<string>(res => {
+        const reader = new FileReader();
+        reader.onload = e => res((e.target?.result as string) ?? "");
+        reader.readAsDataURL(file);
+      });
+      setPending(prev => [...prev, preview]);
 
       try {
         const formData = new FormData();
@@ -562,190 +577,140 @@ useEffect(() => {
         formData.append("account", "general@khienkhet.ac.th");
         formData.append("folder", "WKK_Repair_System");
         formData.append("fileName", `repair-${Date.now()}-${Math.random().toString(36).slice(2)}.${file.name.split(".").pop()}`);
-
-        const res = await fetch("/api/upload-onedrive", {
-          method: "POST",
-          body: formData,
-        });
+        const res = await fetch("/api/upload-onedrive", { method: "POST", body: formData });
         if (!res.ok) {
           const err = await res.json().catch(()=>({}));
           console.error("upload-onedrive error:", err);
           alert("อัปโหลดไม่สำเร็จ: " + JSON.stringify(err.error ?? err ?? res.statusText));
-          setImagePreviews(prev => prev.slice(0, -1));
-          continue;
+        } else {
+          const { url, itemId } = await res.json();
+          setImageUrls(prev => [...prev, url ?? itemId]);
         }
-        const { url, itemId } = await res.json();
-        setImageUrls(prev => [...prev, url ?? itemId]);
       } catch (e: any) {
         alert("อัปโหลดไม่สำเร็จ: " + e.message);
-        setImagePreviews(prev => prev.slice(0, -1));
       }
+      setPending(prev => prev.filter(p => p !== preview));
     }
     setUploading(false);
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  function removeImage(i: number) {
-    setImageUrls(prev => prev.filter((_,j) => j !== i));
-    setImagePreviews(prev => prev.filter((_,j) => j !== i));
-  }
-
   const handleSave = async () => {
     if (!validate()) return;
     setSaving(true);
-    // ★ แก้: payload ตรงกับสคีมาจริงของ repair_requests แล้ว
-    //   - photo_urls (jsonb) แทน image_urls (คอลัมน์เดิมถูกลบไปแล้ว)
-    //   - ไม่ส่ง ticket_no / location เพราะมี default ให้แล้วที่ฝั่ง DB
-    // ★ มอบหมายงานอัตโนมัติให้ "ครูผู้ดูแลอาคารทุกคน" (buildings.repair_user_ids) ทันทีตอนแจ้งซ่อมใหม่
-    //   ไม่ต้องเลือกว่าจะมอบให้ใครคนใดคนหนึ่ง — มอบให้ทุกคนที่ดูแลอาคารนั้น พร้อมรวมผู้รับผิดชอบเฉพาะหมวดหมู่ (ถ้ามี)
     const payload = {
-  title: title.trim(), description: desc.trim(), building_id: buildingId,
-  room: room.trim(), category, priority, photo_urls: imageUrls,
-  asset_id: category === ASSET_CATEGORY ? (assetId || null) : null,
-  reporter_id: existing?.reporter_id ?? currentUser.id,   // ★ แก้รายการเดิม = คงผู้แจ้งเดิม
-  status: existing?.status ?? "pending",
-      // ★ assigned_user_ids (jsonb array คอลัมน์ใหม่) เก็บผู้รับมอบหมายทุกคน
-      //   ตอนแก้ไขรายการเดิม ให้คงรายชื่อที่มอบหมายไว้แล้วไม่เปลี่ยนอัตโนมัติซ้ำ
+      title: title.trim(), description: desc.trim(), building_id: buildingId,
+      room: room.trim(), category, priority, photo_urls: imageUrls,
+      asset_id: category === ASSET_CATEGORY ? (assetId || null) : null,
+      reporter_id: existing?.reporter_id ?? currentUser.id,
+      status: existing?.status ?? "pending",
       assigned_user_ids: existing?.id ? ((existing as any).assigned_user_ids ?? []) : [],
       assigned_to: existing?.assigned_to ?? null,
     };
-        if (existing?.id) {
+    if (existing?.id) {
       const { error } = await supabase.from("repair_requests").update(payload).eq("id", existing.id);
       if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); setSaving(false); return; }
+      pushRepairTeams(existing.id, "edited");
     } else {
       const { data: created, error } = await supabase.from("repair_requests").insert([payload]).select("id").single();
       if (error) { alert("❌ แจ้งซ่อมไม่สำเร็จ: " + error.message); setSaving(false); return; }
       if (category === ASSET_CATEGORY && assetId)
-  await supabase.rpc("update_asset_status", { p_asset: assetId, p_status: "broken", p_condition: null, p_note: `แจ้งซ่อม: ${title.trim()}` });
-      const { data: { session } } = await supabase.auth.getSession();
-      fetch("/api/repair-notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ requestId: created.id }),
-      }).catch(e => console.warn("[repair] notify ไม่สำเร็จ:", e));
-    }   // ← ปิด else ตรงนี้
-
+        await supabase.rpc("update_asset_status", { p_asset: assetId, p_status: "broken", p_condition: null, p_note: `แจ้งซ่อม: ${title.trim()}` });
+      // ★ แจ้งเข้า Teams (รูปแบบเดียวกับใบลา) — ผู้รับเรื่องตามสายจะได้รับข้อความ
+      pushRepairTeams(created.id, "submitted");
+    }
     setSaving(false);
     onSave();
   };
 
-  const iCls = (err?: boolean) =>
-    `w-full border-2 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none bg-white transition-colors
-    ${err ? "border-red-400 bg-red-50" : "border-blue-200 focus:border-blue-500 text-slate-800"}`;
+  const canAddMore = imageUrls.length + pending.length < MAX_IMAGES;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[92vh]"
-        onClick={e=>e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
-          <h3 className="font-bold text-slate-800 text-base">{existing ? "✏️ แก้ไขรายการ" : "🔧 แจ้งซ่อม"}</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">✕</button>
+    <ModalShell title={existing ? "✏️ แก้ไขรายการ" : "🔧 แจ้งซ่อม"} onClose={onClose}
+      footer={<>
+        <button onClick={onClose} className={btnGhost}>ยกเลิก</button>
+        <button onClick={handleSave} disabled={saving || uploading} className={btnPrimary}>
+          {saving ? "กำลังบันทึก..." : (existing ? "บันทึกการแก้ไข" : "ส่งแจ้งซ่อม")}
+        </button>
+      </>}>
+      <div>
+        <Label required>หัวข้อ</Label>
+        <input type="text" value={title} onChange={e=>setTitle(e.target.value)} placeholder="เช่น ไฟฟ้าดับห้อง 101" className={inputCls(errors.title)} />
+        {errors.title && <p className="text-xs text-red-500 mt-1">กรุณากรอกหัวข้อ</p>}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label required>อาคาร</Label>
+          <select value={buildingId} onChange={e=>setBuildingId(e.target.value)} className={inputCls(errors.buildingId)}>
+            <option value="">เลือกอาคาร</option>
+            {buildings.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+          {errors.buildingId && <p className="text-xs text-red-500 mt-1">กรุณาเลือกอาคาร</p>}
         </div>
-        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">หัวข้อ <span className="text-red-400">*</span></label>
-            <input type="text" value={title} onChange={e=>setTitle(e.target.value)}
-              placeholder="เช่น ไฟฟ้าดับห้อง 101" className={iCls(errors.title)} />
-            {errors.title && <p className="text-xs text-red-500 mt-1">กรุณากรอกหัวข้อ</p>}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">อาคาร <span className="text-red-400">*</span></label>
-              <select value={buildingId} onChange={e=>setBuildingId(e.target.value)} className={iCls(errors.buildingId)}>
-                <option value="">— เลือกอาคาร —</option>
-                {buildings.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-              {errors.buildingId && <p className="text-xs text-red-500 mt-1">กรุณาเลือกอาคาร</p>}
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ห้อง/บริเวณ</label>
-              <input type="text" value={room} onChange={e=>setRoom(e.target.value)}
-                placeholder="เช่น ห้อง 101" className={iCls()} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">หมวดหมู่ <span className="text-red-400">*</span></label>
-              <select value={category} onChange={e=>setCategory(e.target.value)} className={iCls(errors.category)}>
-                <option value="">— เลือก —</option>
-                {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
-              </select>
-              {errors.category && <p className="text-xs text-red-500 mt-1">กรุณาเลือกหมวดหมู่</p>}
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ความเร่งด่วน</label>
-              <select value={priority} onChange={e=>setPriority(e.target.value)} className={iCls()}>
-                <option value="low">🟢 ต่ำ</option>
-                <option value="medium">🟡 ปานกลาง</option>
-                <option value="high">🔴 เร่งด่วน</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            {category === ASSET_CATEGORY && (
-  <div>
-    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ครุภัณฑ์ที่ชำรุด <span className="text-red-400">*</span></label>
-    <AssetPicker value={assetId} onChange={setAssetId} error={errors.assetId} />
-  </div>
-)}
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">รายละเอียด</label>
-            <textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={3}
-              placeholder="อธิบายปัญหาเพิ่มเติม..." className={iCls()+" resize-none"} />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">รูปภาพประกอบ</label>
-            {imageUrls.length < MAX_IMAGES && (
-              <label className={`flex items-center gap-3 cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl px-4 py-3 transition-colors ${uploading?"opacity-60":""} hover:border-blue-400`}>
-                <span className="text-2xl">{uploading?"⏳":"📷"}</span>
-                <div>
-                  <p className="font-bold text-slate-600 text-sm">{uploading?"กำลังอัปโหลด...":"คลิกเพื่อแนบรูป"}</p>
-                  <p className="text-slate-400 text-xs">ไม่เกิน 10MB · สูงสุด {MAX_IMAGES} รูป (เพิ่มได้อีก {MAX_IMAGES-imageUrls.length} รูป)</p>
-                </div>
-                <input ref={fileRef} type="file" multiple accept="image/*" disabled={uploading||imageUrls.length>=MAX_IMAGES}
-                  onChange={handleUpload} className="hidden" />
-              </label>
-            )}
-            {(imagePreviews.length > 0 || imageUrls.length > 0) && (
-              <div className="grid grid-cols-4 gap-2 mt-2">
-                {(imagePreviews.length > 0 ? imagePreviews : imageUrls).map((src,i)=>(
-                  <div key={i} className="relative group aspect-square">
-                    <img src={src} alt=""
-                      className="w-full h-full object-cover rounded-xl border border-slate-200"
-                      onClick={()=>window.open(imageUrls[i]??src,"_blank")} style={{cursor:"pointer"}}/>
-                    <button onClick={()=>removeImage(i)}
-                      className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full text-[10px] hidden group-hover:flex items-center justify-center font-bold shadow">×</button>
-                    {uploading && i===imagePreviews.length-1 && (
-                      <div className="absolute inset-0 bg-black/40 rounded-xl flex items-center justify-center">
-                        <span className="text-white text-xs font-bold">⏳</span>
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {imageUrls.length < MAX_IMAGES && (
-                  <label className="aspect-square border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition-colors bg-slate-50">
-                    <span className="text-2xl">📷</span>
-                    <span className="text-xs text-slate-400 mt-1">{MAX_IMAGES - imageUrls.length} เพิ่มได้</span>
-                    <input ref={fileRef} type="file" multiple accept="image/*" disabled={uploading}
-                      onChange={handleUpload} className="hidden" />
-                  </label>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="px-6 py-4 border-t border-slate-100 flex gap-2 justify-end shrink-0 bg-slate-50 rounded-b-2xl">
-          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 text-sm">ยกเลิก</button>
-          <button onClick={handleSave} disabled={saving}
-            className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold disabled:opacity-50">
-            {saving ? "กำลังบันทึก..." : (existing ? "💾 บันทึก" : "📤 แจ้งซ่อม")}
-          </button>
+        <div>
+          <Label>ห้อง/บริเวณ</Label>
+          <input type="text" value={room} onChange={e=>setRoom(e.target.value)} placeholder="เช่น ห้อง 101" className={inputCls()} />
         </div>
       </div>
-    </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label required>หมวดหมู่</Label>
+          <select value={category} onChange={e=>setCategory(e.target.value)} className={inputCls(errors.category)}>
+            <option value="">เลือกหมวดหมู่</option>
+            {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+          {errors.category && <p className="text-xs text-red-500 mt-1">กรุณาเลือกหมวดหมู่</p>}
+        </div>
+        <div>
+          <Label>ความเร่งด่วน</Label>
+          <select value={priority} onChange={e=>setPriority(e.target.value)} className={inputCls()}>
+            <option value="low">🟢 ต่ำ</option>
+            <option value="medium">🟡 ปานกลาง</option>
+            <option value="high">🔴 เร่งด่วน</option>
+          </select>
+        </div>
+      </div>
+      {category === ASSET_CATEGORY && (
+        <div>
+          <Label required>ครุภัณฑ์ที่ชำรุด</Label>
+          <AssetPicker value={assetId} onChange={setAssetId} error={errors.assetId} />
+        </div>
+      )}
+      <div>
+        <Label>รายละเอียด</Label>
+        <textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={3} placeholder="อธิบายอาการหรือปัญหาเพิ่มเติม" className={inputCls()+" resize-none"} />
+      </div>
+      <div>
+        <Label>รูปภาพประกอบ <span className="text-slate-400 font-normal">({imageUrls.length}/{MAX_IMAGES})</span></Label>
+        <div className="grid grid-cols-4 gap-2">
+          {imageUrls.map((src,i)=>(
+            <div key={src+i} className="relative group aspect-square">
+              <img src={src} alt="" className="w-full h-full object-cover rounded-xl border border-slate-200 cursor-pointer" onClick={()=>window.open(src,"_blank")} />
+              <button onClick={()=>setImageUrls(prev=>prev.filter((_,j)=>j!==i))} aria-label="ลบรูป"
+                className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-500 text-white rounded-full text-xs flex items-center justify-center font-bold shadow">×</button>
+            </div>
+          ))}
+          {pending.map((src,i)=>(
+            <div key={"p"+i} className="relative aspect-square">
+              <img src={src} alt="" className="w-full h-full object-cover rounded-xl border border-slate-200 opacity-60" />
+              <div className="absolute inset-0 flex items-center justify-center text-lg animate-pulse">⏳</div>
+            </div>
+          ))}
+          {canAddMore && (
+            <label className={`aspect-square border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-orange-400 hover:bg-orange-50 transition bg-slate-50 ${uploading?"opacity-60 pointer-events-none":""}`}>
+              <span className="text-2xl">📷</span>
+              <span className="text-[11px] text-slate-500 mt-1">เพิ่มรูป</span>
+              <input ref={fileRef} type="file" multiple accept="image/*" disabled={uploading} onChange={handleUpload} className="hidden" />
+            </label>
+          )}
+        </div>
+        <p className="text-xs text-slate-400 mt-1.5">ไฟล์ละไม่เกิน 10MB · แนบได้สูงสุด {MAX_IMAGES} รูป</p>
+      </div>
+    </ModalShell>
   );
 }
 
-// ── ManagersModal ─────────────────────────────────────────────────────────────
+// ── ManagersModal (แอดมินตั้งค่าผู้ดูแลโครงการ + ผู้รับเรื่องตามหมวด) ───────────
 function ManagersModal({ currentUser, allUsers, managers, routes, onClose, onRefresh }: {
   currentUser: User; allUsers: User[]; managers: ProjectManager[]; routes: RepairRoute[];
   onClose: () => void; onRefresh: () => void;
@@ -753,33 +718,29 @@ function ManagersModal({ currentUser, allUsers, managers, routes, onClose, onRef
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
   const managerIds = useMemo(() => new Set(managers.map(m => m.user_id)), [managers]);
-  // state / logic
-const [routeCat, setRouteCat] = useState(INTERNET_CATEGORY);
-const [routeSearch, setRouteSearch] = useState("");
-const catRoutes = routes.filter(r => r.category === routeCat);
-const routeFiltered = useMemo(() => {
-  const q = routeSearch.trim().toLowerCase();
-  if (!q) return [];
-  return allUsers.filter(u => !catRoutes.some(r => r.user_id === u.id) &&
-    `${u.first_name} ${u.last_name}`.toLowerCase().includes(q)).slice(0, 8);
-}, [allUsers, routeSearch, catRoutes]);
-const addRoute = async (u: User) => {
-  const { error } = await supabase.from("repair_category_routes")
-    .insert([{ category: routeCat, user_id: u.id, added_by: currentUser.id }]);
-  if (error) { alert("❌ " + error.message); return; }
-  setRouteSearch(""); onRefresh();
-};
-const removeRoute = async (id: string) => {
-  await supabase.from("repair_category_routes").delete().eq("id", id); onRefresh();
-};
+  const [routeCat, setRouteCat] = useState(INTERNET_CATEGORY);
+  const [routeSearch, setRouteSearch] = useState("");
+  const catRoutes = routes.filter(r => r.category === routeCat);
+  const routeFiltered = useMemo(() => {
+    const q = routeSearch.trim().toLowerCase();
+    if (!q) return [];
+    return allUsers.filter(u => !catRoutes.some(r => r.user_id === u.id) &&
+      `${u.first_name} ${u.last_name}`.toLowerCase().includes(q)).slice(0, 8);
+  }, [allUsers, routeSearch, catRoutes]);
+  const addRoute = async (u: User) => {
+    const { error } = await supabase.from("repair_category_routes")
+      .insert([{ category: routeCat, user_id: u.id, added_by: currentUser.id }]);
+    if (error) { alert("❌ " + error.message); return; }
+    setRouteSearch(""); onRefresh();
+  };
+  const removeRoute = async (id: string) => {
+    await supabase.from("repair_category_routes").delete().eq("id", id); onRefresh();
+  };
 
   const filtered = useMemo(() => {
     if (!search.trim()) return [];
     const q = search.toLowerCase();
-    return allUsers.filter(u =>
-      !managerIds.has(u.id) &&
-      `${u.first_name} ${u.last_name}`.toLowerCase().includes(q)
-    ).slice(0, 8);
+    return allUsers.filter(u => !managerIds.has(u.id) && `${u.first_name} ${u.last_name}`.toLowerCase().includes(q)).slice(0, 8);
   }, [allUsers, search, managerIds]);
 
   const handleAdd = async (u: User) => {
@@ -793,84 +754,140 @@ const removeRoute = async (id: string) => {
     onRefresh();
   };
 
+  const dropdown = "absolute top-full left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-xl z-10 overflow-hidden mt-1";
+  const dropItem = "w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-orange-50 border-b border-slate-100 last:border-0 flex items-center justify-between";
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[88vh]"
-        onClick={e=>e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
-          <h3 className="font-bold text-slate-800 text-base">⚙️ ผู้ดูแลโครงการแจ้งซ่อม</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">✕</button>
+    <ModalShell title="⚙️ ตั้งค่าผู้ดูแลระบบแจ้งซ่อม" onClose={onClose}>
+      <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+        ผู้ดูแลโครงการดูรายงานทั้งหมด สร้างบันทึกข้อความ เปลี่ยนสถานะ และมอบหมายงานได้ · เป็นผู้รับเรื่องสำรองของทุกหมวดที่ไม่ได้ตั้งสายไว้
+      </div>
+
+      <section className="space-y-2">
+        <h4 className="font-bold text-slate-700 text-sm">ผู้ดูแลโครงการ ({managers.length} คน)</h4>
+        <div className="relative">
+          <input type="text" value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 พิมพ์ชื่อครูเพื่อเพิ่ม" className={inputCls()} />
+          {filtered.length > 0 && (
+            <div className={dropdown}>
+              {filtered.map(u=>(
+                <button key={u.id} onClick={()=>handleAdd(u)} disabled={adding} className={dropItem}>
+                  <span>{fullName(u)} <span className="text-slate-400 text-xs">{u.role}</span></span>
+                  <span className="text-orange-600 font-bold text-xs">+ เพิ่ม</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
-            ผู้ดูแลโครงการสามารถดูรายงานทั้งหมด สร้างบันทึกข้อความ และพิมพ์รายงานได้
+        {managers.length === 0 ? (
+          <div className="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-xl border border-dashed border-slate-200">ยังไม่มีผู้ดูแลโครงการ</div>
+        ) : managers.map(m=>(
+          <div key={m.id} className="flex items-center gap-3 bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-200">
+            <Avatar user={m.user} />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-slate-800 text-sm truncate">{fullName(m.user)}</p>
+              <p className="text-xs text-slate-400">{m.user?.role}</p>
+            </div>
+            <button onClick={()=>handleRemove(m.id)} className="px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">ลบ</button>
           </div>
-          <div className="relative">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">เพิ่มผู้ดูแล</label>
-            <input type="text" value={search} onChange={e=>setSearch(e.target.value)}
-              placeholder="🔍 พิมพ์ชื่อครู..."
-              className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm focus:border-blue-500 focus:outline-none bg-white" />
-            {filtered.length > 0 && (
-              <div className="absolute top-full left-0 right-0 bg-white border-2 border-blue-200 rounded-xl shadow-lg z-10 overflow-hidden mt-1">
-                {filtered.map(u=>(
-                  <button key={u.id} onClick={()=>handleAdd(u)} disabled={adding}
-                    className="w-full px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-blue-50 border-b border-slate-100 last:border-0 flex items-center justify-between">
-                    <span>{fullName(u)} <span className="text-slate-400 text-xs">{u.role}</span></span>
-                    <span className="text-blue-500 font-bold text-xs">+ เพิ่ม</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">ผู้ดูแลปัจจุบัน ({managers.length} คน)</p>
-            {managers.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 text-sm bg-slate-50 rounded-xl border border-dashed border-slate-200">ยังไม่มีผู้ดูแลโครงการ</div>
-            ) : (
-              <div className="space-y-2">
-                {managers.map(m=>(
-                  <div key={m.id} className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-3 border border-slate-200">
-                    <div>
-                      <p className="font-bold text-slate-800 text-sm">{fullName(m.user)}</p>
-                      <p className="text-xs text-slate-400">{m.user?.role}</p>
-                    </div>
-                    <button onClick={()=>handleRemove(m.id)}
-                      className="px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">🗑️ ลบ</button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          {/* วางต่อท้ายส่วนผู้ดูแลโครงการ */}
-<div className="pt-4 border-t border-slate-100 space-y-3">
-  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">ผู้รับเรื่องตามหมวดหมู่</p>
-  <select value={routeCat} onChange={e => setRouteCat(e.target.value)}
-    className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white">
-    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-  </select>
-  <div className="relative">
-    <input value={routeSearch} onChange={e => setRouteSearch(e.target.value)} placeholder="🔍 ค้นหาชื่อเพื่อเพิ่ม..."
-      className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-    {routeFiltered.length > 0 && (
-      <div className="absolute top-full left-0 right-0 bg-white border-2 border-blue-200 rounded-xl shadow-lg z-10 mt-1 overflow-hidden">
-        {routeFiltered.map(u => (
-          <button key={u.id} onClick={() => addRoute(u)}
-            className="w-full px-4 py-2.5 text-left text-sm hover:bg-blue-50 border-b border-slate-100 last:border-0 flex justify-between">
-            <span>{fullName(u)}</span><span className="text-blue-500 font-bold text-xs">+ เพิ่ม</span>
-          </button>
         ))}
+      </section>
+
+      <section className="space-y-2 pt-4 border-t border-slate-100">
+        <h4 className="font-bold text-slate-700 text-sm">ผู้รับเรื่องตามหมวดหมู่</h4>
+        <select value={routeCat} onChange={e => setRouteCat(e.target.value)} className={inputCls()}>
+          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <div className="relative">
+          <input value={routeSearch} onChange={e => setRouteSearch(e.target.value)} placeholder="🔍 ค้นหาชื่อเพื่อเพิ่ม" className={inputCls()} />
+          {routeFiltered.length > 0 && (
+            <div className={dropdown}>
+              {routeFiltered.map(u => (
+                <button key={u.id} onClick={() => addRoute(u)} className={dropItem}>
+                  <span>{fullName(u)}</span><span className="text-orange-600 font-bold text-xs">+ เพิ่ม</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {catRoutes.length === 0
+          ? <p className="text-xs text-slate-500 bg-slate-50 rounded-xl px-3 py-2">ยังไม่ได้ตั้งค่า — หมวดนี้จะส่งให้หัวหน้าโครงการ{routeCat === BULB_CATEGORY ? " (หรือครูประจำตึก)" : ""}</p>
+          : catRoutes.map(r => (
+            <div key={r.id} className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2 border border-slate-200">
+              <span className="text-sm font-semibold text-slate-700">{fullName(allUsers.find(u => u.id === r.user_id))}</span>
+              <button onClick={() => removeRoute(r.id)} className="text-xs font-bold text-red-600">ลบ</button>
+            </div>
+          ))}
+      </section>
+    </ModalShell>
+  );
+}
+
+// ── ResponsibilityPanel (แท็บ "ใครดูแลอะไร" — ทุกคนเปิดดูได้) ─────────────────
+function ResponsibilityPanel({ buildings, managers, routes, allUsers }: {
+  buildings: Building[]; managers: ProjectManager[]; routes: RepairRoute[]; allUsers: User[];
+}) {
+  const names = (ids: string[]) => allUsers.filter(u => ids.includes(u.id));
+  const Chips = ({ list, empty }: { list: User[]; empty: string }) =>
+    list.length === 0
+      ? <span className="text-xs text-slate-400">{empty}</span>
+      : <div className="flex flex-wrap gap-1.5">{list.map(u => (
+          <span key={u.id} className="inline-flex items-center gap-1.5 bg-slate-100 rounded-full pl-1 pr-2.5 py-0.5 text-xs font-medium text-slate-700">
+            <Avatar user={u} size={20} />{fullName(u)}
+          </span>))}
+        </div>;
+
+  return (
+    <div className="max-w-4xl mx-auto p-4 sm:p-5 space-y-5">
+      <div className="bg-white rounded-2xl border border-slate-200 p-5">
+        <h3 className="font-bold text-slate-800 mb-3">สิทธิ์ตามบทบาท</h3>
+        <div className="grid sm:grid-cols-2 gap-3 text-sm">
+          {[
+            ["ผู้แจ้ง (ครูทั่วไป)", "แจ้งซ่อม ดูรายการทั้งโรงเรียน แก้ไข/ลบได้เฉพาะรายการของตัวเองที่ยังไม่มีผู้รับเรื่อง"],
+            ["ผู้รับเรื่องตามสาย", "กด “รับเรื่อง” เปลี่ยนสถานะ และบันทึกงบประมาณของรายการที่ได้รับมอบหมาย"],
+            ["ผู้ดูแลโครงการ / แอดมิน", "ดูแดชบอร์ด มอบหมายงาน เปลี่ยนสถานะ แก้ไข/ลบทุกรายการ และสร้างบันทึกข้อความ (แอดมินตั้งค่าผู้ดูแลได้)"],
+            ["ผู้จัดทำบันทึกข้อความ", "general@khienkhet.ac.th สร้างบันทึกข้อความและแก้ไขงบประมาณได้ แต่เปลี่ยนสถานะไม่ได้"],
+          ].map(([t, d]) => (
+            <div key={t} className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+              <p className="font-semibold text-slate-800">{t}</p><p className="text-slate-500 text-[13px] mt-0.5">{d}</p>
+            </div>
+          ))}
+        </div>
       </div>
-    )}
-  </div>
-  {catRoutes.length === 0
-    ? <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">ยังไม่ได้ตั้งค่า — หมวดนี้จะส่งให้ หน.โครงการ{routeCat === BULB_CATEGORY ? " (หรือครูประจำตึก)" : ""}</p>
-    : catRoutes.map(r => (
-      <div key={r.id} className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">
-        <span className="text-sm font-bold text-slate-700">{fullName(allUsers.find(u => u.id === r.user_id))}</span>
-        <button onClick={() => removeRoute(r.id)} className="text-xs font-bold text-red-600">🗑️ ลบ</button>
+
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="font-bold text-slate-800">ผู้รับเรื่องตามหมวดหมู่</h3>
+          <span className="text-xs text-slate-400">ลำดับ: ตั้งสายไว้ → ครูประจำตึก (เฉพาะหลอดไฟ) → ผู้ดูแลโครงการ</span>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {CATEGORIES.map(cat => {
+            const routed = names(routes.filter(r => r.category === cat).map(r => r.user_id));
+            const mgrs = names(managers.map(m => m.user_id));
+            return (
+              <div key={cat} className="px-5 py-3 grid sm:grid-cols-[180px_1fr] gap-2 items-start">
+                <p className="font-semibold text-slate-700 text-sm">{cat}</p>
+                {routed.length > 0 ? <Chips list={routed} empty="" />
+                  : cat === BULB_CATEGORY
+                    ? <span className="text-xs text-slate-500">ครูประจำตึก (ดูด้านล่าง) · สำรอง: ผู้ดูแลโครงการ</span>
+                    : <div><Chips list={mgrs} empty="ยังไม่มีผู้ดูแลโครงการ" /><p className="text-[11px] text-slate-400 mt-1">ยังไม่ได้ตั้งสายเฉพาะ → ส่งให้ผู้ดูแลโครงการ</p></div>}
+              </div>
+            );
+          })}
+        </div>
       </div>
-    ))}
-</div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-100"><h3 className="font-bold text-slate-800">ผู้ดูแลรายอาคาร</h3></div>
+        <div className="divide-y divide-slate-100">
+          {buildings.map(b => (
+            <div key={b.id} className="px-5 py-3 grid sm:grid-cols-[180px_1fr] gap-2">
+              <p className="font-semibold text-slate-700 text-sm">{b.name}</p>
+              <div className="space-y-1.5">
+                <div className="flex items-start gap-2"><span className="text-[11px] text-slate-400 w-16 shrink-0 pt-1">ครูซ่อม</span><Chips list={names(b.repair_user_ids ?? [])} empty="ยังไม่ได้ตั้งค่า" /></div>
+                <div className="flex items-start gap-2"><span className="text-[11px] text-slate-400 w-16 shrink-0 pt-1">ครูดูแลตึก</span><Chips list={names(b.inspector_user_ids ?? [])} empty="ยังไม่ได้ตั้งค่า" /></div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -878,79 +895,70 @@ const removeRoute = async (id: string) => {
 }
 
 // ── DetailModal ───────────────────────────────────────────────────────────────
-function DetailModal({ request, allUsers, currentUserId, isAdmin, isProjManager, recipientIds, isMemoEditor, onEdit, onDelete, onUpdate, onClose }: {
+function DetailModal({ request, allUsers, currentUserId, isAdmin, isProjManager, recipients, isMemoEditor, onEdit, onDelete, onUpdate, onClose }: {
   request: RepairRequest; allUsers: User[];
   currentUserId: string; isAdmin: boolean; isProjManager: boolean;
-  recipientIds: string[]; isMemoEditor: boolean;
+  recipients: User[]; isMemoEditor: boolean;
   onEdit: (r: RepairRequest) => void; onDelete: (id: string) => void;
   onUpdate: () => void; onClose: () => void;
 }) {
   const [status, setStatus] = useState(request.status);
-  // ★ เปลี่ยนจาก assigned_to (คนเดียว) เป็น assigned_user_ids (มอบหมายได้หลายคน)
-  //   ค่าเริ่มต้นอ่านจาก assigned_user_ids ถ้ามี ไม่งั้น fallback ไปที่ assigned_to เดิม (backward-compat)
-  const [assignedIds, setAssignedIds] = useState<string[]>(
-    (request as any).assigned_user_ids ?? (request.assigned_to ? [request.assigned_to] : [])
-  );
+  const [assignedIds, setAssignedIds] = useState<string[]>(assignedIdsOf(request));
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-  // ★ เพิ่ม: งบประมาณต่อรายการ (ใช้ตอนสร้างบันทึกข้อความ)
   const [estimatedCost, setEstimatedCost] = useState<string>(
     (request as any).estimated_cost != null ? String((request as any).estimated_cost) : ""
   );
   const [budgetSource, setBudgetSource] = useState<string>((request as any).budget_source ?? "");
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
-  // ★ ครูที่ดูแลอาคารนี้ (repair_user_ids) — ใช้กรองรายชื่อผู้ที่มอบหมายได้
-  const buildingRepairIds = (request.building as any)?.repair_user_ids ?? [];
-  const assignableUsers = buildingRepairIds.length > 0
-    ? allUsers.filter(u => buildingRepairIds.includes(u.id))
-    : allUsers; // ★ ถ้าอาคารนี้ยังไม่ได้ตั้งค่าครูดูแล ให้ fallback เห็นทุกคน (กันเลือกไม่ได้เลย)
-
-  // ★ ครูดูแลตึก (inspector_user_ids) — แสดงไว้อ้างอิงเฉยๆ ไม่ใช่ dropdown
-  const inspectorIds = (request.building as any)?.inspector_user_ids ?? [];
-  const inspectorNames = allUsers.filter(u => inspectorIds.includes(u.id)).map(fullName);
+  const buildingRepairIds: string[] = (request.building as any)?.repair_user_ids ?? [];
+  const assignableUsers = buildingRepairIds.length > 0 ? allUsers.filter(u => buildingRepairIds.includes(u.id)) : allUsers;
+  const inspectorIds: string[] = (request.building as any)?.inspector_user_ids ?? [];
+  const inspectorUsers = allUsers.filter(u => inspectorIds.includes(u.id));
+  const assignees = allUsers.filter(u => assignedIds.includes(u.id));
 
   function toggleAssignee(id: string) {
     setAssignedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
   }
 
-  // ★ สิทธิ์แก้ไข/ลบรายการ:
-  //   - แอดมิน/ผู้ดูแลโครงการ: แก้ไข/ลบได้เสมอ
-  //   - ครูผู้แจ้งเอง: แก้ไข/ลบได้ ตราบใดที่ยังไม่ถูกมอบหมายงาน (assigned_user_ids/assigned_to ยังว่าง)
-  //     เมื่อถูกมอบหมายแล้ว (เช่น มอบหมายอัตโนมัติให้ครูดูแลอาคารตอนแจ้งซ่อม) ครูผู้แจ้งจะไม่สามารถแก้ไข/ลบได้อีก
   const isReporter = request.reporter_id === currentUserId;
-  const isLocked = ((request as any).assigned_user_ids?.length ?? 0) > 0 || !!request.assigned_to;
+  const originalAssigned = assignedIdsOf(request);
+  const isLocked = originalAssigned.length > 0;
   const canEditDelete = isAdmin || isProjManager || (isReporter && !isLocked);
-  const acknowledged = !!request.assigned_to || (((request as any).assigned_user_ids?.length ?? 0) > 0);
-const isAssignee = request.assigned_to === currentUserId ||
-  (((request as any).assigned_user_ids ?? []) as string[]).includes(currentUserId);
-const canAcknowledge = recipientIds.includes(currentUserId) && !acknowledged && request.status === "pending";
-const canChangeStatus = isAdmin || isProjManager || isAssignee;   // ★ คนรับเรื่อง/แอดมิน/หน.โครงการ
-const canReassign = isAdmin || isProjManager;
-const canManage = canChangeStatus || isMemoEditor;                // memo editor แก้งบประมาณได้
+  const acknowledged = isLocked;
+  const isAssignee = originalAssigned.includes(currentUserId);
+  const canAcknowledge = recipients.some(u => u.id === currentUserId) && !acknowledged && request.status === "pending";
+  const canChangeStatus = isAdmin || isProjManager || isAssignee;
+  const canReassign = isAdmin || isProjManager;
+  const canManage = canChangeStatus || isMemoEditor;
 
-const handleAcknowledge = async () => {
-  setSaving(true);
-  const { data: { session } } = await supabase.auth.getSession();
-  const res = await fetch("/api/repair-ack", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-    body: JSON.stringify({ requestId: request.id }),
-  });
-  const j = await res.json();
-  setSaving(false);
-  if (!j.ok) alert(j.error);
-  onUpdate();
-};
+  // ★ ขั้นตอนความคืบหน้า
+  const step = request.status === "completed" ? 3 : request.status === "in_progress" ? 2 : acknowledged ? 1 : 0;
+  const steps = ["แจ้งซ่อม", "รับเรื่อง", "กำลังซ่อม", "เสร็จแล้ว"];
+
+  const handleAcknowledge = async () => {
+    setSaving(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch("/api/repair-ack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+      body: JSON.stringify({ requestId: request.id }),
+    });
+    const j = await res.json();
+    setSaving(false);
+    if (!j.ok) { alert(j.error); return; }
+    // ★ ถ้า /api/repair-ack ส่ง Teams เองอยู่แล้ว ให้ลบบรรทัดนี้ออกเพื่อไม่ให้แจ้งซ้ำ
+    pushRepairTeams(request.id, "acknowledged");
+    onUpdate();
+  };
 
   const handleUpdate = async () => {
     setSaving(true);
-    // ★ แก้: ใช้ completed_at (คอลัมน์จริงในตาราง) แทน resolved_at
-    //   และเช็คสถานะ 'completed' (ตรงกับ enum) แทน 'resolved'
     const { error } = await supabase.from("repair_requests").update({
       status,
       assigned_user_ids: assignedIds,
-      assigned_to: assignedIds[0] ?? null, // ★ คงคอลัมน์เดิมไว้เพื่อ backward-compat
+      assigned_to: assignedIds[0] ?? null,
       estimated_cost: estimatedCost.trim() ? Number(estimatedCost) : null,
       budget_source: budgetSource.trim() || null,
       updated_at: new Date().toISOString(),
@@ -958,173 +966,210 @@ const handleAcknowledge = async () => {
     }).eq("id", request.id);
     setSaving(false);
     if (error) { alert("❌ บันทึกไม่สำเร็จ: " + error.message); return; }
+
     const aid = (request as any).asset_id as string | undefined;
-if (aid && status !== request.status && (status === "in_progress" || status === "completed")) {
-  await supabase.rpc("update_asset_status", {
-    p_asset: aid, p_status: status === "completed" ? "active" : "repairing", p_condition: null,
-    p_note: status === "completed" ? "ซ่อมเสร็จแล้ว" : "อยู่ระหว่างซ่อม",
-  });
-}
+    if (aid && status !== request.status && (status === "in_progress" || status === "completed")) {
+      await supabase.rpc("update_asset_status", {
+        p_asset: aid, p_status: status === "completed" ? "active" : "repairing", p_condition: null,
+        p_note: status === "completed" ? "ซ่อมเสร็จแล้ว" : "อยู่ระหว่างซ่อม",
+      });
+    }
+
+    // ★ แจ้ง Teams: สถานะเปลี่ยน → แจ้งผู้แจ้ง / มอบหมายคนใหม่ → แจ้งผู้ถูกมอบหมาย
+    const newlyAssigned = assignedIds.some(id => !originalAssigned.includes(id));
+    if (status !== request.status) {
+      pushRepairTeams(request.id, status === "completed" ? "completed" : "status_changed", { status, note: note.trim() || undefined });
+    } else if (newlyAssigned) {
+      pushRepairTeams(request.id, "assigned", { note: note.trim() || undefined });
+    }
     onUpdate();
   };
 
-  const cfg = STATUS_CFG[status] ?? STATUS_CFG.pending;
-
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[92vh]"
-        onClick={e=>e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
-          <h3 className="font-bold text-slate-800 text-base">🔍 รายละเอียดการแจ้งซ่อม</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">✕</button>
-        </div>
-        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
-          <div>
-            <h2 className="font-bold text-slate-800 text-lg">{request.title}</h2>
-            <div className="flex flex-wrap gap-2 mt-1">
-              <span style={{background:cfg.bg,color:cfg.color,borderColor:cfg.border}}
-                className="text-xs font-bold px-2.5 py-1 rounded-lg border">{cfg.label}</span>
-              {request.priority && (
-                <span className="text-xs font-bold px-2.5 py-1 rounded-lg border border-slate-200"
-                  style={{color:PRIORITY_CFG[request.priority]?.color}}>
-                  {PRIORITY_CFG[request.priority]?.label}
-                </span>
-              )}
-              {request.category && <span className="text-xs px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg border border-slate-200 font-medium">{request.category}</span>}
-            </div>
-          </div>
-          <div className="text-sm text-slate-500 space-y-1">
-            <p>🏢 {request.building?.name ?? "—"}{request.room ? ` · ${request.room}` : ""}</p>
-            <p>👤 {fullName(request.reporter)}</p>
-            <p>📅 {thaiDate(request.created_at)}</p>
-          </div>
-          {request.description && <p className="text-sm text-slate-600 bg-slate-50 rounded-xl px-4 py-3">{request.description}</p>}
-          {(request as any).asset_id && (
-  <a href={`/assets/${(request as any).asset_id}`} className="block text-sm font-bold text-blue-600 bg-blue-50 rounded-xl px-4 py-3">
-    🏷️ ดูข้อมูลครุภัณฑ์ที่แจ้งซ่อม (รหัส / ประวัติ)
-  </a>
-)}
-          <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-              รูปภาพที่แนบ {(request.photo_urls??[]).length > 0 ? `(${request.photo_urls!.length} รูป)` : ""}
-            </p>
-            {(request.photo_urls??[]).length > 0 ? (
-              <div className="grid grid-cols-3 gap-2">
-                {request.photo_urls!.map((url,i)=>(
-                  <img key={i} src={url} alt="" onClick={()=>setLightboxUrl(url)}
-                    className="w-full h-24 object-cover rounded-xl border border-slate-200 cursor-pointer hover:brightness-90 transition-all" />
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">📷 ไม่มีรูปภาพแนบ</p>
-            )}
-          </div>
-          {inspectorNames.length > 0 && (
-            <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">
-              🛠️ ครูดูแลตึกนี้ (อ้างอิง): {inspectorNames.join(", ")}
-            </p>
-          )}
-          {assignedIds.length > 0 && (
-            <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
-              ✅ มอบหมายงานให้: {allUsers.filter(u=>assignedIds.includes(u.id)).map(fullName).join(", ") || `${assignedIds.length} คน`}
-            </p>
-          )}
-          {canAcknowledge && (
-  <button onClick={handleAcknowledge} disabled={saving}
-    className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-50">
-    ✋ กดรับทราบ / รับเรื่องนี้
-  </button>
-)}
-{!acknowledged && !canAcknowledge && request.status === "pending" && (
-  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-    ⏳ รอผู้รับผิดชอบในสายงานกดรับทราบ
-  </p>
-)}
-
-          <div className="pt-2 border-t border-slate-100">
-            {canEditDelete ? (
-              <div className="flex gap-2">
-                <button onClick={()=>onEdit(request)}
-                  className="flex-1 py-2.5 rounded-xl border-2 border-blue-200 text-blue-600 text-sm font-bold hover:bg-blue-50">
-                  ✏️ แก้ไขรายการ
-                </button>
-                <button onClick={()=>onDelete(request.id)}
-                  className="flex-1 py-2.5 rounded-xl border-2 border-red-200 text-red-600 text-sm font-bold hover:bg-red-50">
-                  🗑️ ลบรายการ
-                </button>
-              </div>
-            ) : (
-              isReporter && isLocked && (
-                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                  🔒 รายการนี้ถูกมอบหมายงานให้ผู้รับผิดชอบแล้ว จึงไม่สามารถแก้ไขหรือลบได้ หากต้องการเปลี่ยนแปลงกรุณาติดต่อผู้ดูแลระบบ
-                </p>
-              )
-            )}
-          </div>
-
-          {canManage && (
-  <div className="space-y-3 pt-2 border-t border-slate-100">
-    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">จัดการ</p>
-
-    {canChangeStatus && (
+    <ModalShell title="รายละเอียดการแจ้งซ่อม" onClose={onClose}>
       <div>
-        <label className="block text-xs font-bold text-slate-400 mb-1">สถานะ</label>
-        <select value={status} onChange={e=>setStatus(e.target.value)}
-          className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none">
-          {Object.entries(STATUS_CFG).map(([k,v])=>(
-            <option key={k} value={k}>{v.label}</option>
-          ))}
-        </select>
-      </div>
-    )}
-
-    {canReassign && (
-      <div>
-        <label className="block text-xs font-bold text-slate-400 mb-1">
-          มอบหมายให้ (เลือกได้หลายคน) {buildingRepairIds.length===0 && <span className="text-amber-500 font-normal">(อาคารนี้ยังไม่ได้ตั้งค่าครูดูแล แสดงทุกคน)</span>}
-        </label>
-        <div className="max-h-40 overflow-y-auto space-y-1 border-2 border-blue-100 rounded-xl p-2 bg-white">
-          {assignableUsers.length === 0 && <p className="text-xs text-slate-400 px-2 py-1">ไม่มีรายชื่อให้เลือก</p>}
-          {assignableUsers.map(u=>(
-            <label key={u.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-blue-50 cursor-pointer">
-              <input type="checkbox" checked={assignedIds.includes(u.id)} onChange={()=>toggleAssignee(u.id)}
-                className="w-4 h-4 accent-blue-600 shrink-0" />
-              <span className="text-sm text-slate-700">{fullName(u)}</span>
-            </label>
-          ))}
+        <h2 className="font-bold text-slate-900 text-xl leading-snug">{request.title}</h2>
+        <div className="flex flex-wrap items-center gap-2 mt-2">
+          <StatusPill status={request.status} />
+          <PriorityTag priority={request.priority} />
+          {request.category && <span className="text-xs px-2.5 py-0.5 bg-slate-100 text-slate-600 rounded-full font-medium">{request.category}</span>}
         </div>
       </div>
-    )}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">งบประมาณโดยประมาณ (บาท)</label>
-                  <input type="number" value={estimatedCost} onChange={e=>setEstimatedCost(e.target.value)}
-                    placeholder="เช่น 3500"
-                    className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">แหล่งงบประมาณ</label>
-                  <input type="text" value={budgetSource} onChange={e=>setBudgetSource(e.target.value)}
-                    placeholder="เช่น งบดำเนินงาน"
-                    className="w-full border-2 border-blue-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:border-blue-500 focus:outline-none" />
-                </div>
+
+      {request.status !== "cancelled" && (
+        <div className="flex items-center">
+          {steps.map((s, i) => (
+            <div key={s} className="flex items-center flex-1 last:flex-none">
+              <div className="flex flex-col items-center gap-1">
+                <span className={`w-7 h-7 rounded-full text-xs font-bold flex items-center justify-center ${i <= step ? "bg-orange-500 text-white" : "bg-slate-200 text-slate-400"}`}>{i < step ? "✓" : i + 1}</span>
+                <span className={`text-[11px] whitespace-nowrap ${i <= step ? "text-slate-700 font-semibold" : "text-slate-400"}`}>{s}</span>
               </div>
-              <button onClick={handleUpdate} disabled={saving}
-                className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold disabled:opacity-50">
-                {saving ? "กำลังบันทึก..." : "💾 บันทึกการเปลี่ยนแปลง"}
-              </button>
+              {i < steps.length - 1 && <div className={`h-0.5 flex-1 mx-1.5 mb-4 rounded ${i < step ? "bg-orange-400" : "bg-slate-200"}`} />}
             </div>
-          )}
+          ))}
         </div>
-        {lightboxUrl && (
-          <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onClick={()=>setLightboxUrl(null)}>
-            <img src={lightboxUrl} alt="" className="max-w-full max-h-full rounded-xl object-contain" />
-            <button onClick={()=>setLightboxUrl(null)}
-              className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 text-white text-xl flex items-center justify-center">✕</button>
+      )}
+
+      <div className="rounded-xl bg-slate-50 p-4 space-y-2 text-sm text-slate-600">
+        <p>🏢 {request.building?.name ?? "—"}{request.room ? ` · ${request.room}` : ""}</p>
+        <p className="flex items-center gap-2"><Avatar user={request.reporter} size={22} /> แจ้งโดย {fullName(request.reporter)}</p>
+        <p>📅 {thaiDate(request.created_at)} <span className="text-slate-400">({ago(request.created_at)})</span></p>
+        {request.description && <p className="pt-2 border-t border-slate-200 text-slate-700">{request.description}</p>}
+      </div>
+
+      {(request as any).asset_id && (
+        <a href={`/assets/${(request as any).asset_id}`} className="block text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 hover:bg-blue-100 transition">
+          🏷️ ดูข้อมูลครุภัณฑ์ที่แจ้งซ่อม (รหัส / ประวัติ)
+        </a>
+      )}
+
+      <div>
+        <Label>รูปภาพที่แนบ {(request.photo_urls??[]).length > 0 && <span className="text-slate-400 font-normal">({request.photo_urls!.length})</span>}</Label>
+        {(request.photo_urls??[]).length > 0 ? (
+          <div className="grid grid-cols-3 gap-2">
+            {request.photo_urls!.map((url,i)=>(
+              <img key={i} src={url} alt="" onClick={()=>setLightboxUrl(url)}
+                className="w-full h-24 object-cover rounded-xl border border-slate-200 cursor-pointer hover:brightness-90 transition" />
+            ))}
+          </div>
+        ) : <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">📷 ไม่มีรูปภาพแนบ</p>}
+      </div>
+
+      {/* ★ ใครดูแลเรื่องนี้ */}
+      <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+        <p className="font-semibold text-slate-700 text-sm">ผู้รับผิดชอบเรื่องนี้</p>
+        {assignees.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {assignees.map(u => (
+              <span key={u.id} className="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-full pl-1 pr-3 py-0.5 text-xs font-semibold">
+                <Avatar user={u} size={22} />{fullName(u)}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            ⏳ รอผู้รับเรื่องกดรับทราบ{recipients.length > 0 && <> · ส่งถึง: {recipients.map(fullName).join(", ")}</>}
           </div>
         )}
+        {inspectorUsers.length > 0 && <p className="text-xs text-slate-500">🛠️ ครูดูแลตึกนี้ (อ้างอิง): {inspectorUsers.map(fullName).join(", ")}</p>}
       </div>
-    </div>
+
+      {canAcknowledge && (
+        <button onClick={handleAcknowledge} disabled={saving}
+          className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-50 shadow-sm transition">
+          ✋ รับเรื่องนี้
+        </button>
+      )}
+
+      {canEditDelete ? (
+        <div className="flex gap-2 pt-1">
+          <button onClick={()=>onEdit(request)} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50">✏️ แก้ไข</button>
+          <button onClick={()=>onDelete(request.id)} className="flex-1 py-2.5 rounded-xl border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50">🗑️ ลบ</button>
+        </div>
+      ) : (isReporter && isLocked && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+          🔒 รายการนี้มีผู้รับผิดชอบแล้ว จึงแก้ไขหรือลบไม่ได้ หากต้องการเปลี่ยนแปลงกรุณาติดต่อผู้ดูแลระบบ
+        </p>
+      ))}
+
+      {canManage && (
+        <div className="space-y-3 pt-4 border-t border-slate-100">
+          <p className="font-bold text-slate-700 text-sm">จัดการงานซ่อม</p>
+          {canChangeStatus && (
+            <div>
+              <Label>สถานะ</Label>
+              <div className="grid grid-cols-4 gap-1.5">
+                {Object.entries(STATUS_CFG).map(([k,v]) => (
+                  <button key={k} type="button" onClick={()=>setStatus(k)}
+                    className={`py-2 rounded-lg text-[12px] font-bold border transition ${status===k ? "ring-2 ring-offset-1" : "opacity-70 hover:opacity-100"}`}
+                    style={{ background: v.bg, color: v.color, borderColor: v.border, ...(status===k ? { ["--tw-ring-color" as any]: v.dot } : {}) }}>
+                    {v.icon} {v.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {canReassign && (
+            <div>
+              <Label>มอบหมายให้ (เลือกได้หลายคน) {buildingRepairIds.length===0 && <span className="text-amber-600 font-normal text-xs">อาคารนี้ยังไม่ได้ตั้งครูดูแล · แสดงทุกคน</span>}</Label>
+              <div className="max-h-40 overflow-y-auto border border-slate-200 rounded-xl p-1.5 bg-white">
+                {assignableUsers.length === 0 && <p className="text-xs text-slate-400 px-2 py-1">ไม่มีรายชื่อให้เลือก</p>}
+                {assignableUsers.map(u=>(
+                  <label key={u.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-orange-50 cursor-pointer">
+                    <input type="checkbox" checked={assignedIds.includes(u.id)} onChange={()=>toggleAssignee(u.id)} className="w-4 h-4 accent-orange-500 shrink-0" />
+                    <span className="text-sm text-slate-700">{fullName(u)}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>งบโดยประมาณ (บาท)</Label>
+              <input type="number" value={estimatedCost} onChange={e=>setEstimatedCost(e.target.value)} placeholder="เช่น 3500" className={inputCls()} /></div>
+            <div><Label>แหล่งงบประมาณ</Label>
+              <input type="text" value={budgetSource} onChange={e=>setBudgetSource(e.target.value)} placeholder="เช่น งบดำเนินงาน" className={inputCls()} /></div>
+          </div>
+          {canChangeStatus && (
+            <div><Label>ข้อความถึงผู้แจ้ง <span className="text-slate-400 font-normal">(แนบไปกับแจ้งเตือน Teams)</span></Label>
+              <input type="text" value={note} onChange={e=>setNote(e.target.value)} placeholder="เช่น สั่งอะไหล่แล้ว คาดว่าเสร็จวันศุกร์" className={inputCls()} /></div>
+          )}
+          <button onClick={handleUpdate} disabled={saving} className={btnBlue + " w-full"}>{saving ? "กำลังบันทึก..." : "บันทึกการเปลี่ยนแปลง"}</button>
+        </div>
+      )}
+
+      {lightboxUrl && (
+        <div className="fixed inset-0 z-[60] bg-black/85 flex items-center justify-center p-4" onClick={()=>setLightboxUrl(null)}>
+          <img src={lightboxUrl} alt="" className="max-w-full max-h-full rounded-xl object-contain" />
+          <button onClick={()=>setLightboxUrl(null)} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 text-white text-xl flex items-center justify-center">✕</button>
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
+// ── RequestCard ───────────────────────────────────────────────────────────────
+function RequestCard({ r, allUsers, onOpen }: { r: RepairRequest; allUsers: User[]; onOpen: () => void }) {
+  const cfg = STATUS_CFG[r.status] ?? STATUS_CFG.pending;
+  const ids = assignedIdsOf(r);
+  const assignees = allUsers.filter(u => ids.includes(u.id));
+  return (
+    <button onClick={onOpen} className="w-full text-left bg-white rounded-2xl border border-slate-200 hover:border-orange-300 hover:shadow-md transition overflow-hidden flex">
+      <span className="w-1.5 shrink-0" style={{ background: cfg.dot }} />
+      <div className="flex-1 min-w-0 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-slate-900 text-[15px]">{r.title}</span>
+              <PriorityTag priority={r.priority} />
+            </div>
+            <p className="text-[13px] text-slate-500 mt-1">
+              🏢 {r.building?.name ?? "—"}{r.room ? ` · ${r.room}` : ""}
+              {r.category && <span className="ml-2 text-slate-400">· {r.category}</span>}
+            </p>
+          </div>
+          <StatusPill status={r.status} />
+        </div>
+        <div className="flex items-center justify-between gap-3 mt-3">
+          <div className="flex items-center gap-2 min-w-0 text-xs text-slate-500">
+            <Avatar user={r.reporter} size={22} />
+            <span className="truncate">{fullName(r.reporter)} · {ago(r.created_at)}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {(r.photo_urls ?? []).length > 0 && (
+              <div className="flex -space-x-2">
+                {r.photo_urls!.slice(0,3).map((url,i)=><img key={i} src={url} alt="" className="w-8 h-8 object-cover rounded-lg border-2 border-white" />)}
+                {r.photo_urls!.length > 3 && <span className="w-8 h-8 rounded-lg border-2 border-white bg-slate-100 text-[10px] font-bold text-slate-500 flex items-center justify-center">+{r.photo_urls!.length-3}</span>}
+              </div>
+            )}
+          </div>
+        </div>
+        {r.status !== "completed" && r.status !== "cancelled" && (
+          <p className={`mt-2.5 text-xs font-medium rounded-lg px-2.5 py-1.5 ${assignees.length ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+            {assignees.length ? `✋ ดูแลโดย ${assignees.map(u => u.first_name).join(", ")}` : "⏳ รอผู้รับผิดชอบรับเรื่อง"}
+          </p>
+        )}
+      </div>
+    </button>
   );
 }
 
@@ -1138,10 +1183,10 @@ export default function Page() {
   const [managers,     setManagers]    = useState<ProjectManager[]>([]);
   const [allUsers,     setAllUsers]    = useState<User[]>([]);
   const [director,     setDirector]    = useState<User|undefined>();
-  const [tab,          setTab]         = useState<"dashboard"|"list"|"mine">("list");
+  const [tab,          setTab]         = useState<"dashboard"|"list"|"mine"|"team">("list");
   const [filterStatus, setFilterStatus]= useState("");
   const [filterBldg,   setFilterBldg]  = useState("");
-  // ★ ตัวกรองด่วน "เฉพาะตึกที่ฉันดูแล" สำหรับครูที่เป็นผู้ดูแลอาคาร ให้ดูเฉพาะรายการของตึกตัวเองง่ายๆ
+  const [query,        setQuery]       = useState("");
   const [onlyMyBuildings, setOnlyMyBuildings] = useState(false);
   const [showForm,     setShowForm]    = useState(false);
   const [editingReq,   setEditingReq]  = useState<RepairRequest|null>(null);
@@ -1158,9 +1203,8 @@ export default function Page() {
   },[buildings,user]);
   const isBuildingManager = myBuildingIds.size > 0;
   const canSeeAll = isAdmin || isProjManager;
-  const isMemoEditor = useMemo(
-  () => MEMO_EDITOR_EMAILS.includes((user?.email ?? "").toLowerCase()), [user]);
-const canMemo = canSeeAll || isMemoEditor;
+  const isMemoEditor = useMemo(() => MEMO_EDITOR_EMAILS.includes((user?.email ?? "").toLowerCase()), [user]);
+  const canMemo = canSeeAll || isMemoEditor;
 
   useEffect(()=>{
     const init=async()=>{
@@ -1191,11 +1235,9 @@ const canMemo = canSeeAll || isMemoEditor;
     setAllUsers((usrs??[]) as User[]);
     const dir=(usrs??[]).find((u:any)=>u.role==="director") as User|undefined;
     setDirector(dir);
-const { data: rt } = await supabase.from("repair_category_routes").select("*");
-setRoutes((rt ?? []) as RepairRoute[]);
-    // ★ แก้: repair_project_managers มี FK ไปยัง users 2 เส้นทาง (user_id, added_by)
-    //   embed แบบ 'user:users(...)' เดิม ambiguous ทำให้ query error เงียบๆ (data=null)
-    //   -> เพิ่มผู้ดูแลสำเร็จแต่รายชื่อไม่ขึ้นเลย แก้โดยดึงแยก 2 รอบแล้ว join เองใน JS
+    const { data: rt } = await supabase.from("repair_category_routes").select("*");
+    setRoutes((rt ?? []) as RepairRoute[]);
+    // repair_project_managers มี FK ไป users 2 เส้น → ดึงแยกแล้ว join ใน JS
     const {data:mgrRows, error:mgrErr}=await supabase.from("repair_project_managers").select("*");
     if (mgrErr) console.error("[repair] โหลด repair_project_managers ไม่สำเร็จ:", mgrErr.message);
     const mgrUserIds = [...new Set((mgrRows??[]).map((m:any)=>m.user_id).filter(Boolean))];
@@ -1206,29 +1248,28 @@ setRoutes((rt ?? []) as RepairRoute[]);
       (mgrUsers??[]).forEach((u:any)=>{ mgrUserMap[u.id]=u; });
     }
     setManagers(((mgrRows??[]) as any[]).map(m=>({ ...m, user: mgrUserMap[m.user_id] })) as ProjectManager[]);
-    // ★ แก้: เพิ่ม repair_user_ids, inspector_user_ids ใน embed ของ building
-    //   เดิม select แค่ id,name ทำให้ DetailModal อ่าน request.building.repair_user_ids ไม่ได้เลย
-    //   (ดรอปดาวน์ "มอบหมายให้" เลยไม่กรองตามครูที่ดูแลอาคารจริง ๆ)
     const {data:rqs}=await supabase.from("repair_requests")
-  .select(`*,reporter:users!reporter_id(id,first_name,last_name,title),
-    building:buildings(id,name,repair_user_ids,inspector_user_ids)`)
+      .select(`*,reporter:users!reporter_id(id,first_name,last_name,title),
+        building:buildings(id,name,repair_user_ids,inspector_user_ids)`)
       .order("created_at",{ascending:false}).limit(300);
     setRequests((rqs??[]) as unknown as RepairRequest[]);
   },[user]);
 
   useEffect(()=>{if(!loading&&user) loadData();},[loading,user,loadData]);
 
-  const visibleRequests = useMemo(()=>{
-    // ★ ให้ทุกคนเห็นรายการแจ้งซ่อมทั้งโรงเรียน เพื่อไม่ให้แจ้งรายการซ้ำกัน
-    //   (เดิมครูทั่วไป/ผู้ดูแลอาคารเห็นแค่ของตัวเอง/อาคารตัวเอง ตอนนี้เปิดให้เห็นทั้งหมดเสมอ)
+  // ★ ทุกคนเห็นรายการทั้งโรงเรียน (กันแจ้งซ้ำ) — กรองด้วยค้นหา/อาคาร/ตึกที่ฉันดูแล ก่อน แล้วค่อยแยกตามสถานะ
+  const baseList = useMemo(()=>{
     let list = requests;
-    // ★ ตัวกรองด่วน "เฉพาะตึกที่ฉันดูแล" ใช้ได้เฉพาะผู้ที่เป็นผู้ดูแลอาคาร
-    if (onlyMyBuildings && isBuildingManager)
-      list = list.filter(r => myBuildingIds.has(r.building_id ?? ""));
-    if (filterBldg)   list = list.filter(r => r.building_id === filterBldg);
-    if (filterStatus) list = list.filter(r => r.status === filterStatus);
+    if (onlyMyBuildings && isBuildingManager) list = list.filter(r => myBuildingIds.has(r.building_id ?? ""));
+    if (filterBldg) list = list.filter(r => r.building_id === filterBldg);
+    const q = query.trim().toLowerCase();
+    if (q) list = list.filter(r =>
+      [r.title, r.room, r.category, r.building?.name, fullName(r.reporter)].some(v => (v ?? "").toLowerCase().includes(q)));
     return list;
-  },[requests,onlyMyBuildings,isBuildingManager,myBuildingIds,filterStatus,filterBldg]);
+  },[requests,onlyMyBuildings,isBuildingManager,myBuildingIds,filterBldg,query]);
+
+  const visibleRequests = useMemo(()=> filterStatus ? baseList.filter(r=>r.status===filterStatus) : baseList, [baseList,filterStatus]);
+  const statusCount = (s: string) => baseList.filter(r=>r.status===s).length;
 
   const myRequests = useMemo(()=>requests.filter(r=>r.reporter_id===user?.id),[requests,user]);
 
@@ -1242,8 +1283,6 @@ setRoutes((rt ?? []) as RepairRoute[]);
     };
   },[requests,myRequests,canSeeAll]);
 
-  // ★ ลบรายการแจ้งซ่อม (ใช้จาก DetailModal) — สิทธิ์ถูกเช็คแล้วฝั่ง UI ใน DetailModal
-  //   (แอดมิน/ผู้ดูแลโครงการ ลบได้เสมอ, ครูผู้แจ้งลบได้เฉพาะตอนยังไม่ถูกมอบหมายงาน)
   const handleDeleteRequest = useCallback(async (id: string) => {
     if (!confirm("ยืนยันการลบรายการแจ้งซ่อมนี้? เมื่อลบแล้วจะไม่สามารถกู้คืนได้")) return;
     const { error } = await supabase.from("repair_requests").delete().eq("id", id);
@@ -1263,92 +1302,92 @@ setRoutes((rt ?? []) as RepairRoute[]);
     </div>
   );
 
+  const tabs: [typeof tab, string][] = [
+    ["list", "📋 รายการทั้งหมด"],
+    ["mine", "📌 ของฉัน"],
+    ...(canSeeAll ? [["dashboard","📊 แดชบอร์ด"] as [typeof tab,string]] : []),
+    ["team", "👥 ใครดูแลอะไร"],
+  ];
+
+  const statCards = [
+    { label: canSeeAll ? "ทั้งหมด" : "ของฉัน", value: stats.total, icon: "📋" },
+    { label: "รอดำเนินการ", value: stats.pending, icon: "⏳" },
+    { label: "กำลังซ่อม", value: stats.in_progress, icon: "🔧" },
+    { label: "เสร็จแล้ว", value: stats.completed, icon: "✅" },
+  ];
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col" style={{fontFamily:"'Sarabun','Noto Sans Thai',sans-serif"}}>
-      <div className="bg-gradient-to-r from-orange-500 via-orange-400 to-amber-400 px-5 py-4 flex items-center gap-3 shadow-lg shrink-0">
-        <button onClick={()=>router.push("/dashboard")}
-          className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-white text-lg shrink-0" aria-label="กลับหน้าหลัก">🏠</button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-white font-bold text-lg leading-tight">🔧 ระบบแจ้งซ่อม</h1>
-          <p className="text-orange-100 text-sm">{fullName(user)}{isBuildingManager&&!canSeeAll?" · ผู้ดูแลอาคาร":""}{isProjManager?" · ผู้ดูแลโครงการ":""}</p>
-        </div>
-        <div className="flex gap-2 flex-wrap justify-end">
-          {isAdmin && (
-            <button onClick={()=>setShowManagers(true)}
-              className="px-3 py-2 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-xl border border-white/30">
-              ⚙️ ผู้ดูแล
-            </button>
-          )}
-          {canMemo && (
-            <button onClick={()=>setShowMemo(true)}
-              className="px-3 py-2 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-xl border border-white/30">
-              📄 บันทึกข้อความ
-            </button>
-          )}
-          <button onClick={()=>setShowForm(true)}
-            className="px-4 py-2 bg-white text-orange-600 text-xs font-bold rounded-xl shadow-sm hover:bg-orange-50">
-            + แจ้งซ่อม
-          </button>
-        </div>
-      </div>
-
-      <div className="bg-white border-b border-slate-200 flex shrink-0">
-        {([
-          ["list",      "📋 รายการทั้งหมด"],
-          ...(canSeeAll ? [["dashboard","📊 แดชบอร์ด"]] as const : []),
-          ["mine",      "📌 ของฉัน"],
-        ] as const).map(([k,l])=>(
-          <button key={k} onClick={()=>setTab(k as any)}
-            className={`px-5 py-3.5 text-sm font-bold border-b-2 whitespace-nowrap transition-all
-              ${tab===k?"border-orange-500 text-orange-600":"border-transparent text-slate-400 hover:text-slate-600"}`}>
-            {l}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex-1 overflow-y-auto">
-        {tab==="dashboard" && canSeeAll && (
-          <div className="max-w-5xl mx-auto p-5 space-y-6">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {[
-                {label:"ทั้งหมด",     value:stats.total,       color:"#3b82f6", icon:"📋"},
-                {label:"รอดำเนินการ", value:stats.pending,     color:"#d97706", icon:"⏳"},
-                {label:"กำลังซ่อม",  value:stats.in_progress, color:"#2563eb", icon:"🔧"},
-                {label:"เสร็จแล้ว",  value:stats.completed,   color:"#16a34a", icon:"✅"},
-              ].map(s=>(
-                <div key={s.label} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center gap-3">
-                  <span className="text-3xl">{s.icon}</span>
-                  <div>
-                    <div className="text-2xl font-black" style={{color:s.color}}>{s.value}</div>
-                    <div className="text-xs text-slate-400 font-medium">{s.label}</div>
-                  </div>
-                </div>
-              ))}
+    <div className="min-h-screen bg-slate-100/70 flex flex-col" style={{fontFamily:"'Sarabun','Noto Sans Thai',sans-serif"}}>
+      {/* ── Header ── */}
+      <header className="bg-gradient-to-br from-orange-500 to-amber-500 text-white shrink-0">
+        <div className="max-w-5xl mx-auto px-4 sm:px-5 pt-4 pb-5">
+          <div className="flex items-center gap-3">
+            <button onClick={()=>router.push("/dashboard")} aria-label="กลับหน้าหลัก"
+              className="w-10 h-10 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center text-lg shrink-0 transition">🏠</button>
+            <div className="flex-1 min-w-0">
+              <h1 className="font-bold text-xl leading-tight">ระบบแจ้งซ่อม</h1>
+              <p className="text-orange-50 text-sm truncate">
+                {fullName(user)}{isProjManager ? " · ผู้ดูแลโครงการ" : isBuildingManager && !canSeeAll ? " · ผู้ดูแลอาคาร" : ""}
+              </p>
             </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-              <div className="px-5 py-3 border-b border-slate-100">
-                <h3 className="font-bold text-slate-700 text-sm">สรุปรายอาคาร</h3>
+            <div className="flex gap-2">
+              {isAdmin && <button onClick={()=>setShowManagers(true)} className="px-3 py-2 bg-white/20 hover:bg-white/30 text-xs font-bold rounded-xl transition">⚙️ <span className="hidden sm:inline">ตั้งค่า</span></button>}
+              {canMemo && <button onClick={()=>setShowMemo(true)} className="px-3 py-2 bg-white/20 hover:bg-white/30 text-xs font-bold rounded-xl transition">📄 <span className="hidden sm:inline">บันทึกข้อความ</span></button>}
+              <button onClick={()=>setShowForm(true)} className="px-4 py-2 bg-white text-orange-600 text-sm font-bold rounded-xl shadow hover:bg-orange-50 transition">+ แจ้งซ่อม</button>
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-2 sm:gap-3 mt-4">
+            {statCards.map(s => (
+              <div key={s.label} className="bg-white/15 backdrop-blur rounded-2xl px-3 py-2.5">
+                <div className="text-2xl font-black leading-none">{s.value}</div>
+                <div className="text-[11px] sm:text-xs text-orange-50 mt-1">{s.icon} {s.label}</div>
               </div>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      {/* ── Tabs ── */}
+      <nav className="bg-white border-b border-slate-200 shrink-0 sticky top-0 z-20">
+        <div className="max-w-5xl mx-auto flex overflow-x-auto px-2">
+          {tabs.map(([k,l])=>(
+            <button key={k} onClick={()=>setTab(k)}
+              className={`px-4 sm:px-5 py-3.5 text-sm font-bold border-b-[3px] whitespace-nowrap transition
+                ${tab===k?"border-orange-500 text-orange-600":"border-transparent text-slate-400 hover:text-slate-600"}`}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <main className="flex-1">
+        {/* ── Dashboard ── */}
+        {tab==="dashboard" && canSeeAll && (
+          <div className="max-w-5xl mx-auto p-4 sm:p-5 space-y-5">
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100"><h3 className="font-bold text-slate-800">สรุปรายอาคาร</h3></div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gradient-to-r from-orange-500 to-amber-400 text-white text-xs">
-                      {["อาคาร","รอดำเนินการ","กำลังซ่อม","เสร็จแล้ว","รวม"].map(h=>(
-                        <th key={h} className="px-4 py-3 text-left font-bold">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {buildings.map((b,i)=>{
+                  <thead><tr className="text-slate-500 text-xs bg-slate-50">
+                    {["อาคาร","รอดำเนินการ","กำลังซ่อม","เสร็จแล้ว","ความคืบหน้า"].map(h=><th key={h} className="px-4 py-2.5 text-left font-semibold">{h}</th>)}
+                  </tr></thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {buildings.map(b=>{
                       const bReqs=requests.filter(r=>r.building_id===b.id);
+                      const done=bReqs.filter(r=>r.status==="completed").length;
+                      const pct=bReqs.length?Math.round(done/bReqs.length*100):0;
                       return (
-                        <tr key={b.id} className={i%2===0?"bg-slate-50":"bg-white"}>
-                          <td className="px-4 py-3 font-bold text-slate-700">{b.name}</td>
+                        <tr key={b.id}>
+                          <td className="px-4 py-3 font-semibold text-slate-800">{b.name}</td>
                           <td className="px-4 py-3 text-amber-600 font-bold">{bReqs.filter(r=>r.status==="pending").length}</td>
                           <td className="px-4 py-3 text-blue-600 font-bold">{bReqs.filter(r=>r.status==="in_progress").length}</td>
-                          <td className="px-4 py-3 text-emerald-600 font-bold">{bReqs.filter(r=>r.status==="completed").length}</td>
-                          <td className="px-4 py-3 text-slate-600 font-bold">{bReqs.length}</td>
+                          <td className="px-4 py-3 text-emerald-600 font-bold">{done}</td>
+                          <td className="px-4 py-3 min-w-[140px]">
+                            <div className="flex items-center gap-2">
+                              <div className="h-2 flex-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{width:`${pct}%`}} /></div>
+                              <span className="text-xs text-slate-500 w-12 text-right">{done}/{bReqs.length}</span>
+                            </div>
+                          </td>
                         </tr>
                       );
                     })}
@@ -1359,153 +1398,104 @@ setRoutes((rt ?? []) as RepairRoute[]);
 
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="font-bold text-slate-700 text-sm">⏳ รอดำเนินการ ({stats.pending})</h3>
-                <button onClick={()=>setTab("list")} className="text-xs text-orange-500 font-bold hover:underline">ดูทั้งหมด</button>
+                <h3 className="font-bold text-slate-800">รอดำเนินการ ({stats.pending})</h3>
+                <button onClick={()=>{setFilterStatus("pending");setTab("list");}} className="text-xs text-orange-600 font-bold hover:underline">ดูทั้งหมด</button>
               </div>
               <div className="divide-y divide-slate-100">
                 {requests.filter(r=>r.status==="pending").slice(0,5).map(r=>(
-                  <div key={r.id} onClick={()=>setDetailReq(r)}
-                    className="px-5 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer transition-colors">
+                  <button key={r.id} onClick={()=>setDetailReq(r)} className="w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-slate-50 transition">
                     <div className="flex-1 min-w-0">
-                      <p className="font-bold text-slate-800 text-sm truncate">{r.title}</p>
-                      <p className="text-xs text-slate-400">{r.building?.name} · {thaiDate(r.created_at)}</p>
+                      <p className="font-semibold text-slate-800 text-sm truncate">{r.title}</p>
+                      <p className="text-xs text-slate-400">{r.building?.name} · {ago(r.created_at)}</p>
                     </div>
-                    {r.priority && (
-                      <span className="text-xs font-bold shrink-0" style={{color:PRIORITY_CFG[r.priority]?.color}}>
-                        {PRIORITY_CFG[r.priority]?.label}
-                      </span>
-                    )}
-                  </div>
+                    <PriorityTag priority={r.priority} />
+                  </button>
                 ))}
                 {stats.pending===0&&<div className="px-5 py-8 text-center text-slate-400 text-sm">ไม่มีรายการรอดำเนินการ 🎉</div>}
               </div>
             </div>
           </div>
         )}
-        
 
+        {/* ── List ── */}
         {tab==="list" && (
-          <div className="max-w-4xl mx-auto p-5 space-y-4">
-            <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap gap-3 items-end">
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">สถานะ</label>
-                <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}
-                  className="border-2 border-blue-200 rounded-xl px-3 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none">
-                  <option value="">ทั้งหมด</option>
-                  {Object.entries(STATUS_CFG).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">อาคาร</label>
-                <select value={filterBldg} onChange={e=>setFilterBldg(e.target.value)}
-                  className="border-2 border-blue-200 rounded-xl px-3 py-2 text-sm bg-white focus:border-blue-500 focus:outline-none">
-                  <option value="">ทั้งหมด</option>
+          <div className="max-w-4xl mx-auto p-4 sm:p-5 space-y-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-3 sm:p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="🔍 ค้นหาหัวข้อ ห้อง ผู้แจ้ง..." className={inputCls()} />
+                <select value={filterBldg} onChange={e=>setFilterBldg(e.target.value)} className={inputCls() + " sm:max-w-[200px]"}>
+                  <option value="">ทุกอาคาร</option>
                   {buildings.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
               </div>
-              {isBuildingManager && (
-                <button onClick={()=>setOnlyMyBuildings(v=>!v)}
-                  className={`px-3 py-2 text-xs font-bold rounded-xl border-2 transition-colors self-end
-                    ${onlyMyBuildings ? "bg-orange-500 border-orange-500 text-white" : "bg-white border-slate-200 text-slate-500 hover:border-orange-300"}`}>
-                  🏢 เฉพาะตึกที่ฉันดูแล
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+                <button onClick={()=>setFilterStatus("")}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border transition ${!filterStatus?"bg-slate-800 text-white border-slate-800":"bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+                  ทั้งหมด {baseList.length}
                 </button>
-              )}
-              {(filterStatus||filterBldg||onlyMyBuildings)&&(
-                <button onClick={()=>{setFilterStatus("");setFilterBldg("");setOnlyMyBuildings(false);}}
-                  className="px-3 py-2 text-xs text-slate-400 hover:text-slate-600 underline self-end">ล้าง</button>
-              )}
-              <div className="flex-1"/>
-              <span className="text-xs text-slate-400 self-end">{visibleRequests.length} รายการ</span>
+                {Object.entries(STATUS_CFG).map(([k,v])=>(
+                  <button key={k} onClick={()=>setFilterStatus(filterStatus===k?"":k)}
+                    className="px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border transition"
+                    style={filterStatus===k ? {background:v.dot,color:"#fff",borderColor:v.dot} : {background:v.bg,color:v.color,borderColor:v.border}}>
+                    {v.label} {statusCount(k)}
+                  </button>
+                ))}
+                {isBuildingManager && (
+                  <button onClick={()=>setOnlyMyBuildings(v=>!v)}
+                    className={`ml-auto px-3 py-1.5 text-xs font-bold rounded-full border whitespace-nowrap transition ${onlyMyBuildings ? "bg-orange-500 border-orange-500 text-white" : "bg-white border-slate-200 text-slate-500 hover:border-orange-300"}`}>
+                    🏢 ตึกที่ฉันดูแล
+                  </button>
+                )}
+              </div>
             </div>
 
             {visibleRequests.length===0 ? (
-              <div className="text-center py-16 bg-white rounded-2xl border border-slate-200 text-slate-400">
+              <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-slate-300 text-slate-400">
                 <p className="text-4xl mb-2">🔧</p>
-                <p className="text-sm">ไม่มีรายการแจ้งซ่อม</p>
+                <p className="text-sm">ไม่พบรายการแจ้งซ่อมที่ตรงกับตัวกรอง</p>
+                {(query||filterStatus||filterBldg||onlyMyBuildings) && (
+                  <button onClick={()=>{setQuery("");setFilterStatus("");setFilterBldg("");setOnlyMyBuildings(false);}} className="mt-3 text-xs text-orange-600 font-bold underline">ล้างตัวกรอง</button>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
-                {visibleRequests.map(r=>{
-                  const cfg=STATUS_CFG[r.status]??STATUS_CFG.pending;
-                  return (
-                    <div key={r.id} onClick={()=>setDetailReq(r)}
-                      className="bg-white rounded-2xl border border-slate-200 p-4 cursor-pointer hover:border-orange-300 hover:shadow-sm transition-all">
-                      <div className="flex items-start gap-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap mb-1">
-                            <span className="font-bold text-slate-800 text-sm">{r.title}</span>
-                            {r.priority&&<span className="text-xs font-bold" style={{color:PRIORITY_CFG[r.priority]?.color}}>{PRIORITY_CFG[r.priority]?.label}</span>}
-                          </div>
-                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-400">
-                            <span>🏢 {r.building?.name ?? "—"}{r.room?` · ${r.room}`:""}</span>
-                            {r.category&&<span>🏷️ {r.category}</span>}
-                            <span>📅 {thaiDate(r.created_at)}</span>
-                            <span>👤 {fullName(r.reporter)}</span>
-                          </div>
-                        </div>
-                        <span style={{background:cfg.bg,color:cfg.color,borderColor:cfg.border}}
-                          className="text-xs font-bold px-2.5 py-1 rounded-lg border shrink-0">{cfg.label}</span>
-                      </div>
-                      {(r.photo_urls??[]).length>0&&(
-                        <div className="flex gap-1.5 mt-2">
-                          {r.photo_urls!.slice(0,3).map((url,i)=>(
-                            <img key={i} src={url} alt="" className="w-12 h-12 object-cover rounded-lg border border-slate-200"/>
-                          ))}
-                          {r.photo_urls!.length>3&&<div className="w-12 h-12 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center text-xs text-slate-400 font-bold">+{r.photo_urls!.length-3}</div>}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                {visibleRequests.map(r=><RequestCard key={r.id} r={r} allUsers={allUsers} onOpen={()=>setDetailReq(r)} />)}
               </div>
             )}
           </div>
         )}
 
+        {/* ── Mine ── */}
         {tab==="mine" && (
-          <div className="max-w-3xl mx-auto p-5 space-y-4">
+          <div className="max-w-3xl mx-auto p-4 sm:p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="font-bold text-slate-700">รายการแจ้งซ่อมของฉัน ({myRequests.length})</h2>
-              <button onClick={()=>setShowForm(true)}
-                className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold rounded-xl">+ แจ้งซ่อม</button>
+              <h2 className="font-bold text-slate-800">รายการแจ้งซ่อมของฉัน ({myRequests.length})</h2>
+              <button onClick={()=>setShowForm(true)} className={btnPrimary}>+ แจ้งซ่อม</button>
             </div>
             {myRequests.length===0 ? (
-              <div className="text-center py-16 bg-white rounded-2xl border border-slate-200 text-slate-400">
+              <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-slate-300 text-slate-400">
                 <p className="text-4xl mb-2">✅</p>
-                <p className="text-sm">ยังไม่มีรายการแจ้งซ่อม</p>
+                <p className="text-sm">คุณยังไม่เคยแจ้งซ่อม — กด “+ แจ้งซ่อม” เพื่อเริ่มต้น</p>
               </div>
             ) : (
               <div className="space-y-3">
-                {myRequests.map(r=>{
-                  const cfg=STATUS_CFG[r.status]??STATUS_CFG.pending;
-                  return (
-                    <div key={r.id} onClick={()=>setDetailReq(r)}
-                      className="bg-white rounded-2xl border border-slate-200 p-4 cursor-pointer hover:border-orange-300 transition-all">
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold text-slate-800 text-sm">{r.title}</p>
-                          <p className="text-xs text-slate-400 mt-0.5">🏢 {r.building?.name ?? "—"} · 📅 {thaiDate(r.created_at)}</p>
-                        </div>
-                        <span style={{background:cfg.bg,color:cfg.color,borderColor:cfg.border}}
-                          className="text-xs font-bold px-2.5 py-1 rounded-lg border shrink-0">{cfg.label}</span>
-                      </div>
-                    </div>
-                  );
-                })}
+                {myRequests.map(r=><RequestCard key={r.id} r={r} allUsers={allUsers} onOpen={()=>setDetailReq(r)} />)}
               </div>
             )}
           </div>
         )}
-      </div>
+
+        {tab==="team" && <ResponsibilityPanel buildings={buildings} managers={managers} routes={routes} allUsers={allUsers} />}
+      </main>
 
       {(showForm || editingReq) && (
-        <RepairFormModal buildings={buildings} currentUser={user} existing={editingReq} 
+        <RepairFormModal buildings={buildings} currentUser={user} existing={editingReq}
           onSave={async()=>{setShowForm(false);setEditingReq(null);await loadData();}}
           onClose={()=>{setShowForm(false);setEditingReq(null);}} />
       )}
       {showManagers && (
         <ManagersModal currentUser={user} allUsers={allUsers} managers={managers} routes={routes}
-  onClose={()=>setShowManagers(false)} onRefresh={loadData} />
+          onClose={()=>setShowManagers(false)} onRefresh={loadData} />
       )}
       {showMemo && (
         <MemoModal requests={visibleRequests.filter(r=>r.status!=="completed")}
@@ -1515,7 +1505,7 @@ setRoutes((rt ?? []) as RepairRoute[]);
       {detailReq && (
         <DetailModal request={detailReq} allUsers={allUsers}
           currentUserId={user.id} isAdmin={isAdmin} isProjManager={isProjManager}
-          recipientIds={resolveRecipients(detailReq.category, detailReq.building, managers, allUsers, routes).map(u=>u.id)}
+          recipients={resolveRecipients(detailReq.category, detailReq.building, managers, allUsers, routes)}
           isMemoEditor={isMemoEditor}
           onEdit={(r)=>{setDetailReq(null); setEditingReq(r);}}
           onDelete={handleDeleteRequest}

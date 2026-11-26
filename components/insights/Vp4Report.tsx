@@ -412,7 +412,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
         return (
           <div key={s.id} className="vp4-page relative bg-white p-8 mb-6 print:mb-0 print:break-after-page border border-slate-100 print:border-0 text-xl">
             {mode === "midterm" && (
-  <label className="flex items-center gap-2 text-base font-black">
+  <label className="flex items-center gap-2 text-base font-black print:hidden">
     วันที่คะแนน
     <input
       type="date"
@@ -598,7 +598,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
                     <tr><td className="border p-1">จำนวนหน่วยกิต/น้ำหนักวิชาเพิ่มเติม</td><td className="border p-1 text-center">{credits.addPlanned.toFixed(1)}</td><td className="border p-1 text-center">{credits.addEarned.toFixed(1)}</td></tr>
                     <tr><td className="border p-1 font-bold">รวมจำนวนหน่วยกิต/น้ำหนัก</td><td className="border p-1 text-center font-bold">{credits.totalPlanned.toFixed(1)}</td><td className="border p-1 text-center font-bold">{credits.totalEarned.toFixed(1)}</td></tr>
                     <tr><td className="border p-1" colSpan={2}>ระดับผลการเรียนเฉลี่ย (GPA)</td><td className="border p-1 text-center">{gpa}</td></tr>
-                    <tr><td className="border p-1" colSpan={2}>ลำดับที่ในห้องเรียน/ในชั้นเรียน</td><td className="border p-1 text-center">{roomRank}/-</td></tr>
+                    <tr><td className="border p-1" colSpan={2}>ลำดับที่ในห้องเรียน/ในชั้นเรียน</td><td className="border p-1 text-center">{roomRank}/{students.length}</td></tr>
                     <tr><td className="border p-1" colSpan={2}>ผลการประเมินคุณลักษณะอันพึงประสงค์</td><td className="border p-1 text-center">{characteristicLabel(overall?.characteristic ?? "-")}</td></tr>
                     <tr><td className="border p-1" colSpan={2}>ผลการประเมินการอ่าน คิดวิเคราะห์ และเขียน</td><td className="border p-1 text-center">{characteristicLabel(overall?.readThinkWrite ?? "-")}</td></tr>
                     <tr><td className="border p-1" colSpan={2}>ผลการประเมินกิจกรรมพัฒนาผู้เรียน</td><td className="border p-1 text-center">{overallActivityResult(s.id)} = {overallActivityResult(s.id) === "ผ" ? "ผ่าน" : "ไม่ผ่าน"}</td></tr>
@@ -709,7 +709,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
   .signature-grid { gap: 7rem; }
 
   @media print {
-        @page { size: A4 portrait; margin: 8mm 5mm; }
+        @page { size: A4 portrait; margin: 5mm 5mm; }
 
     html, body {
       background: #fff !important;
@@ -752,8 +752,8 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
       letter-spacing: 0 !important;
     }
 
-    /* ตราโรงเรียน 3 ซม. */
-    .vp4-page img { height: 3cm !important; width: 3cm !important; margin-bottom: 2px !important; }
+    /* ตราโรงเรียน 2 ซม. */
+.vp4-page img { height: 2cm !important; width: 2cm !important; margin-bottom: 0 !important; }
 
     .vp4-page .mb-3 { margin-bottom: 4px !important; }
     .vp4-page .mb-2 { margin-bottom: 2px !important; }
@@ -762,6 +762,7 @@ const hasTwoAdvisors = !!(advisors[1] && (advisors[1].first_name || advisors[1].
     .vp4-page .h-8 { height: 8px !important; }
     .vp4-page .gap-6 { gap: 10px !important; }
     .vp4-page .signature-grid { gap: 40px !important; }
+    .vp4-page > .text-center.mb-2 p { margin: 0 !important; }
 
         .vp4-table { table-layout: fixed; width: 100%; }
     .vp4-table th, .vp4-table td { padding: 1px 4px !important; }

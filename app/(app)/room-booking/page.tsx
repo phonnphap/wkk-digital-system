@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Home, ArrowLeft, Calendar, ChevronLeft, ChevronRight, Plus, X, FileText, AlertTriangle, DoorOpen } from "lucide-react";
 import { todayISO, formatThaiDateFull, timeShort, teacherName } from "@/lib/duty-helpers";
 import SignaturePad from "@/components/room-booking/SignaturePad";
+import { authFetch } from "@/lib/booking-client";
 import RoomRequestForm, { RoomFormData, EQUIPMENT_OPTIONS, SEATING_OPTIONS } from "@/components/room-booking/RoomRequestForm";
 
 const supabase = createClient();
@@ -24,7 +25,7 @@ const toMin = (t: string) => { const [h, m] = t.split(":").map(Number); return h
 const DOW_SHORT = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 const isoOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-const NAME_SEL = "id, title, first_name, last_name";
+const NAME_SEL = "id, title, first_name, last_name, email";
 const BOOKING_SELECT = `*, room:meeting_rooms(id,name),
   requester:users!room_bookings_requester_id_fkey(${NAME_SEL}),
   staff:users!room_bookings_staff_id_fkey(${NAME_SEL}),
@@ -93,7 +94,7 @@ async function uploadPdf(file: File, kind: "signed" | "unsigned" | "layout", b: 
   fd.append("kind", kind);
   fd.append("date", b.booking_date);
   fd.append("label", `${b.room?.name ?? ""}-${timeShort(b.start_time).replace(":", ".")}-${teacherName(b.requester)}${suffix}`);
-  const res = await fetch("/api/room-booking-upload", { method: "POST", body: fd });
+  const res = await authFetch("/api/booking-upload", { method: "POST", body: fd });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error ?? "อัปโหลดไม่สำเร็จ");
   return json.webUrl as string;
@@ -131,13 +132,10 @@ async function uploadLayouts(files: File[], b: Booking): Promise<string[]> {
 }
 
 // แจ้ง Teams (ธุรการทั่วไป / หัวหน้างานอาคารสถานที่) — ผู้รับแค่รับทราบ ไม่ต้องกดอะไร (ไม่ให้ล้มทั้งงานถ้าส่งไม่สำเร็จ)
-function notifyAdmin(event: "new" | "approved" | "rejected", b: Booking) {
-  fetch("/api/room-booking-notify", {
+function notifyAdmin(event: "new" | "head_done" | "approved" | "rejected", b: Booking) {
+  authFetch("/api/booking-notify", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      event, room: b.room?.name, date: b.booking_date, start: b.start_time?.slice(0, 5), end: b.end_time?.slice(0, 5),
-      purpose: b.purpose, requester: b.requester ? teacherName(b.requester) : "", reason: b.reject_reason, pdfUrl: b.pdf_signed_url, layoutUrls: b.layout_urls ?? [],
-    }),
+    body: JSON.stringify({ kind: "room", event, id: b.id }),
   }).catch(() => {});
 }
 
@@ -169,7 +167,7 @@ export default function RoomBookingPage() {
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) return;
+      if (!data.user) { window.location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`; return; }
       const { data: p } = await supabase.from("users").select("id, role").eq("auth_id", data.user.id).maybeSingle();
       if (p) { setMyUserId((p as any).id ?? ""); setMyRole((p as any).role ?? ""); }
     });
@@ -205,6 +203,13 @@ export default function RoomBookingPage() {
   useEffect(() => { loadDay(); }, [loadDay]);
   useEffect(() => { loadWork(); }, [loadWork]);
   const reload = () => { loadDay(); loadWork(); };
+
+  // ลิงก์จาก Teams: /room-booking?open=<id>
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("open");
+    if (!id || !myUserId) return;
+    fetchBooking(id).then((b) => { setDetail(b); window.history.replaceState(null, "", "/room-booking"); }).catch(() => {});
+  }, [myUserId]);
 
   const canAct = (b: Booking) => {
     const step = STEP_OF[b.status];
@@ -703,6 +708,8 @@ function StepModal({ b, step, myUserId, rooms, onClose, onDone }: {
           notifyAdmin("approved", { ...full, pdf_signed_url: url });
         } else if (!ok) {
           notifyAdmin("rejected", full);
+        } else if (step === "head") {
+          notifyAdmin("head_done", full);
         }
       } catch (e) { console.warn("[room-booking] แจ้งเตือนไม่สำเร็จ:", e); }
       onDone();

@@ -562,6 +562,18 @@ async function pushApprovalTeams(leaveId: string, event: "approved" | "rejected"
   } catch (e) { console.warn("[pushApprovalTeams]", e); }
 }
 
+async function pushVehicleTeams(vehicleBookingId: string) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await fetch("/api/booking-notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ kind: "vehicle", event: "new", id: vehicleBookingId }),
+    });
+  } catch (e) { console.warn("[pushVehicleTeams]", e); }
+}
+
 /** แจ้งเตือนครูที่ถูกจัดสอนแทน + หัวหน้าสายชั้นของผู้ยื่นลา (ลิงก์กับระบบลา) */
 async function notifySwapAssignments(requester: UserProfile, assignments: SwapAssignment[], allTeachers: UserProfile[]) {
   if (assignments.length === 0) return;
@@ -1995,6 +2007,9 @@ const [orderFrom,   setOrderFrom]   = useState("");
 const [orderNumber, setOrderNumber] = useState("");
 const [orderDate,   setOrderDate]   = useState("");
   const [vehicle,      setVehicle]      = useState<"school"|"personal">("school");
+  const [tripStartTime, setTripStartTime] = useState("07:30");
+const [tripEndTime,   setTripEndTime]   = useState("16:30");
+const [tripDistance,  setTripDistance]  = useState("");
   const [companionIds, setCompanionIds] = useState<string[]>([]);
   const [swapAssignments, setSwapAssignments] = useState<SwapAssignment[]>([]);
   const [showSpecificSwap, setShowSpecificSwap] = useState(false);
@@ -2129,6 +2144,12 @@ const reasonFull = leaveType==="official"
       status:isDraft?"draft":"pending",
       missed_periods: "", substitute_id: null,
       substitute_assignments: swapAssignments.map(({ mode, ...rest }) => rest),
+      vehicle_request: leaveType==="official" && vehicle==="school" ? {
+  destination: tripDest, purpose: reason,
+  passengers: companionIds.length + 1,
+  start_time: tripStartTime, end_time: tripEndTime,
+  distance_km: tripDistance ? Number(tripDistance) : null,
+} : null,
       duty_officer_id:dutyOfficer?.id??null,
       approver_1_id:approvers[0]?.id??null, approver_2_id:approvers[1]?.id??null, approver_3_id:approvers[2]?.id??null,
       approver_1_status:approvers[0]?"pending":null, approver_2_status:approvers[1]?"pending":null, approver_3_status:approvers[2]?"pending":null,
@@ -2335,6 +2356,21 @@ const reasonFull = leaveType==="official"
         </label>
       ))}
     </div>
+
+    {vehicle==="school"&&(
+  <div className="rounded-xl border-2 border-sky-200 bg-white p-4 space-y-3">
+    <p className="text-xs font-bold text-sky-700">🚌 ระบบจะสร้าง “คำขอใช้รถราชการ” ให้อัตโนมัติ — ผู้ดูแลจะเลือกรถและคนขับให้ แล้วแจ้งกลับทาง Teams</p>
+    <div className="grid grid-cols-3 gap-3">
+      <div><label className="block text-sm font-bold text-slate-600 mb-1">เวลาเริ่มเดินทาง</label>
+        <input type="time" value={tripStartTime} onChange={e=>setTripStartTime(e.target.value)} className={inp()}/></div>
+      <div><label className="block text-sm font-bold text-slate-600 mb-1">เวลากลับ (โดยประมาณ)</label>
+        <input type="time" value={tripEndTime} onChange={e=>setTripEndTime(e.target.value)} className={inp()}/></div>
+      <div><label className="block text-sm font-bold text-slate-600 mb-1">ระยะทาง (กม.)</label>
+        <input type="number" min={0} value={tripDistance} onChange={e=>setTripDistance(e.target.value)} placeholder="ไม่บังคับ" className={inp()}/></div>
+    </div>
+    <p className="text-[11px] text-slate-400">จำนวนผู้โดยสาร = ตัวท่าน + ผู้ร่วมเดินทางที่เลือก ({companionIds.length+1} คน)</p>
+  </div>
+)}
 
     <div>
       <label className="block text-sm font-bold text-slate-600 mb-1">ผู้ร่วมเดินทาง</label>
@@ -2597,7 +2633,7 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
 
     // ✅ แก้ submitLeave ให้บันทึก substitute_assignments ต่อจาก insert/update leave_requests
   async function submitLeave(payload:any){
-    const { substitute_assignments, ...leavePayload } = payload;
+    const { substitute_assignments, vehicle_request, ...leavePayload } = payload;
 
     let leaveId = editRequest?.id;
     if(editRequest?.id){
@@ -2645,6 +2681,24 @@ const timetableLoadedRef = useRef(false); // ★ กันโหลดซ้ำ�
         }
       }   // ← ปิด if (substitute_assignments?.length)
     }     // ← ปิด if (leaveId)
+
+        // ★ ผูกคำขอไปราชการ (รถโรงเรียน) กับระบบจองรถ
+    if (leaveId) {
+      await supabase.from("vehicle_bookings").delete().eq("leave_request_id", leaveId).eq("status", "pending_assign");
+      if (vehicle_request && leavePayload.status !== "draft") {
+        const { data: vb, error: vbErr } = await (supabase.from("vehicle_bookings") as any).insert({
+          leave_request_id: leaveId, requester_id: user.id, requester_position: user.position ?? null,
+          purpose: vehicle_request.purpose, destination: vehicle_request.destination,
+          distance_km: vehicle_request.distance_km, passengers: vehicle_request.passengers,
+          start_date: leavePayload.start_date, start_time: vehicle_request.start_time,
+          end_date: leavePayload.end_date, end_time: vehicle_request.end_time,
+          requester_signature: leavePayload.signature_url ?? user.signature_url ?? null,
+          requester_signed_at: new Date().toISOString(),
+        }).select("id").single();
+        if (vbErr) alert("⚠️ ส่งใบลาแล้ว แต่สร้างคำขอใช้รถไม่สำเร็จ: " + vbErr.message);
+        else await pushVehicleTeams(vb.id);
+      }
+    }
 
     if (leaveId && leavePayload.status === "pending") {
       await pushLeaveTeams(leaveId, editRequest?.id ? "edited" : "submitted");
@@ -3392,6 +3446,10 @@ useEffect(() => {
 
     const {error}=await (supabase.from("leave_requests") as any).update(updates).eq("id",id);
 if(error){alert("❌ บันทึกไม่สำเร็จ: "+error.message);return;}
+if (action === "rejected") {
+  await (supabase.from("vehicle_bookings") as any).update({ status: "cancelled" })
+    .eq("leave_request_id", id).in("status", ["pending_assign", "pending_director"]);
+}
 await pushApprovalTeams(id, action, slotNum, reason);
 
 // ✅ รีเฟรชข้อมูล — ถ้าเคยโหลดข้อมูลทั้งหมดแล้ว (กดแท็บอื่นมาก่อน) ให้โหลดใหม่ทั้งหมด

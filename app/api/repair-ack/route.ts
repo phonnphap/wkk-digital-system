@@ -20,7 +20,7 @@ const { data: me } = await admin.from("users").select("id,title,first_name,last_
 
   const { data: upd, error } = await admin.from("repair_requests").update({
     assigned_user_ids: [me.id], assigned_to: me.id, status: "in_progress", updated_at: new Date().toISOString(),
-  }).eq("id", requestId).is("assigned_to", null).select("id");
+  }).eq("id", requestId).is("assigned_to", null).eq("status", "pending").select("id");
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   if (!upd?.length) return NextResponse.json({ ok: false, error: "มีผู้รับเรื่องนี้ไปแล้ว" }, { status: 409 });
 

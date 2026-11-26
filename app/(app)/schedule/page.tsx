@@ -2573,7 +2573,7 @@ export default function SchedulePage() {
   const [selectedYear,     setSelectedYear]     = useState("");
   const [selectedSemester, setSelectedSemester] = useState<number>(1); 
   const [selectedRoom,     setSelectedRoom]     = useState("");
-  const [viewMode, setViewMode] = useState<"room"|"teacher"|"requests"|"duplicates"|"dashboard"|"gradeSchedule">("room");
+  const [viewMode, setViewMode] = useState<"room"|"teacher"|"requests"|"duplicates"|"dashboard"|"gradeSchedule"|"makeup">("room");
   const [selectedDayDetail, setSelectedDayDetail] = useState<number | null>(null);
   const [showSettings,     setShowSettings]     = useState(false);
   const [allEntriesForCheck, setAllEntriesForCheck] = useState<TimetableEntry[]>([]);
@@ -4262,6 +4262,10 @@ const totalScheduledPeriods = dashEntries.length;
                   <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">{pendingCount + pendingSubjectCount}</span>
                 )}
               </button>
+              <button onClick={() => setViewMode("makeup")}
+  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${viewMode === "makeup" ? "bg-white shadow text-slate-800" : "text-slate-500"}`}>
+  📆 สอนชดเชย
+</button>
               {isAdmin && (
   <button onClick={() => setShowGradeHeadPermission(true)}
     className="px-3 py-2 rounded-xl border-2 border-indigo-200 bg-indigo-50 text-indigo-700 font-black text-sm hover:bg-indigo-100">
@@ -4570,6 +4574,12 @@ const totalScheduledPeriods = dashEntries.length;
               </div>
             </div>
           )}
+          {viewMode === "makeup" && (
+  <MakeupSchedulePanel
+    classrooms={classrooms} entries={entries} timeSlots={timeSlots}
+    subjects={subjects} teachers={teachers}
+  />
+)}
 
           {viewMode === "room" && !selectedClassroom && (
             <div className="flex items-center justify-center h-full text-slate-400">

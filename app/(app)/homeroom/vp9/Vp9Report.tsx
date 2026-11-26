@@ -115,6 +115,138 @@ export function mapStudentRow(r: any, levelLabel = ""): Student {
   };
 }
 
+/* =========================================================================
+   JText — จัดข้อความภาษาไทยให้ "เต็มบรรทัด" (เหมือน Thai Distributed ใน Word)
+   ตัดคำด้วย Intl.Segmenter("th") แล้ววัดความกว้างจริงด้วยฟอนต์เดียวกัน เติมช่องไฟระหว่างคำให้ชิดขอบทั้งสองข้าง
+   บรรทัดสุดท้ายของย่อหน้าชิดซ้ายตามปกติ · ใช้ได้ทั้งหน้าจอและตอนพิมพ์ (ตำแหน่งคำเท่ากัน)
+   ========================================================================= */
+const LETTER_FONT = '"TH SarabunIT๙","TH Sarabun New","THSarabunNew","Sarabun",sans-serif';
+const PX_PER_CM = 96 / 2.54;
+type JPart = { t: string; b?: boolean };
+type JTok = { text: string; bold?: boolean; space: boolean; w: number; gap: number };
+type JLine = { toks: JTok[]; extra: number; first: boolean };
+
+function layoutJustified(parts: JPart[], widthPx: number, indentPx: number): JLine[] {
+  const ctx = document.createElement("canvas").getContext("2d")!;
+  const fs = (16 * 96) / 72;
+  const measure = (t: string, b?: boolean) => { ctx.font = `${b ? "bold " : ""}${fs}px ${LETTER_FONT}`; return ctx.measureText(t).width; };
+  const spaceW = measure(" ");
+  const seg = new (Intl as any).Segmenter("th", { granularity: "word" });
+  const toks: JTok[] = [];
+  let pendingSpace = false;
+  for (const part of parts) {
+    for (const sg of seg.segment(part.t) as Iterable<{ segment: string; isWordLike?: boolean }>) {
+      if (/^\s+$/.test(sg.segment)) { pendingSpace = true; continue; }
+      const prev = toks[toks.length - 1];
+      const glueBack = prev && !pendingSpace && !!prev && (/^[ๆฯ,.;:)\]”’!?…%]/.test(sg.segment) || /[(\[“‘]$/.test(prev.text));
+      if (glueBack && prev.bold === part.b) { prev.text += sg.segment; prev.w = measure(prev.text, prev.bold); }
+      else toks.push({ text: sg.segment, bold: part.b, space: pendingSpace && toks.length > 0, w: measure(sg.segment, part.b), gap: 0 });
+      pendingSpace = false;
+    }
+  }
+  const lines: JLine[] = [];
+  let cur: JTok[] = [];
+  let curW = 0;
+  let avail = widthPx - indentPx - 1;
+  let first = true;
+  const flush = (justify: boolean) => {
+    const extra = justify && cur.length > 1 ? (avail - curW) / (cur.length - 1) : 0;
+    lines.push({ toks: cur, extra: Math.max(0, extra), first });
+    cur = []; curW = 0; first = false; avail = widthPx - 1;
+  };
+  for (const tk of toks) {
+    const gap = cur.length ? (tk.space ? spaceW : 0) : 0;
+    if (cur.length && curW + gap + tk.w > avail) flush(true);
+    const g2 = cur.length ? (tk.space ? spaceW : 0) : 0;
+    cur.push({ ...tk, gap: g2 });
+    curW += g2 + tk.w;
+  }
+  if (cur.length) flush(false);
+  return lines;
+}
+
+function JText({ parts, widthCm, indentCm = 0 }: { parts: JPart[]; widthCm: number; indentCm?: number }) {
+  const [lines, setLines] = useState<JLine[] | null>(null);
+  const key = parts.map(p => (p.b ? "*" : "") + p.t).join("");
+  useEffect(() => {
+    let alive = true;
+    const run = () => {
+      if (!alive) return;
+      try { setLines(layoutJustified(parts, widthCm * PX_PER_CM, indentCm * PX_PER_CM)); } catch { setLines(null); }
+    };
+    const fonts: any = (document as any).fonts;
+    if (fonts?.ready) fonts.ready.then(run); else run();
+    fonts?.addEventListener?.("loadingdone", run);
+    return () => { alive = false; fonts?.removeEventListener?.("loadingdone", run); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, widthCm, indentCm]);
+
+  if (!lines) {
+    return (
+      <p style={{ width: `${widthCm}cm`, textIndent: `${indentCm}cm` }}>
+        {parts.map((p, i) => (p.b ? <b key={i}>{p.t}</b> : <span key={i}>{p.t}</span>))}
+      </p>
+    );
+  }
+  return (
+    <div style={{ width: `${widthCm}cm` }}>
+      {lines.map((ln, li) => (
+        <div key={li} style={{ display: "flex", whiteSpace: "nowrap", paddingLeft: ln.first ? `${indentCm}cm` : 0 }}>
+          {ln.toks.map((tk, ti) => (
+            <span key={ti} style={{ marginLeft: ti === 0 ? 0 : tk.gap + ln.extra, fontWeight: tk.bold ? 700 : undefined }}>{tk.text}</span>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* =========================================================================
+   คำนวณเกรดรายวิชา (สูตรเดียวกับ วผ.8 / หน้าคะแนนรวม) — ใช้แสดงเกรดของนักเรียนที่ "ไม่ติด" ใน วผ.9
+   ========================================================================= */
+type GA = { id: string; title: string; max_score: number; weight_percent?: number | null; allow_weight?: boolean; status?: string };
+const isWeightedA = (a: GA) => !!(a.allow_weight && a.weight_percent != null && (a.max_score ?? 0) > 0);
+const contributionOf = (a: GA) => (isWeightedA(a) ? (a.weight_percent as number) : (a.max_score ?? 0));
+const weightedScoreOf = (a: GA, raw: number | null | undefined) =>
+  raw == null ? 0 : isWeightedA(a) ? (raw / (a.max_score || 1)) * (a.weight_percent as number) : raw;
+const examWeighted = (raw: number | null | undefined, rawMax: number | null | undefined, max: number) =>
+  raw == null ? 0 : rawMax && rawMax > 0 ? (raw / rawMax) * max : raw;
+
+function computeGrades(
+  studentIds: string[], g: any, midtermMax: number, finalMax: number,
+  rounding: "up" | "round_up" | "truncate", showSpecial: boolean,
+): Record<string, string> {
+  const assignments: GA[] = ((g.assignments ?? []) as GA[]).filter(a => a.status !== "draft");
+  const submissions: any[] = g.submissions ?? [];
+  const exams: any[] = g.examScores ?? [];
+  const events: any[] = g.scoreEvents ?? [];
+  const presetIds = new Set<string>((g.presets ?? []).map((x: any) => x.id));
+  const criteria: { max_percent: number; min_percent: number; grade: string }[] = g.criteria ?? [];
+  if (criteria.length === 0) return {};
+  const rawMidMax = g.rawMidtermMaxScore ?? null;
+  const rawFinMax = g.rawFinalMaxScore ?? null;
+  const maxAll = assignments.reduce((x, a) => x + contributionOf(a), 0) + midtermMax + finalMax;
+  const sub = new Map<string, any>();
+  submissions.forEach(x => sub.set(`${x.assignment_id}|${x.student_id}`, x));
+  const sorted = [...criteria].sort((a, b) => b.min_percent - a.min_percent);
+  const out: Record<string, string> = {};
+  studentIds.forEach(id => {
+    const aTotal = assignments.reduce((x, a) => x + weightedScoreOf(a, sub.get(`${a.id}|${id}`)?.score), 0);
+    const special = showSpecial ? events.filter(e => e.student_id === id && presetIds.has(e.preset_id)).reduce((x, e) => x + e.points, 0) : 0;
+    const m = exams.find(e => e.student_id === id && e.exam_type === "midterm");
+    const f = exams.find(e => e.student_id === id && e.exam_type === "final");
+    const mRaw = m?.raw_score ?? m?.score ?? null;
+    const fRaw = f?.raw_score ?? f?.score ?? null;
+    if ((finalMax > 0 && fRaw === null) || (midtermMax > 0 && mRaw === null)) return; // คะแนนสอบยังไม่ครบ → ไม่ตัดสิน
+    const raw2 = Math.round((aTotal + examWeighted(mRaw, m?.raw_max_score ?? rawMidMax, midtermMax) + special + examWeighted(fRaw, f?.raw_max_score ?? rawFinMax, finalMax)) * 100) / 100;
+    const total = raw2 % 1 !== 0 ? (rounding === "truncate" ? Math.floor(raw2) : Math.ceil(raw2)) : raw2;
+    const pct = maxAll > 0 ? (total / maxAll) * 100 : 0;
+    const hit = sorted.find(c => pct >= c.min_percent && pct <= c.max_percent);
+    if (hit) out[id] = String(hit.grade);
+  });
+  return out;
+}
+
 /* ช่องลายเซ็นใน วผ.9: ลายเซ็นซ้อนบนเส้นประ + ชื่อในวงเล็บ + ตำแหน่ง */
 function SigBlock({ name, sigUrl, role, w = "min-w-[170px]" }: { name: string; sigUrl?: string; role: string; w?: string }) {
   const [ok, setOk] = useState(true);
@@ -392,6 +524,53 @@ export default function Vp9Report({
   const sorted = useMemo(
     () => [...students, ...extraStudents].sort((a, b) => a.seat_number - b.seat_number),
     [students, extraStudents]);
+  // ---- เกรดของนักเรียนที่ไม่ติด (แสดงเมื่อติ๊ก "แสดงนักเรียนทั้งห้อง") ----
+  const termSecs = useMemo(
+    () => (termSel && terms.length > 0 ? rawSecs.filter(x => semesterOfSec(x) === termSel) : rawSecs),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rawSecs, termSel, terms]);
+  const [gradeMap, setGradeMap] = useState<Record<string, Record<string, string>>>({});
+  const [gradeNote, setGradeNote] = useState("");
+  useEffect(() => {
+    if (!showAll) return;
+    let active = true;
+    (async () => {
+      setGradeNote("กำลังคำนวณเกรด...");
+      const num = (v: any) => (v !== null && v !== undefined && v !== "" && !isNaN(Number(v)) ? Number(v) : null);
+      const findKey = (sec: any, re: RegExp) => {
+        for (const src of [sec, subjectOf(sec)]) {
+          if (!src) continue;
+          for (const [k, v] of Object.entries(src)) if (re.test(k) && num(v) !== null) return num(v);
+        }
+        return null;
+      };
+      const byCode = new Map<string, any>();
+      termSecs.forEach(sec => { const c = codeOfSec(sec); if (c && !byCode.has(c)) byCode.set(c, sec); });
+      const out: Record<string, Record<string, string>> = {};
+      let skipped = 0;
+      await Promise.all([...byCode.entries()].map(async ([code, sec]) => {
+        try {
+          const res = await fetch(`/api/subject-grades/summary?subject_section_id=${sec.id}`);
+          if (!res.ok) { skipped++; return; }
+          const g = await res.json();
+          // คะแนนเต็มกลางภาค/ปลายภาค: จากผลของ API ก่อน แล้วค่อยหาจากแถว section/subject
+          const fin = num(g.finalMaxScore ?? g.final_max_score ?? g.settings?.finalMaxScore) ?? findKey(sec, /final.*(max|full|score)/i);
+          const mid = num(g.midtermMaxScore ?? g.midterm_max_score ?? g.settings?.midtermMaxScore) ?? findKey(sec, /mid(term)?.*(max|full|score)/i);
+          if (fin === null && mid === null) { skipped++; return; }
+          const roundingRaw = String(sec.grade_rounding_mode ?? sec.rounding_mode ?? "truncate");
+          const rounding = roundingRaw === "round_up" || roundingRaw === "up" ? "round_up" : "truncate";
+          const grades = computeGrades(sorted.map(x => x.id), g, mid ?? 0, fin ?? 0, rounding, true);
+          Object.entries(grades).forEach(([sid, gr]) => { (out[sid] ??= {})[code] = gr; });
+        } catch { skipped++; }
+      }));
+      if (!active) return;
+      setGradeMap(out);
+      setGradeNote(skipped > 0 ? `คำนวณเกรดไม่ได้ ${skipped} วิชา (ไม่พบคะแนนเต็มกลางภาค/ปลายภาค หรือยังไม่ตั้งเกณฑ์เกรด)` : "");
+    })();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAll, termSecs, sorted]);
+
   const subjectByCode = useMemo(() => new Map(subjects.map(s => [s.code, s])), [subjects]);
 
   const current = matrix[round];
@@ -463,6 +642,8 @@ export default function Vp9Report({
     })).filter(x => x.names.length > 0);
   }
 
+  const W = 16; // ความกว้างเนื้อหาหนังสือ (ซม.) = A4 210 − ขอบ 25 ซม.×2
+
   function PassLetter({ s }: { s: Student }) {
     return (
       <LetterShell
@@ -471,16 +652,15 @@ export default function Vp9Report({
         subject={`แจ้งผลการตัดสินผลการเรียน  ภาคเรียนที่ ${thd(semesterV)}  ปีการศึกษา ${thd(yearV)}`}
         to={`ผู้ปกครองของ ${nameOf(s)} ชั้น ${thd(roomLabel)} เลขที่ ${thd(s.seat_number)}`}
       >
-        <p style={ind(2.2)}>
-          ด้วย{schoolName}กำหนดให้มีการวัดประเมินผลการเรียนปลายภาค ภาคเรียนที่ {thd(semesterV)} ประจำปีการศึกษา {thd(yearV)}{" "}
-          {thd(scopeText)} ในวันที่ {fill(cfg.announce.held)} ไปแล้วนั้น
-        </p>
-        <p style={ind(2.2)}>
-          โรงเรียนจึงขอแจ้งผลการตัดสินผลการเรียน สำหรับนักเรียนในความปกครองของท่าน ผลปรากฏว่า
-          <b>มีผลการเรียนผ่านทุกรายวิชา</b> และทางโรงเรียนจะแจ้งผลการเรียนรายบุคคล
-          {semesterV === "1" ? ` ${nextTermText}` : ""} ต่อไป
-        </p>
-        <p style={{ ...ind(1.8), marginTop: "8mm" }}>จึงเรียนมาเพื่อโปรดทราบ</p>
+        <JText widthCm={W} indentCm={2.2} parts={[{
+          t: `ด้วย${schoolName}กำหนดให้มีการวัดประเมินผลการเรียนปลายภาค ภาคเรียนที่ ${thd(semesterV)} ประจำปีการศึกษา ${thd(yearV)} ${thd(scopeText)} ในวันที่ ${fill(cfg.announce.held)} ไปแล้วนั้น`,
+        }]} />
+        <JText widthCm={W} indentCm={2.2} parts={[
+          { t: "โรงเรียนจึงขอแจ้งผลการตัดสินผลการเรียน สำหรับนักเรียนในความปกครองของท่าน ผลปรากฏว่า " },
+          { t: "มีผลการเรียนผ่านทุกรายวิชา", b: true },
+          { t: ` และทางโรงเรียนจะแจ้งผลการเรียนรายบุคคล${semesterV === "1" ? " " + nextTermText : ""} ต่อไป` },
+        ]} />
+        <p style={{ textIndent: "1.8cm", marginTop: "8mm" }}>จึงเรียนมาเพื่อโปรดทราบ</p>
       </LetterShell>
     );
   }
@@ -494,6 +674,9 @@ export default function Vp9Report({
     const subj = isFirst
       ? `แจ้งผลการติด ${kinds}  ประจำภาคเรียนที่ ${thd(semesterV)}  ปีการศึกษา ${thd(yearV)}`
       : `แจ้งผลการติด ${kinds}  หลัง${roundInfo.label}  ภาคเรียนที่ ${thd(semesterV)}  ปีการศึกษา ${thd(yearV)}`;
+    const intro = isFirst
+      ? `ด้วย${schoolName}กำหนดให้มีการวัดประเมินผล การสอบปลายภาค ภาคเรียนที่ ${thd(semesterV)} ประจำปีการศึกษา ${thd(yearV)} ${thd(scopeText)} ในวันที่ ${fill(c.held)} ไปแล้วนั้น`
+      : `ด้วย${schoolName}กำหนดให้มี${roundInfo.label} ภาคเรียนที่ ${thd(semesterV)} ประจำปีการศึกษา ${thd(yearV)} ${thd(scopeText)} ในวันที่ ${fill(c.held)} ไปแล้วนั้น`;
     return (
       <LetterShell
         {...commonShell}
@@ -501,50 +684,45 @@ export default function Vp9Report({
         subject={subj}
         to={`ผู้ปกครองของ ${nameOf(s)} ชั้น${levelWord}ปีที่ ${thd(roomNoPrefix)}`}
       >
-        <p style={ind(2.2)}>
-          {isFirst
-            ? <>ด้วย{schoolName}กำหนดให้มีการวัดประเมินผล การสอบปลายภาค ภาคเรียนที่ {thd(semesterV)} ประจำปีการศึกษา {thd(yearV)} {thd(scopeText)} ในวันที่ {fill(c.held)} ไปแล้วนั้น</>
-            : <>ด้วย{schoolName}กำหนดให้มี{roundInfo.label} ภาคเรียนที่ {thd(semesterV)} ประจำปีการศึกษา {thd(yearV)} {thd(scopeText)} ในวันที่ {fill(c.held)} ไปแล้วนั้น</>}
-          {" "}โรงเรียนจึงขอแจ้งผลการตัดสินผลการเรียน
-          {isFirst ? ` สำหรับนักเรียนที่มีผลการเรียน ${kinds}` : ` หลัง${roundInfo.label}`} ซึ่งนักเรียนในความปกครองของท่าน{" "}
-          {isFirst ? "" : "ยัง"}<b>มีผลการเรียนที่ไม่ผ่าน</b>ดังนี้
-        </p>
+        <JText widthCm={W} indentCm={2.2} parts={[
+          { t: `${intro} โรงเรียนจึงขอแจ้งผลการตัดสินผลการเรียน${isFirst ? ` สำหรับนักเรียนที่มีผลการเรียน ${kinds}` : ` หลัง${roundInfo.label}`} ซึ่งนักเรียนในความปกครองของท่าน ${isFirst ? "" : "ยัง"}` },
+          { t: "มีผลการเรียนที่ไม่ผ่าน", b: true },
+          { t: "ดังนี้" },
+        ]} />
 
-        <div style={{ paddingLeft: "2.8cm", paddingRight: "0.3cm" }}>
+        <div style={{ paddingLeft: "2.8cm" }} className="space-y-0">
           {items.map((it, i) => (
-            <p key={it.r} style={{ textIndent: "-0.9cm", paddingLeft: "0.9cm" }}>
-              {thd(i + 1)}. ติด {thd(it.r)} จำนวน {thd(it.names.length)} รายวิชา ได้แก่ {it.names.join(", ")}
-            </p>
+            <div key={it.r} className="flex">
+              <span style={{ width: "0.9cm" }} className="shrink-0">{thd(i + 1)}.</span>
+              <JText widthCm={W - 2.8 - 0.9} parts={[{ t: `ติด ${thd(it.r)} จำนวน ${thd(it.names.length)} รายวิชา ได้แก่ ${it.names.join(", ")}` }]} />
+            </div>
           ))}
         </div>
 
-        <p style={ind(1.6)}>
-          เพื่อให้เป็นไปตามระเบียบ{schoolName}ว่าด้วยการวัดและประเมินผลการเรียน ตามหลักสูตรแกนกลางการศึกษาขั้นพื้นฐาน
-          พุทธศักราช ๒๕๕๑ (ฉบับปรับปรุง พุทธศักราช {thd(revYear)}) ระดับ{levelWord}
-        </p>
-        <p style={ind(1.2)}>
-          {roundInfo.next
+        <JText widthCm={W} indentCm={1.6} parts={[{
+          t: `เพื่อให้เป็นไปตามระเบียบ${schoolName}ว่าด้วยการวัดและประเมินผลการเรียน ตามหลักสูตรแกนกลางการศึกษาขั้นพื้นฐาน พุทธศักราช ๒๕๕๑ (ฉบับปรับปรุง พุทธศักราช ${thd(revYear)}) ระดับ${levelWord}`,
+        }]} />
+        <JText widthCm={W} indentCm={1.2} parts={[{
+          t: roundInfo.next
             ? "จึงขอความร่วมมือผู้ปกครองได้กำกับดูแลติดตามนักเรียนในความปกครองของท่าน ให้ดำเนินการตามกำหนด ดังนี้"
-            : "จึงขอความร่วมมือผู้ปกครองติดต่อฝ่ายวัดผลและประเมินผลของโรงเรียน เพื่อดำเนินการตามระเบียบต่อไป"}
-        </p>
+            : "จึงขอความร่วมมือผู้ปกครองติดต่อฝ่ายวัดผลและประเมินผลของโรงเรียน เพื่อดำเนินการตามระเบียบต่อไป",
+        }]} />
 
         {roundInfo.next && (
           <>
-            <div style={{ paddingLeft: "2.2cm" }} className="space-y-0">
+            <div style={{ paddingLeft: "2.2cm" }}>
               <p className="flex"><span style={{ width: "1.2cm" }} className="shrink-0">{thd(1)}.</span><span style={{ width: "6.6cm" }} className="shrink-0">{thd(roundInfo.next)}</span><span>วันที่ {fill(c.nextExam)}</span></p>
               <p className="flex"><span style={{ width: "1.2cm" }} className="shrink-0">{thd(2)}.</span><span style={{ width: "6.6cm" }} className="shrink-0">ประกาศผล{thd(roundInfo.next)}</span><span>วันที่ {fill(c.nextAnnounce)}</span></p>
             </div>
-            <p style={ind(1.7)}>
-              ถ้านักเรียนไม่มาดำเนินการตามกำหนดเวลาดังกล่าว จะส่งผลให้ไม่ผ่านการตัดสินผลการเรียนรายวิชา
-              และทางโรงเรียนจะแจ้งผลการเรียนรายบุคคล{semesterV === "1" ? ` ${nextTermText}` : ""} ต่อไป
-              ทางโรงเรียนหวังเป็นอย่างยิ่งว่าจะได้รับความร่วมมือเป็นอย่างดี
-            </p>
+            <JText widthCm={W} indentCm={1.7} parts={[{
+              t: `ถ้านักเรียนไม่มาดำเนินการตามกำหนดเวลาดังกล่าว จะส่งผลให้ไม่ผ่านการตัดสินผลการเรียนรายวิชา และทางโรงเรียนจะแจ้งผลการเรียนรายบุคคล${semesterV === "1" ? " " + nextTermText : ""} ต่อไป ทางโรงเรียนหวังเป็นอย่างยิ่งว่าจะได้รับความร่วมมือเป็นอย่างดี`,
+            }]} />
           </>
         )}
         {!roundInfo.next && (
-          <p style={ind(1.7)}>ทางโรงเรียนหวังเป็นอย่างยิ่งว่าจะได้รับความร่วมมือเป็นอย่างดี</p>
+          <JText widthCm={W} indentCm={1.7} parts={[{ t: "ทางโรงเรียนหวังเป็นอย่างยิ่งว่าจะได้รับความร่วมมือเป็นอย่างดี" }]} />
         )}
-        <p style={{ ...ind(1.8), marginTop: "6mm" }}>จึงเรียนมาเพื่อโปรดทราบ และดำเนินการ</p>
+        <p style={{ textIndent: "1.8cm", marginTop: "6mm" }}>จึงเรียนมาเพื่อโปรดทราบ และดำเนินการ</p>
       </LetterShell>
     );
   }
@@ -655,8 +833,9 @@ export default function Vp9Report({
           </div>
           <label className="flex items-center gap-2 text-m font-bold text-slate-500">
             <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} className="accent-fuchsia-500" />
-            แสดงนักเรียนทั้งห้องในตาราง (คนที่ไม่ติดจะเว้นช่องว่าง)
+            แสดงนักเรียนทั้งห้องในตาราง (คนที่ไม่ติดจะแสดงเกรดของแต่ละวิชา)
           </label>
+          {showAll && gradeNote && <p className="text-[12px] font-bold text-amber-600">⚠️ {gradeNote}</p>}
           <p className="text-[12px] font-bold text-slate-400">
             ตรวจข้อมูล: รายวิชาในเทอมนี้ {subjects.length} วิชา · ที่ครูบันทึกไว้ใน วผ.8 รอบนี้ {Object.keys(current).length} คน / {failCells} รายการ
           </p>
@@ -787,7 +966,7 @@ export default function Vp9Report({
                     {/* รหัสวิชา + ชื่อวิชา หมุนขวา 90° (อ่านจากบนลงล่าง) */}
                     <div
                       style={{
-                        writingMode: "vertical-rl", height: 230, margin: "0 auto", padding: "5px 0",
+                        writingMode: "vertical-rl", height: 265, margin: "0 auto", padding: "5px 0",
                         fontSize: 12.5, lineHeight: 1.15, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden",
                       }}>
                       {s ? `${s.code} ${s.title}` : ""}
@@ -803,7 +982,7 @@ export default function Vp9Report({
                   <td className="border border-slate-400 px-2 py-1.5 font-bold whitespace-nowrap overflow-hidden">{nameOf(st)}</td>
                   {allCols.map((s, c) => (
                     <td key={c} className="border border-slate-400 text-center py-1.5 font-black">
-                      {s ? current[st.id]?.[s.code] ?? "" : ""}
+                      {s ? current[st.id]?.[s.code] ?? (showAll ? gradeMap[st.id]?.[s.code] ?? "" : "") : ""}
                     </td>
                   ))}
                 </tr>
@@ -825,6 +1004,10 @@ export default function Vp9Report({
               </tr>
             </tbody>
           </table>
+
+          {showAll && (
+            <p className="mt-2 text-[15px] font-bold">หมายเหตุ ตัวเลข 0, ร, มส = ผลการเรียนที่ไม่ผ่าน · ตัวเลขอื่น = ระดับผลการเรียนของรายวิชานั้น</p>
+          )}
 
           {/* ลายเซ็น */}
           <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-6 text-[18px] font-bold vp9-avoid">

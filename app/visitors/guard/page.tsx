@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import TargetPicker, { Target, Targets } from "@/components/visitors/TargetPicker";
 import StudentPicker, { PickedStudent } from "@/components/visitors/StudentPicker";
+import TeacherFinder from "@/components/visitors/TeacherFinder";
 
 type Visitor = {
   id: string; full_name: string; phone?: string | null; car_plate?: string | null;
@@ -13,7 +14,7 @@ type Visitor = {
   status: string; check_in_at?: string | null; created_at?: string;
   acknowledged_at?: string | null;
 };
-type Mode = "home" | "id" | "face";
+type Mode = "home" | "id" | "face" | "teacher";
 
 const timeTH = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" }) : "";
@@ -188,6 +189,9 @@ export default function GuardPage() {
 </button>
             <Link href="/visitors/parcels" className={`${bigBtn} block bg-amber-500 py-8 text-center text-3xl text-white`}>📦 แจ้งฝากของ</Link>
             <Link href="/visitors/late" className={`${bigBtn} block bg-rose-600 py-8 text-center text-3xl text-white`}>⏰ แจ้งนักเรียนมาสาย</Link>
+            <button onClick={() => setMode("teacher")} className={`${bigBtn} bg-indigo-600 py-8 text-3xl text-white`}>
+  👩‍🏫 ติดต่อครู (ดูครูประจำชั้น)
+</button>
 
             {pending.length > 0 && (
               <section className="space-y-4">
@@ -226,8 +230,14 @@ export default function GuardPage() {
             </section>
           </>
         )}
-
-        {mode !== "home" && (
+        {mode === "teacher" && (
+  <div className="space-y-5">
+    <button onClick={reset} className="rounded-2xl bg-white px-6 py-4 text-2xl font-black text-slate-700 shadow">← กลับ</button>
+    <h2 className="text-3xl font-black">👩‍🏫 ติดต่อครูประจำชั้น</h2>
+    <TeacherFinder big guardKey={gKey()} />
+  </div>
+)}
+        {(mode === "id" || mode === "face") && (
           <div className="space-y-5">
             <button onClick={reset} className="rounded-2xl bg-white px-6 py-4 text-2xl font-black text-slate-700 shadow">← กลับ</button>
             <h2 className="text-3xl font-black">{mode === "id" ? "🪪 สแกนบัตร / ทะเบียนรถ" : "📷 ถ่ายรูปผู้มาติดต่อ"}</h2>

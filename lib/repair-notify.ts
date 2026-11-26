@@ -118,3 +118,99 @@ export async function notifyRepairAcknowledged(requestId: string, actorId: strin
 
   await Promise.allSettled([...sends.values()].map(s => post(s.to, s.card)));
 }
+
+// ─── มอบหมายงาน / เปลี่ยนสถานะ ─────────────────────────────
+// ⚠️ ปรับ key ให้ตรงกับค่า status จริงในตาราง repair_requests (ถ้าไม่ตรง จะแสดงค่าดิบแทน)
+const REPAIR_STATUS_TH: Record<string, string> = {
+  pending: "รอดำเนินการ", acknowledged: "รับเรื่องแล้ว", assigned: "มอบหมายแล้ว",
+  in_progress: "กำลังดำเนินการ", waiting_parts: "รออะไหล่/รอจัดซื้อ",
+  completed: "เสร็จสิ้น", done: "เสร็จสิ้น", cancelled: "ยกเลิก", rejected: "ไม่ดำเนินการ",
+};
+const statusTh = (s?: string | null) => (s && REPAIR_STATUS_TH[s]) || s || "-";
+
+async function loadRepairForNotify(requestId: string) {
+  const { data: req } = await admin.from("repair_requests")
+    .select("*, reporter:users!reporter_id(id,email,title,first_name,last_name), building:buildings(name)")
+    .eq("id", requestId).maybeSingle();
+  if (!req) return null;
+  const ids: string[] = (req.assigned_user_ids as string[] | null) ?? (req.assigned_to ? [req.assigned_to] : []);
+  const { data: assignees } = ids.length
+    ? await admin.from("users").select("id,title,first_name,last_name,email").in("id", ids)
+    : { data: [] as any[] };
+  return { req, assignees: (assignees ?? []) as any[] };
+}
+
+function makeSender() {
+  const sends = new Map<string, { to: string; card: any }>();
+  const add = (to?: string | null, card?: any) => {         // 1 คน = 1 การ์ด (ตัวแรกมีสิทธิ์ก่อน)
+    if (!to || !card) return;
+    const k = to.toLowerCase();
+    if (!sends.has(k)) sends.set(k, { to, card });
+  };
+  const flush = () => Promise.allSettled([...sends.values()].map((s) => post(s.to, s.card)));
+  return { add, flush };
+}
+
+export async function notifyRepairAssigned(requestId: string, byName: string, note?: string) {
+  const loaded = await loadRepairForNotify(requestId);
+  if (!loaded) return;
+  const { req, assignees } = loaded;
+  const where = `${req.building?.name ?? "-"} ${req.room ?? ""}`.trim();
+  const names = assignees.map(nm).join(", ") || "-";
+  const link = [openUrl("เปิดในระบบ", `${SITE}/repair`)];
+  const { add, flush } = makeSender();
+
+  // ① ผู้ที่ได้รับมอบหมาย
+  const taskCard = wrapCard([
+    tb("🛠️ คุณได้รับมอบหมายงานซ่อม", { weight: "Bolder", size: "Large", color: "Accent" }),
+    { type: "FactSet", facts: [
+      { title: "เรื่อง", value: req.title },
+      { title: "หมวดหมู่", value: req.category ?? "-" },
+      { title: "อาคาร", value: where },
+      { title: "เร่งด่วน", value: req.priority ?? "-" },
+      { title: "ผู้แจ้ง", value: nm(req.reporter) },
+      { title: "มอบหมายโดย", value: byName },
+      { title: "ผู้รับผิดชอบ", value: names },
+    ]},
+    ...(note ? [tb(`หมายเหตุ: ${note}`, { size: "Small" })] : []),
+    tb(req.description || "-", { size: "Small", isSubtle: true }),
+  ], link);
+  assignees.forEach((u) => add(u.email, taskCard));
+
+  // ② ผู้แจ้ง
+  add(req.reporter?.email, wrapCard([
+    tb("👷 งานแจ้งซ่อมของคุณมีผู้รับผิดชอบแล้ว", { weight: "Bolder", size: "Large", color: "Good" }),
+    tb(`${req.title}\nผู้รับผิดชอบ: ${names}\nมอบหมายโดย: ${byName}`),
+    ...(note ? [tb(`หมายเหตุ: ${note}`, { size: "Small" })] : []),
+  ], link));
+
+  await flush();
+}
+
+export async function notifyRepairStatusChanged(requestId: string, byName: string, note?: string) {
+  const loaded = await loadRepairForNotify(requestId);
+  if (!loaded) return;
+  const { req, assignees } = loaded;
+  const st = statusTh(req.status);
+  const done = ["completed", "done"].includes(req.status);
+  const bad = ["cancelled", "rejected"].includes(req.status);
+  const link = [openUrl("เปิดในระบบ", `${SITE}/repair`)];
+  const { add, flush } = makeSender();
+
+  const card = wrapCard([
+    tb(done ? "✅ งานซ่อมเสร็จสิ้นแล้ว" : `🔄 สถานะงานซ่อมเปลี่ยนเป็น: ${st}`,
+       { weight: "Bolder", size: "Large", color: done ? "Good" : bad ? "Warning" : "Accent" }),
+    { type: "FactSet", facts: [
+      { title: "เรื่อง", value: req.title },
+      { title: "อาคาร", value: `${req.building?.name ?? "-"} ${req.room ?? ""}`.trim() },
+      { title: "สถานะ", value: st },
+      { title: "อัปเดตโดย", value: byName },
+    ]},
+    ...(note ? [tb(`หมายเหตุ: ${note}`, { size: "Small" })] : []),
+  ], link);
+
+  add(req.reporter?.email, card);               // ผู้แจ้งทราบทุกครั้ง
+  assignees.forEach((u) => add(u.email, card)); // ผู้รับผิดชอบทราบด้วย
+
+  await flush();
+}
