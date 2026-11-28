@@ -66,7 +66,7 @@ async function fetchBooking(id: string): Promise<Booking> {
   if (error) throw new Error(error.message);
   return data;
 }
-function notifyVehicle(event: "new" | "wait_director" | "approved" | "rejected", id: string) {
+function notifyVehicle(event: "new" | "edited" | "wait_director" | "approved" | "rejected", id: string) {
   authFetch("/api/booking-notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "vehicle", event, id }) }).catch(() => {});
 }
 // อนุญาตแล้ว → สร้าง PDF ฉบับลายเซ็นครบ เก็บ OneDrive แล้วแจ้ง Teams
@@ -100,6 +100,7 @@ export default function VehicleBookingPage() {
   const [detail, setDetail] = useState<Booking | null>(null);
   const [assignTarget, setAssignTarget] = useState<Booking | null>(null);
   const [directorTarget, setDirectorTarget] = useState<Booking | null>(null);
+  const [editTarget, setEditTarget] = useState<Booking | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }: any) => {
@@ -176,7 +177,7 @@ export default function VehicleBookingPage() {
       <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <button onClick={() => router.push("/duty-report")} className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-slate-500 shadow-sm ring-1 ring-slate-200 hover:text-indigo-600"><Home className="h-4 w-4" /></button>
+            <button onClick={() => router.push("/dashboard")} className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-slate-500 shadow-sm ring-1 ring-slate-200 hover:text-indigo-600"><Home className="h-4 w-4" /></button>
             <button onClick={() => router.back()} className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-slate-500 shadow-sm ring-1 ring-slate-200 hover:text-indigo-600"><ArrowLeft className="h-4 w-4" /></button>
           </div>
           <div className="flex gap-2">
@@ -286,10 +287,23 @@ export default function VehicleBookingPage() {
         </Section>
       </div>
 
-      {newTarget && <RequestModal defaultDate={date} init={newTarget} myUserId={myUserId} vehicles={vehicles} onClose={() => setNewTarget(null)} onCreated={() => { setNewTarget(null); reload(); }} />}
+      {newTarget && (
+        <RequestModal defaultDate={date} init={newTarget} myUserId={myUserId} vehicles={vehicles} onClose={() => setNewTarget(null)}
+          onCreated={async (id) => {
+            setNewTarget(null); reload();
+            // แอดมิน: เปิดหน้าจัดรถ+คนขับต่อทันที (ผ่านทันที ไม่ต้องรอ)
+            if (isAdmin) { try { setAssignTarget(await fetchBooking(id)); } catch { /* ignore */ } }
+          }} />
+      )}
+      {editTarget && (
+        <RequestModal defaultDate={date} init={{ start: editTarget.start_time.slice(0, 5), end: editTarget.end_time.slice(0, 5) }} myUserId={myUserId} vehicles={vehicles}
+          editing={editTarget} onClose={() => setEditTarget(null)} onCreated={() => { setEditTarget(null); reload(); }} />
+      )}
       {detail && (
         <DetailModal b={detail} vehicles={vehicles} action={actionOf(detail)}
           canCancel={(detail.requester_id === myUserId || isAdmin) && !["cancelled", "rejected"].includes(detail.status)}
+          canEdit={(detail.requester_id === myUserId || isAdmin) && ["pending_assign", "pending_director"].includes(detail.status) && !detail.leave_request_id}
+          onEdit={() => { setEditTarget(detail); setDetail(null); }}
           onClose={() => setDetail(null)} onCancel={() => cancelBooking(detail)}
           onAct={() => { if (actionOf(detail) === "assign") setAssignTarget(detail); else setDirectorTarget(detail); setDetail(null); }} />
       )}
@@ -329,13 +343,14 @@ const inputCls = "mt-1 w-full rounded-xl border-2 border-slate-200 px-3 py-2 tex
 const labelCls = "text-xs font-bold text-slate-500";
 
 // ---------- ขอใช้รถ (ผู้ขอไม่ต้องเลือกรถ — ผู้จัดรถเลือกให้) ----------
-function RequestModal({ defaultDate, init, myUserId, vehicles, onClose, onCreated }: {
-  defaultDate: string; init: { start: string; end: string }; myUserId: string; vehicles: Vehicle[]; onClose: () => void; onCreated: () => void;
+function RequestModal({ defaultDate, init, myUserId, vehicles, editing, onClose, onCreated }: {
+  defaultDate: string; init: { start: string; end: string }; myUserId: string; vehicles: Vehicle[]; editing?: Booking | null; onClose: () => void; onCreated: (id: string) => void;
 }) {
-  const [sd, setSd] = useState(defaultDate), [st, setSt] = useState(init.start);
-  const [ed, setEd] = useState(defaultDate), [et, setEt] = useState(init.end);
-  const [position, setPosition] = useState(""), [purpose, setPurpose] = useState(""), [destination, setDestination] = useState("");
-  const [distance, setDistance] = useState(""), [passengers, setPassengers] = useState("1");
+  const edt = editing ?? null;
+  const [sd, setSd] = useState<string>(edt?.start_date ?? defaultDate), [st, setSt] = useState<string>(edt ? edt.start_time.slice(0, 5) : init.start);
+  const [ed, setEd] = useState<string>(edt?.end_date ?? defaultDate), [et, setEt] = useState<string>(edt ? edt.end_time.slice(0, 5) : init.end);
+  const [position, setPosition] = useState<string>(edt?.requester_position ?? ""), [purpose, setPurpose] = useState<string>(edt?.purpose ?? ""), [destination, setDestination] = useState<string>(edt?.destination ?? "");
+  const [distance, setDistance] = useState<string>(edt?.distance_km != null ? String(edt.distance_km) : ""), [passengers, setPassengers] = useState<string>(edt ? String(edt.passengers) : "1");
   const [sig, setSig] = useState<string | null>(null);
   const [saving, setSaving] = useState(false), [error, setError] = useState("");
 
@@ -348,27 +363,43 @@ function RequestModal({ defaultDate, init, myUserId, vehicles, onClose, onCreate
     if (!sig) { setError("กรุณาลงลายเซ็น"); return; }
     setSaving(true); setError("");
     try {
-      const { data, error: err } = await supabase.from("vehicle_bookings").insert({
-        requester_id: myUserId, requester_position: position.trim(), purpose: purpose.trim(), destination: destination.trim(),
+      const payload = {
+        requester_position: position.trim(), purpose: purpose.trim(), destination: destination.trim(),
         distance_km: distance ? Number(distance) : null, passengers: Number(passengers),
         start_date: sd, start_time: st, end_date: ed, end_time: et,
         requester_signature: sig, requester_signed_at: new Date().toISOString(),
-      }).select("id").single();
-      if (err) throw new Error(err.message);
-      const full = await fetchBooking(data.id);
-      notifyVehicle("new", data.id);
+      };
+      let id: string;
+      if (edt) {
+        // แก้ไขได้ตราบที่ยังไม่อนุญาต — เริ่มขั้นตอนใหม่ (ล้างรถ/คนขับที่จัดไว้)
+        const { data: upd, error: err } = await supabase.from("vehicle_bookings").update({
+          ...payload, status: "pending_assign",
+          vehicle_id: null, driver_id: null, driver_name: null, assigned_by: null, assigned_at: null, assign_note: null, assign_signature: null,
+          director_id: null, director_decision: null, director_signature: null, director_signed_at: null,
+        }).eq("id", edt.id).in("status", ["pending_assign", "pending_director"]).select("id");
+        if (err) throw new Error(err.message);
+        if (!upd?.length) throw new Error("คำขอนี้ถูกดำเนินการไปแล้ว แก้ไขไม่ได้");
+        id = edt.id;
+      } else {
+        const { data, error: err } = await supabase.from("vehicle_bookings").insert({ requester_id: myUserId, ...payload }).select("id").single();
+        if (err) throw new Error(err.message);
+        id = data.id;
+      }
+      const full = await fetchBooking(id);
+      notifyVehicle(edt ? "edited" : "new", id);
       try {
         const pdf = await renderToPdf(<VehicleRequestForm data={toFormData(full, vehicles)} withSignatures={false} />);
         const url = await uploadBookingFile(pdf, "vehicle_unsigned", full.start_date, pdfLabel(full));
-        await supabase.from("vehicle_bookings").update({ pdf_unsigned_url: url }).eq("id", data.id);
+        await supabase.from("vehicle_bookings").update({ pdf_unsigned_url: url }).eq("id", id);
       } catch (e) { console.warn("[vehicle-booking] อัปโหลดฉบับไม่มีลายเซ็นไม่สำเร็จ:", e); }
-      onCreated();
+      onCreated(id);
     } catch (e: any) { setError(e.message ?? "บันทึกไม่สำเร็จ"); } finally { setSaving(false); }
   }
 
   return (
     <Shell wide>
-      <Head title="หนังสือขออนุญาตใช้รถยนต์ทางราชการ" onClose={onClose} />
+      <Head title={edt ? "แก้ไขคำขอใช้รถ" : "หนังสือขออนุญาตใช้รถยนต์ทางราชการ"} onClose={onClose} />
+      {edt && <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">เมื่อบันทึก ระบบจะให้ผู้จัดรถเลือกรถ/คนขับใหม่อีกครั้ง</p>}
       {error && <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">{error}</p>}
       <p className="mt-2 rounded-xl bg-indigo-50 px-3 py-2 text-[11px] font-semibold text-indigo-600">ไม่ต้องเลือกรถ — หัวหน้ากลุ่มบริหารทั่วไป/ธุรการทั่วไปจะจัดรถและคนขับให้ แล้วแจ้งกลับทาง Teams</p>
       <div className="mt-4 grid grid-cols-2 gap-3">
@@ -383,14 +414,14 @@ function RequestModal({ defaultDate, init, myUserId, vehicles, onClose, onCreate
         <div><label className={labelCls}>จำนวนผู้โดยสาร (คน) *</label><input type="number" min={1} value={passengers} onChange={(e) => setPassengers(e.target.value)} className={inputCls} /></div>
       </div>
       <div className="mt-4"><label className={labelCls}>ลายเซ็นผู้ขออนุญาต *</label><div className="mt-1"><SignatureField userId={myUserId} onChange={setSig} /></div></div>
-      <button onClick={submit} disabled={saving} className="mt-6 w-full rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md disabled:opacity-50">{saving ? "กำลังส่งคำขอ..." : "ส่งคำขอใช้รถ"}</button>
+      <button onClick={submit} disabled={saving} className="mt-6 w-full rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md disabled:opacity-50">{saving ? "กำลังบันทึก..." : edt ? "บันทึกการแก้ไข" : "ส่งคำขอใช้รถ"}</button>
     </Shell>
   );
 }
 
 // ---------- รายละเอียด ----------
-function DetailModal({ b, vehicles, action, canCancel, onClose, onCancel, onAct }: {
-  b: Booking; vehicles: Vehicle[]; action: "assign" | "director" | null; canCancel: boolean; onClose: () => void; onCancel: () => void; onAct: () => void;
+function DetailModal({ b, vehicles, action, canCancel, canEdit, onClose, onCancel, onEdit, onAct }: {
+  b: Booking; vehicles: Vehicle[]; action: "assign" | "director" | null; canCancel: boolean; canEdit: boolean; onClose: () => void; onCancel: () => void; onEdit: () => void; onAct: () => void;
 }) {
   const [preview, setPreview] = useState(false);
   const st = STATUS[b.status];
@@ -403,7 +434,7 @@ function DetailModal({ b, vehicles, action, canCancel, onClose, onCancel, onAct 
         <p>ปลายทาง: {b.destination}{b.distance_km ? ` (${b.distance_km} กม.)` : ""}</p>
         <p>เพื่อ: {b.purpose} · ผู้โดยสาร {b.passengers} คน</p>
         <p>ผู้ขอใช้: {teacherName(b.requester)}{b.requester_position ? ` (${b.requester_position})` : ""}</p>
-        {b.leave_request_id && <p className="font-semibold text-sky-600">🏛️ ผูกกับคำขอไปราชการ (เลือกใช้รถโรงเรียน)</p>}
+        {b.leave_request_id && <p className="font-semibold text-sky-600">🏛️ ผูกกับคำขอไปราชการ (เลือกใช้รถโรงเรียน){["pending_assign", "pending_director"].includes(b.status) ? " — แก้ไขได้ที่หน้าใบลา/ไปราชการ" : ""}</p>}
         <p className="font-bold">🚐 รถ: {b.vehicle ? `${vLabel(b.vehicle)} (${b.vehicle.seats} ที่นั่ง${b.vehicle.is_hired ? " · รถจ้าง" : ""})` : "ยังไม่ได้จัดรถ"}</p>
         <p className="font-bold">👤 คนขับ: {b.driver_name ?? "ยังไม่ได้จัดคนขับ"}{b.driver?.phone ? ` · ${b.driver.phone}` : ""}</p>
         {b.assign_note && <p>ความเห็นผู้จัดรถ: {b.assign_note}</p>}
@@ -425,6 +456,7 @@ function DetailModal({ b, vehicles, action, canCancel, onClose, onCancel, onAct 
         </div>
       )}
       <div className="mt-6 flex gap-2">
+        {canEdit && <button onClick={onEdit} className="rounded-xl border-2 border-indigo-200 px-4 py-2.5 text-sm font-semibold text-indigo-600 hover:bg-indigo-50">✏️ แก้ไขคำขอ</button>}
         {canCancel && <button onClick={onCancel} className="rounded-xl border-2 border-rose-200 px-4 py-2.5 text-sm font-semibold text-rose-500 hover:bg-rose-50">ยกเลิกคำขอ</button>}
         {action && <button onClick={onAct} className="flex-1 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md">{action === "assign" ? "เลือกรถ + คนขับ" : "ผอ. พิจารณา"}</button>}
       </div>

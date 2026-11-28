@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Home, ClipboardList, ScanLine, UserCheck, ChevronRight, DoorOpen, Car } from "lucide-react";
+import { Home, ClipboardList, ScanLine, UserCheck, ChevronRight } from "lucide-react";
 
 const DASHBOARD_PATH = "/dashboard";
 
@@ -9,7 +9,7 @@ const MENU = [
   { name: "รายงานเวรประจำวัน", desc: "ดูสรุปผล/บันทึกรายงานเวร", icon: ClipboardList, color: "from-orange-500 to-amber-400", path: "/duty-report/report" },
   { name: "จับสาย", desc: "บันทึกนักเรียนมาสายหน้าประตู", icon: ScanLine, color: "from-rose-600 to-rose-400", path: "/late-checkin" },
   { name: "บุคคลภายนอก", desc: "บันทึกผู้มาติดต่อเข้า-ออกโรงเรียน", icon: UserCheck, color: "from-teal-600 to-emerald-400", path: "/visitors" },
-  ];
+];
 
 export default function DutyReportHubPage() {
   const router = useRouter();

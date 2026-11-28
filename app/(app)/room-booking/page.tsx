@@ -8,10 +8,11 @@ import { Home, ArrowLeft, Calendar, ChevronLeft, ChevronRight, Plus, X, FileText
 import { todayISO, formatThaiDateFull, timeShort, teacherName } from "@/lib/duty-helpers";
 import SignaturePad from "@/components/room-booking/SignaturePad";
 import { authFetch } from "@/lib/booking-client";
+import { isAdminRole } from "@/lib/booking-config";
 import RoomRequestForm, { RoomFormData, EQUIPMENT_OPTIONS, SEATING_OPTIONS } from "@/components/room-booking/RoomRequestForm";
 
 const supabase = createClient();
-const BACK_PATH = "/duty-report";
+const BACK_PATH = "/dashboard";
 
 // ---------- ค่าคงที่ ----------
 const START_H = 7, END_H = 18;
@@ -24,6 +25,15 @@ const TIME_OPTIONS = Array.from({ length: (END_H - START_H) * 2 + 1 }, (_, i) =>
 const toMin = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
 const DOW_SHORT = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 const isoOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+const datesOf = (b: Booking): string[] => (b.booking_dates?.length ? b.booking_dates : [b.booking_date]);
+const datesLabel = (b: Booking) => {
+  const ds = datesOf(b);
+  if (ds.length === 1) return formatThaiDateFull(ds[0]);
+  const sh = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" });
+  return `${ds.length} วัน (${ds.map(sh).join(", ")})`;
+};
+const EDITABLE = ["pending_head", "pending_deputy"];
 
 const NAME_SEL = "id, title, first_name, last_name, email";
 const BOOKING_SELECT = `*, room:meeting_rooms(id,name),
@@ -50,7 +60,7 @@ type Booking = Record<string, any>;
 // ---------- ฟอร์ม / PDF ----------
 function toFormData(b: Booking): RoomFormData {
   return {
-    created_at: b.created_at, booking_date: b.booking_date, start_time: b.start_time, end_time: b.end_time,
+    created_at: b.created_at, booking_date: b.booking_date, booking_dates: datesOf(b), start_time: b.start_time, end_time: b.end_time,
     room_name: b.room?.name ?? "", requester_name: b.requester ? teacherName(b.requester) : "",
     requester_position: b.requester_position ?? "", purpose: b.purpose, attendees: b.attendees,
     equipment: b.equipment ?? [], equipment_other: b.equipment_other, seating: b.seating, seating_other: b.seating_other,
@@ -132,7 +142,7 @@ async function uploadLayouts(files: File[], b: Booking): Promise<string[]> {
 }
 
 // แจ้ง Teams (ธุรการทั่วไป / หัวหน้างานอาคารสถานที่) — ผู้รับแค่รับทราบ ไม่ต้องกดอะไร (ไม่ให้ล้มทั้งงานถ้าส่งไม่สำเร็จ)
-function notifyAdmin(event: "new" | "head_done" | "approved" | "rejected", b: Booking) {
+function notifyAdmin(event: "new" | "edited" | "head_done" | "approved" | "rejected", b: Booking) {
   authFetch("/api/booking-notify", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kind: "room", event, id: b.id }),
@@ -164,6 +174,7 @@ export default function RoomBookingPage() {
   const [newTarget, setNewTarget] = useState<{ roomId: string; start: string; end: string } | null>(null);
   const [detail, setDetail] = useState<Booking | null>(null);
   const [stepTarget, setStepTarget] = useState<{ b: Booking; step: Step } | null>(null);
+  const [editTarget, setEditTarget] = useState<Booking | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
@@ -184,7 +195,7 @@ export default function RoomBookingPage() {
   const loadDay = useCallback(async () => {
     setLoading(true); setErrorMsg("");
     const { data, error } = await supabase.from("room_bookings").select(BOOKING_SELECT)
-      .eq("booking_date", date).not("status", "in", "(rejected,cancelled)").order("start_time");
+      .contains("booking_dates", [date]).not("status", "in", "(rejected,cancelled)").order("start_time");
     if (error) setErrorMsg("โหลดข้อมูลการจองไม่สำเร็จ: " + error.message);
     setDayBookings(data ?? []);
     setLoading(false);
@@ -194,10 +205,10 @@ export default function RoomBookingPage() {
     if (!myUserId) return;
     const [a, b] = await Promise.all([
       supabase.from("room_bookings").select(BOOKING_SELECT).in("status", ["pending_head", "pending_deputy"]).order("booking_date"),
-      supabase.from("room_bookings").select(BOOKING_SELECT).eq("requester_id", myUserId).gte("booking_date", todayISO()).order("booking_date"),
+      supabase.from("room_bookings").select(BOOKING_SELECT).eq("requester_id", myUserId).order("booking_date", { ascending: false }).limit(60),
     ]);
     setPending(a.data ?? []);
-    setMine((b.data ?? []).filter((x: Booking) => x.status !== "cancelled"));
+    setMine((b.data ?? []).filter((x: Booking) => x.status !== "cancelled" && [...datesOf(x)].sort().pop()! >= todayISO()).reverse());
   }, [myUserId]);
 
   useEffect(() => { loadDay(); }, [loadDay]);
@@ -211,9 +222,10 @@ export default function RoomBookingPage() {
     fetchBooking(id).then((b) => { setDetail(b); window.history.replaceState(null, "", "/room-booking"); }).catch(() => {});
   }, [myUserId]);
 
+  const isAdminUser = isAdminRole(myRole);
   const canAct = (b: Booking) => {
     const step = STEP_OF[b.status];
-    return !!step && (mySteps.has(step) || myRole === "admin");
+    return !!step && (mySteps.has(step) || isAdminUser);
   };
   const todo = useMemo(() => pending.filter(canAct), [pending, mySteps, myRole]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -358,13 +370,20 @@ export default function RoomBookingPage() {
       </div>
 
       {newTarget && (
-        <BookingModal rooms={rooms} defaultDate={date} init={newTarget} myUserId={myUserId}
+        <BookingModal rooms={rooms} defaultDate={date} init={newTarget} myUserId={myUserId} isAdmin={isAdminUser}
           onClose={() => setNewTarget(null)} onCreated={() => { setNewTarget(null); reload(); }} />
+      )}
+      {editTarget && (
+        <BookingModal rooms={rooms} defaultDate={date} init={{ roomId: editTarget.room_id, start: editTarget.start_time.slice(0, 5), end: editTarget.end_time.slice(0, 5) }}
+          myUserId={myUserId} isAdmin={isAdminUser} editing={editTarget}
+          onClose={() => setEditTarget(null)} onCreated={() => { setEditTarget(null); reload(); }} />
       )}
       {detail && (
         <DetailModal b={detail} rooms={rooms} canAct={canAct(detail)}
-          canCancel={(detail.requester_id === myUserId || myRole === "admin") && !["cancelled", "rejected"].includes(detail.status)}
+          canCancel={(detail.requester_id === myUserId || isAdminUser) && !["cancelled", "rejected"].includes(detail.status)}
+          canEdit={(detail.requester_id === myUserId || isAdminUser) && EDITABLE.includes(detail.status)}
           onClose={() => setDetail(null)} onCancel={() => cancelBooking(detail)}
+          onEdit={() => { setEditTarget(detail); setDetail(null); }}
           onAct={() => { setStepTarget({ b: detail, step: STEP_OF[detail.status] }); setDetail(null); }} />
       )}
       {stepTarget && (
@@ -417,7 +436,7 @@ function Row({ b, onClick, showDate }: { b: Booking; onClick: () => void; showDa
     <button onClick={onClick} className="flex w-full items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 text-left shadow-sm ring-1 ring-slate-100 hover:ring-indigo-200">
       <div className="min-w-0">
         <p className="text-xs font-bold text-slate-500">
-          {showDate ? `${formatThaiDateFull(b.booking_date)} · ` : ""}{timeShort(b.start_time)} - {timeShort(b.end_time)} น. · {b.room?.name}
+          {showDate ? `${datesLabel(b)} · ` : ""}{timeShort(b.start_time)} - {timeShort(b.end_time)} น. · {b.room?.name}
         </p>
         <p className="truncate text-sm font-semibold text-slate-800">{b.purpose}</p>
         <p className="truncate text-xs text-slate-400">{teacherName(b.requester)}{b.layout_urls?.length ? " · 🪑 มีผังห้อง" : ""}</p>
@@ -441,135 +460,224 @@ const Head = ({ title, onClose }: { title: string; onClose: () => void }) => (
 const inputCls = "mt-1 w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm";
 const labelCls = "text-xs font-bold text-slate-500";
 
-// ---------- ฟอร์มขอใช้ห้อง ----------
-function BookingModal({ rooms, defaultDate, init, myUserId, onClose, onCreated }: {
+// ---------- ฟอร์มขอใช้ห้อง (สร้างใหม่ / แก้ไขได้ถ้ายังไม่อนุมัติ) ----------
+function BookingModal({ rooms, defaultDate, init, myUserId, isAdmin, editing, onClose, onCreated }: {
   rooms: Room[]; defaultDate: string; init: { roomId: string; start: string; end: string };
-  myUserId: string; onClose: () => void; onCreated: () => void;
+  myUserId: string; isAdmin: boolean; editing?: Booking | null; onClose: () => void; onCreated: () => void;
 }) {
-  const [roomId, setRoomId] = useState(init.roomId);
-  const [bdate, setBdate] = useState(defaultDate);
-  const [start, setStart] = useState(init.start);
-  const [end, setEnd] = useState(init.end);
-  const [position, setPosition] = useState("");
-  const [purpose, setPurpose] = useState("");
-  const [attendees, setAttendees] = useState("");
-  const [equipment, setEquipment] = useState<string[]>([]);
-  const [equipOther, setEquipOther] = useState("");
-  const [seating, setSeating] = useState<string>("");
-  const [seatingOther, setSeatingOther] = useState("");
+  const ed = editing ?? null;
+  const [roomId, setRoomId] = useState<string>(ed?.room_id ?? init.roomId);
+  const [dates, setDates] = useState<string[]>(ed ? (ed.booking_dates?.length ? ed.booking_dates : [ed.booking_date]) : [defaultDate]);
+  const [addFrom, setAddFrom] = useState(defaultDate);
+  const [addTo, setAddTo] = useState(defaultDate);
+  const [skipWeekend, setSkipWeekend] = useState(true);
+  const [start, setStart] = useState<string>(ed ? ed.start_time.slice(0, 5) : init.start);
+  const [end, setEnd] = useState<string>(ed ? ed.end_time.slice(0, 5) : init.end);
+  const [position, setPosition] = useState<string>(ed?.requester_position ?? "");
+  const [purpose, setPurpose] = useState<string>(ed?.purpose ?? "");
+  const [attendees, setAttendees] = useState<string>(ed?.attendees ? String(ed.attendees) : "");
+  const [equipment, setEquipment] = useState<string[]>(ed?.equipment ?? []);
+  const [equipOther, setEquipOther] = useState<string>(ed?.equipment_other ?? "");
+  const [seating, setSeating] = useState<string>(ed?.seating ?? "");
+  const [seatingOther, setSeatingOther] = useState<string>(ed?.seating_other ?? "");
   const [layoutFiles, setLayoutFiles] = useState<File[]>([]);
   const layoutPreviews = useMemo(() => layoutFiles.map((f) => URL.createObjectURL(f)), [layoutFiles]);
   const [sig, setSig] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const toggle = (e: string) => setEquipment((p) => (p.includes(e) ? p.filter((x) => x !== e) : [...p, e]));
+  const toggle = (x: string) => setEquipment((p) => (p.includes(x) ? p.filter((y) => y !== x) : [...p, x]));
+  const shortDate = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" });
+
+  function addRange() {
+    if (!addFrom) return;
+    const to = addTo && addTo >= addFrom ? addTo : addFrom;
+    const out = new Set(dates);
+    const cur = new Date(addFrom + "T00:00:00"), last = new Date(to + "T00:00:00");
+    const multi = to !== addFrom;
+    let guard = 0;
+    while (cur <= last && guard++ < 62) {
+      const wk = cur.getDay() === 0 || cur.getDay() === 6;
+      if (!(multi && skipWeekend && wk)) out.add(isoOf(cur));
+      cur.setDate(cur.getDate() + 1);
+    }
+    setDates(Array.from(out).sort());
+  }
 
   async function submit() {
     if (!myUserId) { setError("ไม่พบข้อมูลผู้ใช้ กรุณาเข้าสู่ระบบใหม่"); return; }
+    if (dates.length === 0) { setError("กรุณาเลือกวันที่ใช้ห้องอย่างน้อย 1 วัน"); return; }
     if (!purpose.trim()) { setError("กรุณากรอกวัตถุประสงค์การใช้ห้อง"); return; }
     if (!position.trim()) { setError("กรุณากรอกตำแหน่ง"); return; }
     if (toMin(end) <= toMin(start)) { setError("เวลาสิ้นสุดต้องหลังเวลาเริ่ม"); return; }
     if (!sig) { setError("กรุณาลงลายเซ็น"); return; }
     setSaving(true); setError("");
     try {
-      const { data, error: err } = await supabase.from("room_bookings").insert({
-        room_id: roomId, booking_date: bdate, start_time: start, end_time: end,
-        requester_id: myUserId, requester_position: position.trim(), purpose: purpose.trim(),
+      const now = new Date().toISOString();
+      const sorted = [...dates].sort();
+      const common = {
+        room_id: roomId, booking_date: sorted[0], booking_dates: sorted, start_time: start, end_time: end,
+        requester_position: position.trim(), purpose: purpose.trim(),
         attendees: attendees ? Number(attendees) : null,
         equipment, equipment_other: equipOther.trim() || null,
         seating: seating || null, seating_other: seatingOther.trim() || null,
-        requester_signature: sig, requester_signed_at: new Date().toISOString(),
-      }).select("id").single();
-      if (err) throw new Error(err.code === "23P01" ? "ช่วงเวลานี้ห้องนี้ถูกจองแล้ว กรุณาเลือกเวลาหรือห้องอื่น" : err.message);
+        requester_signature: sig, requester_signed_at: now,
+      };
+      const overlapMsg = "ห้องนี้ถูกจองแล้วในวัน/เวลาที่เลือก กรุณาเลือกวันเวลาหรือห้องอื่น";
+      let id: string;
 
-      // ฉบับไม่มีลายเซ็น -> OneDrive (ไม่ให้ล้มทั้งคำขอถ้าอัปโหลดพลาด)
+      if (ed) {
+        // แก้ไข: เริ่มลำดับอนุมัติใหม่ (ล้างลายเซ็นหัวหน้ากลุ่ม/รองผอ.)
+        const { data: upd, error: err } = await supabase.from("room_bookings").update({
+          ...common, status: "pending_head",
+          head_id: null, head_signature: null, head_signed_at: null,
+          deputy_id: null, deputy_signature: null, deputy_signed_at: null,
+        }).eq("id", ed.id).in("status", ["pending_head", "pending_deputy"]).select("id");
+        if (err) throw new Error(err.code === "23P01" ? overlapMsg : err.message);
+        if (!upd?.length) throw new Error("คำขอนี้ถูกดำเนินการไปแล้ว แก้ไขไม่ได้");
+        id = ed.id;
+      } else {
+        // แอดมิน: ผ่านทันที (ผอ./หัวหน้างานอาคารฯ ลงชื่อให้อัตโนมัติ — หัวหน้ากลุ่ม/รองผอ.ปล่อยว่าง ไม่ลงแทน)
+        let auto: Record<string, any> = {};
+        if (isAdmin) {
+          const { data: ap } = await supabase.from("room_approvers").select("step, user_id").in("step", ["director", "staff"]);
+          const directorId = ap?.find((r: any) => r.step === "director")?.user_id ?? null;
+          const staffId = ap?.find((r: any) => r.step === "staff")?.user_id ?? null;
+          const [dSig, sSig] = await Promise.all([
+            directorId ? getStoredSignature(directorId) : Promise.resolve(null),
+            staffId ? getStoredSignature(staffId) : Promise.resolve(null),
+          ]);
+          auto = {
+            status: "approved",
+            director_id: directorId, director_decision: "approved", director_signature: dSig, director_signed_at: now,
+            staff_id: staffId, staff_result: "available", staff_signature: sSig, staff_signed_at: now,
+          };
+        }
+        const { data, error: err } = await supabase.from("room_bookings")
+          .insert({ requester_id: myUserId, ...common, ...auto }).select("id").single();
+        if (err) throw new Error(err.code === "23P01" ? overlapMsg : err.message);
+        id = data.id;
+      }
+
+      // ผังห้อง (เพิ่มจากของเดิมได้)
+      const full0 = await fetchBooking(id);
+      let layoutUrls: string[] = [...(ed?.layout_urls ?? [])];
       try {
-        const full = await fetchBooking(data.id);
-        let layoutUrls: string[] = [];
-        try {
-          if (layoutFiles.length) {
-            layoutUrls = await uploadLayouts(layoutFiles, full);
-            await supabase.from("room_bookings").update({ layout_urls: layoutUrls }).eq("id", data.id);
-          }
-        } catch (e) { console.warn("[room-booking] อัปโหลดผังห้องไม่สำเร็จ:", e); }
-        notifyAdmin("new", { ...full, layout_urls: layoutUrls });
-        const pdf = await makePdf(full, false, rooms.map((r) => r.name));
-        const url = await uploadPdf(pdf, "unsigned", full);
-        await supabase.from("room_bookings").update({ pdf_unsigned_url: url }).eq("id", data.id);
-      } catch (e) { console.warn("[room-booking] อัปโหลดฉบับไม่มีลายเซ็นไม่สำเร็จ:", e); }
+        if (layoutFiles.length) {
+          layoutUrls = [...layoutUrls, ...(await uploadLayouts(layoutFiles, full0))];
+          await supabase.from("room_bookings").update({ layout_urls: layoutUrls }).eq("id", id);
+        }
+      } catch (er) { console.warn("[room-booking] อัปโหลดผังห้องไม่สำเร็จ:", er); }
 
+      // PDF: ฉบับไม่มีลายเซ็นเสมอ + ฉบับลายเซ็นถ้าแอดมินผ่านทันที
+      const names = rooms.map((r) => r.name);
+      try {
+        const full = await fetchBooking(id);
+        const pdf = await makePdf(full, false, names);
+        const url = await uploadPdf(pdf, "unsigned", full);
+        await supabase.from("room_bookings").update({ pdf_unsigned_url: url }).eq("id", id);
+        if (isAdmin && !ed) {
+          const pdf2 = await makePdf(full, true, names);
+          const url2 = await uploadPdf(pdf2, "signed", full);
+          await supabase.from("room_bookings").update({ pdf_signed_url: url2 }).eq("id", id);
+        }
+      } catch (er) { console.warn("[room-booking] สร้าง/อัปโหลด PDF ไม่สำเร็จ:", er); }
+
+      notifyAdmin(ed ? "edited" : isAdmin ? "approved" : "new", { id } as Booking);
       onCreated();
-    } catch (e: any) {
-      setError(e.message ?? "บันทึกไม่สำเร็จ");
+    } catch (er: any) {
+      setError(er.message ?? "บันทึกไม่สำเร็จ");
     } finally { setSaving(false); }
   }
 
   return (
     <Shell wide>
-      <Head title="แบบคำขอใช้ห้องประชุม" onClose={onClose} />
+      <Head title={ed ? "แก้ไขคำขอใช้ห้องประชุม" : "แบบคำขอใช้ห้องประชุม"} onClose={onClose} />
       {error && <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">{error}</p>}
+      {isAdmin && !ed && <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">สิทธิ์ผู้ดูแลระบบ: คำขอนี้จะอนุมัติผ่านทันที ไม่ต้องรออนุมัติ</p>}
+      {ed && <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">เมื่อบันทึก ลำดับอนุมัติจะเริ่มใหม่ตั้งแต่หัวหน้ากลุ่มบริหารทั่วไป</p>}
 
       <div className="mt-4 grid grid-cols-2 gap-3">
         <div className="col-span-2">
           <label className={labelCls}>ห้องประชุม</label>
-          <select value={roomId} onChange={(e) => setRoomId(e.target.value)} className={inputCls}>
+          <select value={roomId} onChange={(ev) => setRoomId(ev.target.value)} className={inputCls}>
             {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         </div>
-        <div className="col-span-2">
-          <label className={labelCls}>วันที่ใช้ห้อง</label>
-          <input type="date" value={bdate} min={todayISO()} onChange={(e) => setBdate(e.target.value)} className={inputCls} />
+
+        {/* เลือกหลายวัน */}
+        <div className="col-span-2 rounded-2xl border-2 border-slate-200 p-3">
+          <label className={labelCls}>วันที่ใช้ห้อง (เลือกได้หลายวัน)</label>
+          <div className="mt-1 flex flex-wrap items-end gap-2">
+            <div><span className="text-[10px] font-bold text-slate-400">ตั้งแต่</span>
+              <input type="date" value={addFrom} min={todayISO()} onChange={(ev) => { setAddFrom(ev.target.value); if (addTo < ev.target.value) setAddTo(ev.target.value); }} className="block rounded-xl border-2 border-slate-200 px-2 py-1.5 text-sm" /></div>
+            <div><span className="text-[10px] font-bold text-slate-400">ถึง</span>
+              <input type="date" value={addTo} min={addFrom} onChange={(ev) => setAddTo(ev.target.value)} className="block rounded-xl border-2 border-slate-200 px-2 py-1.5 text-sm" /></div>
+            <button type="button" onClick={addRange} className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white">+ เพิ่มวัน</button>
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-[11px] font-semibold text-slate-500">
+            <input type="checkbox" checked={skipWeekend} onChange={(ev) => setSkipWeekend(ev.target.checked)} className="accent-indigo-600" /> ข้ามเสาร์-อาทิตย์ (เมื่อเพิ่มเป็นช่วง)
+          </label>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {dates.map((d) => (
+              <span key={d} className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700 ring-1 ring-indigo-200">
+                {shortDate(d)}
+                {dates.length > 1 && <button type="button" onClick={() => setDates((p) => p.filter((x) => x !== d))} className="text-indigo-400 hover:text-rose-500">✕</button>}
+              </span>
+            ))}
+          </div>
+          <p className="mt-1 text-[11px] text-slate-400">รวม {dates.length} วัน · ใช้เวลาเดียวกันทุกวัน</p>
         </div>
+
         <div>
           <label className={labelCls}>เวลาเริ่ม</label>
-          <select value={start} onChange={(e) => setStart(e.target.value)} className={inputCls}>{TIME_OPTIONS.map((t) => <option key={t}>{t}</option>)}</select>
+          <select value={start} onChange={(ev) => setStart(ev.target.value)} className={inputCls}>{TIME_OPTIONS.map((t) => <option key={t}>{t}</option>)}</select>
         </div>
         <div>
           <label className={labelCls}>เวลาสิ้นสุด</label>
-          <select value={end} onChange={(e) => setEnd(e.target.value)} className={inputCls}>{TIME_OPTIONS.map((t) => <option key={t}>{t}</option>)}</select>
+          <select value={end} onChange={(ev) => setEnd(ev.target.value)} className={inputCls}>{TIME_OPTIONS.map((t) => <option key={t}>{t}</option>)}</select>
         </div>
         <div className="col-span-2">
           <label className={labelCls}>ตำแหน่งผู้ขอใช้ *</label>
-          <input value={position} onChange={(e) => setPosition(e.target.value)} placeholder="เช่น ครู / หัวหน้างาน..." className={inputCls} />
+          <input value={position} onChange={(ev) => setPosition(ev.target.value)} placeholder="เช่น ครู / หัวหน้างาน..." className={inputCls} />
         </div>
         <div className="col-span-2">
           <label className={labelCls}>เพื่อใช้ในการประชุม / จัดกิจกรรม / โครงการ *</label>
-          <input value={purpose} onChange={(e) => setPurpose(e.target.value)} className={inputCls} />
+          <input value={purpose} onChange={(ev) => setPurpose(ev.target.value)} className={inputCls} />
         </div>
         <div className="col-span-2">
           <label className={labelCls}>จำนวนผู้เข้าร่วม (คน)</label>
-          <input type="number" min={1} value={attendees} onChange={(e) => setAttendees(e.target.value)} className={inputCls} />
+          <input type="number" min={1} value={attendees} onChange={(ev) => setAttendees(ev.target.value)} className={inputCls} />
         </div>
       </div>
 
       <div className="mt-4">
         <label className={labelCls}>อุปกรณ์ที่ขอให้จัดเตรียม</label>
         <div className="mt-1 flex flex-wrap gap-2">
-          {EQUIPMENT_OPTIONS.map((e) => (
-            <button type="button" key={e} onClick={() => toggle(e)}
-              className={`rounded-full px-3 py-1 text-xs font-semibold ${equipment.includes(e) ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{e}</button>
+          {EQUIPMENT_OPTIONS.map((x) => (
+            <button type="button" key={x} onClick={() => toggle(x)}
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${equipment.includes(x) ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{x}</button>
           ))}
         </div>
-        <input value={equipOther} onChange={(e) => setEquipOther(e.target.value)} placeholder="อื่นๆ (ถ้ามี)" className={inputCls} />
+        <input value={equipOther} onChange={(ev) => setEquipOther(ev.target.value)} placeholder="อื่นๆ (ถ้ามี)" className={inputCls} />
       </div>
 
       <div className="mt-4">
         <label className={labelCls}>การจัดที่นั่ง</label>
         <div className="mt-1 flex flex-wrap gap-2">
-          {SEATING_OPTIONS.map((e) => (
-            <button type="button" key={e} onClick={() => setSeating(seating === e ? "" : e)}
-              className={`rounded-full px-3 py-1 text-xs font-semibold ${seating === e ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{e}</button>
+          {SEATING_OPTIONS.map((x) => (
+            <button type="button" key={x} onClick={() => setSeating(seating === x ? "" : x)}
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${seating === x ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{x}</button>
           ))}
         </div>
-        <input value={seatingOther} onChange={(e) => setSeatingOther(e.target.value)} placeholder="อื่นๆ (ถ้ามี)" className={inputCls} />
+        <input value={seatingOther} onChange={(ev) => setSeatingOther(ev.target.value)} placeholder="อื่นๆ (ถ้ามี)" className={inputCls} />
       </div>
 
       <div className="mt-4">
         <label className={labelCls}>แนบภาพผังการจัดห้อง / โต๊ะ-เก้าอี้ (ไม่เกิน 3 รูป)</label>
-        <p className="text-[11px] text-slate-400">ฝ่ายทั่วไปจะใช้ภาพนี้จัดเตรียมโต๊ะและเก้าอี้ให้ตรงตามต้องการ</p>
+        <p className="text-[11px] text-slate-400">ฝ่ายทั่วไปจะใช้ภาพนี้จัดเตรียมโต๊ะและเก้าอี้ให้ตรงตามต้องการ{ed?.layout_urls?.length ? ` · มีผังเดิม ${ed.layout_urls.length} รูป (เพิ่มรูปใหม่ได้)` : ""}</p>
         <input type="file" accept="image/*" multiple
-          onChange={(e) => { const fs = Array.from(e.target.files ?? []); setLayoutFiles((p) => [...p, ...fs].slice(0, 3)); e.target.value = ""; }}
+          onChange={(ev) => { const fs = Array.from(ev.target.files ?? []); setLayoutFiles((p) => [...p, ...fs].slice(0, 3)); ev.target.value = ""; }}
           className="mt-1 block w-full text-xs text-slate-500 file:mr-3 file:rounded-xl file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-indigo-600" />
         {layoutPreviews.length > 0 && (
           <div className="mt-2 flex gap-2">
@@ -590,16 +698,16 @@ function BookingModal({ rooms, defaultDate, init, myUserId, onClose, onCreated }
       </div>
 
       <button onClick={submit} disabled={saving} className="mt-6 w-full rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md disabled:opacity-50">
-        {saving ? "กำลังส่งคำขอ..." : "ส่งคำขอใช้ห้อง"}
+        {saving ? "กำลังบันทึก..." : ed ? "บันทึกการแก้ไข" : isAdmin ? "ยืนยันการจอง (อนุมัติทันที)" : "ส่งคำขอใช้ห้อง"}
       </button>
     </Shell>
   );
 }
 
 // ---------- รายละเอียดคำขอ ----------
-function DetailModal({ b, rooms, canAct, canCancel, onClose, onAct, onCancel }: {
-  b: Booking; rooms: Room[]; canAct: boolean; canCancel: boolean;
-  onClose: () => void; onAct: () => void; onCancel: () => void;
+function DetailModal({ b, rooms, canAct, canCancel, canEdit, onClose, onAct, onCancel, onEdit }: {
+  b: Booking; rooms: Room[]; canAct: boolean; canCancel: boolean; canEdit: boolean;
+  onClose: () => void; onAct: () => void; onCancel: () => void; onEdit: () => void;
 }) {
   const [preview, setPreview] = useState(false);
   const st = STATUS[b.status];
@@ -610,7 +718,7 @@ function DetailModal({ b, rooms, canAct, canCancel, onClose, onAct, onCancel }: 
       <Head title="รายละเอียดคำขอใช้ห้อง" onClose={onClose} />
       <span className={`mt-3 inline-block rounded-lg px-2 py-1 text-[11px] font-bold ${st.cls}`}>{st.label}</span>
       <div className="mt-3 space-y-1 text-sm text-slate-700">
-        <p className="font-extrabold">{b.room?.name} · {formatThaiDateFull(b.booking_date)}</p>
+        <p className="font-extrabold">{b.room?.name} · {datesLabel(b)}</p>
         <p>เวลา {timeShort(b.start_time)} - {timeShort(b.end_time)} น.{b.attendees ? ` · ${b.attendees} คน` : ""}</p>
         <p>กิจกรรม: {b.purpose}</p>
         <p>ผู้ขอใช้: {teacherName(b.requester)}{b.requester_position ? ` (${b.requester_position})` : ""}</p>
@@ -644,6 +752,7 @@ function DetailModal({ b, rooms, canAct, canCancel, onClose, onAct, onCancel }: 
       )}
 
       <div className="mt-6 flex gap-2">
+        {canEdit && <button onClick={onEdit} className="rounded-xl border-2 border-indigo-200 px-4 py-2.5 text-sm font-semibold text-indigo-600 hover:bg-indigo-50">✏️ แก้ไขคำขอ</button>}
         {canCancel && <button onClick={onCancel} className="rounded-xl border-2 border-rose-200 px-4 py-2.5 text-sm font-semibold text-rose-500 hover:bg-rose-50">ยกเลิกคำขอ</button>}
         {canAct && <button onClick={onAct} className="flex-1 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md">{STEP_TITLE[STEP_OF[b.status]]} · เซ็นชื่อ</button>}
       </div>
@@ -721,7 +830,7 @@ function StepModal({ b, step, myUserId, rooms, onClose, onDone }: {
   return (
     <Shell>
       <Head title={STEP_TITLE[step]} onClose={onClose} />
-      <p className="mt-1 text-xs text-slate-400">{b.room?.name} · {formatThaiDateFull(b.booking_date)} · {timeShort(b.start_time)} - {timeShort(b.end_time)} น.</p>
+      <p className="mt-1 text-xs text-slate-400">{b.room?.name} · {datesLabel(b)} · {timeShort(b.start_time)} - {timeShort(b.end_time)} น.</p>
       <p className="mt-1 text-sm font-semibold text-slate-700">{b.purpose} — {teacherName(b.requester)}</p>
       {error && <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">{error}</p>}
 

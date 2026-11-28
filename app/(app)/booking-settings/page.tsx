@@ -141,7 +141,7 @@ export default function BookingSettingsPage() {
     <div className="min-h-screen w-full bg-gradient-to-br from-sky-50 via-white to-violet-50">
       <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
         <div className="flex items-center gap-2">
-          <button onClick={() => router.push("/duty-report")} className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-slate-500 shadow-sm ring-1 ring-slate-200"><Home className="h-4 w-4" /></button>
+          <button onClick={() => router.push("/dashboard")} className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-slate-500 shadow-sm ring-1 ring-slate-200"><Home className="h-4 w-4" /></button>
           <button onClick={() => router.back()} className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-slate-500 shadow-sm ring-1 ring-slate-200"><ArrowLeft className="h-4 w-4" /></button>
         </div>
         <h1 className="mt-6 text-2xl font-extrabold tracking-tight text-slate-800 sm:text-3xl">ตั้งค่าห้องประชุม / รถราชการ</h1>

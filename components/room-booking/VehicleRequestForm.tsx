@@ -37,9 +37,19 @@ const Radio = ({ on }: { on: boolean }) => (
     {on && <span style={{ position: "absolute", left: 2.5, top: 2.5, width: 6, height: 6, borderRadius: "50%", background: "#000" }} />}
   </span>
 );
-const Sig = ({ src }: { src?: string | null }) => (
-  <div style={{ height: 42, textAlign: "center" }}>
-    {src && /* eslint-disable-next-line @next/next/no-img-element */ <img src={src} alt="" style={{ height: 42, maxWidth: 200 }} />}
+// ลงชื่อ ......[ลายเซ็นวางบนเส้นประ]...... — ลายเซ็นอยู่กึ่งกลางเส้นพอดี
+const SigLine = ({ src, w = 200, label = "ลงชื่อ", suffix }: { src?: string | null; w?: number; label?: string; suffix?: string }) => (
+  <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 6, height: 48 }}>
+    {label ? <span style={{ lineHeight: 1.2 }}>{label}</span> : null}
+    <span style={{ position: "relative", display: "inline-block", width: w, height: 44, borderBottom: "1px dotted #000" }}>
+      {src && (
+        <span style={{ position: "absolute", left: 0, right: 0, bottom: 2, display: "flex", justifyContent: "center" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={src} alt="" style={{ maxHeight: 42, maxWidth: w - 8 }} />
+        </span>
+      )}
+    </span>
+    {suffix ? <span style={{ lineHeight: 1.2 }}>{suffix}</span> : null}
   </div>
 );
 
@@ -88,9 +98,8 @@ export default function VehicleRequestForm({ data, withSignatures }: { data: Veh
       <div style={{ paddingLeft: 40, marginTop: 8 }}>จึงเรียนมาเพื่อโปรดพิจารณา</div>
 
       <div style={{ marginLeft: 330, marginTop: 6, textAlign: "center" }}>
-        <div>ลงชื่อ</div>
-        <Sig src={s ? data.requester_signature : null} />
-        <div>({data.requester_name || "........................................"}) ผู้ขออนุญาต</div>
+        <SigLine src={s ? data.requester_signature : null} w={190} suffix="ผู้ขออนุญาต" />
+        <div>({data.requester_name || "........................................"})</div>
         <div>ตำแหน่ง {data.requester_position || "........................................"}</div>
       </div>
 
@@ -99,8 +108,7 @@ export default function VehicleRequestForm({ data, withSignatures }: { data: Veh
           <div>ความเห็น <Dots v={s ? data.assign_note : ""} w={230} /></div>
           <div style={{ marginTop: 2 }}>พนักงานขับรถ <Dots v={s ? data.driver_name : ""} w={190} /></div>
           <div style={{ marginTop: 6, textAlign: "center" }}>
-            ลงชื่อ
-            <Sig src={s ? data.assigner_signature : null} />
+            <SigLine src={s ? data.assigner_signature : null} w={170} />
             ({(s && data.assigner_name) || "........................................"})<br />
             {(s && data.assigner_position) || "ตำแหน่ง ........................................"}
           </div>
@@ -113,7 +121,7 @@ export default function VehicleRequestForm({ data, withSignatures }: { data: Veh
             <div><Radio on={false} />อื่นๆ <Dots v="" w={150} /></div>
           </div>
           <div style={{ marginTop: 6, textAlign: "center" }}>
-            <Sig src={s ? data.director_signature : null} />
+            <SigLine src={s ? data.director_signature : null} w={170} label="ลงชื่อ" />
             ({(s && data.director_name) || DEFAULT_DIRECTOR})<br />ผู้อำนวยการโรงเรียนวัดเขียนเขต
           </div>
         </div>

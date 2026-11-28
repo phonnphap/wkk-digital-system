@@ -12,6 +12,7 @@ export const SEATING_OPTIONS = ["โต๊ะและเก้าอี้", "�
 export type RoomFormData = {
   created_at?: string | null;
   booking_date: string;
+  booking_dates: string[];            // จองหลายวัน
   start_time: string;
   end_time: string;
   room_name: string;
@@ -40,31 +41,50 @@ export type RoomFormData = {
 const MONTHS = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
 function thaiParts(iso: string) {
   const [y, m, d] = iso.split("-").map(Number);
-  return { d, m: MONTHS[m - 1], y: y + 543 };
+  return { d, m: MONTHS[m - 1], y: y + 543, key: `${y}-${m}` };
+}
+// "27, 28 พฤศจิกายน 2569 และ 1 ธันวาคม 2569"
+function thaiDatesText(dates: string[]) {
+  const groups: { label: string; days: number[] }[] = [];
+  const seen = new Map<string, number>();
+  [...dates].sort().forEach((iso) => {
+    const p = thaiParts(iso);
+    if (!seen.has(p.key)) { seen.set(p.key, groups.length); groups.push({ label: `${p.m} ${p.y}`, days: [] }); }
+    groups[seen.get(p.key)!].days.push(p.d);
+  });
+  return groups.map((g) => `${g.days.join(", ")} ${g.label}`).join(" และ ");
 }
 const hhmm = (t: string) => t.slice(0, 5).replace(":", ".");
 
+// ฟอนต์จาก /public/fonts
+const FONT_CSS = `
+@font-face{font-family:"THSarabunNew";font-weight:400;src:url("/fonts/THSarabunNew.ttf") format("truetype");}
+@font-face{font-family:"THSarabunNew";font-weight:700;src:url("/fonts/THSarabun-Bold.ttf") format("truetype");}
+`;
+
 const Dots = ({ v, w = 80 }: { v?: string | number | null; w?: number }) => (
-  <span style={{ display: "inline-block", minWidth: w, borderBottom: "1px dotted #000", textAlign: "center", padding: "0 4px" }}>
-    {v ?? ""}
-  </span>
+  <span style={{ display: "inline-block", minWidth: w, borderBottom: "1px dotted #000", textAlign: "center", padding: "0 4px" }}>{v ?? ""}</span>
 );
 const Box = ({ on }: { on: boolean }) => (
   <span style={{ display: "inline-block", width: 12, height: 12, border: "1px solid #000", marginRight: 4, verticalAlign: "middle", textAlign: "center", lineHeight: "11px", fontSize: 11 }}>
     {on ? "✓" : ""}
   </span>
 );
-const Sig = ({ src }: { src?: string | null }) => (
-  <div style={{ height: 40, textAlign: "center" }}>
-    {src && /* eslint-disable-next-line @next/next/no-img-element */ <img src={src} alt="" style={{ height: 40, maxWidth: 200 }} />}
+// ลงชื่อ ......[ลายเซ็นวางบนเส้นประ]...... — ลายเซ็นอยู่กึ่งกลางเส้นพอดี
+const SigLine = ({ src, w = 200, label = "ลงชื่อ", suffix }: { src?: string | null; w?: number; label?: string; suffix?: string }) => (
+  <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 6, height: 48 }}>
+    {label ? <span style={{ lineHeight: 1.2 }}>{label}</span> : null}
+    <span style={{ position: "relative", display: "inline-block", width: w, height: 44, borderBottom: "1px dotted #000" }}>
+      {src && (
+        <span style={{ position: "absolute", left: 0, right: 0, bottom: 2, display: "flex", justifyContent: "center" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={src} alt="" style={{ maxHeight: 42, maxWidth: w - 8 }} />
+        </span>
+      )}
+    </span>
+    {suffix ? <span style={{ lineHeight: 1.2 }}>{suffix}</span> : null}
   </div>
 );
-
-// ฟอนต์จาก /public/fonts (โหลดผ่าน @font-face ในตัวฟอร์มเอง)
-const FONT_CSS = `
-@font-face{font-family:"THSarabunNew";font-weight:400;src:url("/fonts/THSarabunNew.ttf") format("truetype");}
-@font-face{font-family:"THSarabunNew";font-weight:700;src:url("/fonts/THSarabun-Bold.ttf") format("truetype");}
-`;
 
 const DEFAULT_STAFF = "นายเชิดชู ไวยบุรี";
 const DEFAULT_DIRECTOR = "นายธนณัฐ ศิระวงษ์";
@@ -80,16 +100,16 @@ export default function RoomRequestForm({
     ? new Date(data.created_at).toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" })
     : new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
   const rd = thaiParts(reqDate);
-  const bd = thaiParts(data.booking_date);
+  const dates = data.booking_dates?.length ? data.booking_dates : [data.booking_date];
+  const bd = thaiParts(dates[0]);
   const s = withSignatures;
 
   return (
     <div style={{ width: 794, height: 1123, boxSizing: "border-box", padding: "36px 56px", background: "#fff", color: "#000", fontFamily: '"THSarabunNew","TH Sarabun New",Tahoma,sans-serif', fontSize: 20, lineHeight: 1.3, position: "relative" }}>
       <style>{FONT_CSS}</style>
+      {/* ตราครุฑ (ซ้ายบน) */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/images.jpg" alt="" style={{ position: "absolute", left: 56, top: 30, width: 64, height: 76, objectFit: "contain" }} />
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/images1.jpg" alt="" style={{ position: "absolute", right: 56, top: 30, width: 70, height: 76, objectFit: "contain" }} />
       <div style={{ textAlign: "center", fontWeight: 700, fontSize: 23, padding: "0 80px" }}>
         แบบคำขอการใช้บริการสถานที่ห้องประชุม<br />
         โรงเรียนวัดเขียนเขต สำนักงานเขตพื้นที่การศึกษาประถมศึกษาปทุมธานี เขต 2
@@ -116,7 +136,11 @@ export default function RoomRequestForm({
         เพื่อใช้ในการประชุม / จัดกิจกรรม / โครงการ <Dots v={data.purpose} w={300} />
       </div>
       <div>
-        ในวันที่ <Dots v={bd.d} w={36} /> เดือน <Dots v={bd.m} w={90} /> พ.ศ. <Dots v={bd.y} w={50} />{" "}
+        {dates.length === 1 ? (
+          <>ในวันที่ <Dots v={bd.d} w={36} /> เดือน <Dots v={bd.m} w={90} /> พ.ศ. <Dots v={bd.y} w={50} /></>
+        ) : (
+          <>ในวันที่ <Dots v={thaiDatesText(dates)} w={330} /> (รวม {dates.length} วัน)</>
+        )}{" "}
         เวลา <Dots v={`${hhmm(data.start_time)} - ${hhmm(data.end_time)}`} w={110} /> น.
       </div>
       <div>จำนวนผู้เข้าร่วมประชุม/กิจกรรม/โครงการ <Dots v={data.attendees} w={70} /> คน</div>
@@ -139,10 +163,10 @@ export default function RoomRequestForm({
 
       <div style={{ marginTop: 8, textIndent: 36 }}>จึงเรียนมาเพื่อโปรดพิจารณา</div>
 
-      <div style={{ marginTop: 6, marginLeft: 330, textAlign: "center" }}>
-        <div>ลงชื่อ</div>
-        <Sig src={s ? data.requester_signature : null} />
-        <div>({data.requester_name || "........................................"}) ผู้ขอใช้</div>
+      {/* ผู้ขอใช้: ลงชื่อ ....ลายเซ็น.... ผู้ขอใช้ */}
+      <div style={{ marginLeft: 300, marginTop: 4, textAlign: "center", width: 400 }}>
+        <SigLine src={s ? data.requester_signature : null} w={190} suffix="ผู้ขอใช้" />
+        <div>({data.requester_name || "........................................"})</div>
         <div>ตำแหน่ง {data.requester_position || "........................................"}</div>
       </div>
 
@@ -153,19 +177,18 @@ export default function RoomRequestForm({
           <div>ตรวจสอบแล้ว ห้องประชุม <Dots v={s ? data.room_name : ""} w={110} /></div>
           <div><Box on={s && data.staff_result === "available"} />ว่าง</div>
           <div><Box on={s && data.staff_result === "unavailable"} />ไม่ว่าง เนื่องจาก <Dots v={s ? data.staff_reason : ""} w={110} /></div>
-          <div style={{ textAlign: "center", marginTop: 4 }}>
-            ลงชื่อ
-            <Sig src={s ? data.staff_signature : null} />
+          <div style={{ textAlign: "center", marginTop: 2 }}>
+            <SigLine src={s ? data.staff_signature : null} w={150} />
             ({(s && data.staff_name) || DEFAULT_STAFF})<br />ตำแหน่ง หัวหน้างานอาคารสถานที่
           </div>
-          <div style={{ fontWeight: 700, marginTop: 6 }}>ตรวจเสนอ</div>
+          <div style={{ fontWeight: 700, marginTop: 4 }}>ตรวจเสนอ</div>
           <div style={{ display: "flex", gap: 6, textAlign: "center" }}>
             <div style={{ flex: 1 }}>
-              <Sig src={s ? data.head_signature : null} />
+              <SigLine src={s ? data.head_signature : null} w={120} label="" />
               ({(s && data.head_name) || "..................."})<br />หัวหน้ากลุ่มบริหารทั่วไป
             </div>
             <div style={{ flex: 1 }}>
-              <Sig src={s ? data.deputy_signature : null} />
+              <SigLine src={s ? data.deputy_signature : null} w={120} label="" />
               ({(s && data.deputy_name) || "..................."})<br />รองผู้อำนวยการกลุ่มบริหารทั่วไป
             </div>
           </div>
@@ -176,9 +199,8 @@ export default function RoomRequestForm({
             <Box on={s && data.director_decision === "approved"} />อนุมัติ{"    "}
             <Box on={s && data.director_decision === "rejected"} />ไม่อนุมัติ
           </div>
-          <div style={{ textAlign: "center", marginTop: 40 }}>
-            ลงชื่อ
-            <Sig src={s ? data.director_signature : null} />
+          <div style={{ textAlign: "center", marginTop: 30 }}>
+            <SigLine src={s ? data.director_signature : null} w={160} />
             ({(s && data.director_name) || DEFAULT_DIRECTOR})<br />ตำแหน่ง ผู้อำนวยการโรงเรียนวัดเขียนเขต
           </div>
         </div>

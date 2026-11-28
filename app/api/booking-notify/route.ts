@@ -19,15 +19,17 @@ const hhmm = (t?: string) => (t ?? "").slice(0, 5);
 
 const TITLES: Record<string, string> = {
   "room:new": "📩 มีคำขอใช้ห้องประชุมใหม่ — รอหัวหน้ากลุ่มฯ ตรวจเสนอ",
+  "room:edited": "✏️ คำขอใช้ห้องประชุมถูกแก้ไข — รอหัวหน้ากลุ่มฯ ตรวจเสนอใหม่",
   "room:head_done": "⏳ คำขอใช้ห้องประชุม — รอรองผอ. ตรวจเสนอ (ผอ.อนุมัติพร้อมกัน)",
   "room:approved": "✅ อนุมัติการใช้ห้องประชุมแล้ว — โปรดจัดเตรียมห้อง",
   "room:rejected": "❌ คำขอใช้ห้องประชุมไม่ผ่านการพิจารณา",
   "vehicle:new": "🚐 มีคำขอใช้รถราชการใหม่ — โปรดเลือกรถและคนขับ",
+  "vehicle:edited": "✏️ คำขอใช้รถราชการถูกแก้ไข — โปรดเลือกรถและคนขับใหม่",
   "vehicle:wait_director": "⏳ คำขอใช้รถราชการ — รอ ผอ. อนุญาต",
   "vehicle:approved": "✅ อนุญาตการใช้รถราชการแล้ว",
   "vehicle:rejected": "❌ คำขอใช้รถราชการไม่ผ่านการพิจารณา",
 };
-const ACTION_EVENTS = new Set(["room:new", "room:head_done", "vehicle:new", "vehicle:wait_director"]);
+const ACTION_EVENTS = new Set(["room:new", "room:edited", "room:head_done", "vehicle:new", "vehicle:edited", "vehicle:wait_director"]);
 
 export async function POST(req: NextRequest) {
   const hook = process.env.TEAMS_BOOKING_WEBHOOK_URL ?? process.env.TEAMS_LEAVE_WEBHOOK_URL ?? process.env.TEAMS_REPAIR_WEBHOOK_URL;
@@ -56,7 +58,7 @@ export async function POST(req: NextRequest) {
       requester = rq?.email ? { email: rq.email, name: nameOf(rq) } : null;
       facts = [
         { title: "ห้อง", value: (b as any).room?.name ?? "-" },
-        { title: "วันที่", value: (b as any).booking_date },
+        { title: "วันที่", value: ((b as any).booking_dates?.length ? (b as any).booking_dates : [(b as any).booking_date]).join(", ") },
         { title: "เวลา", value: `${hhmm((b as any).start_time)} - ${hhmm((b as any).end_time)} น.` },
         { title: "กิจกรรม", value: (b as any).purpose },
         { title: "ผู้ขอใช้", value: nameOf(rq) },
@@ -85,11 +87,11 @@ export async function POST(req: NextRequest) {
     if (reason) facts.push({ title: "เหตุผล", value: reason });
 
     const who: Person[] =
-      key === "room:new" ? [P.head, P.clerk]
+      (key === "room:new" || key === "room:edited") ? [P.head, P.clerk]
       : key === "room:head_done" ? [P.deputy]
       : key === "room:approved" ? [P.clerk, P.building, ...(requester ? [requester] : [])]
       : key === "room:rejected" ? [P.clerk, ...(requester ? [requester] : [])]
-      : key === "vehicle:new" ? [P.head, P.clerk]
+      : (key === "vehicle:new" || key === "vehicle:edited") ? [P.head, P.clerk]
       : key === "vehicle:wait_director" ? [P.director]
       : key === "vehicle:approved" ? [...(requester ? [requester] : []), ...(driver ? [driver] : []), P.clerk]
       : [...(requester ? [requester] : []), P.clerk];
